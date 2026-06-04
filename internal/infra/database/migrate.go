@@ -23,7 +23,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/logext"
 )
 
 //go:embed migrations/*.sql

@@ -31,9 +31,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/wanmuchengchuan/listen/internal/domain"
-	"github.com/wanmuchengchuan/listen/internal/logext"
-
+	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/listen/internal/logext"
 	// OTel-aware logging convention — see docs/observability-sop.md.
 )
 
@@ -145,20 +144,20 @@ func ParseGitHubRepoURL(raw string) (owner, repo string, err error) {
 // Kept unexported because the outbox payload is the contract — if it
 // changes, both senders must update.
 type listenEnvelope struct {
-	Version   string          `json:"version"`
-	EventType string          `json:"event_type"`
-	TraceID   string          `json:"trace_id"`
-	Feedback  listenFeedback  `json:"feedback"`
+	Version   string         `json:"version"`
+	EventType string         `json:"event_type"`
+	TraceID   string         `json:"trace_id"`
+	Feedback  listenFeedback `json:"feedback"`
 }
 
 type listenFeedback struct {
-	ID          int64           `json:"id"`
-	TenantID    string          `json:"tenant_id"`
-	Content     string          `json:"content"`
-	Source      string          `json:"source"`
-	UserID      string          `json:"user_id"`
-	SubmittedAt string          `json:"submitted_at"`
-	Enriched    listenEnriched  `json:"enriched"`
+	ID          int64          `json:"id"`
+	TenantID    string         `json:"tenant_id"`
+	Content     string         `json:"content"`
+	Source      string         `json:"source"`
+	UserID      string         `json:"user_id"`
+	SubmittedAt string         `json:"submitted_at"`
+	Enriched    listenEnriched `json:"enriched"`
 }
 
 type listenEnriched struct {

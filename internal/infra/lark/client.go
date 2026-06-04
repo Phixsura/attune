@@ -25,7 +25,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/logext"
 )
 
 // upstreamBodyLogCap —— 飞书 API 上游 body 截断阈值(4KB),memory:upstream_http_log_info。

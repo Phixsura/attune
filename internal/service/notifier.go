@@ -11,7 +11,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/wanmuchengchuan/listen/internal/domain"
+	"github.com/Phixsura/listen/internal/domain"
 )
 
 // Notifier is the side-channel the enricher hands a freshly classified

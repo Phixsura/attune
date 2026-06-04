@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wanmuchengchuan/listen/internal/domain"
-	"github.com/wanmuchengchuan/listen/internal/logext"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 // Evaluator runs the listen eval CLI's three modes:

@@ -16,9 +16,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
-	"github.com/wanmuchengchuan/listen/internal/notify"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/notify"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 // sendByDestType is the per-destination switchboard. The outbox row's

@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/logext"
 )
 
 // TenantRepo wraps the tenants table. Wave 1 only needs slug → id

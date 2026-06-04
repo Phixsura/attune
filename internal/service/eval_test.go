@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wanmuchengchuan/listen/internal/domain"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 func TestModuleJaccard(t *testing.T) {

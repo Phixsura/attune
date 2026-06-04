@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
-	"github.com/wanmuchengchuan/listen/internal/notify"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/notify"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 // selfReportDead pushes a one-shot text card to the tenant's lark-bot

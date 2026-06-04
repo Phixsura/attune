@@ -11,10 +11,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/wanmuchengchuan/listen/internal/domain"
-	"github.com/wanmuchengchuan/listen/internal/infra/lark"
-	"github.com/wanmuchengchuan/listen/internal/repo"
-	"github.com/wanmuchengchuan/listen/internal/service"
+	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/listen/internal/infra/lark"
+	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/service"
 )
 
 // LarkHandler serves POST /v1/lark/event for Lark/Feishu event

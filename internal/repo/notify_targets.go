@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/logext"
 )
 
 // NotifyTargetRepo owns the tenant_notify_targets table. Wave 1.2 wires

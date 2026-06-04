@@ -48,9 +48,9 @@ func TestParseGitHubRepoURL_HappyPath(t *testing.T) {
 		owner string
 		repo  string
 	}{
-		{"https://github.com/wanmuchengchuan/listen", "wanmuchengchuan", "listen"},
-		{"https://github.com/wanmuchengchuan/listen.git", "wanmuchengchuan", "listen"},
-		{"https://github.com/wanmuchengchuan/listen/", "wanmuchengchuan", "listen"},
+		{"https://github.com/Phixsura/listen", "Phixsura", "listen"},
+		{"https://github.com/Phixsura/listen.git", "Phixsura", "listen"},
+		{"https://github.com/Phixsura/listen/", "Phixsura", "listen"},
 		{"  https://github.com/owner/repo  ", "owner", "repo"},
 		{"https://www.github.com/Owner/Repo", "Owner", "Repo"},
 	}
@@ -263,9 +263,9 @@ func TestCheckGitHubResponse_StatusMatrix(t *testing.T) {
 		want   string // "ok" | "terminal" | "retry"
 	}{
 		{http.StatusCreated, "ok"},
-		{http.StatusUnauthorized, "terminal"},  // 401: bad PAT
-		{http.StatusForbidden, "terminal"},     // 403: rate limit / scope
-		{http.StatusNotFound, "terminal"},      // 404: repo gone
+		{http.StatusUnauthorized, "terminal"},        // 401: bad PAT
+		{http.StatusForbidden, "terminal"},           // 403: rate limit / scope
+		{http.StatusNotFound, "terminal"},            // 404: repo gone
 		{http.StatusUnprocessableEntity, "terminal"}, // 422: bad body
 		{http.StatusRequestTimeout, "retry"},
 		{http.StatusTooManyRequests, "retry"},
