@@ -1,0 +1,191 @@
+# CI — mirrors the quality gates in CLAUDE.md §1, built to match how
+# well-maintained Go + JS-frontend repos (cli/cli, goreleaser, gitea) run CI.
+#
+# Conventions:
+#   * Actions are pinned to a full commit SHA with a trailing `# vX.Y.Z` comment;
+#     .github/dependabot.yml bumps both together weekly.
+#   * Go + pnpm use the toolchains' BUILT-IN caching (setup-go keyed on go.sum,
+#     setup-node `cache: pnpm`) — no hand-rolled actions/cache.
+#   * dorny/paths-filter runs the Go jobs only on `**/*.go` and the console job
+#     only on `console/**`; touching this workflow re-runs everything.
+#   * `ci-gate` is an `if: always()` aggregator and is the ONLY job that should
+#     be marked "required" in branch protection — a path-skipped job reports
+#     success, so gating on the real jobs directly would let unrelated PRs pass
+#     without ever running them. The gate fails iff a real job failed/cancelled.
+#
+# Deliberately omitted for now:
+#   * docker-build — the Dockerfile still assumes the old monorepo layout
+#     (COPY gateway/ + listen/); deferred to a follow-up that builds standalone.
+#   * lint-slog   — scripts/lint-slog.sh does not exist yet (gated on #4).
+#
+# govulncheck is informational (continue-on-error): its standard-library
+# findings track the Go toolchain version against a live DB, so they change
+# over time independent of our code and must not block unrelated PRs.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Path gate: which areas changed? ────────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # dorny/paths-filter reads changed files on PRs
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      console: ${{ steps.filter.outputs.console }}
+      code: ${{ steps.filter.outputs.code }}
+      changelog: ${{ steps.filter.outputs.changelog }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        with:
+          filters: |
+            go:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - '.github/workflows/ci.yml'
+            console:
+              - 'console/**'
+              - '.github/workflows/ci.yml'
+            # `code` = substantive source whose change should carry a changelog entry
+            code:
+              - '**/*.go'
+              - 'console/src/**'
+            changelog:
+              - 'CHANGELOG.md'
+
+  # ── Go: vet / build / test ─────────────────────────────────────────────────
+  go-checks:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod # single source of truth (Go 1.25)
+          cache-dependency-path: go.sum # built-in cache, keyed on go.sum
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -short ./...
+
+  # ── Lizard: complexity (CCN ≤ 15) + length (NLOC ≤ 100) ────────────────────
+  lizard:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+      - run: pip install lizard==1.23.0
+      - run: lizard . -l go -C 15 -T nloc=100 --warnings_only
+
+  # ── govulncheck (informational — never blocks; see header) ─────────────────
+  govulncheck:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+      - name: govulncheck ./...
+        continue-on-error: true
+        run: govulncheck ./...
+
+  # ── Console SPA: biome + tsc ───────────────────────────────────────────────
+  console:
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      # pnpm before setup-node so setup-node can resolve the store for caching.
+      # Version comes from console/package.json "packageManager".
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          package_json_file: console/package.json
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm biome check
+      # vite build generates src/routeTree.gen.ts (gitignored, produced by the
+      # TanStack Router plugin) that tsc needs — and doubles as a build smoke test.
+      - run: pnpm exec vite build
+      - run: pnpm tsc -b --noEmit
+
+  # ── Changelog enforcement: a code PR must update CHANGELOG.md (CLAUDE.md §2) ─
+  changelog:
+    needs: changes
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.code == 'true' &&
+      needs.changes.outputs.changelog != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a CHANGELOG.md entry (unless exempt)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HAS_SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'skip-changelog') }}
+        run: |
+          if [ "$HAS_SKIP_LABEL" = "true" ]; then
+            echo "skip-changelog label present — exempt."
+            exit 0
+          fi
+          # Exempt the changelog-free commit types from CLAUDE.md §2 (+ style).
+          if printf '%s' "$PR_TITLE" | grep -qiE '^(chore|ci|docs|refactor|style|test)(\(.+\))?!?:'; then
+            echo "PR title is changelog-exempt per CLAUDE.md §2 — ok."
+            exit 0
+          fi
+          echo "::error::Code changed but CHANGELOG.md was not updated."
+          echo "Fix one of: add an entry under [Unreleased] in CHANGELOG.md;"
+          echo "  use a chore/ci/docs/refactor/test/style PR title;"
+          echo "  or apply the 'skip-changelog' label (CLAUDE.md §2)."
+          exit 1
+
+  # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
+  ci-gate:
+    needs: [changes, go-checks, lizard, govulncheck, console, changelog]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify no required job failed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "upstream results: $RESULTS"
+          bad=0
+          for r in $RESULTS; do
+            case "$r" in
+              success | skipped) ;;
+              *) echo "::error::a required job concluded '$r'"; bad=1 ;;
+            esac
+          done
+          if [ "$bad" -ne 0 ]; then exit 1; fi
+          echo "All required jobs passed or were legitimately skipped."

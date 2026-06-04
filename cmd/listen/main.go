@@ -20,10 +20,22 @@ import (
 
 	"github.com/Phixsura/listen/internal/infra/config"
 	"github.com/Phixsura/listen/internal/infra/database"
+	"github.com/Phixsura/listen/internal/observability"
 	"github.com/Phixsura/listen/internal/repo"
 	"github.com/Phixsura/listen/internal/service"
-	"github.com/Phixsura/listen/internal/observability"
 )
+
+// subcommands routes each CLI verb to its handler. `server` ignores its args
+// (it reads config + env); the rest receive args[1:]. A dispatch table keeps
+// main() a thin router instead of a long switch.
+var subcommands = map[string]func([]string) error{
+	"server": func([]string) error { return runServer() },
+	"keys":   runKeys,
+	"tenant": runTenant,
+	"eval":   runEval,
+	"outbox": runOutbox,
+	"digest": runDigest,
+}
 
 func main() {
 	// slog handler:默认 JSON(prod 安全默认,SLS 字段索引必需)。
@@ -43,42 +55,19 @@ func main() {
 		args = []string{"server"}
 	}
 	switch args[0] {
-	case "server":
-		if err := runServer(); err != nil {
-			slog.ErrorContext(ctx, "server exited", "err", err)
-			os.Exit(1)
-		}
-	case "keys":
-		if err := runKeys(args[1:]); err != nil {
-			slog.ErrorContext(ctx, "keys subcommand failed", "err", err)
-			os.Exit(1)
-		}
-	case "tenant":
-		if err := runTenant(args[1:]); err != nil {
-			slog.ErrorContext(ctx, "tenant subcommand failed", "err", err)
-			os.Exit(1)
-		}
-	case "eval":
-		if err := runEval(args[1:]); err != nil {
-			slog.ErrorContext(ctx, "eval subcommand failed", "err", err)
-			os.Exit(1)
-		}
-	case "outbox":
-		if err := runOutbox(args[1:]); err != nil {
-			slog.ErrorContext(ctx, "outbox subcommand failed", "err", err)
-			os.Exit(1)
-		}
-	case "digest":
-		if err := runDigest(args[1:]); err != nil {
-			slog.ErrorContext(ctx, "digest subcommand failed", "err", err)
-			os.Exit(1)
-		}
 	case "-h", "--help", "help":
 		printUsage()
-	default:
+		return
+	}
+	handler, ok := subcommands[args[0]]
+	if !ok {
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n\n", args[0])
 		printUsage()
 		os.Exit(2)
+	}
+	if err := handler(args[1:]); err != nil {
+		slog.ErrorContext(ctx, args[0]+" subcommand failed", "err", err)
+		os.Exit(1)
 	}
 }
 
