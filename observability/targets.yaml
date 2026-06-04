@@ -1,0 +1,18 @@
+# Prometheus file_sd target declaration for the listen scrape job.
+#
+# Wire your Prometheus / VictoriaMetrics file_sd_configs at this file
+# (or a synced copy). Reload is automatic on file change — no scraper
+# restart needed.
+#
+# Add more entries when listen scales horizontally:
+#   - targets: ['127.0.0.1:8090']  ← prod-1
+#     labels: { instance: listen-prod-1, ... }
+#   - targets: ['127.0.0.1:8091']  ← prod-2
+#     labels: { instance: listen-prod-2, ... }
+
+- targets:
+    - 127.0.0.1:8090
+  labels:
+    job: listen
+    service: listen
+    instance: listen-prod-1

@@ -1,0 +1,193 @@
+// Package notify pushes enriched feedback to outbound destinations.
+//
+// Wave 1 ships a single concrete sink — a Lark/Feishu custom group bot
+// webhook (the "自定义机器人" of any Lark chat). Wave 1.2 adds raw HTTPS
+// webhook. All destinations share Transport for POST + retry + body
+// reading; per-destination code only owns envelope construction and
+// in-band response checking.
+//
+// Two Lark destinations are configured statically via env (Wave 1 =
+// single tenant, single org). Per-tenant routing moves into the DB in
+// Wave 2 via the tenantID that already threads through every Push call.
+package notify
+
+import (
+	"bytes"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/wanmuchengchuan/listen/internal/domain"
+	"github.com/wanmuchengchuan/listen/internal/infra/metrics"
+	"github.com/wanmuchengchuan/listen/internal/logext"
+)
+
+// LarkWebhook delivers Snapshot payloads to one or two Lark group bot
+// webhook URLs. A zero-value (empty URL) destination is silently
+// skipped; callers do not need to gate Push* on Enabled() — they can
+// call freely.
+type LarkWebhook struct {
+	poolURL     string
+	poolSecret  string
+	radarURL    string
+	radarSecret string
+	transport   *Transport
+}
+
+// NewLarkWebhook returns a notifier wired to the given destinations.
+// Pass "" for any URL to disable that destination. Secrets are
+// optional — set them only if the Lark bot has 签名校验 enabled in the
+// chat settings.
+//
+// Retry policy is NoRetry: Lark group bots are at-most-once by
+// convention (duplicate cards would spam the chat). Wave 1.2's raw
+// webhook flips on DefaultRetry.
+func NewLarkWebhook(poolURL, poolSecret, radarURL, radarSecret string) *LarkWebhook {
+	return &LarkWebhook{
+		poolURL:     poolURL,
+		poolSecret:  poolSecret,
+		radarURL:    radarURL,
+		radarSecret: radarSecret,
+		transport:   NewTransport(nil, NoRetry()),
+	}
+}
+
+// PoolEnabled / RadarEnabled report whether each destination is wired.
+func (l *LarkWebhook) PoolEnabled() bool  { return l != nil && l.poolURL != "" }
+func (l *LarkWebhook) RadarEnabled() bool { return l != nil && l.radarURL != "" }
+
+// PushPool delivers s to the 反馈池 group (every enriched row).
+// Returns nil if the pool destination is unconfigured.
+func (l *LarkWebhook) PushPool(ctx context.Context, s domain.Snapshot) error {
+	if !l.PoolEnabled() {
+		return nil
+	}
+	return l.send(ctx, "lark-pool", l.poolURL, l.poolSecret, s)
+}
+
+// PushRadar delivers s to the 研发雷达 group (P0 / P1 only — callers
+// should filter, but we don't reject other severities to keep the
+// notifier shape simple). Returns nil if radar is unconfigured.
+func (l *LarkWebhook) PushRadar(ctx context.Context, s domain.Snapshot) error {
+	if !l.RadarEnabled() {
+		return nil
+	}
+	return l.send(ctx, "lark-radar", l.radarURL, l.radarSecret, s)
+}
+
+// send routes through Transport. The RequestBuilder regenerates the
+// timestamp + signature on each attempt (irrelevant for NoRetry but
+// keeps the contract right when the destination later opts into
+// retries). The ResponseChecker decodes Lark's in-band error body —
+// Lark returns HTTP 200 even on logical failure.
+func (l *LarkWebhook) send(ctx context.Context, dest, url, secret string, s domain.Snapshot) error {
+	const where = "notify.LarkWebhook.send"
+	logext.Infof(ctx, "[%s] start,dest:%s,feedback_id:%d,severity:%s,tenant_id:%s",
+		where, dest, s.ID, s.Severity, s.TenantID)
+	build := func(ctx context.Context) (*http.Request, error) {
+		body, err := l.buildBody(secret, s)
+		if err != nil {
+			return nil, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+		// 上游请求 body (skip secret/Authorization 类敏感头) — see CLAUDE.md
+		// upstream-log 纪律,truncate 1024 字节避免大 card 撑爆日志。
+		logext.Infof(ctx, "[%s] upstream req,dest:%s,url:%s,body:%s",
+			where, dest, url, truncate(string(body), 1024))
+		return req, nil
+	}
+	err := l.transport.Send(ctx, dest, build, checkLarkResponse(dest, s))
+	if err != nil {
+		reason := "transport"
+		if errors.Is(err, ErrTerminal) {
+			reason = "terminal"
+		}
+		metrics.NotifyFailuresTotal.WithLabelValues(dest, reason).Inc()
+		logext.Errorf(ctx, "[%s] send failed,dest:%s,feedback_id:%d,reason:%s,err:%+v",
+			where, dest, s.ID, reason, err.Error())
+		return err
+	}
+	logext.Infof(ctx, "[%s] OK,dest:%s,feedback_id:%d", where, dest, s.ID)
+	return nil
+}
+
+// buildBody serializes a Snapshot into Lark's interactive-card envelope,
+// optionally adding the timestamp + sign fields if a secret is set.
+func (l *LarkWebhook) buildBody(secret string, s domain.Snapshot) ([]byte, error) {
+	envelope := map[string]any{
+		"msg_type": "interactive",
+		"card":     buildCard(s),
+	}
+	if secret != "" {
+		ts := strconv.FormatInt(time.Now().Unix(), 10)
+		sig, err := signLarkBot(ts, secret)
+		if err != nil {
+			return nil, fmt.Errorf("sign lark bot: %w", err)
+		}
+		envelope["timestamp"] = ts
+		envelope["sign"] = sig
+	}
+	return json.Marshal(envelope)
+}
+
+// checkLarkResponse is the ResponseChecker for Lark group webhooks.
+// Lark always responds 200 even on logical failure, embedding the real
+// status in {"code":N,"msg":"..."}. Non-zero code is treated as
+// terminal — retrying a malformed card or a revoked bot URL won't help.
+func checkLarkResponse(dest string, s domain.Snapshot) ResponseChecker {
+	const where = "notify.checkLarkResponse"
+	return func(status int, body []byte) error {
+		var out struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		_ = json.Unmarshal(body, &out)
+		// ResponseChecker 不接 ctx,用 Background 保留对上游响应的可观测性
+		// (跟既有 slog 行为一致)。Body truncate 1024 字节。
+		logext.Infof(context.Background(),
+			"[%s] upstream resp,dest:%s,feedback_id:%d,status:%d,code:%d,msg:%s,body:%s",
+			where, dest, s.ID, status, out.Code, out.Msg, truncate(string(body), 1024))
+		if status != http.StatusOK || out.Code != 0 {
+			return fmt.Errorf("%w: http=%d code=%d msg=%s body=%s",
+				ErrTerminal, status, out.Code, out.Msg, truncate(string(body), 200))
+		}
+		slog.InfoContext(context.Background(), "lark webhook pushed",
+			"dest", dest, "feedback_id", s.ID, "severity", s.Severity)
+		return nil
+	}
+}
+
+// signLarkBot implements Lark's group-bot signature algorithm:
+//
+//	string_to_sign = timestamp + "\n" + secret
+//	signature      = base64(HMAC_SHA256(key=string_to_sign, msg=""))
+//
+// The key here is `string_to_sign` itself, not `secret` — this matches
+// the official docs (open.feishu.cn/document/.../bot-v2).
+func signLarkBot(timestamp, secret string) (string, error) {
+	stringToSign := timestamp + "\n" + secret
+	h := hmac.New(sha256.New, []byte(stringToSign))
+	if _, err := h.Write([]byte{}); err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}

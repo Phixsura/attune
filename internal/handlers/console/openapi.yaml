@@ -1,0 +1,762 @@
+openapi: 3.1.0
+
+info:
+  title: 听见 Console API
+  version: 0.1.0
+  description: |
+    Stage B 控制台后端契约。所有路径前缀 `/fb/v1/console`。
+    单一真理源——任何 endpoint 的 schema/参数/错误一切以本文件为准。
+    前端 TS 类型由 `openapi-typescript` 自动生成到
+    `listen/console/src/api/types.ts`，CI gate 阻止漂移。
+
+    认证模型：HMAC-signed HttpOnly cookie + 双提交 CSRF header。
+    所有非 GET/HEAD 请求必须带 `X-CSRF-Token`。
+
+servers:
+  - url: https://listen.app
+    description: 生产环境
+  - url: http://127.0.0.1:8090
+    description: 本地开发
+
+tags:
+  - name: install
+    description: 飞书 OAuth 安装与会话生命周期
+  - name: feedback
+    description: 反馈列表与详情
+  - name: notify-targets
+    description: 通知目标（飞书群 / webhook）配置
+  - name: api-keys
+    description: 开发者 API key 管理
+  - name: usage
+    description: 用量看板
+
+paths:
+  /fb/v1/console/install/start:
+    get:
+      tags: [install]
+      summary: 跳转飞书 OAuth 授权
+      description: 302 → 飞书授权页。state 参数防 CSRF。
+      parameters:
+        - in: query
+          name: redirect_uri
+          schema: { type: string, format: uri }
+          description: 授权完成后跳回的 console 相对路径，默认 `/`
+      responses:
+        '302':
+          description: 重定向至飞书授权页
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+            Set-Cookie:
+              schema: { type: string }
+              description: 短期 oauth_state cookie
+
+  /fb/v1/console/install/callback:
+    get:
+      tags: [install]
+      summary: 飞书 OAuth 回调
+      description: |
+        飞书 redirects here 携带 `code` 与 `state`。
+        服务端用 code 换 user_access_token，取 tenant_key + user info，
+        upsert tenants 行，签 session cookie，302 回 `/console`。
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema: { type: string }
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+      responses:
+        '302':
+          description: 登录成功，重定向到 console 主页
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: listen_session（HttpOnly, Secure, SameSite=Lax）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /fb/v1/console/me:
+    get:
+      tags: [install]
+      summary: 当前会话
+      description: SPA boot 时调用判断登录态。无 session → 401。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 当前 tenant + user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionMe' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /fb/v1/console/logout:
+    post:
+      tags: [install]
+      summary: 登出
+      description: 清 session cookie。
+      security:
+        - sessionCookie: []
+        - csrfHeader: []
+      responses:
+        '204':
+          description: 已登出
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+
+  /fb/v1/console/feedback:
+    get:
+      tags: [feedback]
+      summary: 反馈列表
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: query
+          name: cursor
+          schema: { type: string }
+          description: 分页游标（来自上次响应的 next_cursor）
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: kind
+          schema:
+            type: string
+            enum: [bug, feature, ops, question, other]
+          description: 按 enriched_kind 过滤（与 domain/feedback.go ValidKinds 同步）
+        - in: query
+          name: severity
+          schema: { type: string, enum: [P0, P1, P2, P3] }
+        - in: query
+          name: source
+          schema: { type: string }
+          description: 渠道，如 api / lark / sdk
+        - in: query
+          name: q
+          schema: { type: string }
+          description: 全文搜索（content + enriched_title）
+      responses:
+        '200':
+          description: 反馈分页
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Feedback' }
+                  next_cursor:
+                    type: string
+                    nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /fb/v1/console/feedback/stats:
+    get:
+      tags: [feedback]
+      summary: 反馈分布统计（当前月）
+      description: |
+        本月按 enriched_kind 的计数分布，给控制台首页 donut 用。
+        Phase 1.5 Layer 2 — 客户登进来不需要点列表也能一眼看
+        本月反馈结构。范围固定本月（UTC 切日）；未来按需扩 query。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 当月分布
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [period_start, period_end, total, by_kind]
+                properties:
+                  period_start: { type: string, format: date-time }
+                  period_end:   { type: string, format: date-time }
+                  total:        { type: integer, format: int64 }
+                  by_kind:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                      format: int64
+                    description: |
+                      Map of enriched_kind → count. Keys mirror
+                      domain.ValidKinds (bug/feature/ops/question/other).
+                      Unenriched rows are bucketed into "unknown".
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /fb/v1/console/feedback/{id}:
+    get:
+      tags: [feedback]
+      summary: 反馈详情
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 详情（含附件、enrich 全量字段）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /fb/v1/console/notify-targets:
+    get:
+      tags: [notify-targets]
+      summary: 列出当前 tenant 的所有通知目标
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 通知目标列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/NotifyTarget' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [notify-targets]
+      summary: 新建一个通知目标
+      description: |
+        受 DB UNIQUE (tenant_id, destination_type, audience) 约束——
+        同一 (type, audience) 组合已存在时 409 Conflict。
+      security:
+        - sessionCookie: []
+        - csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotifyTargetCreate' }
+      responses:
+        '201':
+          description: 新建成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotifyTarget' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '501':
+          description: destination_type 尚未实现（slack-bot / email）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /fb/v1/console/notify-targets/{id}:
+    patch:
+      tags: [notify-targets]
+      summary: 修改单条通知目标（sparse）
+      description: |
+        部分更新：仅传入要改的字段。destination_type 不可改（要换类型
+        请删旧建新——身份变了）。改 audience 命中 UNIQUE (tenant_id,
+        destination_type, audience) 时 409。
+      security:
+        - sessionCookie: []
+        - csrfHeader: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotifyTargetPatch' }
+      responses:
+        '200':
+          description: 更新后的 target
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotifyTarget' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+    delete:
+      tags: [notify-targets]
+      summary: 删除单条通知目标
+      security:
+        - sessionCookie: []
+        - csrfHeader: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: 已删除
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fb/v1/console/notify-targets/{id}/test:
+    post:
+      tags: [notify-targets]
+      summary: 测试通知目标连通性
+      description: |
+        服务端构造一条合成事件 `{event:"test", ts:<unix>, tenant:<slug>}`，
+        按目标 destination_type 发出去。客户端用这个验证 webhook URL +
+        HMAC secret + 飞书 chat_id 配对的真实可达性，不必等真反馈。
+      security:
+        - sessionCookie: []
+        - csrfHeader: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 目标返回 2xx
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, latency_ms]
+                properties:
+                  ok: { type: boolean }
+                  status_code: { type: integer }
+                  latency_ms: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          description: 目标返回非 2xx 或连接失败
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    properties:
+                      status_code: { type: integer, nullable: true }
+                      latency_ms: { type: integer, nullable: true }
+
+  /fb/v1/console/api-keys:
+    get:
+      tags: [api-keys]
+      summary: 列 API key（仅返回元数据，不返回明文）
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: API key 列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApiKey' }
+
+    post:
+      tags: [api-keys]
+      summary: 铸新 key（明文 secret 仅此一次返回）
+      description: |
+        明文 key 仅本响应里出现，之后只能查到 prefix。
+        客户必须当场保存——丢失只能撤销重铸。
+      security:
+        - sessionCookie: []
+        - csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label:
+                  type: string
+                  maxLength: 200
+                  description: 用途备注，如 "prod-app" / "dev-test"
+      responses:
+        '201':
+          description: 新建成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NewApiKey' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /fb/v1/console/api-keys/{id}:
+    delete:
+      tags: [api-keys]
+      summary: 撤销 key（软删，留审计记录）
+      security:
+        - sessionCookie: []
+        - csrfHeader: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: 已撤销
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fb/v1/console/usage:
+    get:
+      tags: [usage]
+      summary: 用量看板数据
+      description: |
+        返回当前计费周期（自然月）+ 上一周期的 ingest 计数。
+        Stage B 仅 ingest 维度；M5 看板上线后扩 enrich / notify。
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: query
+          name: granularity
+          schema: { type: string, enum: [hour, day], default: day }
+        - in: query
+          name: range
+          schema:
+            type: string
+            enum: [current_period, last_period, last_7d, last_30d]
+            default: current_period
+      responses:
+        '200':
+          description: 用量序列
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usage' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: listen_session
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+
+  schemas:
+    Tenant:
+      type: object
+      required: [id, slug, name, locale, timezone]
+      properties:
+        id: { type: string, description: UUID (TEXT 列) }
+        slug: { type: string }
+        name: { type: string }
+        lark_tenant_key:
+          type: string
+          nullable: true
+        locale:
+          type: string
+          description: BCP 47，例如 zh-CN / en-US。enrich 摘要与 digest 据此渲染。
+        timezone:
+          type: string
+          description: IANA tz，例如 Asia/Shanghai / America/Los_Angeles。
+
+    SessionUser:
+      type: object
+      required: [open_id, name, role]
+      properties:
+        open_id: { type: string }
+        name: { type: string }
+        avatar_url:
+          type: string
+          format: uri
+          nullable: true
+        role:
+          type: string
+          enum: [admin, member]
+          description: Stage B 不强制 RBAC，但字段已下发供前端隐藏管理项。
+
+    SessionMe:
+      type: object
+      required: [tenant, user, csrf_token]
+      properties:
+        tenant: { $ref: '#/components/schemas/Tenant' }
+        user: { $ref: '#/components/schemas/SessionUser' }
+        csrf_token:
+          type: string
+          description: |
+            轮转策略：在 session 生命周期内固定不变；session 失效
+            （含主动 logout）后下次 /me 返回新值。客户端把它放在
+            内存里，每次非 GET 请求带 `X-CSRF-Token` header。
+            不要把 token 写回 cookie——它必须是 JS 可读但非
+            HttpOnly cookie 自动发送的，才能验证 origin。
+
+    Feedback:
+      type: object
+      required: [id, content, source, created_at, enrichment_status]
+      properties:
+        id: { type: integer, format: int64 }
+        content: { type: string }
+        source: { type: string }
+        type: { type: string }
+        user_id: { type: string }
+        page_url: { type: string }
+        enriched_title: { type: string, nullable: true }
+        enriched_kind:
+          type: string
+          enum: [bug, feature, ops, question, other]
+          nullable: true
+          description: 与 domain/feedback.go ValidKinds 同步
+        enriched_severity:
+          type: string
+          enum: [P0, P1, P2, P3]
+          nullable: true
+        enriched_modules:
+          type: array
+          items: { type: string }
+          nullable: true
+        enriched_priority:
+          type: number
+          nullable: true
+        enrichment_status:
+          type: string
+          enum: [pending, enriching, done, failed]
+        created_at: { type: string, format: date-time }
+
+    FeedbackDetail:
+      allOf:
+        - $ref: '#/components/schemas/Feedback'
+        - type: object
+          properties:
+            source_meta:
+              type: object
+              additionalProperties: true
+            attachments:
+              type: array
+              items:
+                type: object
+                required: [url]
+                properties:
+                  url: { type: string, format: uri }
+                  mime: { type: string }
+                  size: { type: integer }
+            enrichment_error:
+              type: string
+              nullable: true
+            enriched_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    NotifyTarget:
+      type: object
+      required: [id, destination_type, audience, url, disabled, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        destination_type:
+          type: string
+          enum: [lark-bot, raw-webhook, slack-bot, email]
+          description: |
+            **Stage B 仅 `lark-bot` 与 `raw-webhook` 已实现**；
+            slack-bot / email 在 DB CHECK 约束里预留，POST 时后端返回
+            501 直到 adapter 实现（Wave 3+）。
+        audience:
+          type: string
+          enum: [pool, radar, all]
+          description: pool=全量反馈池；radar=高优先级雷达;all=两者皆送
+        url:
+          type: string
+          format: uri
+          description: |
+            目的地 URL。两类 destination_type 都用同一字段：
+              - lark-bot：飞书群「自定义机器人」的 Webhook URL
+                (https://open.feishu.cn/open-apis/bot/v2/hook/...)
+              - raw-webhook：任意 HTTPS endpoint（loopback 仅开发）
+        timeout_seconds: { type: integer, minimum: 1, maximum: 60 }
+        disabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        last_failure_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Phase 3.2 · 最近一次 markDead 的时间。当前失败状态指示器，
+            而非历史日志（成功投递时清除）。非 nil = 该目标当前处于
+            告警状态——前端应显示徽标。
+        last_error:
+          type: string
+          description: |
+            Phase 3.2 · 与 last_failure_at 配对的失败原因（截断 1000 字符）。
+            last_failure_at 为 null 时该字段为空字符串。
+
+    NotifyTargetCreate:
+      type: object
+      required: [destination_type, url]
+      properties:
+        destination_type:
+          type: string
+          enum: [lark-bot, raw-webhook, slack-bot, email]
+        audience:
+          type: string
+          enum: [pool, radar, all]
+          default: all
+        url:
+          type: string
+          format: uri
+          description: |
+            lark-bot：飞书群机器人 Webhook URL。
+            raw-webhook：HTTPS 接收端 URL。
+        secret:
+          type: string
+          description: |
+            HMAC 签名 secret。
+            - lark-bot：飞书群机器人「签名校验」开启后填那个字符串
+            - raw-webhook：自定义 32+ 字节随机串
+            空字符串 = 不签名（仅 lark-bot 关签名校验时可用）
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 60
+          default: 10
+        disabled:
+          type: boolean
+          default: false
+
+    NotifyTargetPatch:
+      type: object
+      description: |
+        Sparse update — only fields present in the request body are
+        applied. `destination_type` is intentionally omitted (changing
+        type = different identity; delete + recreate instead).
+        Empty `secret` string is treated as "clear the secret"; omit
+        the key entirely to leave it unchanged.
+      properties:
+        audience:
+          type: string
+          enum: [pool, radar, all]
+        url:
+          type: string
+          format: uri
+        secret:
+          type: string
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 60
+        disabled:
+          type: boolean
+
+    ApiKey:
+      type: object
+      required: [id, key_prefix, label, is_active, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        key_prefix:
+          type: string
+          description: 前缀 + ... + 后 4 位，用于客户辨识
+        label: { type: string }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    NewApiKey:
+      allOf:
+        - $ref: '#/components/schemas/ApiKey'
+        - type: object
+          required: [secret]
+          properties:
+            secret:
+              type: string
+              description: 明文 key。仅此一次返回，丢失只能撤销重铸。
+
+    Usage:
+      type: object
+      required: [period_start, period_end, total, series]
+      properties:
+        period_start: { type: string, format: date-time }
+        period_end: { type: string, format: date-time }
+        total: { type: integer, format: int64 }
+        series:
+          type: array
+          items:
+            type: object
+            required: [bucket, value]
+            properties:
+              bucket: { type: string, format: date-time }
+              value: { type: integer, format: int64 }
+        quota:
+          type: integer
+          nullable: true
+          description: 当前套餐月度配额；超限时拒绝 ingest
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: 机器可读，如 `unauthorized` / `tenant_not_found`
+        message:
+          type: string
+          description: 中文人类可读
+        request_id:
+          type: string
+          description: trace id，复用 chi RequestID 中间件
+
+  responses:
+    BadRequest:
+      description: 请求体或参数不合法
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: 未登录或 session 过期
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: 资源不存在或不属于当前 tenant
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: 违反唯一约束或并发冲突
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

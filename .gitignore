@@ -1,0 +1,32 @@
+# Compiled binaries
+/listen
+/listen.exe
+/cmd/listen/listen
+/cmd/listen/listen.exe
+
+# Go test/cover artifacts
+/coverage.out
+/coverage.html
+/*.test
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Local config (never commit secrets)
+/config.yaml
+.env
+.env.local
+.env.*.local
+
+# Console (Vite + biome)
+/console/node_modules/
+/console/dist/
+/console/.vite/
+/console/coverage/
+
+# Logs
+*.log
