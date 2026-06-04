@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 // notifyTargetRepo is the subset of *repo.NotifyTargetRepo that the
@@ -203,7 +203,11 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 		return errors.New("url 不能为空")
 	}
 	u, err := url.Parse(req.URL)
-	if err != nil || (u.Scheme != "https" && !(u.Scheme == "http" && isLoopback(u.Hostname()))) {
+	if err != nil {
+		return errors.New("url 必须是 https://… 或本地 loopback http://127.0.0.1")
+	}
+	loopbackHTTP := u.Scheme == "http" && isLoopback(u.Hostname())
+	if u.Scheme != "https" && !loopbackHTTP {
 		return errors.New("url 必须是 https://… 或本地 loopback http://127.0.0.1")
 	}
 	// audience normalize

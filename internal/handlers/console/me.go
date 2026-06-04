@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 // MeHandler serves GET /fb/v1/console/me and POST /fb/v1/console/logout.

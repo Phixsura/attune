@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/wanmuchengchuan/listen/internal/infra/metrics"
-	"github.com/wanmuchengchuan/listen/internal/logext"
-	"github.com/wanmuchengchuan/listen/internal/notify"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/infra/metrics"
+	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/notify"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 // OutboxWorker drains the notify_outbox queue. Wave 1.2 scope: only

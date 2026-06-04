@@ -10,11 +10,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/logext"
 )
 
-const defaultPath = "config.yaml"
-const envPath = "FEEDBACK_API_CONFIG"
+const (
+	defaultPath = "config.yaml"
+	envPath     = "FEEDBACK_API_CONFIG"
+)
 
 type Config struct {
 	Port             int           `yaml:"port"`

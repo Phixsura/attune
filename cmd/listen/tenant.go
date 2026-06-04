@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/wanmuchengchuan/listen/internal/infra/config"
-	"github.com/wanmuchengchuan/listen/internal/infra/database"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/infra/config"
+	"github.com/Phixsura/listen/internal/infra/database"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 // runTenant dispatches `listen tenant <verb>` subcommands. Wave 1.2

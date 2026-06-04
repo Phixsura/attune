@@ -11,10 +11,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/wanmuchengchuan/listen/internal/domain"
-	"github.com/wanmuchengchuan/listen/internal/infra/lark"
-	"github.com/wanmuchengchuan/listen/internal/repo"
-	"github.com/wanmuchengchuan/listen/internal/service"
+	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/listen/internal/infra/lark"
+	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/service"
 )
 
 // LarkHandler serves POST /v1/lark/event for Lark/Feishu event
@@ -98,7 +98,7 @@ func (h *LarkHandler) Event(w http.ResponseWriter, r *http.Request) {
 	case lark.EventURLVerification:
 		h.handleURLVerification(w, ev)
 	case lark.EventMessageReceive:
-		h.handleMessage(w, r.Context(), ev)
+		h.handleMessage(r.Context(), w, ev)
 	default:
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
 	}
@@ -115,7 +115,7 @@ func (h *LarkHandler) handleURLVerification(w http.ResponseWriter, ev lark.Event
 	writeJSON(w, http.StatusOK, map[string]string{"challenge": ev.Challenge})
 }
 
-func (h *LarkHandler) handleMessage(w http.ResponseWriter, ctx context.Context, ev lark.Event) {
+func (h *LarkHandler) handleMessage(ctx context.Context, w http.ResponseWriter, ev lark.Event) {
 	if ev.Text == "" {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ignored-empty"})
 		return

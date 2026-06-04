@@ -15,7 +15,7 @@ import (
 	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/logext"
 )
 
 // NewPool 建 pgxpool + otelpgx tracer。listen 子命令 / server 都用这个。

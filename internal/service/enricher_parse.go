@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wanmuchengchuan/listen/internal/domain"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 // buildSnapshot copies the persistence-side row + AI classification into

@@ -45,9 +45,9 @@ func TestTriage_IgnorePureSymbols(t *testing.T) {
 
 func TestTriage_IgnoreLongRunSpam(t *testing.T) {
 	cases := []string{
-		"aaaaaaaaaa",          // 10 a
+		"aaaaaaaaaa", // 10 a
 		"哈哈哈哈哈哈哈哈哈哈哈哈哈哈", // 14 哈
-		"垃垃垃垃垃垃垃垃垃垃spam",   // long run before spam
+		"垃垃垃垃垃垃垃垃垃垃spam", // long run before spam
 	}
 	for _, in := range cases {
 		d := Triage(in)

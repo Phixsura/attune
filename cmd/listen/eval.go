@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/wanmuchengchuan/listen/internal/infra/config"
-	"github.com/wanmuchengchuan/listen/internal/infra/database"
-	"github.com/wanmuchengchuan/listen/internal/repo"
-	"github.com/wanmuchengchuan/listen/internal/service"
+	"github.com/Phixsura/listen/internal/infra/config"
+	"github.com/Phixsura/listen/internal/infra/database"
+	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/service"
 )
 
 // runEval dispatches the `listen eval` CLI. Three modes:

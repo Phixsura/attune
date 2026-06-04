@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 // TestResult is the outcome of a one-shot connectivity ping.

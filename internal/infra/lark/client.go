@@ -25,7 +25,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/logext"
 )
 
 // upstreamBodyLogCap —— 飞书 API 上游 body 截断阈值(4KB),memory:upstream_http_log_info。
@@ -178,11 +178,11 @@ func (c *Client) GetUserInfo(ctx context.Context, userAccessToken string) (*User
 }
 
 // truncateBytes —— body 日志截断,跟 gateway provider.http_log.go 同实现。
-func truncateBytes(b []byte, cap int) string {
-	if len(b) <= cap {
+func truncateBytes(b []byte, limit int) string {
+	if len(b) <= limit {
 		return string(b)
 	}
-	return string(b[:cap]) + "...(truncated)"
+	return string(b[:limit]) + "...(truncated)"
 }
 
 // appAccessTokenLocked returns a cached app token, refreshing if within

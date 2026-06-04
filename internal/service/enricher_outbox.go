@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/wanmuchengchuan/listen/internal/domain"
-	"github.com/wanmuchengchuan/listen/internal/infra/trace"
-	"github.com/wanmuchengchuan/listen/internal/logext"
-	"github.com/wanmuchengchuan/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/listen/internal/infra/trace"
+	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/repo"
 )
 
 // persistEnriched flips user_feedback to 'done' and (when outbox is
@@ -51,7 +51,7 @@ func (e *Enricher) persistEnriched(
 			where, s.ID, err.Error())
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := e.repo.MarkDoneTx(ctx, tx, s.ID, enriched); err != nil {
 		logext.Errorf(ctx, "[%s] MarkDoneTx failed,feedback_id:%d,err:%+v",

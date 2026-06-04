@@ -18,21 +18,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/riandyrn/otelchi"
-	"go.opentelemetry.io/otel/trace"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/wanmuchengchuan/listen/internal/handlers"
-	"github.com/wanmuchengchuan/listen/internal/infra/apikey"
-	"github.com/wanmuchengchuan/listen/internal/infra/config"
-	"github.com/wanmuchengchuan/listen/internal/infra/database"
-	"github.com/wanmuchengchuan/listen/internal/infra/metrics"
-	"github.com/wanmuchengchuan/listen/internal/logext"
-	"github.com/wanmuchengchuan/listen/internal/notify"
-	"github.com/wanmuchengchuan/listen/internal/repo"
-	"github.com/wanmuchengchuan/listen/internal/service"
-	"github.com/wanmuchengchuan/listen/internal/observability"
+	"github.com/Phixsura/listen/internal/handlers"
+	"github.com/Phixsura/listen/internal/infra/config"
+	"github.com/Phixsura/listen/internal/infra/database"
+	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/notify"
+	"github.com/Phixsura/listen/internal/observability"
+	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/listen/internal/service"
 )
 
 // ── server ────────────────────────────────────────────────────────────────
@@ -56,39 +51,17 @@ func runServer() error {
 	//   - 客户端可选传 W3C traceparent,不传也工作
 	//   - 响应头 X-Trace-Id 是 optional debug 字段,API 契约不变
 	//   - 内部业务日志带 trace_id 仅供运维 / SLS 用,客户不感知
-	otelShutdown, err := observability.InitTracer(ctx, observability.Options{
-		ServiceName:    "casceneai-listen",
-		ServiceVersion: envOrDefault("APP_VERSION", "dev"),
-		Environment:    envOrDefault("ENV", "dev"),
-		Endpoint:       os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-		URLPath:        envOrDefault("OTEL_EXPORTER_OTLP_TRACES_PATH", "/opentelemetry/v1/traces"),
-		Headers:        parseOTelHeaders(os.Getenv("OTEL_EXPORTER_OTLP_HEADERS")),
-		Insecure:       os.Getenv("OTEL_EXPORTER_OTLP_INSECURE") == "true",
-	})
+	otelShutdown, err := setupTracing(ctx)
 	if err != nil {
 		return fmt.Errorf("otel init: %w", err)
 	}
-	defer func() {
-		shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
-		defer c()
-		if err := otelShutdown(shutdownCtx); err != nil {
-			slog.WarnContext(shutdownCtx, "otel shutdown failed", "err", err)
-		}
-	}()
+	defer shutdownTracing(otelShutdown)
 
-	pool, err := database.NewPool(ctx, cfg.DatabaseURL)
+	pool, err := setupDatabase(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("pgxpool: %w", err)
+		return err
 	}
 	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		return fmt.Errorf("pg ping: %w", err)
-	}
-	slog.InfoContext(ctx, "postgres connected")
-
-	if err := database.RunMigrations(ctx, pool); err != nil {
-		return fmt.Errorf("migrations: %w", err)
-	}
 
 	llm, err := buildLLMClient(cfg)
 	if err != nil {
@@ -145,49 +118,9 @@ func runServer() error {
 	}
 	ingestHandler := handlers.NewIngestHandler(ingestor)
 
-	r := chi.NewRouter()
-	// otelchi 入口产 root span(从客户端 traceparent 继承 or 兜底生成可读 trace_id)。
-	// 必须最先,过滤 /health 避免心跳塞满 trace。
-	r.Use(otelchi.Middleware("casceneai-listen", otelchi.WithFilter(func(r *http.Request) bool {
-		return !strings.HasPrefix(r.URL.Path, "/health") && !strings.HasPrefix(r.URL.Path, "/metrics")
-	})))
-	// X-Trace-Id 响应头(对客户 optional debug,API 契约不强制)
-	r.Use(traceIDResponseHeader)
-	r.Use(middleware.RequestID) // chi 自己的 X-Request-ID(向后兼容,跟 X-Trace-Id 并存)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
-	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte("ok"))
-	})
-	// Prometheus scrape endpoint. Restrict to internal CIDR via nginx
-	// in production — no auth at the Go level.
-	r.Handle("/metrics", metrics.Handler())
-	rateLimiter := buildRateLimiter(cfg)
-
-	r.Route("/v1", func(r chi.Router) {
-		r.Mount("/lark", larkHandler.Routes())
-		r.Group(func(r chi.Router) {
-			r.Use(apikey.Middleware(apiKeys))
-			r.Use(rateLimiter.Middleware)
-			r.Mount("/feedback", ingestHandler.Routes())
-		})
-	})
-
-	// Stage B 控制台 (console). Mounted under /fb/v1/console; gateway/
-	// nginx reverse-proxies external traffic here. Disabled gracefully
-	// when ConsoleSessionKey is empty (single-process dev defaults).
-	if cfg.ConsoleSessionKey != "" {
-		consoleRouter, err := buildConsoleRouter(cfg, pool)
-		if err != nil {
-			return fmt.Errorf("build console: %w", err)
-		}
-		r.Route("/fb/v1/console", func(r chi.Router) {
-			r.Mount("/", consoleRouter)
-		})
-		slog.InfoContext(ctx, "console enabled", "base_url", cfg.ConsoleBaseURL)
-	} else {
-		slog.InfoContext(ctx, "console disabled (no CONSOLE_SESSION_KEY)")
+	r, err := buildRouter(ctx, cfg, larkHandler, ingestHandler, apiKeys, pool)
+	if err != nil {
+		return err
 	}
 
 	go enricher.RunBackground(ctx, cfg.EnricherInterval, cfg.EnricherBatch)
@@ -214,6 +147,50 @@ func runServer() error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+// setupTracing builds the OpenTelemetry tracer from env. endpoint 空 = noop
+// (本地能跑);prod 配 OTEL_EXPORTER_OTLP_ENDPOINT 才真上报 SLS Trace。OTel 对
+// 客户完全非侵入:可选 W3C traceparent、响应头 X-Trace-Id 仅 debug、内部日志
+// trace_id 仅运维用。详见 docs/observability-trace-design.md。
+func setupTracing(ctx context.Context) (func(context.Context) error, error) {
+	return observability.InitTracer(ctx, observability.Options{
+		ServiceName:    "casceneai-listen",
+		ServiceVersion: envOrDefault("APP_VERSION", "dev"),
+		Environment:    envOrDefault("ENV", "dev"),
+		Endpoint:       os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		URLPath:        envOrDefault("OTEL_EXPORTER_OTLP_TRACES_PATH", "/opentelemetry/v1/traces"),
+		Headers:        parseOTelHeaders(os.Getenv("OTEL_EXPORTER_OTLP_HEADERS")),
+		Insecure:       os.Getenv("OTEL_EXPORTER_OTLP_INSECURE") == "true",
+	})
+}
+
+// shutdownTracing flushes the tracer on exit with a bounded timeout.
+func shutdownTracing(shutdown func(context.Context) error) {
+	shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
+	defer c()
+	if err := shutdown(shutdownCtx); err != nil {
+		slog.WarnContext(shutdownCtx, "otel shutdown failed", "err", err)
+	}
+}
+
+// setupDatabase opens the pgx pool, verifies connectivity, and applies
+// migrations. The caller owns the returned pool (defer pool.Close()).
+func setupDatabase(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
+	pool, err := database.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("pgxpool: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("pg ping: %w", err)
+	}
+	slog.InfoContext(ctx, "postgres connected")
+	if err := database.RunMigrations(ctx, pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("migrations: %w", err)
+	}
+	return pool, nil
 }
 
 func signalContext() (context.Context, context.CancelFunc) {
@@ -253,16 +230,4 @@ func parseOTelHeaders(raw string) map[string]string {
 		out[strings.TrimSpace(pair[:idx])] = strings.TrimSpace(pair[idx+1:])
 	}
 	return out
-}
-
-// traceIDResponseHeader 把 OTel trace_id 写到 X-Trace-Id 响应头(给客户 debug 用)。
-// 必须在 otelchi 之后(否则 SpanContext 不可见)。
-func traceIDResponseHeader(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		span := trace.SpanFromContext(r.Context())
-		if span.SpanContext().IsValid() {
-			w.Header().Set("X-Trace-Id", span.SpanContext().TraceID().String())
-		}
-		next.ServeHTTP(w, r)
-	})
 }

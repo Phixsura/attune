@@ -1,0 +1,16 @@
+# Keeps the SHA-pinned actions in .github/workflows/* current. Dependabot bumps
+# both the commit SHA and the trailing `# vX.Y.Z` comment in one reviewable PR,
+# so pins stay immutable AND readable.
+#
+# (Go modules and the console pnpm deps are intentionally not auto-updated here
+# yet — add `gomod` / `npm` ecosystems in a follow-up if/when desired.)
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci

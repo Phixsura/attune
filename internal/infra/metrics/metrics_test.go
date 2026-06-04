@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -52,7 +53,7 @@ func TestHandlerServesPrometheusFormat(t *testing.T) {
 	// are sometimes omitted by the encoder).
 	IngestTotal.WithLabelValues("test-tenant", "api", "ok").Inc()
 
-	req := httptest.NewRequest("GET", "/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rec := httptest.NewRecorder()
 	Handler().ServeHTTP(rec, req)
 
@@ -64,11 +65,4 @@ func TestHandlerServesPrometheusFormat(t *testing.T) {
 		t.Fatalf("expected listen_ingest_total in body, got:\n%s",
 			string(body)[:min(len(body), 500)])
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

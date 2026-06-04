@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wanmuchengchuan/listen/internal/logext"
+	"github.com/Phixsura/listen/internal/logext"
 )
 
 // openaiHTTPTimeout —— OpenAI 兼容端点 HTTP 超时。 60s 覆盖大多数 4-8K token 推理;
