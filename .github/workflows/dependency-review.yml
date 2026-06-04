@@ -20,3 +20,6 @@ jobs:
         with:
           fail-on-severity: high
           deny-licenses: GPL-3.0, AGPL-3.0, LGPL-3.0
+          # TruffleHog's *action* is AGPL, but it's a CI tool — not linked into
+          # our Apache-2.0 binary — so its license doesn't affect our code.
+          allow-dependencies-licenses: pkg:githubactions/trufflesecurity/trufflehog
