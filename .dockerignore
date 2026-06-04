@@ -1,0 +1,13 @@
+# Keep the Docker build context to what `go build ./cmd/listen` needs.
+# The console SPA is built + served separately (not embedded in the binary),
+# so its 310 MB node_modules must never enter the build context.
+.git
+.github
+.claude
+console
+docs
+*.md
+LICENSE
+.golangci.yml
+.gitignore
+.dockerignore

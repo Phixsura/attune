@@ -160,6 +160,27 @@ When Claude / Cursor / similar tooling is editing this repo:
   evidence in the PR description.
 - Never bypass pre-commit hooks or CI gates to "make red go green." Fix the
   underlying issue.
+- **Every issue gets a proposal** (§10) written before/with the code.
+
+---
+
+## 10 · Proposals (one per issue)
+
+**Every issue we work on gets a short design proposal, written before/with the
+implementation and committed alongside the change.**
+
+- **Location / naming:** `docs/proposals/YYYY-MM-DD-<slug>.md` — the date prefix
+  is when the proposal was *started*, so `ls docs/proposals` reads as a timeline.
+- **Header:** a table with `Issue` (#N), `Status` (`Proposed` → `Accepted` →
+  `Implemented`), `Started` (timestamp), and `Related` issues.
+- **Sections** (ADR/RFC-lite): Problem → Goals / Non-goals → Proposal →
+  Alternatives considered → Risks / tradeoffs → Implementation plan →
+  Verification → References.
+- **Association:** the proposal links its issue; the implementing PR uses
+  `Closes #N` and includes the proposal doc in the same change.
+
+This is where assumptions get surfaced and alternatives weighed *before* writing
+code (see §6). Update the `Status` as the work lands.
 
 ---
 
