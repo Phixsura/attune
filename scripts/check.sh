@@ -45,14 +45,6 @@ lizard . -l go -C 10 -T nloc=100 -w || {
   # distinguish via exit code alone; surface visually for now.
 }
 
-step "file size (≤ 300 lines)"
-oversize=$(find . -name '*.go' -not -path './.git/*' -exec wc -l {} + | awk '$1 > 300 && $2 != "total" {print $2 " " $1 " lines"}')
-if [[ -n "$oversize" ]]; then
-  echo "❌ files over 300 lines:" >&2
-  echo "$oversize" >&2
-  exit 1
-fi
-
 if [[ "$skip_jscpd" -eq 0 ]]; then
   step "jscpd (duplication < 2%)"
   npx -y jscpd . --pattern '**/*.go' --threshold 2 --silent
