@@ -178,11 +178,11 @@ func (c *Client) GetUserInfo(ctx context.Context, userAccessToken string) (*User
 }
 
 // truncateBytes —— body 日志截断,跟 gateway provider.http_log.go 同实现。
-func truncateBytes(b []byte, cap int) string {
-	if len(b) <= cap {
+func truncateBytes(b []byte, limit int) string {
+	if len(b) <= limit {
 		return string(b)
 	}
-	return string(b[:cap]) + "...(truncated)"
+	return string(b[:limit]) + "...(truncated)"
 }
 
 // appAccessTokenLocked returns a cached app token, refreshing if within

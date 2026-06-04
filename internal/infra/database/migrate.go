@@ -84,7 +84,7 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("begin tx for %d: %w", version, err)
 		}
 		if _, err := tx.Exec(ctx, string(body)); err != nil {
-			tx.Rollback(ctx)
+			_ = tx.Rollback(ctx)
 			logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
 			return fmt.Errorf("apply %s: %w", name, err)
 		}
@@ -92,7 +92,7 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable),
 			version, name,
 		); err != nil {
-			tx.Rollback(ctx)
+			_ = tx.Rollback(ctx)
 			logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, err.Error())
 			return fmt.Errorf("record %s: %w", name, err)
 		}

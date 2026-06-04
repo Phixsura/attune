@@ -51,7 +51,7 @@ func (e *Enricher) persistEnriched(
 			where, s.ID, err.Error())
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := e.repo.MarkDoneTx(ctx, tx, s.ID, enriched); err != nil {
 		logext.Errorf(ctx, "[%s] MarkDoneTx failed,feedback_id:%d,err:%+v",

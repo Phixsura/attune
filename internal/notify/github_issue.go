@@ -71,12 +71,12 @@ func SendGitHubIssue(
 	env, err := unmarshalListenEnvelope(payload)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad payload,err:%s", where, err.Error())
-		return fmt.Errorf("%w: github-issue payload: %v", ErrTerminal, err)
+		return fmt.Errorf("%w: github-issue payload: %w", ErrTerminal, err)
 	}
 	owner, repoName, err := ParseGitHubRepoURL(repoURL)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad repo url,url:%s,err:%s", where, repoURL, err.Error())
-		return fmt.Errorf("%w: github-issue url: %v", ErrTerminal, err)
+		return fmt.Errorf("%w: github-issue url: %w", ErrTerminal, err)
 	}
 	body, err := buildIssueBody(env)
 	if err != nil {

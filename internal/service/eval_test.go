@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -106,8 +107,10 @@ func TestFormatReport_HappyPath(t *testing.T) {
 		ModuleSumIoU: 8.5,
 		LLMCostYuan:  0.08,
 		Mismatches: []Mismatch{
-			{FeedbackID: 1, Content: "卡死", OldKind: "bug", NewKind: "ops",
-				OldSeverity: "P0", NewSeverity: "P1", ModuleJaccard: 0.5},
+			{
+				FeedbackID: 1, Content: "卡死", OldKind: "bug", NewKind: "ops",
+				OldSeverity: "P0", NewSeverity: "P1", ModuleJaccard: 0.5,
+			},
 		},
 	}
 	md := FormatReport(rep)
@@ -148,7 +151,7 @@ func TestScoreHuman_CSVRoundTrip(t *testing.T) {
 		"3,skipped,bug,P3,,1.0,,,,", // empty human_kind = skip
 	}, "\n")
 	ev := &Evaluator{} // ScoreHuman doesn't touch repo / LLM
-	rep, err := ev.ScoreHuman(nil, bytes.NewReader([]byte(csvBody)))
+	rep, err := ev.ScoreHuman(context.TODO(), bytes.NewReader([]byte(csvBody)))
 	if err != nil {
 		t.Fatalf("ScoreHuman: %v", err)
 	}

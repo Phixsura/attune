@@ -28,17 +28,21 @@ type fakeNotifyRepo struct {
 func (f *fakeNotifyRepo) ListByTenant(_ context.Context, _ string) ([]repo.NotifyTarget, error) {
 	return nil, nil
 }
+
 func (f *fakeNotifyRepo) Insert(_ context.Context, _ repo.NotifyTarget) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
+
 func (f *fakeNotifyRepo) GetByID(_ context.Context, _ string, _ uuid.UUID) (*repo.NotifyTarget, error) {
 	return f.getRow, f.getErr
 }
+
 func (f *fakeNotifyRepo) UpdateByID(_ context.Context, _ string, _ uuid.UUID, t repo.NotifyTarget) error {
 	tCopy := t
 	f.updateCalledWith = &tCopy
 	return f.updateErr
 }
+
 func (f *fakeNotifyRepo) Delete(_ context.Context, _ string, _ uuid.UUID) error {
 	return nil
 }

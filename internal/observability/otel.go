@@ -59,8 +59,8 @@ func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
 			semconv.ServiceVersion(opts.ServiceVersion),
 			semconv.DeploymentEnvironmentName(opts.Environment),
 		),
-		resource.WithFromEnv(),   // 允许 env 补充 OTEL_RESOURCE_ATTRIBUTES
-		resource.WithProcess(),   // 自动加 process.pid / process.runtime
+		resource.WithFromEnv(), // 允许 env 补充 OTEL_RESOURCE_ATTRIBUTES
+		resource.WithProcess(), // 自动加 process.pid / process.runtime
 		resource.WithTelemetrySDK(),
 	)
 	if err != nil {

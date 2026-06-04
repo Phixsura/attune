@@ -50,7 +50,7 @@ func buildRouter(
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 	// Prometheus scrape endpoint. Restrict to internal CIDR via nginx
 	// in production — no auth at the Go level.

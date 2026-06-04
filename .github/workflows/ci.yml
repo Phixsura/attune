@@ -82,7 +82,33 @@ jobs:
           cache-dependency-path: go.sum # built-in cache, keyed on go.sum
       - run: go vet ./...
       - run: go build ./...
-      - run: go test -short ./...
+      - name: Test (race + coverage)
+        run: go test -race -covermode=atomic -coverprofile=coverage.txt ./...
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        continue-on-error: true # never block on a coverage-upload hiccup
+        with:
+          files: ./coverage.txt
+          flags: go
+      - name: go.mod / go.sum tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  # ── golangci-lint: ~15 linters (subsumes go vet) + §5 layering via depguard ─
+  golangci-lint:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
+        with:
+          version: v2.12.2
 
   # ── Lizard: complexity (CCN ≤ 15) + length (NLOC ≤ 100) ────────────────────
   lizard:
@@ -139,6 +165,7 @@ jobs:
       # TanStack Router plugin) that tsc needs — and doubles as a build smoke test.
       - run: pnpm exec vite build
       - run: pnpm tsc -b --noEmit
+      - run: pnpm vitest run --passWithNoTests
 
   # ── Changelog enforcement: a code PR must update CHANGELOG.md (CLAUDE.md §2) ─
   changelog:
@@ -171,7 +198,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, lizard, govulncheck, console, changelog]
+    needs: [changes, go-checks, golangci-lint, lizard, govulncheck, console, changelog]
     if: always()
     runs-on: ubuntu-latest
     steps:

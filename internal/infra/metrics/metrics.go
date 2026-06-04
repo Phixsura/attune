@@ -94,11 +94,12 @@ var IngestRateLimitTotal = prometheus.NewCounterVec(
 // full LLM enrich call.
 //
 // Labels:
-//   tenant   — TEXT tenant id (matches IngestTotal's labels)
-//   decision — "ignore" | "fast" | "full"
-//     • ignore: skipped (noise / too short / spam) — no LLM cost
-//     • fast:   matched a per-tenant rule, no LLM call (v1 feature)
-//     • full:   passed to the full LLM enrich stage (Sprint 1.3 default)
+//
+//	tenant   — TEXT tenant id (matches IngestTotal's labels)
+//	decision — "ignore" | "fast" | "full"
+//	  • ignore: skipped (noise / too short / spam) — no LLM cost
+//	  • fast:   matched a per-tenant rule, no LLM call (v1 feature)
+//	  • full:   passed to the full LLM enrich stage (Sprint 1.3 default)
 var TriageDecisionsTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "listen_triage_decisions_total",

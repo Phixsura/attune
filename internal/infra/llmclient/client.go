@@ -24,9 +24,9 @@ type LLMClient interface {
 }
 
 // truncate caps s at the given byte length so logs stay scannable.
-func truncate(s string, cap int) string {
-	if len(s) <= cap {
+func truncate(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	return s[:cap] + "...(truncated)"
+	return s[:limit] + "...(truncated)"
 }

@@ -1,11 +1,11 @@
 // attrs.go — 跨服务统一的日志字段名常量。
 //
 // 设计原则:
-//   1. 字段语义跨协议本来就不同。HTTP 跟 gRPC 是两个维度,不强行用同名。
-//   2. 命名照 OTel Semantic Conventions(https://opentelemetry.io/docs/specs/semconv/)。
-//      OTel SemConv 用 dot notation 如 `http.method`,SLS 把 `.` 当字段分隔会
-//      自动 flatten,我们直接用 `_` 形式避免歧义。
-//   3. 用 const 而非 string literal,业务代码任何字段名漂移在编译期就阻断。
+//  1. 字段语义跨协议本来就不同。HTTP 跟 gRPC 是两个维度,不强行用同名。
+//  2. 命名照 OTel Semantic Conventions(https://opentelemetry.io/docs/specs/semconv/)。
+//     OTel SemConv 用 dot notation 如 `http.method`,SLS 把 `.` 当字段分隔会
+//     自动 flatten,我们直接用 `_` 形式避免歧义。
+//  3. 用 const 而非 string literal,业务代码任何字段名漂移在编译期就阻断。
 //
 // 业务代码用法:
 //
