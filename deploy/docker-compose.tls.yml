@@ -1,0 +1,38 @@
+# Optional TLS overlay — Caddy reverse proxy with automatic HTTPS for attune.
+#
+# Usage (after `cp Caddyfile.example Caddyfile` and setting your domain):
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+#
+# Caddy terminates TLS on 443 and reverse-proxies to attune over the compose
+# network. Automatic Let's Encrypt needs a public domain + ports 80/443 reachable
+# from the internet. Certs persist in the attune-caddy-data volume.
+
+services:
+  caddy:
+    image: caddy:2.11.4  # pinned (top reference stacks pin; bump deliberately)
+    depends_on:
+      - attune
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3 (QUIC)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - attune-caddy-data:/data      # TLS certs live here — keep this volume
+      - attune-caddy-config:/config
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  attune-caddy-data:
+  attune-caddy-config:

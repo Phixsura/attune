@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Prometheus datasource and the "Attune Overview" dashboard, and documents the
   `attune_*` metrics as a backend-agnostic contract in `observability/README.md`.
 - CI: a `deploy/**`-filtered `docker compose config` smoke check.
+- **TLS overlay** (`deploy/docker-compose.tls.yml` + `Caddyfile.example`) — front
+  attune with Caddy for automatic HTTPS (#7).
+- **Private-deployment guide** (`docs/private-deploy.md`) — a verified
+  external-user walkthrough, kept honest by a CI-run happy-path smoke test
+  (`scripts/smoke-deploy.sh`), a deploy-doc-rot gate, and a markdown link
+  checker (#7).
 
 ### Changed
 

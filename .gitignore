@@ -9,6 +9,9 @@
 /coverage.html
 /*.test
 
+.claude
+.agents
+
 # Editor / OS
 .DS_Store
 *.swp
@@ -30,3 +33,4 @@
 
 # Logs
 *.log
+deploy/Caddyfile
