@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-05
+
 ### Added
 
 - **Private-deploy docker-compose kit** under `deploy/` (#5): `docker-compose.yml`
@@ -64,5 +66,6 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Configurable per-tenant token-bucket rate limiting.
 - Lark event subscription handler with signature verification.
 
-[Unreleased]: https://github.com/Phixsura/attune/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Phixsura/attune/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Phixsura/attune/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Phixsura/attune/releases/tag/v0.1.0
