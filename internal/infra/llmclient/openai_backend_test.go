@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // TestOpenAIBackend_Chat_HappyPath exercises the whole request/response cycle:
@@ -183,5 +185,17 @@ func TestNewOpenAI_TrimsTrailingSlash(t *testing.T) {
 func TestNewOpenAI_RejectsEmptyBaseURL(t *testing.T) {
 	if _, err := NewOpenAI("", "k"); err == nil {
 		t.Fatal("want error for empty base_url, got nil")
+	}
+}
+
+func TestNewOpenAI_UsesOtelHTTPTransport(t *testing.T) {
+	b, err := NewOpenAI("https://example.test", "k")
+	if err != nil {
+		t.Fatalf("NewOpenAI: %v", err)
+	}
+	defer b.Close()
+
+	if _, ok := b.client.Transport.(*otelhttp.Transport); !ok {
+		t.Fatalf("client transport: want *otelhttp.Transport, got %T", b.client.Transport)
 	}
 }
