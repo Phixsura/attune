@@ -1,0 +1,75 @@
+# attune private-deploy stack — attune + postgres.
+#
+# Quickstart (see README.md for the full ordered walk-through):
+#   cd deploy
+#   cp .env.example .env        # then set POSTGRES_PASSWORD + FEEDBACK_API_LLM_OPENAI_API_KEY
+#   docker compose up -d
+#   curl http://localhost:8090/healthz     # -> ok
+#
+# Postgres data lives in the named volume `attune-pg` and survives
+# `docker compose down`. Use `docker compose down -v` to wipe it.
+
+services:
+  attune:
+    image: ${ATTUNE_IMAGE:-ghcr.io/phixsura/attune:latest}
+    # No published image yet, or want to run your local tree? Build from source:
+    #   docker compose up -d --build
+    # build:
+    #   context: ..
+    #   dockerfile: Dockerfile
+    env_file: .env
+    # Binds host loopback by default (secure). Front with your own TLS proxy, or
+    # set ATTUNE_BIND=0.0.0.0 in .env to publish on all interfaces.
+    ports:
+      - "${ATTUNE_BIND:-127.0.0.1}:${ATTUNE_PORT:-8090}:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    # Hardening — safe on the distroless/static nonroot (uid 65532) image.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # No container healthcheck: the distroless image has no shell/curl. Probe
+    # liveness from the host via GET /healthz.
+    #
+    # Optional YAML config. Env vars (.env) override every field, so a mount is
+    # only needed for the non-env knobs (enricher_interval, enricher_batch). The
+    # image already sets FEEDBACK_API_CONFIG=/app/config.yaml.
+    # volumes:
+    #   - ./config.yaml:/app/config.yaml:ro
+
+  postgres:
+    image: postgres:17-alpine
+    env_file: .env
+    volumes:
+      - attune-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-attune}"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+    restart: unless-stopped
+    # no-new-privileges only: the official entrypoint needs CHOWN/SETUID/SETGID
+    # to init the data dir and drop to the postgres user, so cap_drop:ALL /
+    # read_only would break first boot.
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  attune-pg:
