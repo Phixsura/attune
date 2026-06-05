@@ -46,6 +46,9 @@ jobs:
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
         with:
           images: ghcr.io/phixsura/attune
+          # :latest is controlled solely by the explicit raw rule below — disable
+          # metadata-action's default auto-latest so there's one source of truth.
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -87,5 +90,5 @@ jobs:
           PRERELEASE: ${{ contains(github.ref_name, '-') }}
         run: |
           flags=(--title "$TAG" --notes-file release-notes.md)
-          [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
           gh release create "$TAG" "${flags[@]}"
