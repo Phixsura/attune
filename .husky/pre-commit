@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# attune — pre-commit gate. A fast, dependency-free local mirror of the quick
+# CLAUDE.md §1 checks plus the standard large-file guard, run on STAGED changes
+# so policy violations surface in seconds instead of a CI round-trip.
+#
+# CI remains the authoritative full gate (vet/build/test/golangci/lizard/console);
+# this hook is best-effort local feedback — a SUBSET of CI, never stricter.
+#
+#   Enable:   git config core.hooksPath .husky
+#   Bypass:   git -c core.hooksPath=/dev/null commit ...   (emergencies only)
+#
+# Notes:
+#   • This file MUST stay executable (+x). With core.hooksPath, git silently
+#     skips a non-executable hook. It is committed mode 100755, so fresh clones
+#     are fine; don't strip the bit.
+#   • The console step is best-effort: it runs console's OWN biome only when
+#     console/src files are staged AND console deps are installed — Go-only
+#     contributors never need node_modules.
+#
+# Checks:
+#   ① large-file guard — staged blob > 500 KB (catches stray binaries/blobs;
+#      à la pre-commit's check-added-large-files). We do NOT cap source LINES:
+#      Go idiom + Google style cap functions, not files (already enforced in CI
+#      via lizard CCN/NLOC); a hard per-file line block would be stricter than CI.
+#   ② go vet — packages touched by staged .go (blocks)
+#   ③ scripts/lint-slog.sh — slog/OTel lint (warn-only; never blocks)
+#   ④ biome — staged console/src files (blocks, only if console deps present)
+
+set -uo pipefail  # NOT -e: we accumulate failures and decide the exit ourselves.
+
+if [ -t 1 ]; then B=$'\033[1m'; R=$'\033[0m'; else B=''; R=''; fi
+say(){ printf '%s▸ %s%s\n' "$B" "$1" "$R"; }
+fail=0
+
+# ── ① large-file guard (bytes; staged blob via cat-file -s) ───────────────────
+MAXKB=500
+say "large-file guard (≤${MAXKB}KB/file)"
+while IFS= read -r f; do
+  sz=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+  if [ "$((sz / 1024))" -gt "$MAXKB" ]; then
+    echo "✗ $f: $((sz / 1024))KB (>${MAXKB}KB) — large/binary blob; reconsider or use git-lfs"
+    fail=1
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+# ── ② go vet on staged packages (array → space-safe, no fragile xargs) ────────
+go_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
+if [ -n "$go_files" ]; then
+  say "go vet"
+  pkgs=()
+  while IFS= read -r d; do pkgs+=("./$d"); done \
+    < <(while IFS= read -r f; do dirname "$f"; done <<< "$go_files" | sort -u)
+  go vet "${pkgs[@]}" || fail=1
+fi
+
+# ── ③ slog/OTel lint (warn-only; #4) ─────────────────────────────────────────
+if [ -f scripts/lint-slog.sh ]; then
+  say "lint-slog (warn-only)"
+  bash scripts/lint-slog.sh || true
+fi
+
+# ── ④ console biome — staged console/src only, guarded on installed deps ──────
+con=$(git diff --cached --name-only --diff-filter=ACM -- 'console/src/**' \
+      | grep -E '\.(ts|tsx|js|jsx|json)$' || true)
+if [ -n "$con" ]; then
+  if [ -x console/node_modules/.bin/biome ]; then
+    say "biome (staged console/src)"
+    ( cd console && ./node_modules/.bin/biome check $(printf '%s\n' "$con" | sed 's#^console/##') ) || fail=1
+  else
+    echo "⚠ console/src staged but console/node_modules absent — run 'pnpm -C console install' for local biome (CI checks regardless)"
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo
+  echo "pre-commit blocked — fix the above, or bypass (emergencies): git -c core.hooksPath=/dev/null commit"
+  exit 1
+fi
+echo "${B}✓ pre-commit ok${R}"

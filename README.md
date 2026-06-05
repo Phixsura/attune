@@ -130,9 +130,36 @@ Every issue carries a `pillar/*` label. Pick one if you want to contribute:
 | `go test -short ./...` | all pass on changed code |
 | `lizard . -l go -C 15 -T nloc=100` | CCN ≤ 15, NLOC ≤ 100 per function |
 | `npx -y jscpd . --pattern '**/*.go' --threshold 5` | duplication < 2 % |
-| Single Go file size | ≤ 300 lines |
 
 Full engineering contract: [CLAUDE.md](CLAUDE.md). Every code-changing PR must add a `[Unreleased]` entry in [CHANGELOG.md](CHANGELOG.md).
+
+## Local development
+
+An optional, dependency-free pre-commit hook gives fast local feedback (~seconds)
+on the quick §1 checks before you commit, complementing CI. **Enable it once per
+clone:**
+
+```bash
+git config core.hooksPath .husky
+```
+
+On `git commit` it runs, on your **staged** changes only:
+
+| Check | Blocks? | Notes |
+|---|---|---|
+| Large-file guard (> 500 KB) | yes | catches stray binaries / large blobs |
+| `go vet` on touched packages | yes | |
+| `scripts/lint-slog.sh` (slog / OTel) | no | warn-only |
+| `biome` on staged `console/src` | yes¹ | ¹only if `console/node_modules` is installed |
+
+The console step is best-effort — **Go-only contributors never need Node.** To get
+local biome on console changes, install its deps once: `pnpm -C console install`.
+
+**Bypass** (emergencies only): `git -c core.hooksPath=/dev/null commit …`
+
+CI stays the authoritative gate; the hook is a fast subset of it, never stricter.
+The hook file must remain executable (`+x`) — git silently skips a non-executable
+hook (it's committed with the bit set, so fresh clones are fine).
 
 ## Contributing
 
