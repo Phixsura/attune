@@ -107,7 +107,7 @@ do **not** migrate, so run them after the server above is up:
 ```bash
 docker compose run --rm attune tenant create --slug acme --name "Acme Inc"
 docker compose run --rm attune keys issue --tenant acme --label main
-#   key:    fbk_live_1b70b736517564257aa8475407eb466b
+#   key:    fbk_live_0123456789abcdef0123456789abcdef   # example — yours differs
 #   Store this key now — it is not recoverable.
 ```
 
@@ -176,10 +176,11 @@ attune.example.com {
 Caddy terminates TLS on 443 and reverse-proxies to attune over the compose
 network (verified: requests arrive with a `via: 1.1 Caddy` header). **Automatic
 TLS needs a public domain whose DNS points here and ports 80/443 reachable from
-the internet** (the ACME challenge). Once Caddy fronts attune you can drop the
-`ports:` on the attune service — Caddy reaches it internally. **Do drop it if you
-set `ATTUNE_BIND=0.0.0.0`**, or attune stays reachable in plaintext on `:8090`
-beside the TLS front door.
+the internet** (the ACME challenge). Caddy reaches attune over the compose
+network, so **leave `ATTUNE_BIND` at its `127.0.0.1` default** — attune's own
+port then listens on loopback only, never reachable in plaintext from outside.
+(Setting `ATTUNE_BIND=0.0.0.0` behind Caddy would expose attune in plaintext on
+`:8090` beside the TLS front door — don't.)
 
 ---
 
@@ -190,12 +191,13 @@ cd deploy
 docker compose pull && docker compose up -d
 ```
 
-> **Pinning.** Only the moving `:latest` tag is published today, so
-> `docker compose up -d` tracks latest. For a **reproducible** deploy, pin a
-> digest in `.env`:
+> **Pinning.** `:latest` moves, so plain `docker compose up -d` tracks it. For a
+> **reproducible** deploy, pin a release in `.env`. A version tag is simplest —
+> `ATTUNE_IMAGE=ghcr.io/phixsura/attune:0.2.0` (or `:0.2` to follow that minor
+> line's patches). A digest is strongest (fully immutable):
 > `ATTUNE_IMAGE=ghcr.io/phixsura/attune@sha256:<digest>`
-> (get it with `docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/phixsura/attune:latest`).
-> The obs/TLS overlay images are already pinned to specific versions.
+> (get it with `docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/phixsura/attune:0.2.0`).
+> The obs/TLS overlay images are already pinned.
 
 ---
 

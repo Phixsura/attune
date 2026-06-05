@@ -12,7 +12,7 @@
 services:
   attune:
     image: ${ATTUNE_IMAGE:-ghcr.io/phixsura/attune:latest}
-    # No published image yet, or want to run your local tree? Build from source:
+    # Want to run your local tree (or build for a platform we don't publish)?
     #   docker compose up -d --build
     # build:
     #   context: ..

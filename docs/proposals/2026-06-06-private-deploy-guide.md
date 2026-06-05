@@ -150,7 +150,8 @@ Consistent across Sentry self-hosted, Plausible CE, Immich, Supabase:
 - Root README links `docs/private-deploy.md`; 6 troubleshooting entries, each a
   **real captured error** (LLM 401, port-in-use, DSN parse, …).
 - Every command/output in the guide was run on a real cold deployment (incl. the
-  corrected findings: first-boot timing, the `:v0.2.0` pin gap, and the api-key
+  corrected findings: first-boot timing, the real published tag (`:0.2.0`/`:0.2`,
+  not `:v0.2.0`), and the api-key
   "bug" that was a harness artifact).
 
 ## References
