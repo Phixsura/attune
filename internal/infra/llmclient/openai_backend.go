@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/Phixsura/attune/internal/logext"
 )
 
@@ -48,7 +50,10 @@ func NewOpenAI(baseURL, apiKey string) (*OpenAIBackend, error) {
 	return &OpenAIBackend{
 		baseURL: trimmed,
 		apiKey:  apiKey,
-		client:  &http.Client{Timeout: openaiHTTPTimeout},
+		client: &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Timeout:   openaiHTTPTimeout,
+		},
 	}, nil
 }
 
