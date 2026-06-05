@@ -55,7 +55,9 @@ docker compose run --rm attune tenant create --slug <slug> --name <name>
 docker compose run --rm attune keys issue --tenant <slug> --label <s>  # mint an API key
 ```
 
-See [`deploy/README.md`](deploy/README.md) for the full walk-through. Or build from source:
+See [`docs/private-deploy.md`](docs/private-deploy.md) for the full private-deploy
+guide (TLS, backup, upgrades, troubleshooting), or [`deploy/README.md`](deploy/README.md)
+for the minimal path. Or build from source:
 
 ```bash
 go build ./cmd/attune
