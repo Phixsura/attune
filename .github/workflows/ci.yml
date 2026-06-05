@@ -14,10 +14,8 @@
 #     without ever running them. The gate fails iff a real job failed/cancelled.
 #
 # Deliberately omitted for now:
-#   * docker-build — the Dockerfile still assumes the old monorepo layout
-#     (COPY gateway/ + listen/); deferred to a follow-up that builds standalone.
-#   * lint-slog   — scripts/lint-slog.sh now exists, but CI --strict gating is
-#     deferred until #9 clears the 3 known warnings; it is warn-only till then.
+#   * lint-slog --strict gating — deferred until #9 clears the 3 known warnings;
+#     scripts/lint-slog.sh runs warn-only till then.
 #
 # govulncheck is informational (continue-on-error): its standard-library
 # findings track the Go toolchain version against a live DB, so they change
@@ -50,6 +48,9 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
       changelog: ${{ steps.filter.outputs.changelog }}
       deploy: ${{ steps.filter.outputs.deploy }}
+      deploycode: ${{ steps.filter.outputs.deploycode }}
+      deploydocs: ${{ steps.filter.outputs.deploydocs }}
+      md: ${{ steps.filter.outputs.md }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -76,6 +77,19 @@ jobs:
             deploy:
               - 'deploy/**'
               - '.github/workflows/ci.yml'
+            # deploycode = deploy-facing surfaces whose change should prompt a
+            # docs/private-deploy.md update (the "did you update the guide?" gate)
+            deploycode:
+              - 'deploy/docker-compose*.yml'
+              - 'deploy/.env.example'
+              - 'deploy/config.yaml'
+              - 'deploy/Caddyfile.example'
+              - 'internal/infra/config/**'
+            deploydocs:
+              - 'docs/private-deploy.md'
+              - 'deploy/README.md'
+            md:
+              - '**/*.md'
 
   # ── Go: vet / build / test ─────────────────────────────────────────────────
   go-checks:
@@ -241,18 +255,72 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - name: Validate base + obs overlay merge & parse
+      - name: Validate base + obs + tls overlay merges & parse
         working-directory: deploy
         # The base compose has `env_file: .env` (gitignored); seed a throwaway one
         # from the example so `config` can resolve it. `config` validates the
         # merged YAML only — it never starts containers or reads real secrets.
         run: |
           cp .env.example .env
+          cp Caddyfile.example Caddyfile
           docker compose -f docker-compose.yml -f docker-compose.obs.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.tls.yml config -q
+
+  # ── Deploy smoke: build attune + walk docs/private-deploy.md's happy path ───
+  # Executable form of the deploy guide (scripts/smoke-deploy.sh): build from
+  # source, bring the stack up with a mock LLM, and assert healthz -> tenant ->
+  # key -> ingest -> enrich -> backup. A code change that breaks a documented step
+  # turns this red — the guard against deploy-doc rot.
+  deploy-smoke:
+    needs: changes
+    if: ${{ needs.changes.outputs.deploy == 'true' || needs.changes.outputs.go == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Smoke the documented deploy path
+        run: bash scripts/smoke-deploy.sh
+
+  # ── Deploy-doc rot gate: a deploy-surface change must update the guide ───────
+  # Mirrors the `changelog` gate. Catches "rot by omission" — a new env var /
+  # service / config that the smoke test (happy-path) wouldn't flag as missing.
+  deploy-docs:
+    needs: changes
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.deploycode == 'true' &&
+      needs.changes.outputs.deploydocs != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a deploy-guide update when a deploy surface changes
+        env:
+          HAS_SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'skip-deploy-docs') }}
+        run: |
+          if [ "$HAS_SKIP_LABEL" = "true" ]; then
+            echo "skip-deploy-docs label present — exempt."
+            exit 0
+          fi
+          echo "::error::A deploy surface (.env.example / compose / config) changed, but"
+          echo "  docs/private-deploy.md (and deploy/README.md) were not updated."
+          echo "Update the deploy guide, or apply the 'skip-deploy-docs' label."
+          exit 1
+
+  # ── Docs: relative markdown links resolve (catches the commonest doc rot) ────
+  doc-links:
+    needs: changes
+    if: needs.changes.outputs.md == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Check relative markdown links resolve
+        run: python3 scripts/check-md-links.py
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, golangci-lint, lizard, govulncheck, console, changelog, docker-build, compose-config]
+    needs: [changes, go-checks, golangci-lint, lizard, govulncheck, console, changelog, docker-build, compose-config, deploy-smoke, deploy-docs, doc-links]
     if: always()
     runs-on: ubuntu-latest
     steps:

@@ -1,7 +1,6 @@
 # Attune Console
 
-Stage B 自服务控制台 SPA。物理独立于主仓 pnpm workspace
-（见 [`attune/docs/2026-05-15-console-tech-stack.md`](../docs/2026-05-15-console-tech-stack.md)）。
+Stage B 自服务控制台 SPA。物理独立于主仓 pnpm workspace。
 
 ## Stack
 

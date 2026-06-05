@@ -1,0 +1,14 @@
+# attune reverse proxy with automatic HTTPS (Let's Encrypt).
+#
+#   1. Point your domain's DNS (A/AAAA record) at this host.
+#   2. cp Caddyfile.example Caddyfile   and replace attune.example.com below.
+#   3. docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+#
+# Caddy fetches and auto-renews the TLS certificate. It needs ports 80 + 443
+# reachable from the internet (the ACME challenge). Caddy reaches attune over the
+# compose network, so attune itself no longer needs a published host port — you
+# can drop the `ports:` on the attune service once Caddy fronts it.
+
+attune.example.com {
+	reverse_proxy attune:8090
+}

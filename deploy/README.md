@@ -3,7 +3,9 @@
 One-command **attune + Postgres** stack for self-hosting. Requires Docker with
 the Compose plugin (`docker compose version`).
 
-> Full tutorial lands with #7; this is the minimal ordered path.
+> Full guide — TLS, backup, upgrades, troubleshooting — is
+> [`../docs/private-deploy.md`](../docs/private-deploy.md). This is the minimal
+> ordered path.
 
 ## 1. Configure
 
@@ -50,7 +52,7 @@ Send feedback with the printed key:
 ```bash
 curl -X POST http://localhost:8090/v1/feedback/ingest \
   -H "X-API-Key: <key>" -H "Content-Type: application/json" \
-  -d '{"text":"hello"}'
+  -d '{"content":"hello","source":"web"}'
 ```
 
 ## 4. Observability (optional overlay)
@@ -99,17 +101,12 @@ OpenTelemetry Collector, or another backend instead, point it at `/metrics` (see
 
 - **Data** lives in the `attune-pg` volume; it survives `docker compose down`.
   `docker compose down -v` wipes it.
-- **Backup / restore:**
-  ```bash
-  docker compose exec postgres pg_dump -U attune attune > backup.sql
-  cat backup.sql | docker compose exec -T postgres psql -U attune attune
-  ```
-- **Exposure:** the host port binds `127.0.0.1` by default. Front attune with
-  your own TLS reverse proxy; set `ATTUNE_BIND=0.0.0.0` only behind one.
-- **Pinning:** `:latest` moves. Pin `ATTUNE_IMAGE` to a version or, best, a
-  `@sha256:` digest for reproducible deploys.
-- **No published image yet?** Build from source: `docker compose up -d --build`
-  (uncomment the `build:` block in `docker-compose.yml`).
+- **Exposure:** the host port binds `127.0.0.1` by default. Front attune with a
+  TLS reverse proxy (the Caddy overlay in the full guide); set
+  `ATTUNE_BIND=0.0.0.0` only behind one.
+
+**Backup/restore, HTTPS, upgrades, and troubleshooting** are single-sourced in the
+full guide → [`../docs/private-deploy.md`](../docs/private-deploy.md).
 
 ## Not included
 
