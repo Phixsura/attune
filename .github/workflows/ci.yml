@@ -16,7 +16,8 @@
 # Deliberately omitted for now:
 #   * docker-build — the Dockerfile still assumes the old monorepo layout
 #     (COPY gateway/ + listen/); deferred to a follow-up that builds standalone.
-#   * lint-slog   — scripts/lint-slog.sh does not exist yet (gated on #4).
+#   * lint-slog   — scripts/lint-slog.sh now exists, but CI --strict gating is
+#     deferred until #9 clears the 3 known warnings; it is warn-only till then.
 #
 # govulncheck is informational (continue-on-error): its standard-library
 # findings track the Go toolchain version against a live DB, so they change
