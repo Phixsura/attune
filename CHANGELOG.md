@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- **Private-deploy docker-compose kit** under `deploy/` (#5): `docker-compose.yml`
+  (attune + postgres), a documented `.env.example`, an optional `config.yaml`
+  template, and a quickstart `README.md`. `cd deploy && cp .env.example .env &&
+  docker compose up -d` brings up a hardened (loopback-bound, `no-new-privileges`,
+  read-only attune rootfs), persistent stack; first-tenant bootstrap via
+  `docker compose run --rm attune tenant create / keys issue`.
+- **`/healthz` liveness endpoint** (#5) — the Kubernetes/cloud-native convention
+  (trailing `z` avoids colliding with a real application route).
+
 ### Changed
 
 - **BREAKING — project-wide rename `listen` → `attune`** (#8). The Go module
@@ -18,6 +29,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `attune_oauth_state`. Pre-1.0, so this lands as a single breaking change —
   update any scrapers, dashboards, webhook verifiers, or label filters
   accordingly. The `FEEDBACK_API_*` env prefix is intentionally unchanged.
+
+### Removed
+
+- **BREAKING — the `/health` endpoint is removed** (#5); use `/healthz` instead.
+  Pre-1.0, so it lands as a flagged minor bump (CLAUDE.md §3). Update any uptime
+  monitor, load-balancer, or container probe that hit `/health`.
 
 ### Security
 

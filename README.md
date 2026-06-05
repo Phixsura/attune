@@ -44,12 +44,22 @@ PostgreSQL   ·   single source of truth · your data, your control
 
 ## Quickstart
 
-Production docker-compose kit lands in v0.3. For now, build from source:
+Self-host with the docker-compose kit (attune + Postgres):
+
+```bash
+cd deploy
+cp .env.example .env        # set POSTGRES_PASSWORD + FEEDBACK_API_LLM_OPENAI_API_KEY
+docker compose up -d
+curl http://localhost:8090/healthz                                     # -> ok
+docker compose run --rm attune tenant create --slug <slug> --name <name>
+docker compose run --rm attune keys issue --tenant <slug> --label <s>  # mint an API key
+```
+
+See [`deploy/README.md`](deploy/README.md) for the full walk-through. Or build from source:
 
 ```bash
 go build ./cmd/attune
 go run ./cmd/attune server                                  # start HTTP server
-go run ./cmd/attune keys issue --tenant <slug> --label <s>  # mint an API key
 ```
 
 Every field in [`config.example.yaml`](config.example.yaml) has an env-var override — see [`internal/infra/config/env.go`](internal/infra/config/env.go) for the full table.

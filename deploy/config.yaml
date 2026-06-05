@@ -1,0 +1,22 @@
+# Optional attune YAML config for the docker-compose stack.
+#
+# You usually DON'T need this — every secret and connection field is set via
+# .env (see .env.example), and env vars override YAML. Mount it only for the
+# three fields that have NO env override, then uncomment the attune `volumes:`
+# block in docker-compose.yml.
+#
+# Full annotated reference: ../config.example.yaml
+# Env override table:       ../internal/infra/config/env.go
+
+# Background enricher cadence (no env override).
+enricher_interval: "30s"
+enricher_batch: 10
+
+# HTTP listen port inside the container (no env override). Leave at 8090 — it
+# must match EXPOSE and the compose port mapping. To change the *host* port use
+# ATTUNE_PORT in .env instead.
+# port: 8090
+
+# NOTE: everything else (database_url, llm_*, lark_*, webhooks, rate limits,
+# and even custom_webhooks via FEEDBACK_API_CUSTOM_WEBHOOKS) has an env
+# override — set those in .env, not here.

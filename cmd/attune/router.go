@@ -26,7 +26,7 @@ import (
 )
 
 // buildRouter wires the chi router: OTel root span + X-Trace-Id, the standard
-// middleware chain, /health, /metrics, the /v1 API (lark webhook + api-key /
+// middleware chain, /healthz, /metrics, the /v1 API (lark webhook + api-key /
 // rate-limited feedback ingest), and — when CONSOLE_SESSION_KEY is set — the
 // Stage B console under /fb/v1/console.
 func buildRouter(
@@ -39,7 +39,8 @@ func buildRouter(
 ) (chi.Router, error) {
 	r := chi.NewRouter()
 	// otelchi 入口产 root span(从客户端 traceparent 继承 or 兜底生成可读 trace_id)。
-	// 必须最先,过滤 /health 避免心跳塞满 trace。
+	// 必须最先。按 /health 前缀过滤,避免心跳塞满 trace —— 该前缀覆盖 /healthz,
+	// 并顺带把任何残留 /health 探活(现已 404)挡在 trace 之外。
 	r.Use(otelchi.Middleware("attune", otelchi.WithFilter(func(r *http.Request) bool {
 		return !strings.HasPrefix(r.URL.Path, "/health") && !strings.HasPrefix(r.URL.Path, "/metrics")
 	})))
@@ -49,9 +50,7 @@ func buildRouter(
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
-	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("ok"))
-	})
+	mountHealth(r)
 	// Prometheus scrape endpoint. Restrict to internal CIDR via nginx
 	// in production — no auth at the Go level.
 	r.Handle("/metrics", metrics.Handler())
@@ -82,6 +81,16 @@ func buildRouter(
 		slog.InfoContext(ctx, "console disabled (no CONSOLE_SESSION_KEY)")
 	}
 	return r, nil
+}
+
+// mountHealth registers the liveness probe at /healthz — the Google/Kubernetes
+// convention, where the trailing "z" keeps a health route from colliding with a
+// real application path. (The pre-0.2 /health route was removed; see CHANGELOG.)
+// The otelchi /health-prefix filter in buildRouter keeps /healthz out of traces.
+func mountHealth(r chi.Router) {
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
 }
 
 // traceIDResponseHeader 把 OTel trace_id 写到 X-Trace-Id 响应头(给客户 debug 用)。
