@@ -1,13 +1,11 @@
-// Package metrics exposes attune's 5 core Prometheus metrics. They are
-// the only telemetry surface promised by the v0.4 design doc (§3.7);
-// per-tenant slices + Grafana dashboards land in Wave 2.
+// Package metrics exposes attune's 7 Prometheus metrics — the telemetry contract
+// documented in observability/README.md. Any Prometheus-compatible backend can
+// scrape them at /metrics (OpenMetrics).
 //
-// All metrics use the "attune_" prefix so they don't collide with the
-// main backend's metrics on the shared Prometheus instance.
+// All metrics use the "attune_" prefix to namespace them on a shared scrape.
 //
-// One Registry singleton — no per-package globals, no init() side
-// effects. Handler() is the only public hook outside the metric
-// recorders themselves.
+// One Registry singleton — no per-package globals, no init() side effects beyond
+// registration. Handler() is the only public hook outside the metric recorders.
 package metrics
 
 import (
@@ -17,8 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Registry is the single Prometheus registry attune exposes. Tests
-// can swap it via SetRegistry; production uses the default.
+// Registry is the single Prometheus registry attune exposes via Handler().
 var Registry = prometheus.NewRegistry()
 
 // IngestTotal counts ingest API requests, split by tenant / source /
@@ -32,9 +29,9 @@ var IngestTotal = prometheus.NewCounterVec(
 )
 
 // EnrichDuration tracks AI enrichment wall time. result ∈ {ok,
-// llm_err, parse_err, db_err}. Use the histogram's
-// attune_enrich_duration_seconds_bucket for SLO calculation (p95 ≤ 30s
-// per design doc §5.3.2).
+// llm_err, parse_err, other_err, db_err}. Use the histogram's
+// attune_enrich_duration_seconds_bucket for p95 SLO tracking
+// (target p95 ≤ 30s).
 var EnrichDuration = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Name:    "attune_enrich_duration_seconds",
@@ -46,7 +43,7 @@ var EnrichDuration = prometheus.NewHistogramVec(
 
 // NotifyFailuresTotal increments on every notifier push that didn't
 // return nil. destination_type ∈ {lark-pool, lark-radar, raw-webhook};
-// reason is the error class (terminal, retryable, timeout, etc).
+// reason is the error class (transport | terminal).
 var NotifyFailuresTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "attune_notify_failures_total",
@@ -88,18 +85,16 @@ var IngestRateLimitTotal = prometheus.NewCounterVec(
 )
 
 // TriageDecisionsTotal counts triage-stage decisions per tenant. Lets
-// PMs see "AI 处理率" (decision=full / total) and "ignored 噪声率"
-// (decision=ignore / total) without scraping logs. Sprint 1.3 (Y1
-// 工程, 2026-05-18) introduced the triage stage in front of the
-// full LLM enrich call.
+// PMs see the AI handling rate (decision=full / total) and the ignored
+// noise rate (decision=ignore / total) without scraping logs.
 //
 // Labels:
 //
 //	tenant   — TEXT tenant id (matches IngestTotal's labels)
 //	decision — "ignore" | "fast" | "full"
 //	  • ignore: skipped (noise / too short / spam) — no LLM cost
-//	  • fast:   matched a per-tenant rule, no LLM call (v1 feature)
-//	  • full:   passed to the full LLM enrich stage (Sprint 1.3 default)
+//	  • fast:   matched a per-tenant rule, no LLM call
+//	  • full:   passed to the full LLM enrich stage
 var TriageDecisionsTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "attune_triage_decisions_total",
@@ -108,19 +103,21 @@ var TriageDecisionsTotal = prometheus.NewCounterVec(
 	[]string{"tenant", "decision"},
 )
 
-// init registers all metrics on the package's Registry. Side-effect
-// only at process start; tests can re-register their own metrics on a
-// fresh registry via SetRegistry.
+// allMetrics is the registered set — the single source of truth that init()
+// registers and the drift-guard test checks against the documented reference
+// (observability/README.md). Add a metric here AND to that reference together.
+var allMetrics = []prometheus.Collector{
+	IngestTotal,
+	EnrichDuration,
+	NotifyFailuresTotal,
+	OutboxLagSeconds,
+	ClaimContentionTotal,
+	IngestRateLimitTotal,
+	TriageDecisionsTotal,
+}
+
 func init() {
-	Registry.MustRegister(
-		IngestTotal,
-		EnrichDuration,
-		NotifyFailuresTotal,
-		OutboxLagSeconds,
-		ClaimContentionTotal,
-		IngestRateLimitTotal,
-		TriageDecisionsTotal,
-	)
+	Registry.MustRegister(allMetrics...)
 }
 
 // Handler returns the http.Handler that serves Prometheus scrape
