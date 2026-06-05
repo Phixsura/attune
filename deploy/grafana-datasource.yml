@@ -1,0 +1,13 @@
+# Grafana datasource provisioning — Prometheus as the default datasource. The
+# committed dashboard has no hardcoded datasource, so isDefault routes its panels
+# here. uid is pinned so a future second datasource can't steal the default.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
