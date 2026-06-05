@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 听见 Listen — slog / OTel / http.Client static linter.
+# attune — slog / OTel / http.Client static linter.
 #
 # A fast (≤ 1s) grep+awk pass that catches the three observability mistakes
 # most likely to silently break tracing. Ported from the parent monorepo's
-# bin/lint-slog.sh, trimmed to listen scope. Invoked by the pre-commit hook
+# bin/lint-slog.sh, trimmed to attune scope. Invoked by the pre-commit hook
 # (.husky/pre-commit, issue #3) and — once the known warnings below are cleared
 # (issue #9) — by CI in --strict mode (issue #1). See CLAUDE.md §1 / §7.
 #
