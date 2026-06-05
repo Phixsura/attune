@@ -11,23 +11,23 @@ import (
 	"testing"
 )
 
-// envelopeFixture is the v1 listen envelope the outbox row carries —
+// envelopeFixture is the v1 attune envelope the outbox row carries —
 // matches the shape service/enricher_outbox.buildOutboxEnvelope writes.
 // Kept inline (rather than depending on service package) so the notify
 // unit tests stay self-contained and free of cycles.
 func envelopeFixture() []byte {
-	env := listenEnvelope{
+	env := attuneEnvelope{
 		Version:   "1",
 		EventType: "feedback.enriched",
 		TraceID:   "trace-abc-123",
-		Feedback: listenFeedback{
+		Feedback: attuneFeedback{
 			ID:          12345,
 			TenantID:    "tenant-test",
 			Content:     "导出按钮点了没反应",
 			Source:      "lark-group",
 			UserID:      "ou_xyz",
 			SubmittedAt: "2026-05-17T10:00:00Z",
-			Enriched: listenEnriched{
+			Enriched: attuneEnriched{
 				Title:      "导出按钮无响应",
 				Kind:       "bug",
 				Severity:   "P1",
@@ -48,9 +48,9 @@ func TestParseGitHubRepoURL_HappyPath(t *testing.T) {
 		owner string
 		repo  string
 	}{
-		{"https://github.com/Phixsura/listen", "Phixsura", "listen"},
-		{"https://github.com/Phixsura/listen.git", "Phixsura", "listen"},
-		{"https://github.com/Phixsura/listen/", "Phixsura", "listen"},
+		{"https://github.com/Phixsura/attune", "Phixsura", "attune"},
+		{"https://github.com/Phixsura/attune.git", "Phixsura", "attune"},
+		{"https://github.com/Phixsura/attune/", "Phixsura", "attune"},
 		{"  https://github.com/owner/repo  ", "owner", "repo"},
 		{"https://www.github.com/Owner/Repo", "Owner", "Repo"},
 	}
@@ -86,7 +86,7 @@ func TestParseGitHubRepoURL_Reject(t *testing.T) {
 }
 
 func TestBuildIssueBody_ShapesGitHubFields(t *testing.T) {
-	env, err := unmarshalListenEnvelope(envelopeFixture())
+	env, err := unmarshalAttuneEnvelope(envelopeFixture())
 	if err != nil {
 		t.Fatalf("fixture parse: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestBuildIssueBody_ShapesGitHubFields(t *testing.T) {
 	if !strings.Contains(got.Title, "导出按钮无响应") {
 		t.Errorf("title missing AI title; got %q", got.Title)
 	}
-	wantLabels := []string{"listen/feedback", "listen/kind-bug", "listen/severity-P1"}
+	wantLabels := []string{"attune/feedback", "attune/kind-bug", "attune/severity-P1"}
 	if len(got.Labels) != len(wantLabels) {
 		t.Fatalf("labels: want %d, got %d (%v)", len(wantLabels), len(got.Labels), got.Labels)
 	}
@@ -134,12 +134,12 @@ func TestBuildIssueBody_RendersChineseSourceLabel(t *testing.T) {
 		"lark-group":    "飞书群消息",
 	}
 	for src, wantLabel := range cases {
-		env := listenEnvelope{
+		env := attuneEnvelope{
 			Version:   "1",
 			EventType: "feedback.enriched",
-			Feedback: listenFeedback{
+			Feedback: attuneFeedback{
 				ID: 1, TenantID: "t", Source: src,
-				Enriched: listenEnriched{Title: "x", Kind: "bug", Severity: "P2"},
+				Enriched: attuneEnriched{Title: "x", Kind: "bug", Severity: "P2"},
 			},
 		}
 		body, _ := buildIssueBody(env)
@@ -152,12 +152,12 @@ func TestBuildIssueBody_RendersChineseSourceLabel(t *testing.T) {
 }
 
 func TestBuildIssueBody_HandlesEmptyOptionalFields(t *testing.T) {
-	env := listenEnvelope{
+	env := attuneEnvelope{
 		Version:   "1",
 		EventType: "feedback.enriched",
-		Feedback: listenFeedback{
+		Feedback: attuneFeedback{
 			ID: 99, TenantID: "t",
-			Enriched: listenEnriched{
+			Enriched: attuneEnriched{
 				Title: "x", Kind: "other", Severity: "P3",
 				// no Modules, no Rationale, no UserID
 			},
@@ -255,7 +255,7 @@ func TestSendGitHubIssue_BadRepoURL_Terminal(t *testing.T) {
 }
 
 func TestCheckGitHubResponse_StatusMatrix(t *testing.T) {
-	env, _ := unmarshalListenEnvelope(envelopeFixture())
+	env, _ := unmarshalAttuneEnvelope(envelopeFixture())
 	check := checkGitHubResponse("test", env)
 
 	cases := []struct {

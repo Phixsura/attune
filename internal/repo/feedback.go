@@ -13,8 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // FeedbackRepo wraps the user_feedback table. Concurrency-safe: pgxpool
@@ -200,7 +200,7 @@ type SampleRow struct {
 }
 
 // SampleEnriched returns up to n randomly-sampled rows that completed
-// enrichment after `since`. Used by `listen eval` to feed re-run /
+// enrichment after `since`. Used by `attune eval` to feed re-run /
 // human-label workflows. Order is random per call (ORDER BY RANDOM())
 // — fine for a 50-row sample; Wave 3 may switch to TABLESAMPLE if
 // the table grows past a few million rows.

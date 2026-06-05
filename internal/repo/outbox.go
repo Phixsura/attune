@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // OutboxRepo owns the notify_outbox table — the at-least-once delivery
@@ -235,7 +235,7 @@ func (r *OutboxRepo) ResetStaleClaims(ctx context.Context) (int64, error) {
 
 // OldestPendingAge returns the wall-clock age of the oldest unsent
 // outbox row (status pending or failed). Used by metric
-// listen_outbox_lag_seconds. Returns 0 when the queue is empty.
+// attune_outbox_lag_seconds. Returns 0 when the queue is empty.
 func (r *OutboxRepo) OldestPendingAge(ctx context.Context) (time.Duration, error) {
 	var ageSec *float64
 	err := r.pool.QueryRow(ctx, `

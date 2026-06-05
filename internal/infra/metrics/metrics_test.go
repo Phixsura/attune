@@ -27,11 +27,11 @@ func TestRegistryHasAllFiveCoreMetrics(t *testing.T) {
 		t.Fatalf("Registry.Gather: %v", err)
 	}
 	want := map[string]bool{
-		"listen_ingest_total":            false,
-		"listen_enrich_duration_seconds": false,
-		"listen_notify_failures_total":   false,
-		"listen_outbox_lag_seconds":      false,
-		"listen_claim_contention_total":  false,
+		"attune_ingest_total":            false,
+		"attune_enrich_duration_seconds": false,
+		"attune_notify_failures_total":   false,
+		"attune_outbox_lag_seconds":      false,
+		"attune_claim_contention_total":  false,
 	}
 	for _, fam := range families {
 		if _, ok := want[fam.GetName()]; ok {
@@ -61,8 +61,8 @@ func TestHandlerServesPrometheusFormat(t *testing.T) {
 		t.Fatalf("status: want 200, got %d", rec.Code)
 	}
 	body, _ := io.ReadAll(rec.Body)
-	if !strings.Contains(string(body), "listen_ingest_total") {
-		t.Fatalf("expected listen_ingest_total in body, got:\n%s",
+	if !strings.Contains(string(body), "attune_ingest_total") {
+		t.Fatalf("expected attune_ingest_total in body, got:\n%s",
 			string(body)[:min(len(body), 500)])
 	}
 }

@@ -4,9 +4,9 @@
 // 结构化 key-value 风格,可搜索但读起来啰嗦,跟错时一行 log 看不全字段值。
 // 这层封装支持 printf 风格,人眼跟错的可读性优先。
 //
-// 这是 listen 这边的本地副本(从 backend/internal/logext 复制改的) — 因为
-// listen 是独立 go.mod 不跟 backend 互 import。 唯一改动:序列化用
-// encoding/json 替 sonic,避免给 listen 引新 dep(listen Day-1 纪律是"不引
+// 这是 attune 这边的本地副本(从 backend/internal/logext 复制改的) — 因为
+// attune 是独立 go.mod 不跟 backend 互 import。 唯一改动:序列化用
+// encoding/json 替 sonic,避免给 attune 引新 dep(attune Day-1 纪律是"不引
 // 新 dep" — 见 CLAUDE.md / code_no_new_deps memory)。 性能差异在日志路径
 // 可忽略(序列化不是 hot path)。
 //
@@ -51,8 +51,8 @@ func Errorf(ctx context.Context, format string, args ...any) {
 
 // AsLogParam —— 结构体 → JSON 字符串,塞进日志 format 用 %s 占位。
 //
-// listen 用 stdlib encoding/json(vs backend 用 bytedance/sonic) — 日志序列化
-// 不是 hot path,stdlib 够用,且 listen 严守"不引新 dep"纪律。
+// attune 用 stdlib encoding/json(vs backend 用 bytedance/sonic) — 日志序列化
+// 不是 hot path,stdlib 够用,且 attune 严守"不引新 dep"纪律。
 // 序列化失败返 "<marshal-err: ...>"(不抛错,日志容错优先)。
 //
 // 跟 fmt 的 %+v 区别:

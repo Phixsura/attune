@@ -9,11 +9,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // LarkInstall is a row in tenant_lark_install — one tenant's
-// installation of the listen Lark app. Tokens drive every outbound
+// installation of the attune Lark app. Tokens drive every outbound
 // Lark API call (chats list, send_message, refresh token rotation).
 type LarkInstall struct {
 	TenantID              string

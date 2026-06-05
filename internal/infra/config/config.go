@@ -1,4 +1,4 @@
-// Package config loads the listen YAML config and exposes a typed
+// Package config loads the attune YAML config and exposes a typed
 // Config to the rest of the service.
 package config
 
@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 const (
@@ -49,7 +49,7 @@ type Config struct {
 	// Console config. LarkAppID/Secret are used for OAuth +
 	// app_access_token calls. ConsoleSessionKey must be ≥ 32 random bytes
 	// (HMACs the session / CSRF tokens). ConsoleBaseURL is the Lark OAuth
-	// callback redirect_uri origin (e.g. https://listen.example.com).
+	// callback redirect_uri origin (e.g. https://attune.example.com).
 	LarkAppID         string `yaml:"lark_app_id"`
 	LarkAppSecret     string `yaml:"lark_app_secret"`
 	ConsoleSessionKey string `yaml:"console_session_key"`

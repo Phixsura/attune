@@ -7,7 +7,7 @@
 //     used by net/http2, grpc, kubernetes).
 //   - One bucket per tenant_id, keyed in a sync.Map. Buckets never
 //     evict: Y1 < 400 tenants ≈ < 50KB memory, GC isn't worth the code.
-//   - State is in-memory only. A listen restart drops all bucket
+//   - State is in-memory only. A attune restart drops all bucket
 //     state — short-lived bursts immediately after deploy can exceed
 //     the limit. Acceptable trade-off: zero new infra (no Redis), zero
 //     DB writes per request.
@@ -22,8 +22,8 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/Phixsura/listen/internal/infra/apikey"
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/infra/apikey"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // Limiter is the per-tenant rate limiter. Construct once, share via

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/attune/internal/domain"
 )
 
 // buildCard renders fb into a Lark interactive card payload. The schema

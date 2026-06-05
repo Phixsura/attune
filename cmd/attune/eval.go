@@ -7,13 +7,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/Phixsura/listen/internal/infra/config"
-	"github.com/Phixsura/listen/internal/infra/database"
-	"github.com/Phixsura/listen/internal/repo"
-	"github.com/Phixsura/listen/internal/service"
+	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/service"
 )
 
-// runEval dispatches the `listen eval` CLI. Three modes:
+// runEval dispatches the `attune eval` CLI. Three modes:
 //
 //	consistency       re-run LLM on N rows; report match rate
 //	export-for-human  write CSV for offline human labeling

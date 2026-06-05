@@ -1,4 +1,4 @@
-module github.com/Phixsura/listen
+module github.com/Phixsura/attune
 
 go 1.25.0
 

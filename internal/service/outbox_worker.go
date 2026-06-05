@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Phixsura/listen/internal/infra/metrics"
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/notify"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // OutboxWorker drains the notify_outbox queue. Wave 1.2 scope: only
@@ -171,7 +171,7 @@ func (w *OutboxWorker) processRow(ctx context.Context, row repo.OutboxRow) {
 
 // sendByDestType, sendRawWebhook, signRawBody, checkOutboxResponse, and
 // truncateStr now live in outbox_worker_send.go to keep this file under
-// the listen ≤300-line rule (CLAUDE.md 律 2).
+// the attune ≤300-line rule (CLAUDE.md 律 2).
 
 // failOrDead promotes a row to dead once attempts exceeds max.
 // Otherwise schedules the next retry per the backoff table.

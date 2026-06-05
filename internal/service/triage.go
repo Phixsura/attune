@@ -22,7 +22,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/attune/internal/domain"
 )
 
 // TriageMode is the routing decision the triage stage emits.

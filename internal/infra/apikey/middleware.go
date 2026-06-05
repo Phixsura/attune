@@ -15,8 +15,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // Verifier is the dependency middleware needs from the service layer.

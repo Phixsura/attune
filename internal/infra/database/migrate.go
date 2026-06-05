@@ -1,15 +1,15 @@
-// Package database runs listen's own schema migrations against its
-// dedicated PostgreSQL database (`listen` on Aliyun RDS as of Wave 1.2).
+// Package database runs attune's own schema migrations against its
+// dedicated PostgreSQL database (`attune` on Aliyun RDS as of Wave 1.2).
 //
-// History: pre-Wave 1.2 listen shared the main backend's PG and migrations
-// 001..003 were no-op + ALTER-style increments. Wave 1.2 split listen to
+// History: pre-Wave 1.2 attune shared the main backend's PG and migrations
+// 001..003 were no-op + ALTER-style increments. Wave 1.2 split attune to
 // its own DB; migration 001 was rewritten to build the full schema from
 // scratch (tenants / user_feedback / external_api_keys). 002..005 are
 // kept verbatim and remain idempotent (IF NOT EXISTS / IF EXISTS), so a
 // fresh DB applies them as no-ops after 001 and the rare legacy shared-DB
 // install can still run them safely.
 //
-// The tracker table `schema_migrations_feedback` is the listen-local
+// The tracker table `schema_migrations_feedback` is the attune-local
 // version-bookkeeping table — name preserved so existing prod tracker
 // rows survive a redeploy.
 package database
@@ -23,7 +23,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 //go:embed migrations/*.sql

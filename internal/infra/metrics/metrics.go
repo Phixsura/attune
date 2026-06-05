@@ -1,8 +1,8 @@
-// Package metrics exposes listen's 5 core Prometheus metrics. They are
+// Package metrics exposes attune's 5 core Prometheus metrics. They are
 // the only telemetry surface promised by the v0.4 design doc (§3.7);
 // per-tenant slices + Grafana dashboards land in Wave 2.
 //
-// All metrics use the "listen_" prefix so they don't collide with the
+// All metrics use the "attune_" prefix so they don't collide with the
 // main backend's metrics on the shared Prometheus instance.
 //
 // One Registry singleton — no per-package globals, no init() side
@@ -17,7 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Registry is the single Prometheus registry listen exposes. Tests
+// Registry is the single Prometheus registry attune exposes. Tests
 // can swap it via SetRegistry; production uses the default.
 var Registry = prometheus.NewRegistry()
 
@@ -25,7 +25,7 @@ var Registry = prometheus.NewRegistry()
 // result. result ∈ {ok, validate_err, auth_err, internal_err}.
 var IngestTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
-		Name: "listen_ingest_total",
+		Name: "attune_ingest_total",
 		Help: "Number of POST /v1/feedback/ingest requests received.",
 	},
 	[]string{"tenant", "source", "result"},
@@ -33,11 +33,11 @@ var IngestTotal = prometheus.NewCounterVec(
 
 // EnrichDuration tracks AI enrichment wall time. result ∈ {ok,
 // llm_err, parse_err, db_err}. Use the histogram's
-// listen_enrich_duration_seconds_bucket for SLO calculation (p95 ≤ 30s
+// attune_enrich_duration_seconds_bucket for SLO calculation (p95 ≤ 30s
 // per design doc §5.3.2).
 var EnrichDuration = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
-		Name:    "listen_enrich_duration_seconds",
+		Name:    "attune_enrich_duration_seconds",
 		Help:    "End-to-end AI enrichment latency per row.",
 		Buckets: prometheus.ExponentialBuckets(0.5, 2, 8), // 0.5s..64s
 	},
@@ -49,7 +49,7 @@ var EnrichDuration = prometheus.NewHistogramVec(
 // reason is the error class (terminal, retryable, timeout, etc).
 var NotifyFailuresTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
-		Name: "listen_notify_failures_total",
+		Name: "attune_notify_failures_total",
 		Help: "Notifier push failures by destination_type + reason.",
 	},
 	[]string{"destination_type", "reason"},
@@ -61,7 +61,7 @@ var NotifyFailuresTotal = prometheus.NewCounterVec(
 // 0 when the queue is empty.
 var OutboxLagSeconds = prometheus.NewGauge(
 	prometheus.GaugeOpts{
-		Name: "listen_outbox_lag_seconds",
+		Name: "attune_outbox_lag_seconds",
 		Help: "Age in seconds of the oldest pending outbox row (0 = queue empty).",
 	},
 )
@@ -71,7 +71,7 @@ var OutboxLagSeconds = prometheus.NewGauge(
 // contention = consider tuning enricher_batch / interval.
 var ClaimContentionTotal = prometheus.NewCounter(
 	prometheus.CounterOpts{
-		Name: "listen_claim_contention_total",
+		Name: "attune_claim_contention_total",
 		Help: "Number of tryClaim attempts that lost to another worker.",
 	},
 )
@@ -81,7 +81,7 @@ var ClaimContentionTotal = prometheus.NewCounter(
 // spiking across tenants = config too tight, raise defaults.
 var IngestRateLimitTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
-		Name: "listen_ingest_rate_limit_total",
+		Name: "attune_ingest_rate_limit_total",
 		Help: "Ingest requests rejected with 429 by the per-tenant rate limiter.",
 	},
 	[]string{"tenant"},
@@ -102,7 +102,7 @@ var IngestRateLimitTotal = prometheus.NewCounterVec(
 //	  • full:   passed to the full LLM enrich stage (Sprint 1.3 default)
 var TriageDecisionsTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
-		Name: "listen_triage_decisions_total",
+		Name: "attune_triage_decisions_total",
 		Help: "Triage-stage routing decisions for incoming feedback rows.",
 	},
 	[]string{"tenant", "decision"},

@@ -2,7 +2,7 @@ package console
 
 // notify_targets_write.go — the by-id mutating + probe handlers
 // (Delete, Test) split out of notify_targets.go to keep that file under
-// the listen ≤300-line rule (CLAUDE.md 律 2). Pure move; List/Create and
+// the attune ≤300-line rule (CLAUDE.md 律 2). Pure move; List/Create and
 // the shared DTO + validation stay in notify_targets.go.
 
 import (
@@ -14,9 +14,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/notify"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // Delete handles DELETE /fb/v1/console/notify-targets/{id}.

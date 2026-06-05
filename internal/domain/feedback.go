@@ -1,6 +1,6 @@
-// Package domain holds the pure types shared across listen's layered
+// Package domain holds the pure types shared across attune's layered
 // architecture (律 8). Files in this package MUST NOT depend on any other
-// listen/internal/* package and MUST NOT import pgx, net/http, gRPC, or
+// attune/internal/* package and MUST NOT import pgx, net/http, gRPC, or
 // any I/O — keeping the boundary clean prevents cycles when handlers,
 // service, repo, and notify all need to talk about the same shape.
 package domain
@@ -19,8 +19,8 @@ const MaxContentLen = 5000
 //
 // Sprint 1.2 (Y1 工程, 2026-05-17) added 4 飞书-native source enums so
 // customers can pipe 飞书审批 / 多维表格 / 服务台 / 表单评论 directly
-// into listen via 飞书自动化 → POST /v1/feedback/ingest (no extra
-// listen-side endpoint needed). See README.md "飞书原生 source 接入"
+// into attune via 飞书自动化 → POST /v1/feedback/ingest (no extra
+// attune-side endpoint needed). See README.md "飞书原生 source 接入"
 // for per-source configuration snippets.
 var (
 	ValidSources = map[string]bool{

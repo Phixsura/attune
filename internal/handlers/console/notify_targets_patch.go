@@ -2,7 +2,7 @@ package console
 
 // Phase 1.2 follow-up — PATCH /notify-targets/{id} for sparse edits
 // (change URL / toggle disabled / rotate secret without delete+recreate).
-// Split into its own file to keep notify_targets.go under the listen
+// Split into its own file to keep notify_targets.go under the attune
 // ≤300-line discipline.
 
 import (
@@ -14,8 +14,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // patchNotifyRequest is the sparse PATCH body. Every field is *T so we

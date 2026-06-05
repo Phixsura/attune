@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 听见 Listen — quality gate one-shot runner.
+# Attune — quality gate one-shot runner.
 #
 # CLAUDE.md 律 1（闭环反馈）要求：写完任何模块必跑 jscpd + lizard，提交前
 # 必跑 lint + typecheck + test. 这个脚本把它们串成一遍。

@@ -12,7 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // fakeNotifyRepo implements notifyTargetRepo for tests. Each method

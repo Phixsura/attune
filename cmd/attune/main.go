@@ -1,8 +1,8 @@
-// listen is the public-facing ingest service for AI-classified user
+// attune is the public-facing ingest service for AI-classified user
 // feedback (operationally still deployed as "feedback-api"). Subcommands:
 //
-//	listen server                     # run the HTTP server (default)
-//	listen keys issue --tenant <slug> # mint a new external API key
+//	attune server                     # run the HTTP server (default)
+//	attune keys issue --tenant <slug> # mint a new external API key
 //
 // main.go is the CLI entrypoint: it installs the slog handler and dispatches
 // subcommands. The `server` bootstrap lives in server.go; tenant/eval/outbox/
@@ -18,11 +18,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/Phixsura/listen/internal/infra/config"
-	"github.com/Phixsura/listen/internal/infra/database"
-	"github.com/Phixsura/listen/internal/observability"
-	"github.com/Phixsura/listen/internal/repo"
-	"github.com/Phixsura/listen/internal/service"
+	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/observability"
+	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/service"
 )
 
 // subcommands routes each CLI verb to its handler. `server` ignores its args
@@ -72,15 +72,15 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprint(os.Stderr, `listen
+	fmt.Fprint(os.Stderr, `attune
 
 Usage:
-  listen server                                       Run the HTTP server (default)
-  listen tenant create --slug <s> [--name <n>]        Create a new tenant
-  listen keys issue --tenant <slug> [--label <s>]     Mint an API key
-  listen eval --mode <m> [--since <date>] ...         AI accuracy report
-  listen outbox prune --older-than <dur>              Mark stale pending rows dead
-  listen digest run --tenant <slug>                   Send weekly digest now (smoke)
+  attune server                                       Run the HTTP server (default)
+  attune tenant create --slug <s> [--name <n>]        Create a new tenant
+  attune keys issue --tenant <slug> [--label <s>]     Mint an API key
+  attune eval --mode <m> [--since <date>] ...         AI accuracy report
+  attune outbox prune --older-than <dur>              Mark stale pending rows dead
+  attune digest run --tenant <slug>                   Send weekly digest now (smoke)
 `)
 }
 
@@ -88,7 +88,7 @@ Usage:
 
 func runKeys(args []string) error {
 	if len(args) == 0 || args[0] != "issue" {
-		return fmt.Errorf("usage: listen keys issue --tenant <slug> [--label <s>]")
+		return fmt.Errorf("usage: attune keys issue --tenant <slug> [--label <s>]")
 	}
 	fs := flag.NewFlagSet("keys issue", flag.ContinueOnError)
 	tenantSlug := fs.String("tenant", "", "tenant slug (required)")

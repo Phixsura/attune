@@ -75,7 +75,7 @@ export interface paths {
                 /** @description 登录成功，重定向到 console 主页 */
                 302: {
                     headers: {
-                        /** @description listen_session（HttpOnly, Secure, SameSite=Lax） */
+                        /** @description attune_session（HttpOnly, Secure, SameSite=Lax） */
                         "Set-Cookie"?: string;
                         [name: string]: unknown;
                     };

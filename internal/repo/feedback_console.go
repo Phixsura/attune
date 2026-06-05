@@ -1,5 +1,5 @@
 // Package repo — console-scoped projections of user_feedback.
-// Kept separate from feedback.go to honor the listen ≤300-line file
+// Kept separate from feedback.go to honor the attune ≤300-line file
 // rule (CLAUDE.md 律 2) and to keep "ingest path SQL" decoupled from
 // "read path SQL" — the latter only the console reads.
 //
@@ -16,7 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // ConsoleListOpts is the filter set the console UI sends. Each field

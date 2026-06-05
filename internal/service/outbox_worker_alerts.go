@@ -1,7 +1,7 @@
 package service
 
 // Phase 3.2 webhook failure visibility — split from outbox_worker.go to
-// honor the listen ≤300-line file rule (CLAUDE.md 律 2). Holds the
+// honor the attune ≤300-line file rule (CLAUDE.md 律 2). Holds the
 // self-report dispatch logic that fires when a row marks dead.
 
 import (
@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/notify"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // selfReportDead pushes a one-shot text card to the tenant's lark-bot
@@ -37,7 +37,7 @@ func (w *OutboxWorker) selfReportDead(ctx context.Context, row repo.OutboxRow, r
 		return // no chat to alert
 	}
 	text := fmt.Sprintf(
-		"⚠️ 通知投递失败\n类型：%s\nURL：%s\n原因：%s\n听见已停止重试此目标，请到控制台修改配置后再发布。",
+		"⚠️ 通知投递失败\n类型：%s\nURL：%s\n原因：%s\nAttune已停止重试此目标，请到控制台修改配置后再发布。",
 		row.DestinationType, row.DestinationTarget, truncate(reason, 200),
 	)
 	// Use the first bot only — repeated alerts to every bot would spam

@@ -1,4 +1,4 @@
-# Listen
+# Attune
 
 > **Feedback ingest + AI triage + smart fan-out**
 >
@@ -25,7 +25,7 @@ Open-source service for collecting user feedback, classifying it with an LLM, an
 ### Package layout
 
 ```
-cmd/listen/                Bootstrap: DI + signals + CLI subcommands
+cmd/attune/                Bootstrap: DI + signals + CLI subcommands
 internal/
   domain/                  Pure types: IngestInput / Snapshot / Enriched
   repo/                    Data access — all SQL lives here
@@ -47,9 +47,9 @@ console/                   Stage B web console (React + Vite + biome)
 ## Quickstart (dev)
 
 ```bash
-go build ./cmd/listen
-go run ./cmd/listen server                                    # Start HTTP server
-go run ./cmd/listen keys issue --tenant <slug> --label <s>    # Mint an API key
+go build ./cmd/attune
+go run ./cmd/attune server                                    # Start HTTP server
+go run ./cmd/attune keys issue --tenant <slug> --label <s>    # Mint an API key
 ```
 
 Required env / yaml: see [`config.example.yaml`](config.example.yaml).
@@ -72,11 +72,11 @@ Required env / yaml: see [`config.example.yaml`](config.example.yaml).
 ## Docker
 
 ```bash
-docker build -t listen:local .
+docker build -t attune:local .
 docker run -p 8090:8090 \
-  -e FEEDBACK_API_DATABASE_URL=postgres://user:pass@host:5432/listen \
+  -e FEEDBACK_API_DATABASE_URL=postgres://<user>:<password>@<host>:5432/attune \
   -e FEEDBACK_API_LLM_OPENAI_API_KEY=sk-... \
-  listen:local
+  attune:local
 ```
 
 Production-ready `docker-compose.yml` with PostgreSQL + Grafana coming in `deploy/` (next phase).

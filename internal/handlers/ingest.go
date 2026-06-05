@@ -1,4 +1,4 @@
-// Package handlers wires HTTP routes for listen.
+// Package handlers wires HTTP routes for attune.
 package handlers
 
 import (
@@ -9,11 +9,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/infra/apikey"
-	"github.com/Phixsura/listen/internal/infra/metrics"
-	"github.com/Phixsura/listen/internal/infra/trace"
-	"github.com/Phixsura/listen/internal/service"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/apikey"
+	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/infra/trace"
+	"github.com/Phixsura/attune/internal/service"
 )
 
 // IngestHandler serves POST /v1/feedback/ingest.

@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "听见 Console",
+    "title": "Attune Console",
     "loading": "加载中…"
   },
   "common": {
@@ -64,7 +64,7 @@
     "empty_body": "签一把就能把 ingest API 接到你的产品里。明文 key 仅签发时返回一次。"
   },
   "notify_targets": {
-    "subtitle": "告诉听见把反馈推到哪里——飞书群机器人 webhook、或你自己的 HTTPS 接收端。",
+    "subtitle": "告诉Attune把反馈推到哪里——飞书群机器人 webhook、或你自己的 HTTPS 接收端。",
     "create_button": "+ 添加目标",
     "test_button": "测试",
     "delete_button": "删除",
@@ -87,7 +87,7 @@
       "type_raw": "自定义 webhook（你自己的 HTTPS 接收端）",
       "url_field": "Webhook URL",
       "url_help_lark": "在飞书群里：设置 → 群机器人 → 自定义机器人 → 复制 webhook 地址",
-      "url_help_raw": "你的 HTTPS 端点。HMAC 签名将通过 X-Listen-Signature header 发送。",
+      "url_help_raw": "你的 HTTPS 端点。HMAC 签名将通过 X-Attune-Signature header 发送。",
       "secret_field": "签名 secret",
       "secret_help_lark": "可选——如果你在飞书机器人启用了「签名校验」，把那个字符串粘过来",
       "secret_help_raw": "建议至少 32 字节随机串。空 = 不签名。",

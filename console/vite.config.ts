@@ -4,12 +4,12 @@ import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-// listen console dev server. Proxies /fb/v1 to local listen backend on
+// attune console dev server. Proxies /fb/v1 to local attune backend on
 // :8090 so the SPA can be developed against the real Go service without
 // CORS or cookie domain complications.
 //
 // In production a same-origin nginx serves /console/* statically and
-// /fb/v1/* through to listen — see listen/docs/2026-05-15-console-tech-stack.md.
+// /fb/v1/* through to attune — see attune/docs/2026-05-15-console-tech-stack.md.
 
 export default defineConfig({
   // Prod nginx serves the SPA under /console/* — vite's asset URLs must

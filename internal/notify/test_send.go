@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // TestResult is the outcome of a one-shot connectivity ping.
@@ -62,7 +62,7 @@ func TestSend(ctx context.Context, target repo.NotifyTarget) TestResult {
 		body, err = buildRawTestBody()
 		if err == nil && target.Secret != "" {
 			extraHeaders = map[string]string{
-				"X-Listen-Signature": signRawBody(body, target.Secret),
+				"X-Attune-Signature": signRawBody(body, target.Secret),
 			}
 		}
 		checkResponse = checkRawTestResponse
@@ -83,11 +83,11 @@ func TestSend(ctx context.Context, target repo.NotifyTarget) TestResult {
 		return TestResult{Err: fmt.Errorf("build request: %w", err)}
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("User-Agent", "listen/test-ping")
+	req.Header.Set("User-Agent", "attune/test-ping")
 	for k, v := range extraHeaders {
 		req.Header.Set(k, v)
 	}
-	// 上游 req body (truncate 1024 字节; X-Listen-Signature 等签名头 skip)。
+	// 上游 req body (truncate 1024 字节; X-Attune-Signature 等签名头 skip)。
 	logext.Infof(ctx, "[%s] upstream req,dest_type:%s,url:%s,body:%s",
 		where, target.DestinationType, target.URL, truncate(string(body), 1024))
 
@@ -115,11 +115,11 @@ func TestSend(ctx context.Context, target repo.NotifyTarget) TestResult {
 }
 
 // buildLarkTestBody constructs a minimal text message envelope. Avoid
-// an interactive card here — a simple "听见连通性测试" text is more
+// an interactive card here — a simple "Attune连通性测试" text is more
 // recognizable to the human staring at the group chat trying to verify.
 func buildLarkTestBody(secret string) ([]byte, error) {
 	return buildLarkTextBody(
-		"🔔 听见连通性测试 — 如果你看到这条，notify target 已配通。",
+		"🔔 Attune连通性测试 — 如果你看到这条，notify target 已配通。",
 		secret,
 	)
 }
@@ -163,7 +163,7 @@ func buildRawTestBody() ([]byte, error) {
 		"version":      envelopeVersion,
 		"event_type":   "test",
 		"delivered_at": time.Now().UTC().Format(time.RFC3339),
-		"note":         "连通性测试 — 此事件由听见控制台「测试」按钮触发",
+		"note":         "连通性测试 — 此事件由Attune控制台「测试」按钮触发",
 	}
 	return json.Marshal(env)
 }
@@ -205,7 +205,7 @@ func SendAlert(ctx context.Context, target repo.NotifyTarget, text string) TestR
 		return TestResult{Err: fmt.Errorf("build request: %w", reqErr)}
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("User-Agent", "listen/alert")
+	req.Header.Set("User-Agent", "attune/alert")
 	logext.Infof(ctx, "[%s] upstream req,url:%s,body:%s",
 		where, target.URL, truncate(string(body), 1024))
 	start := time.Now()

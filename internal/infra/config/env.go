@@ -8,12 +8,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // applyEnvOverrides mutates yc in place, letting env vars trump YAML.
 // Kept in its own file because the override tables grow with every new
-// config field and would otherwise inflate config.go past the listen
+// config field and would otherwise inflate config.go past the attune
 // 300-line discipline.
 //
 // FEEDBACK_API_CUSTOM_WEBHOOKS is a JSON array of CustomWebhookDest

@@ -1,7 +1,7 @@
 package service
 
 // outbox_worker_send.go — per-destination sender switchboard. Split from
-// outbox_worker.go to keep both files under the listen ≤300-line rule
+// outbox_worker.go to keep both files under the attune ≤300-line rule
 // (CLAUDE.md 律 2). Each outbox-routed destination_type owns one branch
 // of sendByDestType plus, if its protocol differs from raw-webhook, a
 // dedicated send* helper here.
@@ -16,13 +16,13 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/notify"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // sendByDestType is the per-destination switchboard. The outbox row's
-// payload is the same generic listen-envelope for every dest; each
+// payload is the same generic attune-envelope for every dest; each
 // branch shapes the actual HTTP request (URL, headers, body transform).
 // Adding a new dest_type means adding one case here and one sender file
 // in internal/notify/.
@@ -62,10 +62,10 @@ func (w *OutboxWorker) sendRawWebhook(
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-		req.Header.Set("X-Listen-Signature", signRawBody(row.Payload, target.Secret))
+		req.Header.Set("X-Attune-Signature", signRawBody(row.Payload, target.Secret))
 		req.Header.Set("X-Trace-ID", row.TraceID)
-		req.Header.Set("User-Agent", "listen/1.0")
-		// 上游 req body truncate 1024 字节; X-Listen-Signature 签名头 skip。
+		req.Header.Set("User-Agent", "attune/1.0")
+		// 上游 req body truncate 1024 字节; X-Attune-Signature 签名头 skip。
 		logext.Infof(ctx, "[%s] upstream req,label:%s,url:%s,body:%s",
 			where, label, target.URL, truncateStr(string(row.Payload), 1024))
 		return req, nil

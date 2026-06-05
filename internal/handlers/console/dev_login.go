@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // DevLoginHandler implements the backdoor /install/dev-login endpoint
@@ -81,7 +81,7 @@ func (h *DevLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, repo.ErrTenantNotFound) {
 			logext.Warnf(ctx, "[%s] reject: tenant not found,slug:%s", where, slug)
 			writeError(w, http.StatusNotFound, "tenant_not_found",
-				"tenant '"+slug+"' 不存在；请先用 `listen tenant create` 建好")
+				"tenant '"+slug+"' 不存在；请先用 `attune tenant create` 建好")
 			return
 		}
 		slog.ErrorContext(ctx, "dev-login: resolve tenant", "err", err)

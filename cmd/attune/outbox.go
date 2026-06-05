@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Phixsura/listen/internal/infra/config"
-	"github.com/Phixsura/listen/internal/infra/database"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
-// runOutbox dispatches `listen outbox <subcmd> [flags]`.
+// runOutbox dispatches `attune outbox <subcmd> [flags]`.
 //
-//	listen outbox prune --older-than 1h   Mark every pending/failed row
+//	attune outbox prune --older-than 1h   Mark every pending/failed row
 //	                                       older than 1h as 'dead'.
 //	                                       Reads DB URL from FEEDBACK_API_*
 //	                                       env vars / config.yaml exactly
@@ -25,7 +25,7 @@ import (
 // on an empty backlog.
 func runOutbox(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: listen outbox prune --older-than <duration>")
+		return fmt.Errorf("usage: attune outbox prune --older-than <duration>")
 	}
 	switch args[0] {
 	case "prune":

@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/attune/internal/domain"
 )
 
 // fakeNotifier records every Push call so tests can assert fanout
