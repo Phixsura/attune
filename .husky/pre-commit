@@ -18,10 +18,13 @@
 #     contributors never need node_modules.
 #
 # Checks:
-#   ① large-file guard — staged blob > 500 KB (catches stray binaries/blobs;
-#      à la pre-commit's check-added-large-files). We do NOT cap source LINES:
-#      Go idiom + Google style cap functions, not files (already enforced in CI
-#      via lizard CCN/NLOC); a hard per-file line block would be stricter than CI.
+#   ① large-file guard — a NEWLY-ADDED file whose blob is > 500 KB (catches stray
+#      binaries/dumps). Matches pre-commit's check-added-large-files, which scopes
+#      to ADDED files: a tracked file growing past the limit (e.g. pnpm-lock.yaml,
+#      go.sum) is a modification and is intentionally NOT re-checked, so dep bumps
+#      never get blocked. Escapes for a legit large add: git-lfs (its pointer blob
+#      is ~130 B → passes automatically), or a one-off bypass. We do NOT cap source
+#      LINES: Go/Google style cap functions not files (CI's lizard already does).
 #   ② go vet — packages touched by staged .go (blocks)
 #   ③ scripts/lint-slog.sh — slog/OTel lint (warn-only; never blocks)
 #   ④ biome — staged console/src files (blocks, only if console deps present)
@@ -32,16 +35,16 @@ if [ -t 1 ]; then B=$'\033[1m'; R=$'\033[0m'; else B=''; R=''; fi
 say(){ printf '%s▸ %s%s\n' "$B" "$1" "$R"; }
 fail=0
 
-# ── ① large-file guard (bytes; staged blob via cat-file -s) ───────────────────
+# ── ① large-file guard — NEWLY-ADDED blobs only (à la check-added-large-files) ─
 MAXKB=500
-say "large-file guard (≤${MAXKB}KB/file)"
+say "large-file guard (≤${MAXKB}KB, new files)"
 while IFS= read -r f; do
   sz=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
   if [ "$((sz / 1024))" -gt "$MAXKB" ]; then
-    echo "✗ $f: $((sz / 1024))KB (>${MAXKB}KB) — large/binary blob; reconsider or use git-lfs"
+    echo "✗ $f: $((sz / 1024))KB (>${MAXKB}KB) — large/binary blob; use git-lfs, or bypass for a one-off"
     fail=1
   fi
-done < <(git diff --cached --name-only --diff-filter=ACM)
+done < <(git diff --cached --name-only --diff-filter=A)
 
 # ── ② go vet on staged packages (array → space-safe, no fragile xargs) ────────
 go_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')

@@ -34,8 +34,15 @@ it real: a fast (~seconds), dependency-free local gate on **staged** changes.
 A hand-written `.husky/pre-commit`, enabled via `git config core.hooksPath .husky`.
 Checks, on staged ACM files only:
 
-1. **Large-file guard** — staged blob > 500 KB (`git cat-file -s`), à la pre-commit's
-   `check-added-large-files`. Blocks. Catches stray binaries/blobs.
+1. **Large-file guard** — a NEWLY-ADDED file whose staged blob > 500 KB
+   (`git cat-file -s`, `--diff-filter=A`), matching pre-commit's
+   `check-added-large-files` (which scopes to *added* files). Blocks. Catches stray
+   binaries/dumps. Scoping to adds is deliberate: a tracked file that grows past the
+   limit (e.g. `console/pnpm-lock.yaml` — 177 KB today and climbing, or `go.sum`) is
+   a *modification*, so dep bumps are never blocked. Escapes for a legitimate large
+   *add*: git-lfs (its pointer blob is ~130 B → passes automatically; also keeps git
+   history lean) or a one-off bypass. No bespoke allowlist — that would be new,
+   fallible surface for a problem these two standard escapes already cover.
 2. **`go vet`** on the packages touched by staged `.go` (space-safe array). Blocks.
 3. **`scripts/lint-slog.sh`** (#4) — slog/OTel lint. **Warn-only** (matches its exit-0
    contract; the 3 known warnings shouldn't block commits until #9).
