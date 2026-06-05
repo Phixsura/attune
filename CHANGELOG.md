@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- **Observability overlay** (`deploy/docker-compose.obs.yml`) — optional
+  Prometheus + Grafana stack (pinned images, memory-capped) layered with
+  `-f docker-compose.yml -f docker-compose.obs.yml` (#6). Auto-provisions the
+  Prometheus datasource and the "Attune Overview" dashboard, and documents the
+  `attune_*` metrics as a backend-agnostic contract in `observability/README.md`.
+- CI: a `deploy/**`-filtered `docker compose config` smoke check.
+
+### Changed
+
+- Renamed the bundled Grafana dashboard "Attune Overview (Wave 1.2)" → "Attune
+  Overview" and removed internal roadmap jargon from `observability/` and the
+  `metrics` package doc (no metric names changed).
+
+### Security
+
+- Bounded the `source` label on `attune_ingest_total`: a rejected (invalid)
+  client-supplied `source` is now recorded as `invalid` instead of the raw value,
+  closing an unbounded metric-cardinality vector on the ingest validation-error
+  path.
+
 ## [0.2.0] - 2026-06-05
 
 ### Added

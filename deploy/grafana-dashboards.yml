@@ -1,0 +1,15 @@
+# Grafana dashboard provider — loads every *.json mounted under the attune/
+# provisioning dir (../observability/dashboards is bind-mounted there, read-only).
+apiVersion: 1
+
+providers:
+  - name: attune
+    orgId: 1
+    folder: attune
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards/attune
+      foldersFromFilesStructure: false

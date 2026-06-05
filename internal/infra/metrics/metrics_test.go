@@ -4,45 +4,62 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-// TestRegistryHasAllFiveCoreMetrics asserts every metric documented in
-// design doc §3.7 is actually wired on the package Registry. This is a
-// contract test — Grafana dashboards downstream pin these names, so
-// dropping one silently would break alerting.
-//
-// CounterVec / HistogramVec metrics only appear in Gather() after at
-// least one observation, so we touch each labeled metric first.
-func TestRegistryHasAllFiveCoreMetrics(t *testing.T) {
-	IngestTotal.WithLabelValues("t", "s", "r").Inc()
-	EnrichDuration.WithLabelValues("t", "r").Observe(0.1)
-	NotifyFailuresTotal.WithLabelValues("d", "r").Inc()
-	OutboxLagSeconds.Set(0)
-	ClaimContentionTotal.Inc()
+// TestRegisteredMetricsMatchDocumentedReference is the drift-guard: the metrics
+// registered in metrics.go must exactly equal the catalog documented in
+// observability/README.md. Add or rename a metric without updating the docs and
+// this fails. (Names are a semver-stable contract — proposal #6.)
+func TestRegisteredMetricsMatchDocumentedReference(t *testing.T) {
+	// Mirror of observability/README.md's metrics reference (the 7 families).
+	documented := map[string]bool{
+		"attune_ingest_total":            true,
+		"attune_enrich_duration_seconds": true,
+		"attune_notify_failures_total":   true,
+		"attune_outbox_lag_seconds":      true,
+		"attune_claim_contention_total":  true,
+		"attune_ingest_rate_limit_total": true,
+		"attune_triage_decisions_total":  true,
+	}
 
-	families, err := Registry.Gather()
-	if err != nil {
-		t.Fatalf("Registry.Gather: %v", err)
+	got := registeredMetricNames(t)
+	if len(got) != len(documented) {
+		t.Fatalf("registered %d metrics, documented %d: %v", len(got), len(documented), got)
 	}
-	want := map[string]bool{
-		"attune_ingest_total":            false,
-		"attune_enrich_duration_seconds": false,
-		"attune_notify_failures_total":   false,
-		"attune_outbox_lag_seconds":      false,
-		"attune_claim_contention_total":  false,
-	}
-	for _, fam := range families {
-		if _, ok := want[fam.GetName()]; ok {
-			want[fam.GetName()] = true
+	for _, name := range got {
+		if !documented[name] {
+			t.Errorf("metric %q is registered but missing from observability/README.md's reference", name)
 		}
 	}
-	for name, seen := range want {
-		if !seen {
-			t.Errorf("metric %q missing from Registry", name)
+}
+
+// registeredMetricNames extracts the fully-qualified name of every collector in
+// allMetrics via Describe (each emits one Desc), so it sees label-vec metrics
+// that Gather() omits until first observation.
+func registeredMetricNames(t *testing.T) []string {
+	t.Helper()
+	ch := make(chan *prometheus.Desc)
+	go func() {
+		defer close(ch)
+		for _, c := range allMetrics {
+			c.Describe(ch)
 		}
+	}()
+	fqName := regexp.MustCompile(`fqName: "([^"]+)"`)
+	var names []string
+	for d := range ch {
+		m := fqName.FindStringSubmatch(d.String())
+		if m == nil {
+			t.Fatalf("could not parse fqName from Desc: %s", d.String())
+		}
+		names = append(names, m[1])
 	}
+	return names
 }
 
 // TestHandlerServesPrometheusFormat asserts /metrics returns a body

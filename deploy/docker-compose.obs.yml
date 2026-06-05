@@ -1,0 +1,88 @@
+# Optional observability overlay — Prometheus + Grafana for attune's /metrics.
+#
+# Usage (layer on top of the base stack):
+#   docker compose -f docker-compose.yml -f docker-compose.obs.yml up -d
+#   # Grafana    → http://127.0.0.1:3000  (admin / $GF_SECURITY_ADMIN_PASSWORD)
+#   # Prometheus → http://127.0.0.1:9090
+#
+# Tear down with the SAME -f flags (or add --remove-orphans) so the obs
+# containers don't orphan:
+#   docker compose -f docker-compose.yml -f docker-compose.obs.yml down
+#
+# This is ONE reference stack. attune exposes standard Prometheus/OpenMetrics at
+# /metrics — point any compatible backend (VictoriaMetrics, OTel Collector, …) at
+# it instead if you prefer. See ../observability/README.md.
+
+services:
+  prometheus:
+    # Pinned for reproducibility — top reference stacks pin, never :latest in prod.
+    # Bump deliberately; see ../observability/README.md.
+    image: prom/prometheus:v3.12.0
+    # Cap memory so a runaway TSDB (cardinality growth) can't OOM the co-located
+    # attune/postgres. Compose v2 honors this on `up`. Tune for your scrape volume.
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - attune-prom:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+    # Loopback by default — Prometheus exposes ALL your metrics, unauthenticated.
+    # Front with a proxy or set ATTUNE_BIND=0.0.0.0 to publish.
+    ports:
+      - "${ATTUNE_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  grafana:
+    image: grafana/grafana:13.0.2  # pinned; bump deliberately
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    depends_on:
+      - prometheus
+    volumes:
+      - ../observability/dashboards/:/etc/grafana/provisioning/dashboards/attune/:ro
+      - ./grafana-datasource.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+      - ./grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/attune.yml:ro
+      - attune-grafana:/var/lib/grafana
+    # Only Grafana's own vars — NOT env_file: .env (that would inject attune's
+    # DB/LLM secrets into this container).
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${ATTUNE_BIND:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  attune-prom:
+  attune-grafana:

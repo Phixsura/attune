@@ -63,7 +63,7 @@ func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 		default:
 			code, msg, result = http.StatusBadRequest, err.Error(), "validate_err"
 		}
-		metrics.IngestTotal.WithLabelValues(tenantID, in.Source, result).Inc()
+		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(in.Source), result).Inc()
 		writeJSON(w, code, map[string]string{"error": msg})
 		return
 	}
@@ -87,4 +87,15 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// boundedSource keeps attune_ingest_total's `source` label bounded to known
+// sources. On the validate_err path we'd otherwise record the raw client value,
+// an unbounded-cardinality vector (proposal #6). Mirrors how the JSON-decode and
+// auth paths record "unknown".
+func boundedSource(s string) string {
+	if domain.ValidSources[s] {
+		return s
+	}
+	return "invalid"
 }

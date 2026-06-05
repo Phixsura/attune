@@ -49,6 +49,7 @@ jobs:
       console: ${{ steps.filter.outputs.console }}
       code: ${{ steps.filter.outputs.code }}
       changelog: ${{ steps.filter.outputs.changelog }}
+      deploy: ${{ steps.filter.outputs.deploy }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -72,6 +73,9 @@ jobs:
               - 'console/src/**'
             changelog:
               - 'CHANGELOG.md'
+            deploy:
+              - 'deploy/**'
+              - '.github/workflows/ci.yml'
 
   # ── Go: vet / build / test ─────────────────────────────────────────────────
   go-checks:
@@ -228,9 +232,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # ── Deploy: docker-compose base + obs overlay parse ────────────────────────
+  compose-config:
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Validate base + obs overlay merge & parse
+        working-directory: deploy
+        # The base compose has `env_file: .env` (gitignored); seed a throwaway one
+        # from the example so `config` can resolve it. `config` validates the
+        # merged YAML only — it never starts containers or reads real secrets.
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.obs.yml config -q
+
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, golangci-lint, lizard, govulncheck, console, changelog, docker-build]
+    needs: [changes, go-checks, golangci-lint, lizard, govulncheck, console, changelog, docker-build, compose-config]
     if: always()
     runs-on: ubuntu-latest
     steps:

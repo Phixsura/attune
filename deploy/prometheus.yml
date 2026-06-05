@@ -1,0 +1,10 @@
+# Prometheus scrape config for the attune observability overlay. Scrapes attune's
+# /metrics over the compose network (service `attune`, port 8090) — independent of
+# the host port bind. Default scrape path /metrics needs no metrics_path override.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: attune
+    static_configs:
+      - targets: ["attune:8090"]
