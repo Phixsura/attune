@@ -1,7 +1,7 @@
 {
   "uid": "attune-overview",
-  "title": "Attune Overview (Wave 1.2)",
-  "tags": ["attune", "wave1.2"],
+  "title": "Attune Overview",
+  "tags": ["attune"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
