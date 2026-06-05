@@ -7,17 +7,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Phixsura/listen/internal/infra/config"
-	"github.com/Phixsura/listen/internal/infra/database"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
-// runTenant dispatches `listen tenant <verb>` subcommands. Wave 1.2
+// runTenant dispatches `attune tenant <verb>` subcommands. Wave 1.2
 // only exposes `create`; Wave 2 control plane will add `list / activate /
 // deactivate / set-lark-key` once the OAuth flow lands.
 func runTenant(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: listen tenant create --slug <s> [--name <n>]")
+		return fmt.Errorf("usage: attune tenant create --slug <s> [--name <n>]")
 	}
 	switch args[0] {
 	case "create":
@@ -69,7 +69,7 @@ func runTenantCreate(args []string) error {
   id:   %s
 
 Next:
-  listen keys issue --tenant %s [--label <label>]
+  attune keys issue --tenant %s [--label <label>]
 `, *slug, *name, id, *slug)
 	return nil
 }

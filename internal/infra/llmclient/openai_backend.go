@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // openaiHTTPTimeout —— OpenAI 兼容端点 HTTP 超时。 60s 覆盖大多数 4-8K token 推理;
@@ -57,7 +57,7 @@ func NewOpenAI(baseURL, apiKey string) (*OpenAIBackend, error) {
 func (b *OpenAIBackend) Close() error { return nil }
 
 // openaiChatRequest mirrors the minimal subset of OpenAI /v1/chat/completions
-// listen needs (single user message). Fields kept untyped pointers/values so
+// attune needs (single user message). Fields kept untyped pointers/values so
 // the marshaled JSON exactly matches OpenAI's schema.
 type openaiChatRequest struct {
 	Model       string              `json:"model"`

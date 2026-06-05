@@ -1,5 +1,5 @@
 // Package repo — console analytics/aggregate queries over user_feedback.
-// Split from feedback_console.go to honor the listen ≤300-line file rule
+// Split from feedback_console.go to honor the attune ≤300-line file rule
 // (CLAUDE.md 律 2). These power the dashboard widgets + weekly digest
 // (usage bars, kind donut, top-modules line); the list/detail read path
 // stays in feedback_console.go.

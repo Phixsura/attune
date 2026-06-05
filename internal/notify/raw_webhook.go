@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/infra/metrics"
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // envelopeVersion is the wire-format version field. Bumping requires
@@ -137,9 +137,9 @@ func (r *RawWebhookRouter) send(
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-		req.Header.Set("X-Listen-Signature", signRawBody(body, dest.secret))
-		req.Header.Set("User-Agent", "listen/1.0")
-		// 上游 req body 截断 1024 字节; X-Listen-Signature 头 skip(签名敏感)。
+		req.Header.Set("X-Attune-Signature", signRawBody(body, dest.secret))
+		req.Header.Set("User-Agent", "attune/1.0")
+		// 上游 req body 截断 1024 字节; X-Attune-Signature 头 skip(签名敏感)。
 		logext.Infof(ctx, "[%s] upstream req,label:%s,body:%s",
 			where, label, truncate(string(body), 1024))
 		return req, nil

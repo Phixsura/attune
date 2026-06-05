@@ -11,15 +11,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phixsura/listen/internal/handlers/console"
-	"github.com/Phixsura/listen/internal/infra/config"
-	larkclient "github.com/Phixsura/listen/internal/infra/lark"
-	"github.com/Phixsura/listen/internal/infra/llmclient"
-	"github.com/Phixsura/listen/internal/infra/metrics"
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/notify"
-	"github.com/Phixsura/listen/internal/repo"
-	"github.com/Phixsura/listen/internal/service"
+	"github.com/Phixsura/attune/internal/handlers/console"
+	"github.com/Phixsura/attune/internal/infra/config"
+	larkclient "github.com/Phixsura/attune/internal/infra/lark"
+	"github.com/Phixsura/attune/internal/infra/llmclient"
+	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/service"
 )
 
 // buildLLMClient wires the OpenAI-compatible LLM client used by the
@@ -124,7 +124,7 @@ func buildNotifier(
 }
 
 // runOutboxLagRefresher ticks every 30s and updates the
-// listen_outbox_lag_seconds gauge. Decoupling refresh from Prometheus
+// attune_outbox_lag_seconds gauge. Decoupling refresh from Prometheus
 // scrape avoids one DB roundtrip per scrape (could be 1/sec for tight
 // alerting setups) and keeps the gauge meaningful even when scrape
 // frequency varies.

@@ -1,4 +1,4 @@
-// Package trace owns the request-scoped trace_id contract for listen.
+// Package trace owns the request-scoped trace_id contract for attune.
 //
 // chi's middleware.RequestID populates request_id on every HTTP
 // request. This package lifts that into a typed ctx value so non-HTTP

@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
-// Cookie + header names. listen_session is HttpOnly; csrf token lives
+// Cookie + header names. attune_session is HttpOnly; csrf token lives
 // in the /me response body and is mirrored by SPA into X-CSRF-Token.
 const (
-	SessionCookieName = "listen_session"
-	OAuthStateCookie  = "listen_oauth_state"
+	SessionCookieName = "attune_session"
+	OAuthStateCookie  = "attune_oauth_state"
 	CSRFHeader        = "X-CSRF-Token"
 
 	sessionTTL    = 7 * 24 * time.Hour

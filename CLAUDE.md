@@ -1,4 +1,4 @@
-# CLAUDE.md · Engineering Guidelines for listen-feedback
+# CLAUDE.md · Engineering Guidelines for attune
 
 > Apache-2.0 open-source service. Keep it simple, observable, well-tested. Every
 > meaningful change is documented in [CHANGELOG.md](CHANGELOG.md) — no exceptions
@@ -130,7 +130,7 @@ For the full layout, see [`README.md`](README.md).
 - HTTP clients hitting external services must wrap their transport with
   `otelhttp.NewTransport(http.DefaultTransport)`.
 - New metrics live in `internal/infra/metrics` and follow the existing
-  naming pattern (`listen_<area>_<thing>_<unit>`).
+  naming pattern (`attune_<area>_<thing>_<unit>`).
 - Sensitive fields (API keys, secrets, raw token values) are never logged
   in clear text. Hash or `truncate()` them at the call site.
 

@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // FeedbackHandler serves /fb/v1/console/feedback.

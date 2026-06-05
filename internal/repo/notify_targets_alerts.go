@@ -1,5 +1,5 @@
 // Package repo — alert-state tracking for tenant_notify_targets.
-// Split from notify_targets.go to honor the listen ≤300-line file rule
+// Split from notify_targets.go to honor the attune ≤300-line file rule
 // (CLAUDE.md 律 2). These methods support Phase 3.2 webhook failure
 // visibility — outbox worker calls TouchFailure on markDead and
 // ClearFailure on first successful re-delivery.

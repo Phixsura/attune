@@ -1,7 +1,7 @@
-# 听见 Console
+# Attune Console
 
 Stage B 自服务控制台 SPA。物理独立于主仓 pnpm workspace
-（见 [`listen/docs/2026-05-15-console-tech-stack.md`](../docs/2026-05-15-console-tech-stack.md)）。
+（见 [`attune/docs/2026-05-15-console-tech-stack.md`](../docs/2026-05-15-console-tech-stack.md)）。
 
 ## Stack
 
@@ -14,7 +14,7 @@ date-fns 3 · Biome 2.
 ```bash
 pnpm install
 pnpm gen:api       # openapi.yaml → src/api/types.ts
-pnpm dev           # :10092；/fb/v1 proxy 到本地 listen :8090
+pnpm dev           # :10092；/fb/v1 proxy 到本地 attune :8090
 ```
 
 ## API 契约同步

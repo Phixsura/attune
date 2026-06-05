@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 func snapshotFixture() domain.Snapshot {
@@ -49,7 +49,7 @@ func TestRawWebhook_HappyPath(t *testing.T) {
 	var receivedSig string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedBody, _ = io.ReadAll(r.Body)
-		receivedSig = r.Header.Get("X-Listen-Signature")
+		receivedSig = r.Header.Get("X-Attune-Signature")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()

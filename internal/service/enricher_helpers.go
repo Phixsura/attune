@@ -1,7 +1,7 @@
 package service
 
 // enricher_helpers.go — the non-LLM triage persist paths extracted from
-// enricher.go so the main file stays under the listen ≤300-line rule
+// enricher.go so the main file stays under the attune ≤300-line rule
 // (CLAUDE.md 律 2). Both share runFullEnrich's downstream behavior
 // (persist + best-effort fan-out) but skip the LLM call.
 
@@ -11,9 +11,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/infra/trace"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/trace"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // persistIgnored marks the row done with a sentinel "ignored" Enriched

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Phixsura/listen/internal/infra/lark"
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/infra/lark"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // OAuthHandler wires /install/start + /install/callback. It owns:
@@ -32,7 +32,7 @@ type OAuthHandler struct {
 	users        *repo.TenantUserRepo
 	installs     *repo.LarkInstallRepo
 	appID        string
-	baseURL      string // origin where /console lives, e.g. https://listen.app
+	baseURL      string // origin where /console lives, e.g. https://attune.app
 	authorizeURL string // Lark authorize endpoint
 }
 

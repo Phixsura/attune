@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/infra/trace"
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/trace"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // Ingestor is the business-layer entry point for "a new feedback row
@@ -53,7 +53,7 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 		// Capture inbound trace_id (业务: Lark / customer webhook trace_id)
 		// + OTel SpanContext(自家 trace_id),让 async enrich goroutine
 		// 同时继承"客户 trace"和"自家 OTel trace",enricher 调 gateway
-		// LLM 时 traceparent 透传,SLS 上 trace_id 串联 listen + gateway。
+		// LLM 时 traceparent 透传,SLS 上 trace_id 串联 attune + gateway。
 		go i.fireEnrich(ctx, id, trace.FromContext(ctx))
 	}
 	return id, nil

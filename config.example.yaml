@@ -1,4 +1,4 @@
-# Listen configuration. Override path via FEEDBACK_API_CONFIG env var.
+# Attune configuration. Override path via FEEDBACK_API_CONFIG env var.
 # Every field below has an env var override — see internal/infra/config/env.go.
 
 # HTTP listen port.
@@ -8,13 +8,13 @@ port: 8090
 # Format: postgres://<user>:<password>@<host>:5432/<db>?sslmode=<mode>
 #
 # First-time setup on a fresh DB:
-#   1. Apply migrations (auto on listen server startup, or:
+#   1. Apply migrations (auto on attune server startup, or:
 #      psql ... -f internal/infra/database/migrations/001_init.sql)
 #   2. Create your first tenant:
-#      listen tenant create --slug acme-corp --name "Acme Corp"
+#      attune tenant create --slug acme-corp --name "Acme Corp"
 #   3. Mint an API key:
-#      listen keys issue --tenant acme-corp --label "main-app"
-database_url: "postgres://user:pass@host:5432/listen?sslmode=require"
+#      attune keys issue --tenant acme-corp --label "main-app"
+database_url: "postgres://<user>:<password>@<host>:5432/attune?sslmode=require"
 
 # ── LLM endpoint ──────────────────────────────────────────────────
 # Enricher hits any OpenAI-compatible /v1/chat/completions endpoint.
@@ -24,7 +24,7 @@ database_url: "postgres://user:pass@host:5432/listen?sslmode=require"
 #   vllm local:     http://localhost:8000
 #   ollama local:   http://localhost:11434
 #   oneapi proxy:   http://your-oneapi-host:3000
-# Listen auto-appends "/v1/chat/completions" — don't include it in base_url.
+# Attune auto-appends "/v1/chat/completions" — don't include it in base_url.
 llm_openai_base_url: "https://api.openai.com"
 
 # Bearer token. Local ollama / vllm without auth may leave this blank.
@@ -63,13 +63,13 @@ dev_radar_webhook_secret:     ""
 #
 # tenant_slug must already exist in tenants.slug or startup will fail.
 # url must be https://. secret must be ≥ 16 chars (used for HMAC-SHA256
-# over POST body; customer verifies via X-Listen-Signature header).
+# over POST body; customer verifies via X-Attune-Signature header).
 # audience ∈ {pool, radar, all}; default pool.
 custom_webhooks: []
 # Example:
 # custom_webhooks:
 #   - tenant_slug: "acme-corp"
-#     url:    "https://example.com/api/internal/listen-webhook"
+#     url:    "https://example.com/api/internal/attune-webhook"
 #     secret: "<set-via-env-or-ops-handoff>"
 #     audience: "all"     # optional, default "pool"
 #     timeout_seconds: 10 # optional, default 10

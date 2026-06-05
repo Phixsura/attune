@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // NotifyTargetRepo owns the tenant_notify_targets table. Wave 1.2 wires
@@ -45,7 +45,7 @@ const (
 const (
 	AudiencePool  = "pool"  // every enriched row
 	AudienceRadar = "radar" // P0 / P1 only
-	AudienceAll   = "all"   // listen routes both PushPool + PushRadar here
+	AudienceAll   = "all"   // attune routes both PushPool + PushRadar here
 )
 
 // NotifyTarget is one wired destination row.
@@ -101,7 +101,7 @@ func (r *NotifyTargetRepo) Upsert(ctx context.Context, t NotifyTarget) error {
 // ListAllActive returns every active row across all tenants. Used by
 // startup wiring to build the in-memory routing table for Wave 1.2.
 // Wave 2 may add a "refresh on tenant_notify_targets change" mechanism;
-// for now, listen restart picks up any DB-side change.
+// for now, attune restart picks up any DB-side change.
 func (r *NotifyTargetRepo) ListAllActive(ctx context.Context) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,

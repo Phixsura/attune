@@ -1,4 +1,4 @@
-// Package lark is a thin client over the Lark Open API endpoints listen
+// Package lark is a thin client over the Lark Open API endpoints attune
 // actually needs. It is intentionally small — no global SDK
 // abstractions, just typed wrappers around the 3 calls Stage B uses:
 //
@@ -25,7 +25,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // upstreamBodyLogCap —— 飞书 API 上游 body 截断阈值(4KB),memory:upstream_http_log_info。
@@ -60,7 +60,7 @@ func New(appID, appSecret string) *Client {
 	}
 }
 
-// UserTokenResponse is the decoded body of the OIDC exchange. Listen
+// UserTokenResponse is the decoded body of the OIDC exchange. Attune
 // only needs the AccessToken + RefreshToken + their expiries + the open
 // + tenant identities. The rest of Lark's payload (scope, token_type,
 // etc.) is ignored here.

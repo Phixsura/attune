@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Standalone, multi-stage, multi-arch build for the listen service.
+# Standalone, multi-stage, multi-arch build for the attune service.
 # Context = repo root (the Go module itself). buildx cross-compiles to the
 # target arch on the native builder, so linux/amd64 + linux/arm64 build
 # without qemu emulation.
@@ -20,18 +20,18 @@ COPY . .
 
 ARG TARGETOS TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /listen ./cmd/listen
+    go build -trimpath -ldflags="-s -w" -o /attune ./cmd/attune
 
 # ── Stage 2: runtime (distroless static, nonroot, no shell) ──
 # ca-certificates + tzdata are baked in; runs as uid 65532.
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY --from=builder /listen /app/listen
+COPY --from=builder /attune /app/attune
 
 WORKDIR /app
 EXPOSE 8090
 # Overridable; the prod compose mounts a yaml here.
 ENV FEEDBACK_API_CONFIG=/app/config.yaml
 
-ENTRYPOINT ["/app/listen"]
+ENTRYPOINT ["/app/attune"]
 CMD ["server"]

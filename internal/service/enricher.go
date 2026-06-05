@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/infra/llmclient"
-	"github.com/Phixsura/listen/internal/infra/metrics"
-	"github.com/Phixsura/listen/internal/infra/trace"
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/llmclient"
+	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/infra/trace"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 const (
@@ -238,7 +238,7 @@ func (e *Enricher) RunBackground(ctx context.Context, interval time.Duration, ba
 }
 
 // buildSnapshot, parseEnrichJSON, classifyErrResult, truncate moved to
-// enricher_parse.go (Sprint 1.3) to keep this file under listen ≤300-
+// enricher_parse.go (Sprint 1.3) to keep this file under attune ≤300-
 // line rule (CLAUDE.md 律 2) after the Triage split.
 //
 // persistIgnored, persistFromTriage moved to enricher_helpers.go for the

@@ -1,4 +1,4 @@
-// Package service holds listen's business logic. It sits between
+// Package service holds attune's business logic. It sits between
 // handlers (HTTP) and repo (DB), depending on domain for types and
 // optionally on llmclient + notify for I/O collaborators (律 8).
 //
@@ -11,7 +11,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Phixsura/listen/internal/domain"
+	"github.com/Phixsura/attune/internal/domain"
 )
 
 // Notifier is the side-channel the enricher hands a freshly classified

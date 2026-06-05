@@ -1,5 +1,5 @@
 // Package llmclient provides single-shot non-streaming chat completion
-// for the listen enricher. It exposes an LLMClient interface implemented
+// for the attune enricher. It exposes an LLMClient interface implemented
 // by OpenAIBackend (openai_backend.go), which POSTs OpenAI-compatible
 // /v1/chat/completions over HTTP. Wire it against OpenAI, Azure OpenAI,
 // vllm, ollama, oneapi, or any other compatible endpoint.
@@ -16,8 +16,8 @@ import "context"
 // proxy like mitmproxy.
 const upstreamBodyLogCap = 4096
 
-// LLMClient is the single abstraction the rest of listen depends on.
-// OpenAIBackend implements it; cmd/listen wires one instance at boot.
+// LLMClient is the single abstraction the rest of attune depends on.
+// OpenAIBackend implements it; cmd/attune wires one instance at boot.
 type LLMClient interface {
 	Chat(ctx context.Context, userID, model, prompt string, temperature float64, maxTokens int32) (string, error)
 	Close() error

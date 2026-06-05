@@ -7,15 +7,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Phixsura/listen/internal/infra/config"
-	"github.com/Phixsura/listen/internal/infra/database"
-	"github.com/Phixsura/listen/internal/repo"
-	"github.com/Phixsura/listen/internal/service"
+	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/service"
 )
 
-// runDigest dispatches `listen digest <subcmd>`.
+// runDigest dispatches `attune digest <subcmd>`.
 //
-//	listen digest run --tenant <slug>   Send one digest right now to
+//	attune digest run --tenant <slug>   Send one digest right now to
 //	                                     the tenant's first lark-bot.
 //	                                     Used for prod smoke + manual
 //	                                     catch-up when scheduler missed.
@@ -25,7 +25,7 @@ import (
 // so it counts as the week's official send.
 func runDigest(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: listen digest run --tenant <slug>")
+		return fmt.Errorf("usage: attune digest run --tenant <slug>")
 	}
 	switch args[0] {
 	case "run":

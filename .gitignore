@@ -1,8 +1,8 @@
 # Compiled binaries
-/listen
-/listen.exe
-/cmd/listen/listen
-/cmd/listen/listen.exe
+/attune
+/attune.exe
+/cmd/attune/attune
+/cmd/attune/attune.exe
 
 # Go test/cover artifacts
 /coverage.out

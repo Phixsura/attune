@@ -1,4 +1,4 @@
-// server.go holds the `listen server` bootstrap: it loads config, wires up
+// server.go holds the `attune server` bootstrap: it loads config, wires up
 // OpenTelemetry, the pgx pool, the LLM client, repos/services, the outbox +
 // digest background workers, the chi router (lark + ingest + console mounts)
 // and runs the HTTP server until SIGINT/SIGTERM. The small OTel header helpers
@@ -20,14 +20,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phixsura/listen/internal/handlers"
-	"github.com/Phixsura/listen/internal/infra/config"
-	"github.com/Phixsura/listen/internal/infra/database"
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/notify"
-	"github.com/Phixsura/listen/internal/observability"
-	"github.com/Phixsura/listen/internal/repo"
-	"github.com/Phixsura/listen/internal/service"
+	"github.com/Phixsura/attune/internal/handlers"
+	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/observability"
+	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/service"
 )
 
 // ── server ────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ func runServer() error {
 	// 配 OTEL_EXPORTER_OTLP_ENDPOINT 才真上报 SLS Trace。详见
 	// docs/observability-trace-design.md
 	//
-	// Listen 是对外服务(私有化部署 / SaaS),OTel 完全非侵入:
+	// Attune 是对外服务(私有化部署 / SaaS),OTel 完全非侵入:
 	//   - 客户端可选传 W3C traceparent,不传也工作
 	//   - 响应头 X-Trace-Id 是 optional debug 字段,API 契约不变
 	//   - 内部业务日志带 trace_id 仅供运维 / SLS 用,客户不感知
@@ -97,7 +97,7 @@ func runServer() error {
 		notify.NewTransport(nil, notify.DefaultRetry()),
 	)
 	go outboxWorker.Run(ctx)
-	// listen_outbox_lag_seconds is refreshed on a 30s ticker rather than
+	// attune_outbox_lag_seconds is refreshed on a 30s ticker rather than
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
 
@@ -130,7 +130,7 @@ func runServer() error {
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	slog.InfoContext(ctx, "listen server listening", "addr", srv.Addr)
+	slog.InfoContext(ctx, "attune server listening", "addr", srv.Addr)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -155,7 +155,7 @@ func runServer() error {
 // trace_id 仅运维用。详见 docs/observability-trace-design.md。
 func setupTracing(ctx context.Context) (func(context.Context) error, error) {
 	return observability.InitTracer(ctx, observability.Options{
-		ServiceName:    "casceneai-listen",
+		ServiceName:    "casceneai-attune",
 		ServiceVersion: envOrDefault("APP_VERSION", "dev"),
 		Environment:    envOrDefault("ENV", "dev"),
 		Endpoint:       os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),

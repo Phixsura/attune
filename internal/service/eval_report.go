@@ -11,7 +11,7 @@ import (
 // matches design doc v0.4 §4.6.
 func FormatReport(rep *EvalReport) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# listen eval report · %s\n\n", rep.GeneratedAt.Format(time.RFC3339))
+	fmt.Fprintf(&b, "# attune eval report · %s\n\n", rep.GeneratedAt.Format(time.RFC3339))
 	fmt.Fprintf(&b, "- mode: %s\n- label source: %s\n", rep.Mode, rep.LabelSource)
 	if !rep.Since.IsZero() {
 		fmt.Fprintf(&b, "- since: %s\n", rep.Since.Format(time.RFC3339))

@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
-// Severity color mapping — listen-specific design choice:
+// Severity color mapping — attune-specific design choice:
 //   P0 阻塞 = destructive red
 //   P1 严重 = amber
 //   P2 中等 = blue

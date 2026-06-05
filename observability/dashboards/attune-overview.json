@@ -1,7 +1,7 @@
 {
-  "uid": "listen-overview",
-  "title": "Listen Overview (Wave 1.2)",
-  "tags": ["listen", "wave1.2"],
+  "uid": "attune-overview",
+  "title": "Attune Overview (Wave 1.2)",
+  "tags": ["attune", "wave1.2"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -16,7 +16,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(listen_ingest_total[5m])) * 60",
+          "expr": "sum(rate(attune_ingest_total[5m])) * 60",
           "refId": "A"
         }
       ],
@@ -41,7 +41,7 @@
       "title": "Outbox lag (sec)",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "targets": [
-        { "expr": "listen_outbox_lag_seconds", "refId": "A" }
+        { "expr": "attune_outbox_lag_seconds", "refId": "A" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -65,7 +65,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(listen_enrich_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(attune_enrich_duration_seconds_bucket[5m])))",
           "refId": "A"
         }
       ],
@@ -91,7 +91,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "targets": [
         {
-          "expr": "increase(listen_claim_contention_total[5m])",
+          "expr": "increase(attune_claim_contention_total[5m])",
           "refId": "A"
         }
       ],
@@ -115,7 +115,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "targets": [
         {
-          "expr": "sum by (source, result) (rate(listen_ingest_total[1m]))",
+          "expr": "sum by (source, result) (rate(attune_ingest_total[1m]))",
           "legendFormat": "{{source}} · {{result}}",
           "refId": "A"
         }
@@ -130,9 +130,9 @@
       "title": "Enrichment duration p50 / p95 / p99",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "targets": [
-        { "expr": "histogram_quantile(0.50, sum by (le) (rate(listen_enrich_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A" },
-        { "expr": "histogram_quantile(0.95, sum by (le) (rate(listen_enrich_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B" },
-        { "expr": "histogram_quantile(0.99, sum by (le) (rate(listen_enrich_duration_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "C" }
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(attune_enrich_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(attune_enrich_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(attune_enrich_duration_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "C" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 5 } }
@@ -145,7 +145,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "targets": [
         {
-          "expr": "sum by (destination_type, reason) (rate(listen_notify_failures_total[1m]))",
+          "expr": "sum by (destination_type, reason) (rate(attune_notify_failures_total[1m]))",
           "legendFormat": "{{destination_type}} · {{reason}}",
           "refId": "A"
         }
@@ -160,7 +160,7 @@
       "title": "Outbox lag (gauge over time)",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "targets": [
-        { "expr": "listen_outbox_lag_seconds", "legendFormat": "lag", "refId": "A" }
+        { "expr": "attune_outbox_lag_seconds", "legendFormat": "lag", "refId": "A" }
       ],
       "fieldConfig": {
         "defaults": {

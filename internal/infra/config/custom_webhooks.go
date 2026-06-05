@@ -1,5 +1,5 @@
 // Package config — custom webhook destination type and validation.
-// Split from config.go to keep that file under listen's 300-line cap
+// Split from config.go to keep that file under attune's 300-line cap
 // (CLAUDE.md 律 2). This file owns the CustomWebhookDest type and the
 // validation rules documented in docs/wave-1.2 §4.5.
 package config

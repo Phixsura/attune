@@ -1,5 +1,5 @@
 // Package repo — by-id / single-row CRUD for tenant_notify_targets.
-// Split from notify_targets.go to honor the listen ≤300-line file rule
+// Split from notify_targets.go to honor the attune ≤300-line file rule
 // (CLAUDE.md 律 2). The list/scan/insert path + type + constants stay in
 // notify_targets.go; these are the tenant-scoped single-row operations
 // the Wave 2 console drives (read one, delete one, update one).

@@ -7,7 +7,7 @@ import (
 )
 
 // Router wires every console endpoint into a single chi.Router that
-// the listen main mounts under /fb/v1/console.
+// the attune main mounts under /fb/v1/console.
 //
 // Endpoint inventory (matches openapi.yaml):
 //

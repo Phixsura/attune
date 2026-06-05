@@ -1,4 +1,4 @@
-// router.go builds the HTTP router for `listen server`: the OTel root span +
+// router.go builds the HTTP router for `attune server`: the OTel root span +
 // X-Trace-Id middleware, the standard chi middleware chain, health/metrics, the
 // /v1 API surface, and the optional Stage B console mount. Split out of
 // server.go to keep each file under the 300-line cap (CLAUDE.md §1).
@@ -18,11 +18,11 @@ import (
 	"github.com/riandyrn/otelchi"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/Phixsura/listen/internal/handlers"
-	"github.com/Phixsura/listen/internal/infra/apikey"
-	"github.com/Phixsura/listen/internal/infra/config"
-	"github.com/Phixsura/listen/internal/infra/metrics"
-	"github.com/Phixsura/listen/internal/service"
+	"github.com/Phixsura/attune/internal/handlers"
+	"github.com/Phixsura/attune/internal/infra/apikey"
+	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/service"
 )
 
 // buildRouter wires the chi router: OTel root span + X-Trace-Id, the standard
@@ -40,7 +40,7 @@ func buildRouter(
 	r := chi.NewRouter()
 	// otelchi 入口产 root span(从客户端 traceparent 继承 or 兜底生成可读 trace_id)。
 	// 必须最先,过滤 /health 避免心跳塞满 trace。
-	r.Use(otelchi.Middleware("casceneai-listen", otelchi.WithFilter(func(r *http.Request) bool {
+	r.Use(otelchi.Middleware("casceneai-attune", otelchi.WithFilter(func(r *http.Request) bool {
 		return !strings.HasPrefix(r.URL.Path, "/health") && !strings.HasPrefix(r.URL.Path, "/metrics")
 	})))
 	// X-Trace-Id 响应头(对客户 optional debug,API 契约不强制)

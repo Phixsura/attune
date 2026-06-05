@@ -13,7 +13,7 @@ package notify
 //   secret           = ghp_xxx | github_pat_xxx (needs `issues:write`)
 //   audience         = pool | radar | all
 //
-// and listen converts every enriched Snapshot into a "Create Issue"
+// and attune converts every enriched Snapshot into a "Create Issue"
 // against that repo via the outbox + Transport pipeline (same retry
 // semantics as raw-webhook: 5 attempts, 30s/2m/10m/1h backoff).
 //
@@ -31,8 +31,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/logext"
 	// OTel-aware logging convention — see docs/observability-sop.md.
 )
 
@@ -49,13 +49,13 @@ var githubAPIBaseForTest = "https://api.github.com"
 // docs.github.com/en/rest/overview/api-versions.
 const githubAPIVersion = "2022-11-28"
 
-// SendGitHubIssue posts one issue derived from a listen-envelope payload.
+// SendGitHubIssue posts one issue derived from a attune-envelope payload.
 // Called per outbox row by service.OutboxWorker.sendByDestType when the
 // row's destination_type is github-issue.
 //
 // repoURL is the customer-visible https://github.com/{owner}/{repo}
 // string stored in tenant_notify_targets.url; token is the PAT stored
-// in .secret. payload is the same v1 listen envelope raw-webhook uses
+// in .secret. payload is the same v1 attune envelope raw-webhook uses
 // (verbatim JSON bytes from the outbox row).
 //
 // Returns:
@@ -68,7 +68,7 @@ func SendGitHubIssue(
 	repoURL, token string, payload []byte,
 ) error {
 	const where = "notify.SendGitHubIssue"
-	env, err := unmarshalListenEnvelope(payload)
+	env, err := unmarshalAttuneEnvelope(payload)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad payload,err:%s", where, err.Error())
 		return fmt.Errorf("%w: github-issue payload: %w", ErrTerminal, err)
@@ -98,7 +98,7 @@ func SendGitHubIssue(
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-		req.Header.Set("User-Agent", "listen/1.0")
+		req.Header.Set("User-Agent", "attune/1.0")
 		// 上游 req body 截断 1024 字节; Authorization 头 skip(已遵规)。
 		logext.Infof(ctx, "[%s] upstream req,label:%s,body:%s",
 			where, label, truncate(string(body), 1024))
@@ -140,27 +140,27 @@ func ParseGitHubRepoURL(raw string) (owner, repo string, err error) {
 	return owner, repo, nil
 }
 
-// listenEnvelope mirrors the v1 envelope service/enricher_outbox.go writes.
+// attuneEnvelope mirrors the v1 envelope service/enricher_outbox.go writes.
 // Kept unexported because the outbox payload is the contract — if it
 // changes, both senders must update.
-type listenEnvelope struct {
+type attuneEnvelope struct {
 	Version   string         `json:"version"`
 	EventType string         `json:"event_type"`
 	TraceID   string         `json:"trace_id"`
-	Feedback  listenFeedback `json:"feedback"`
+	Feedback  attuneFeedback `json:"feedback"`
 }
 
-type listenFeedback struct {
+type attuneFeedback struct {
 	ID          int64          `json:"id"`
 	TenantID    string         `json:"tenant_id"`
 	Content     string         `json:"content"`
 	Source      string         `json:"source"`
 	UserID      string         `json:"user_id"`
 	SubmittedAt string         `json:"submitted_at"`
-	Enriched    listenEnriched `json:"enriched"`
+	Enriched    attuneEnriched `json:"enriched"`
 }
 
-type listenEnriched struct {
+type attuneEnriched struct {
 	Title      string   `json:"title"`
 	Kind       string   `json:"kind"`
 	Severity   string   `json:"severity"`
@@ -170,10 +170,10 @@ type listenEnriched struct {
 	EnrichedAt string   `json:"enriched_at"`
 }
 
-func unmarshalListenEnvelope(p []byte) (listenEnvelope, error) {
-	var env listenEnvelope
+func unmarshalAttuneEnvelope(p []byte) (attuneEnvelope, error) {
+	var env attuneEnvelope
 	if err := json.Unmarshal(p, &env); err != nil {
-		return env, fmt.Errorf("unmarshal listen envelope: %w", err)
+		return env, fmt.Errorf("unmarshal attune envelope: %w", err)
 	}
 	if env.Feedback.ID == 0 || env.Feedback.Enriched.Title == "" {
 		return env, fmt.Errorf("envelope missing required fields (id / title)")
@@ -183,7 +183,7 @@ func unmarshalListenEnvelope(p []byte) (listenEnvelope, error) {
 
 // ghIssueBody is GitHub's "Create issue" request shape. assignees and
 // milestone are omitted intentionally in v0: the assignee should come
-// from per-repo CODEOWNERS, not from listen. v1 may add an optional
+// from per-repo CODEOWNERS, not from attune. v1 may add an optional
 // `default_assignees` config column.
 type ghIssueBody struct {
 	Title  string   `json:"title"`
@@ -191,12 +191,12 @@ type ghIssueBody struct {
 	Labels []string `json:"labels,omitempty"`
 }
 
-// buildIssueBody renders the listen envelope into a GitHub issue. Title
+// buildIssueBody renders the attune envelope into a GitHub issue. Title
 // is prefixed with [Severity] for at-a-glance triage in the GitHub UI;
 // body keeps every field a developer might want when triaging without
-// jumping back to the listen console. Labels follow listen/* prefix so
+// jumping back to the attune console. Labels follow attune/* prefix so
 // they don't collide with the repo's own taxonomy.
-func buildIssueBody(env listenEnvelope) ([]byte, error) {
+func buildIssueBody(env attuneEnvelope) ([]byte, error) {
 	f := env.Feedback
 	e := f.Enriched
 	user := f.UserID
@@ -214,7 +214,7 @@ func buildIssueBody(env listenEnvelope) ([]byte, error) {
 	title := fmt.Sprintf("[%s] %s", e.Severity, e.Title)
 	sourceLabel := fmt.Sprintf("%s (`%s`)", domain.SourceDisplayName(f.Source), f.Source)
 	body := fmt.Sprintf(
-		"> 来自听见 Listen 用户反馈 · 自动转单\n\n"+
+		"> 来自 Attune 用户反馈 · 自动转单\n\n"+
 			"| 字段 | 值 |\n"+
 			"| --- | --- |\n"+
 			"| 用户 | `%s` |\n"+
@@ -224,7 +224,7 @@ func buildIssueBody(env listenEnvelope) ([]byte, error) {
 			"| 来源 | %s |\n"+
 			"| AI 分类理由 | %s |\n\n"+
 			"## 原始反馈\n\n%s\n\n"+
-			"---\n*Listen feedback id: `#%d` · enriched at %s · trace `%s`*",
+			"---\n*Attune feedback id: `#%d` · enriched at %s · trace `%s`*",
 		user, e.Severity, e.Priority, e.Kind, modules, sourceLabel, rationale,
 		f.Content, f.ID, e.EnrichedAt, env.TraceID,
 	)
@@ -232,9 +232,9 @@ func buildIssueBody(env listenEnvelope) ([]byte, error) {
 		Title: title,
 		Body:  body,
 		Labels: []string{
-			"listen/feedback",
-			"listen/kind-" + e.Kind,
-			"listen/severity-" + e.Severity,
+			"attune/feedback",
+			"attune/kind-" + e.Kind,
+			"attune/severity-" + e.Severity,
 		},
 	}
 	return json.Marshal(out)
@@ -248,7 +248,7 @@ func buildIssueBody(env listenEnvelope) ([]byte, error) {
 // all 403 as terminal (the outbox dead queue surfaces them to ops, who
 // can rotate the PAT or wait out the limit). v1 should parse the
 // response body for "secondary rate limit" and demote to retryable.
-func checkGitHubResponse(label string, env listenEnvelope) ResponseChecker {
+func checkGitHubResponse(label string, env attuneEnvelope) ResponseChecker {
 	const where = "notify.checkGitHubResponse"
 	return func(status int, body []byte) error {
 		// 上游响应日志(每次 attempt 都有,truncate 1024 字节)。

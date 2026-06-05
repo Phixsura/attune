@@ -32,9 +32,9 @@ linters:
           files:
             - "**/internal/infra/**/*.go"
           deny:
-            - pkg: github.com/Phixsura/listen/internal/service
+            - pkg: github.com/Phixsura/attune/internal/service
               desc: "infra must not import service (CLAUDE.md §5)"
-            - pkg: github.com/Phixsura/listen/internal/repo
+            - pkg: github.com/Phixsura/attune/internal/repo
               desc: "infra must not import repo (CLAUDE.md §5)"
         # CLAUDE.md §5: notify never imports service.
         notify-isolation:
@@ -42,7 +42,7 @@ linters:
           files:
             - "**/internal/notify/**/*.go"
           deny:
-            - pkg: github.com/Phixsura/listen/internal/service
+            - pkg: github.com/Phixsura/attune/internal/service
               desc: "notify must not import service (CLAUDE.md §5)"
     revive:
       rules:
@@ -81,4 +81,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/Phixsura/listen
+        - github.com/Phixsura/attune

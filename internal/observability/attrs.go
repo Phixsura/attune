@@ -25,7 +25,7 @@ const AttrTraceID = "trace_id"
 // AttrSpanID 跟 OTel SpanContext.SpanID 同源,由 TraceIDHandler 自动注入。
 const AttrSpanID = "span_id"
 
-// AttrDurationMs 单位毫秒,整数。跟 BE/Gateway/Listen 一致,SLS 可 SQL 聚合 P99。
+// AttrDurationMs 单位毫秒,整数。跟 BE/Gateway/Attune 一致,SLS 可 SQL 聚合 P99。
 const AttrDurationMs = "duration_ms"
 
 // AttrService 服务名,如 "casceneai-be" / "casceneai-gateway"。InitTracer 时已注入
@@ -35,7 +35,7 @@ const AttrService = "service"
 // AttrError 错误对象。slog 自动序列化为字符串。
 const AttrError = "error"
 
-// ── HTTP 协议字段(BE / Listen)──
+// ── HTTP 协议字段(BE / Attune)──
 
 // AttrHTTPMethod HTTP 请求方法 GET/POST/PUT/DELETE/...
 const AttrHTTPMethod = "http_method"

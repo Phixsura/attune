@@ -25,9 +25,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/infra/metrics"
-	"github.com/Phixsura/listen/internal/logext"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/logext"
 )
 
 // LarkWebhook delivers Snapshot payloads to one or two Lark group bot

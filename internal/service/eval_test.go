@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 func TestModuleJaccard(t *testing.T) {
@@ -115,7 +115,7 @@ func TestFormatReport_HappyPath(t *testing.T) {
 	}
 	md := FormatReport(rep)
 	for _, needle := range []string{
-		"# listen eval report",
+		"# attune eval report",
 		"mode: consistency",
 		"sample size: 10",
 		"kind | 90.0% (9/10)",

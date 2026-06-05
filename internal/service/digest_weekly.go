@@ -24,9 +24,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/notify"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 const (
@@ -151,7 +151,7 @@ func composeDigest(
 	topModules []string,
 ) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "📊 听见周报 · %s\n", displayName)
+	fmt.Fprintf(&b, "📊 Attune周报 · %s\n", displayName)
 	fmt.Fprintf(&b, "时间窗口：%s ~ %s\n",
 		from.Format("01-02"), to.Format("01-02"))
 	fmt.Fprintf(&b, "本周共收到 %d 条反馈\n", total)
@@ -176,7 +176,7 @@ func composeDigest(
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n→ 打开听见控制台查看详情。")
+	b.WriteString("\n→ 打开Attune控制台查看详情。")
 	return b.String()
 }
 

@@ -4,9 +4,9 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/Phixsura/listen/internal/infra/config"
-	"github.com/Phixsura/listen/internal/infra/metrics"
-	"github.com/Phixsura/listen/internal/infra/ratelimit"
+	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/infra/ratelimit"
 )
 
 // buildRateLimiter is the per-tenant ingest rate limiter (Phase 3.3).
@@ -14,7 +14,7 @@ import (
 // onLimit hook increments the Prometheus counter so Grafana can show
 // who's hitting the wall.
 //
-// Lives in its own file so cmd/listen/main.go stays under the listen
+// Lives in its own file so cmd/attune/main.go stays under the attune
 // 300-line discipline.
 func buildRateLimiter(cfg *config.Config) *ratelimit.Limiter {
 	ctx := context.Background()

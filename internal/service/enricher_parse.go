@@ -1,7 +1,7 @@
 package service
 
 // enricher_parse.go — pure helpers extracted from enricher.go so the
-// main file stays under the listen ≤300-line rule (CLAUDE.md 律 2).
+// main file stays under the attune ≤300-line rule (CLAUDE.md 律 2).
 // Everything here is stateless and trivially testable in isolation.
 
 import (
@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // buildSnapshot copies the persistence-side row + AI classification into

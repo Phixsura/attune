@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
 // UsageHandler serves GET /fb/v1/console/usage. Phase 1 ships only the

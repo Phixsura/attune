@@ -21,7 +21,7 @@ assignees: ''
 
 | | |
 |---|---|
-| listen-feedback version / commit | |
+| attune version / commit | |
 | Go version (if running from source) | |
 | Postgres version | |
 | LLM endpoint (OpenAI / Azure / vllm / ollama / oneapi) | |

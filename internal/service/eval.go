@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Phixsura/listen/internal/domain"
-	"github.com/Phixsura/listen/internal/logext"
-	"github.com/Phixsura/listen/internal/repo"
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo"
 )
 
-// Evaluator runs the listen eval CLI's three modes:
+// Evaluator runs the attune eval CLI's three modes:
 //
 //	consistency        re-run LLM on N historical rows, compare new vs old
 //	export-for-human   dump N rows to CSV for offline human labeling
