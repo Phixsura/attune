@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 ### Added
 
 - **Observability overlay** (`deploy/docker-compose.obs.yml`) — optional
-  Prometheus + Grafana stack layered with
+  Prometheus + Grafana stack (pinned images, memory-capped) layered with
   `-f docker-compose.yml -f docker-compose.obs.yml` (#6). Auto-provisions the
   Prometheus datasource and the "Attune Overview" dashboard, and documents the
   `attune_*` metrics as a backend-agnostic contract in `observability/README.md`.

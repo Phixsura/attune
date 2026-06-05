@@ -74,7 +74,11 @@ single TSDB, no per-backend overlays) are *correct*, not gaps — investing past
 - **Alerting** (Alertmanager, alert rules) — dashboards + scrape only.
 - **Prometheus HA / remote-write / long-term storage** — single local TSDB,
   15d retention.
-- **Resource limits / autoscaling** for prom/grafana — left to the operator.
+- **HA / autoscaling / alerting / remote-write** for prom/grafana — the
+  operator's real monitoring stack owns these (consume the contract instead).
+  *Memory limits are set* to bound the co-location OOM risk (see Resolved
+  decisions) — that's the one "production" guard that belongs in a co-located
+  reference stack.
 - **Prometheus self-monitoring** — the overlay scrapes attune only, not
   prom/grafana's own `/metrics`.
 - **Per-backend overlays** (VictoriaMetrics / Datadog / …) or bundling
@@ -340,7 +344,9 @@ it with a clear "set me" note.
 | D1 bind | **loopback by default** | obs UIs are sensitive; match #5 |
 | D2 Grafana env | **`environment:` (GF_* only), no `env_file`** | avoid DB/LLM secret sprawl into Grafana |
 | D3 hardening | **`no-new-privileges` + log caps, no `read_only`** | match #5; both need writable data dirs |
-| D4 image tags | **`:latest` + documented pinning** | issue spec + #5 guidance |
+| D4 image tags | **pin versions in-file** (prometheus v3.12.0, grafana 13.0.2) | revisited under the production lens — top reference stacks (dockprom, otel-demo) pin; `:latest` is testing-only. Pinned to the live-verified versions |
+| resource limits | **memory caps (512M) on prom/grafana + `retention.size=2GB`** | otel-demo sets limits "for stability on local machines" — same co-location risk; stops a runaway Prometheus from OOMing attune/postgres |
+| prod framing | **README: this is a reference/dev stack; prod scrapes `/metrics` from a *separate* backend** | monitoring shouldn't co-locate with the app it watches; benchmarked vs top compose stacks |
 | Q1 decision surface | **adopt secure defaults, don't manufacture forks** | decisiveness over choice theater |
 | Q2 jargon | **clean dashboard + `observability/README.md` in #6** | §1 leak operators would see |
 | Q3 mechanism | **separate `-f obs.yml`** | issue spec; #7 docs reference it; self-contained |
@@ -381,7 +387,8 @@ it with a clear "set me" note.
 
 ## Risks / tradeoffs
 
-- **`:latest` for prom/grafana** — moving tags; pinning documented (D4).
+- **Image version drift** — prom/grafana are pinned in-file (v3.12.0 / 13.0.2)
+  for reproducibility; bump deliberately. A `@sha256:` digest is the strongest pin.
 - **attune `/metrics` is unauthenticated** — by existing design (router.go:54);
   the overlay doesn't change it, but the docs now make the exposure + proxy
   guidance explicit so nobody publishes it unknowingly.

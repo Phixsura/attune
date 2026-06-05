@@ -61,6 +61,14 @@ Layer Prometheus + Grafana on top to see attune's metrics — zero manual setup:
 docker compose -f docker-compose.yml -f docker-compose.obs.yml up -d
 ```
 
+> **This is a reference / dev stack** — pinned images, single-node Prometheus
+> (15 d / 2 GB retention), memory-capped, **no alerting or HA**. For a real
+> production setup, point your *existing* monitoring (a Prometheus / Grafana /
+> VictoriaMetrics / Datadog running **separately from the app host**, with your
+> own retention + alerting) at attune's `/metrics` — see the contract in
+> [`../observability/README.md`](../observability/README.md). Don't run production
+> monitoring on the same host as the app it's watching.
+
 - **Grafana** → http://127.0.0.1:3000 — log in as `admin` with
   `GF_SECURITY_ADMIN_PASSWORD` (set it in `.env`). The "Attune Overview" dashboard
   is auto-loaded.

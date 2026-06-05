@@ -15,13 +15,22 @@
 
 services:
   prometheus:
-    image: prom/prometheus:latest
+    # Pinned for reproducibility — top reference stacks pin, never :latest in prod.
+    # Bump deliberately; see ../observability/README.md.
+    image: prom/prometheus:v3.12.0
+    # Cap memory so a runaway TSDB (cardinality growth) can't OOM the co-located
+    # attune/postgres. Compose v2 honors this on `up`. Tune for your scrape volume.
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - attune-prom:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
     # Loopback by default — Prometheus exposes ALL your metrics, unauthenticated.
     # Front with a proxy or set ATTUNE_BIND=0.0.0.0 to publish.
     ports:
@@ -41,7 +50,11 @@ services:
         max-file: "3"
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.0.2  # pinned; bump deliberately
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     depends_on:
       - prometheus
     volumes:
