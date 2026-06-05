@@ -42,7 +42,7 @@ contents: read`; the job adds `contents: write` (Release) + `packages: write`
 (`persist-credentials: false`) → setup-buildx → login *(push only)* →
 metadata-action (`images: ghcr.io/phixsura/attune`, semver + `latest` tags) →
 build-push (both arches; `push` only on a tag; `build-args: APP_VERSION`;
-`cache-from: type=gha`) → release-notes → action-gh-release *(push only)*. All
+`cache-from: type=gha`) → release-notes → `gh release create` *(push only)*. All
 actions SHA-pinned with exact `# vX.Y.Z` comments.
 
 ### `scripts/extract-changelog.sh`
@@ -73,6 +73,7 @@ which also treats empty as `dev`). Local/CI builds stay `dev`.
 - **Literal `:v0.2.0` tag** (issue's `github.ref_name`) — chose semver `:0.2.0`.
 - **Fail on missing notes for *all* tags** — chose stable-required / prerelease-fallback so dry-runs work.
 - **PAT for ghcr** — unneeded; the built-in `GITHUB_TOKEN` + `packages: write` suffices.
+- **Third-party `action-gh-release`** — replaced with `gh release create` (the runner already ships `gh`; one less external action — §8 / zizmor).
 
 ## Risks / tradeoffs
 
