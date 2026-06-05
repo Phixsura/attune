@@ -28,7 +28,7 @@ const AttrSpanID = "span_id"
 // AttrDurationMs 单位毫秒,整数。跟 BE/Gateway/Attune 一致,SLS 可 SQL 聚合 P99。
 const AttrDurationMs = "duration_ms"
 
-// AttrService 服务名,如 "casceneai-be" / "casceneai-gateway"。InitTracer 时已注入
+// AttrService 服务名,如 "attune"。InitTracer 时已注入
 // Resource,业务代码一般不用手动加。
 const AttrService = "service"
 
