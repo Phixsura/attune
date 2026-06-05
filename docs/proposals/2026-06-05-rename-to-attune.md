@@ -35,10 +35,8 @@ first. This proposal supersedes #8's target.
 
 - The `FEEDBACK_API_*` env-var prefix — it's "feedback-api", not the `listen`
   brand; renaming it is a separate, more-breaking decision (deferred).
-- Scrubbing the pre-existing `§1` internal-info leaks the sweep surfaced
-  (internal IP in `scripts/health-check.sh`, `casceneai` in
-  `observability/README.md`, "Aliyun RDS" in migration comments) — tracked
-  separately; not bundled into a rename.
+- Scrubbing the pre-existing `§1` internal-info leaks the sweep surfaced —
+  tracked separately; not bundled into a rename.
 - Rewriting immutable history: applied SQL migrations, the #14 ADR, and the
   `ci.yml` "gateway/ + listen/" history comment keep their original `listen`
   text.

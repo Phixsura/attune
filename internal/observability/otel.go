@@ -28,7 +28,7 @@ import (
 
 // Options for InitTracer.
 type Options struct {
-	// ServiceName 服务名,如 "casceneai-be" / "casceneai-gateway"。
+	// ServiceName 服务名,如 "attune"。
 	ServiceName string
 	// ServiceVersion 服务版本(通常是 git commit hash),如 "5d6ea83"。
 	ServiceVersion string
@@ -37,7 +37,7 @@ type Options struct {
 
 	// Endpoint OTLP HTTP 端点的 host(不带 path)。空字符串 = noop tracer
 	// (不上报,但仍产 trace_id 注入到 slog)。
-	// 例: "casceneai-prod.cn-shenzhen-intranet.log.aliyuncs.com"
+	// 例: "otel-collector.example.com:4318" 或任意自托管 OTLP HTTP 端点。
 	Endpoint string
 	// URLPath OTLP HTTP 路径。SLS Trace 服务用 "/opentelemetry/v1/traces"。
 	URLPath string

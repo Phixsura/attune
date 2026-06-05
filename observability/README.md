@@ -1,9 +1,8 @@
 # attune 服务 observability 配置
 
 This is **attune 自己拥有的** observability declaration —
-scrape target + Grafana dashboards. casceneai 平台共享 stack
-(infra/observability) 会在部署时把这里的文件 sync 过去，所以 attune
-作为一个独立服务可以完整地"打包带 obs 配置"。
+Prometheus scrape target + Grafana dashboards，都放在这个目录里，所以 attune
+作为一个独立服务可以完整地"打包带 obs 配置"部署。
 
 ## 布局
 
@@ -25,10 +24,5 @@ attune/observability/
 
 ## 部署
 
-部署到生产时 ops 运行：
-
-```bash
-infra/observability/sync-from-services.sh   # 把每个服务的 obs config 同步过去
-```
-
-VM + Grafana 都会 auto-reload（不重启容器）。
+把 `targets.yaml` 指给 Prometheus 的 `file_sd_configs`，把 `dashboards/*.json`
+导入 Grafana —— 两者都支持热加载，无需重启。

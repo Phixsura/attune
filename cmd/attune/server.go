@@ -155,7 +155,7 @@ func runServer() error {
 // trace_id 仅运维用。详见 docs/observability-trace-design.md。
 func setupTracing(ctx context.Context) (func(context.Context) error, error) {
 	return observability.InitTracer(ctx, observability.Options{
-		ServiceName:    "casceneai-attune",
+		ServiceName:    "attune",
 		ServiceVersion: envOrDefault("APP_VERSION", "dev"),
 		Environment:    envOrDefault("ENV", "dev"),
 		Endpoint:       os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
