@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   update any scrapers, dashboards, webhook verifiers, or label filters
   accordingly. The `FEEDBACK_API_*` env prefix is intentionally unchanged.
 
+### Security
+
+- Bump dependencies carrying published advisories: `github.com/jackc/pgx/v5`
+  5.9.1→5.9.2 (GHSA-j88v-2chj-qfwx), `golang.org/x/net`→0.55.0 and
+  `golang.org/x/sys`→0.45.0 (GO-2026-4918 / 5024–5030), and `vitest`→4.1
+  (GHSA-5xrq-8626-4rwp). `govulncheck` confirms none of the Go advisories were
+  reachable from attune's code, and `vitest` is a test-only dependency with no
+  tests and no UI server, so there was no exploitable exposure — bumped for
+  hygiene and to clear the alerts.
+
 ## [0.1.0] - 2026-06-04
 
 ### Added
