@@ -30,8 +30,13 @@ COPY --from=builder /attune /app/attune
 
 WORKDIR /app
 EXPOSE 8090
-# Overridable; the prod compose mounts a yaml here.
-ENV FEEDBACK_API_CONFIG=/app/config.yaml
+
+# Stamped by the release workflow (--build-arg APP_VERSION=<tag>) so the running
+# container reports its real version via OTel/telemetry; "dev" for local/CI builds.
+ARG APP_VERSION=dev
+# FEEDBACK_API_CONFIG is overridable; the prod compose mounts a yaml here.
+ENV FEEDBACK_API_CONFIG=/app/config.yaml \
+    APP_VERSION=${APP_VERSION}
 
 ENTRYPOINT ["/app/attune"]
 CMD ["server"]

@@ -1,0 +1,94 @@
+# Release — on a `v*` tag: build the standalone multi-arch image, push it to
+# ghcr.io, and publish a GitHub Release whose notes come from the matching
+# CHANGELOG section. Reuses the #14 Dockerfile, which cross-compiles
+# (FROM --platform=$BUILDPLATFORM + GOOS/GOARCH) so both arches build without
+# qemu — hence no setup-qemu-action here.
+#
+# workflow_dispatch runs a build-only dry-run (no login, no push, no release)
+# so the build path can be exercised without cutting a tag.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # never cancel a half-pushed release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+      packages: write # push to ghcr.io
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push'
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags + labels
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        with:
+          images: ghcr.io/phixsura/attune
+          # :latest is controlled solely by the explicit raw rule below — disable
+          # metadata-action's default auto-latest so there's one source of truth.
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build + push (push only on a tag; dispatch = dry-run)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha # best-effort reuse of the ci.yml docker-build cache
+
+      - name: Release notes from CHANGELOG
+        if: github.event_name == 'push'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          IS_PRERELEASE: ${{ contains(github.ref_name, '-') }}
+        run: |
+          if scripts/extract-changelog.sh "$VERSION" > release-notes.md; then
+            echo "Using CHANGELOG [$VERSION] section as release notes."
+          elif [ "$IS_PRERELEASE" = "true" ]; then
+            printf 'Pre-release %s — see CHANGELOG for the upcoming stable notes.\n' "$VERSION" > release-notes.md
+          else
+            echo "::error::No CHANGELOG [$VERSION] section — a stable release must have one (CLAUDE.md §2)."
+            exit 1
+          fi
+
+      # gh is preinstalled on the runner — no third-party release action needed.
+      - name: Publish GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ contains(github.ref_name, '-') }}
+        run: |
+          flags=(--title "$TAG" --notes-file release-notes.md)
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" "${flags[@]}"
