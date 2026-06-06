@@ -1,7 +1,7 @@
 // dependency-cruiser config — architectural import boundaries (issue #19).
 //
 // Why this tool, not Biome native? See
-// docs/proposals/2026-06-06-feature-organization.md §4-B for the full
+// docs/proposals/2026/06/2026-06-06-feature-organization.md §4-B for the full
 // research, in short:
 //   1. Biome's noRestrictedImports matches the literal import specifier,
 //      so `import '../foo'` slips past any rule written against

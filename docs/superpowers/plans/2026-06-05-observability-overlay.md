@@ -8,7 +8,7 @@
 
 **Tech Stack:** docker-compose, Prometheus, Grafana file-provisioning, Go 1.25 (`prometheus/client_golang`), GitHub Actions (`dorny/paths-filter`).
 
-**Spec:** `docs/proposals/2026-06-05-observability-overlay.md` (Accepted). That proposal is the §10 record; this plan is the execution aid.
+**Spec:** `docs/proposals/2026/06/2026-06-05-observability-overlay.md` (Accepted). That proposal is the §10 record; this plan is the execution aid.
 
 **Note:** Every commit ends with the trailer `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` (omitted in the commands below for brevity). Conventional-commit types per CLAUDE.md §4.
 
@@ -17,7 +17,7 @@
 ### Task 1: Branch + commit the accepted proposal
 
 **Files:**
-- Modify: `docs/proposals/2026-06-05-observability-overlay.md` (already Status: Accepted in working tree)
+- Modify: `docs/proposals/2026/06/2026-06-05-observability-overlay.md` (already Status: Accepted in working tree)
 
 - [ ] **Step 1: Create the feature branch** (we're on `main`)
 
@@ -27,7 +27,7 @@ Expected: `Switched to a new branch 'feat/observability-overlay'`
 - [ ] **Step 2: Commit the accepted proposal + this plan**
 
 ```bash
-git add docs/proposals/2026-06-05-observability-overlay.md docs/superpowers/plans/2026-06-05-observability-overlay.md
+git add docs/proposals/2026/06/2026-06-05-observability-overlay.md docs/superpowers/plans/2026-06-05-observability-overlay.md
 git commit -m "docs(proposal): accept observability overlay design (#6)"
 ```
 
@@ -723,7 +723,7 @@ git commit -m "docs(changelog): observability overlay + cardinality fix (#6)"
 ```bash
 git push -u origin feat/observability-overlay
 gh pr create --title "feat(deploy): observability overlay (prometheus + grafana) (#6)" \
-  --body "Closes #6. See docs/proposals/2026-06-05-observability-overlay.md. <fill: verification results>"
+  --body "Closes #6. See docs/proposals/2026/06/2026-06-05-observability-overlay.md. <fill: verification results>"
 ```
 
 - [ ] **Step 5: Manual stack verification (record results in the PR)**
