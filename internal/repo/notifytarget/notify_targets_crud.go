@@ -1,6 +1,6 @@
 // Package repo — by-id / single-row CRUD for tenant_notify_targets.
-// Split from notify_targets.go to honor the attune ≤300-line file rule
-// (CLAUDE.md 律 2). The list/scan/insert path + type + constants stay in
+// Split from notify_targets.go to honor the no-grab-bag-files guidance
+// . The list/scan/insert path + type + constants stay in
 // notify_targets.go; these are the tenant-scoped single-row operations
 // the Wave 2 console drives (read one, delete one, update one).
 package notifytarget
@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
 // GetByID returns the row, scoped by tenant. Returns ErrNotifyTargetNotFound
@@ -82,7 +84,7 @@ func (r *NotifyTargetRepo) UpdateByID(
 		t.TimeoutSeconds, t.Disabled,
 	)
 	if err != nil {
-		if isUniqueViolation(err) {
+		if pgxutil.IsUniqueViolation(err) {
 			return ErrNotifyTargetConflict
 		}
 		return fmt.Errorf("update notify target: %w", err)

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
 // OutboxRepo owns the notify_outbox table — the at-least-once delivery
@@ -53,7 +54,7 @@ var ErrOutboxNotFound = errors.New("outbox row not found")
 
 // Insert writes one outbox row inside an existing transaction. enricher
 // MUST call this in the same tx as MarkDone so the row + the enrichment
-// state flip are atomic — see service/enricher.go EnrichOne for the
+// state flip are atomic — see service/enrich/enricher.go EnrichOne for the
 // canonical pattern.
 //
 // payload is the fully-built envelope JSON ready to POST (modulo the
@@ -164,7 +165,7 @@ func (r *OutboxRepo) MarkFailed(ctx context.Context, id int64, errMsg string, ne
 		       next_retry_at = NOW() + make_interval(secs => $3),
 		       claimed_at = NULL
 		 WHERE id = $1`,
-		id, truncate(errMsg, 1000), int(nextDelay.Seconds()))
+		id, pgxutil.Truncate(errMsg, 1000), int(nextDelay.Seconds()))
 	if err != nil {
 		logext.Errorf(ctx, "[%s] mark failed,id:%d,err:%+v", where, id, err.Error())
 		return fmt.Errorf("mark failed %d: %w", id, err)
@@ -182,12 +183,12 @@ func (r *OutboxRepo) MarkDead(ctx context.Context, id int64, reason string) erro
 		   SET status = 'dead',
 		       dead_reason = $2,
 		       claimed_at = NULL
-		 WHERE id = $1`, id, truncate(reason, 1000))
+		 WHERE id = $1`, id, pgxutil.Truncate(reason, 1000))
 	if err != nil {
 		logext.Errorf(ctx, "[%s] mark dead failed,id:%d,err:%+v", where, id, err.Error())
 		return fmt.Errorf("mark dead %d: %w", id, err)
 	}
-	logext.Infof(ctx, "[%s] OK,id:%d,reason:%s", where, id, truncate(reason, 200))
+	logext.Infof(ctx, "[%s] OK,id:%d,reason:%s", where, id, pgxutil.Truncate(reason, 200))
 	return nil
 }
 
@@ -210,7 +211,7 @@ func (r *OutboxRepo) PruneStalePending(ctx context.Context, before time.Time, re
 		       claimed_at  = NULL
 		 WHERE status IN ('pending', 'failed')
 		   AND created_at < $1`,
-		before, truncate(reason, 1000),
+		before, pgxutil.Truncate(reason, 1000),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("prune stale pending: %w", err)

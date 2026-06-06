@@ -173,7 +173,7 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 
 // sendByDestType, sendRawWebhook, signRawBody, checkOutboxResponse, and
 // truncateStr now live in outbox_worker_send.go to keep this file under
-// the attune ≤300-line rule (CLAUDE.md 律 2).
+// the attune no-grab-bag-files guidance.
 
 // failOrDead promotes a row to dead once attempts exceeds max.
 // Otherwise schedules the next retry per the backoff table.

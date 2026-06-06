@@ -1,6 +1,6 @@
 // Package repo — alert-state tracking for tenant_notify_targets.
-// Split from notify_targets.go to honor the attune ≤300-line file rule
-// (CLAUDE.md 律 2). These methods support Phase 3.2 webhook failure
+// Split from notify_targets.go to honor the no-grab-bag-files guidance
+// . These methods support Phase 3.2 webhook failure
 // visibility — outbox worker calls TouchFailure on markDead and
 // ClearFailure on first successful re-delivery.
 package notifytarget
@@ -8,6 +8,8 @@ package notifytarget
 import (
 	"context"
 	"fmt"
+
+	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
 // TouchFailure marks the target identified by (tenant_id, destination_type,
@@ -29,7 +31,7 @@ func (r *NotifyTargetRepo) TouchFailure(
 		   AND destination_type = $2
 		   AND url = $3
 		   AND audience = $4`,
-		tenantID, destType, url, audience, truncate(errMsg, 1000),
+		tenantID, destType, url, audience, pgxutil.Truncate(errMsg, 1000),
 	)
 	if err != nil {
 		return fmt.Errorf("touch notify target failure: %w", err)

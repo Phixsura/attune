@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
 // NotifyTargetRepo owns the tenant_notify_targets table. Wave 1.2 wires
@@ -28,10 +29,10 @@ func NewNotifyTarget(pool *pgxpool.Pool) *NotifyTargetRepo {
 // migrations/004_tenant_notify_targets.sql (and 011 for github-issue).
 //
 // All outbox-routed destinations share the same Transport + RetryPolicy;
-// only the per-type sender (notify/raw_webhook.go, notify/github_issue.go,
+// only the per-type sender (notify/adapter/rawwebhook/raw_webhook.go, notify/adapter/githubissue/github_issue.go,
 // …) differs. New destinations require: (1) extend the CHECK constraint
 // via a new migration, (2) add the constant here, (3) wire a sender into
-// service/outbox_worker.go's sendByDestType, (4) include in
+// service/outbox/outbox_worker.go's sendByDestType, (4) include in
 // selectOutboxTargets if the audience semantics apply.
 const (
 	DestRawWebhook  = "raw-webhook"
@@ -187,7 +188,7 @@ func (r *NotifyTargetRepo) Insert(ctx context.Context, t NotifyTarget) (uuid.UUI
 		t.URL, t.Secret, t.TimeoutSeconds, t.Disabled,
 	).Scan(&id, &createdAt)
 	if err != nil {
-		if isUniqueViolation(err) {
+		if pgxutil.IsUniqueViolation(err) {
 			return uuid.Nil, time.Time{}, ErrNotifyTargetConflict
 		}
 		logext.Errorf(ctx, "[%s] insert failed,tenant:%s,dest_type:%s,err:%+v",

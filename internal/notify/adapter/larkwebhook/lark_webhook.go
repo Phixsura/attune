@@ -10,9 +10,6 @@ package larkwebhook
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +22,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/notify/sig"
 )
 
 // LarkWebhook delivers Snapshot payloads to one or two Lark group bot
@@ -129,7 +127,7 @@ func (l *LarkWebhook) buildBody(secret string, s domain.Snapshot) ([]byte, error
 	}
 	if secret != "" {
 		ts := strconv.FormatInt(time.Now().Unix(), 10)
-		sig, err := signLarkBot(ts, secret)
+		sig, err := sig.SignLarkBot(ts, secret)
 		if err != nil {
 			return nil, fmt.Errorf("sign lark bot: %w", err)
 		}
@@ -166,21 +164,8 @@ func checkLarkResponse(dest string, s domain.Snapshot) notify.ResponseChecker {
 	}
 }
 
-// signLarkBot implements Lark's group-bot signature algorithm:
-//
-//	string_to_sign = timestamp + "\n" + secret
-//	signature      = base64(HMAC_SHA256(key=string_to_sign, msg=""))
-//
-// The key here is `string_to_sign` itself, not `secret` — this matches
-// the official docs (open.feishu.cn/document/.../bot-v2).
-func signLarkBot(timestamp, secret string) (string, error) {
-	stringToSign := timestamp + "\n" + secret
-	h := hmac.New(sha256.New, []byte(stringToSign))
-	if _, err := h.Write([]byte{}); err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
-}
+// signLarkBot moved to `internal/notify/sig.SignLarkBot` — see that
+// package for the algorithm reference (open.feishu.cn/document/.../bot-v2).
 
 func truncate(s string, n int) string {
 	if len(s) <= n {

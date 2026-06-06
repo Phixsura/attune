@@ -11,6 +11,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
@@ -50,7 +51,7 @@ const enrichPromptTmpl = `你是产品反馈分类助手。给你一段用户反
 type Enricher struct {
 	repo     *feedback.FeedbackRepo
 	llm      llmclient.LLMClient
-	notifier Notifier                       // optional inline fan-out (Lark)
+	notifier notify.Notifier                // optional inline fan-out (Lark)
 	outbox   *outboxrepo.OutboxRepo         // optional outbox writer
 	targets  *notifytarget.NotifyTargetRepo // optional, paired with outbox
 }
@@ -61,7 +62,7 @@ func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient) *Enricher {
 
 // SetNotifier wires the inline webhook fan-out (Lark). nil = no
 // notifications; rows still land in Postgres normally.
-func (e *Enricher) SetNotifier(n Notifier) { e.notifier = n }
+func (e *Enricher) SetNotifier(n notify.Notifier) { e.notifier = n }
 
 // SetOutbox wires at-least-once delivery for raw-webhook destinations.
 // When set, every enrich success inserts one outbox row per active
@@ -241,7 +242,7 @@ func (e *Enricher) RunBackground(ctx context.Context, interval time.Duration, ba
 
 // buildSnapshot, parseEnrichJSON, classifyErrResult, truncate moved to
 // enricher_parse.go (Sprint 1.3) to keep this file under attune ≤300-
-// line rule (CLAUDE.md 律 2) after the Triage split.
+// line rule after the Triage split.
 //
 // persistIgnored, persistFromTriage moved to enricher_helpers.go for the
 // same reason.

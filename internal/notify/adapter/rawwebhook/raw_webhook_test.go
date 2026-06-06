@@ -16,6 +16,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/notify/sig"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
@@ -211,8 +212,8 @@ func TestRawWebhook_5xxRetries(t *testing.T) {
 
 func TestSignRawBody_Deterministic(t *testing.T) {
 	body := []byte(`{"hello":"world"}`)
-	a := signRawBody(body, "shared-secret")
-	b := signRawBody(body, "shared-secret")
+	a := sig.SignRaw(body, "shared-secret")
+	b := sig.SignRaw(body, "shared-secret")
 	if a != b {
 		t.Fatalf("same body+secret should give same sig: %q vs %q", a, b)
 	}
@@ -223,8 +224,8 @@ func TestSignRawBody_Deterministic(t *testing.T) {
 
 func TestSignRawBody_DifferentSecretChangesSig(t *testing.T) {
 	body := []byte(`{}`)
-	a := signRawBody(body, "secret-a")
-	b := signRawBody(body, "secret-b")
+	a := sig.SignRaw(body, "secret-a")
+	b := sig.SignRaw(body, "secret-b")
 	if a == b {
 		t.Fatalf("different secret must produce different sig")
 	}

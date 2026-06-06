@@ -3,9 +3,6 @@ package rawwebhook
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,12 +15,9 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/notify/sig"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
-
-// envelopeVersion is the wire-format version field. Bumping requires
-// coordination with every customer's verifier — never break v1.
-const envelopeVersion = "1"
 
 // EventEnriched is the only event_type Wave 1.2 emits. Wave 2 adds
 // "feedback.updated" / "feedback.deleted" — handlers should switch on
@@ -138,7 +132,7 @@ func (r *RawWebhookRouter) send(
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-		req.Header.Set("X-Attune-Signature", signRawBody(body, dest.secret))
+		req.Header.Set("X-Attune-Signature", sig.SignRaw(body, dest.secret))
 		req.Header.Set("User-Agent", "attune/1.0")
 		// 上游 req body 截断 1024 字节; X-Attune-Signature 头 skip(签名敏感)。
 		logext.Infof(ctx, "[%s] upstream req,label:%s,body:%s",
@@ -172,7 +166,7 @@ func (r *RawWebhookRouter) send(
 // leaves it empty until §3.6 lands.
 func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 	env := rawEnvelope{
-		Version:     envelopeVersion,
+		Version:     sig.EnvelopeVersion,
 		EventType:   EventEnriched,
 		DeliveredAt: time.Now().UTC().Format(time.RFC3339),
 		Feedback: rawFeedback{
@@ -196,14 +190,10 @@ func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 	return json.Marshal(env)
 }
 
-// signRawBody is the HMAC-SHA256 over the request body, encoded as
-// "sha256=<hex>". Customers verify with the same construction in their
+// signRawBody moved to `internal/notify/sig.SignRaw` — single
+// canonical implementation shared by rawwebhook, test_send, outbox.
+// Customers verify with the same "sha256=<hex>" construction in their
 // language — see quickstart.md for 5-line examples.
-func signRawBody(body []byte, secret string) string {
-	h := hmac.New(sha256.New, []byte(secret))
-	h.Write(body)
-	return "sha256=" + hex.EncodeToString(h.Sum(nil))
-}
 
 // checkRawResponse maps HTTP responses to nil / retryable / ErrTerminal.
 // Per §3.1 edge cases: 4xx (except 408 / 429) is terminal; everything

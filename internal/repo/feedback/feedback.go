@@ -15,6 +15,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
 // FeedbackRepo wraps the user_feedback table. Concurrency-safe: pgxpool
@@ -160,7 +161,7 @@ func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) 
 	const where = "repo.FeedbackRepo.MarkFailed"
 	if _, err := r.pool.Exec(ctx,
 		`UPDATE user_feedback SET enrichment_status='failed', enrichment_error=$1 WHERE id=$2`,
-		truncate(errMsg, 1000), id); err != nil {
+		pgxutil.Truncate(errMsg, 1000), id); err != nil {
 		logext.Errorf(ctx, "[%s] update failed,id:%d,err:%+v", where, id, err.Error())
 	}
 }
@@ -242,9 +243,5 @@ func (r *FeedbackRepo) SampleEnriched(ctx context.Context, since time.Time, n in
 	return out, rows.Err()
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
-}
+// truncate moved to internal/repo/pgxutil.Truncate (single canonical
+// helper imported by every repo subpackage).

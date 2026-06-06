@@ -3,10 +3,6 @@ package notify
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,35 +11,14 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify/sig"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
-// envelopeVersion / signRawBody / signLarkBot / truncate are private helpers
-// duplicated here so test_send.go (in the notify root package) can construct
-// canonical raw-webhook + lark-bot signatures without importing the adapter
-// subpackages — that would create a notify → adapter → notify cycle. The
-// adapters keep their own copies; both copies must stay in sync.
-
-const envelopeVersion = "1"
-
-// signRawBody is HMAC-SHA256 over the body, "sha256=<hex>" — matches
-// adapter/rawwebhook.signRawBody verbatim.
-func signRawBody(body []byte, secret string) string {
-	h := hmac.New(sha256.New, []byte(secret))
-	h.Write(body)
-	return "sha256=" + hex.EncodeToString(h.Sum(nil))
-}
-
-// signLarkBot computes the Lark bot V2 signature — matches
-// adapter/larkwebhook.signLarkBot verbatim.
-func signLarkBot(timestamp, secret string) (string, error) {
-	stringToSign := timestamp + "\n" + secret
-	h := hmac.New(sha256.New, []byte(stringToSign))
-	if _, err := h.Write([]byte{}); err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
-}
+// HMAC + envelope-version helpers live in `internal/notify/sig` so the
+// canonical raw-webhook + lark-bot signing formats are shared verbatim
+// across notify root, every adapter, and service/outbox — no
+// "must-stay-in-sync" comments, no drift.
 
 func truncate(s string, n int) string {
 	if len(s) <= n {
@@ -100,7 +75,7 @@ func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult 
 		body, err = buildRawTestBody()
 		if err == nil && target.Secret != "" {
 			extraHeaders = map[string]string{
-				"X-Attune-Signature": signRawBody(body, target.Secret),
+				"X-Attune-Signature": sig.SignRaw(body, target.Secret),
 			}
 		}
 		checkResponse = checkRawTestResponse
@@ -171,7 +146,7 @@ func buildLarkTextBody(text, secret string) ([]byte, error) {
 	}
 	if secret != "" {
 		ts := strconv.FormatInt(time.Now().Unix(), 10)
-		sig, err := signLarkBot(ts, secret)
+		sig, err := sig.SignLarkBot(ts, secret)
 		if err != nil {
 			return nil, err
 		}
@@ -198,7 +173,7 @@ func checkLarkTestResponse(status int, body []byte) error {
 // so the customer's receiver can filter test events out of audit logs.
 func buildRawTestBody() ([]byte, error) {
 	env := map[string]any{
-		"version":      envelopeVersion,
+		"version":      sig.EnvelopeVersion,
 		"event_type":   "test",
 		"delivered_at": time.Now().UTC().Format(time.RFC3339),
 		"note":         "连通性测试 — 此事件由Attune控制台「测试」按钮触发",

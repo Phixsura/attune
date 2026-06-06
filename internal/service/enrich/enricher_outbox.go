@@ -92,7 +92,7 @@ func (e *Enricher) persistEnriched(
 // outboxDestTypes lists destination_type values that go through the
 // outbox + Transport pipeline (rather than inline fan-out like lark-bot).
 // New outbox-routed dispatchers add themselves here and grow a sender in
-// service/outbox_worker.go's sendByDestType. Sprint 1 adds github-issue.
+// service/outbox/outbox_worker.go's sendByDestType. Sprint 1 adds github-issue.
 var outboxDestTypes = map[string]bool{
 	notifytarget.DestRawWebhook:  true,
 	notifytarget.DestGitHubIssue: true,
@@ -141,7 +141,7 @@ func extractTraceID(ctx context.Context) string {
 // traceID is embedded as the top-level "trace_id" field so customers
 // can correlate the received envelope with their own logs.
 //
-// Field order + names MUST match notify/raw_webhook.go's inline path
+// Field order + names MUST match notify/adapter/rawwebhook/raw_webhook.go's inline path
 // because customer verifiers may rely on canonical JSON. json.Marshal
 // preserves struct field order — change with caution.
 func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {

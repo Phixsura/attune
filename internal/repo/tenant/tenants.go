@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
 // TenantRepo wraps the tenants table. Wave 1 only needs slug → id
@@ -68,7 +68,7 @@ func (r *TenantRepo) Create(ctx context.Context, slug, name string) (string, err
 		slug, name,
 	).Scan(&id)
 	if err != nil {
-		if isUniqueViolation(err) {
+		if pgxutil.IsUniqueViolation(err) {
 			return "", fmt.Errorf("%w: %q", ErrTenantSlugTaken, slug)
 		}
 		logext.Errorf(ctx, "[%s] insert failed,slug:%s,err:%+v",
@@ -79,15 +79,9 @@ func (r *TenantRepo) Create(ctx context.Context, slug, name string) (string, err
 	return id, nil
 }
 
-// isUniqueViolation reports whether err is a PG unique constraint
-// violation (SQLSTATE 23505).
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23505"
-	}
-	return false
-}
+// isUniqueViolation moved to internal/repo/pgxutil.IsUniqueViolation
+// (single canonical helper imported by every repo subpackage that maps
+// SQLSTATE 23505 to a domain-typed "conflict" sentinel).
 
 // Tenant is the read shape for /me and other console endpoints.
 type Tenant struct {
@@ -163,7 +157,7 @@ func (r *TenantRepo) UpsertByLarkKey(
 		slug, name, larkTenantKey,
 	).Scan(&id)
 	if err != nil {
-		if isUniqueViolation(err) {
+		if pgxutil.IsUniqueViolation(err) {
 			return "", false, fmt.Errorf("%w: %q", ErrTenantSlugTaken, slug)
 		}
 		logext.Errorf(ctx, "[%s] insert failed,slug:%s,err:%+v",

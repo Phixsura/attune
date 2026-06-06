@@ -17,6 +17,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/notify/adapter/larkwebhook"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -25,7 +26,6 @@ import (
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
-	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
 // buildLLMClient wires the OpenAI-compatible LLM client used by the
@@ -106,7 +106,7 @@ func buildNotifier(
 	ctx context.Context,
 	cfg *config.Config,
 	_ *notifytarget.NotifyTargetRepo,
-) (enrich.Notifier, error) {
+) (notify.Notifier, error) {
 	// Design contract (v0.4 §3.6): raw-webhook delivers via outbox ONLY
 	// (at-least-once via DB queue + worker). Lark group bot delivers
 	// inline through this Notifier (best-effort, NoRetry — duplicate

@@ -1,7 +1,7 @@
 package enrich
 
 // enricher_parse.go — pure helpers extracted from enricher.go so the
-// main file stays under the attune ≤300-line rule (CLAUDE.md 律 2).
+// main file stays under the attune no-grab-bag-files guidance.
 // Everything here is stateless and trivially testable in isolation.
 
 import (

@@ -1,6 +1,6 @@
 // Package repo — console-scoped projections of user_feedback.
-// Kept separate from feedback.go to honor the attune ≤300-line file
-// rule (CLAUDE.md 律 2) and to keep "ingest path SQL" decoupled from
+// Kept separate from feedback.go to honor the no-grab-bag-files guidance
+// rule and to keep "ingest path SQL" decoupled from
 // "read path SQL" — the latter only the console reads.
 //
 // This file holds the list + detail read path. The analytics/aggregate

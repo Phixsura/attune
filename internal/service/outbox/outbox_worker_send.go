@@ -1,17 +1,14 @@
 package outbox
 
 // outbox_worker_send.go — per-destination sender switchboard. Split from
-// outbox_worker.go to keep both files under the attune ≤300-line rule
-// (CLAUDE.md 律 2). Each outbox-routed destination_type owns one branch
+// outbox_worker.go to keep both files under the no-grab-bag-files guidance
+//. Each outbox-routed destination_type owns one branch
 // of sendByDestType plus, if its protocol differs from raw-webhook, a
 // dedicated send* helper here.
 
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -19,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/notify/adapter/githubissue"
+	"github.com/Phixsura/attune/internal/notify/sig"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
@@ -64,7 +62,7 @@ func (w *OutboxWorker) sendRawWebhook(
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-		req.Header.Set("X-Attune-Signature", signRawBody(row.Payload, target.Secret))
+		req.Header.Set("X-Attune-Signature", sig.SignRaw(row.Payload, target.Secret))
 		req.Header.Set("X-Trace-ID", row.TraceID)
 		req.Header.Set("User-Agent", "attune/1.0")
 		// 上游 req body truncate 1024 字节; X-Attune-Signature 签名头 skip。
@@ -76,17 +74,11 @@ func (w *OutboxWorker) sendRawWebhook(
 	return w.transport.Send(ctx, label, build, check)
 }
 
-// signRawBody mirrors notify/raw_webhook.go's signing. Kept in the
-// service package so outbox doesn't import notify for one helper
-// (cycle prevention). The string format MUST match — customers verify
-// against "sha256=<hex>" produced by HMAC-SHA256 over the request body.
-func signRawBody(body []byte, secret string) string {
-	h := hmac.New(sha256.New, []byte(secret))
-	h.Write(body)
-	return "sha256=" + hex.EncodeToString(h.Sum(nil))
-}
+// signRawBody moved to `internal/notify/sig.SignRaw` — outbox now imports
+// notify/sig directly (no cycle), eliminating the previous "must stay in
+// sync with notify/raw_webhook" maintenance contract.
 
-// checkOutboxResponse mirrors notify/raw_webhook.go classification for
+// checkOutboxResponse mirrors notify/adapter/rawwebhook/raw_webhook.go classification for
 // HTTP statuses. Kept here so outbox worker doesn't depend on notify's
 // internal closure.
 func checkOutboxResponse(label string, row outboxrepo.OutboxRow) notify.ResponseChecker {

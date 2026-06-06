@@ -1,7 +1,7 @@
 package outbox
 
 // Phase 3.2 webhook failure visibility — split from outbox_worker.go to
-// honor the attune ≤300-line file rule (CLAUDE.md 律 2). Holds the
+// honor the no-grab-bag-files guidance (per-file scope kept narrow). Holds the
 // self-report dispatch logic that fires when a row marks dead.
 
 import (
