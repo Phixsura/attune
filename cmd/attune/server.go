@@ -25,7 +25,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
-	"github.com/Phixsura/attune/internal/observability"
+	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/repo"
 	"github.com/Phixsura/attune/internal/service"
 )

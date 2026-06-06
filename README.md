@@ -97,7 +97,7 @@ internal/
     database/              Schema migrations
     llmclient/             OpenAI-compatible HTTP client
     lark/                  Inbound Lark protocol
-  observability/           Vendored OTel + slog helpers
+    observability/         Vendored OTel + slog helpers
 console/                   React triage UI
 ```
 
