@@ -23,13 +23,13 @@ func (r *NotifyTargetRepo) GetByID(
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       last_failure_at, last_error
+		       created_at, last_failure_at, last_error
 		  FROM tenant_notify_targets
 		 WHERE id = $1 AND tenant_id = $2`, id, tenantID,
 	).Scan(
 		&t.ID, &t.TenantID, &t.DestinationType, &t.Audience,
 		&t.URL, &t.Secret, &t.TimeoutSeconds, &t.Disabled,
-		&t.LastFailureAt, &t.LastError,
+		&t.CreatedAt, &t.LastFailureAt, &t.LastError,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotifyTargetNotFound
@@ -103,7 +103,7 @@ func (r *NotifyTargetRepo) GetByTenantAudience(
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       last_failure_at, last_error
+		       created_at, last_failure_at, last_error
 		  FROM tenant_notify_targets
 		 WHERE tenant_id = $1
 		   AND destination_type = $2
@@ -112,7 +112,7 @@ func (r *NotifyTargetRepo) GetByTenantAudience(
 	).Scan(
 		&t.ID, &t.TenantID, &t.DestinationType, &t.Audience,
 		&t.URL, &t.Secret, &t.TimeoutSeconds, &t.Disabled,
-		&t.LastFailureAt, &t.LastError,
+		&t.CreatedAt, &t.LastFailureAt, &t.LastError,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotifyTargetNotFound

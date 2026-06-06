@@ -58,6 +58,7 @@ type NotifyTarget struct {
 	Secret          string
 	TimeoutSeconds  int
 	Disabled        bool
+	CreatedAt       time.Time // DB column tenant_notify_targets.created_at (UTC)
 	// Phase 3.2 — current alert state. LastFailureAt is non-nil iff the
 	// most recent delivery to this target failed (cleared on next success).
 	LastFailureAt *time.Time
@@ -106,7 +107,7 @@ func (r *NotifyTargetRepo) Upsert(ctx context.Context, t NotifyTarget) error {
 func (r *NotifyTargetRepo) ListAllActive(ctx context.Context) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       last_failure_at, last_error
+		       created_at, last_failure_at, last_error
 		  FROM tenant_notify_targets
 		 WHERE disabled = FALSE`)
 	if err != nil {
@@ -121,7 +122,7 @@ func (r *NotifyTargetRepo) ListAllActive(ctx context.Context) ([]NotifyTarget, e
 func (r *NotifyTargetRepo) ListActiveByTenant(ctx context.Context, tenantID string) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       last_failure_at, last_error
+		       created_at, last_failure_at, last_error
 		  FROM tenant_notify_targets
 		 WHERE tenant_id = $1
 		   AND disabled = FALSE`, tenantID)
@@ -141,7 +142,7 @@ func scanNotifyTargets(rows pgx.Rows) ([]NotifyTarget, error) {
 		if err := rows.Scan(
 			&t.ID, &t.TenantID, &t.DestinationType, &t.Audience,
 			&t.URL, &t.Secret, &t.TimeoutSeconds, &t.Disabled,
-			&t.LastFailureAt, &t.LastError,
+			&t.CreatedAt, &t.LastFailureAt, &t.LastError,
 		); err != nil {
 			return nil, fmt.Errorf("scan notify target: %w", err)
 		}
@@ -155,7 +156,7 @@ func scanNotifyTargets(rows pgx.Rows) ([]NotifyTarget, error) {
 func (r *NotifyTargetRepo) ListByTenant(ctx context.Context, tenantID string) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       last_failure_at, last_error
+		       created_at, last_failure_at, last_error
 		  FROM tenant_notify_targets
 		 WHERE tenant_id = $1
 		 ORDER BY destination_type, audience`, tenantID)
@@ -169,28 +170,29 @@ func (r *NotifyTargetRepo) ListByTenant(ctx context.Context, tenantID string) ([
 // Insert creates a fresh row. Distinct from Upsert (which the boot path
 // uses) so the console can surface "already exists" as 409 instead of
 // silently overwriting a manually-tuned secret.
-func (r *NotifyTargetRepo) Insert(ctx context.Context, t NotifyTarget) (uuid.UUID, error) {
+func (r *NotifyTargetRepo) Insert(ctx context.Context, t NotifyTarget) (uuid.UUID, time.Time, error) {
 	const where = "repo.NotifyTargetRepo.Insert"
 	if t.TenantID == "" || t.DestinationType == "" || t.Audience == "" {
-		return uuid.Nil, fmt.Errorf("notify target requires tenant_id, destination_type, audience")
+		return uuid.Nil, time.Time{}, fmt.Errorf("notify target requires tenant_id, destination_type, audience")
 	}
 	var id uuid.UUID
+	var createdAt time.Time
 	err := r.pool.QueryRow(
 		ctx, `
 		INSERT INTO tenant_notify_targets
 		  (tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id`,
+		RETURNING id, created_at`,
 		t.TenantID, t.DestinationType, t.Audience,
 		t.URL, t.Secret, t.TimeoutSeconds, t.Disabled,
-	).Scan(&id)
+	).Scan(&id, &createdAt)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return uuid.Nil, ErrNotifyTargetConflict
+			return uuid.Nil, time.Time{}, ErrNotifyTargetConflict
 		}
 		logext.Errorf(ctx, "[%s] insert failed,tenant:%s,dest_type:%s,err:%+v",
 			where, t.TenantID, t.DestinationType, err.Error())
-		return uuid.Nil, fmt.Errorf("insert notify target: %w", err)
+		return uuid.Nil, time.Time{}, fmt.Errorf("insert notify target: %w", err)
 	}
-	return id, nil
+	return id, createdAt, nil
 }

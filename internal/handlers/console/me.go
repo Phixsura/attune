@@ -47,7 +47,9 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 		respondError(ctx, w, http.StatusInternalServerError, "internal", "加载用户失败")
 		return
 	}
-	tenant, err := h.tenants.GetByID(ctx, auth.TenantID)
+	// Local name avoids shadowing the imported `tenant` package — code added
+	// below this point can still reference tenant.ErrX / tenant.Y.
+	tenantRow, err := h.tenants.GetByID(ctx, auth.TenantID)
 	if err != nil {
 		slog.ErrorContext(ctx, "/me: load tenant", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] tenants.GetByID failed,tenant_id:%s,err:%+v",
@@ -63,12 +65,12 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 
 	me := &attunev1.GetMeResponse{
 		Tenant: &attunev1.Tenant{
-			Id:            tenant.ID,
-			Slug:          tenant.Slug,
-			Name:          tenant.Name,
-			LarkTenantKey: tenant.LarkTenantKey,
-			Locale:        tenant.Locale,
-			Timezone:      tenant.Timezone,
+			Id:            tenantRow.ID,
+			Slug:          tenantRow.Slug,
+			Name:          tenantRow.Name,
+			LarkTenantKey: tenantRow.LarkTenantKey,
+			Locale:        tenantRow.Locale,
+			Timezone:      tenantRow.Timezone,
 		},
 		User: &attunev1.SessionUser{
 			OpenId: user.OpenID,

@@ -173,14 +173,14 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 		ck, err := r.Cookie(SessionCookieName)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] reject: missing cookie,path:%s", where, r.URL.Path)
-			writeError(w, http.StatusUnauthorized, "unauthorized", "未登录或 session 已过期")
+			writeError(ctx, w, http.StatusUnauthorized, "unauthorized", "未登录或 session 已过期")
 			return
 		}
 		p, err := s.VerifySession(ck.Value)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] reject: verify session failed,path:%s,err:%s",
 				where, r.URL.Path, err.Error())
-			writeError(w, http.StatusUnauthorized, "unauthorized", "session 校验失败")
+			writeError(ctx, w, http.StatusUnauthorized, "unauthorized", "session 校验失败")
 			return
 		}
 		// CSRF check for state-changing methods. GET/HEAD bypass.
@@ -188,7 +188,7 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 			if !s.VerifyCSRF(p.UserID, r.Header.Get(CSRFHeader)) {
 				logext.Warnf(ctx, "[%s] reject: csrf invalid,path:%s,user_id:%s",
 					where, r.URL.Path, p.UserID)
-				writeError(w, http.StatusForbidden, "csrf_invalid", "CSRF token 无效")
+				writeError(ctx, w, http.StatusForbidden, "csrf_invalid", "CSRF token 无效")
 				return
 			}
 		}
@@ -212,13 +212,11 @@ func FromContext(ctx context.Context) *AuthCtx {
 	return v
 }
 
-// writeError emits the {code, message, request_id} envelope from
-// openapi.yaml.
-func writeError(w http.ResponseWriter, status int, code, msg string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"code":    code,
-		"message": msg,
-	})
+// writeError emits the unified {code, message, requestId} envelope.
+// Thin wrapper over respondError for the auth/oauth/dev_login paths that
+// don't yet take a proto request body; new code should call respondError
+// directly. requestId is sourced from the chi RequestID middleware so it
+// matches the one threaded through the rest of the stack (#19).
+func writeError(ctx context.Context, w http.ResponseWriter, status int, code, msg string) {
+	respondError(ctx, w, status, code, msg)
 }

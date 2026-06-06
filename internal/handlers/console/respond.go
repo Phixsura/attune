@@ -2,6 +2,7 @@ package console
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 
@@ -39,13 +40,25 @@ func respondError(ctx context.Context, w http.ResponseWriter, status int, code, 
 
 var consoleUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
 
+// errBodyTooLarge is returned when the request body exceeds the 1 MiB cap.
+// Callers map it to HTTP 413 (via decodeRequest); kept as a sentinel rather
+// than a typed *http.MaxBytesError because decodeProto takes io.Reader for
+// testability and doesn't have a *http.Request to wrap with MaxBytesReader.
+var errBodyTooLarge = errors.New("console: request body exceeds 1 MiB")
+
 // decodeProto reads a JSON request body into a proto message (lenient: unknown
-// fields are ignored, matching the previous encoding/json behaviour). Body is
-// capped at 1 MiB.
+// fields are ignored, matching the previous encoding/json behaviour). Returns
+// errBodyTooLarge when the body exceeds 1 MiB so callers can distinguish
+// "oversized" (→ 413) from "bad JSON" (→ 400); reading limit+1 bytes makes
+// the exact-1-MiB case round up to "too large" — acceptable off-by-one.
 func decodeProto(r io.Reader, m proto.Message) error {
-	b, err := io.ReadAll(io.LimitReader(r, 1<<20))
+	const limit = 1 << 20
+	b, err := io.ReadAll(io.LimitReader(r, limit+1))
 	if err != nil {
 		return err
+	}
+	if len(b) > limit {
+		return errBodyTooLarge
 	}
 	return consoleUnmarshal.Unmarshal(b, m)
 }

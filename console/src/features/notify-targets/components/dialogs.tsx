@@ -61,8 +61,8 @@ export function CreateNotifyDialog({
           onSubmit={(e) => {
             e.preventDefault()
             if (!url.trim()) return
-            // openapi-typescript treats fields with `default:` as required
-            // even though the server fills them — pass explicitly.
+            // Pass server-side defaults explicitly so the wire body is
+            // self-describing — the API also fills these if omitted.
             const body: NotifyTargetCreate = {
               destinationType: type,
               url: url.trim(),

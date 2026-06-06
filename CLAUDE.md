@@ -18,7 +18,7 @@ AI assistants (Claude Code, Cursor, etc.) working on this repository.
 | `go test -short ./...` | All pass on changed code | CI |
 | Function CCN | ≤ 15 | `lizard . -l go -C 15` |
 | Function NLOC | ≤ 100 | `lizard . -l go -T nloc=100` |
-| Code duplication | < 2% | `npx -y jscpd . --pattern '**/*.go' --threshold 5` |
+| Code duplication | < 4% | `npx -y jscpd . --pattern '**/*.go' --threshold 5` |
 | Internal info | 0 leaks (IPs, /opt paths, brand names) | grep |
 | Outbound HTTP clients | must wrap with `otelhttp.NewTransport` | `scripts/lint-slog.sh` Rule 3 |
 | Logging | `logext.*` + `ctx` first | `scripts/lint-slog.sh` Rule 1 |

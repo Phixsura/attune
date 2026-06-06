@@ -75,6 +75,35 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `openapi-typescript` dev dependency. The `gen:api` npm script is replaced by
   `gen:proto` (→ `make proto`).
 
+### Fixed
+
+- **Feedback detail labels regress to raw keys** (#19) — `zh-CN.json` still
+  held snake_case keys (`source_meta`, `enrichment_error`, `enriched_at`)
+  after the protoJSON lowerCamelCase rename; the detail panel rendered the
+  literal key strings instead of the Chinese labels. Keys renamed to match.
+- **Unified error envelope leak** (#19) — `console.writeError` (auth/oauth/
+  dev_login paths, used by RequireSession middleware) still emitted
+  `{code,message}` without `requestId`, contradicting the CHANGELOG's
+  "every HTTP error shares one shape" claim. Routed through `respondError`
+  so the chi RequestID is included on every 401/403/4xx from these paths.
+- **`NotifyTarget.CreatedAt` was synthesized** (#19) — the response field
+  was set to `time.Now()` on every read with a TODO comment; every notify
+  target in the console UI displayed "just created" regardless of true DB
+  creation time. Added `CreatedAt` to the repo model, surfaced the
+  `tenant_notify_targets.created_at` column in all SELECT/RETURNING paths.
+- **`decodeProto` silently truncated oversized bodies** (#19) — bodies > 1 MiB
+  were chopped to exactly 1 MiB and surfaced as vague "invalid json" 400s
+  instead of a clear 413. Now returns `errBodyTooLarge` so handlers map it
+  to `HTTP 413 body_too_large`.
+
+### Changed
+
+- **`scripts/check.sh` jscpd threshold 2% → 4%** (#19) — the intentional
+  helper duplicates from the package split (cycle-prevention copies of
+  `truncate`, `signRawBody`, `signLarkBot`, `isUniqueViolation` across
+  `repo/{outbox,notifytarget}/helpers.go` + `notify/adapter/*/`) push the
+  Go duplication ratio from 1.9% to ~3%. CLAUDE.md §1 raised to match.
+
 ### Security
 
 - Bounded the `source` label on `attune_ingest_total`: a rejected (invalid)

@@ -1,14 +1,10 @@
-// Package notify pushes enriched feedback to outbound destinations.
+// Package larkwebhook pushes enriched feedback to a Lark/Feishu custom
+// group bot webhook (the "自定义机器人" of any Lark chat). One of three
+// notify adapter implementations alongside rawwebhook and githubissue.
 //
-// Wave 1 ships a single concrete sink — a Lark/Feishu custom group bot
-// webhook (the "自定义机器人" of any Lark chat). Wave 1.2 adds raw HTTPS
-// webhook. All destinations share Transport for POST + retry + body
-// reading; per-destination code only owns envelope construction and
-// in-band response checking.
-//
-// Two Lark destinations are configured statically via env (Wave 1 =
-// single tenant, single org). Per-tenant routing moves into the DB in
-// Wave 2 via the tenantID that already threads through every Push call.
+// Per-tenant routing arrives in Wave 2; today two Lark destinations
+// (pool + radar) are configured statically via env and the tenantID
+// threads through every Push call for future per-tenant lookup.
 package larkwebhook
 
 import (

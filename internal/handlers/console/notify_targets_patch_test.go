@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -29,8 +30,8 @@ func (f *fakeNotifyRepo) ListByTenant(_ context.Context, _ string) ([]notifytarg
 	return nil, nil
 }
 
-func (f *fakeNotifyRepo) Insert(_ context.Context, _ notifytarget.NotifyTarget) (uuid.UUID, error) {
-	return uuid.Nil, nil
+func (f *fakeNotifyRepo) Insert(_ context.Context, _ notifytarget.NotifyTarget) (uuid.UUID, time.Time, error) {
+	return uuid.Nil, time.Time{}, nil
 }
 
 func (f *fakeNotifyRepo) GetByID(_ context.Context, _ string, _ uuid.UUID) (*notifytarget.NotifyTarget, error) {

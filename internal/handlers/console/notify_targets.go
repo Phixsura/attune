@@ -20,7 +20,7 @@ import (
 // handler uses. Defined here (consumer side) so unit tests can pass a fake.
 type notifyTargetRepo interface {
 	ListByTenant(ctx context.Context, tenantID string) ([]notifytarget.NotifyTarget, error)
-	Insert(ctx context.Context, t notifytarget.NotifyTarget) (uuid.UUID, error)
+	Insert(ctx context.Context, t notifytarget.NotifyTarget) (uuid.UUID, time.Time, error)
 	GetByID(ctx context.Context, tenantID string, id uuid.UUID) (*notifytarget.NotifyTarget, error)
 	UpdateByID(ctx context.Context, tenantID string, id uuid.UUID, t notifytarget.NotifyTarget) error
 	Delete(ctx context.Context, tenantID string, id uuid.UUID) error
@@ -44,7 +44,7 @@ func toNotifyProto(row notifytarget.NotifyTarget) *attunev1.NotifyTarget {
 		Url:             row.URL,
 		TimeoutSeconds:  int32(row.TimeoutSeconds),
 		Disabled:        row.Disabled,
-		CreatedAt:       time.Now().UTC().Format(time.RFC3339), // TODO: model lacks CreatedAt
+		CreatedAt:       row.CreatedAt.UTC().Format(time.RFC3339),
 		LastError:       row.LastError,
 	}
 	if row.LastFailureAt != nil {
@@ -63,7 +63,7 @@ func (h *NotifyTargetsHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.repo.ListByTenant(ctx, auth.TenantID)
 	if err != nil {
 		slog.ErrorContext(ctx, "notify-targets list", "err", err, "tenant_id", auth.TenantID)
-		logext.Errorf(ctx, "[%s] apikey.ListByTenant failed,tenant_id:%s,err:%+v",
+		logext.Errorf(ctx, "[%s] notifytarget.ListByTenant failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respondError(ctx, w, http.StatusInternalServerError, "internal", "查询通知目标失败")
 		return
@@ -93,6 +93,11 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	auth := FromContext(ctx)
 	var req attunev1.CreateNotifyTargetRequest
 	if err := decodeProto(r.Body, &req); err != nil {
+		if errors.Is(err, errBodyTooLarge) {
+			logext.Warnf(ctx, "[%s] reject: body too large,tenant_id:%s", where, auth.TenantID)
+			respondError(ctx, w, http.StatusRequestEntityTooLarge, "body_too_large", "请求体超过 1 MiB 上限")
+			return
+		}
 		logext.Warnf(ctx, "[%s] reject: bad json,tenant_id:%s,err:%s",
 			where, auth.TenantID, err.Error())
 		respondError(ctx, w, http.StatusBadRequest, "bad_request", "请求体不是合法 JSON")
@@ -132,7 +137,7 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		TimeoutSeconds:  nreq.TimeoutSeconds,
 		Disabled:        nreq.Disabled,
 	}
-	id, err := h.repo.Insert(ctx, target)
+	id, createdAt, err := h.repo.Insert(ctx, target)
 	if err != nil {
 		if errors.Is(err, notifytarget.ErrNotifyTargetConflict) {
 			logext.Warnf(ctx, "[%s] reject: conflict,tenant_id:%s,dest:%s,audience:%s",
@@ -148,6 +153,7 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target.ID = id
+	target.CreatedAt = createdAt
 	respondProto(w, http.StatusCreated, toNotifyProto(target))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s,dest:%s",
 		where, auth.TenantID, id, nreq.DestinationType)

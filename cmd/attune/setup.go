@@ -120,13 +120,15 @@ func buildNotifier(
 		slog.InfoContext(ctx, "no inline notifiers wired (lark webhook URLs empty)")
 		return nil, nil
 	}
-	lark := larkwebhook.NewLarkWebhook(
+	// Local name avoids shadowing the imported `lark` package
+	// (internal/repo/lark — see callers of lark.NewLarkInstallRepo).
+	larkBot := larkwebhook.NewLarkWebhook(
 		cfg.FeedbackPoolWebhookURL, cfg.FeedbackPoolWebhookSecret,
 		cfg.DevRadarWebhookURL, cfg.DevRadarWebhookSecret,
 	)
 	slog.InfoContext(ctx, "lark webhook wired",
-		"pool", lark.PoolEnabled(), "radar", lark.RadarEnabled())
-	return lark, nil
+		"pool", larkBot.PoolEnabled(), "radar", larkBot.RadarEnabled())
+	return larkBot, nil
 }
 
 // runOutboxLagRefresher ticks every 30s and updates the
