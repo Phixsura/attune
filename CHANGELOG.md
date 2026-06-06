@@ -15,9 +15,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Prometheus datasource and the "Attune Overview" dashboard, and documents the
   `attune_*` metrics as a backend-agnostic contract in `observability/README.md`.
 - CI: a `deploy/**`-filtered `docker compose config` smoke check.
+- **Protobuf IDL contract** (#19) — `.proto` in `proto/attune/v1/` is now the
+  single source of truth for the HTTP contract, generating Go (`internal/proto/`),
+  TypeScript (`console/src/proto/`, via ts-proto) and OpenAPI (`docs/openapi/`).
+  `make proto` regenerates all three; a CI `proto-sync` gate fails on drift.
+  `POST /v1/feedback/ingest` is migrated end-to-end (decoded/encoded via
+  `protojson`) as the first of an incremental, per-endpoint rollout.
 
 ### Changed
 
+- **`POST /v1/feedback/ingest` response `id` is now a JSON string**
+  (`{"id":"123"}`) — protoJSON serializes 64-bit integers as strings, which is
+  also safe for JavaScript clients (#19). All other ingest fields are unchanged.
 - Renamed the bundled Grafana dashboard "Attune Overview (Wave 1.2)" → "Attune
   Overview" and removed internal roadmap jargon from `observability/` and the
   `metrics` package doc (no metric names changed).

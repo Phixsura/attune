@@ -50,7 +50,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/api/types.ts", "src/routeTree.gen.ts"],
+      "includes": ["src/api/types.ts", "src/routeTree.gen.ts", "src/proto/**"],
       "linter": {
         "enabled": false
       },

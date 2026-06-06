@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package attune.v1;
+
+// ErrorResponse is the JSON body returned on 4xx/5xx by attune's public + console
+// APIs: a single human-facing message, e.g. {"error": "content is required"}.
+// (The console's richer envelope — code / message / request_id — folds in as the
+// console endpoints migrate; see proposal 2026-06-06-protobuf-idl-contract.)
+message ErrorResponse {
+  string error = 1;
+}

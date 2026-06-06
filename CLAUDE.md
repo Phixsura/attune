@@ -184,6 +184,22 @@ code (see §6). Update the `Status` as the work lands.
 
 ---
 
+## 11 · Proto IDL contract
+
+The HTTP request/response contract is defined in `.proto` (`proto/attune/v1/`)
+and code-generated — not hand-written (#19):
+
+- **To change an HTTP shape: edit the `.proto`, run `make proto`, then commit
+  both the proto and the regenerated Go / TS / OpenAPI.** Never hand-edit
+  generated files (`internal/proto/**`, `console/src/proto/**`, `docs/openapi/**`).
+- `make proto` needs `buf` (https://buf.build/docs/installation); plugins run as
+  buf remote plugins, so no local `protoc-gen-*` installs are required.
+- CI's `proto-sync` job runs `buf generate` and fails if the committed output
+  drifts. The migration is incremental — one endpoint per PR; `/v1/lark/event`
+  stays off the contract (it consumes Lark's external event format — see #66).
+
+---
+
 For project-level architecture, overview, and quickstart, see
 [README.md](README.md). For private deployment, see `docs/private-deploy.md`
 (coming in a follow-up issue).
