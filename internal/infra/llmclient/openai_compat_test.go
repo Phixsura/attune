@@ -90,6 +90,11 @@ func assertHappyPathRequest(t *testing.T, method, path, auth, contentType string
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		t.Fatalf("unmarshal req: %v (body=%s)", err, body)
 	}
+	assertRequestBody(t, parsed)
+}
+
+func assertRequestBody(t *testing.T, parsed openaiChatRequest) {
+	t.Helper()
 	if parsed.Model != "gpt-4o-mini" {
 		t.Errorf("model: want gpt-4o-mini, got %q", parsed.Model)
 	}
