@@ -13,17 +13,17 @@ import (
 	"github.com/Phixsura/attune/internal/logext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo"
-	"github.com/Phixsura/attune/internal/service"
+	"github.com/Phixsura/attune/internal/service/apikey"
 )
 
 // APIKeysHandler serves /fb/v1/console/api-keys. All three operations
 // scope to the session's tenant — see auth.RequireSession middleware
 // which writes TenantID to context before this handler runs.
 type APIKeysHandler struct {
-	svc *service.APIKeys
+	svc *apikey.APIKeys
 }
 
-func NewAPIKeysHandler(svc *service.APIKeys) *APIKeysHandler {
+func NewAPIKeysHandler(svc *apikey.APIKeys) *APIKeysHandler {
 	return &APIKeysHandler{svc: svc}
 }
 

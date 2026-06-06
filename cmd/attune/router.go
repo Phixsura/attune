@@ -22,7 +22,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/metrics"
-	"github.com/Phixsura/attune/internal/service"
+	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 )
 
 // buildRouter wires the chi router: OTel root span + X-Trace-Id, the standard
@@ -34,7 +34,7 @@ func buildRouter(
 	cfg *config.Config,
 	larkHandler *handlers.LarkHandler,
 	ingestHandler *handlers.IngestHandler,
-	apiKeys *service.APIKeys,
+	apiKeys *apikeysvc.APIKeys,
 	pool *pgxpool.Pool,
 ) (chi.Router, error) {
 	r := chi.NewRouter()

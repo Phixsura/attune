@@ -22,7 +22,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/repo"
-	"github.com/Phixsura/attune/internal/service"
+	"github.com/Phixsura/attune/internal/service/apikey"
 )
 
 // subcommands routes each CLI verb to its handler. `server` ignores its args
@@ -120,7 +120,7 @@ func runKeys(args []string) error {
 		return err
 	}
 
-	svc := service.NewAPIKeys(repo.NewAPIKey(pool))
+	svc := apikey.NewAPIKeys(repo.NewAPIKey(pool))
 	raw, keyID, err := svc.Issue(ctx, tenantID, *label)
 	if err != nil {
 		return err

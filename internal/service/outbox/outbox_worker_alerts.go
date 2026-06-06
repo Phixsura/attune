@@ -1,4 +1,4 @@
-package service
+package outbox
 
 // Phase 3.2 webhook failure visibility — split from outbox_worker.go to
 // honor the attune ≤300-line file rule (CLAUDE.md 律 2). Holds the
@@ -38,7 +38,7 @@ func (w *OutboxWorker) selfReportDead(ctx context.Context, row repo.OutboxRow, r
 	}
 	text := fmt.Sprintf(
 		"⚠️ 通知投递失败\n类型：%s\nURL：%s\n原因：%s\nAttune已停止重试此目标，请到控制台修改配置后再发布。",
-		row.DestinationType, row.DestinationTarget, truncate(reason, 200),
+		row.DestinationType, row.DestinationTarget, truncateStr(reason, 200),
 	)
 	// Use the first bot only — repeated alerts to every bot would spam
 	// when a tenant has multiple chats wired up.

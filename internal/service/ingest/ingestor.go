@@ -1,4 +1,4 @@
-package service
+package ingest
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
 // Ingestor is the business-layer entry point for "a new feedback row
@@ -21,10 +22,10 @@ import (
 // because there is one ingest pipeline today.
 type Ingestor struct {
 	repo     *repo.FeedbackRepo
-	enricher *Enricher
+	enricher *enrich.Enricher
 }
 
-func NewIngestor(r *repo.FeedbackRepo, e *Enricher) *Ingestor {
+func NewIngestor(r *repo.FeedbackRepo, e *enrich.Enricher) *Ingestor {
 	return &Ingestor{repo: r, enricher: e}
 }
 

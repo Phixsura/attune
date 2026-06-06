@@ -14,7 +14,7 @@
 //   - UTC week boundary, ignores tenants.timezone. Acceptable until
 //     billing-grade accuracy.
 //   - Empty week → skip send (silent week is less noise than "0 条").
-package service
+package outbox
 
 import (
 	"context"

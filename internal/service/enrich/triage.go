@@ -1,4 +1,4 @@
-package service
+package enrich
 
 // triage.go — Triage Agent v0 (Sprint 1.3, Y1 工程 2026-05-18).
 //

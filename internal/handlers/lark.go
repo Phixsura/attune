@@ -14,7 +14,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/lark"
 	"github.com/Phixsura/attune/internal/repo"
-	"github.com/Phixsura/attune/internal/service"
+	"github.com/Phixsura/attune/internal/service/ingest"
 )
 
 // LarkHandler serves POST /v1/lark/event for Lark/Feishu event
@@ -28,7 +28,7 @@ type LarkHandler struct {
 	signingSecret     string
 	verificationToken string
 	defaultTenant     string // TEXT tenants.id
-	ingestor          *service.Ingestor
+	ingestor          *ingest.Ingestor
 }
 
 // NewLarkHandler constructs the handler. If signingSecret is empty all
@@ -37,7 +37,7 @@ type LarkHandler struct {
 func NewLarkHandler(
 	ctx context.Context,
 	tenants *repo.TenantRepo,
-	ingestor *service.Ingestor,
+	ingestor *ingest.Ingestor,
 	signingSecret, verificationToken, defaultTenantSlug string,
 ) (*LarkHandler, error) {
 	h := &LarkHandler{

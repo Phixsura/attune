@@ -10,7 +10,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/repo"
-	"github.com/Phixsura/attune/internal/service"
+	"github.com/Phixsura/attune/internal/service/outbox"
 )
 
 // runDigest dispatches `attune digest <subcmd>`.
@@ -67,7 +67,7 @@ func runDigestSend(args []string) error {
 		return fmt.Errorf("get tenant: %w", err)
 	}
 
-	svc := service.NewDigestService(
+	svc := outbox.NewDigestService(
 		tenants,
 		repo.NewFeedback(pool),
 		repo.NewNotifyTarget(pool),

@@ -23,11 +23,14 @@ import (
 	"github.com/Phixsura/attune/internal/handlers"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
-	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/repo"
-	"github.com/Phixsura/attune/internal/service"
+	"github.com/Phixsura/attune/internal/service/apikey"
+	"github.com/Phixsura/attune/internal/service/enrich"
+	"github.com/Phixsura/attune/internal/service/ingest"
+	"github.com/Phixsura/attune/internal/service/outbox"
 )
 
 // ── server ────────────────────────────────────────────────────────────────
@@ -75,9 +78,9 @@ func runServer() error {
 	tenantRepo := repo.NewTenant(pool)
 	notifyTargetRepo := repo.NewNotifyTarget(pool)
 	outboxRepo := repo.NewOutbox(pool)
-	enricher := service.NewEnricher(feedbackRepo, llm)
-	ingestor := service.NewIngestor(feedbackRepo, enricher)
-	apiKeys := service.NewAPIKeys(apikeyRepo)
+	enricher := enrich.NewEnricher(feedbackRepo, llm)
+	ingestor := ingest.NewIngestor(feedbackRepo, enricher)
+	apiKeys := apikey.NewAPIKeys(apikeyRepo)
 
 	if err := syncCustomWebhooks(ctx, cfg.CustomWebhooks, tenantRepo, notifyTargetRepo); err != nil {
 		return fmt.Errorf("sync custom webhooks: %w", err)
@@ -92,7 +95,7 @@ func runServer() error {
 	// Outbox wiring: enricher writes raw-webhook rows in same tx as
 	// MarkDone (at-least-once); a background worker drains them.
 	enricher.SetOutbox(outboxRepo, notifyTargetRepo)
-	outboxWorker := service.NewOutboxWorker(
+	outboxWorker := outbox.NewOutboxWorker(
 		outboxRepo, notifyTargetRepo,
 		notify.NewTransport(nil, notify.DefaultRetry()),
 	)
@@ -104,7 +107,7 @@ func runServer() error {
 	// Phase 5 M6 weekly digest scheduler. Ticks every 30 min; scans
 	// tenants whose last_digest_sent_at < now-6d AND has at least one
 	// active lark-bot; composes 7-day summary + sends via SendAlert.
-	go service.NewDigestService(tenantRepo, feedbackRepo, notifyTargetRepo).Run(ctx)
+	go outbox.NewDigestService(tenantRepo, feedbackRepo, notifyTargetRepo).Run(ctx)
 
 	larkHandler, err := handlers.NewLarkHandler(ctx, tenantRepo, ingestor,
 		cfg.LarkSigningSecret, cfg.LarkVerificationToken, cfg.LarkDefaultTenantSlug)

@@ -19,7 +19,8 @@ import (
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/repo"
-	"github.com/Phixsura/attune/internal/service"
+	"github.com/Phixsura/attune/internal/service/apikey"
+	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
 // buildLLMClient wires the OpenAI-compatible LLM client used by the
@@ -100,7 +101,7 @@ func buildNotifier(
 	ctx context.Context,
 	cfg *config.Config,
 	_ *repo.NotifyTargetRepo,
-) (service.Notifier, error) {
+) (enrich.Notifier, error) {
 	// Design contract (v0.4 §3.6): raw-webhook delivers via outbox ONLY
 	// (at-least-once via DB queue + worker). Lark group bot delivers
 	// inline through this Notifier (best-effort, NoRetry — duplicate
@@ -189,7 +190,7 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 	tenantRepo := repo.NewTenant(pool)
 	userRepo := repo.NewTenantUserRepo(pool)
 	installRepo := repo.NewLarkInstallRepo(pool)
-	apiKeySvc := service.NewAPIKeys(repo.NewAPIKey(pool))
+	apiKeySvc := apikey.NewAPIKeys(repo.NewAPIKey(pool))
 	notifyTargetRepo := repo.NewNotifyTarget(pool)
 	feedbackRepo := repo.NewFeedback(pool)
 

@@ -10,7 +10,8 @@ import (
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/repo"
-	"github.com/Phixsura/attune/internal/service"
+	"github.com/Phixsura/attune/internal/service/enrich"
+	"github.com/Phixsura/attune/internal/service/eval"
 )
 
 // runEval dispatches the `attune eval` CLI. Three modes:
@@ -47,8 +48,8 @@ func runEval(args []string) error {
 		return fmt.Errorf("llm backend: %w", err)
 	}
 	defer llm.Close()
-	enricher := service.NewEnricher(feedbackRepo, llm)
-	evaluator := service.NewEvaluator(feedbackRepo, enricher)
+	enricher := enrich.NewEnricher(feedbackRepo, llm)
+	evaluator := eval.NewEvaluator(feedbackRepo, enricher)
 
 	switch *mode {
 	case "consistency":
@@ -64,7 +65,7 @@ func runEval(args []string) error {
 
 func runEvalConsistency(
 	ctx context.Context,
-	ev *service.Evaluator,
+	ev *eval.Evaluator,
 	sinceStr string, sample int, output string,
 ) error {
 	since, err := parseSince(sinceStr)
@@ -75,12 +76,12 @@ func runEvalConsistency(
 	if err != nil {
 		return err
 	}
-	return writeReport(service.FormatReport(rep), output)
+	return writeReport(eval.FormatReport(rep), output)
 }
 
 func runEvalExport(
 	ctx context.Context,
-	ev *service.Evaluator,
+	ev *eval.Evaluator,
 	sinceStr string, sample int, output string,
 ) error {
 	since, err := parseSince(sinceStr)
@@ -102,7 +103,7 @@ func runEvalExport(
 	return nil
 }
 
-func runEvalScore(ev *service.Evaluator, inputPath, output string) error {
+func runEvalScore(ev *eval.Evaluator, inputPath, output string) error {
 	if inputPath == "" {
 		return fmt.Errorf("--input is required for score-human")
 	}
@@ -115,7 +116,7 @@ func runEvalScore(ev *service.Evaluator, inputPath, output string) error {
 	if err != nil {
 		return err
 	}
-	return writeReport(service.FormatReport(rep), output)
+	return writeReport(eval.FormatReport(rep), output)
 }
 
 // parseSince accepts either YYYY-MM-DD or full RFC3339; empty defaults

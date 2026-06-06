@@ -1,4 +1,4 @@
-package service
+package eval
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
 // Evaluator runs the attune eval CLI's three modes:
@@ -25,13 +26,13 @@ import (
 // ground-truth measure for对外宣传.
 type Evaluator struct {
 	repo     *repo.FeedbackRepo
-	enricher *Enricher
+	enricher *enrich.Enricher
 }
 
 // NewEvaluator wires the repo for sampling and the enricher's Classify
 // for re-running LLM. enricher must be non-nil — eval is meaningless
 // without an LLM connection.
-func NewEvaluator(r *repo.FeedbackRepo, e *Enricher) *Evaluator {
+func NewEvaluator(r *repo.FeedbackRepo, e *enrich.Enricher) *Evaluator {
 	return &Evaluator{repo: r, enricher: e}
 }
 

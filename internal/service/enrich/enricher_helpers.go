@@ -1,4 +1,4 @@
-package service
+package enrich
 
 // enricher_helpers.go — the non-LLM triage persist paths extracted from
 // enricher.go so the main file stays under the attune ≤300-line rule

@@ -1,4 +1,4 @@
-package service
+package outbox
 
 // outbox_worker_send.go — per-destination sender switchboard. Split from
 // outbox_worker.go to keep both files under the attune ≤300-line rule
