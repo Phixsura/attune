@@ -6,7 +6,7 @@
 // This file holds the list + detail read path. The analytics/aggregate
 // queries (usage-by-day, kind counts, top modules) live in
 // feedback_console_stats.go to keep both files under the line cap.
-package repo
+package feedback
 
 import (
 	"context"
@@ -129,7 +129,8 @@ func (r *FeedbackRepo) GetForConsole(
 	ctx context.Context, tenantID string, id int64,
 ) (*ConsoleDetailRow, error) {
 	var row ConsoleDetailRow
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		SELECT id, content, source, type, user_id, page_url,
 		       COALESCE(enriched_title, ''),
 		       COALESCE(enriched_kind, ''),

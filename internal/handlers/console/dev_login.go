@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/Phixsura/attune/internal/logext"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
 // DevLoginHandler implements the backdoor /install/dev-login endpoint
@@ -27,15 +27,15 @@ import (
 // user-facing deployment.
 type DevLoginHandler struct {
 	signer  *Signer
-	tenants *repo.TenantRepo
-	users   *repo.TenantUserRepo
+	tenants *tenant.TenantRepo
+	users   *tenant.TenantUserRepo
 	baseURL string
 }
 
 func NewDevLoginHandler(
 	signer *Signer,
-	tenants *repo.TenantRepo,
-	users *repo.TenantUserRepo,
+	tenants *tenant.TenantRepo,
+	users *tenant.TenantUserRepo,
 	baseURL string,
 ) *DevLoginHandler {
 	return &DevLoginHandler{
@@ -78,7 +78,7 @@ func (h *DevLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	tenantID, err := h.tenants.ResolveSlug(ctx, slug)
 	if err != nil {
-		if errors.Is(err, repo.ErrTenantNotFound) {
+		if errors.Is(err, tenant.ErrTenantNotFound) {
 			logext.Warnf(ctx, "[%s] reject: tenant not found,slug:%s", where, slug)
 			writeError(w, http.StatusNotFound, "tenant_not_found",
 				"tenant '"+slug+"' 不存在；请先用 `attune tenant create` 建好")

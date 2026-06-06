@@ -17,7 +17,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/logext"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
 // envelopeVersion is the wire-format version field. Bumping requires
@@ -58,10 +58,10 @@ type rawDestination struct {
 //
 // Passing a nil httpClient gives a 10s-per-call default. retry should
 // usually be DefaultRetry() for raw webhook (5 attempts with backoff).
-func NewRawWebhookRouter(transport *Transport, targets []repo.NotifyTarget) *RawWebhookRouter {
+func NewRawWebhookRouter(transport *Transport, targets []notifytarget.NotifyTarget) *RawWebhookRouter {
 	dests := make(map[string]map[string]*rawDestination)
 	for _, t := range targets {
-		if t.DestinationType != repo.DestRawWebhook {
+		if t.DestinationType != notifytarget.DestRawWebhook {
 			continue
 		}
 		if t.URL == "" || t.Secret == "" {
@@ -89,14 +89,14 @@ func NewRawWebhookRouter(transport *Transport, targets []repo.NotifyTarget) *Raw
 // audience=all). Returns nil silently when the tenant has no configured
 // raw-webhook destination.
 func (r *RawWebhookRouter) PushPool(ctx context.Context, s domain.Snapshot) error {
-	return r.dispatch(ctx, s, repo.AudiencePool)
+	return r.dispatch(ctx, s, notifytarget.AudiencePool)
 }
 
 // PushRadar delivers s to the tenant's audience=radar destination (or
 // audience=all). Caller should filter to P0/P1 — but we don't enforce
 // here, keeping the Notifier shape uniform.
 func (r *RawWebhookRouter) PushRadar(ctx context.Context, s domain.Snapshot) error {
-	return r.dispatch(ctx, s, repo.AudienceRadar)
+	return r.dispatch(ctx, s, notifytarget.AudienceRadar)
 }
 
 // dispatch finds the right destination by (tenant, audience), tries
@@ -109,7 +109,7 @@ func (r *RawWebhookRouter) dispatch(ctx context.Context, s domain.Snapshot, audi
 	}
 	dest, ok := tenantDests[audience]
 	if !ok {
-		dest, ok = tenantDests[repo.AudienceAll]
+		dest, ok = tenantDests[notifytarget.AudienceAll]
 	}
 	if !ok {
 		return nil
@@ -154,7 +154,7 @@ func (r *RawWebhookRouter) send(
 			reason = "terminal"
 		}
 		metrics.NotifyFailuresTotal.
-			WithLabelValues(repo.DestRawWebhook, reason).Inc()
+			WithLabelValues(notifytarget.DestRawWebhook, reason).Inc()
 		logext.Errorf(ctx, "[%s] send failed,label:%s,feedback_id:%d,reason:%s,err:%+v",
 			where, label, s.ID, reason, err.Error())
 		return err

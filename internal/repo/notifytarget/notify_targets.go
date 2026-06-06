@@ -1,4 +1,4 @@
-package repo
+package notifytarget
 
 import (
 	"context"
@@ -78,7 +78,8 @@ func (r *NotifyTargetRepo) Upsert(ctx context.Context, t NotifyTarget) error {
 	if t.TenantID == "" || t.DestinationType == "" || t.Audience == "" {
 		return fmt.Errorf("notify target requires tenant_id, destination_type, audience")
 	}
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.pool.Exec(
+		ctx, `
 		INSERT INTO tenant_notify_targets
 		  (tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
@@ -174,7 +175,8 @@ func (r *NotifyTargetRepo) Insert(ctx context.Context, t NotifyTarget) (uuid.UUI
 		return uuid.Nil, fmt.Errorf("notify target requires tenant_id, destination_type, audience")
 	}
 	var id uuid.UUID
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		INSERT INTO tenant_notify_targets
 		  (tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)

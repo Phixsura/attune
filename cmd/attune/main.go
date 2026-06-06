@@ -21,7 +21,8 @@ import (
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/observability"
-	"github.com/Phixsura/attune/internal/repo"
+	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
 )
 
@@ -112,15 +113,15 @@ func runKeys(args []string) error {
 	}
 	defer pool.Close()
 
-	tenantID, err := repo.NewTenant(pool).ResolveSlug(ctx, *tenantSlug)
-	if errors.Is(err, repo.ErrTenantNotFound) {
+	tenantID, err := tenant.NewTenant(pool).ResolveSlug(ctx, *tenantSlug)
+	if errors.Is(err, tenant.ErrTenantNotFound) {
 		return fmt.Errorf("tenant slug %q not found or inactive", *tenantSlug)
 	}
 	if err != nil {
 		return err
 	}
 
-	svc := apikey.NewAPIKeys(repo.NewAPIKey(pool))
+	svc := apikey.NewAPIKeys(apikeyrepo.NewAPIKey(pool))
 	raw, keyID, err := svc.Issue(ctx, tenantID, *label)
 	if err != nil {
 		return err

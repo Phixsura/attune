@@ -1,4 +1,4 @@
-package repo
+package apikey
 
 import (
 	"context"
@@ -41,7 +41,8 @@ var ErrAPIKeyNotFound = errors.New("api key not found")
 func (r *APIKeyRepo) Insert(ctx context.Context, tenantID string, hash []byte, prefix, label string) (uuid.UUID, error) {
 	const where = "repo.APIKeyRepo.Insert"
 	var id uuid.UUID
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		INSERT INTO external_api_keys (tenant_id, key_hash, key_prefix, label)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id`,
@@ -59,7 +60,8 @@ func (r *APIKeyRepo) Insert(ctx context.Context, tenantID string, hash []byte, p
 // Returns ErrAPIKeyNotFound if nothing matches an active, unrevoked key.
 func (r *APIKeyRepo) LookupByHash(ctx context.Context, hash []byte) (*APIKeyRow, error) {
 	var row APIKeyRow
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		SELECT id, tenant_id, key_hash
 		  FROM external_api_keys
 		 WHERE key_hash = $1
@@ -81,7 +83,8 @@ func (r *APIKeyRepo) LookupByHash(ctx context.Context, hash []byte) (*APIKeyRow,
 func (r *APIKeyRepo) TouchLastUsed(id uuid.UUID) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := r.pool.Exec(ctx,
+	if _, err := r.pool.Exec(
+		ctx,
 		`UPDATE external_api_keys SET last_used_at = NOW() WHERE id = $1`, id,
 	); err != nil {
 		slog.WarnContext(ctx, "apikey: touch last_used_at failed", "id", id, "err", err)
@@ -103,7 +106,8 @@ type APIKeyListRow struct {
 // ListByTenant returns every key for the given tenant, including revoked
 // ones (console UI shows them dimmed). Newest first.
 func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]APIKeyListRow, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.pool.Query(
+		ctx, `
 		SELECT id, key_prefix, label, is_active, created_at, last_used_at, revoked_at
 		  FROM external_api_keys
 		 WHERE tenant_id = $1
@@ -136,7 +140,8 @@ func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]APIKe
 // Returns ErrAPIKeyNotFound if no row matched (wrong tenant or id).
 func (r *APIKeyRepo) Revoke(ctx context.Context, tenantID string, id uuid.UUID) error {
 	const where = "repo.APIKeyRepo.Revoke"
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.pool.Exec(
+		ctx, `
 		UPDATE external_api_keys
 		   SET revoked_at = COALESCE(revoked_at, NOW()),
 		       is_active  = FALSE

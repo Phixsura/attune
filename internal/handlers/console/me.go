@@ -7,7 +7,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/logext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
 // MeHandler serves GET /fb/v1/console/me and POST /fb/v1/console/logout.
@@ -16,11 +16,11 @@ import (
 // user from DB, and returns GetMeResponse. /logout clears the cookie.
 type MeHandler struct {
 	signer  *Signer
-	tenants *repo.TenantRepo
-	users   *repo.TenantUserRepo
+	tenants *tenant.TenantRepo
+	users   *tenant.TenantUserRepo
 }
 
-func NewMeHandler(signer *Signer, tenants *repo.TenantRepo, users *repo.TenantUserRepo) *MeHandler {
+func NewMeHandler(signer *Signer, tenants *tenant.TenantRepo, users *tenant.TenantUserRepo) *MeHandler {
 	return &MeHandler{signer: signer, tenants: tenants, users: users}
 }
 
@@ -33,7 +33,7 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.users.GetByID(ctx, auth.UserID)
 	if err != nil {
-		if errors.Is(err, repo.ErrTenantUserNotFound) {
+		if errors.Is(err, tenant.ErrTenantUserNotFound) {
 			// Session points to a user that no longer exists — clear the
 			// cookie and 401 so the SPA bounces to /login.
 			logext.Warnf(ctx, "[%s] reject: user gone,user_id:%s", where, auth.UserID)

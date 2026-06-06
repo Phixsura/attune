@@ -10,7 +10,8 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
 // OutboxWorker drains the notify_outbox queue. Wave 1.2 scope: only
@@ -19,8 +20,8 @@ import (
 // missed card to an internal PM, not a missed delivery to a paying
 // customer. Wave 2-3 may unify if Lark per-tenant routing arrives.
 type OutboxWorker struct {
-	outbox    *repo.OutboxRepo
-	targets   *repo.NotifyTargetRepo
+	outbox    *outboxrepo.OutboxRepo
+	targets   *notifytarget.NotifyTargetRepo
 	transport *notify.Transport
 
 	pollInterval time.Duration
@@ -31,8 +32,8 @@ type OutboxWorker struct {
 // NewOutboxWorker wires the worker. Defaults baked in below match
 // design doc §3.6 retry table (30s / 2m / 10m / 1h / dead).
 func NewOutboxWorker(
-	outbox *repo.OutboxRepo,
-	targets *repo.NotifyTargetRepo,
+	outbox *outboxrepo.OutboxRepo,
+	targets *notifytarget.NotifyTargetRepo,
 	transport *notify.Transport,
 ) *OutboxWorker {
 	return &OutboxWorker{
@@ -102,13 +103,13 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 // would have accepted but worker can't actually send (catches drift
 // where someone adds a dest_type to one side and forgets the other).
 var supportedOutboxDestTypes = map[string]bool{
-	repo.DestRawWebhook:  true,
-	repo.DestGitHubIssue: true,
+	notifytarget.DestRawWebhook:  true,
+	notifytarget.DestGitHubIssue: true,
 }
 
 // processRow handles one outbox entry end-to-end: lookup destination,
 // send, mark delivered/failed/dead.
-func (w *OutboxWorker) processRow(ctx context.Context, row repo.OutboxRow) {
+func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow) {
 	const where = "service.OutboxWorker.processRow"
 	logext.Infof(ctx, "[%s] start,id:%d,tenant:%s,dest_type:%s,audience:%s,attempts:%d",
 		where, row.ID, row.TenantID, row.DestinationType, row.Audience, row.Attempts)
@@ -120,7 +121,7 @@ func (w *OutboxWorker) processRow(ctx context.Context, row repo.OutboxRow) {
 	target, err := w.targets.GetByTenantAudience(
 		ctx, row.TenantID, row.DestinationType, row.Audience,
 	)
-	if errors.Is(err, repo.ErrNotifyTargetNotFound) {
+	if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 		// Customer's webhook destination was removed mid-flight.
 		w.markDead(ctx, row, fmt.Sprintf("destination not found (tenant=%s aud=%s)",
 			row.TenantID, row.Audience))
@@ -162,7 +163,8 @@ func (w *OutboxWorker) processRow(ctx context.Context, row repo.OutboxRow) {
 	// Phase 3.2 · clear the alert state on first success after a
 	// failing streak. ClearFailure is no-op when last_failure_at IS NULL,
 	// so the common (always-green) path is one cheap UPDATE per delivery.
-	if err := w.targets.ClearFailure(ctx,
+	if err := w.targets.ClearFailure(
+		ctx,
 		row.TenantID, row.DestinationType, row.DestinationTarget, row.Audience,
 	); err != nil {
 		slog.DebugContext(ctx, "outbox: clear target failure errored", "id", row.ID, "err", err)
@@ -175,7 +177,7 @@ func (w *OutboxWorker) processRow(ctx context.Context, row repo.OutboxRow) {
 
 // failOrDead promotes a row to dead once attempts exceeds max.
 // Otherwise schedules the next retry per the backoff table.
-func (w *OutboxWorker) failOrDead(ctx context.Context, row repo.OutboxRow, msg string) {
+func (w *OutboxWorker) failOrDead(ctx context.Context, row outboxrepo.OutboxRow, msg string) {
 	next := row.Attempts + 1
 	if next >= w.maxAttempts {
 		w.markDead(ctx, row, fmt.Sprintf("exceeded %d attempts: %s", w.maxAttempts, msg))
@@ -199,7 +201,7 @@ func (w *OutboxWorker) failOrDead(ctx context.Context, row repo.OutboxRow, msg s
 //
 // Self-report failures are logged but never propagated — we don't want
 // alert-of-alert recursion when a tenant's lark-bot is also broken.
-func (w *OutboxWorker) markDead(ctx context.Context, row repo.OutboxRow, reason string) {
+func (w *OutboxWorker) markDead(ctx context.Context, row outboxrepo.OutboxRow, reason string) {
 	if err := w.outbox.MarkDead(ctx, row.ID, reason); err != nil {
 		slog.WarnContext(ctx, "outbox: mark dead errored",
 			"id", row.ID, "inbound_trace_id", row.TraceID, "err", err)
@@ -210,7 +212,8 @@ func (w *OutboxWorker) markDead(ctx context.Context, row repo.OutboxRow, reason 
 
 	// Touch the target's alert state. Best-effort — if the customer
 	// already deleted the target, this UPDATE matches 0 rows.
-	if err := w.targets.TouchFailure(ctx,
+	if err := w.targets.TouchFailure(
+		ctx,
 		row.TenantID, row.DestinationType, row.DestinationTarget, row.Audience, reason,
 	); err != nil {
 		slog.WarnContext(ctx, "outbox: touch target failure errored",

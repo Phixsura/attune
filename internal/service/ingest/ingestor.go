@@ -12,7 +12,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/logext"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
@@ -21,11 +21,11 @@ import (
 // enrichment. Handlers depend on this concrete type (not an interface)
 // because there is one ingest pipeline today.
 type Ingestor struct {
-	repo     *repo.FeedbackRepo
+	repo     *feedback.FeedbackRepo
 	enricher *enrich.Enricher
 }
 
-func NewIngestor(r *repo.FeedbackRepo, e *enrich.Enricher) *Ingestor {
+func NewIngestor(r *feedback.FeedbackRepo, e *enrich.Enricher) *Ingestor {
 	return &Ingestor{repo: r, enricher: e}
 }
 

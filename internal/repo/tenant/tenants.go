@@ -1,4 +1,4 @@
-package repo
+package tenant
 
 import (
 	"context"
@@ -32,7 +32,8 @@ var ErrTenantNotFound = errors.New("tenant not found")
 // actual id stored on user_feedback rows.
 func (r *TenantRepo) ResolveSlug(ctx context.Context, slug string) (string, error) {
 	var id string
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRow(
+		ctx,
 		`SELECT id FROM tenants WHERE slug = $1 AND is_active = TRUE`,
 		slug,
 	).Scan(&id)
@@ -59,7 +60,8 @@ func (r *TenantRepo) Create(ctx context.Context, slug, name string) (string, err
 		return "", fmt.Errorf("tenant slug is required")
 	}
 	var id string
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		INSERT INTO tenants (slug, name)
 		VALUES ($1, $2)
 		RETURNING id`,
@@ -102,7 +104,8 @@ type Tenant struct {
 // switcher / settings header.
 func (r *TenantRepo) GetByID(ctx context.Context, id string) (*Tenant, error) {
 	var t Tenant
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		SELECT id, slug, name, lark_tenant_key, locale, timezone, is_active
 		  FROM tenants
 		 WHERE id = $1`, id,
@@ -131,13 +134,15 @@ func (r *TenantRepo) UpsertByLarkKey(
 	}
 	// Try lookup first — fast path for existing installs.
 	var id string
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRow(
+		ctx,
 		`SELECT id FROM tenants WHERE lark_tenant_key = $1`, larkTenantKey,
 	).Scan(&id)
 	if err == nil {
 		// Refresh name if Lark sent something newer.
 		if name != "" {
-			_, _ = r.pool.Exec(ctx,
+			_, _ = r.pool.Exec(
+				ctx,
 				`UPDATE tenants SET name = $1, updated_at = NOW() WHERE id = $2 AND name <> $1`,
 				name, id,
 			)
@@ -150,7 +155,8 @@ func (r *TenantRepo) UpsertByLarkKey(
 		return "", false, fmt.Errorf("lookup tenant by lark key: %w", err)
 	}
 	// Not present — create.
-	err = r.pool.QueryRow(ctx, `
+	err = r.pool.QueryRow(
+		ctx, `
 		INSERT INTO tenants (slug, name, lark_tenant_key)
 		VALUES ($1, $2, $3)
 		RETURNING id`,
@@ -189,7 +195,8 @@ type DigestCandidate struct {
 func (r *TenantRepo) TenantsNeedingDigest(
 	ctx context.Context, cutoff time.Time,
 ) ([]DigestCandidate, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.pool.Query(
+		ctx, `
 		SELECT id, slug, name, timezone
 		  FROM tenants
 		 WHERE is_active = TRUE

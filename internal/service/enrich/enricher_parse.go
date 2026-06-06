@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
 // buildSnapshot copies the persistence-side row + AI classification into
 // the immutable Snapshot value the notifier layer consumes. Copy by
 // value so the notifier can outlive any DB tx or HTTP scope.
-func buildSnapshot(id int64, row *repo.EnrichInput, e domain.Enriched, at time.Time) domain.Snapshot {
+func buildSnapshot(id int64, row *feedback.EnrichInput, e domain.Enriched, at time.Time) domain.Snapshot {
 	return domain.Snapshot{
 		ID:         id,
 		TenantID:   row.TenantID,

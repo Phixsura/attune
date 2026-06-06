@@ -13,16 +13,16 @@ import (
 
 	"github.com/Phixsura/attune/internal/logext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
 // FeedbackHandler serves /fb/v1/console/feedback. All queries scope to the
 // session's tenant via FromContext — never taking tenant_id from query params.
 type FeedbackHandler struct {
-	repo *repo.FeedbackRepo
+	repo *feedback.FeedbackRepo
 }
 
-func NewFeedbackHandler(r *repo.FeedbackRepo) *FeedbackHandler {
+func NewFeedbackHandler(r *feedback.FeedbackRepo) *FeedbackHandler {
 	return &FeedbackHandler{repo: r}
 }
 
@@ -41,7 +41,7 @@ func modulesOf(raw json.RawMessage) []string {
 	return modules
 }
 
-func toProtoFeedback(row repo.ConsoleListRow) *attunev1.Feedback {
+func toProtoFeedback(row feedback.ConsoleListRow) *attunev1.Feedback {
 	return &attunev1.Feedback{
 		Id:               row.ID,
 		Content:          row.Content,
@@ -65,7 +65,7 @@ func (h *FeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	auth := FromContext(ctx)
 	q := r.URL.Query()
-	opts := repo.ConsoleListOpts{
+	opts := feedback.ConsoleListOpts{
 		Kind:     q.Get("kind"),
 		Severity: q.Get("severity"),
 		Q:        q.Get("q"),
@@ -86,7 +86,7 @@ func (h *FeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.repo.ListForConsole(ctx, auth.TenantID, opts)
 	if err != nil {
 		slog.ErrorContext(ctx, "feedback list", "err", err, "tenant_id", auth.TenantID)
-		logext.Errorf(ctx, "[%s] repo.ListForConsole failed,tenant_id:%s,err:%+v",
+		logext.Errorf(ctx, "[%s] feedback.ListForConsole failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respondError(ctx, w, http.StatusInternalServerError, "internal", "查询反馈失败")
 		return
@@ -121,14 +121,14 @@ func (h *FeedbackHandler) Get(w http.ResponseWriter, r *http.Request) {
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,id:%d", where, auth.TenantID, id)
 	row, err := h.repo.GetForConsole(ctx, auth.TenantID, id)
 	if err != nil {
-		if errors.Is(err, repo.ErrFeedbackNotFound) {
+		if errors.Is(err, feedback.ErrFeedbackNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%d",
 				where, auth.TenantID, id)
 			respondError(ctx, w, http.StatusNotFound, "not_found", "反馈不存在或不属于当前 tenant")
 			return
 		}
 		slog.ErrorContext(ctx, "feedback detail", "err", err, "id", id)
-		logext.Errorf(ctx, "[%s] repo.GetForConsole failed,tenant_id:%s,id:%d,err:%+v",
+		logext.Errorf(ctx, "[%s] feedback.GetForConsole failed,tenant_id:%s,id:%d,err:%+v",
 			where, auth.TenantID, id, err.Error())
 		respondError(ctx, w, http.StatusInternalServerError, "internal", "加载反馈详情失败")
 		return
@@ -196,7 +196,7 @@ func (h *FeedbackHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	counts, err := h.repo.KindCounts(ctx, auth.TenantID, from, to)
 	if err != nil {
 		slog.ErrorContext(ctx, "feedback stats", "err", err, "tenant_id", auth.TenantID)
-		logext.Errorf(ctx, "[%s] repo.KindCounts failed,tenant_id:%s,err:%+v",
+		logext.Errorf(ctx, "[%s] feedback.KindCounts failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respondError(ctx, w, http.StatusInternalServerError, "internal", "查询反馈分布失败")
 		return

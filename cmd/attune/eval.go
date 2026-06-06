@@ -9,7 +9,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/eval"
 )
@@ -42,7 +42,7 @@ func runEval(args []string) error {
 	}
 	defer pool.Close()
 
-	feedbackRepo := repo.NewFeedback(pool)
+	feedbackRepo := feedback.NewFeedback(pool)
 	llm, err := buildLLMClient(cfg)
 	if err != nil {
 		return fmt.Errorf("llm backend: %w", err)

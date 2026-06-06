@@ -10,7 +10,8 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/logext"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
 // persistEnriched flips user_feedback to 'done' and (when outbox is
@@ -59,7 +60,7 @@ func (e *Enricher) persistEnriched(
 		return err
 	}
 	for _, t := range selected {
-		if _, err := e.outbox.Insert(ctx, tx, repo.OutboxRow{
+		if _, err := e.outbox.Insert(ctx, tx, outboxrepo.OutboxRow{
 			FeedbackID:        s.ID,
 			TenantID:          s.TenantID,
 			DestinationType:   t.DestinationType,
@@ -93,26 +94,26 @@ func (e *Enricher) persistEnriched(
 // New outbox-routed dispatchers add themselves here and grow a sender in
 // service/outbox_worker.go's sendByDestType. Sprint 1 adds github-issue.
 var outboxDestTypes = map[string]bool{
-	repo.DestRawWebhook:  true,
-	repo.DestGitHubIssue: true,
+	notifytarget.DestRawWebhook:  true,
+	notifytarget.DestGitHubIssue: true,
 }
 
 // selectOutboxTargets returns the destination rows that should receive
 // an outbox row for this snapshot. The audience semantics (pool / radar /
 // all) apply uniformly across dest types; only the set of "outbox-aware"
 // dest types is filtered here.
-func selectOutboxTargets(targets []repo.NotifyTarget, s domain.Snapshot) []repo.NotifyTarget {
-	out := make([]repo.NotifyTarget, 0, len(targets))
+func selectOutboxTargets(targets []notifytarget.NotifyTarget, s domain.Snapshot) []notifytarget.NotifyTarget {
+	out := make([]notifytarget.NotifyTarget, 0, len(targets))
 	for _, t := range targets {
 		if !outboxDestTypes[t.DestinationType] {
 			continue
 		}
 		switch t.Audience {
-		case repo.AudienceAll:
+		case notifytarget.AudienceAll:
 			out = append(out, t)
-		case repo.AudiencePool:
+		case notifytarget.AudiencePool:
 			out = append(out, t)
-		case repo.AudienceRadar:
+		case notifytarget.AudienceRadar:
 			if s.IsHighSeverity() {
 				out = append(out, t)
 			}

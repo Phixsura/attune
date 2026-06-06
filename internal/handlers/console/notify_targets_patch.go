@@ -14,7 +14,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/logext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
 // Patch handles PATCH /fb/v1/console/notify-targets/{id}.
@@ -41,7 +41,7 @@ func (h *NotifyTargetsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 
 	cur, err := h.repo.GetByID(ctx, auth.TenantID, id)
 	if err != nil {
-		if errors.Is(err, repo.ErrNotifyTargetNotFound) {
+		if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
 			respondError(ctx, w, http.StatusNotFound, "not_found",
@@ -89,14 +89,14 @@ func (h *NotifyTargetsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.UpdateByID(ctx, auth.TenantID, id, *cur); err != nil {
-		if errors.Is(err, repo.ErrNotifyTargetConflict) {
+		if errors.Is(err, notifytarget.ErrNotifyTargetConflict) {
 			logext.Warnf(ctx, "[%s] reject: conflict,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
 			respondError(ctx, w, http.StatusConflict, "conflict",
 				"audience 与同 destination_type 下另一目标冲突；改回去或先删那条")
 			return
 		}
-		if errors.Is(err, repo.ErrNotifyTargetNotFound) {
+		if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found pre-update,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
 			respondError(ctx, w, http.StatusNotFound, "not_found", "通知目标在更新前被删除")

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
 func TestModuleJaccard(t *testing.T) {
@@ -57,7 +57,7 @@ func TestSplitModules(t *testing.T) {
 
 func TestScoreRow_AllMatch(t *testing.T) {
 	rep := &EvalReport{}
-	old := repo.SampleRow{
+	old := feedback.SampleRow{
 		ID: 1, Kind: "bug", Severity: "P1", Modules: []string{"剧本"},
 	}
 	fresh := domain.Enriched{
@@ -80,7 +80,7 @@ func TestScoreRow_AllMatch(t *testing.T) {
 
 func TestScoreRow_KindDiffPushesMismatch(t *testing.T) {
 	rep := &EvalReport{}
-	old := repo.SampleRow{ID: 7, Kind: "bug", Severity: "P1"}
+	old := feedback.SampleRow{ID: 7, Kind: "bug", Severity: "P1"}
 	fresh := domain.Enriched{Kind: "feature", Severity: "P1"}
 	scoreRow(rep, old, fresh)
 	if rep.KindMatches != 0 {

@@ -1,4 +1,4 @@
-package repo
+package outbox
 
 import (
 	"context"
@@ -67,7 +67,8 @@ func (r *OutboxRepo) Insert(
 ) (int64, error) {
 	const where = "repo.OutboxRepo.Insert"
 	var id int64
-	err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(
+		ctx, `
 		INSERT INTO notify_outbox
 		  (feedback_id, tenant_id, destination_type, destination_target,
 		   audience, payload, status, trace_id)
@@ -201,7 +202,8 @@ func (r *OutboxRepo) MarkDead(ctx context.Context, id int64, reason string) erro
 //
 // Returns the number of rows marked dead.
 func (r *OutboxRepo) PruneStalePending(ctx context.Context, before time.Time, reason string) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.pool.Exec(
+		ctx, `
 		UPDATE notify_outbox
 		   SET status      = 'dead',
 		       dead_reason = $2,

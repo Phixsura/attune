@@ -12,32 +12,32 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
 // fakeNotifyRepo implements notifyTargetRepo for tests. Each method
 // records the last invocation arguments + returns the configured stub.
 type fakeNotifyRepo struct {
-	getRow *repo.NotifyTarget
+	getRow *notifytarget.NotifyTarget
 	getErr error
 
 	updateErr        error
-	updateCalledWith *repo.NotifyTarget
+	updateCalledWith *notifytarget.NotifyTarget
 }
 
-func (f *fakeNotifyRepo) ListByTenant(_ context.Context, _ string) ([]repo.NotifyTarget, error) {
+func (f *fakeNotifyRepo) ListByTenant(_ context.Context, _ string) ([]notifytarget.NotifyTarget, error) {
 	return nil, nil
 }
 
-func (f *fakeNotifyRepo) Insert(_ context.Context, _ repo.NotifyTarget) (uuid.UUID, error) {
+func (f *fakeNotifyRepo) Insert(_ context.Context, _ notifytarget.NotifyTarget) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
 
-func (f *fakeNotifyRepo) GetByID(_ context.Context, _ string, _ uuid.UUID) (*repo.NotifyTarget, error) {
+func (f *fakeNotifyRepo) GetByID(_ context.Context, _ string, _ uuid.UUID) (*notifytarget.NotifyTarget, error) {
 	return f.getRow, f.getErr
 }
 
-func (f *fakeNotifyRepo) UpdateByID(_ context.Context, _ string, _ uuid.UUID, t repo.NotifyTarget) error {
+func (f *fakeNotifyRepo) UpdateByID(_ context.Context, _ string, _ uuid.UUID, t notifytarget.NotifyTarget) error {
 	tCopy := t
 	f.updateCalledWith = &tCopy
 	return f.updateErr
@@ -65,7 +65,7 @@ func authCtxRequest(method, body string, id uuid.UUID) *http.Request {
 func TestPatch_Happy(t *testing.T) {
 	id := uuid.New()
 	fake := &fakeNotifyRepo{
-		getRow: &repo.NotifyTarget{
+		getRow: &notifytarget.NotifyTarget{
 			ID:              id,
 			TenantID:        "tenant-1",
 			DestinationType: "raw-webhook",
@@ -110,7 +110,7 @@ func TestPatch_Happy(t *testing.T) {
 
 func TestPatch_404_GetReturnsNotFound(t *testing.T) {
 	id := uuid.New()
-	fake := &fakeNotifyRepo{getErr: repo.ErrNotifyTargetNotFound}
+	fake := &fakeNotifyRepo{getErr: notifytarget.ErrNotifyTargetNotFound}
 	h := NewNotifyTargetsHandler(fake)
 
 	w := httptest.NewRecorder()
@@ -127,7 +127,7 @@ func TestPatch_404_GetReturnsNotFound(t *testing.T) {
 func TestPatch_409_UpdateConflict(t *testing.T) {
 	id := uuid.New()
 	fake := &fakeNotifyRepo{
-		getRow: &repo.NotifyTarget{
+		getRow: &notifytarget.NotifyTarget{
 			ID:              id,
 			TenantID:        "tenant-1",
 			DestinationType: "raw-webhook",
@@ -135,7 +135,7 @@ func TestPatch_409_UpdateConflict(t *testing.T) {
 			URL:             "https://example.com/x",
 			TimeoutSeconds:  10,
 		},
-		updateErr: repo.ErrNotifyTargetConflict,
+		updateErr: notifytarget.ErrNotifyTargetConflict,
 	}
 	h := NewNotifyTargetsHandler(fake)
 

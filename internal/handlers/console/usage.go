@@ -7,7 +7,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/logext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
 // UsageHandler serves GET /fb/v1/console/usage. Phase 1 ships only the
@@ -15,10 +15,10 @@ import (
 // `granularity` + `range` fields are silently ignored until billing surfaces
 // real choices.
 type UsageHandler struct {
-	repo *repo.FeedbackRepo
+	repo *feedback.FeedbackRepo
 }
 
-func NewUsageHandler(r *repo.FeedbackRepo) *UsageHandler {
+func NewUsageHandler(r *feedback.FeedbackRepo) *UsageHandler {
 	return &UsageHandler{repo: r}
 }
 
@@ -35,7 +35,7 @@ func (h *UsageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	buckets, err := h.repo.UsageByDay(ctx, auth.TenantID, periodStart, periodEnd)
 	if err != nil {
 		slog.ErrorContext(ctx, "usage", "err", err, "tenant_id", auth.TenantID)
-		logext.Errorf(ctx, "[%s] repo.UsageByDay failed,tenant_id:%s,err:%+v",
+		logext.Errorf(ctx, "[%s] feedback.UsageByDay failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respondError(ctx, w, http.StatusInternalServerError, "internal", "查询用量失败")
 		return

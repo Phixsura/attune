@@ -11,7 +11,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/logext"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
@@ -25,14 +25,14 @@ import (
 // consistency mode is the cheap automated check; score-human is the
 // ground-truth measure for对外宣传.
 type Evaluator struct {
-	repo     *repo.FeedbackRepo
+	repo     *feedback.FeedbackRepo
 	enricher *enrich.Enricher
 }
 
 // NewEvaluator wires the repo for sampling and the enricher's Classify
 // for re-running LLM. enricher must be non-nil — eval is meaningless
 // without an LLM connection.
-func NewEvaluator(r *repo.FeedbackRepo, e *enrich.Enricher) *Evaluator {
+func NewEvaluator(r *feedback.FeedbackRepo, e *enrich.Enricher) *Evaluator {
 	return &Evaluator{repo: r, enricher: e}
 }
 
@@ -103,7 +103,7 @@ func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample
 }
 
 // ExportForHuman writes a CSV that a human reviewer fills in. Columns
-// match repo.SampleRow + four blank human_* columns the reviewer fills.
+// match feedback.SampleRow + four blank human_* columns the reviewer fills.
 //
 //	id, content, ai_kind, ai_severity, ai_modules, ai_priority,
 //	human_kind, human_severity, human_modules, human_notes
@@ -174,7 +174,7 @@ func (ev *Evaluator) ScoreHuman(ctx context.Context, r io.Reader) (*EvalReport, 
 			continue
 		}
 		id, _ := strconv.ParseInt(rec[idx["id"]], 10, 64)
-		row := repo.SampleRow{
+		row := feedback.SampleRow{
 			ID:       id,
 			Content:  safeColumn(rec, idx, "content"),
 			Kind:     rec[idx["ai_kind"]],
@@ -193,7 +193,7 @@ func (ev *Evaluator) ScoreHuman(ctx context.Context, r io.Reader) (*EvalReport, 
 	return report, nil
 }
 
-func scoreRow(rep *EvalReport, old repo.SampleRow, fresh domain.Enriched) {
+func scoreRow(rep *EvalReport, old feedback.SampleRow, fresh domain.Enriched) {
 	jaccard := moduleJaccard(old.Modules, fresh.Modules)
 	rep.ModuleSumIoU += jaccard
 	kindMatch := old.Kind == fresh.Kind

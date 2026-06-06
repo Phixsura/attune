@@ -9,7 +9,9 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/outbox"
 )
 
@@ -57,7 +59,7 @@ func runDigestSend(args []string) error {
 	}
 	defer pool.Close()
 
-	tenants := repo.NewTenant(pool)
+	tenants := tenant.NewTenant(pool)
 	tenantID, err := tenants.ResolveSlug(ctx, *slug)
 	if err != nil {
 		return fmt.Errorf("resolve tenant: %w", err)
@@ -69,8 +71,8 @@ func runDigestSend(args []string) error {
 
 	svc := outbox.NewDigestService(
 		tenants,
-		repo.NewFeedback(pool),
-		repo.NewNotifyTarget(pool),
+		feedback.NewFeedback(pool),
+		notifytarget.NewNotifyTarget(pool),
 	)
 	if err := svc.SendForTenant(ctx, tenantID, t.Slug, t.Name); err != nil {
 		return err

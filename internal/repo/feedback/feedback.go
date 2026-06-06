@@ -2,7 +2,7 @@
 // statement that touches user_feedback and exposes only typed methods
 // to service/. Handlers and notifiers MUST NOT import this package —
 // they go through service.
-package repo
+package feedback
 
 import (
 	"context"
@@ -44,7 +44,8 @@ func (r *FeedbackRepo) Insert(ctx context.Context, tenantID, userID string, in d
 		sourceMetaJSON = b
 	}
 	var id int64
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		INSERT INTO user_feedback
 		  (user_id, tenant_id, type, content, page_url, attachments, source, source_meta)
 		VALUES
@@ -92,7 +93,8 @@ type EnrichInput struct {
 // Snapshot need. Assumes the caller just claimed the row.
 func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInput, error) {
 	var in EnrichInput
-	err := r.pool.QueryRow(ctx,
+	err := r.pool.QueryRow(
+		ctx,
 		`SELECT content, source, user_id, tenant_id FROM user_feedback WHERE id=$1`, id,
 	).Scan(&in.Content, &in.Source, &in.UserID, &in.TenantID)
 	if err != nil {
@@ -121,7 +123,8 @@ const markDoneSQL = `
 // other writes (e.g. outbox insertion).
 func (r *FeedbackRepo) MarkDone(ctx context.Context, id int64, e domain.Enriched) error {
 	modulesJSON, _ := json.Marshal(e.Modules)
-	if _, err := r.pool.Exec(ctx, markDoneSQL,
+	if _, err := r.pool.Exec(
+		ctx, markDoneSQL,
 		e.Title, e.Kind, modulesJSON, e.Severity, e.Priority, id,
 	); err != nil {
 		return fmt.Errorf("update enrichment row %d: %w", id, err)
@@ -135,7 +138,8 @@ func (r *FeedbackRepo) MarkDone(ctx context.Context, id int64, e domain.Enriched
 // queued", anything else is undefined state).
 func (r *FeedbackRepo) MarkDoneTx(ctx context.Context, tx pgx.Tx, id int64, e domain.Enriched) error {
 	modulesJSON, _ := json.Marshal(e.Modules)
-	if _, err := tx.Exec(ctx, markDoneSQL,
+	if _, err := tx.Exec(
+		ctx, markDoneSQL,
 		e.Title, e.Kind, modulesJSON, e.Severity, e.Priority, id,
 	); err != nil {
 		return fmt.Errorf("update enrichment row %d (tx): %w", id, err)

@@ -1,4 +1,4 @@
-package repo
+package tenant
 
 import (
 	"context"
@@ -47,7 +47,8 @@ func (r *TenantUserRepo) Upsert(
 		role = "member"
 	}
 	var id string
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		INSERT INTO tenant_users (tenant_id, open_id, name, avatar_url, role, last_seen_at)
 		VALUES ($1, $2, $3, $4, $5, NOW())
 		ON CONFLICT (tenant_id, open_id) DO UPDATE
@@ -69,7 +70,8 @@ func (r *TenantUserRepo) Upsert(
 // Lark identity we don't want leaking into our session payload).
 func (r *TenantUserRepo) GetByID(ctx context.Context, id string) (*TenantUser, error) {
 	var u TenantUser
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		SELECT id, tenant_id, open_id, name, avatar_url, role, is_active,
 		       created_at, last_seen_at
 		  FROM tenant_users
@@ -90,7 +92,8 @@ func (r *TenantUserRepo) GetByID(ctx context.Context, id string) (*TenantUser, e
 // can show "active users this month" without a separate analytics table.
 // Failures are swallowed by the caller (it's an observability nicety).
 func (r *TenantUserRepo) TouchLastSeen(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.pool.Exec(
+		ctx,
 		`UPDATE tenant_users SET last_seen_at = NOW() WHERE id = $1`, id,
 	)
 	return err

@@ -3,7 +3,7 @@
 // (CLAUDE.md 律 2). The list/scan/insert path + type + constants stay in
 // notify_targets.go; these are the tenant-scoped single-row operations
 // the Wave 2 console drives (read one, delete one, update one).
-package repo
+package notifytarget
 
 import (
 	"context"
@@ -20,7 +20,8 @@ func (r *NotifyTargetRepo) GetByID(
 	ctx context.Context, tenantID string, id uuid.UUID,
 ) (*NotifyTarget, error) {
 	var t NotifyTarget
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
 		       last_failure_at, last_error
 		  FROM tenant_notify_targets
@@ -45,7 +46,8 @@ func (r *NotifyTargetRepo) GetByID(
 func (r *NotifyTargetRepo) Delete(
 	ctx context.Context, tenantID string, id uuid.UUID,
 ) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.pool.Exec(
+		ctx,
 		`DELETE FROM tenant_notify_targets WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
 	)
@@ -69,7 +71,8 @@ func (r *NotifyTargetRepo) Delete(
 func (r *NotifyTargetRepo) UpdateByID(
 	ctx context.Context, tenantID string, id uuid.UUID, t NotifyTarget,
 ) error {
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.pool.Exec(
+		ctx, `
 		UPDATE tenant_notify_targets
 		   SET audience = $3, url = $4, secret = $5,
 		       timeout_seconds = $6, disabled = $7,
@@ -97,7 +100,8 @@ func (r *NotifyTargetRepo) GetByTenantAudience(
 	ctx context.Context, tenantID, destType, audience string,
 ) (*NotifyTarget, error) {
 	var t NotifyTarget
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
 		       last_failure_at, last_error
 		  FROM tenant_notify_targets

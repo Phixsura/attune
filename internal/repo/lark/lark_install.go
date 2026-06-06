@@ -1,4 +1,4 @@
-package repo
+package lark
 
 import (
 	"context"
@@ -43,7 +43,8 @@ func NewLarkInstallRepo(pool *pgxpool.Pool) *LarkInstallRepo { return &LarkInsta
 // (token rotation also goes through here when refresh succeeds).
 func (r *LarkInstallRepo) Upsert(ctx context.Context, install *LarkInstall) error {
 	const where = "repo.LarkInstallRepo.Upsert"
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.pool.Exec(
+		ctx, `
 		INSERT INTO tenant_lark_install (
 			tenant_id, lark_tenant_key, app_id,
 			access_token, access_token_expires_at,
@@ -77,7 +78,8 @@ func (r *LarkInstallRepo) Upsert(ctx context.Context, install *LarkInstall) erro
 
 func (r *LarkInstallRepo) Get(ctx context.Context, tenantID string) (*LarkInstall, error) {
 	var i LarkInstall
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		SELECT tenant_id, lark_tenant_key, app_id,
 		       access_token, access_token_expires_at,
 		       refresh_token, refresh_token_expires_at,
@@ -104,7 +106,8 @@ func (r *LarkInstallRepo) GetByLarkTenantKey(
 	ctx context.Context, larkTenantKey string,
 ) (*LarkInstall, error) {
 	var i LarkInstall
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		SELECT tenant_id, lark_tenant_key, app_id,
 		       access_token, access_token_expires_at,
 		       refresh_token, refresh_token_expires_at,

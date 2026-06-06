@@ -9,7 +9,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
 // runTenant dispatches `attune tenant <verb>` subcommands. Wave 1.2
@@ -54,9 +54,9 @@ func runTenantCreate(args []string) error {
 	}
 	defer pool.Close()
 
-	tenants := repo.NewTenant(pool)
+	tenants := tenant.NewTenant(pool)
 	id, err := tenants.Create(ctx, *slug, *name)
-	if errors.Is(err, repo.ErrTenantSlugTaken) {
+	if errors.Is(err, tenant.ErrTenantSlugTaken) {
 		return err
 	}
 	if err != nil {

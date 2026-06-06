@@ -3,7 +3,7 @@
 // (CLAUDE.md 律 2). These power the dashboard widgets + weekly digest
 // (usage bars, kind donut, top-modules line); the list/detail read path
 // stays in feedback_console.go.
-package repo
+package feedback
 
 import (
 	"context"
@@ -27,7 +27,8 @@ type UsageBucket struct {
 func (r *FeedbackRepo) UsageByDay(
 	ctx context.Context, tenantID string, from, to time.Time,
 ) ([]UsageBucket, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.pool.Query(
+		ctx, `
 		SELECT date_trunc('day', created_at) AS bucket, COUNT(*)
 		  FROM user_feedback
 		 WHERE tenant_id = $1
@@ -59,7 +60,8 @@ func (r *FeedbackRepo) UsageByDay(
 func (r *FeedbackRepo) KindCounts(
 	ctx context.Context, tenantID string, from, to time.Time,
 ) (map[string]int64, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.pool.Query(
+		ctx, `
 		SELECT COALESCE(enriched_kind, 'unknown') AS kind, COUNT(*)
 		  FROM user_feedback
 		 WHERE tenant_id = $1
@@ -97,7 +99,8 @@ func (r *FeedbackRepo) TopModulesByTenant(
 	if n <= 0 {
 		n = 3
 	}
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.pool.Query(
+		ctx, `
 		SELECT module, COUNT(*) AS c
 		  FROM user_feedback,
 		       LATERAL jsonb_array_elements_text(COALESCE(enriched_modules, '[]'::jsonb)) AS module

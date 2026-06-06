@@ -13,7 +13,8 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/lark"
 	"github.com/Phixsura/attune/internal/logext"
-	"github.com/Phixsura/attune/internal/repo"
+	larkrepo "github.com/Phixsura/attune/internal/repo/lark"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
 // OAuthHandler wires /install/start + /install/callback. It owns:
@@ -28,9 +29,9 @@ import (
 type OAuthHandler struct {
 	signer       *Signer
 	lark         *lark.Client
-	tenants      *repo.TenantRepo
-	users        *repo.TenantUserRepo
-	installs     *repo.LarkInstallRepo
+	tenants      *tenant.TenantRepo
+	users        *tenant.TenantUserRepo
+	installs     *larkrepo.LarkInstallRepo
 	appID        string
 	baseURL      string // origin where /console lives, e.g. https://attune.app
 	authorizeURL string // Lark authorize endpoint
@@ -39,9 +40,9 @@ type OAuthHandler struct {
 func NewOAuthHandler(
 	signer *Signer,
 	larkClient *lark.Client,
-	tenants *repo.TenantRepo,
-	users *repo.TenantUserRepo,
-	installs *repo.LarkInstallRepo,
+	tenants *tenant.TenantRepo,
+	users *tenant.TenantUserRepo,
+	installs *larkrepo.LarkInstallRepo,
 	appID, baseURL string,
 ) *OAuthHandler {
 	return &OAuthHandler{
@@ -170,7 +171,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	// 5. Persist Lark install (tokens for outbound API calls).
 	now := time.Now()
-	if err := h.installs.Upsert(ctx, &repo.LarkInstall{
+	if err := h.installs.Upsert(ctx, &larkrepo.LarkInstall{
 		TenantID:              tenantID,
 		LarkTenantKey:         tok.TenantKey,
 		AppID:                 h.appID,

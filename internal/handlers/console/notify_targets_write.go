@@ -13,7 +13,7 @@ import (
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
 // Delete handles DELETE /fb/v1/console/notify-targets/{id}.
@@ -29,7 +29,7 @@ func (h *NotifyTargetsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,id:%s", where, auth.TenantID, id)
 	if err := h.repo.Delete(ctx, auth.TenantID, id); err != nil {
-		if errors.Is(err, repo.ErrNotifyTargetNotFound) {
+		if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
 			respondError(ctx, w, http.StatusNotFound, "not_found", "通知目标不存在或不属于当前 tenant")
@@ -60,7 +60,7 @@ func (h *NotifyTargetsHandler) Test(w http.ResponseWriter, r *http.Request) {
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,id:%s", where, auth.TenantID, id)
 	target, err := h.repo.GetByID(ctx, auth.TenantID, id)
 	if err != nil {
-		if errors.Is(err, repo.ErrNotifyTargetNotFound) {
+		if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
 			respondError(ctx, w, http.StatusNotFound, "not_found", "通知目标不存在或不属于当前 tenant")

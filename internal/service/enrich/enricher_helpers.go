@@ -13,14 +13,14 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
 // persistIgnored marks the row done with a sentinel "ignored" Enriched
 // so downstream queries can filter it out. Does NOT fan out — silence
 // is the right outcome for noise. Observability still records the row
 // (via the triage_decisions counter) so PMs can audit the ignore rate.
-func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *repo.EnrichInput, reason string) error {
+func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.EnrichInput, reason string) error {
 	enriched := domain.Enriched{
 		Title:     "[triage-ignored]",
 		Kind:      "other",
@@ -44,7 +44,7 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *repo.Enric
 // per-tenant rule and produced a full Enriched without consulting the
 // LLM. Same downstream behavior as runFullEnrich (persist + fan out),
 // just without the LLM call.
-func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *repo.EnrichInput, enriched domain.Enriched) error {
+func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedback.EnrichInput, enriched domain.Enriched) error {
 	enriched.Priority = domain.SeverityWeight[enriched.Severity]
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
 	if err := e.persistEnriched(ctx, snapshot, enriched); err != nil {

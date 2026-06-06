@@ -11,7 +11,8 @@ import (
 
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
 // selfReportDead pushes a one-shot text card to the tenant's lark-bot
@@ -20,9 +21,9 @@ import (
 //     bot would be confusing; alert-of-alert is mostly noise);
 //   - the tenant has no active lark-bot configured;
 //   - the lark-bot send itself errors (we log + carry on, no recursion).
-func (w *OutboxWorker) selfReportDead(ctx context.Context, row repo.OutboxRow, reason string) {
+func (w *OutboxWorker) selfReportDead(ctx context.Context, row outboxrepo.OutboxRow, reason string) {
 	const where = "service.OutboxWorker.selfReportDead"
-	if row.DestinationType == repo.DestLarkBot {
+	if row.DestinationType == notifytarget.DestLarkBot {
 		return // alerting a sibling lark-bot is noise
 	}
 	bots, err := w.targets.ListLarkBots(ctx, row.TenantID)

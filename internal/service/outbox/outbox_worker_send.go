@@ -18,7 +18,8 @@ import (
 
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
 // sendByDestType is the per-destination switchboard. The outbox row's
@@ -28,13 +29,13 @@ import (
 // in internal/notify/.
 func (w *OutboxWorker) sendByDestType(
 	ctx context.Context,
-	row repo.OutboxRow,
-	target *repo.NotifyTarget,
+	row outboxrepo.OutboxRow,
+	target *notifytarget.NotifyTarget,
 ) error {
 	switch row.DestinationType {
-	case repo.DestRawWebhook:
+	case notifytarget.DestRawWebhook:
 		return w.sendRawWebhook(ctx, row, target)
-	case repo.DestGitHubIssue:
+	case notifytarget.DestGitHubIssue:
 		return notify.SendGitHubIssue(ctx, w.transport, target.URL, target.Secret, row.Payload)
 	default:
 		// Should be unreachable because processRow filters first, but
@@ -49,8 +50,8 @@ func (w *OutboxWorker) sendByDestType(
 // Behavior is unchanged from before sendByDestType existed.
 func (w *OutboxWorker) sendRawWebhook(
 	ctx context.Context,
-	row repo.OutboxRow,
-	target *repo.NotifyTarget,
+	row outboxrepo.OutboxRow,
+	target *notifytarget.NotifyTarget,
 ) error {
 	const where = "service.OutboxWorker.sendRawWebhook"
 	label := fmt.Sprintf("outbox-%d", row.ID)
@@ -87,7 +88,7 @@ func signRawBody(body []byte, secret string) string {
 // checkOutboxResponse mirrors notify/raw_webhook.go classification for
 // HTTP statuses. Kept here so outbox worker doesn't depend on notify's
 // internal closure.
-func checkOutboxResponse(label string, row repo.OutboxRow) notify.ResponseChecker {
+func checkOutboxResponse(label string, row outboxrepo.OutboxRow) notify.ResponseChecker {
 	const where = "service.checkOutboxResponse"
 	return func(status int, body []byte) error {
 		// 上游响应日志(每 attempt 都有,truncate 1024 字节)。

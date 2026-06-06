@@ -13,16 +13,16 @@ import (
 
 	"github.com/Phixsura/attune/internal/logext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
-// notifyTargetRepo is the subset of *repo.NotifyTargetRepo that the console
+// notifyTargetRepo is the subset of *notifytarget.NotifyTargetRepo that the console
 // handler uses. Defined here (consumer side) so unit tests can pass a fake.
 type notifyTargetRepo interface {
-	ListByTenant(ctx context.Context, tenantID string) ([]repo.NotifyTarget, error)
-	Insert(ctx context.Context, t repo.NotifyTarget) (uuid.UUID, error)
-	GetByID(ctx context.Context, tenantID string, id uuid.UUID) (*repo.NotifyTarget, error)
-	UpdateByID(ctx context.Context, tenantID string, id uuid.UUID, t repo.NotifyTarget) error
+	ListByTenant(ctx context.Context, tenantID string) ([]notifytarget.NotifyTarget, error)
+	Insert(ctx context.Context, t notifytarget.NotifyTarget) (uuid.UUID, error)
+	GetByID(ctx context.Context, tenantID string, id uuid.UUID) (*notifytarget.NotifyTarget, error)
+	UpdateByID(ctx context.Context, tenantID string, id uuid.UUID, t notifytarget.NotifyTarget) error
 	Delete(ctx context.Context, tenantID string, id uuid.UUID) error
 }
 
@@ -36,7 +36,7 @@ func NewNotifyTargetsHandler(r notifyTargetRepo) *NotifyTargetsHandler {
 }
 
 // toNotifyProto drops Secret (write-only) + TenantID (known via session).
-func toNotifyProto(row repo.NotifyTarget) *attunev1.NotifyTarget {
+func toNotifyProto(row notifytarget.NotifyTarget) *attunev1.NotifyTarget {
 	t := &attunev1.NotifyTarget{
 		Id:              row.ID.String(),
 		DestinationType: row.DestinationType,
@@ -63,7 +63,7 @@ func (h *NotifyTargetsHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.repo.ListByTenant(ctx, auth.TenantID)
 	if err != nil {
 		slog.ErrorContext(ctx, "notify-targets list", "err", err, "tenant_id", auth.TenantID)
-		logext.Errorf(ctx, "[%s] repo.ListByTenant failed,tenant_id:%s,err:%+v",
+		logext.Errorf(ctx, "[%s] apikey.ListByTenant failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respondError(ctx, w, http.StatusInternalServerError, "internal", "查询通知目标失败")
 		return
@@ -113,7 +113,7 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Phase 1 only ships lark-bot + raw-webhook adapters.
-	if nreq.DestinationType == repo.DestSlackBot || nreq.DestinationType == repo.DestEmail {
+	if nreq.DestinationType == notifytarget.DestSlackBot || nreq.DestinationType == notifytarget.DestEmail {
 		logext.Warnf(ctx, "[%s] reject: not implemented,tenant_id:%s,dest:%s",
 			where, auth.TenantID, nreq.DestinationType)
 		respondError(ctx, w, http.StatusNotImplemented, "not_implemented",
@@ -123,7 +123,7 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,dest:%s,audience:%s",
 		where, auth.TenantID, nreq.DestinationType, nreq.Audience)
 
-	target := repo.NotifyTarget{
+	target := notifytarget.NotifyTarget{
 		TenantID:        auth.TenantID,
 		DestinationType: nreq.DestinationType,
 		Audience:        nreq.Audience,
@@ -134,7 +134,7 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.repo.Insert(ctx, target)
 	if err != nil {
-		if errors.Is(err, repo.ErrNotifyTargetConflict) {
+		if errors.Is(err, notifytarget.ErrNotifyTargetConflict) {
 			logext.Warnf(ctx, "[%s] reject: conflict,tenant_id:%s,dest:%s,audience:%s",
 				where, auth.TenantID, nreq.DestinationType, nreq.Audience)
 			respondError(ctx, w, http.StatusConflict, "conflict",
@@ -161,7 +161,7 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 		return errors.New("destination_type 不能为空")
 	}
 	switch req.DestinationType {
-	case repo.DestLarkBot, repo.DestRawWebhook, repo.DestSlackBot, repo.DestEmail:
+	case notifytarget.DestLarkBot, notifytarget.DestRawWebhook, notifytarget.DestSlackBot, notifytarget.DestEmail:
 	default:
 		return errors.New("destination_type 取值非法")
 	}
@@ -178,8 +178,8 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 	}
 	switch req.Audience {
 	case "":
-		req.Audience = repo.AudienceAll
-	case repo.AudiencePool, repo.AudienceRadar, repo.AudienceAll:
+		req.Audience = notifytarget.AudienceAll
+	case notifytarget.AudiencePool, notifytarget.AudienceRadar, notifytarget.AudienceAll:
 	default:
 		return errors.New("audience 取值非法")
 	}

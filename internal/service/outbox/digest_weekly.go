@@ -26,7 +26,9 @@ import (
 
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
 const (
@@ -37,13 +39,13 @@ const (
 // DigestService bundles every dep needed to compose + send a digest.
 // Scheduler goroutine owns one instance; CLI subcommand reuses Send.
 type DigestService struct {
-	tenants  *repo.TenantRepo
-	feedback *repo.FeedbackRepo
-	targets  *repo.NotifyTargetRepo
+	tenants  *tenant.TenantRepo
+	feedback *feedback.FeedbackRepo
+	targets  *notifytarget.NotifyTargetRepo
 }
 
 func NewDigestService(
-	t *repo.TenantRepo, f *repo.FeedbackRepo, n *repo.NotifyTargetRepo,
+	t *tenant.TenantRepo, f *feedback.FeedbackRepo, n *notifytarget.NotifyTargetRepo,
 ) *DigestService {
 	return &DigestService{tenants: t, feedback: f, targets: n}
 }

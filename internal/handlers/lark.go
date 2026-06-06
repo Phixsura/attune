@@ -13,7 +13,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/lark"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/ingest"
 )
 
@@ -36,7 +36,7 @@ type LarkHandler struct {
 // tenant repo; pass an empty slug to keep the handler disabled.
 func NewLarkHandler(
 	ctx context.Context,
-	tenants *repo.TenantRepo,
+	tenants *tenant.TenantRepo,
 	ingestor *ingest.Ingestor,
 	signingSecret, verificationToken, defaultTenantSlug string,
 ) (*LarkHandler, error) {
@@ -49,7 +49,7 @@ func NewLarkHandler(
 		return h, nil
 	}
 	tid, err := tenants.ResolveSlug(ctx, defaultTenantSlug)
-	if errors.Is(err, repo.ErrTenantNotFound) {
+	if errors.Is(err, tenant.ErrTenantNotFound) {
 		return nil, fmt.Errorf("lark: tenant slug %q not found or inactive", defaultTenantSlug)
 	}
 	if err != nil {

@@ -13,7 +13,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/logext"
-	"github.com/Phixsura/attune/internal/repo"
+	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 )
 
 const (
@@ -26,10 +26,10 @@ const (
 // sha256 hashes; the raw value is shown to the operator exactly once
 // at issuance.
 type APIKeys struct {
-	repo *repo.APIKeyRepo
+	repo *apikeyrepo.APIKeyRepo
 }
 
-func NewAPIKeys(r *repo.APIKeyRepo) *APIKeys {
+func NewAPIKeys(r *apikeyrepo.APIKeyRepo) *APIKeys {
 	return &APIKeys{repo: r}
 }
 
@@ -57,7 +57,7 @@ func (s *APIKeys) Issue(ctx context.Context, tenantID, label string) (raw string
 }
 
 // List returns every key (active + revoked) for tenantID, newest first.
-func (s *APIKeys) List(ctx context.Context, tenantID string) ([]repo.APIKeyListRow, error) {
+func (s *APIKeys) List(ctx context.Context, tenantID string) ([]apikeyrepo.APIKeyListRow, error) {
 	return s.repo.ListByTenant(ctx, tenantID)
 }
 
@@ -80,12 +80,12 @@ func (s *APIKeys) Lookup(ctx context.Context, raw string) (tenantID string, keyI
 	}
 	sum := sha256.Sum256([]byte(raw))
 	row, err := s.repo.LookupByHash(ctx, sum[:])
-	if errors.Is(err, repo.ErrAPIKeyNotFound) {
+	if errors.Is(err, apikeyrepo.ErrAPIKeyNotFound) {
 		logext.Warnf(ctx, "[%s] reject: hash not found", where)
 		return "", uuid.Nil, domain.ErrInvalidAPIKey
 	}
 	if err != nil {
-		logext.Errorf(ctx, "[%s] repo.LookupByHash failed,err:%+v", where, err.Error())
+		logext.Errorf(ctx, "[%s] apikey.LookupByHash failed,err:%+v", where, err.Error())
 		return "", uuid.Nil, err
 	}
 	if !hmac.Equal(row.StoredHash, sum[:]) {

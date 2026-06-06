@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
 func snapshotFixture() domain.Snapshot {
@@ -57,10 +57,10 @@ func TestRawWebhook_HappyPath(t *testing.T) {
 	secret := "test-secret-16-or-more-chars"
 	router := NewRawWebhookRouter(
 		NewTransport(nil, NoRetry()),
-		[]repo.NotifyTarget{{
+		[]notifytarget.NotifyTarget{{
 			TenantID:        "test-tenant",
-			DestinationType: repo.DestRawWebhook,
-			Audience:        repo.AudiencePool,
+			DestinationType: notifytarget.DestRawWebhook,
+			Audience:        notifytarget.AudiencePool,
 			URL:             srv.URL,
 			Secret:          secret,
 			TimeoutSeconds:  10,
@@ -108,10 +108,10 @@ func TestRawWebhook_UnknownTenantSilentNoOp(t *testing.T) {
 
 	router := NewRawWebhookRouter(
 		NewTransport(nil, NoRetry()),
-		[]repo.NotifyTarget{{
+		[]notifytarget.NotifyTarget{{
 			TenantID:        "different-tenant",
-			DestinationType: repo.DestRawWebhook,
-			Audience:        repo.AudiencePool,
+			DestinationType: notifytarget.DestRawWebhook,
+			Audience:        notifytarget.AudiencePool,
 			URL:             srv.URL,
 			Secret:          "test-secret-16-or-more-chars",
 		}},
@@ -136,10 +136,10 @@ func TestRawWebhook_AudienceAllMatchesBothPushes(t *testing.T) {
 
 	router := NewRawWebhookRouter(
 		NewTransport(nil, NoRetry()),
-		[]repo.NotifyTarget{{
+		[]notifytarget.NotifyTarget{{
 			TenantID:        "test-tenant",
-			DestinationType: repo.DestRawWebhook,
-			Audience:        repo.AudienceAll,
+			DestinationType: notifytarget.DestRawWebhook,
+			Audience:        notifytarget.AudienceAll,
 			URL:             srv.URL,
 			Secret:          "test-secret-16-or-more-chars",
 		}},
@@ -165,10 +165,10 @@ func TestRawWebhook_4xxIsTerminal(t *testing.T) {
 		NewTransport(nil, RetryPolicy{
 			MaxAttempts: 5, BaseDelay: 1 * time.Millisecond, MaxDelay: 2 * time.Millisecond,
 		}),
-		[]repo.NotifyTarget{{
+		[]notifytarget.NotifyTarget{{
 			TenantID:        "test-tenant",
-			DestinationType: repo.DestRawWebhook,
-			Audience:        repo.AudiencePool,
+			DestinationType: notifytarget.DestRawWebhook,
+			Audience:        notifytarget.AudiencePool,
 			URL:             srv.URL,
 			Secret:          "test-secret-16-or-more-chars",
 		}},
@@ -194,10 +194,10 @@ func TestRawWebhook_5xxRetries(t *testing.T) {
 		NewTransport(nil, RetryPolicy{
 			MaxAttempts: 3, BaseDelay: 1 * time.Millisecond, MaxDelay: 2 * time.Millisecond,
 		}),
-		[]repo.NotifyTarget{{
+		[]notifytarget.NotifyTarget{{
 			TenantID:        "test-tenant",
-			DestinationType: repo.DestRawWebhook,
-			Audience:        repo.AudiencePool,
+			DestinationType: notifytarget.DestRawWebhook,
+			Audience:        notifytarget.AudiencePool,
 			URL:             srv.URL,
 			Secret:          "test-secret-16-or-more-chars",
 		}},

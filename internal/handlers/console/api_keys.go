@@ -12,7 +12,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/logext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/repo"
+	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/service/apikey"
 )
 
@@ -27,7 +27,7 @@ func NewAPIKeysHandler(svc *apikey.APIKeys) *APIKeysHandler {
 	return &APIKeysHandler{svc: svc}
 }
 
-func toProtoAPIKey(row repo.APIKeyListRow) *attunev1.ApiKey {
+func toProtoAPIKey(row apikeyrepo.APIKeyListRow) *attunev1.ApiKey {
 	k := &attunev1.ApiKey{
 		Id:        row.ID.String(),
 		KeyPrefix: row.KeyPrefix,
@@ -112,7 +112,7 @@ func (h *APIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 		logext.Warnf(ctx, "[%s] post-issue list failed,tenant_id:%s,err:%s",
 			where, auth.TenantID, err.Error())
 	}
-	var newRow repo.APIKeyListRow
+	var newRow apikeyrepo.APIKeyListRow
 	for _, row := range rows {
 		if row.ID == id {
 			newRow = row
@@ -143,7 +143,7 @@ func (h *APIKeysHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,key_id:%s", where, auth.TenantID, id)
 	if err := h.svc.Revoke(ctx, auth.TenantID, id); err != nil {
-		if errors.Is(err, repo.ErrAPIKeyNotFound) {
+		if errors.Is(err, apikeyrepo.ErrAPIKeyNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,key_id:%s",
 				where, auth.TenantID, id)
 			respondError(ctx, w, http.StatusNotFound, "not_found", "API key 不存在或不属于当前 tenant")

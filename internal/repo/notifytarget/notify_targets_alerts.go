@@ -3,7 +3,7 @@
 // (CLAUDE.md 律 2). These methods support Phase 3.2 webhook failure
 // visibility — outbox worker calls TouchFailure on markDead and
 // ClearFailure on first successful re-delivery.
-package repo
+package notifytarget
 
 import (
 	"context"
@@ -20,7 +20,8 @@ import (
 func (r *NotifyTargetRepo) TouchFailure(
 	ctx context.Context, tenantID, destType, url, audience, errMsg string,
 ) error {
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.pool.Exec(
+		ctx, `
 		UPDATE tenant_notify_targets
 		   SET last_failure_at = NOW(),
 		       last_error = $5
@@ -41,7 +42,8 @@ func (r *NotifyTargetRepo) TouchFailure(
 func (r *NotifyTargetRepo) ClearFailure(
 	ctx context.Context, tenantID, destType, url, audience string,
 ) error {
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.pool.Exec(
+		ctx, `
 		UPDATE tenant_notify_targets
 		   SET last_failure_at = NULL, last_error = ''
 		 WHERE tenant_id = $1

@@ -11,7 +11,9 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/logext"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
 const (
@@ -46,14 +48,14 @@ const enrichPromptTmpl = `你是产品反馈分类助手。给你一段用户反
 // SetNotifier and SetOutbox are independent; either / both / neither
 // may be wired without code changes elsewhere.
 type Enricher struct {
-	repo     *repo.FeedbackRepo
+	repo     *feedback.FeedbackRepo
 	llm      llmclient.LLMClient
-	notifier Notifier               // optional inline fan-out (Lark)
-	outbox   *repo.OutboxRepo       // optional outbox writer
-	targets  *repo.NotifyTargetRepo // optional, paired with outbox
+	notifier Notifier                       // optional inline fan-out (Lark)
+	outbox   *outboxrepo.OutboxRepo         // optional outbox writer
+	targets  *notifytarget.NotifyTargetRepo // optional, paired with outbox
 }
 
-func NewEnricher(r *repo.FeedbackRepo, llm llmclient.LLMClient) *Enricher {
+func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient) *Enricher {
 	return &Enricher{repo: r, llm: llm}
 }
 
@@ -65,7 +67,7 @@ func (e *Enricher) SetNotifier(n Notifier) { e.notifier = n }
 // When set, every enrich success inserts one outbox row per active
 // matching destination inside the same tx as MarkDone. Both repos
 // must be non-nil or this is a no-op.
-func (e *Enricher) SetOutbox(outbox *repo.OutboxRepo, targets *repo.NotifyTargetRepo) {
+func (e *Enricher) SetOutbox(outbox *outboxrepo.OutboxRepo, targets *notifytarget.NotifyTargetRepo) {
 	e.outbox = outbox
 	e.targets = targets
 }
@@ -125,7 +127,7 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 // runFullEnrich is the pre-Sprint-1.3 path — call the LLM, build the
 // snapshot, persist, fan out. Extracted so the triage switch in
 // EnrichOne stays one expression per branch.
-func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *repo.EnrichInput) error {
+func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.EnrichInput) error {
 	start := time.Now()
 	enriched, err := e.classify(ctx, id, row.Content)
 	if err != nil {

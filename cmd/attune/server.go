@@ -26,7 +26,11 @@ import (
 	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
-	"github.com/Phixsura/attune/internal/repo"
+	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/ingest"
@@ -73,11 +77,11 @@ func runServer() error {
 	defer llm.Close()
 	slog.InfoContext(ctx, "llm backend ready", "endpoint", cfg.LLMOpenAIBaseURL)
 
-	feedbackRepo := repo.NewFeedback(pool)
-	apikeyRepo := repo.NewAPIKey(pool)
-	tenantRepo := repo.NewTenant(pool)
-	notifyTargetRepo := repo.NewNotifyTarget(pool)
-	outboxRepo := repo.NewOutbox(pool)
+	feedbackRepo := feedback.NewFeedback(pool)
+	apikeyRepo := apikeyrepo.NewAPIKey(pool)
+	tenantRepo := tenant.NewTenant(pool)
+	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
+	outboxRepo := outboxrepo.NewOutbox(pool)
 	enricher := enrich.NewEnricher(feedbackRepo, llm)
 	ingestor := ingest.NewIngestor(feedbackRepo, enricher)
 	apiKeys := apikey.NewAPIKeys(apikeyRepo)
