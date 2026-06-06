@@ -2,7 +2,6 @@ import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { AlertTriangle, CheckCircle2, Loader2, Pencil, Trash2, XCircle, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { NotifyTarget, NotifyTestResult } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -12,6 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import type { NotifyTarget } from '@/features/notify-targets/api/list-notify-targets'
+import type { NotifyTestResult } from '@/features/notify-targets/api/test-notify-target'
 
 // Extracted from _authed.notify-targets.tsx to keep that route ≤300 lines
 // (CLAUDE.md 律 2). Pure presentation — no queries, no state; parent

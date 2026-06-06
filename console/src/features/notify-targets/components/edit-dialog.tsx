@@ -1,7 +1,6 @@
 import { Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { NotifyTarget, NotifyTargetPatch } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -20,6 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import type { NotifyTarget } from '@/features/notify-targets/api/list-notify-targets'
+import type { NotifyTargetPatch } from '@/features/notify-targets/api/update-notify-target'
 
 // EditNotifyDialog edits an existing notify-target.
 // destinationType is locked (changing type = different identity; the

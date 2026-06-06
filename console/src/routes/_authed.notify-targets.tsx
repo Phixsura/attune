@@ -4,20 +4,29 @@ import { Bell, CheckCircle2, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { NotifyTarget, NotifyTargetCreate, NotifyTargetPatch } from '@/api/queries'
-import {
-  notifyTargetsQuery,
-  useCreateNotifyTarget,
-  useDeleteNotifyTarget,
-  useTestNotifyTarget,
-  useUpdateNotifyTarget,
-} from '@/api/queries'
 import { EmptyState } from '@/components/empty-state'
-import { CreateNotifyDialog, DeleteNotifyDialog } from '@/components/notify-targets/dialogs'
-import { EditNotifyDialog } from '@/components/notify-targets/edit-dialog'
-import { TargetTable, type TestState } from '@/components/notify-targets/table'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  type NotifyTargetCreate,
+  useCreateNotifyTarget,
+} from '@/features/notify-targets/api/create-notify-target'
+import { useDeleteNotifyTarget } from '@/features/notify-targets/api/delete-notify-target'
+import {
+  type NotifyTarget,
+  notifyTargetsQuery,
+} from '@/features/notify-targets/api/list-notify-targets'
+import { useTestNotifyTarget } from '@/features/notify-targets/api/test-notify-target'
+import {
+  type NotifyTargetPatch,
+  useUpdateNotifyTarget,
+} from '@/features/notify-targets/api/update-notify-target'
+import {
+  CreateNotifyDialog,
+  DeleteNotifyDialog,
+} from '@/features/notify-targets/components/dialogs'
+import { EditNotifyDialog } from '@/features/notify-targets/components/edit-dialog'
+import { TargetTable, type TestState } from '@/features/notify-targets/components/table'
 
 export const Route = createFileRoute('/_authed/notify-targets')({
   component: NotifyTargetsPage,

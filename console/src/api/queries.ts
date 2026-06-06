@@ -1,12 +1,5 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ApiKey, CreateApiKeyResponse, ListApiKeysResponse } from '../proto/attune/v1/api_key'
-import type {
-  CreateNotifyTargetRequest,
-  ListNotifyTargetsResponse,
-  NotifyTarget,
-  TestNotifyTargetResponse,
-  UpdateNotifyTargetRequest,
-} from '../proto/attune/v1/notify_target'
 import type { GetMeResponse } from '../proto/attune/v1/session'
 import type { GetUsageResponse } from '../proto/attune/v1/usage'
 import { api, setCsrfToken } from './client'
@@ -16,15 +9,11 @@ import { api, setCsrfToken } from './client'
 //
 // As of #19's feature-organization refactor, NEW resources colocate their
 // types + queries under src/features/<x>/api/. This file holds only the
-// resources that have not migrated yet (session, api-keys, notify-targets,
-// usage); see commits 4-5 of the proposal for their migration.
+// resources that have not migrated yet (session, api-keys, usage); see
+// commits 4-5 of the proposal for their migration.
 export type SessionMe = GetMeResponse
 export type { ApiKey }
 export type NewApiKey = CreateApiKeyResponse
-export type { NotifyTarget }
-export type NotifyTargetCreate = CreateNotifyTargetRequest
-export type NotifyTargetPatch = Omit<UpdateNotifyTargetRequest, 'id'>
-export type NotifyTestResult = TestNotifyTargetResponse
 export type Usage = GetUsageResponse
 
 // Query options for the current session. Used by route loaders + UI.
@@ -88,63 +77,14 @@ export function useRevokeApiKey() {
 }
 
 // ── Notify targets ─────────────────────────────────────────────────
-
-export const notifyTargetsQuery = () =>
-  queryOptions({
-    queryKey: ['console', 'notify-targets'],
-    queryFn: async ({ signal }) => {
-      const resp = await api<ListNotifyTargetsResponse>('/fb/v1/console/notify-targets', {
-        signal,
-      })
-      return resp.items
-    },
-    staleTime: 30_000,
-  })
-
-export function useCreateNotifyTarget() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: NotifyTargetCreate) =>
-      api<NotifyTarget>('/fb/v1/console/notify-targets', { method: 'POST', body }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['console', 'notify-targets'] })
-    },
-  })
-}
-
-export function useDeleteNotifyTarget() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: string) =>
-      api<void>(`/fb/v1/console/notify-targets/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['console', 'notify-targets'] })
-    },
-  })
-}
-
-// PATCH is sparse — pass only the fields you want to change. Server-side
-// the omitted keys stay as-is; empty `secret` string explicitly clears it.
-export function useUpdateNotifyTarget() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: NotifyTargetPatch }) =>
-      api<NotifyTarget>(`/fb/v1/console/notify-targets/${id}`, {
-        method: 'PATCH',
-        body: patch,
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['console', 'notify-targets'] })
-    },
-  })
-}
-
-export function useTestNotifyTarget() {
-  return useMutation({
-    mutationFn: (id: string) =>
-      api<NotifyTestResult>(`/fb/v1/console/notify-targets/${id}/test`, { method: 'POST' }),
-  })
-}
+//
+// Migrated to src/features/notify-targets/api/ (#19, commit 4 of the
+// feature-organization proposal). See:
+//   - list-notify-targets.ts     (notifyTargetsQuery + NotifyTarget)
+//   - create-notify-target.ts    (useCreateNotifyTarget + NotifyTargetCreate)
+//   - update-notify-target.ts    (useUpdateNotifyTarget + NotifyTargetPatch)
+//   - delete-notify-target.ts    (useDeleteNotifyTarget)
+//   - test-notify-target.ts      (useTestNotifyTarget + NotifyTestResult)
 
 // ── Feedback ─────────────────────────────────────────────────────────
 //

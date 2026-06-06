@@ -1,7 +1,6 @@
 import { Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { NotifyTarget, NotifyTargetCreate } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -20,6 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import type { NotifyTargetCreate } from '@/features/notify-targets/api/create-notify-target'
+import type { NotifyTarget } from '@/features/notify-targets/api/list-notify-targets'
 
 type DestType = 'lark-bot' | 'raw-webhook'
 
