@@ -3,8 +3,6 @@ import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { feedbackDetailQuery } from '@/api/queries'
-import { KindBadge, SeverityBadge } from '@/components/feedback/badges'
 import {
   Sheet,
   SheetContent,
@@ -12,6 +10,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import {
+  type FeedbackDetail,
+  feedbackDetailQuery,
+} from '@/features/feedback/api/get-feedback-detail'
+import { KindBadge, SeverityBadge } from '@/features/feedback/components/badges'
 
 export function FeedbackDetailSheet({
   id,
@@ -54,7 +57,7 @@ export function FeedbackDetailSheet({
   )
 }
 
-function DetailBody({ data }: { data: import('@/api/queries').FeedbackDetail }) {
+function DetailBody({ data }: { data: FeedbackDetail }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-6">

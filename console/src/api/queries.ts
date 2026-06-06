@@ -1,12 +1,6 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ApiKey, CreateApiKeyResponse, ListApiKeysResponse } from '../proto/attune/v1/api_key'
 import type {
-  Feedback,
-  FeedbackDetail,
-  GetFeedbackStatsResponse,
-  ListFeedbackResponse,
-} from '../proto/attune/v1/ingest'
-import type {
   CreateNotifyTargetRequest,
   ListNotifyTargetsResponse,
   NotifyTarget,
@@ -19,6 +13,11 @@ import { api, setCsrfToken } from './client'
 
 // Stable aliases over the ts-proto-generated types so the rest of the console
 // imports names that don't change when the proto evolves.
+//
+// As of #19's feature-organization refactor, NEW resources colocate their
+// types + queries under src/features/<x>/api/. This file holds only the
+// resources that have not migrated yet (session, api-keys, notify-targets,
+// usage); see commits 4-5 of the proposal for their migration.
 export type SessionMe = GetMeResponse
 export type { ApiKey }
 export type NewApiKey = CreateApiKeyResponse
@@ -26,15 +25,7 @@ export type { NotifyTarget }
 export type NotifyTargetCreate = CreateNotifyTargetRequest
 export type NotifyTargetPatch = Omit<UpdateNotifyTargetRequest, 'id'>
 export type NotifyTestResult = TestNotifyTargetResponse
-export type { Feedback, FeedbackDetail }
-export type FeedbackStats = GetFeedbackStatsResponse
 export type Usage = GetUsageResponse
-
-export interface FeedbackListFilters {
-  kind?: string
-  severity?: string
-  q?: string
-}
 
 // Query options for the current session. Used by route loaders + UI.
 //
@@ -156,39 +147,12 @@ export function useTestNotifyTarget() {
 }
 
 // ── Feedback ─────────────────────────────────────────────────────────
-
-// Infinite query for cursor pagination. Each page is one server call;
-// TanStack Query handles page concatenation + de-dup via getPageParam.
-export const feedbackListInfiniteQuery = (filters: FeedbackListFilters) => ({
-  queryKey: ['console', 'feedback', filters] as const,
-  queryFn: async ({ pageParam, signal }: { pageParam: string | null; signal: AbortSignal }) => {
-    const params = new URLSearchParams()
-    if (filters.kind) params.set('kind', filters.kind)
-    if (filters.severity) params.set('severity', filters.severity)
-    if (filters.q) params.set('q', filters.q)
-    if (pageParam) params.set('cursor', pageParam)
-    const qs = params.toString()
-    const url = `/fb/v1/console/feedback${qs ? `?${qs}` : ''}`
-    return api<ListFeedbackResponse>(url, { signal })
-  },
-  initialPageParam: null as string | null,
-  getNextPageParam: (last: ListFeedbackResponse) => last.nextCursor ?? null,
-  staleTime: 15_000,
-})
-
-export const feedbackStatsQuery = () =>
-  queryOptions({
-    queryKey: ['console', 'feedback', 'stats'],
-    queryFn: ({ signal }) => api<FeedbackStats>('/fb/v1/console/feedback/stats', { signal }),
-    staleTime: 60_000,
-  })
-
-export const feedbackDetailQuery = (id: string) =>
-  queryOptions({
-    queryKey: ['console', 'feedback', 'detail', id],
-    queryFn: ({ signal }) => api<FeedbackDetail>(`/fb/v1/console/feedback/${id}`, { signal }),
-    staleTime: 30_000,
-  })
+//
+// Migrated to src/features/feedback/api/ (#19, commit 3 of the
+// feature-organization proposal). See:
+//   - list-feedback-infinite.ts  (feedbackListInfiniteQuery + FeedbackListFilters)
+//   - get-feedback-stats.ts      (feedbackStatsQuery + FeedbackStats)
+//   - get-feedback-detail.ts     (feedbackDetailQuery + FeedbackDetail)
 
 // ── Usage ────────────────────────────────────────────────────────────
 

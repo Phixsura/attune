@@ -5,12 +5,7 @@ import { zhCN } from 'date-fns/locale'
 import { Inbox, Loader2 } from 'lucide-react'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { FeedbackListFilters } from '@/api/queries'
-import { feedbackListInfiniteQuery, feedbackStatsQuery } from '@/api/queries'
 import { EmptyState } from '@/components/empty-state'
-import { KindBadge, SeverityBadge } from '@/components/feedback/badges'
-import { FeedbackDetailSheet } from '@/components/feedback/detail-sheet'
-import { KindDonut } from '@/components/feedback/kind-donut'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -29,6 +24,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
+import {
+  type Feedback,
+  type FeedbackListFilters,
+  feedbackListInfiniteQuery,
+} from '@/features/feedback/api/list-feedback-infinite'
+import { KindBadge, SeverityBadge } from '@/features/feedback/components/badges'
+import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
+import { KindDonut } from '@/features/feedback/components/kind-donut'
 
 export const Route = createFileRoute('/_authed/feedback')({
   component: FeedbackPage,
@@ -195,7 +199,7 @@ function FeedbackTable({
   items,
   onRowClick,
 }: {
-  items: import('@/api/queries').Feedback[]
+  items: Feedback[]
   onRowClick: (id: string) => void
 }) {
   const { t } = useTranslation()
