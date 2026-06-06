@@ -30,6 +30,7 @@ func buildSnapshot(id int64, row *feedback.EnrichInput, e domain.Enriched, at ti
 		Modules:    e.Modules,
 		Severity:   e.Severity,
 		Priority:   e.Priority,
+		Rationale:  e.Rationale,
 		EnrichedAt: at,
 	}
 }
@@ -42,11 +43,14 @@ var jsonObjRe = regexp.MustCompile(`(?s)\{.*\}`)
 // parseEnrichJSON validates and decodes the LLM's reply. Returns a
 // user-facing error string (the eval CLI reports it back to the
 // human auditing accuracy), so keep the messages short and precise.
+// markdownFenceRe strips markdown code fences (case-insensitive, any
+// language tag) so the LLM's ```json / ```JSON / ``` are all handled.
+var markdownFenceRe = regexp.MustCompile("(?is)^```(?:\\w*)\\s*\n?|```\\s*$")
+
 func parseEnrichJSON(s string) (domain.Enriched, error) {
 	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
+	// Strip markdown fences (case-insensitive, any language tag).
+	s = markdownFenceRe.ReplaceAllString(s, "")
 	s = strings.TrimSpace(s)
 	if !strings.HasPrefix(s, "{") {
 		m := jsonObjRe.FindString(s)
@@ -92,5 +96,9 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n]
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
 }

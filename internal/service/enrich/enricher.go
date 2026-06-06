@@ -23,23 +23,6 @@ const (
 	enrichmentSystemUser = "system-feedback-enricher"
 )
 
-const enrichPromptTmpl = `你是产品反馈分类助手。给你一段用户反馈原文，严格只输出一行 JSON 对象（不要 markdown 包裹，不要解释，不要前后空行），字段如下：
-
-{
-  "title": "10-30 字一句话摘要，不要标点结尾",
-  "kind": "bug | feature | ops | question | other 之一",
-  "modules": [识别到的产品模块名字符串数组，没识别到就空数组],
-  "severity": "P0 | P1 | P2 | P3 之一",
-  "rationale": "30 字以内为什么这么打"
-}
-
-严重度判断：P0=阻塞（不能用/丢钱/数据丢失）、P1=严重（关键功能失效但有 workaround）、P2=影响体验、P3=优化建议。
-
-用户反馈原文：
-"""
-%s
-"""`
-
 // Enricher classifies user_feedback rows via the LLM gateway. It owns
 // the claim-then-update loop but holds no SQL itself — repo does.
 //
@@ -108,7 +91,7 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 	}
 	row, err := e.repo.LoadForEnrich(ctx, id)
 	if err != nil {
-		metrics.EnrichDuration.WithLabelValues("unknown", "db_err").Observe(0)
+		metrics.EnrichDuration.WithLabelValues("unknown", "freeform", "db_err").Observe(0)
 		logext.Errorf(ctx, "[%s] load failed,feedback_id:%d,err:%+v",
 			where, id, err.Error())
 		return err
@@ -142,19 +125,21 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 // EnrichOne stays one expression per branch.
 func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.EnrichInput) error {
 	start := time.Now()
-	enriched, err := e.classify(ctx, id, row.Content)
+	cfg := classifyConfigFromRow(row)
+	mode := moduleMode(cfg)
+	enriched, err := e.classify(ctx, id, row.Content, cfg)
 	if err != nil {
-		metrics.EnrichDuration.WithLabelValues(row.TenantID, classifyErrResult(err)).
+		metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, classifyErrResult(err)).
 			Observe(time.Since(start).Seconds())
 		return err
 	}
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
 	if err := e.persistEnriched(ctx, snapshot, enriched); err != nil {
-		metrics.EnrichDuration.WithLabelValues(row.TenantID, "db_err").
+		metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "db_err").
 			Observe(time.Since(start).Seconds())
 		return err
 	}
-	metrics.EnrichDuration.WithLabelValues(row.TenantID, "ok").
+	metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "ok").
 		Observe(time.Since(start).Seconds())
 	slog.InfoContext(ctx, "feedback enriched",
 		"inbound_trace_id", trace.FromContext(ctx),
@@ -172,34 +157,73 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 // Classify is the public, side-effect-free LLM classification entry
 // point. eval CLI re-runs historical content through this without
 // touching the DB. The internal classify wraps it with MarkFailed.
-func (e *Enricher) Classify(ctx context.Context, content string) (domain.Enriched, error) {
+func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyConfig) (domain.Enriched, error) {
 	const where = "service.Enricher.Classify"
-	prompt := fmt.Sprintf(enrichPromptTmpl, content)
-	out, err := e.llm.Chat(ctx, enrichmentSystemUser, enrichmentModelID, prompt, 0.0, 512)
+	prompt := renderPrompt(cfg, content)
+	req := llmclient.CompletionRequest{
+		Model:       enrichmentModelID,
+		Prompt:      prompt,
+		Temperature: 0.0,
+		MaxTokens:   512,
+		UserID:      enrichmentSystemUser,
+	}
+	if cfg.IsConstrained() {
+		req.Schema = buildEnrichSchema(cfg.Modules)
+	}
+	resp, err := e.llm.Complete(ctx, req)
 	if err != nil {
-		logext.Errorf(ctx, "[%s] llm.Chat failed,model:%s,err:%+v",
+		logext.Errorf(ctx, "[%s] llm.Complete failed,model:%s,err:%+v",
 			where, enrichmentModelID, err.Error())
 		return domain.Enriched{}, fmt.Errorf("llm: %w", err)
 	}
-	parsed, err := parseEnrichJSON(out)
+	parsed, err := parseEnrichJSON(resp.Text)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] parse failed,err:%s,raw:%s",
-			where, err.Error(), truncate(out, 300))
-		return domain.Enriched{}, fmt.Errorf("parse: %w; raw=%s", err, truncate(out, 300))
+			where, err.Error(), truncate(resp.Text, 300))
+		return domain.Enriched{}, fmt.Errorf("parse: %w; raw=%s", err, truncate(resp.Text, 300))
 	}
+	tenant := cfg.TenantID
+	if tenant == "" {
+		tenant = "unknown"
+	}
+	parsed.Modules, _ = applyModuleGate(ctx, tenant, parsed.Modules, cfg.Modules)
 	parsed.Priority = domain.SeverityWeight[parsed.Severity]
 	return parsed, nil
 }
 
 // classify calls Classify and, on failure, marks the row 'failed' so the
 // next sweep won't retry immediately. Used by the main enricher loop.
-func (e *Enricher) classify(ctx context.Context, id int64, content string) (domain.Enriched, error) {
-	parsed, err := e.Classify(ctx, content)
+func (e *Enricher) classify(ctx context.Context, id int64, content string, cfg ClassifyConfig) (domain.Enriched, error) {
+	parsed, err := e.Classify(ctx, content, cfg)
 	if err != nil {
 		e.repo.MarkFailed(ctx, id, err.Error())
 		return domain.Enriched{}, err
 	}
 	return parsed, nil
+}
+
+func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {
+	return ClassifyConfig{
+		TenantID:       row.TenantID,
+		PromptTemplate: row.PromptTemplate,
+		Modules:        row.Modules,
+	}
+}
+
+// applyModuleGate runs gate (2) and records observability for dropped /
+// suggested modules. Returns the canonical kept list.
+func applyModuleGate(ctx context.Context, tenantID string, produced, allowed []string) (kept, dropped []string) {
+	kept, dropped = filterModules(produced, allowed)
+	if len(dropped) == 0 {
+		return kept, dropped
+	}
+	for range dropped {
+		metrics.EnrichModulesDroppedTotal.WithLabelValues(tenantID).Inc()
+	}
+	metrics.EnrichSuggestedModulesTotal.WithLabelValues(tenantID).Inc()
+	logext.Infof(ctx, "[service.Enricher.applyModuleGate] suggested_module,tenant_id:%s,dropped:%v",
+		tenantID, dropped)
+	return kept, dropped
 }
 
 // fanOut pushes a freshly enriched snapshot to the snapshot of `notifier`
