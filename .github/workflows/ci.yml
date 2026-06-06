@@ -201,6 +201,10 @@ jobs:
       - run: pnpm exec vite build
       - run: pnpm tsc -b --noEmit
       - run: pnpm vitest run --passWithNoTests
+      # dependency-cruiser enforces architectural import boundaries (#19):
+      # no cross-feature imports, shared → features → app one-way,
+      # no circular deps. See console/.dependency-cruiser.cjs.
+      - run: pnpm arch
 
   # ── Changelog enforcement: a code PR must update CHANGELOG.md (CLAUDE.md §2) ─
   changelog:
