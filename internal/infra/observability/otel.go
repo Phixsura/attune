@@ -53,7 +53,8 @@ type ShutdownFunc func(context.Context) error
 // InitTracer 初始化全局 OTel TracerProvider + propagator。
 // Endpoint 空时返回 noop tracer(本地开发可用),不向 SLS 上报。
 func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
-	res, err := resource.New(ctx,
+	res, err := resource.New(
+		ctx,
 		resource.WithAttributes(
 			semconv.ServiceName(opts.ServiceName),
 			semconv.ServiceVersion(opts.ServiceVersion),
@@ -106,7 +107,8 @@ func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
 	}
 
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter,
+		sdktrace.WithBatcher(
+			exporter,
 			sdktrace.WithBatchTimeout(5*time.Second),
 			sdktrace.WithMaxExportBatchSize(512),
 		),
@@ -117,7 +119,8 @@ func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
 	)
 	otel.SetTracerProvider(tp)
 
-	slog.InfoContext(ctx, "otel: tracer initialized",
+	slog.InfoContext(
+		ctx, "otel: tracer initialized",
 		"service", opts.ServiceName,
 		"endpoint", opts.Endpoint,
 		"path", opts.URLPath,

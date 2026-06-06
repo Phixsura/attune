@@ -68,7 +68,7 @@ func (h *OAuthHandler) Start(w http.ResponseWriter, r *http.Request) {
 	nonce, err := randomNonce(24)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] randomNonce failed,err:%+v", where, err.Error())
-		writeError(w, http.StatusInternalServerError, "internal", "无法生成 state")
+		writeError(ctx, w, http.StatusInternalServerError, "internal", "无法生成 state")
 		return
 	}
 	postLogin := r.URL.Query().Get("redirect_uri")
@@ -105,7 +105,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	if code == "" || state == "" {
 		logext.Warnf(ctx, "[%s] reject: missing code/state", where)
-		writeError(w, http.StatusBadRequest, "bad_request", "缺少 code 或 state")
+		writeError(ctx, w, http.StatusBadRequest, "bad_request", "缺少 code 或 state")
 		return
 	}
 	logext.Infof(ctx, "[%s] start", where)
@@ -113,13 +113,13 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	stateNonce, postLogin, err := parseState(state)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: parse state failed,err:%s", where, err.Error())
-		writeError(w, http.StatusBadRequest, "bad_request", "state 不合法")
+		writeError(ctx, w, http.StatusBadRequest, "bad_request", "state 不合法")
 		return
 	}
 	ck, err := r.Cookie(OAuthStateCookie)
 	if err != nil || ck.Value != stateNonce {
 		logext.Warnf(ctx, "[%s] reject: state cookie mismatch", where)
-		writeError(w, http.StatusBadRequest, "bad_request", "state cookie 不匹配，请重新发起登录")
+		writeError(ctx, w, http.StatusBadRequest, "bad_request", "state cookie 不匹配，请重新发起登录")
 		return
 	}
 	// Wipe the state cookie — it has served its purpose.
@@ -133,7 +133,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.ErrorContext(ctx, "oauth: exchange code failed", "err", err)
 		logext.Errorf(ctx, "[%s] lark.ExchangeUserCode failed,err:%+v", where, err.Error())
-		writeError(w, http.StatusBadGateway, "lark_exchange_failed", "向飞书换 token 失败")
+		writeError(ctx, w, http.StatusBadGateway, "lark_exchange_failed", "向飞书换 token 失败")
 		return
 	}
 	// 2. user_access_token → display info
@@ -142,7 +142,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "oauth: user_info failed", "err", err)
 		logext.Errorf(ctx, "[%s] lark.GetUserInfo failed,open_id:%s,err:%+v",
 			where, tok.OpenID, err.Error())
-		writeError(w, http.StatusBadGateway, "lark_userinfo_failed", "向飞书取用户信息失败")
+		writeError(ctx, w, http.StatusBadGateway, "lark_userinfo_failed", "向飞书取用户信息失败")
 		return
 	}
 	// 3. Upsert tenant by lark_tenant_key (creates row on first install)
@@ -153,7 +153,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "oauth: upsert tenant", "err", err)
 		logext.Errorf(ctx, "[%s] tenants.UpsertByLarkKey failed,tenant_key:%s,err:%+v",
 			where, tok.TenantKey, err.Error())
-		writeError(w, http.StatusInternalServerError, "tenant_upsert_failed", "登记 tenant 失败")
+		writeError(ctx, w, http.StatusInternalServerError, "tenant_upsert_failed", "登记 tenant 失败")
 		return
 	}
 	// 4. Upsert user. First user of a brand-new tenant is admin.
@@ -166,7 +166,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "oauth: upsert user", "err", err)
 		logext.Errorf(ctx, "[%s] users.Upsert failed,tenant_id:%s,open_id:%s,err:%+v",
 			where, tenantID, tok.OpenID, err.Error())
-		writeError(w, http.StatusInternalServerError, "user_upsert_failed", "登记用户失败")
+		writeError(ctx, w, http.StatusInternalServerError, "user_upsert_failed", "登记用户失败")
 		return
 	}
 	// 5. Persist Lark install (tokens for outbound API calls).
@@ -184,7 +184,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "oauth: upsert install", "err", err)
 		logext.Errorf(ctx, "[%s] installs.Upsert failed,tenant_id:%s,err:%+v",
 			where, tenantID, err.Error())
-		writeError(w, http.StatusInternalServerError, "install_upsert_failed", "登记 Lark install 失败")
+		writeError(ctx, w, http.StatusInternalServerError, "install_upsert_failed", "登记 Lark install 失败")
 		return
 	}
 	// 6. Sign session, redirect.
@@ -192,7 +192,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "oauth: sign session", "err", err)
 		logext.Errorf(ctx, "[%s] signer.IssueSessionCookie failed,user_id:%s,err:%+v",
 			where, userID, err.Error())
-		writeError(w, http.StatusInternalServerError, "session_sign_failed", "签 session 失败")
+		writeError(ctx, w, http.StatusInternalServerError, "session_sign_failed", "签 session 失败")
 		return
 	}
 	slog.InfoContext(ctx, "console: oauth login",
