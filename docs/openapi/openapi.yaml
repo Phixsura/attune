@@ -3,17 +3,38 @@
 
 openapi: 3.0.3
 info:
-    title: FeedbackService API
-    description: |-
-        FeedbackService is attune's feedback API. Today it exposes Ingest
-         (POST /v1/feedback/ingest, public, API-key auth); the console feedback reads
-         (list / stats / detail) join it as the migration proceeds.
-
-         We do NOT generate server stubs — chi routing stays. The google.api.http
-         annotation exists only so protoc-gen-openapi emits the REST path + operation
-         into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
+    title: ""
     version: 0.0.1
 paths:
+    /fb/v1/console/usage:
+        get:
+            tags:
+                - UsageService
+            description: GET /fb/v1/console/usage — ingest volume for the current calendar month.
+            operationId: UsageService_GetUsage
+            parameters:
+                - name: granularity
+                  in: query
+                  description: Reserved for future billing surfaces; currently ignored by the handler.
+                  schema:
+                    type: string
+                - name: range
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetUsageResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /v1/feedback/ingest:
         post:
             tags:
@@ -40,6 +61,25 @@ paths:
                                 $ref: '#/components/schemas/Status'
 components:
     schemas:
+        GetUsageResponse:
+            type: object
+            properties:
+                periodStart:
+                    type: string
+                    description: RFC3339 period bounds (current calendar month, UTC).
+                periodEnd:
+                    type: string
+                total:
+                    type: string
+                    description: Total ingested rows in the period. (int64 → JSON string.)
+                series:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/UsageBucket'
+                    description: Per-day buckets.
+                quota:
+                    type: string
+                    description: Plan quota; absent until billing lands. (int64 → JSON string.)
         GoogleProtobufAny:
             type: object
             properties:
@@ -105,5 +145,24 @@ components:
                         $ref: '#/components/schemas/GoogleProtobufAny'
                     description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
             description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
+        UsageBucket:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                    description: RFC3339 day bucket (UTC).
+                value:
+                    type: string
+                    description: Rows in the bucket. (int64 → JSON string.)
 tags:
     - name: FeedbackService
+      description: |-
+        FeedbackService is attune's feedback API. Today it exposes Ingest
+         (POST /v1/feedback/ingest, public, API-key auth); the console feedback reads
+         (list / stats / detail) join it as the migration proceeds.
+
+         We do NOT generate server stubs — chi routing stays. The google.api.http
+         annotation exists only so protoc-gen-openapi emits the REST path + operation
+         into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
+    - name: UsageService
+      description: UsageService serves the console usage dashboard.
