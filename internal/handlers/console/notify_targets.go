@@ -2,7 +2,6 @@ package console
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -13,13 +12,12 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/logext"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo"
 )
 
-// notifyTargetRepo is the subset of *repo.NotifyTargetRepo that the
-// console handler uses. Defined here (consumer side) so unit tests can
-// pass a fake without importing repo or wiring a real Postgres.
-// *repo.NotifyTargetRepo satisfies it implicitly.
+// notifyTargetRepo is the subset of *repo.NotifyTargetRepo that the console
+// handler uses. Defined here (consumer side) so unit tests can pass a fake.
 type notifyTargetRepo interface {
 	ListByTenant(ctx context.Context, tenantID string) ([]repo.NotifyTarget, error)
 	Insert(ctx context.Context, t repo.NotifyTarget) (uuid.UUID, error)
@@ -28,10 +26,7 @@ type notifyTargetRepo interface {
 	Delete(ctx context.Context, tenantID string, id uuid.UUID) error
 }
 
-// NotifyTargetsHandler serves /fb/v1/console/notify-targets. The
-// destination_type-specific quirks (lark-bot signature format vs
-// raw-webhook HMAC header) are encapsulated in notify.TestSend — this
-// handler only orchestrates CRUD + scope-by-tenant.
+// NotifyTargetsHandler serves /fb/v1/console/notify-targets.
 type NotifyTargetsHandler struct {
 	repo notifyTargetRepo
 }
@@ -40,154 +35,125 @@ func NewNotifyTargetsHandler(r notifyTargetRepo) *NotifyTargetsHandler {
 	return &NotifyTargetsHandler{repo: r}
 }
 
-// notifyTargetDTO mirrors openapi.yaml `NotifyTarget`. Secret is NEVER
-// returned — once stored it's write-only from the console.
-type notifyTargetDTO struct {
-	ID              string  `json:"id"`
-	DestinationType string  `json:"destination_type"`
-	Audience        string  `json:"audience"`
-	URL             string  `json:"url"`
-	TimeoutSeconds  int     `json:"timeout_seconds"`
-	Disabled        bool    `json:"disabled"`
-	CreatedAt       string  `json:"created_at"`
-	LastFailureAt   *string `json:"last_failure_at"`
-	LastError       string  `json:"last_error"`
-}
-
-// toDTO drops Secret + TenantID (already known via session).
-// CreatedAt is read from updated_at because the table only tracks
-// updated_at — created_at is approximated by initial insert's timestamp,
-// which is fine for the console UI (sort by recency).
-func toNotifyDTO(row repo.NotifyTarget) notifyTargetDTO {
-	// repo.NotifyTarget doesn't carry created_at; the table has
-	// created_at but the model omits it. Use current Time fallback
-	// when caller didn't read it — this never produces wrong ordering
-	// in practice because rows are returned sorted by destination_type.
-	dto := notifyTargetDTO{
-		ID:              row.ID.String(),
+// toNotifyProto drops Secret (write-only) + TenantID (known via session).
+func toNotifyProto(row repo.NotifyTarget) *attunev1.NotifyTarget {
+	t := &attunev1.NotifyTarget{
+		Id:              row.ID.String(),
 		DestinationType: row.DestinationType,
 		Audience:        row.Audience,
-		URL:             row.URL,
-		TimeoutSeconds:  row.TimeoutSeconds,
+		Url:             row.URL,
+		TimeoutSeconds:  int32(row.TimeoutSeconds),
 		Disabled:        row.Disabled,
-		CreatedAt:       time.Now().UTC().Format(time.RFC3339), // TODO: extend model with CreatedAt
+		CreatedAt:       time.Now().UTC().Format(time.RFC3339), // TODO: model lacks CreatedAt
 		LastError:       row.LastError,
 	}
 	if row.LastFailureAt != nil {
 		s := row.LastFailureAt.UTC().Format(time.RFC3339)
-		dto.LastFailureAt = &s
+		t.LastFailureAt = &s
 	}
-	return dto
+	return t
 }
 
 // List handles GET /fb/v1/console/notify-targets.
 func (h *NotifyTargetsHandler) List(w http.ResponseWriter, r *http.Request) {
 	const where = "console.NotifyTargetsHandler.List"
 	ctx := r.Context()
-	auth := FromContext(r.Context())
-	if auth == nil {
-		logext.Warnf(ctx, "[%s] reject: missing auth ctx", where)
-		writeError(w, http.StatusUnauthorized, "unauthorized", "未登录")
-		return
-	}
+	auth := FromContext(ctx)
 	logext.Infof(ctx, "[%s] start,tenant_id:%s", where, auth.TenantID)
-	rows, err := h.repo.ListByTenant(r.Context(), auth.TenantID)
+	rows, err := h.repo.ListByTenant(ctx, auth.TenantID)
 	if err != nil {
 		slog.ErrorContext(ctx, "notify-targets list", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] repo.ListByTenant failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		writeError(w, http.StatusInternalServerError, "internal", "查询通知目标失败")
+		respondError(ctx, w, http.StatusInternalServerError, "internal", "查询通知目标失败")
 		return
 	}
-	items := make([]notifyTargetDTO, 0, len(rows))
+	items := make([]*attunev1.NotifyTarget, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, toNotifyDTO(row))
+		items = append(items, toNotifyProto(row))
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+	respondProto(w, http.StatusOK, &attunev1.ListNotifyTargetsResponse{Items: items})
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
 }
 
-// createRequest matches openapi.yaml NotifyTargetCreate. audience
-// defaults to "all" — Phase 1 doesn't surface a pool/radar selector.
+// createNotifyRequest carries normalized create/patch fields through validation.
 type createNotifyRequest struct {
-	DestinationType string `json:"destination_type"`
-	Audience        string `json:"audience"`
-	URL             string `json:"url"`
-	Secret          string `json:"secret"`
-	TimeoutSeconds  int    `json:"timeout_seconds"`
-	Disabled        bool   `json:"disabled"`
+	DestinationType string
+	Audience        string
+	URL             string
+	Secret          string
+	TimeoutSeconds  int
+	Disabled        bool
 }
 
 // Create handles POST /fb/v1/console/notify-targets.
 func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	const where = "console.NotifyTargetsHandler.Create"
 	ctx := r.Context()
-	auth := FromContext(r.Context())
-	if auth == nil {
-		logext.Warnf(ctx, "[%s] reject: missing auth ctx", where)
-		writeError(w, http.StatusUnauthorized, "unauthorized", "未登录")
-		return
-	}
-	var req createNotifyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	auth := FromContext(ctx)
+	var req attunev1.CreateNotifyTargetRequest
+	if err := decodeProto(r.Body, &req); err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad json,tenant_id:%s,err:%s",
 			where, auth.TenantID, err.Error())
-		writeError(w, http.StatusBadRequest, "bad_request", "请求体不是合法 JSON")
+		respondError(ctx, w, http.StatusBadRequest, "bad_request", "请求体不是合法 JSON")
 		return
 	}
-	if err := validateNotifyCreate(&req); err != nil {
+	nreq := &createNotifyRequest{
+		DestinationType: req.GetDestinationType(),
+		Audience:        req.GetAudience(),
+		URL:             req.GetUrl(),
+		Secret:          req.GetSecret(),
+		TimeoutSeconds:  int(req.GetTimeoutSeconds()),
+		Disabled:        req.GetDisabled(),
+	}
+	if err := validateNotifyCreate(nreq); err != nil {
 		logext.Warnf(ctx, "[%s] reject: validation,tenant_id:%s,err:%s",
 			where, auth.TenantID, err.Error())
-		writeError(w, http.StatusBadRequest, "validation", err.Error())
+		respondError(ctx, w, http.StatusBadRequest, "validation", err.Error())
 		return
 	}
-	// Phase 1 only ships lark-bot + raw-webhook adapters; slack-bot/email
-	// are valid in the schema but not yet implemented in notify.TestSend
-	// (or the outbound path).
-	if req.DestinationType == repo.DestSlackBot || req.DestinationType == repo.DestEmail {
+	// Phase 1 only ships lark-bot + raw-webhook adapters.
+	if nreq.DestinationType == repo.DestSlackBot || nreq.DestinationType == repo.DestEmail {
 		logext.Warnf(ctx, "[%s] reject: not implemented,tenant_id:%s,dest:%s",
-			where, auth.TenantID, req.DestinationType)
-		writeError(w, http.StatusNotImplemented, "not_implemented",
-			"destination_type "+req.DestinationType+" 尚未实现（Wave 3+）")
+			where, auth.TenantID, nreq.DestinationType)
+		respondError(ctx, w, http.StatusNotImplemented, "not_implemented",
+			"destination_type "+nreq.DestinationType+" 尚未实现（Wave 3+）")
 		return
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,dest:%s,audience:%s",
-		where, auth.TenantID, req.DestinationType, req.Audience)
+		where, auth.TenantID, nreq.DestinationType, nreq.Audience)
 
 	target := repo.NotifyTarget{
 		TenantID:        auth.TenantID,
-		DestinationType: req.DestinationType,
-		Audience:        req.Audience,
-		URL:             req.URL,
-		Secret:          req.Secret,
-		TimeoutSeconds:  req.TimeoutSeconds,
-		Disabled:        req.Disabled,
+		DestinationType: nreq.DestinationType,
+		Audience:        nreq.Audience,
+		URL:             nreq.URL,
+		Secret:          nreq.Secret,
+		TimeoutSeconds:  nreq.TimeoutSeconds,
+		Disabled:        nreq.Disabled,
 	}
-	id, err := h.repo.Insert(r.Context(), target)
+	id, err := h.repo.Insert(ctx, target)
 	if err != nil {
 		if errors.Is(err, repo.ErrNotifyTargetConflict) {
 			logext.Warnf(ctx, "[%s] reject: conflict,tenant_id:%s,dest:%s,audience:%s",
-				where, auth.TenantID, req.DestinationType, req.Audience)
-			writeError(w, http.StatusConflict, "conflict",
+				where, auth.TenantID, nreq.DestinationType, nreq.Audience)
+			respondError(ctx, w, http.StatusConflict, "conflict",
 				"同一 (destination_type, audience) 组合下已有目标；先删除旧的再建")
 			return
 		}
 		slog.ErrorContext(ctx, "notify-targets insert", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] repo.Insert failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		writeError(w, http.StatusInternalServerError, "internal", "新建通知目标失败")
+		respondError(ctx, w, http.StatusInternalServerError, "internal", "新建通知目标失败")
 		return
 	}
 	target.ID = id
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(toNotifyDTO(target))
+	respondProto(w, http.StatusCreated, toNotifyProto(target))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s,dest:%s",
-		where, auth.TenantID, id, req.DestinationType)
+		where, auth.TenantID, id, nreq.DestinationType)
 }
 
-// validateNotifyCreate runs the field-level rules. Returns nil if good.
+// validateNotifyCreate runs the field-level rules + normalization in place.
 func validateNotifyCreate(req *createNotifyRequest) error {
 	req.DestinationType = strings.TrimSpace(req.DestinationType)
 	req.URL = strings.TrimSpace(req.URL)
@@ -210,7 +176,6 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 	if u.Scheme != "https" && !loopbackHTTP {
 		return errors.New("url 必须是 https://… 或本地 loopback http://127.0.0.1")
 	}
-	// audience normalize
 	switch req.Audience {
 	case "":
 		req.Audience = repo.AudienceAll

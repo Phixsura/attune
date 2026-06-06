@@ -74,6 +74,91 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback:
+        get:
+            tags:
+                - FeedbackService
+            description: GET /fb/v1/console/feedback (console; session auth)
+            operationId: FeedbackService_ListFeedback
+            parameters:
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: kind
+                  in: query
+                  schema:
+                    type: string
+                - name: severity
+                  in: query
+                  schema:
+                    type: string
+                - name: q
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListFeedbackResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/stats:
+        get:
+            tags:
+                - FeedbackService
+            description: GET /fb/v1/console/feedback/stats
+            operationId: FeedbackService_GetFeedbackStats
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetFeedbackStatsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/{id}:
+        get:
+            tags:
+                - FeedbackService
+            description: GET /fb/v1/console/feedback/{id}
+            operationId: FeedbackService_GetFeedback
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/FeedbackDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/logout:
         post:
             tags:
@@ -112,6 +197,135 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/GetMeResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/notify-targets:
+        get:
+            tags:
+                - NotifyTargetService
+            description: GET /fb/v1/console/notify-targets
+            operationId: NotifyTargetService_ListNotifyTargets
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListNotifyTargetsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - NotifyTargetService
+            description: POST /fb/v1/console/notify-targets
+            operationId: NotifyTargetService_CreateNotifyTarget
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateNotifyTargetRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotifyTarget'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/notify-targets/{id}:
+        delete:
+            tags:
+                - NotifyTargetService
+            description: DELETE /fb/v1/console/notify-targets/{id} (204)
+            operationId: NotifyTargetService_DeleteNotifyTarget
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteNotifyTargetResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        patch:
+            tags:
+                - NotifyTargetService
+            description: PATCH /fb/v1/console/notify-targets/{id}
+            operationId: NotifyTargetService_UpdateNotifyTarget
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateNotifyTargetRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NotifyTarget'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/notify-targets/{id}/test:
+        post:
+            tags:
+                - NotifyTargetService
+            description: POST /fb/v1/console/notify-targets/{id}/test
+            operationId: NotifyTargetService_TestNotifyTarget
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TestNotifyTargetRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TestNotifyTargetResponse'
                 default:
                     description: Default error response
                     content:
@@ -190,6 +404,15 @@ components:
                     type: string
                 revokedAt:
                     type: string
+        Attachment:
+            type: object
+            properties:
+                url:
+                    type: string
+                mime:
+                    type: string
+                size:
+                    type: string
         CreateApiKeyRequest:
             required:
                 - label
@@ -205,9 +428,120 @@ components:
                 secret:
                     type: string
                     description: The raw secret — returned only here, once, at creation.
+        CreateNotifyTargetRequest:
+            required:
+                - destinationType
+                - url
+            type: object
+            properties:
+                destinationType:
+                    type: string
+                audience:
+                    type: string
+                url:
+                    type: string
+                secret:
+                    type: string
+                timeoutSeconds:
+                    type: integer
+                    format: int32
+                disabled:
+                    type: boolean
         DeleteApiKeyResponse:
             type: object
             properties: {}
+        DeleteNotifyTargetResponse:
+            type: object
+            properties: {}
+        Feedback:
+            type: object
+            properties:
+                id:
+                    type: string
+                content:
+                    type: string
+                source:
+                    type: string
+                type:
+                    type: string
+                userId:
+                    type: string
+                pageUrl:
+                    type: string
+                enrichedTitle:
+                    type: string
+                enrichedKind:
+                    type: string
+                enrichedSeverity:
+                    type: string
+                enrichedModules:
+                    type: array
+                    items:
+                        type: string
+                enrichedPriority:
+                    type: number
+                    format: double
+                enrichmentStatus:
+                    type: string
+                createdAt:
+                    type: string
+            description: Feedback is a console feedback list row.
+        FeedbackDetail:
+            type: object
+            properties:
+                id:
+                    type: string
+                content:
+                    type: string
+                source:
+                    type: string
+                type:
+                    type: string
+                userId:
+                    type: string
+                pageUrl:
+                    type: string
+                enrichedTitle:
+                    type: string
+                enrichedKind:
+                    type: string
+                enrichedSeverity:
+                    type: string
+                enrichedModules:
+                    type: array
+                    items:
+                        type: string
+                enrichedPriority:
+                    type: number
+                    format: double
+                enrichmentStatus:
+                    type: string
+                createdAt:
+                    type: string
+                sourceMeta:
+                    type: object
+                attachments:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Attachment'
+                enrichmentError:
+                    type: string
+                enrichedAt:
+                    type: string
+            description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
+        GetFeedbackStatsResponse:
+            type: object
+            properties:
+                periodStart:
+                    type: string
+                periodEnd:
+                    type: string
+                total:
+                    type: string
+                byKind:
+                    type: object
+                    additionalProperties:
+                        type: string
         GetMeResponse:
             type: object
             properties:
@@ -292,12 +626,51 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ApiKey'
+        ListFeedbackResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Feedback'
+                nextCursor:
+                    type: string
+        ListNotifyTargetsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/NotifyTarget'
         LogoutRequest:
             type: object
             properties: {}
         LogoutResponse:
             type: object
             properties: {}
+        NotifyTarget:
+            type: object
+            properties:
+                id:
+                    type: string
+                destinationType:
+                    type: string
+                audience:
+                    type: string
+                url:
+                    type: string
+                timeoutSeconds:
+                    type: integer
+                    format: int32
+                disabled:
+                    type: boolean
+                createdAt:
+                    type: string
+                lastFailureAt:
+                    type: string
+                lastError:
+                    type: string
+            description: NotifyTarget never carries the secret — it is write-only once stored.
         SessionUser:
             type: object
             properties:
@@ -342,6 +715,37 @@ components:
                 timezone:
                     type: string
             description: Tenant is the console-facing tenant record.
+        TestNotifyTargetRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        TestNotifyTargetResponse:
+            type: object
+            properties:
+                ok:
+                    type: boolean
+                statusCode:
+                    type: integer
+                    format: int32
+                latencyMs:
+                    type: string
+        UpdateNotifyTargetRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                audience:
+                    type: string
+                url:
+                    type: string
+                secret:
+                    type: string
+                timeoutSeconds:
+                    type: integer
+                    format: int32
+                disabled:
+                    type: boolean
         UsageBucket:
             type: object
             properties:
@@ -363,6 +767,8 @@ tags:
          We do NOT generate server stubs — chi routing stays. The google.api.http
          annotation exists only so protoc-gen-openapi emits the REST path + operation
          into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
+    - name: NotifyTargetService
+      description: NotifyTargetService manages a tenant's outbound notification destinations.
     - name: SessionService
       description: SessionService backs the console session (current tenant + user, logout).
     - name: UsageService

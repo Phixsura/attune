@@ -45,6 +45,102 @@ export interface IngestResponse {
   enrichmentStatus: string;
 }
 
+/** Feedback is a console feedback list row. */
+export interface Feedback {
+  /** → JSON string */
+  id: string;
+  content: string;
+  source: string;
+  type: string;
+  userId: string;
+  pageUrl: string;
+  enrichedTitle?:
+    | string
+    | undefined;
+  /** bug | feature | ops | question | other */
+  enrichedKind?:
+    | string
+    | undefined;
+  /** P0 | P1 | P2 | P3 */
+  enrichedSeverity?: string | undefined;
+  enrichedModules: string[];
+  enrichedPriority?:
+    | number
+    | undefined;
+  /** pending | enriching | done | failed */
+  enrichmentStatus: string;
+  /** RFC3339 */
+  createdAt: string;
+}
+
+/** FeedbackDetail is the single-row view: the list fields plus extras (flat). */
+export interface FeedbackDetail {
+  id: string;
+  content: string;
+  source: string;
+  type: string;
+  userId: string;
+  pageUrl: string;
+  enrichedTitle?: string | undefined;
+  enrichedKind?: string | undefined;
+  enrichedSeverity?: string | undefined;
+  enrichedModules: string[];
+  enrichedPriority?: number | undefined;
+  enrichmentStatus: string;
+  createdAt: string;
+  sourceMeta?: { [key: string]: any } | undefined;
+  attachments: Attachment[];
+  enrichmentError?:
+    | string
+    | undefined;
+  /** RFC3339 */
+  enrichedAt?: string | undefined;
+}
+
+export interface Attachment {
+  url: string;
+  mime?: string | undefined;
+  size?: string | undefined;
+}
+
+export interface ListFeedbackRequest {
+  /** last row id; opaque to the client */
+  cursor?: string | undefined;
+  limit?: number | undefined;
+  kind?: string | undefined;
+  severity?:
+    | string
+    | undefined;
+  /** full-text query */
+  q?: string | undefined;
+}
+
+export interface ListFeedbackResponse {
+  items: Feedback[];
+  /** absent when no more pages */
+  nextCursor?: string | undefined;
+}
+
+export interface GetFeedbackRequest {
+  /** path param */
+  id: string;
+}
+
+export interface GetFeedbackStatsRequest {
+}
+
+export interface GetFeedbackStatsResponse {
+  periodStart: string;
+  periodEnd: string;
+  total: string;
+  byKind: { [key: string]: string };
+}
+
+export interface GetFeedbackStatsResponse_ByKindEntry {
+  key: string;
+  value: string;
+}
+
 /**
  * FeedbackService is attune's feedback API. Today it exposes Ingest
  * (POST /v1/feedback/ingest, public, API-key auth); the console feedback reads
@@ -56,4 +152,10 @@ export interface IngestResponse {
  */
 export interface FeedbackService {
   Ingest(request: IngestRequest): Promise<IngestResponse>;
+  /** GET /fb/v1/console/feedback (console; session auth) */
+  ListFeedback(request: ListFeedbackRequest): Promise<ListFeedbackResponse>;
+  /** GET /fb/v1/console/feedback/{id} */
+  GetFeedback(request: GetFeedbackRequest): Promise<FeedbackDetail>;
+  /** GET /fb/v1/console/feedback/stats */
+  GetFeedbackStats(request: GetFeedbackStatsRequest): Promise<GetFeedbackStatsResponse>;
 }
