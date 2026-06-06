@@ -6,7 +6,7 @@
 # without qemu emulation.
 
 # ── Stage 1: build (cross-compiled, static) ──
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine@sha256:c05ba4b73604069d376c4f41346b05374335b5ca0c46fb6dfede5a59f5196931 AS builder
 
 # CI uses the default module proxy; local CN builds can override, e.g.
 #   docker build --build-arg GOPROXY=https://goproxy.cn,direct .
@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 
 # ── Stage 2: runtime (distroless static, nonroot, no shell) ──
 # ca-certificates + tzdata are baked in; runs as uid 65532.
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:d093aa3e30dbadd3efe1310db061a14da60299baff8450a17fe0ccc514a16639
 
 COPY --from=builder /attune /app/attune
 

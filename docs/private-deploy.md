@@ -361,7 +361,9 @@ config to match.
 example, `p@ss:word` becomes `p%40ss%3Aword`:
 
 ```bash
+<!-- trufflehog:ignore -->
 FEEDBACK_API_DATABASE_URL=<your-postgres-connection-string>
+<!-- /trufflehog:ignore -->
 ```
 
 ### China-region servers timing out on image pulls

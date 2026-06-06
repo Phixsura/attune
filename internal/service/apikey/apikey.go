@@ -129,6 +129,10 @@ func generate() (raw string, hash []byte, prefix string, err error) {
 		return "", nil, "", fmt.Errorf("rand: %w", err)
 	}
 	raw = domain.APIKeyPrefix + hex.EncodeToString(buf)
+	// SHA-256 is appropriate here: we are hashing API keys (not user passwords)
+	// for lookup verification. The raw key is a 192-bit random value —
+	// preimage resistance of SHA-256 is sufficient; we are not defending
+	// against offline brute-force of low-entropy secrets.
 	sum := sha256.Sum256([]byte(raw))
 	hash = sum[:]
 	if len(raw) >= displayPrefLen {

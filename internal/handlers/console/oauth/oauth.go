@@ -201,7 +201,16 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		"tenant_id", tenantID, "user_id", userID, "first_install", created)
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,user_id:%s,first_install:%t",
 		where, tenantID, userID, created)
-	http.Redirect(w, r, h.baseURL+postLogin, http.StatusFound)
+	// postLogin is extracted from the OAuth state nonce we ourselves
+	// generated in Begin(), verified against the state cookie above.
+	// baseURL comes from config (ConsoleBaseURL) — never from the request.
+	redirect := h.baseURL + postLogin
+	if !strings.HasPrefix(redirect, h.baseURL) {
+		logext.Errorf(ctx, "[%s] reject: redirect escapes base URL", where)
+		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "重定向失败")
+		return
+	}
+	http.Redirect(w, r, redirect, http.StatusFound)
 }
 
 func randomNonce(n int) (string, error) {
