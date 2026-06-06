@@ -58,7 +58,7 @@ func TestIngestRequestDiscardUnknown(t *testing.T) {
 
 // TestErrorResponseWire pins the error envelope: {"error": "..."}.
 func TestErrorResponseWire(t *testing.T) {
-	b, err := protojson.Marshal(&attunev1.ErrorResponse{Error: "content is required"})
+	b, err := protojson.Marshal(&attunev1.ErrorResponse{Code: "validation", Message: "content is required"})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestErrorResponseWire(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatalf("re-decode: %v (%s)", err, b)
 	}
-	if m["error"] != "content is required" {
-		t.Errorf("error envelope wrong: %s", b)
+	if m["code"] != "validation" || m["message"] != "content is required" {
+		t.Errorf("unified error envelope wrong: %s", b)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -53,7 +54,7 @@ func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := apikey.TenantIDFromContext(ctx)
 	if !ok {
 		metrics.IngestTotal.WithLabelValues("unknown", "unknown", "auth_err").Inc()
-		writeError(w, http.StatusUnauthorized, "no tenant in context")
+		writeError(ctx, w, http.StatusUnauthorized, "unauthorized", "no tenant in context")
 		return
 	}
 	keyID, _ := apikey.KeyIDFromContext(ctx)
@@ -61,13 +62,13 @@ func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64*1024))
 	if err != nil {
 		metrics.IngestTotal.WithLabelValues(tenantID, "unknown", "validate_err").Inc()
-		writeError(w, http.StatusBadRequest, "invalid json body")
+		writeError(ctx, w, http.StatusBadRequest, "bad_request", "invalid json body")
 		return
 	}
 	var req attunev1.IngestRequest
 	if err := ingestUnmarshal.Unmarshal(body, &req); err != nil {
 		metrics.IngestTotal.WithLabelValues(tenantID, "unknown", "validate_err").Inc()
-		writeError(w, http.StatusBadRequest, "invalid json body")
+		writeError(ctx, w, http.StatusBadRequest, "bad_request", "invalid json body")
 		return
 	}
 
@@ -87,12 +88,12 @@ func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 	id, err := h.ingestor.IngestRow(ctx, tenantID, keyID, in)
 	if err != nil {
 		// validate() errors are user-facing 400s; everything else is 500.
-		code, msg, result := http.StatusBadRequest, err.Error(), "validate_err"
+		status, code, message, result := http.StatusBadRequest, "validation", err.Error(), "validate_err"
 		if errors.Is(err, errInternal) {
-			code, msg, result = http.StatusInternalServerError, "internal error", "internal_err"
+			status, code, message, result = http.StatusInternalServerError, "internal", "internal error", "internal_err"
 		}
 		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(in.Source), result).Inc()
-		writeError(w, code, msg)
+		writeError(ctx, w, status, code, message)
 		return
 	}
 
@@ -133,9 +134,15 @@ func writeJSONProto(w http.ResponseWriter, code int, m proto.Message) {
 	_, _ = w.Write(b)
 }
 
-// writeError returns the canonical {"error": msg} body as a proto ErrorResponse.
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSONProto(w, code, &attunev1.ErrorResponse{Error: msg})
+// writeError emits the unified ErrorResponse {code, message, requestId} used by
+// every proto-migrated endpoint (#19). request_id comes from the chi RequestID
+// middleware (X-Request-ID) for support / log correlation.
+func writeError(ctx context.Context, w http.ResponseWriter, status int, code, message string) {
+	writeJSONProto(w, status, &attunev1.ErrorResponse{
+		Code:      code,
+		Message:   message,
+		RequestId: middleware.GetReqID(ctx),
+	})
 }
 
 // boundedSource keeps attune_ingest_total's `source` label bounded to known

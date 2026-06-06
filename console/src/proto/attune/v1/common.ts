@@ -9,11 +9,22 @@
 export const protobufPackage = "attune.v1";
 
 /**
- * ErrorResponse is the JSON body returned on 4xx/5xx by attune's public + console
- * APIs: a single human-facing message, e.g. {"error": "content is required"}.
- * (The console's richer envelope — code / message / request_id — folds in as the
- * console endpoints migrate; see proposal 2026-06-06-protobuf-idl-contract.)
+ * ErrorResponse is the JSON body returned on any 4xx/5xx across attune's HTTP
+ * APIs — a stable machine-readable `code`, a human-facing `message`, and the
+ * request id for support/tracing:
+ *
+ *   {"code":"validation","message":"content is required","requestId":"abc123"}
+ *
+ * One envelope for the public ingest API and the console alike.
  */
 export interface ErrorResponse {
-  error: string;
+  /**
+   * Stable error code, e.g. unauthorized / bad_request / validation /
+   * not_found / conflict / internal. Safe for clients to switch on.
+   */
+  code: string;
+  /** Human-facing message. Not stable; do not switch on it. */
+  message: string;
+  /** The request id (chi X-Request-ID) for support / log correlation. */
+  requestId: string;
 }

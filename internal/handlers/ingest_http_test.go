@@ -110,8 +110,8 @@ func TestIngestHTTP_InvalidJSON(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body)
 	}
-	if decodeBody(t, rec)["error"] == nil {
-		t.Errorf("want {\"error\": …}, got %s", rec.Body)
+	if got := decodeBody(t, rec); got["code"] == nil || got["message"] == nil {
+		t.Errorf("want {code, message, …}, got %s", rec.Body)
 	}
 }
 
@@ -122,8 +122,8 @@ func TestIngestHTTP_IngestError(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body)
 	}
-	if got := decodeBody(t, rec)["error"]; got != "content is required" {
-		t.Errorf("error body = %v (%s)", got, rec.Body)
+	if got := decodeBody(t, rec)["message"]; got != "content is required" {
+		t.Errorf("error message = %v (%s)", got, rec.Body)
 	}
 }
 
