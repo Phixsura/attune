@@ -74,6 +74,74 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrich-config:
+        get:
+            tags:
+                - EnrichConfigService
+            description: GET /fb/v1/console/enrich-config
+            operationId: EnrichConfigService_GetEnrichConfig
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetEnrichConfigResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        put:
+            tags:
+                - EnrichConfigService
+            description: PUT /fb/v1/console/enrich-config
+            operationId: EnrichConfigService_UpdateEnrichConfig
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateEnrichConfigRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateEnrichConfigResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrich-config/preview:
+        post:
+            tags:
+                - EnrichConfigService
+            description: POST /fb/v1/console/enrich-config/preview
+            operationId: EnrichConfigService_PreviewEnrichPrompt
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PreviewEnrichPromptRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreviewEnrichPromptResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback:
         get:
             tags:
@@ -453,6 +521,26 @@ components:
         DeleteNotifyTargetResponse:
             type: object
             properties: {}
+        EnrichConfig:
+            type: object
+            properties:
+                promptTemplate:
+                    type: string
+                    description: Tenant override; unset means "use default_prompt_template".
+                defaultPromptTemplate:
+                    type: string
+                    description: Built-in default — always returned so the console can restore it.
+                modules:
+                    type: array
+                    items:
+                        type: string
+                moduleMode:
+                    enum:
+                        - MODULE_MODE_UNSPECIFIED
+                        - MODULE_MODE_FREEFORM
+                        - MODULE_MODE_CONSTRAINED
+                    type: string
+                    format: enum
         Feedback:
             type: object
             properties:
@@ -529,6 +617,11 @@ components:
                 enrichedAt:
                     type: string
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
+        GetEnrichConfigResponse:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/EnrichConfig'
         GetFeedbackStatsResponse:
             type: object
             properties:
@@ -671,6 +764,18 @@ components:
                 lastError:
                     type: string
             description: NotifyTarget never carries the secret — it is write-only once stored.
+        PreviewEnrichPromptRequest:
+            required:
+                - sampleContent
+            type: object
+            properties:
+                sampleContent:
+                    type: string
+        PreviewEnrichPromptResponse:
+            type: object
+            properties:
+                renderedPrompt:
+                    type: string
         SessionUser:
             type: object
             properties:
@@ -730,6 +835,22 @@ components:
                     format: int32
                 latencyMs:
                     type: string
+        UpdateEnrichConfigRequest:
+            type: object
+            properties:
+                promptTemplate:
+                    type: string
+                    description: Omit or null to restore the built-in default prompt.
+                modules:
+                    type: array
+                    items:
+                        type: string
+                    description: Empty clears the whitelist (free-form mode).
+        UpdateEnrichConfigResponse:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/EnrichConfig'
         UpdateNotifyTargetRequest:
             type: object
             properties:
@@ -758,6 +879,8 @@ components:
 tags:
     - name: ApiKeyService
       description: ApiKeyService manages a tenant's external ingest API keys (console).
+    - name: EnrichConfigService
+      description: EnrichConfigService manages per-tenant enricher prompt + module whitelist (#10).
     - name: FeedbackService
       description: |-
         FeedbackService is attune's feedback API. Today it exposes Ingest

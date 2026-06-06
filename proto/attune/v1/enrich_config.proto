@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+// EnrichConfigService manages per-tenant enricher prompt + module whitelist (#10).
+service EnrichConfigService {
+  // GET /fb/v1/console/enrich-config
+  rpc GetEnrichConfig(GetEnrichConfigRequest) returns (GetEnrichConfigResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/enrich-config"};
+  }
+  // PUT /fb/v1/console/enrich-config
+  rpc UpdateEnrichConfig(UpdateEnrichConfigRequest) returns (UpdateEnrichConfigResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/enrich-config"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/enrich-config/preview
+  rpc PreviewEnrichPrompt(PreviewEnrichPromptRequest) returns (PreviewEnrichPromptResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/enrich-config/preview"
+      body: "*"
+    };
+  }
+}
+
+enum ModuleMode {
+  MODULE_MODE_UNSPECIFIED = 0;
+  MODULE_MODE_FREEFORM = 1;
+  MODULE_MODE_CONSTRAINED = 2;
+}
+
+message EnrichConfig {
+  // Tenant override; unset means "use default_prompt_template".
+  optional string prompt_template = 1;
+  // Built-in default — always returned so the console can restore it.
+  string default_prompt_template = 2;
+  repeated string modules = 3;
+  ModuleMode module_mode = 4;
+}
+
+message GetEnrichConfigRequest {}
+
+message GetEnrichConfigResponse {
+  EnrichConfig config = 1;
+}
+
+message UpdateEnrichConfigRequest {
+  // Omit or null to restore the built-in default prompt.
+  optional string prompt_template = 1;
+  // Empty clears the whitelist (free-form mode).
+  repeated string modules = 2;
+}
+
+message UpdateEnrichConfigResponse {
+  EnrichConfig config = 1;
+}
+
+message PreviewEnrichPromptRequest {
+  string sample_content = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message PreviewEnrichPromptResponse {
+  string rendered_prompt = 1;
+}
