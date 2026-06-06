@@ -8,7 +8,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
-	"github.com/Phixsura/attune/internal/repo"
+	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
 // runOutbox dispatches `attune outbox <subcmd> [flags]`.
@@ -58,7 +58,7 @@ func runOutboxPrune(args []string) error {
 	defer pool.Close()
 
 	before := time.Now().Add(-*olderThan)
-	n, err := repo.NewOutbox(pool).PruneStalePending(ctx, before, *reason)
+	n, err := outboxrepo.NewOutbox(pool).PruneStalePending(ctx, before, *reason)
 	if err != nil {
 		return err
 	}

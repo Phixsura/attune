@@ -48,6 +48,7 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
       changelog: ${{ steps.filter.outputs.changelog }}
       deploy: ${{ steps.filter.outputs.deploy }}
+      proto: ${{ steps.filter.outputs.proto }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -73,6 +74,12 @@ jobs:
               - 'CHANGELOG.md'
             deploy:
               - 'deploy/**'
+              - '.github/workflows/ci.yml'
+            proto:
+              - 'proto/**'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - 'buf.lock'
               - '.github/workflows/ci.yml'
 
   # ── Go: vet / build / test ─────────────────────────────────────────────────
@@ -194,6 +201,10 @@ jobs:
       - run: pnpm exec vite build
       - run: pnpm tsc -b --noEmit
       - run: pnpm vitest run --passWithNoTests
+      # dependency-cruiser enforces architectural import boundaries (#19):
+      # no cross-feature imports, shared → features → app one-way,
+      # no circular deps. See console/.dependency-cruiser.cjs.
+      - run: pnpm arch
 
   # ── Changelog enforcement: a code PR must update CHANGELOG.md (CLAUDE.md §2) ─
   changelog:
@@ -260,9 +271,32 @@ jobs:
           cp .env.example .env
           docker compose -f docker-compose.yml -f docker-compose.obs.yml config -q
 
+  # ── proto: buf lint + codegen drift gate (issue #19) ───────────────────────
+  proto:
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install buf
+        env:
+          BUF_VERSION: 1.50.0
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-Linux-x86_64" -o "$HOME/.local/bin/buf"
+          chmod +x "$HOME/.local/bin/buf"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: buf lint
+      - name: proto-sync (committed Go/TS/OpenAPI match `buf generate`)
+        run: |
+          buf generate
+          git diff --exit-code
+
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, golangci-lint, lint-slog, lizard, govulncheck, console, changelog, docker-build, compose-config]
+    needs: [changes, go-checks, golangci-lint, lint-slog, lizard, govulncheck, console, changelog, docker-build, compose-config, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:

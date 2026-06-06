@@ -1,49 +1,96 @@
+// Package console is the root that wires every console handler
+// subpackage (apikey, feedback, me, notifytarget, oauth, usage) into a
+// single chi.Router mounted by attune under /fb/v1/console.
+//
+// Shared helpers live under handlers/console/internal/:
+//   - internal/respond   — response/decode helpers (Proto, Error, Decode,
+//     ErrBodyTooLarge)
+//   - internal/session   — Signer, cookies, RequireSession middleware,
+//     AuthCtx + FromContext
+//
+// Each handler subpackage imports respond + session. This package
+// (`console`) imports the handler subpackages + session for the
+// middleware. No cycles: subpackages do not import this root, and
+// neither internal/respond nor internal/session import any handler.
 package console
 
 import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Phixsura/attune/internal/handlers/console/apikey"
+	"github.com/Phixsura/attune/internal/handlers/console/feedback"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	"github.com/Phixsura/attune/internal/handlers/console/me"
+	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
+	"github.com/Phixsura/attune/internal/handlers/console/oauth"
+	"github.com/Phixsura/attune/internal/handlers/console/usage"
 )
 
-// Router wires every console endpoint into a single chi.Router that
-// the attune main mounts under /fb/v1/console.
+// Re-exports so cmd/attune can keep a single `console.X` surface even
+// after the per-feature split. Lets the bootstrap (setup.go) stay close
+// to the previous shape without learning every new package path.
+type (
+	Signer = session.Signer
+)
+
+// Constructor re-exports so cmd/attune/setup.go can keep building
+// handlers via `console.NewXHandler(...)` after the split.
+var (
+	NewSigner               = session.NewSigner
+	NewOAuthHandler         = oauth.NewOAuthHandler
+	NewDevLoginHandler      = oauth.NewDevLoginHandler
+	NewMeHandler            = me.NewMeHandler
+	NewAPIKeysHandler       = apikey.NewAPIKeysHandler
+	NewNotifyTargetsHandler = notifytarget.NewNotifyTargetsHandler
+	NewFeedbackHandler      = feedback.NewFeedbackHandler
+	NewUsageHandler         = usage.NewUsageHandler
+)
+
+// Router wires every console endpoint into a single chi.Router.
 //
-// Endpoint inventory (matches openapi.yaml):
+// Endpoint inventory:
 //
 //	public (no session required):
-//	  GET    /install/start                 → OAuth.Start
-//	  GET    /install/callback              → OAuth.Callback
-//	  GET    /install/dev-login   (gated)   → DevLogin (HTTP test backdoor)
+//	  GET    /install/start        → oauth.Handler.Start
+//	  GET    /install/callback     → oauth.Handler.Callback
+//	  GET    /install/dev-login    → DevLogin (optional, gated)
 //
 //	session-required (RequireSession middleware):
-//	  GET    /me                            → Me.Me
-//	  POST   /logout                        → Me.Logout
-//	  GET    /api-keys                      → APIKeys.List
-//	  POST   /api-keys                      → APIKeys.Create
-//	  DELETE /api-keys/{id}                 → APIKeys.Revoke
-//
-// Wave 2.x next: feedback / notify-targets / usage handlers attach
-// under RequireSession in this same Mount() body.
+//	  GET    /me                   → me.Handler.Me
+//	  POST   /logout               → me.Handler.Logout
+//	  GET    /api-keys             → apikey.Handler.List
+//	  POST   /api-keys             → apikey.Handler.Create
+//	  DELETE /api-keys/{id}        → apikey.Handler.Revoke
+//	  GET    /notify-targets       → notifytarget.Handler.List
+//	  POST   /notify-targets       → notifytarget.Handler.Create
+//	  PATCH  /notify-targets/{id}  → notifytarget.Handler.Patch
+//	  DELETE /notify-targets/{id}  → notifytarget.Handler.Delete
+//	  POST   /notify-targets/{id}/test → notifytarget.Handler.Test
+//	  GET    /feedback             → feedback.Handler.List
+//	  GET    /feedback/stats       → feedback.Handler.Stats
+//	  GET    /feedback/{id}        → feedback.Handler.Get
+//	  GET    /usage                → usage.Handler.ServeHTTP
 type Router struct {
-	signer        *Signer
-	oauth         *OAuthHandler
-	me            *MeHandler
-	apiKeys       *APIKeysHandler
-	notifyTargets *NotifyTargetsHandler
-	feedback      *FeedbackHandler
-	usage         *UsageHandler
+	signer        *session.Signer
+	oauth         *oauth.OAuthHandler
+	me            *me.MeHandler
+	apiKeys       *apikey.APIKeysHandler
+	notifyTargets *notifytarget.NotifyTargetsHandler
+	feedback      *feedback.FeedbackHandler
+	usage         *usage.UsageHandler
 	devLogin      http.Handler // nil when ConsoleDevLogin is off
 }
 
 func NewRouter(
-	signer *Signer,
-	oauth *OAuthHandler,
-	me *MeHandler,
-	apiKeys *APIKeysHandler,
-	notifyTargets *NotifyTargetsHandler,
-	feedback *FeedbackHandler,
-	usage *UsageHandler,
+	signer *session.Signer,
+	oauth *oauth.OAuthHandler,
+	me *me.MeHandler,
+	apiKeys *apikey.APIKeysHandler,
+	notifyTargets *notifytarget.NotifyTargetsHandler,
+	feedback *feedback.FeedbackHandler,
+	usage *usage.UsageHandler,
 	devLogin http.Handler,
 ) *Router {
 	return &Router{

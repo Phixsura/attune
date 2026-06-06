@@ -11,8 +11,21 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/logext"
-	"github.com/Phixsura/attune/internal/repo"
+	"github.com/Phixsura/attune/internal/notify/sig"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
+
+// HMAC + envelope-version helpers live in `internal/notify/sig` so the
+// canonical raw-webhook + lark-bot signing formats are shared verbatim
+// across notify root, every adapter, and service/outbox — no
+// "must-stay-in-sync" comments, no drift.
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
 
 // TestResult is the outcome of a one-shot connectivity ping.
 // Returned by TestSend; the console /notify-targets/{id}/test endpoint
@@ -33,7 +46,7 @@ type TestResult struct {
 // return TestResult{Err: <not-implemented>}.
 //
 // Timeout is bounded by target.TimeoutSeconds (defaults to 10).
-func TestSend(ctx context.Context, target repo.NotifyTarget) TestResult {
+func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult {
 	const where = "notify.TestSend"
 	logext.Infof(ctx, "[%s] start,target_id:%s,dest_type:%s,url:%s",
 		where, target.ID, target.DestinationType, target.URL)
@@ -55,14 +68,14 @@ func TestSend(ctx context.Context, target repo.NotifyTarget) TestResult {
 		err           error
 	)
 	switch target.DestinationType {
-	case repo.DestLarkBot:
+	case notifytarget.DestLarkBot:
 		body, err = buildLarkTestBody(target.Secret)
 		checkResponse = checkLarkTestResponse
-	case repo.DestRawWebhook:
+	case notifytarget.DestRawWebhook:
 		body, err = buildRawTestBody()
 		if err == nil && target.Secret != "" {
 			extraHeaders = map[string]string{
-				"X-Attune-Signature": signRawBody(body, target.Secret),
+				"X-Attune-Signature": sig.SignRaw(body, target.Secret),
 			}
 		}
 		checkResponse = checkRawTestResponse
@@ -133,7 +146,7 @@ func buildLarkTextBody(text, secret string) ([]byte, error) {
 	}
 	if secret != "" {
 		ts := strconv.FormatInt(time.Now().Unix(), 10)
-		sig, err := signLarkBot(ts, secret)
+		sig, err := sig.SignLarkBot(ts, secret)
 		if err != nil {
 			return nil, err
 		}
@@ -160,7 +173,7 @@ func checkLarkTestResponse(status int, body []byte) error {
 // so the customer's receiver can filter test events out of audit logs.
 func buildRawTestBody() ([]byte, error) {
 	env := map[string]any{
-		"version":      envelopeVersion,
+		"version":      sig.EnvelopeVersion,
 		"event_type":   "test",
 		"delivered_at": time.Now().UTC().Format(time.RFC3339),
 		"note":         "连通性测试 — 此事件由Attune控制台「测试」按钮触发",
@@ -176,14 +189,14 @@ func checkRawTestResponse(status int, _ []byte) error {
 }
 
 // SendAlert pushes a meta-admin text message to a lark-bot target.
-// Caller looks up the tenant's lark-bot via repo.ListLarkBots, then
+// Caller looks up the tenant's lark-bot via notifytarget.ListLarkBots, then
 // invokes this. Sync, NoRetry — if the alert itself fails we log;
 // we do NOT enqueue another outbox row (would recurse when the
 // tenant's lark-bot is also broken).
-func SendAlert(ctx context.Context, target repo.NotifyTarget, text string) TestResult {
+func SendAlert(ctx context.Context, target notifytarget.NotifyTarget, text string) TestResult {
 	const where = "notify.SendAlert"
 	logext.Infof(ctx, "[%s] start,target_id:%s,url:%s", where, target.ID, target.URL)
-	if target.DestinationType != repo.DestLarkBot {
+	if target.DestinationType != notifytarget.DestLarkBot {
 		logext.Warnf(ctx, "[%s] reject: only lark-bot,dest_type:%s",
 			where, target.DestinationType)
 		return TestResult{Err: fmt.Errorf("SendAlert only supports lark-bot; got %q", target.DestinationType)}

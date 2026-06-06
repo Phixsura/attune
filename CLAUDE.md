@@ -18,7 +18,7 @@ AI assistants (Claude Code, Cursor, etc.) working on this repository.
 | `go test -short ./...` | All pass on changed code | CI |
 | Function CCN | ≤ 15 | `lizard . -l go -C 15` |
 | Function NLOC | ≤ 100 | `lizard . -l go -T nloc=100` |
-| Code duplication | < 2% | `npx -y jscpd . --pattern '**/*.go' --threshold 5` |
+| Code duplication | < 4% | `npx -y jscpd . --pattern '**/*.go' --threshold 5` |
 | Internal info | 0 leaks (IPs, /opt paths, brand names) | grep |
 | Outbound HTTP clients | must wrap with `otelhttp.NewTransport` | `scripts/lint-slog.sh` Rule 3 |
 | Logging | `logext.*` + `ctx` first | `scripts/lint-slog.sh` Rule 1 |
@@ -98,6 +98,19 @@ handlers  →  service  →  repo
 handlers  →  domain  (pure types, any direction)
 handlers  →  infra/apikey (middleware) → service (via Verifier interface)
 ```
+
+Inside each layer, files are grouped into **feature subpackages** (hybrid
+layout, gitea pattern — see `docs/proposals/2026-06-06-feature-organization.md`):
+
+```
+service/  enrich/  ingest/  outbox/  apikey/  eval/
+repo/     feedback/  apikey/  outbox/  notifytarget/  tenant/  lark/
+notify/   adapter/{rawwebhook,larkwebhook,githubissue}/   (transport stays at root)
+```
+
+`internal/service/apikey` and `internal/repo/apikey` collide on package name;
+importers needing both alias the repo side as `apikeyrepo` (same for `outboxrepo`
+and `larkrepo` where it collides with `internal/infra/lark`).
 
 Cross-layer rules — a violation is a rejection-grade lint:
 
@@ -181,6 +194,22 @@ implementation and committed alongside the change.**
 
 This is where assumptions get surfaced and alternatives weighed *before* writing
 code (see §6). Update the `Status` as the work lands.
+
+---
+
+## 11 · Proto IDL contract
+
+The HTTP request/response contract is defined in `.proto` (`proto/attune/v1/`)
+and code-generated — not hand-written (#19):
+
+- **To change an HTTP shape: edit the `.proto`, run `make proto`, then commit
+  both the proto and the regenerated Go / TS / OpenAPI.** Never hand-edit
+  generated files (`internal/proto/**`, `console/src/proto/**`, `docs/openapi/**`).
+- `make proto` needs `buf` (https://buf.build/docs/installation); plugins run as
+  buf remote plugins, so no local `protoc-gen-*` installs are required.
+- CI's `proto-sync` job runs `buf generate` and fails if the committed output
+  drifts. The migration is incremental — one endpoint per PR; `/v1/lark/event`
+  stays off the contract (it consumes Lark's external event format — see #66).
 
 ---
 

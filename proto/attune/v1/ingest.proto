@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/struct.proto";
+
+// FeedbackService is attune's feedback API. Today it exposes Ingest
+// (POST /v1/feedback/ingest, public, API-key auth); the console feedback reads
+// (list / stats / detail) join it as the migration proceeds.
+//
+// We do NOT generate server stubs — chi routing stays. The google.api.http
+// annotation exists only so protoc-gen-openapi emits the REST path + operation
+// into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
+service FeedbackService {
+  rpc Ingest(IngestRequest) returns (IngestResponse) {
+    option (google.api.http) = {
+      post: "/v1/feedback/ingest"
+      body: "*"
+    };
+  }
+
+  // GET /fb/v1/console/feedback (console; session auth)
+  rpc ListFeedback(ListFeedbackRequest) returns (ListFeedbackResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback"};
+  }
+  // GET /fb/v1/console/feedback/{id}
+  rpc GetFeedback(GetFeedbackRequest) returns (FeedbackDetail) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/{id}"};
+  }
+  // GET /fb/v1/console/feedback/stats
+  rpc GetFeedbackStats(GetFeedbackStatsRequest) returns (GetFeedbackStatsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/stats"};
+  }
+}
+
+// IngestRequest is the JSON body of POST /v1/feedback/ingest.
+//
+// JSON field names follow the protoJSON default (lowerCamelCase), which exactly
+// reproduces today's wire: content / source / sourceUser / sourceMeta / pageUrl.
+message IngestRequest {
+  // The feedback text. Required; the handler caps it at 5000 chars.
+  string content = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Inbound channel/source identity ("api", "web", …). Channel-agnostic and
+  // validated against the handler allow-list; defaults to "api" when empty.
+  string source = 2;
+
+  // Opaque end-user identifier from the originating system (optional).
+  string source_user = 3;
+
+  // Arbitrary source-specific metadata (optional).
+  google.protobuf.Struct source_meta = 4;
+
+  // Originating page URL, for the in-app web widget (optional).
+  string page_url = 5;
+}
+
+// IngestResponse is returned on 200.
+message IngestResponse {
+  // The stored feedback row id.
+  //
+  // NOTE: per the protoJSON spec, int64 serializes as a JSON *string*
+  // ({"id":"123"}). Deliberate — JavaScript cannot safely parse 64-bit integers.
+  int64 id = 1;
+
+  // Enrichment lifecycle state at ingest time (always "pending" here).
+  string enrichment_status = 2;
+}
+
+// Feedback is a console feedback list row.
+message Feedback {
+  int64 id = 1;  // → JSON string
+  string content = 2;
+  string source = 3;
+  string type = 4;
+  string user_id = 5;
+  string page_url = 6;
+  optional string enriched_title = 7;
+  optional string enriched_kind = 8;      // bug | feature | ops | question | other
+  optional string enriched_severity = 9;  // P0 | P1 | P2 | P3
+  repeated string enriched_modules = 10;
+  optional double enriched_priority = 11;
+  string enrichment_status = 12;  // pending | enriching | done | failed
+  string created_at = 13;         // RFC3339
+}
+
+// FeedbackDetail is the single-row view: the list fields plus extras (flat).
+message FeedbackDetail {
+  int64 id = 1;
+  string content = 2;
+  string source = 3;
+  string type = 4;
+  string user_id = 5;
+  string page_url = 6;
+  optional string enriched_title = 7;
+  optional string enriched_kind = 8;
+  optional string enriched_severity = 9;
+  repeated string enriched_modules = 10;
+  optional double enriched_priority = 11;
+  string enrichment_status = 12;
+  string created_at = 13;
+  google.protobuf.Struct source_meta = 14;
+  repeated Attachment attachments = 15;
+  optional string enrichment_error = 16;
+  optional string enriched_at = 17;  // RFC3339
+}
+
+message Attachment {
+  string url = 1;
+  optional string mime = 2;
+  optional int64 size = 3;
+}
+
+message ListFeedbackRequest {
+  optional string cursor = 1;  // last row id; opaque to the client
+  optional int32 limit = 2;
+  optional string kind = 3;
+  optional string severity = 4;
+  optional string q = 5;  // full-text query
+}
+
+message ListFeedbackResponse {
+  repeated Feedback items = 1;
+  optional string next_cursor = 2;  // absent when no more pages
+}
+
+message GetFeedbackRequest {
+  int64 id = 1;  // path param
+}
+
+message GetFeedbackStatsRequest {}
+
+message GetFeedbackStatsResponse {
+  string period_start = 1;
+  string period_end = 2;
+  int64 total = 3;
+  map<string, int64> by_kind = 4;
+}

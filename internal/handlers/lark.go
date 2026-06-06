@@ -13,8 +13,8 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/lark"
-	"github.com/Phixsura/attune/internal/repo"
-	"github.com/Phixsura/attune/internal/service"
+	"github.com/Phixsura/attune/internal/repo/tenant"
+	"github.com/Phixsura/attune/internal/service/ingest"
 )
 
 // LarkHandler serves POST /v1/lark/event for Lark/Feishu event
@@ -28,7 +28,7 @@ type LarkHandler struct {
 	signingSecret     string
 	verificationToken string
 	defaultTenant     string // TEXT tenants.id
-	ingestor          *service.Ingestor
+	ingestor          *ingest.Ingestor
 }
 
 // NewLarkHandler constructs the handler. If signingSecret is empty all
@@ -36,8 +36,8 @@ type LarkHandler struct {
 // tenant repo; pass an empty slug to keep the handler disabled.
 func NewLarkHandler(
 	ctx context.Context,
-	tenants *repo.TenantRepo,
-	ingestor *service.Ingestor,
+	tenants *tenant.TenantRepo,
+	ingestor *ingest.Ingestor,
 	signingSecret, verificationToken, defaultTenantSlug string,
 ) (*LarkHandler, error) {
 	h := &LarkHandler{
@@ -49,7 +49,7 @@ func NewLarkHandler(
 		return h, nil
 	}
 	tid, err := tenants.ResolveSlug(ctx, defaultTenantSlug)
-	if errors.Is(err, repo.ErrTenantNotFound) {
+	if errors.Is(err, tenant.ErrTenantNotFound) {
 		return nil, fmt.Errorf("lark: tenant slug %q not found or inactive", defaultTenantSlug)
 	}
 	if err != nil {

@@ -155,12 +155,12 @@
       "ai_summary": "AI 摘要",
       "raw_content": "原始内容",
       "source": "来源",
-      "source_meta": "元数据",
+      "sourceMeta": "元数据",
       "attachments": "附件",
       "modules": "相关模块",
       "no_modules": "（未识别模块）",
-      "enrichment_error": "AI 富化失败原因",
-      "enriched_at": "富化于"
+      "enrichmentError": "AI 富化失败原因",
+      "enrichedAt": "富化于"
     },
     "empty_title": "还没有反馈",
     "empty_body": "把 API key 接到你的产品里。新反馈到了 1 分钟内会出现在这里，飞书群也会同步。",

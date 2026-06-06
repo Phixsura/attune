@@ -62,7 +62,8 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	for i, name := range names {
 		version := i + 1
 		var applied bool
-		if err := pool.QueryRow(ctx,
+		if err := pool.QueryRow(
+			ctx,
 			fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE version=$1)", trackerTable),
 			version,
 		).Scan(&applied); err != nil {
@@ -88,7 +89,8 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
 			return fmt.Errorf("apply %s: %w", name, err)
 		}
-		if _, err := tx.Exec(ctx,
+		if _, err := tx.Exec(
+			ctx,
 			fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable),
 			version, name,
 		); err != nil {

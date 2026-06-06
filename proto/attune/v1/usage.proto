@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+// UsageService serves the console usage dashboard.
+service UsageService {
+  // GET /fb/v1/console/usage — ingest volume for the current calendar month.
+  rpc GetUsage(GetUsageRequest) returns (GetUsageResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/usage"};
+  }
+}
+
+message GetUsageRequest {
+  // Reserved for future billing surfaces; currently ignored by the handler.
+  string granularity = 1;
+  string range = 2;
+}
+
+message GetUsageResponse {
+  // RFC3339 period bounds (current calendar month, UTC).
+  string period_start = 1;
+  string period_end = 2;
+
+  // Total ingested rows in the period. (int64 → JSON string.)
+  int64 total = 3;
+
+  // Per-day buckets.
+  repeated UsageBucket series = 4;
+
+  // Plan quota; absent until billing lands. (int64 → JSON string.)
+  optional int64 quota = 5;
+}
+
+message UsageBucket {
+  // RFC3339 day bucket (UTC).
+  string bucket = 1;
+  // Rows in the bucket. (int64 → JSON string.)
+  int64 value = 2;
+}

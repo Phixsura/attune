@@ -2,7 +2,7 @@
 
 > Canonical reference for attune's tracing / structured-logging design. Referenced
 > from `cmd/attune/main.go`, `cmd/attune/server.go`, and
-> `internal/observability/otel.go`. If you change how `trace_id` / `span_id` reach
+> `internal/infra/observability/otel.go`. If you change how `trace_id` / `span_id` reach
 > the logs, update this file in the same change.
 
 ## Where it's wired
@@ -10,7 +10,7 @@
 ```
 cmd/attune/main.go:50   slog.SetDefault(slog.New(observability.NewTraceIDHandler(inner)))
 cmd/attune/server.go    observability.InitTracer(ctx, Options{…})  // OTLP exporter (or noop)
-internal/observability/
+internal/infra/observability/
   otel.go     InitTracer — global TracerProvider + W3C propagator + OTLP/noop exporter
   idgen.go    ReadableIDGenerator — timestamp-prefixed, human-readable trace_id
   slog.go     TraceIDHandler — injects trace_id/span_id into every ctx-carrying log line
@@ -102,13 +102,13 @@ the time straight off the ID:
 | rule-2 | business code re-emitting a reserved key (`trace_id`, …) | drop it — the handler injects it |
 | rule-3 | `&http.Client{}` without `otelhttp.NewTransport` | wrap the transport (outbound spans) |
 
-**Facade exemption.** `internal/observability/` and `internal/logext/` are exempt
+**Facade exemption.** `internal/infra/observability/` and `internal/logext/` are exempt
 from the business-field rules (1, 2): they *define and inject* the reserved keys
 rather than misuse them. `TraceIDHandler` setting `trace_id` is the canonical
 source, not a rule-2 violation. The linter runs `--strict` in pre-commit and CI.
 
 ## References
 
-- Code: `internal/observability/{otel,idgen,slog,attrs}.go`, `cmd/attune/main.go`.
+- Code: `internal/infra/observability/{otel,idgen,slog,attrs}.go`, `cmd/attune/main.go`.
 - Issues: #9 (cleared the warnings + `--strict` + this doc), #48 (logext facade),
   #4 (lint-slog), #1 (CI gate).

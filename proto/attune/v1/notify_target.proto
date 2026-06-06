@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+// NotifyTargetService manages a tenant's outbound notification destinations.
+service NotifyTargetService {
+  // GET /fb/v1/console/notify-targets
+  rpc ListNotifyTargets(ListNotifyTargetsRequest) returns (ListNotifyTargetsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/notify-targets"};
+  }
+  // POST /fb/v1/console/notify-targets
+  rpc CreateNotifyTarget(CreateNotifyTargetRequest) returns (NotifyTarget) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/notify-targets"
+      body: "*"
+    };
+  }
+  // PATCH /fb/v1/console/notify-targets/{id}
+  rpc UpdateNotifyTarget(UpdateNotifyTargetRequest) returns (NotifyTarget) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/notify-targets/{id}"
+      body: "*"
+    };
+  }
+  // DELETE /fb/v1/console/notify-targets/{id} (204)
+  rpc DeleteNotifyTarget(DeleteNotifyTargetRequest) returns (DeleteNotifyTargetResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/notify-targets/{id}"};
+  }
+  // POST /fb/v1/console/notify-targets/{id}/test
+  rpc TestNotifyTarget(TestNotifyTargetRequest) returns (TestNotifyTargetResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/notify-targets/{id}/test"
+      body: "*"
+    };
+  }
+}
+
+// NotifyTarget never carries the secret — it is write-only once stored.
+message NotifyTarget {
+  string id = 1;
+  string destination_type = 2;  // lark-bot | raw-webhook | slack-bot | email
+  string audience = 3;          // pool | radar | all
+  string url = 4;
+  int32 timeout_seconds = 5;
+  bool disabled = 6;
+  string created_at = 7;             // RFC3339
+  optional string last_failure_at = 8;  // RFC3339, null if never failed
+  string last_error = 9;
+}
+
+message ListNotifyTargetsRequest {}
+
+message ListNotifyTargetsResponse {
+  repeated NotifyTarget items = 1;
+}
+
+message CreateNotifyTargetRequest {
+  string destination_type = 1 [(google.api.field_behavior) = REQUIRED];
+  string audience = 2;  // defaults to "all"
+  string url = 3 [(google.api.field_behavior) = REQUIRED];
+  optional string secret = 4;
+  int32 timeout_seconds = 5;  // defaults to 10
+  bool disabled = 6;
+}
+
+message UpdateNotifyTargetRequest {
+  string id = 1;  // path param (UUID)
+  optional string audience = 2;
+  optional string url = 3;
+  optional string secret = 4;
+  optional int32 timeout_seconds = 5;
+  optional bool disabled = 6;
+}
+
+message DeleteNotifyTargetRequest {
+  string id = 1;  // path param (UUID)
+}
+
+message DeleteNotifyTargetResponse {}
+
+message TestNotifyTargetRequest {
+  string id = 1;  // path param (UUID)
+}
+
+message TestNotifyTargetResponse {
+  bool ok = 1;
+  optional int32 status_code = 2;
+  optional int64 latency_ms = 3;
+}

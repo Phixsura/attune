@@ -1,0 +1,28 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/Phixsura/attune/internal/proto
+  disable:
+    - module: buf.build/googleapis/googleapis
+plugins:
+  # Go message types — consumed by internal/handlers.
+  - remote: buf.build/protocolbuffers/go:v1.36.5
+    out: internal/proto
+    opt: paths=source_relative
+  # TypeScript interfaces for the console SPA (ts-proto). `onlyTypes` keeps it to
+  # plain interfaces with no runtime deps, and ts-proto ignores the
+  # google.api.http / field_behavior options (those drive OpenAPI, not the TS
+  # client) — so the annotations stay in proto without breaking TS.
+  - remote: buf.build/community/stephenh-ts-proto:v2.6.1
+    out: console/src/proto
+    opt:
+      - onlyTypes=true
+      - forceLong=string
+      - useOptionals=messages
+  # OpenAPI v3 (gnostic) — REST paths come from the google.api.http annotations.
+  - remote: buf.build/community/google-gnostic-openapi:v0.7.0
+    out: docs/openapi
+    opt:
+      - enum_type=string

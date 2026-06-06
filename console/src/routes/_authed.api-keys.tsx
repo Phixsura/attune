@@ -6,9 +6,6 @@ import { Key, Loader2, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { ApiKey, NewApiKey } from '@/api/queries'
-import { apiKeysQuery, useCreateApiKey, useRevokeApiKey } from '@/api/queries'
-import { CreateKeyDialog, RevokeKeyDialog, SecretKeyDialog } from '@/components/api-keys/dialogs'
 import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,6 +17,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { type NewApiKey, useCreateApiKey } from '@/features/api-keys/api/create-api-key'
+import { type ApiKey, apiKeysQuery } from '@/features/api-keys/api/list-api-keys'
+import { useRevokeApiKey } from '@/features/api-keys/api/revoke-api-key'
+import {
+  CreateKeyDialog,
+  RevokeKeyDialog,
+  SecretKeyDialog,
+} from '@/features/api-keys/components/dialogs'
 
 export const Route = createFileRoute('/_authed/api-keys')({
   component: ApiKeysPage,
@@ -139,26 +144,26 @@ function KeyTable({
       </TableHeader>
       <TableBody>
         {keys.map((k) => (
-          <TableRow key={k.id} className={k.is_active ? '' : 'opacity-50'}>
-            <TableCell className="font-mono text-xs">{k.key_prefix}…</TableCell>
+          <TableRow key={k.id} className={k.isActive ? '' : 'opacity-50'}>
+            <TableCell className="font-mono text-xs">{k.keyPrefix}…</TableCell>
             <TableCell>{k.label || '—'}</TableCell>
             <TableCell className="text-muted-foreground">
-              {formatDistanceToNow(new Date(k.created_at), { addSuffix: true, locale: zhCN })}
+              {formatDistanceToNow(new Date(k.createdAt), { addSuffix: true, locale: zhCN })}
             </TableCell>
             <TableCell className="text-muted-foreground">
-              {k.last_used_at
-                ? formatDistanceToNow(new Date(k.last_used_at), { addSuffix: true, locale: zhCN })
+              {k.lastUsedAt
+                ? formatDistanceToNow(new Date(k.lastUsedAt), { addSuffix: true, locale: zhCN })
                 : t('common.never')}
             </TableCell>
             <TableCell>
-              {k.is_active ? (
+              {k.isActive ? (
                 <span className="text-green-600">{t('api_keys.status.active')}</span>
               ) : (
                 <span className="text-muted-foreground">{t('api_keys.status.revoked')}</span>
               )}
             </TableCell>
             <TableCell className="text-right">
-              {k.is_active ? (
+              {k.isActive ? (
                 <Button
                   variant="ghost"
                   size="sm"

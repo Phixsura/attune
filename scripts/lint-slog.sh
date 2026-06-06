@@ -17,11 +17,11 @@
 #
 #   rule-2  Business field collides with an OTel auto-injected key.
 #           Keys like "trace_id" / "span_id" are injected by TraceIDHandler
-#           (internal/observability/slog.go); "service.name" / "http.method" …
+#           (internal/infra/observability/slog.go); "service.name" / "http.method" …
 #           are injected by the OTel SDK. Re-setting them from business code
 #           produces duplicate/ambiguous fields in the log backend.
 #           FIX: don't set auto-injected keys by hand. For deliberate business
-#           fields use the underscore constants in observability/attrs.go
+#           fields use the underscore constants in infra/observability/attrs.go
 #           (AttrHTTPMethod = "http_method", …), which are chosen to NOT collide.
 #
 #   rule-3  &http.Client{…} without an otelhttp Transport.
@@ -39,7 +39,7 @@
 #   suppresses only that rule on that line. Use sparingly and only where the
 #   collision/omission is intentional (e.g. the canonical injector itself).
 #
-#   Facade internals — internal/observability/ and internal/logext/ — are
+#   Facade internals — internal/infra/observability/ and internal/logext/ — are
 #   auto-exempt from the business-field rules (rule-1, rule-2): they define and
 #   inject the reserved keys rather than misuse them. No per-line marker needed.
 #
@@ -62,7 +62,7 @@
 #
 # History (Phase 1A warnings, all cleared in issue #9):
 #   internal/infra/llmclient/openai_backend.go   rule-3 — fixed (#55: otelhttp Transport)
-#   internal/observability/slog.go:32,33         rule-2 — auto-exempt (facade internal)
+#   internal/infra/observability/slog.go:32,33   rule-2 — auto-exempt (facade internal)
 
 set -uo pipefail  # NOT -e: grep exits 1 on "no match", which is the happy path.
 
@@ -113,7 +113,7 @@ fi
 # they own those keys, not misuse them. #48 reuses this when it tightens rule-1.
 is_facade_internal() {
   case "$1" in
-    internal/observability/*|internal/logext/*) return 0 ;;
+    internal/infra/observability/*|internal/logext/*) return 0 ;;
     *) return 1 ;;
   esac
 }

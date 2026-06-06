@@ -18,8 +18,14 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
-	"github.com/Phixsura/attune/internal/repo"
-	"github.com/Phixsura/attune/internal/service"
+	"github.com/Phixsura/attune/internal/notify/adapter/larkwebhook"
+	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/lark"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
+	"github.com/Phixsura/attune/internal/repo/tenant"
+	"github.com/Phixsura/attune/internal/service/apikey"
 )
 
 // buildLLMClient wires the OpenAI-compatible LLM client used by the
@@ -39,8 +45,8 @@ func buildLLMClient(cfg *config.Config) (llmclient.LLMClient, error) {
 func syncCustomWebhooks(
 	ctx context.Context,
 	dests []config.CustomWebhookDest,
-	tenants *repo.TenantRepo,
-	targets *repo.NotifyTargetRepo,
+	tenants *tenant.TenantRepo,
+	targets *notifytarget.NotifyTargetRepo,
 ) error {
 	const where = "main.syncCustomWebhooks"
 	if len(dests) == 0 {
@@ -51,7 +57,7 @@ func syncCustomWebhooks(
 	logext.Infof(ctx, "[%s] start,count:%d", where, len(dests))
 	for i, d := range dests {
 		tenantID, err := tenants.ResolveSlug(ctx, d.TenantSlug)
-		if errors.Is(err, repo.ErrTenantNotFound) {
+		if errors.Is(err, tenant.ErrTenantNotFound) {
 			logext.Errorf(ctx, "[%s] reject: tenant slug not found,idx:%d,slug:%s",
 				where, i, d.TenantSlug)
 			return fmt.Errorf("custom_webhooks[%d]: tenant slug %q not found in tenants table",
@@ -65,15 +71,15 @@ func syncCustomWebhooks(
 		}
 		audience := d.Audience
 		if audience == "" {
-			audience = repo.AudiencePool
+			audience = notifytarget.AudiencePool
 		}
 		timeout := d.TimeoutSeconds
 		if timeout <= 0 {
 			timeout = 10
 		}
-		if err := targets.Upsert(ctx, repo.NotifyTarget{
+		if err := targets.Upsert(ctx, notifytarget.NotifyTarget{
 			TenantID:        tenantID,
-			DestinationType: repo.DestRawWebhook,
+			DestinationType: notifytarget.DestRawWebhook,
 			Audience:        audience,
 			URL:             d.URL,
 			Secret:          d.Secret,
@@ -99,8 +105,8 @@ func syncCustomWebhooks(
 func buildNotifier(
 	ctx context.Context,
 	cfg *config.Config,
-	_ *repo.NotifyTargetRepo,
-) (service.Notifier, error) {
+	_ *notifytarget.NotifyTargetRepo,
+) (notify.Notifier, error) {
 	// Design contract (v0.4 §3.6): raw-webhook delivers via outbox ONLY
 	// (at-least-once via DB queue + worker). Lark group bot delivers
 	// inline through this Notifier (best-effort, NoRetry — duplicate
@@ -114,13 +120,15 @@ func buildNotifier(
 		slog.InfoContext(ctx, "no inline notifiers wired (lark webhook URLs empty)")
 		return nil, nil
 	}
-	lark := notify.NewLarkWebhook(
+	// Local name avoids shadowing the imported `lark` package
+	// (internal/repo/lark — see callers of lark.NewLarkInstallRepo).
+	larkBot := larkwebhook.NewLarkWebhook(
 		cfg.FeedbackPoolWebhookURL, cfg.FeedbackPoolWebhookSecret,
 		cfg.DevRadarWebhookURL, cfg.DevRadarWebhookSecret,
 	)
 	slog.InfoContext(ctx, "lark webhook wired",
-		"pool", lark.PoolEnabled(), "radar", lark.RadarEnabled())
-	return lark, nil
+		"pool", larkBot.PoolEnabled(), "radar", larkBot.RadarEnabled())
+	return larkBot, nil
 }
 
 // runOutboxLagRefresher ticks every 30s and updates the
@@ -128,7 +136,7 @@ func buildNotifier(
 // scrape avoids one DB roundtrip per scrape (could be 1/sec for tight
 // alerting setups) and keeps the gauge meaningful even when scrape
 // frequency varies.
-func runOutboxLagRefresher(ctx context.Context, outbox *repo.OutboxRepo) {
+func runOutboxLagRefresher(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
 	// Refresh once at startup so the gauge isn't stuck at 0 until the
@@ -144,7 +152,7 @@ func runOutboxLagRefresher(ctx context.Context, outbox *repo.OutboxRepo) {
 	}
 }
 
-func refreshOutboxLag(ctx context.Context, outbox *repo.OutboxRepo) {
+func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 	age, err := outbox.OldestPendingAge(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "outbox lag refresh failed", "err", err)
@@ -175,7 +183,8 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 	}
 	if cfg.ConsoleDevLogin && !cfg.ConsoleInsecureCookies {
 		return nil, fmt.Errorf(
-			"console: dev_login requires insecure_cookies (TLS would lose the test session cookie)")
+			"console: dev_login requires insecure_cookies (TLS would lose the test session cookie)",
+		)
 	}
 	signer, err := console.NewSigner(cfg.ConsoleSessionKey, cfg.ConsoleInsecureCookies)
 	if err != nil {
@@ -186,12 +195,12 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 	}
 
 	larkClient := larkclient.New(cfg.LarkAppID, cfg.LarkAppSecret)
-	tenantRepo := repo.NewTenant(pool)
-	userRepo := repo.NewTenantUserRepo(pool)
-	installRepo := repo.NewLarkInstallRepo(pool)
-	apiKeySvc := service.NewAPIKeys(repo.NewAPIKey(pool))
-	notifyTargetRepo := repo.NewNotifyTarget(pool)
-	feedbackRepo := repo.NewFeedback(pool)
+	tenantRepo := tenant.NewTenant(pool)
+	userRepo := tenant.NewTenantUserRepo(pool)
+	installRepo := lark.NewLarkInstallRepo(pool)
+	apiKeySvc := apikey.NewAPIKeys(apikeyrepo.NewAPIKey(pool))
+	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
+	feedbackRepo := feedback.NewFeedback(pool)
 
 	oauth := console.NewOAuthHandler(signer, larkClient, tenantRepo, userRepo, installRepo,
 		cfg.LarkAppID, cfg.ConsoleBaseURL)

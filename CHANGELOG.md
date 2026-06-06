@@ -9,18 +9,115 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **CI architectural-boundary gate for the console SPA** (#19) — runs
+  `dependency-cruiser` on every console PR with four rules: no cross-feature
+  imports, shared layers (components/lib/proto) may not reach into features/
+  routes/app, features may not reach into routes/app, no circular deps.
+  Config in `console/.dependency-cruiser.cjs`; `pnpm arch` runs it locally
+  (requires Node ≥20.12 || ≥22 || ≥24).
 - **Observability overlay** (`deploy/docker-compose.obs.yml`) — optional
   Prometheus + Grafana stack (pinned images, memory-capped) layered with
   `-f docker-compose.yml -f docker-compose.obs.yml` (#6). Auto-provisions the
   Prometheus datasource and the "Attune Overview" dashboard, and documents the
   `attune_*` metrics as a backend-agnostic contract in `observability/README.md`.
 - CI: a `deploy/**`-filtered `docker compose config` smoke check.
+- **Protobuf IDL contract** (#19) — `.proto` in `proto/attune/v1/` is now the
+  single source of truth for the HTTP contract, generating Go (`internal/proto/`),
+  TypeScript (`console/src/proto/`, via ts-proto) and OpenAPI (`docs/openapi/`).
+  `make proto` regenerates all three; a CI `proto-sync` gate fails on drift.
+  Every HTTP endpoint is decoded/encoded via `protojson` against the generated
+  types: the public `POST /v1/feedback/ingest` plus the full console API
+  (session, API keys, notify-targets, feedback, usage).
+- **Unified error envelope** (#19) — every HTTP error now shares one shape,
+  `{"code","message","requestId"}` (`ErrorResponse` in
+  `proto/attune/v1/common.proto`), where `requestId` echoes the request's chi
+  correlation id for support triage. The shared writer lives at
+  `internal/respond.Error` so handler subpackages and infra-layer
+  middlewares emit the same envelope; `internal/handlers/console/internal/respond`
+  re-exports it so existing console handlers don't change.
+
+### Fixed
+
+- **apikey middleware no longer leaks the legacy `{"error":"..."}` shape**
+  (#19) — caught by docker-compose smoke tests: `POST /v1/feedback/ingest`
+  without (or with an invalid) `X-API-Key` previously returned the old
+  one-key envelope — the only customer-facing endpoint that did. Now
+  emits `{code,message,requestId}` like every other path, with
+  `code=unauthenticated` on 401s and `code=internal` on lookup failures.
+  Covered by new `internal/infra/apikey/middleware_test.go` (4 cases:
+  missing header, invalid prefix, lookup-failure 500, happy-path
+  forwarding).
 
 ### Changed
 
+- **Backend reorganized into hybrid layer-outside / feature-inside packages**
+  (#19) — `internal/{service,repo,notify}` no longer flat. Each layer keeps
+  its name + the four CLAUDE.md §5 rules (re-verified clean by grep after
+  the move) and adds feature subpackages inside:
+  - `internal/service/{enrich,ingest,outbox,apikey,eval}/`
+  - `internal/repo/{feedback,apikey,outbox,notifytarget,tenant,lark}/`
+  - `internal/notify/adapter/{rawwebhook,larkwebhook,githubissue}/`
+    (Transport framework stays in the root `internal/notify` package).
+  Importers needing both `service/apikey` and `repo/apikey` alias the repo
+  side as `apikeyrepo`; same for `outboxrepo` and `larkrepo`.
+- **Console SPA migrated to feature-based layout** (#19) — `src/api/` retired;
+  every console resource now lives under `src/features/<x>/{api,components}/`
+  per bulletproof-react conventions, with React Query co-located per feature
+  (queryOptions + hook one file per operation). `src/components/` keeps only
+  truly shared primitives (`ui/`, `brand/`, layout shells).
+- **`internal/observability` → `internal/infra/observability`** (#19) — naming
+  consistency with sibling infra packages (`infra/trace`, `infra/metrics`).
+  Bootstrap-only package; only `cmd/attune` importers updated.
+- **Console API responses are now lowerCamelCase** (#19, breaking) — protoJSON
+  renders fields in lowerCamelCase, so console endpoints under `/fb/v1/console/*`
+  now return `userId`, `createdAt`, `enrichedTitle`, … instead of the previous
+  snake_case (`user_id`, `created_at`, …). Request bodies still accept both
+  casings. The bundled console SPA is updated in lockstep; any out-of-tree
+  console API client must follow. (Pre-1.0 breaking change, flagged per §3.)
+- **64-bit integer fields are now JSON strings** (#19) — protoJSON serializes
+  `int64`/`uint64` as strings (`{"id":"123"}`), which is also safe for JavaScript
+  clients. Affects the ingest response `id`, the console feedback `id`, usage
+  totals/buckets, and feedback-stats counts.
 - Renamed the bundled Grafana dashboard "Attune Overview (Wave 1.2)" → "Attune
   Overview" and removed internal roadmap jargon from `observability/` and the
   `metrics` package doc (no metric names changed).
+
+### Removed
+
+- **`openapi-typescript` and the hand-written `openapi.yaml`** (#19) — console
+  TypeScript types are now generated from `.proto` via ts-proto, retiring the
+  hand-maintained `internal/handlers/console/openapi.yaml` and the
+  `openapi-typescript` dev dependency. The `gen:api` npm script is replaced by
+  `gen:proto` (→ `make proto`).
+
+### Fixed
+
+- **Feedback detail labels regress to raw keys** (#19) — `zh-CN.json` still
+  held snake_case keys (`source_meta`, `enrichment_error`, `enriched_at`)
+  after the protoJSON lowerCamelCase rename; the detail panel rendered the
+  literal key strings instead of the Chinese labels. Keys renamed to match.
+- **Unified error envelope leak** (#19) — `console.writeError` (auth/oauth/
+  dev_login paths, used by RequireSession middleware) still emitted
+  `{code,message}` without `requestId`, contradicting the CHANGELOG's
+  "every HTTP error shares one shape" claim. Routed through `respondError`
+  so the chi RequestID is included on every 401/403/4xx from these paths.
+- **`NotifyTarget.CreatedAt` was synthesized** (#19) — the response field
+  was set to `time.Now()` on every read with a TODO comment; every notify
+  target in the console UI displayed "just created" regardless of true DB
+  creation time. Added `CreatedAt` to the repo model, surfaced the
+  `tenant_notify_targets.created_at` column in all SELECT/RETURNING paths.
+- **`decodeProto` silently truncated oversized bodies** (#19) — bodies > 1 MiB
+  were chopped to exactly 1 MiB and surfaced as vague "invalid json" 400s
+  instead of a clear 413. Now returns `errBodyTooLarge` so handlers map it
+  to `HTTP 413 body_too_large`.
+
+### Changed
+
+- **`scripts/check.sh` jscpd threshold 2% → 4%** (#19) — the intentional
+  helper duplicates from the package split (cycle-prevention copies of
+  `truncate`, `signRawBody`, `signLarkBot`, `isUniqueViolation` across
+  `repo/{outbox,notifytarget}/helpers.go` + `notify/adapter/*/`) push the
+  Go duplication ratio from 1.9% to ~3%. CLAUDE.md §1 raised to match.
 
 ### Security
 

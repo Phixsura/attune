@@ -50,7 +50,7 @@ Send feedback with the printed key:
 ```bash
 curl -X POST http://localhost:8090/v1/feedback/ingest \
   -H "X-API-Key: <key>" -H "Content-Type: application/json" \
-  -d '{"text":"hello"}'
+  -d '{"content":"hello"}'
 ```
 
 ## 4. Observability (optional overlay)

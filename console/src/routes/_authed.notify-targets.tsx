@@ -4,20 +4,29 @@ import { Bell, CheckCircle2, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { NotifyTarget, NotifyTargetCreate, NotifyTargetPatch } from '@/api/queries'
-import {
-  notifyTargetsQuery,
-  useCreateNotifyTarget,
-  useDeleteNotifyTarget,
-  useTestNotifyTarget,
-  useUpdateNotifyTarget,
-} from '@/api/queries'
 import { EmptyState } from '@/components/empty-state'
-import { CreateNotifyDialog, DeleteNotifyDialog } from '@/components/notify-targets/dialogs'
-import { EditNotifyDialog } from '@/components/notify-targets/edit-dialog'
-import { TargetTable, type TestState } from '@/components/notify-targets/table'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  type NotifyTargetCreate,
+  useCreateNotifyTarget,
+} from '@/features/notify-targets/api/create-notify-target'
+import { useDeleteNotifyTarget } from '@/features/notify-targets/api/delete-notify-target'
+import {
+  type NotifyTarget,
+  notifyTargetsQuery,
+} from '@/features/notify-targets/api/list-notify-targets'
+import { useTestNotifyTarget } from '@/features/notify-targets/api/test-notify-target'
+import {
+  type NotifyTargetPatch,
+  useUpdateNotifyTarget,
+} from '@/features/notify-targets/api/update-notify-target'
+import {
+  CreateNotifyDialog,
+  DeleteNotifyDialog,
+} from '@/features/notify-targets/components/dialogs'
+import { EditNotifyDialog } from '@/features/notify-targets/components/edit-dialog'
+import { TargetTable, type TestState } from '@/features/notify-targets/components/table'
 
 export const Route = createFileRoute('/_authed/notify-targets')({
   component: NotifyTargetsPage,
@@ -73,7 +82,7 @@ function NotifyTargetsPage() {
     test.mutate(target.id, {
       onSuccess: (result) => {
         setLastTest({ id: target.id, result })
-        toast.success(t('notify_targets.test_result.ok', { ms: result.latency_ms }))
+        toast.success(t('notify_targets.test_result.ok', { ms: result.latencyMs }))
       },
       onError: (err) => {
         // The /test endpoint returns 502 with envelope on delivery failure;
@@ -81,7 +90,7 @@ function NotifyTargetsPage() {
         const apiErr = err as { status?: number; code?: string; message?: string }
         setLastTest({
           id: target.id,
-          result: { ok: false, status_code: apiErr.status, message: apiErr.message },
+          result: { ok: false, statusCode: apiErr.status, message: apiErr.message },
         })
         toast.error(
           t('notify_targets.test_result.fail', {
@@ -178,9 +187,9 @@ function Loading() {
 // up" (the create button takes them there).
 function LarkChip({ targets }: { targets: NotifyTarget[] }) {
   const { t } = useTranslation()
-  const larkBots = targets.filter((x) => x.destination_type === 'lark-bot')
+  const larkBots = targets.filter((x) => x.destinationType === 'lark-bot')
   if (larkBots.length === 0) return null
-  const healthy = larkBots.find((x) => !x.disabled && !x.last_failure_at)
+  const healthy = larkBots.find((x) => !x.disabled && !x.lastFailureAt)
   if (healthy) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
@@ -195,5 +204,3 @@ function LarkChip({ targets }: { targets: NotifyTarget[] }) {
     </span>
   )
 }
-
-// TargetTable + FailureBadge live in @/components/notify-targets/table

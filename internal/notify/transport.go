@@ -69,7 +69,7 @@ type RequestBuilder func(ctx context.Context) (*http.Request, error)
 // ResponseChecker maps an HTTP response to success (nil), a retriable
 // error, or ErrTerminal. body is fully buffered already; status is the
 // HTTP status code.
-type ResponseChecker func(status int, body []byte) error
+type ResponseChecker func(ctx context.Context, status int, body []byte) error
 
 // ErrTerminal signals the response is a final failure — transport
 // stops retrying and returns the error.
@@ -141,7 +141,7 @@ func (t *Transport) attempt(
 	if err != nil {
 		return fmt.Errorf("read body: %w", err)
 	}
-	return check(resp.StatusCode, body)
+	return check(ctx, resp.StatusCode, body)
 }
 
 // backoff returns the delay before retry n (1-indexed: n=1 is between

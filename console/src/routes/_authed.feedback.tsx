@@ -5,12 +5,7 @@ import { zhCN } from 'date-fns/locale'
 import { Inbox, Loader2 } from 'lucide-react'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { FeedbackListFilters } from '@/api/queries'
-import { feedbackListInfiniteQuery, feedbackStatsQuery } from '@/api/queries'
 import { EmptyState } from '@/components/empty-state'
-import { KindBadge, SeverityBadge } from '@/components/feedback/badges'
-import { FeedbackDetailSheet } from '@/components/feedback/detail-sheet'
-import { KindDonut } from '@/components/feedback/kind-donut'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -29,6 +24,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
+import {
+  type Feedback,
+  type FeedbackListFilters,
+  feedbackListInfiniteQuery,
+} from '@/features/feedback/api/list-feedback-infinite'
+import { KindBadge, SeverityBadge } from '@/features/feedback/components/badges'
+import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
+import { KindDonut } from '@/features/feedback/components/kind-donut'
 
 export const Route = createFileRoute('/_authed/feedback')({
   component: FeedbackPage,
@@ -43,7 +47,7 @@ function FeedbackPage() {
   const [severity, setSeverity] = useState<string>('')
   const [qInput, setQInput] = useState('')
   const qDeferred = useDeferredValue(qInput)
-  const [detailId, setDetailId] = useState<number | null>(null)
+  const [detailId, setDetailId] = useState<string | null>(null)
 
   const filters: FeedbackListFilters = useMemo(
     () => ({ kind, severity, q: qDeferred.trim() }),
@@ -61,13 +65,18 @@ function FeedbackPage() {
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t('feedback.subtitle')}</p>
       </div>
 
-      {stats.data && stats.data.total > 0 && (
+      {stats.data && Number(stats.data.total) > 0 && (
         <Card className="mt-6">
           <CardHeader>
             <CardTitle className="text-base">{t('feedback.donut_title')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <KindDonut byKind={stats.data.by_kind} total={stats.data.total} />
+            <KindDonut
+              byKind={Object.fromEntries(
+                Object.entries(stats.data.byKind).map(([k, v]) => [k, Number(v)]),
+              )}
+              total={Number(stats.data.total)}
+            />
           </CardContent>
         </Card>
       )}
@@ -190,8 +199,8 @@ function FeedbackTable({
   items,
   onRowClick,
 }: {
-  items: import('@/api/queries').Feedback[]
-  onRowClick: (id: number) => void
+  items: Feedback[]
+  onRowClick: (id: string) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -213,20 +222,20 @@ function FeedbackTable({
             className="cursor-pointer hover:bg-muted/40"
           >
             <TableCell className="max-w-[28rem]">
-              <div className="truncate font-medium">{f.enriched_title || `#${f.id}`}</div>
+              <div className="truncate font-medium">{f.enrichedTitle || `#${f.id}`}</div>
               <div className="truncate text-xs text-muted-foreground">{f.content}</div>
             </TableCell>
             <TableCell>
-              <KindBadge kind={f.enriched_kind} />
+              <KindBadge kind={f.enrichedKind} />
             </TableCell>
             <TableCell>
-              <SeverityBadge severity={f.enriched_severity} />
+              <SeverityBadge severity={f.enrichedSeverity} />
             </TableCell>
             <TableCell className="truncate font-mono text-xs text-muted-foreground">
-              {f.user_id || '—'}
+              {f.userId || '—'}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(f.created_at), { addSuffix: true, locale: zhCN })}
+              {formatDistanceToNow(new Date(f.createdAt), { addSuffix: true, locale: zhCN })}
             </TableCell>
           </TableRow>
         ))}

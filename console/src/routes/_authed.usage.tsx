@@ -4,11 +4,11 @@ import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { BarChart3, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { usageQuery } from '@/api/queries'
 import { EmptyState } from '@/components/empty-state'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { UsageBarChart } from '@/components/usage/bar-chart'
-import { UsageSparkline } from '@/components/usage/sparkline'
+import { usageQuery } from '@/features/usage/api/get-usage'
+import { UsageBarChart } from '@/features/usage/components/bar-chart'
+import { UsageSparkline } from '@/features/usage/components/sparkline'
 
 export const Route = createFileRoute('/_authed/usage')({
   component: UsagePage,
@@ -29,10 +29,12 @@ function UsagePage() {
   }
   if (!usage.data) return null
 
-  const { total, quota, period_start, period_end, series } = usage.data
+  const { total, quota, periodStart, periodEnd } = usage.data
+  // int64 buckets arrive as JSON strings; the charts want numbers.
+  const series = usage.data.series.map((b) => ({ bucket: b.bucket, value: Number(b.value) }))
   const periodLabel = t('usage.period', {
-    start: format(new Date(period_start), 'yyyy-MM-dd', { locale: zhCN }),
-    end: format(new Date(period_end), 'yyyy-MM-dd', { locale: zhCN }),
+    start: format(new Date(periodStart), 'yyyy-MM-dd', { locale: zhCN }),
+    end: format(new Date(periodEnd), 'yyyy-MM-dd', { locale: zhCN }),
   })
 
   return (

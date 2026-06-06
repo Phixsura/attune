@@ -30,3 +30,8 @@
 
 # Logs
 *.log
+
+# Claude Code / agent local state (per-clone, not project state)
+.agents/
+.claude/
+skills-lock.json
