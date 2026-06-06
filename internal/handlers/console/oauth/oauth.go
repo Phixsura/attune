@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -130,63 +131,11 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true, Secure: !h.signer.Insecure(), SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
 
-	// 1. Code → user_access_token + tenant_key + open_id
-	tok, err := h.lark.ExchangeUserCode(ctx, code)
+	// 1-5. Exchange code, upsert tenant/user/install.
+	tenantID, userID, created, err := h.resolveAndUpsert(ctx, code)
 	if err != nil {
-		slog.ErrorContext(ctx, "oauth: exchange code failed", "err", err)
-		logext.Errorf(ctx, "[%s] lark.ExchangeUserCode failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusBadGateway, "lark_exchange_failed", "向飞书换 token 失败")
-		return
-	}
-	// 2. user_access_token → display info
-	info, err := h.lark.GetUserInfo(ctx, tok.AccessToken)
-	if err != nil {
-		slog.ErrorContext(ctx, "oauth: user_info failed", "err", err)
-		logext.Errorf(ctx, "[%s] lark.GetUserInfo failed,open_id:%s,err:%+v",
-			where, tok.OpenID, err.Error())
-		respond.Error(ctx, w, http.StatusBadGateway, "lark_userinfo_failed", "向飞书取用户信息失败")
-		return
-	}
-	// 3. Upsert tenant by lark_tenant_key (creates row on first install)
-	defaultSlug := "lark-" + shortHash(tok.TenantKey)
-	tenantName := info.Name + " 的工作区"
-	tenantID, created, err := h.tenants.UpsertByLarkKey(ctx, tok.TenantKey, tenantName, defaultSlug)
-	if err != nil {
-		slog.ErrorContext(ctx, "oauth: upsert tenant", "err", err)
-		logext.Errorf(ctx, "[%s] tenants.UpsertByLarkKey failed,tenant_key:%s,err:%+v",
-			where, tok.TenantKey, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "tenant_upsert_failed", "登记 tenant 失败")
-		return
-	}
-	// 4. Upsert user. First user of a brand-new tenant is admin.
-	role := "member"
-	if created {
-		role = "admin"
-	}
-	userID, err := h.users.Upsert(ctx, tenantID, tok.OpenID, info.Name, info.AvatarURL, role)
-	if err != nil {
-		slog.ErrorContext(ctx, "oauth: upsert user", "err", err)
-		logext.Errorf(ctx, "[%s] users.Upsert failed,tenant_id:%s,open_id:%s,err:%+v",
-			where, tenantID, tok.OpenID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "user_upsert_failed", "登记用户失败")
-		return
-	}
-	// 5. Persist Lark install (tokens for outbound API calls).
-	now := time.Now()
-	if err := h.installs.Upsert(ctx, &larkrepo.LarkInstall{
-		TenantID:              tenantID,
-		LarkTenantKey:         tok.TenantKey,
-		AppID:                 h.appID,
-		AccessToken:           tok.AccessToken,
-		AccessTokenExpiresAt:  now.Add(time.Duration(tok.AccessExpiresIn) * time.Second),
-		RefreshToken:          tok.RefreshToken,
-		RefreshTokenExpiresAt: now.Add(time.Duration(tok.RefreshExpiresIn) * time.Second),
-		Scopes:                tok.Scope,
-	}); err != nil {
-		slog.ErrorContext(ctx, "oauth: upsert install", "err", err)
-		logext.Errorf(ctx, "[%s] installs.Upsert failed,tenant_id:%s,err:%+v",
-			where, tenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "install_upsert_failed", "登记 Lark install 失败")
+		slog.ErrorContext(ctx, "oauth: exchange/upsert failed", "err", err)
+		respond.Error(ctx, w, http.StatusBadGateway, err.Error(), "向飞书交换/登记失败")
 		return
 	}
 	// 6. Sign session, redirect.
@@ -213,6 +162,52 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, redirect.String(), http.StatusFound)
+}
+
+// resolveAndUpsert performs the Lark OAuth code exchange followed by
+// upserting tenant, user, and install rows. Extracted to keep Callback
+// under the NLOC=100 gate.
+func (h *OAuthHandler) resolveAndUpsert(ctx context.Context, code string) (tenantID, userID string, created bool, err error) {
+	// 1. Code → user_access_token + tenant_key + open_id
+	tok, err := h.lark.ExchangeUserCode(ctx, code)
+	if err != nil {
+		return "", "", false, fmt.Errorf("lark_exchange_failed")
+	}
+	// 2. user_access_token → display info
+	info, err := h.lark.GetUserInfo(ctx, tok.AccessToken)
+	if err != nil {
+		return "", "", false, fmt.Errorf("lark_userinfo_failed")
+	}
+	// 3. Upsert tenant by lark_tenant_key (creates row on first install)
+	defaultSlug := "lark-" + shortHash(tok.TenantKey)
+	tenantID, created, err = h.tenants.UpsertByLarkKey(ctx, tok.TenantKey, info.Name+" 的工作区", defaultSlug)
+	if err != nil {
+		return "", "", false, fmt.Errorf("tenant_upsert_failed")
+	}
+	// 4. Upsert user. First user of a brand-new tenant is admin.
+	role := "member"
+	if created {
+		role = "admin"
+	}
+	userID, err = h.users.Upsert(ctx, tenantID, tok.OpenID, info.Name, info.AvatarURL, role)
+	if err != nil {
+		return "", "", false, fmt.Errorf("user_upsert_failed")
+	}
+	// 5. Persist Lark install (tokens for outbound API calls).
+	now := time.Now()
+	if err := h.installs.Upsert(ctx, &larkrepo.LarkInstall{
+		TenantID:              tenantID,
+		LarkTenantKey:         tok.TenantKey,
+		AppID:                 h.appID,
+		AccessToken:           tok.AccessToken,
+		AccessTokenExpiresAt:  now.Add(time.Duration(tok.AccessExpiresIn) * time.Second),
+		RefreshToken:          tok.RefreshToken,
+		RefreshTokenExpiresAt: now.Add(time.Duration(tok.RefreshExpiresIn) * time.Second),
+		Scopes:                tok.Scope,
+	}); err != nil {
+		return "", "", false, fmt.Errorf("install_upsert_failed")
+	}
+	return tenantID, userID, created, nil
 }
 
 func randomNonce(n int) (string, error) {
