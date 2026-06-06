@@ -152,16 +152,13 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		where, tenantID, userID, created)
 	// postLogin is extracted from the OAuth state nonce we ourselves
 	// generated in Begin(), verified against the state cookie above.
-	// baseURL comes from config (ConsoleBaseURL) — never from the request.
-	// Use url.Parse to validate the redirect stays within our origin.
-	base, _ := url.Parse(h.baseURL)
-	redirect, err := url.Parse(h.baseURL + postLogin)
-	if err != nil || redirect.Scheme != base.Scheme || redirect.Host != base.Host {
+	// Validate it is a same-origin path and redirect.
+	if !redirectIsSafe(h.baseURL, postLogin) {
 		logext.Errorf(ctx, "[%s] reject: redirect escapes base URL", where)
 		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "重定向失败")
 		return
 	}
-	http.Redirect(w, r, redirect.String(), http.StatusFound)
+	http.Redirect(w, r, h.baseURL+postLogin, http.StatusFound)
 }
 
 // resolveAndUpsert performs the Lark OAuth code exchange followed by
@@ -208,6 +205,34 @@ func (h *OAuthHandler) resolveAndUpsert(ctx context.Context, code string) (tenan
 		return "", "", false, fmt.Errorf("install_upsert_failed")
 	}
 	return tenantID, userID, created, nil
+}
+
+// redirectIsSafe validates that a redirect path combined with the
+// configured base URL stays within the same origin. postLogin originates
+// from the OAuth state we ourselves generated, so it is trusted content,
+// but CodeQL demands explicit origin validation.
+func redirectIsSafe(baseURL, postLogin string) bool {
+	// postLogin must be a path (starts with /) and not a protocol-relative URL.
+	if !strings.HasPrefix(postLogin, "/") || strings.HasPrefix(postLogin, "//") {
+		return false
+	}
+	// It must not contain newlines or other control characters that could
+	// be used for header injection.
+	for _, r := range postLogin {
+		if r < 32 || r > 126 {
+			return false
+		}
+	}
+	// The combined URL must stay within the configured baseURL origin.
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	combined, err := url.Parse(baseURL + postLogin)
+	if err != nil {
+		return false
+	}
+	return combined.Scheme == base.Scheme && combined.Host == base.Host
 }
 
 func randomNonce(n int) (string, error) {
