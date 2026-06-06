@@ -58,29 +58,37 @@ func TestOpenAICompat_Complete_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
+	assertHappyPathResponse(t, resp)
+	assertHappyPathRequest(t, gotMethod, gotPath, gotAuth, gotContentType, gotBody)
+}
+
+func assertHappyPathResponse(t *testing.T, resp CompletionResponse) {
+	t.Helper()
 	if resp.Text != "hello-world" {
 		t.Fatalf("want resp.Text=hello-world, got %q", resp.Text)
 	}
 	if resp.Usage.InputTokens != 11 || resp.Usage.OutputTokens != 7 {
 		t.Errorf("usage: want {11,7}, got %+v", resp.Usage)
 	}
+}
 
-	if gotMethod != http.MethodPost {
-		t.Errorf("method: want POST, got %s", gotMethod)
+func assertHappyPathRequest(t *testing.T, method, path, auth, contentType string, body []byte) {
+	t.Helper()
+	if method != http.MethodPost {
+		t.Errorf("method: want POST, got %s", method)
 	}
-	if gotPath != "/v1/chat/completions" {
-		t.Errorf("path: want /v1/chat/completions, got %s", gotPath)
+	if path != "/v1/chat/completions" {
+		t.Errorf("path: want /v1/chat/completions, got %s", path)
 	}
-	if gotAuth != "Bearer sk-test-key" {
-		t.Errorf("Authorization: want 'Bearer sk-test-key', got %q", gotAuth)
+	if auth != "Bearer sk-test-key" {
+		t.Errorf("Authorization: want 'Bearer sk-test-key', got %q", auth)
 	}
-	if gotContentType != "application/json" {
-		t.Errorf("Content-Type: want application/json, got %q", gotContentType)
+	if contentType != "application/json" {
+		t.Errorf("Content-Type: want application/json, got %q", contentType)
 	}
-
 	var parsed openaiChatRequest
-	if err := json.Unmarshal(gotBody, &parsed); err != nil {
-		t.Fatalf("unmarshal req: %v (body=%s)", err, gotBody)
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("unmarshal req: %v (body=%s)", err, body)
 	}
 	if parsed.Model != "gpt-4o-mini" {
 		t.Errorf("model: want gpt-4o-mini, got %q", parsed.Model)

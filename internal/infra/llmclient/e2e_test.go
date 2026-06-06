@@ -12,8 +12,8 @@ import (
 //
 // Usage:
 //
-//	E2E_LLM_BASE_URL=http://208.98.41.154:3000 \
-//	HTTP_PROXY=http://127.0.0.1:7897 \
+//	E2E_LLM_BASE_URL=<your-llm-endpoint> \
+//	E2E_OPENAI_COMPAT_KEY=<your-api-key> \
 //	go test -v -run TestE2E -timeout 300s ./internal/infra/llmclient/
 const e2eContent = "购物车页面添加超过10件商品后会崩溃，结账按钮也没有反应"
 
@@ -50,7 +50,7 @@ func TestE2E_OpenAICompat_FreeForm(t *testing.T) {
 	base := e2eBase(t)
 	key := os.Getenv("E2E_OPENAI_COMPAT_KEY")
 	if key == "" {
-		key = "sk-kD41Zq1O5KvPKwxkQvwkxllKKxN4Tfa68ZaH6qsuCryAgEMd"
+		t.Skip("E2E_OPENAI_COMPAT_KEY not set")
 	}
 	backend, err := NewOpenAICompat(base, key)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestE2E_OpenAICompat_Structured(t *testing.T) {
 	base := e2eBase(t)
 	key := os.Getenv("E2E_OPENAI_COMPAT_KEY")
 	if key == "" {
-		key = "sk-kD41Zq1O5KvPKwxkQvwkxllKKxN4Tfa68ZaH6qsuCryAgEMd"
+		t.Skip("E2E_OPENAI_COMPAT_KEY not set")
 	}
 	backend, err := NewOpenAICompat(base, key)
 	if err != nil {
@@ -117,7 +117,7 @@ func TestE2E_OpenAIResponses_FreeForm(t *testing.T) {
 	base := e2eBase(t)
 	key := os.Getenv("E2E_OPENAI_RESPONSES_KEY")
 	if key == "" {
-		key = "sk-kD41Zq1O5KvPKwxkQvwkxllKKxN4Tfa68ZaH6qsuCryAgEMd"
+		t.Skip("E2E_OPENAI_RESPONSES_KEY not set")
 	}
 	model := e2eModel(t, "E2E_OPENAI_RESPONSES_MODEL", "o3-pro")
 	backend, err := NewOpenAIResponses(base, key)
@@ -147,7 +147,7 @@ func TestE2E_OpenAIResponses_Structured(t *testing.T) {
 	base := e2eBase(t)
 	key := os.Getenv("E2E_OPENAI_RESPONSES_KEY")
 	if key == "" {
-		key = "sk-kD41Zq1O5KvPKwxkQvwkxllKKxN4Tfa68ZaH6qsuCryAgEMd"
+		t.Skip("E2E_OPENAI_RESPONSES_KEY not set")
 	}
 	model := e2eModel(t, "E2E_OPENAI_RESPONSES_MODEL", "o3-pro")
 	backend, err := NewOpenAIResponses(base, key)
@@ -180,7 +180,7 @@ func TestE2E_Anthropic_FreeForm(t *testing.T) {
 	base := e2eBase(t)
 	key := os.Getenv("E2E_ANTHROPIC_KEY")
 	if key == "" {
-		key = "sk-dmrVMN2Lzhocr06McJIOXqbbK7un6hAO9hyN7dgIU005NNet"
+		t.Skip("E2E_ANTHROPIC_KEY not set")
 	}
 	backend, err := NewAnthropic(base, key)
 	if err != nil {
@@ -209,7 +209,7 @@ func TestE2E_Anthropic_Structured(t *testing.T) {
 	base := e2eBase(t)
 	key := os.Getenv("E2E_ANTHROPIC_KEY")
 	if key == "" {
-		key = "sk-dmrVMN2Lzhocr06McJIOXqbbK7un6hAO9hyN7dgIU005NNet"
+		t.Skip("E2E_ANTHROPIC_KEY not set")
 	}
 	backend, err := NewAnthropic(base, key)
 	if err != nil {
@@ -241,7 +241,7 @@ func TestE2E_Gemini_FreeForm(t *testing.T) {
 	base := e2eBase(t)
 	key := os.Getenv("E2E_GEMINI_KEY")
 	if key == "" {
-		key = "sk-MiyOv81zmpEh2wNCZPWv9nWkP6zgL5SfE9mFoig5gmQx0Wjs"
+		t.Skip("E2E_GEMINI_KEY not set")
 	}
 	backend, err := NewGemini(base, key)
 	if err != nil {
@@ -270,7 +270,7 @@ func TestE2E_Gemini_Structured(t *testing.T) {
 	base := e2eBase(t)
 	key := os.Getenv("E2E_GEMINI_KEY")
 	if key == "" {
-		key = "sk-MiyOv81zmpEh2wNCZPWv9nWkP6zgL5SfE9mFoig5gmQx0Wjs"
+		t.Skip("E2E_GEMINI_KEY not set")
 	}
 	backend, err := NewGemini(base, key)
 	if err != nil {

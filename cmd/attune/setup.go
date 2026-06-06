@@ -33,7 +33,7 @@ import (
 // supported protocols (#10):
 //
 //   - "openai-compat"     hand-rolled /v1/chat/completions client; covers
-//                         OpenAI / Azure / vLLM / ollama / oneapi.
+//     OpenAI / Azure / vLLM / ollama / oneapi.
 //   - "openai-responses"  openai-go/v3 client.Responses.New.
 //   - "anthropic"         anthropic-sdk-go with forced tool_use.
 //   - "gemini"            google.golang.org/genai responseJsonSchema.
