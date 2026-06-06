@@ -388,7 +388,7 @@ After commit 10:
 **This repo:**
 - CLAUDE.md §5 — current four-layer contract being preserved.
 - CLAUDE.md §10 — proposal acceptance gate this document satisfies.
-- `docs/proposals/2026-06-06-inbound-adapter-framework.md` — sibling proposal for #66 (de-rooting Lark), unrelated to this refactor but referenced because it would land *into* the new `handlers/` shape.
+- `docs/proposals/2026/06/2026-06-06-inbound-adapter-framework.md` — sibling proposal for #66 (de-rooting Lark), unrelated to this refactor but referenced because it would land *into* the new `handlers/` shape.
 
 ---
 

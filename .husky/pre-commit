@@ -46,6 +46,16 @@ while IFS= read -r f; do
   fi
 done < <(git diff --cached --name-only --diff-filter=A)
 
+# ── ①b proposal location — must go into YYYY/MM/, not root (#72) ─────────────
+root_proposals=$(git diff --cached --name-only --diff-filter=ACM \
+  | grep -E '^docs/proposals/[^/]+\.md$' | grep -v '^docs/proposals/README\.md$' || true)
+if [ -n "$root_proposals" ]; then
+  say "proposal location"
+  echo "✗ proposals must go into docs/proposals/YYYY/MM/, not the root:"
+  printf '    %s\n' $root_proposals
+  fail=1
+fi
+
 # ── ② go vet on staged packages (array → space-safe, no fragile xargs) ────────
 go_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
 if [ -n "$go_files" ]; then

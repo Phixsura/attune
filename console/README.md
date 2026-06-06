@@ -36,4 +36,4 @@ feature 的 `src/features/<x>/api/*.ts` 把这些类型按消费场景重导出�
 - 禁跨 feature 互引
 - 无循环依赖
 
-详见 `.dependency-cruiser.cjs` 与 `docs/proposals/2026-06-06-feature-organization.md`。
+详见 `.dependency-cruiser.cjs` 与 `docs/proposals/2026/06/2026-06-06-feature-organization.md`。

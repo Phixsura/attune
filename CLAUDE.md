@@ -100,7 +100,7 @@ handlers  →  infra/apikey (middleware) → service (via Verifier interface)
 ```
 
 Inside each layer, files are grouped into **feature subpackages** (hybrid
-layout, gitea pattern — see `docs/proposals/2026-06-06-feature-organization.md`):
+layout, gitea pattern — see `docs/proposals/2026/06/2026-06-06-feature-organization.md`):
 
 ```
 service/  enrich/  ingest/  outbox/  apikey/  eval/
@@ -182,8 +182,9 @@ When Claude / Cursor / similar tooling is editing this repo:
 **Every issue we work on gets a short design proposal, written before/with the
 implementation and committed alongside the change.**
 
-- **Location / naming:** `docs/proposals/YYYY-MM-DD-<slug>.md` — the date prefix
-  is when the proposal was *started*, so `ls docs/proposals` reads as a timeline.
+- **Location / naming:** `docs/proposals/YYYY/MM/YYYY-MM-DD-<slug>.md` — the date
+  prefix is when the proposal was *started*; year/month directories keep the tree
+  browsable as it grows.
 - **Header:** a table with `Issue` (#N), `Status` (`Proposed` → `Accepted` →
   `Implemented`), `Started` (timestamp), and `Related` issues.
 - **Sections** (ADR/RFC-lite): Problem → Goals / Non-goals → Proposal →
