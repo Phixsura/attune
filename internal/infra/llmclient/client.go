@@ -1,29 +1,110 @@
-// Package llmclient provides single-shot non-streaming chat completion
-// for the attune enricher. It exposes an LLMClient interface implemented
-// by OpenAIBackend (openai_backend.go), which POSTs OpenAI-compatible
-// /v1/chat/completions over HTTP. Wire it against OpenAI, Azure OpenAI,
-// vllm, ollama, oneapi, or any other compatible endpoint.
+// Package llmclient is the provider-agnostic facade for single-shot,
+// non-streaming chat completions used by the attune enricher.
 //
-// Streaming, tool calls, and multi-turn are intentionally out of scope —
-// the enricher only needs one prompt-in / one-string-out per row.
+// One method — Complete — keeps the surface minimal. Streaming, tool
+// calls beyond the structured-output shim, and multi-turn are out of
+// scope: the enricher only needs one prompt-in / one-string-out per row.
+//
+// Four backends implement LLMClient (#10):
+//
+//   - openai_compat.go  — POST /v1/chat/completions over hand-rolled HTTP;
+//     covers OpenAI / Azure OpenAI / vLLM / ollama / oneapi / any
+//     OpenAI-compatible endpoint, with optional response_format json_schema
+//     for structured output.
+//   - openai_responses.go — github.com/openai/openai-go/v3 /v1/responses,
+//     text.format json_schema.
+//   - anthropic.go      — github.com/anthropics/anthropic-sdk-go
+//     /v1/messages with forced tool_use for structured output.
+//   - gemini.go         — google.golang.org/genai generateContent with
+//     responseSchema + responseMimeType="application/json".
+//
+// Backend selection is wired by cmd/attune (config llm_protocol).
+// Users can plug their own backend by implementing LLMClient and
+// wiring it in cmd/attune/setup.go — no registration mechanism needed.
 package llmclient
 
 import "context"
 
-// upstreamBodyLogCap — LLM upstream request/response body truncation
-// threshold for INFO-level logging. 4 KB is enough to see the prompt,
-// JSON structure, and most error stacks; for larger payloads use a
-// proxy like mitmproxy.
+// upstreamBodyLogCap caps INFO-level upstream request/response logging
+// at 4 KB — enough to see the prompt, JSON structure, and most error
+// stacks; for larger payloads, use a sidecar like mitmproxy.
 const upstreamBodyLogCap = 4096
 
 // LLMClient is the single abstraction the rest of attune depends on.
-// OpenAIBackend implements it; cmd/attune wires one instance at boot.
+// Each backend file implements this interface; cmd/attune/setup.go
+// wires one concrete instance at boot.
 type LLMClient interface {
-	Chat(ctx context.Context, userID, model, prompt string, temperature float64, maxTokens int32) (string, error)
+	// Complete issues a single non-streaming chat completion.
+	//
+	// When req.Schema is non-nil, the backend asks the provider to
+	// constrain its output to that JSON Schema using the provider's
+	// native mechanism (response_format json_schema, text.format,
+	// forced tool_use, or responseSchema). When the provider honours
+	// it, resp.Text is the JSON object described by the schema.
+	//
+	// Gate (2) — the post-parse modules whitelist filter in
+	// service/enrich — is always on, so a provider that silently
+	// ignores Schema still yields clean stored output. Backends do
+	// not feature-detect.
+	Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error)
+	// Close releases backend-owned resources. Most backends have
+	// none and return nil.
 	Close() error
 }
 
-// truncate caps s at the given byte length so logs stay scannable.
+// CompletionRequest is the provider-agnostic input.
+//
+// System and Prompt are kept separate so backends that have a dedicated
+// system-message channel (Anthropic, Gemini) can route them natively;
+// the OpenAI-Compatible backend stitches them into the messages array.
+// Multi-turn is out of scope — attune is single-turn end-to-end.
+type CompletionRequest struct {
+	Model       string        // provider-native model id (e.g. "gpt-4o-mini")
+	System      string        // optional system prompt
+	Prompt      string        // single user turn
+	Temperature float64       // 0..2 (provider-clamped)
+	MaxTokens   int32         // upper bound on completion tokens
+	UserID      string        // audit + OpenAI `user` field; backends without one log it
+	Schema      *OutputSchema // nil = free-form text; non-nil = request structured output
+}
+
+// CompletionResponse is the provider-agnostic output.
+type CompletionResponse struct {
+	// Text is the assistant's raw text. When the request carried a
+	// Schema and the provider honoured it, Text is the JSON object
+	// described by the schema.
+	Text string
+	// Usage carries token counts when the provider returns them.
+	// Zero-valued when unavailable; never an error.
+	Usage Usage
+}
+
+// Usage is provider-reported token accounting. Optional — backends
+// leave it zero when the provider doesn't return it.
+type Usage struct {
+	InputTokens  int32
+	OutputTokens int32
+}
+
+// OutputSchema is a provider-agnostic JSON Schema fragment used to
+// request structured output.
+//
+// Schema is a JSON Schema object (typically {"type":"object","properties":
+// {...},"required":[...],"additionalProperties":false}). It is passed as
+// map[string]any deliberately: attune only constructs object + enum +
+// array-of-enum and each backend handles the last-mile dialect (OpenAI
+// strict mode quirks, Gemini's restricted subset, Anthropic's
+// input_schema). A typed Builder would be over-engineering for this
+// single use site.
+type OutputSchema struct {
+	// Name is a logical identifier the provider may surface (OpenAI
+	// json_schema name, Anthropic tool name). Used for telemetry too.
+	Name string
+	// Schema is the JSON Schema body.
+	Schema map[string]any
+}
+
+// truncate caps s at limit bytes so upstream logs stay scannable.
 func truncate(s string, limit int) string {
 	if len(s) <= limit {
 		return s
