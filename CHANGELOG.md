@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **CI architectural-boundary gate for the console SPA** (#19) — runs
+  `dependency-cruiser` on every console PR with four rules: no cross-feature
+  imports, shared layers (components/lib/proto) may not reach into features/
+  routes/app, features may not reach into routes/app, no circular deps.
+  Config in `console/.dependency-cruiser.cjs`; `pnpm arch` runs it locally
+  (requires Node ≥20.12 || ≥22 || ≥24).
 - **Observability overlay** (`deploy/docker-compose.obs.yml`) — optional
   Prometheus + Grafana stack (pinned images, memory-capped) layered with
   `-f docker-compose.yml -f docker-compose.obs.yml` (#6). Auto-provisions the
@@ -29,6 +35,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **Backend reorganized into hybrid layer-outside / feature-inside packages**
+  (#19) — `internal/{service,repo,notify}` no longer flat. Each layer keeps
+  its name + the four CLAUDE.md §5 rules (re-verified clean by grep after
+  the move) and adds feature subpackages inside:
+  - `internal/service/{enrich,ingest,outbox,apikey,eval}/`
+  - `internal/repo/{feedback,apikey,outbox,notifytarget,tenant,lark}/`
+  - `internal/notify/adapter/{rawwebhook,larkwebhook,githubissue}/`
+    (Transport framework stays in the root `internal/notify` package).
+  Importers needing both `service/apikey` and `repo/apikey` alias the repo
+  side as `apikeyrepo`; same for `outboxrepo` and `larkrepo`.
+- **Console SPA migrated to feature-based layout** (#19) — `src/api/` retired;
+  every console resource now lives under `src/features/<x>/{api,components}/`
+  per bulletproof-react conventions, with React Query co-located per feature
+  (queryOptions + hook one file per operation). `src/components/` keeps only
+  truly shared primitives (`ui/`, `brand/`, layout shells).
+- **`internal/observability` → `internal/infra/observability`** (#19) — naming
+  consistency with sibling infra packages (`infra/trace`, `infra/metrics`).
+  Bootstrap-only package; only `cmd/attune` importers updated.
 - **Console API responses are now lowerCamelCase** (#19, breaking) — protoJSON
   renders fields in lowerCamelCase, so console endpoints under `/fb/v1/console/*`
   now return `userId`, `createdAt`, `enrichedTitle`, … instead of the previous

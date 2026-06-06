@@ -84,21 +84,26 @@ Every field in [`config.example.yaml`](config.example.yaml) has an env-var overr
 ### Package layout
 
 ```
-cmd/attune/                Bootstrap: DI + signals + CLI subcommands
+cmd/attune/                  Bootstrap: DI + signals + CLI subcommands
 internal/
-  domain/                  Pure types: IngestInput / Snapshot / Enriched
-  repo/                    Data access — all SQL lives here
-  service/                 Business logic + orchestration
-  handlers/                HTTP routes + parameter parsing
-  notify/                  Outbound webhooks + transport
+  domain/                    Pure types: IngestInput / Snapshot / Enriched
+  repo/                      Data access — all SQL lives here
+    feedback/  apikey/  outbox/  notifytarget/  tenant/  lark/
+  service/                   Business logic + orchestration
+    enrich/  ingest/  outbox/  apikey/  eval/
+  handlers/                  HTTP routes + parameter parsing
+    console/                 Stage B console API
+  notify/                    Outbound webhooks + Transport framework
+    adapter/                 Per-destination senders
+      rawwebhook/  larkwebhook/  githubissue/
   infra/
-    apikey/                HTTP middleware + context keys
-    config/                YAML + env override
-    database/              Schema migrations
-    llmclient/             OpenAI-compatible HTTP client
-    lark/                  Inbound Lark protocol
-    observability/         Vendored OTel + slog helpers
-console/                   React triage UI
+    apikey/                  HTTP middleware + context keys
+    config/                  YAML + env override
+    database/                Schema migrations
+    llmclient/               OpenAI-compatible HTTP client
+    lark/                    Inbound Lark protocol
+    observability/           Vendored OTel + slog helpers
+console/                     React triage UI (feature-based: src/features/*)
 ```
 
 **Layering rule** — handlers never write SQL; service never writes HTTP; notify never imports service; infra never imports service or repo. A reverse import is a rejection-grade lint.

@@ -99,6 +99,19 @@ handlers  →  domain  (pure types, any direction)
 handlers  →  infra/apikey (middleware) → service (via Verifier interface)
 ```
 
+Inside each layer, files are grouped into **feature subpackages** (hybrid
+layout, gitea pattern — see `docs/proposals/2026-06-06-feature-organization.md`):
+
+```
+service/  enrich/  ingest/  outbox/  apikey/  eval/
+repo/     feedback/  apikey/  outbox/  notifytarget/  tenant/  lark/
+notify/   adapter/{rawwebhook,larkwebhook,githubissue}/   (transport stays at root)
+```
+
+`internal/service/apikey` and `internal/repo/apikey` collide on package name;
+importers needing both alias the repo side as `apikeyrepo` (same for `outboxrepo`
+and `larkrepo` where it collides with `internal/infra/lark`).
+
 Cross-layer rules — a violation is a rejection-grade lint:
 
 - `handlers` never writes SQL.
