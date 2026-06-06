@@ -74,7 +74,7 @@ func (r *FeedbackRepo) TryClaim(ctx context.Context, id int64) (bool, error) {
 		WHERE id = $1
 		  AND (enrichment_status IN ('pending','failed')
 		       OR (enrichment_status = 'enriching'
-		           AND enrichment_claimed_at < NOW() - INTERVAL '5 minutes'))`, id)
+		           AND enrichment_claimed_at < NOW() - INTERVAL '15 minutes'))`, id)
 	if err != nil {
 		return false, fmt.Errorf("claim feedback %d: %w", id, err)
 	}
@@ -83,21 +83,36 @@ func (r *FeedbackRepo) TryClaim(ctx context.Context, id int64) (bool, error) {
 
 // EnrichInput is the row data the enricher needs to call the LLM.
 // Returned by LoadForEnrich after a successful TryClaim.
+//
+// PromptTemplate / Modules come from the per-tenant override on the
+// tenants row (#10). Both may be nil; the service layer falls back to
+// the default prompt and free-form modules respectively.
 type EnrichInput struct {
-	Content  string
-	Source   string
-	UserID   string
-	TenantID string
+	Content        string
+	Source         string
+	UserID         string
+	TenantID       string
+	PromptTemplate *string
+	Modules        []string
 }
 
 // LoadForEnrich returns the columns the LLM prompt and the downstream
 // Snapshot need. Assumes the caller just claimed the row.
+//
+// LEFT JOIN tenants pulls the per-tenant enricher override in the same
+// query — saves a round-trip and means the enricher never needs to
+// import the tenant repo.
 func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInput, error) {
 	var in EnrichInput
 	err := r.pool.QueryRow(
 		ctx,
-		`SELECT content, source, user_id, tenant_id FROM user_feedback WHERE id=$1`, id,
-	).Scan(&in.Content, &in.Source, &in.UserID, &in.TenantID)
+		`SELECT uf.content, uf.source, uf.user_id, uf.tenant_id,
+		        t.enrich_prompt_template, t.enrich_modules
+		   FROM user_feedback uf
+		   LEFT JOIN tenants t ON t.id = uf.tenant_id
+		  WHERE uf.id = $1`, id,
+	).Scan(&in.Content, &in.Source, &in.UserID, &in.TenantID,
+		&in.PromptTemplate, &in.Modules)
 	if err != nil {
 		return nil, fmt.Errorf("load feedback %d: %w", id, err)
 	}
