@@ -55,7 +55,7 @@ docker compose run --rm attune tenant create --slug <slug> --name <name>
 docker compose run --rm attune keys issue --tenant <slug> --label <s>  # mint an API key
 ```
 
-See [`deploy/README.md`](deploy/README.md) for the full walk-through. Or build from source:
+See [`deploy/README.md`](deploy/README.md) for the compose-kit quick-reference, or the full [private deployment guide](docs/private-deploy.md) for a step-by-step walk-through with monitoring, SSL, upgrades, and troubleshooting. Or build from source:
 
 ```bash
 go build ./cmd/attune
@@ -67,8 +67,9 @@ Every field in [`config.example.yaml`](config.example.yaml) has an env-var overr
 | Required | Env var | Notes |
 |---|---|---|
 | `database_url` | `FEEDBACK_API_DATABASE_URL` | PostgreSQL DSN, e.g. `postgres://<user>:<password>@<host>:5432/attune` |
-| `llm_openai_base_url` | `FEEDBACK_API_LLM_OPENAI_BASE_URL` | Any OpenAI-compatible endpoint |
-| `llm_openai_api_key` | `FEEDBACK_API_LLM_OPENAI_API_KEY` | Bearer token (blank OK for local ollama) |
+| `llm_protocol` | `FEEDBACK_API_LLM_PROTOCOL` | `openai-compat` (default), `openai-responses`, `anthropic`, or `gemini` |
+| `llm_openai_base_url` | `FEEDBACK_API_LLM_OPENAI_BASE_URL` | Any OpenAI-compatible endpoint (only for `openai-compat`) |
+| `llm_openai_api_key` | `FEEDBACK_API_LLM_OPENAI_API_KEY` | Bearer token / API key (required for all protocols) |
 
 ## Architecture
 
@@ -76,7 +77,7 @@ Every field in [`config.example.yaml`](config.example.yaml) has an env-var overr
 |---|---|---|
 | HTTP server | Go 1.25, chi router, structured slog | Single static binary |
 | Storage | PostgreSQL 14+ | pgvector for clustering (v0.5+) |
-| LLM enrichment | Any OpenAI-compatible `/v1/chat/completions` | Default OpenAI; Anthropic + Gemini in v0.4 |
+| LLM enrichment | OpenAI Chat / OpenAI Responses / Anthropic / Gemini | Multi-protocol with structured output |
 | Outbound | Lark group bot · customer HTTPS webhooks | Slack / Discord / email in v0.6 |
 | Console | React + Vite + biome (`console/`) | Triage UI, served as static files |
 | Observability | OpenTelemetry + Prometheus `/metrics` | Grafana dashboards in `observability/dashboards/` |
@@ -100,7 +101,7 @@ internal/
     apikey/                  HTTP middleware + context keys
     config/                  YAML + env override
     database/                Schema migrations
-    llmclient/               OpenAI-compatible HTTP client
+    llmclient/               Multi-protocol LLM client (OpenAI / Anthropic / Gemini)
     lark/                    Inbound Lark protocol
     observability/           Vendored OTel + slog helpers
 console/                     React triage UI (feature-based: src/features/*)

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Per-tenant enricher prompt + module whitelist** (#10) — tenants can
+  override the classification prompt (`{{content}}` / `{{modules}}` token
+  substitution, SSTI-safe) and declare a modules vocabulary. Gate (2)
+  post-filter guarantees stored `modules` ⊆ configured list; off-list
+  labels surface as a suggested-module signal (metric + log). Gate (3)
+  structured output is wired across four LLM protocols (`openai-compat`,
+  `openai-responses`, `anthropic`, `gemini`). Console adds
+  `/settings` (GET/PUT `/enrich-config`, POST `/enrich-config/preview`).
+  Migration `012_enricher_per_tenant_prompt.sql`; proposal
+  `docs/proposals/2026-06-06-enricher-per-tenant-prompt.md`.
 - **CI architectural-boundary gate for the console SPA** (#19) — runs
   `dependency-cruiser` on every console PR with four rules: no cross-feature
   imports, shared layers (components/lib/proto) may not reach into features/

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #10 |
-| **Status** | Accepted |
+| **Status** | Implemented |
 | **Started** | 2026-06-06 22:53 CST |
 | **Related** | #7 (deploy docs: "how to configure modules"), CLAUDE.md §5 (layering), §7 (observability), §8 (deps), §11 (proto IDL) |
 

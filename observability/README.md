@@ -28,7 +28,9 @@ exposition plus the portable assets in this directory.
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `attune_ingest_total` | counter | `tenant`, `source`, `result` | ingest API requests |
-| `attune_enrich_duration_seconds` | histogram | `tenant`, `result` | end-to-end AI enrichment latency |
+| `attune_enrich_duration_seconds` | histogram | `tenant`, `module_mode`, `result` | end-to-end AI enrichment latency |
+| `attune_enrich_modules_dropped_total` | counter | `tenant` | module labels removed by whitelist filter (#10) |
+| `attune_enrich_suggested_modules_total` | counter | `tenant` | enrich rows with off-list module suggestions (#10) |
 | `attune_notify_failures_total` | counter | `destination_type`, `reason` | notifier push failures |
 | `attune_outbox_lag_seconds` | gauge | — | age of the oldest pending outbox row (0 = empty) |
 | `attune_claim_contention_total` | counter | — | enricher `tryClaim` lost to another worker |
@@ -41,6 +43,7 @@ Label values:
   `lark-helpdesk`, `lark-form`, `email`, `web`, `other`; or `invalid` when a
   request's source failed validation.
 - ingest `result` — `ok` · `validate_err` · `auth_err` · `internal_err`.
+- enrich `module_mode` — `freeform` · `constrained`.
 - enrich `result` — `ok` · `llm_err` · `parse_err` · `other_err` · `db_err`.
 - `destination_type` — `lark-pool` · `lark-radar` · `raw-webhook`.
 - `reason` — `transport` · `terminal`.
