@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+// ApiKeyService manages a tenant's external ingest API keys (console).
+service ApiKeyService {
+  // GET /fb/v1/console/api-keys
+  rpc ListApiKeys(ListApiKeysRequest) returns (ListApiKeysResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys"};
+  }
+  // POST /fb/v1/console/api-keys — returns the raw secret once.
+  rpc CreateApiKey(CreateApiKeyRequest) returns (CreateApiKeyResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/api-keys"
+      body: "*"
+    };
+  }
+  // DELETE /fb/v1/console/api-keys/{id} — revoke (204).
+  rpc DeleteApiKey(DeleteApiKeyRequest) returns (DeleteApiKeyResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/api-keys/{id}"};
+  }
+}
+
+message ApiKey {
+  string id = 1;
+  string key_prefix = 2;
+  string label = 3;
+  bool is_active = 4;
+  string created_at = 5;             // RFC3339
+  optional string last_used_at = 6;  // RFC3339, null if never used
+  optional string revoked_at = 7;    // RFC3339, null if active
+}
+
+message ListApiKeysRequest {}
+
+message ListApiKeysResponse {
+  repeated ApiKey items = 1;
+}
+
+message CreateApiKeyRequest {
+  string label = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message CreateApiKeyResponse {
+  ApiKey key = 1;
+  // The raw secret — returned only here, once, at creation.
+  string secret = 2;
+}
+
+message DeleteApiKeyRequest {
+  string id = 1;  // path param (UUID)
+}
+
+message DeleteApiKeyResponse {}

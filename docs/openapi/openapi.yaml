@@ -6,6 +6,118 @@ info:
     title: ""
     version: 0.0.1
 paths:
+    /fb/v1/console/api-keys:
+        get:
+            tags:
+                - ApiKeyService
+            description: GET /fb/v1/console/api-keys
+            operationId: ApiKeyService_ListApiKeys
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListApiKeysResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/api-keys — returns the raw secret once.
+            operationId: ApiKeyService_CreateApiKey
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateApiKeyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateApiKeyResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}:
+        delete:
+            tags:
+                - ApiKeyService
+            description: DELETE /fb/v1/console/api-keys/{id} — revoke (204).
+            operationId: ApiKeyService_DeleteApiKey
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteApiKeyResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/logout:
+        post:
+            tags:
+                - SessionService
+            description: POST /fb/v1/console/logout — clears the session cookie (204).
+            operationId: SessionService_Logout
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LogoutRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LogoutResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/me:
+        get:
+            tags:
+                - SessionService
+            description: GET /fb/v1/console/me
+            operationId: SessionService_GetMe
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetMeResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/usage:
         get:
             tags:
@@ -61,6 +173,50 @@ paths:
                                 $ref: '#/components/schemas/Status'
 components:
     schemas:
+        ApiKey:
+            type: object
+            properties:
+                id:
+                    type: string
+                keyPrefix:
+                    type: string
+                label:
+                    type: string
+                isActive:
+                    type: boolean
+                createdAt:
+                    type: string
+                lastUsedAt:
+                    type: string
+                revokedAt:
+                    type: string
+        CreateApiKeyRequest:
+            required:
+                - label
+            type: object
+            properties:
+                label:
+                    type: string
+        CreateApiKeyResponse:
+            type: object
+            properties:
+                key:
+                    $ref: '#/components/schemas/ApiKey'
+                secret:
+                    type: string
+                    description: The raw secret — returned only here, once, at creation.
+        DeleteApiKeyResponse:
+            type: object
+            properties: {}
+        GetMeResponse:
+            type: object
+            properties:
+                tenant:
+                    $ref: '#/components/schemas/Tenant'
+                user:
+                    $ref: '#/components/schemas/SessionUser'
+                csrfToken:
+                    type: string
         GetUsageResponse:
             type: object
             properties:
@@ -129,6 +285,31 @@ components:
                     type: string
                     description: Enrichment lifecycle state at ingest time (always "pending" here).
             description: IngestResponse is returned on 200.
+        ListApiKeysResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ApiKey'
+        LogoutRequest:
+            type: object
+            properties: {}
+        LogoutResponse:
+            type: object
+            properties: {}
+        SessionUser:
+            type: object
+            properties:
+                openId:
+                    type: string
+                name:
+                    type: string
+                avatarUrl:
+                    type: string
+                role:
+                    type: string
+            description: SessionUser is the logged-in console user.
         Status:
             type: object
             properties:
@@ -145,6 +326,22 @@ components:
                         $ref: '#/components/schemas/GoogleProtobufAny'
                     description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
             description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
+        Tenant:
+            type: object
+            properties:
+                id:
+                    type: string
+                slug:
+                    type: string
+                name:
+                    type: string
+                larkTenantKey:
+                    type: string
+                locale:
+                    type: string
+                timezone:
+                    type: string
+            description: Tenant is the console-facing tenant record.
         UsageBucket:
             type: object
             properties:
@@ -155,6 +352,8 @@ components:
                     type: string
                     description: Rows in the bucket. (int64 → JSON string.)
 tags:
+    - name: ApiKeyService
+      description: ApiKeyService manages a tenant's external ingest API keys (console).
     - name: FeedbackService
       description: |-
         FeedbackService is attune's feedback API. Today it exposes Ingest
@@ -164,5 +363,7 @@ tags:
          We do NOT generate server stubs — chi routing stays. The google.api.http
          annotation exists only so protoc-gen-openapi emits the REST path + operation
          into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
+    - name: SessionService
+      description: SessionService backs the console session (current tenant + user, logout).
     - name: UsageService
       description: UsageService serves the console usage dashboard.

@@ -1,7 +1,6 @@
 package console
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/logext"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo"
 	"github.com/Phixsura/attune/internal/service"
 )
@@ -27,21 +27,9 @@ func NewAPIKeysHandler(svc *service.APIKeys) *APIKeysHandler {
 	return &APIKeysHandler{svc: svc}
 }
 
-// keyDTO mirrors openapi.yaml `ApiKey`. Optional time fields use *string
-// so JSON renders null when absent (matches the `nullable: true` schema).
-type keyDTO struct {
-	ID         string  `json:"id"`
-	KeyPrefix  string  `json:"key_prefix"`
-	Label      string  `json:"label"`
-	IsActive   bool    `json:"is_active"`
-	CreatedAt  string  `json:"created_at"`
-	LastUsedAt *string `json:"last_used_at"`
-	RevokedAt  *string `json:"revoked_at"`
-}
-
-func toDTO(row repo.APIKeyListRow) keyDTO {
-	dto := keyDTO{
-		ID:        row.ID.String(),
+func toProtoAPIKey(row repo.APIKeyListRow) *attunev1.ApiKey {
+	k := &attunev1.ApiKey{
+		Id:        row.ID.String(),
 		KeyPrefix: row.KeyPrefix,
 		Label:     row.Label,
 		IsActive:  row.IsActive,
@@ -49,53 +37,35 @@ func toDTO(row repo.APIKeyListRow) keyDTO {
 	}
 	if row.LastUsedAt != nil {
 		s := row.LastUsedAt.UTC().Format(time.RFC3339)
-		dto.LastUsedAt = &s
+		k.LastUsedAt = &s
 	}
 	if row.RevokedAt != nil {
 		s := row.RevokedAt.UTC().Format(time.RFC3339)
-		dto.RevokedAt = &s
+		k.RevokedAt = &s
 	}
-	return dto
+	return k
 }
 
 // List handles GET /fb/v1/console/api-keys.
 func (h *APIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
 	const where = "console.APIKeysHandler.List"
 	ctx := r.Context()
-	auth := FromContext(r.Context())
-	if auth == nil {
-		logext.Warnf(ctx, "[%s] reject: missing auth ctx", where)
-		writeError(w, http.StatusUnauthorized, "unauthorized", "未登录")
-		return
-	}
+	auth := FromContext(ctx)
 	logext.Infof(ctx, "[%s] start,tenant_id:%s", where, auth.TenantID)
-	rows, err := h.svc.List(r.Context(), auth.TenantID)
+	rows, err := h.svc.List(ctx, auth.TenantID)
 	if err != nil {
 		slog.ErrorContext(ctx, "api-keys list", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] svc.List failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		writeError(w, http.StatusInternalServerError, "internal", "查询 API key 失败")
+		respondError(ctx, w, http.StatusInternalServerError, "internal", "查询 API key 失败")
 		return
 	}
-	items := make([]keyDTO, 0, len(rows))
+	items := make([]*attunev1.ApiKey, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, toDTO(row))
+		items = append(items, toProtoAPIKey(row))
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+	respondProto(w, http.StatusOK, &attunev1.ListApiKeysResponse{Items: items})
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
-}
-
-// createRequest is the POST body. Label is required + length-bounded so
-// a misbehaving client can't store huge strings.
-type createRequest struct {
-	Label string `json:"label"`
-}
-
-// newKeyResponse is the 201 body, matching openapi.yaml `NewApiKey`.
-type newKeyResponse struct {
-	keyDTO
-	Secret string `json:"secret"`
 }
 
 // Create handles POST /fb/v1/console/api-keys.
@@ -104,45 +74,39 @@ type newKeyResponse struct {
 func (h *APIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 	const where = "console.APIKeysHandler.Create"
 	ctx := r.Context()
-	auth := FromContext(r.Context())
-	if auth == nil {
-		logext.Warnf(ctx, "[%s] reject: missing auth ctx", where)
-		writeError(w, http.StatusUnauthorized, "unauthorized", "未登录")
-		return
-	}
-	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	auth := FromContext(ctx)
+	var req attunev1.CreateApiKeyRequest
+	if err := decodeProto(r.Body, &req); err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad json,tenant_id:%s,err:%s",
 			where, auth.TenantID, err.Error())
-		writeError(w, http.StatusBadRequest, "bad_request", "请求体不是合法 JSON")
+		respondError(ctx, w, http.StatusBadRequest, "bad_request", "请求体不是合法 JSON")
 		return
 	}
-	req.Label = strings.TrimSpace(req.Label)
-	if req.Label == "" {
+	label := strings.TrimSpace(req.GetLabel())
+	if label == "" {
 		logext.Warnf(ctx, "[%s] reject: missing label,tenant_id:%s", where, auth.TenantID)
-		writeError(w, http.StatusBadRequest, "missing_label", "label 不能为空")
+		respondError(ctx, w, http.StatusBadRequest, "missing_label", "label 不能为空")
 		return
 	}
-	if len(req.Label) > 200 {
+	if len(label) > 200 {
 		logext.Warnf(ctx, "[%s] reject: label too long,tenant_id:%s,len:%d",
-			where, auth.TenantID, len(req.Label))
-		writeError(w, http.StatusBadRequest, "label_too_long", "label 不能超过 200 字符")
+			where, auth.TenantID, len(label))
+		respondError(ctx, w, http.StatusBadRequest, "label_too_long", "label 不能超过 200 字符")
 		return
 	}
-	logext.Infof(ctx, "[%s] start,tenant_id:%s,label:%s", where, auth.TenantID, req.Label)
+	logext.Infof(ctx, "[%s] start,tenant_id:%s,label:%s", where, auth.TenantID, label)
 
-	raw, id, err := h.svc.Issue(r.Context(), auth.TenantID, req.Label)
+	raw, id, err := h.svc.Issue(ctx, auth.TenantID, label)
 	if err != nil {
 		slog.ErrorContext(ctx, "api-keys issue", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] svc.Issue failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		writeError(w, http.StatusInternalServerError, "internal", "签发 API key 失败")
+		respondError(ctx, w, http.StatusInternalServerError, "internal", "签发 API key 失败")
 		return
 	}
 
-	// Build response — re-read the row so we return canonical timestamps.
-	// Cheap: O(N) list with N tiny for early customers.
-	rows, err := h.svc.List(r.Context(), auth.TenantID)
+	// Re-read the row so we return canonical timestamps. Cheap: N is tiny.
+	rows, err := h.svc.List(ctx, auth.TenantID)
 	if err != nil {
 		slog.WarnContext(ctx, "api-keys post-issue list", "err", err)
 		logext.Warnf(ctx, "[%s] post-issue list failed,tenant_id:%s,err:%s",
@@ -156,10 +120,10 @@ func (h *APIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp := newKeyResponse{keyDTO: toDTO(newRow), Secret: raw}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(resp)
+	respondProto(w, http.StatusCreated, &attunev1.CreateApiKeyResponse{
+		Key:    toProtoAPIKey(newRow),
+		Secret: raw,
+	})
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,key_id:%s", where, auth.TenantID, id)
 }
 
@@ -168,32 +132,27 @@ func (h *APIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *APIKeysHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	const where = "console.APIKeysHandler.Revoke"
 	ctx := r.Context()
-	auth := FromContext(r.Context())
-	if auth == nil {
-		logext.Warnf(ctx, "[%s] reject: missing auth ctx", where)
-		writeError(w, http.StatusUnauthorized, "unauthorized", "未登录")
-		return
-	}
+	auth := FromContext(ctx)
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad id,tenant_id:%s,id_str:%s",
 			where, auth.TenantID, idStr)
-		writeError(w, http.StatusBadRequest, "bad_id", "id 不是 UUID")
+		respondError(ctx, w, http.StatusBadRequest, "bad_id", "id 不是 UUID")
 		return
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,key_id:%s", where, auth.TenantID, id)
-	if err := h.svc.Revoke(r.Context(), auth.TenantID, id); err != nil {
+	if err := h.svc.Revoke(ctx, auth.TenantID, id); err != nil {
 		if errors.Is(err, repo.ErrAPIKeyNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,key_id:%s",
 				where, auth.TenantID, id)
-			writeError(w, http.StatusNotFound, "not_found", "API key 不存在或不属于当前 tenant")
+			respondError(ctx, w, http.StatusNotFound, "not_found", "API key 不存在或不属于当前 tenant")
 			return
 		}
 		slog.ErrorContext(ctx, "api-keys revoke", "err", err, "id", id, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] svc.Revoke failed,tenant_id:%s,key_id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		writeError(w, http.StatusInternalServerError, "internal", "撤销失败")
+		respondError(ctx, w, http.StatusInternalServerError, "internal", "撤销失败")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

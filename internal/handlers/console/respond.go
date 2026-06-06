@@ -2,6 +2,7 @@ package console
 
 import (
 	"context"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -34,4 +35,17 @@ func respondError(ctx context.Context, w http.ResponseWriter, status int, code, 
 		Message:   message,
 		RequestId: middleware.GetReqID(ctx),
 	})
+}
+
+var consoleUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
+
+// decodeProto reads a JSON request body into a proto message (lenient: unknown
+// fields are ignored, matching the previous encoding/json behaviour). Body is
+// capped at 1 MiB.
+func decodeProto(r io.Reader, m proto.Message) error {
+	b, err := io.ReadAll(io.LimitReader(r, 1<<20))
+	if err != nil {
+		return err
+	}
+	return consoleUnmarshal.Unmarshal(b, m)
 }

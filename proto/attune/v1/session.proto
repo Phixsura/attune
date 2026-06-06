@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+// SessionService backs the console session (current tenant + user, logout).
+service SessionService {
+  // GET /fb/v1/console/me
+  rpc GetMe(GetMeRequest) returns (GetMeResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/me"};
+  }
+  // POST /fb/v1/console/logout — clears the session cookie (204).
+  rpc Logout(LogoutRequest) returns (LogoutResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/logout"
+      body: "*"
+    };
+  }
+}
+
+message GetMeRequest {}
+
+message GetMeResponse {
+  Tenant tenant = 1;
+  SessionUser user = 2;
+  string csrf_token = 3;
+}
+
+// Tenant is the console-facing tenant record.
+message Tenant {
+  string id = 1;
+  string slug = 2;
+  string name = 3;
+  optional string lark_tenant_key = 4;
+  string locale = 5;    // BCP 47
+  string timezone = 6;  // IANA tz
+}
+
+// SessionUser is the logged-in console user.
+message SessionUser {
+  string open_id = 1;
+  string name = 2;
+  optional string avatar_url = 3;
+  string role = 4;  // admin | member
+}
+
+message LogoutRequest {}
+
+message LogoutResponse {}
