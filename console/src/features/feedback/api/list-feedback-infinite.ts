@@ -1,4 +1,4 @@
-import { api } from '@/api/client'
+import { api } from '@/lib/api-client'
 import type { Feedback, ListFeedbackResponse } from '@/proto/attune/v1/ingest'
 
 // Re-export the proto item type under a feature-stable alias so consumers

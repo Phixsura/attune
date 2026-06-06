@@ -1,7 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { LogOut, User } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { type SessionMe, useLogout } from '@/api/queries'
 import { Logo } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import {
@@ -11,6 +10,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import type { SessionMe } from '@/features/session/api/get-me'
+import { useLogout } from '@/features/session/api/logout'
 
 interface TopBarProps {
   me: SessionMe

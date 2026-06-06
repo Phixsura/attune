@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/api/client'
+import { api } from '@/lib/api-client'
 
 export function useDeleteNotifyTarget() {
   const qc = useQueryClient()

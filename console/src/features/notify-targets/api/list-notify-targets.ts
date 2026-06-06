@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query'
-import { api } from '@/api/client'
+import { api } from '@/lib/api-client'
 import type { ListNotifyTargetsResponse, NotifyTarget } from '@/proto/attune/v1/notify_target'
 
 // Re-export the proto type under a feature-stable alias so consumers

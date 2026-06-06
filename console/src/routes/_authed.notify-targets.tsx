@@ -205,4 +205,4 @@ function LarkChip({ targets }: { targets: NotifyTarget[] }) {
   )
 }
 
-// TargetTable + FailureBadge live in @/components/notify-targets/table
+// TargetTable + FailureBadge live in @/features/notify-targets/components/table

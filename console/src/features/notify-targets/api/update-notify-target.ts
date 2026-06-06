@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/api/client'
+import { api } from '@/lib/api-client'
 import type { NotifyTarget, UpdateNotifyTargetRequest } from '@/proto/attune/v1/notify_target'
 
 // PATCH is sparse — pass only the fields you want to change. Server-side the

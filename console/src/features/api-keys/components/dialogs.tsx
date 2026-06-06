@@ -2,7 +2,6 @@ import { Copy, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { ApiKey, NewApiKey } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -14,6 +13,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import type { NewApiKey } from '@/features/api-keys/api/create-api-key'
+import type { ApiKey } from '@/features/api-keys/api/list-api-keys'
 
 export function CreateKeyDialog({
   open,

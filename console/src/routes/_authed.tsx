@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { meQuery } from '@/api/queries'
-import { TopBar } from '@/components/topbar'
+import { meQuery } from '@/features/session/api/get-me'
+import { TopBar } from '@/features/session/components/topbar'
 
 // _authed.* routes share this layout. The loader runs /me once at
 // router-context boot; if it 401s we redirect to /login with the

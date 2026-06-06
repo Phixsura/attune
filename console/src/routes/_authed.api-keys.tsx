@@ -6,9 +6,6 @@ import { Key, Loader2, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { ApiKey, NewApiKey } from '@/api/queries'
-import { apiKeysQuery, useCreateApiKey, useRevokeApiKey } from '@/api/queries'
-import { CreateKeyDialog, RevokeKeyDialog, SecretKeyDialog } from '@/components/api-keys/dialogs'
 import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,6 +17,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { type NewApiKey, useCreateApiKey } from '@/features/api-keys/api/create-api-key'
+import { type ApiKey, apiKeysQuery } from '@/features/api-keys/api/list-api-keys'
+import { useRevokeApiKey } from '@/features/api-keys/api/revoke-api-key'
+import {
+  CreateKeyDialog,
+  RevokeKeyDialog,
+  SecretKeyDialog,
+} from '@/features/api-keys/components/dialogs'
 
 export const Route = createFileRoute('/_authed/api-keys')({
   component: ApiKeysPage,

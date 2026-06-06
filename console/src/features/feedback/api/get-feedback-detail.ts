@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query'
-import { api } from '@/api/client'
+import { api } from '@/lib/api-client'
 import type { FeedbackDetail } from '@/proto/attune/v1/ingest'
 
 // Re-export so consumers (sheet, future detail panels) get the type from the

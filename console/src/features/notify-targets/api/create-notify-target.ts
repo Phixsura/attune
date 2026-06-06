@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/api/client'
+import { api } from '@/lib/api-client'
 import type { CreateNotifyTargetRequest, NotifyTarget } from '@/proto/attune/v1/notify_target'
 
 // Feature-stable alias for the create payload.
