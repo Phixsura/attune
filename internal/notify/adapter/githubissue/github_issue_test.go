@@ -198,10 +198,12 @@ func TestSendGitHubIssue_HappyPath_201Created(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Override the API base for this one test via a tiny indirection:
-	// re-run with a custom apiURL builder. Since SendGitHubIssue builds
-	// the URL internally, we patch via a wrapper. Simpler: swap
-	// githubAPIBase using a test-local override pattern.
+	// Swap the package-level API base for this test. DO NOT add
+	// t.Parallel() to ANY test in this package — they all share
+	// githubAPIBaseForTest, which is not protected by a mutex. (Refactor:
+	// thread the base URL through Transport / a config struct when the
+	// first GitHub Enterprise customer asks; until then the var swap is
+	// the lowest-cost seam.)
 	origBase := githubAPIBaseForTest
 	githubAPIBaseForTest = srv.URL
 	defer func() { githubAPIBaseForTest = origBase }()
@@ -276,7 +278,7 @@ func TestCheckGitHubResponse_StatusMatrix(t *testing.T) {
 		{http.StatusServiceUnavailable, "retry"},
 	}
 	for _, c := range cases {
-		err := check(c.status, []byte(`{}`))
+		err := check(context.Background(), c.status, []byte(`{}`))
 		switch c.want {
 		case "ok":
 			if err != nil {

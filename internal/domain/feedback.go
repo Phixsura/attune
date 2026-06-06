@@ -124,6 +124,7 @@ type Snapshot struct {
 	Modules    []string
 	Severity   string
 	Priority   float64
+	Rationale  string // LLM's short explanation; surfaced in outbox envelopes
 	EnrichedAt time.Time
 }
 

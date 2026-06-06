@@ -189,6 +189,7 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 				Severity:   s.Severity,
 				Modules:    s.Modules,
 				Priority:   s.Priority,
+				Rationale:  s.Rationale,
 				EnrichedAt: at,
 			},
 		},

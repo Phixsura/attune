@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -27,7 +29,15 @@ const (
 // at issuance.
 type APIKeys struct {
 	repo *apikeyrepo.APIKeyRepo
+	// touchCache debounces TouchLastUsed: if a key was touched within the
+	// last touchInterval we skip the goroutine entirely. Prevents unbounded
+	// fan-out under load (many concurrent requests authenticating with the
+	// same key would otherwise fire N goroutines/sec, each holding a
+	// pgxpool connection).
+	touchCache sync.Map // map[uuid.UUID]time.Time (last touch)
 }
+
+const touchInterval = 30 * time.Second
 
 func NewAPIKeys(r *apikeyrepo.APIKeyRepo) *APIKeys {
 	return &APIKeys{repo: r}
@@ -92,8 +102,22 @@ func (s *APIKeys) Lookup(ctx context.Context, raw string) (tenantID string, keyI
 		logext.Warnf(ctx, "[%s] reject: hmac mismatch,key_id:%s", where, row.ID)
 		return "", uuid.Nil, domain.ErrInvalidAPIKey
 	}
-	go s.repo.TouchLastUsed(row.ID)
+	s.touchAsync(row.ID)
 	return row.TenantID, row.ID, nil
+}
+
+// touchAsync debounces s.repo.TouchLastUsed: skips the goroutine if this
+// key was touched within touchInterval (30s). Trades small accuracy on
+// last_used_at for bounded fan-out under heavy auth load.
+func (s *APIKeys) touchAsync(id uuid.UUID) {
+	now := time.Now()
+	if last, ok := s.touchCache.Load(id); ok {
+		if t, _ := last.(time.Time); now.Sub(t) < touchInterval {
+			return
+		}
+	}
+	s.touchCache.Store(id, now)
+	go s.repo.TouchLastUsed(id)
 }
 
 // generate is the random-key + hash + display-prefix construction.

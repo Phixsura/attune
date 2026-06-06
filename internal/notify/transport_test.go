@@ -32,7 +32,7 @@ func TestTransport_HappyPath(t *testing.T) {
 	build := func(ctx context.Context) (*http.Request, error) {
 		return http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, bytes.NewReader([]byte(`{}`)))
 	}
-	check := func(status int, body []byte) error {
+	check := func(_ context.Context, status int, body []byte) error {
 		if status == http.StatusOK {
 			return nil
 		}
@@ -58,7 +58,7 @@ func TestTransport_RetryThenSuccess(t *testing.T) {
 	build := func(ctx context.Context) (*http.Request, error) {
 		return http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, bytes.NewReader([]byte(`{}`)))
 	}
-	check := func(status int, body []byte) error {
+	check := func(_ context.Context, status int, body []byte) error {
 		if status >= 200 && status < 300 {
 			return nil
 		}
@@ -84,7 +84,7 @@ func TestTransport_TerminalShortCircuits(t *testing.T) {
 	build := func(ctx context.Context) (*http.Request, error) {
 		return http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, bytes.NewReader([]byte(`{}`)))
 	}
-	check := func(status int, body []byte) error {
+	check := func(_ context.Context, status int, body []byte) error {
 		if status >= 200 && status < 300 {
 			return nil
 		}
@@ -114,7 +114,7 @@ func TestTransport_NoRetrySingleAttempt(t *testing.T) {
 	build := func(ctx context.Context) (*http.Request, error) {
 		return http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, bytes.NewReader([]byte(`{}`)))
 	}
-	check := func(status int, body []byte) error {
+	check := func(_ context.Context, status int, body []byte) error {
 		if status >= 200 && status < 300 {
 			return nil
 		}
@@ -142,7 +142,7 @@ func TestTransport_ContextCancellationStopsLoop(t *testing.T) {
 	build := func(ctx context.Context) (*http.Request, error) {
 		return http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, bytes.NewReader([]byte(`{}`)))
 	}
-	check := func(status int, body []byte) error { return errors.New("503") }
+	check := func(_ context.Context, status int, body []byte) error { return errors.New("503") }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()

@@ -182,7 +182,7 @@ func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 				Severity:   s.Severity,
 				Modules:    s.Modules,
 				Priority:   s.Priority,
-				Rationale:  "", // domain.Snapshot doesn't carry rationale yet
+				Rationale:  s.Rationale,
 				EnrichedAt: s.EnrichedAt.UTC().Format(time.RFC3339),
 			},
 		},
@@ -201,14 +201,14 @@ func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 // retryable up to the transport's MaxAttempts.
 func checkRawResponse(label string, s domain.Snapshot) notify.ResponseChecker {
 	const where = "notify.checkRawResponse"
-	return func(status int, body []byte) error {
+	return func(ctx context.Context, status int, body []byte) error {
 		// 上游响应日志(每 attempt 都有,truncate 1024 字节)。
-		logext.Infof(context.Background(),
+		logext.Infof(ctx,
 			"[%s] upstream resp,label:%s,feedback_id:%d,status:%d,body:%s",
 			where, label, s.ID, status, truncate(string(body), 1024))
 		switch {
 		case status >= 200 && status < 300:
-			slog.InfoContext(context.Background(), "raw webhook delivered",
+			slog.InfoContext(ctx, "raw webhook delivered",
 				"dest", label, "feedback_id", s.ID, "status", status)
 			return nil
 		case status == 408 || status == 429:

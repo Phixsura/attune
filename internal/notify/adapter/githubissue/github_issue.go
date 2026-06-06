@@ -251,9 +251,9 @@ func buildIssueBody(env attuneEnvelope) ([]byte, error) {
 // response body for "secondary rate limit" and demote to retryable.
 func checkGitHubResponse(label string, env attuneEnvelope) notify.ResponseChecker {
 	const where = "notify.checkGitHubResponse"
-	return func(status int, body []byte) error {
+	return func(ctx context.Context, status int, body []byte) error {
 		// 上游响应日志(每次 attempt 都有,truncate 1024 字节)。
-		logext.Infof(context.Background(),
+		logext.Infof(ctx,
 			"[%s] upstream resp,label:%s,feedback_id:%d,status:%d,body:%s",
 			where, label, env.Feedback.ID, status, truncate(string(body), 1024))
 		switch {
@@ -262,7 +262,7 @@ func checkGitHubResponse(label string, env attuneEnvelope) notify.ResponseChecke
 			// ResponseChecker doesn't receive ctx; Background here is
 			// safe because env already carries the inbound trace
 			// correlation in fields (bin/lint-slog.sh §1).
-			slog.InfoContext(context.Background(), "github issue created",
+			slog.InfoContext(ctx, "github issue created",
 				"dest", label, "feedback_id", env.Feedback.ID,
 				"issue_number", number, "url", htmlURL,
 				"inbound_trace_id", env.TraceID)

@@ -56,8 +56,8 @@ func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedbac
 		"feedback_id", id,
 		"kind", enriched.Kind,
 		"severity", enriched.Severity)
-	if e.notifier != nil {
-		go e.fanOut(snapshot)
+	if n := e.notifier.Load(); n != nil {
+		go e.fanOut(snapshot, *n)
 	}
 	return nil
 }

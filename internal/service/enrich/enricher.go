@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
@@ -49,9 +50,13 @@ const enrichPromptTmpl = `你是产品反馈分类助手。给你一段用户反
 // SetNotifier and SetOutbox are independent; either / both / neither
 // may be wired without code changes elsewhere.
 type Enricher struct {
-	repo     *feedback.FeedbackRepo
-	llm      llmclient.LLMClient
-	notifier notify.Notifier                // optional inline fan-out (Lark)
+	repo *feedback.FeedbackRepo
+	llm  llmclient.LLMClient
+	// notifier is read from fanOut goroutines, written by SetNotifier
+	// (typically once at startup, but Wave 2 plans dynamic per-tenant
+	// re-wiring). atomic.Pointer keeps the read race-free without
+	// per-call locking — fanOut takes a snapshot via .Load().
+	notifier atomic.Pointer[notify.Notifier]
 	outbox   *outboxrepo.OutboxRepo         // optional outbox writer
 	targets  *notifytarget.NotifyTargetRepo // optional, paired with outbox
 }
@@ -61,8 +66,15 @@ func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient) *Enricher {
 }
 
 // SetNotifier wires the inline webhook fan-out (Lark). nil = no
-// notifications; rows still land in Postgres normally.
-func (e *Enricher) SetNotifier(n notify.Notifier) { e.notifier = n }
+// notifications; rows still land in Postgres normally. Safe for concurrent
+// reads (fanOut goroutines).
+func (e *Enricher) SetNotifier(n notify.Notifier) {
+	if n == nil {
+		e.notifier.Store(nil)
+		return
+	}
+	e.notifier.Store(&n)
+}
 
 // SetOutbox wires at-least-once delivery for raw-webhook destinations.
 // When set, every enrich success inserts one outbox row per active
@@ -151,8 +163,8 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 		"kind", enriched.Kind,
 		"severity", enriched.Severity,
 		"title", enriched.Title)
-	if e.notifier != nil {
-		go e.fanOut(snapshot)
+	if n := e.notifier.Load(); n != nil {
+		go e.fanOut(snapshot, *n)
 	}
 	return nil
 }
@@ -190,17 +202,19 @@ func (e *Enricher) classify(ctx context.Context, id int64, content string) (doma
 	return parsed, nil
 }
 
-// fanOut pushes a freshly enriched snapshot to all configured webhook
-// destinations. Best-effort: per-destination errors are logged but never
-// propagated — webhook outages must not block downstream rows.
-func (e *Enricher) fanOut(s domain.Snapshot) {
+// fanOut pushes a freshly enriched snapshot to the snapshot of `notifier`
+// taken at fire time. Best-effort: per-destination errors are logged but
+// never propagated — webhook outages must not block downstream rows.
+// `n` is captured at goroutine launch so a concurrent SetNotifier(nil)
+// or replacement can't trip a nil deref mid-call.
+func (e *Enricher) fanOut(s domain.Snapshot, n notify.Notifier) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := e.notifier.PushPool(ctx, s); err != nil {
+	if err := n.PushPool(ctx, s); err != nil {
 		slog.WarnContext(ctx, "notify pool failed", "id", s.ID, "err", err)
 	}
 	if s.IsHighSeverity() {
-		if err := e.notifier.PushRadar(ctx, s); err != nil {
+		if err := n.PushRadar(ctx, s); err != nil {
 			slog.WarnContext(ctx, "notify radar failed", "id", s.ID, "err", err)
 		}
 	}

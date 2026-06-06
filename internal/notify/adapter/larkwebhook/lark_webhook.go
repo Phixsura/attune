@@ -143,7 +143,7 @@ func (l *LarkWebhook) buildBody(secret string, s domain.Snapshot) ([]byte, error
 // terminal — retrying a malformed card or a revoked bot URL won't help.
 func checkLarkResponse(dest string, s domain.Snapshot) notify.ResponseChecker {
 	const where = "notify.checkLarkResponse"
-	return func(status int, body []byte) error {
+	return func(ctx context.Context, status int, body []byte) error {
 		var out struct {
 			Code int    `json:"code"`
 			Msg  string `json:"msg"`
@@ -151,14 +151,14 @@ func checkLarkResponse(dest string, s domain.Snapshot) notify.ResponseChecker {
 		_ = json.Unmarshal(body, &out)
 		// ResponseChecker 不接 ctx,用 Background 保留对上游响应的可观测性
 		// (跟既有 slog 行为一致)。Body truncate 1024 字节。
-		logext.Infof(context.Background(),
+		logext.Infof(ctx,
 			"[%s] upstream resp,dest:%s,feedback_id:%d,status:%d,code:%d,msg:%s,body:%s",
 			where, dest, s.ID, status, out.Code, out.Msg, truncate(string(body), 1024))
 		if status != http.StatusOK || out.Code != 0 {
 			return fmt.Errorf("%w: http=%d code=%d msg=%s body=%s",
 				notify.ErrTerminal, status, out.Code, out.Msg, truncate(string(body), 200))
 		}
-		slog.InfoContext(context.Background(), "lark webhook pushed",
+		slog.InfoContext(ctx, "lark webhook pushed",
 			"dest", dest, "feedback_id", s.ID, "severity", s.Severity)
 		return nil
 	}

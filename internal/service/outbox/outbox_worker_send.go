@@ -83,9 +83,9 @@ func (w *OutboxWorker) sendRawWebhook(
 // internal closure.
 func checkOutboxResponse(label string, row outboxrepo.OutboxRow) notify.ResponseChecker {
 	const where = "service.checkOutboxResponse"
-	return func(status int, body []byte) error {
+	return func(ctx context.Context, status int, body []byte) error {
 		// 上游响应日志(每 attempt 都有,truncate 1024 字节)。
-		logext.Infof(context.Background(),
+		logext.Infof(ctx,
 			"[%s] upstream resp,label:%s,id:%d,status:%d,body:%s",
 			where, label, row.ID, status, truncateStr(string(body), 1024))
 		switch {
@@ -93,7 +93,7 @@ func checkOutboxResponse(label string, row outboxrepo.OutboxRow) notify.Response
 			// OTel: inbound_trace_id (not trace_id) — see docs/observability-sop.md.
 			// Ctx isn't threaded into ResponseChecker so use Background; the
 			// row already carries the inbound trace correlation in fields.
-			slog.InfoContext(context.Background(), "outbox row delivered",
+			slog.InfoContext(ctx, "outbox row delivered",
 				"id", row.ID, "tenant", row.TenantID,
 				"inbound_trace_id", row.TraceID, "status", status)
 			return nil
