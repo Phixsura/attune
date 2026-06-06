@@ -158,7 +158,26 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "重定向失败")
 		return
 	}
-	http.Redirect(w, r, h.baseURL+postLogin, http.StatusFound)
+	base, err := url.Parse(h.baseURL)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] reject: invalid base URL", where)
+		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "重定向失败")
+		return
+	}
+	normalized := strings.ReplaceAll(postLogin, "\\", "/")
+	rel, err := url.Parse(normalized)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] reject: invalid post-login redirect,err:%s", where, err.Error())
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "state 不合法")
+		return
+	}
+	dst := base.ResolveReference(rel)
+	if dst.Scheme != base.Scheme || dst.Host != base.Host || !strings.HasPrefix(dst.Path, "/console") {
+		logext.Errorf(ctx, "[%s] reject: redirect escapes base URL", where)
+		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "重定向失败")
+		return
+	}
+	http.Redirect(w, r, dst.String(), http.StatusFound)
 }
 
 // resolveAndUpsert performs the Lark OAuth code exchange followed by
