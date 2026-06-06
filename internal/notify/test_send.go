@@ -3,6 +3,10 @@ package notify
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +17,40 @@ import (
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
+
+// envelopeVersion / signRawBody / signLarkBot / truncate are private helpers
+// duplicated here so test_send.go (in the notify root package) can construct
+// canonical raw-webhook + lark-bot signatures without importing the adapter
+// subpackages — that would create a notify → adapter → notify cycle. The
+// adapters keep their own copies; both copies must stay in sync.
+
+const envelopeVersion = "1"
+
+// signRawBody is HMAC-SHA256 over the body, "sha256=<hex>" — matches
+// adapter/rawwebhook.signRawBody verbatim.
+func signRawBody(body []byte, secret string) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write(body)
+	return "sha256=" + hex.EncodeToString(h.Sum(nil))
+}
+
+// signLarkBot computes the Lark bot V2 signature — matches
+// adapter/larkwebhook.signLarkBot verbatim.
+func signLarkBot(timestamp, secret string) (string, error) {
+	stringToSign := timestamp + "\n" + secret
+	h := hmac.New(sha256.New, []byte(stringToSign))
+	if _, err := h.Write([]byte{}); err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
 
 // TestResult is the outcome of a one-shot connectivity ping.
 // Returned by TestSend; the console /notify-targets/{id}/test endpoint

@@ -1,4 +1,4 @@
-package notify
+package githubissue
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Phixsura/attune/internal/notify"
 )
 
 // envelopeFixture is the v1 attune envelope the outbox row carries —
@@ -206,7 +208,7 @@ func TestSendGitHubIssue_HappyPath_201Created(t *testing.T) {
 
 	err := SendGitHubIssue(
 		context.Background(),
-		NewTransport(nil, NoRetry()),
+		notify.NewTransport(nil, notify.NoRetry()),
 		"https://github.com/owner/repo",
 		"ghp_testtoken_dummy",
 		envelopeFixture(),
@@ -231,12 +233,12 @@ func TestSendGitHubIssue_HappyPath_201Created(t *testing.T) {
 func TestSendGitHubIssue_BadPayload_Terminal(t *testing.T) {
 	err := SendGitHubIssue(
 		context.Background(),
-		NewTransport(nil, NoRetry()),
+		notify.NewTransport(nil, notify.NoRetry()),
 		"https://github.com/owner/repo",
 		"ghp_x",
 		[]byte(`{"version":"1"}`), // missing feedback.id + title
 	)
-	if !errors.Is(err, ErrTerminal) {
+	if !errors.Is(err, notify.ErrTerminal) {
 		t.Fatalf("want ErrTerminal, got %v", err)
 	}
 }
@@ -244,12 +246,12 @@ func TestSendGitHubIssue_BadPayload_Terminal(t *testing.T) {
 func TestSendGitHubIssue_BadRepoURL_Terminal(t *testing.T) {
 	err := SendGitHubIssue(
 		context.Background(),
-		NewTransport(nil, NoRetry()),
+		notify.NewTransport(nil, notify.NoRetry()),
 		"https://gitlab.com/x/y",
 		"ghp_x",
 		envelopeFixture(),
 	)
-	if !errors.Is(err, ErrTerminal) {
+	if !errors.Is(err, notify.ErrTerminal) {
 		t.Fatalf("want ErrTerminal, got %v", err)
 	}
 }
@@ -281,11 +283,11 @@ func TestCheckGitHubResponse_StatusMatrix(t *testing.T) {
 				t.Errorf("status %d: want nil, got %v", c.status, err)
 			}
 		case "terminal":
-			if !errors.Is(err, ErrTerminal) {
+			if !errors.Is(err, notify.ErrTerminal) {
 				t.Errorf("status %d: want ErrTerminal, got %v", c.status, err)
 			}
 		case "retry":
-			if err == nil || errors.Is(err, ErrTerminal) {
+			if err == nil || errors.Is(err, notify.ErrTerminal) {
 				t.Errorf("status %d: want retryable non-nil, got %v", c.status, err)
 			}
 		}

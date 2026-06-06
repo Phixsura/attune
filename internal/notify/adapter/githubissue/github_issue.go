@@ -1,4 +1,4 @@
-package notify
+package githubissue
 
 // github_issue.go — native GitHub Issue dispatch.
 //
@@ -33,6 +33,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
 	// OTel-aware logging convention — see docs/observability-sop.md.
 )
 
@@ -64,19 +65,19 @@ const githubAPIVersion = "2022-11-28"
 //     malformed repo URL — outbox will mark dead immediately
 //   - plain error on 5xx / 408 / 429 / network failures — outbox retries
 func SendGitHubIssue(
-	ctx context.Context, transport *Transport,
+	ctx context.Context, transport *notify.Transport,
 	repoURL, token string, payload []byte,
 ) error {
 	const where = "notify.SendGitHubIssue"
 	env, err := unmarshalAttuneEnvelope(payload)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad payload,err:%s", where, err.Error())
-		return fmt.Errorf("%w: github-issue payload: %w", ErrTerminal, err)
+		return fmt.Errorf("%w: github-issue payload: %w", notify.ErrTerminal, err)
 	}
 	owner, repoName, err := ParseGitHubRepoURL(repoURL)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad repo url,url:%s,err:%s", where, repoURL, err.Error())
-		return fmt.Errorf("%w: github-issue url: %w", ErrTerminal, err)
+		return fmt.Errorf("%w: github-issue url: %w", notify.ErrTerminal, err)
 	}
 	body, err := buildIssueBody(env)
 	if err != nil {
@@ -248,7 +249,7 @@ func buildIssueBody(env attuneEnvelope) ([]byte, error) {
 // all 403 as terminal (the outbox dead queue surfaces them to ops, who
 // can rotate the PAT or wait out the limit). v1 should parse the
 // response body for "secondary rate limit" and demote to retryable.
-func checkGitHubResponse(label string, env attuneEnvelope) ResponseChecker {
+func checkGitHubResponse(label string, env attuneEnvelope) notify.ResponseChecker {
 	const where = "notify.checkGitHubResponse"
 	return func(status int, body []byte) error {
 		// 上游响应日志(每次 attempt 都有,truncate 1024 字节)。
@@ -271,7 +272,7 @@ func checkGitHubResponse(label string, env attuneEnvelope) ResponseChecker {
 				label, status, truncate(string(body), 200))
 		case status >= 400 && status < 500:
 			return fmt.Errorf("%w: github-issue %s status=%d body=%s",
-				ErrTerminal, label, status, truncate(string(body), 200))
+				notify.ErrTerminal, label, status, truncate(string(body), 200))
 		default:
 			return fmt.Errorf("github-issue %s status=%d body=%s",
 				label, status, truncate(string(body), 200))

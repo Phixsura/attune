@@ -1,4 +1,4 @@
-package notify
+package rawwebhook
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
@@ -56,7 +57,7 @@ func TestRawWebhook_HappyPath(t *testing.T) {
 
 	secret := "test-secret-16-or-more-chars"
 	router := NewRawWebhookRouter(
-		NewTransport(nil, NoRetry()),
+		notify.NewTransport(nil, notify.NoRetry()),
 		[]notifytarget.NotifyTarget{{
 			TenantID:        "test-tenant",
 			DestinationType: notifytarget.DestRawWebhook,
@@ -107,7 +108,7 @@ func TestRawWebhook_UnknownTenantSilentNoOp(t *testing.T) {
 	defer srv.Close()
 
 	router := NewRawWebhookRouter(
-		NewTransport(nil, NoRetry()),
+		notify.NewTransport(nil, notify.NoRetry()),
 		[]notifytarget.NotifyTarget{{
 			TenantID:        "different-tenant",
 			DestinationType: notifytarget.DestRawWebhook,
@@ -135,7 +136,7 @@ func TestRawWebhook_AudienceAllMatchesBothPushes(t *testing.T) {
 	defer srv.Close()
 
 	router := NewRawWebhookRouter(
-		NewTransport(nil, NoRetry()),
+		notify.NewTransport(nil, notify.NoRetry()),
 		[]notifytarget.NotifyTarget{{
 			TenantID:        "test-tenant",
 			DestinationType: notifytarget.DestRawWebhook,
@@ -162,7 +163,7 @@ func TestRawWebhook_4xxIsTerminal(t *testing.T) {
 	defer srv.Close()
 
 	router := NewRawWebhookRouter(
-		NewTransport(nil, RetryPolicy{
+		notify.NewTransport(nil, notify.RetryPolicy{
 			MaxAttempts: 5, BaseDelay: 1 * time.Millisecond, MaxDelay: 2 * time.Millisecond,
 		}),
 		[]notifytarget.NotifyTarget{{
@@ -191,7 +192,7 @@ func TestRawWebhook_5xxRetries(t *testing.T) {
 	defer srv.Close()
 
 	router := NewRawWebhookRouter(
-		NewTransport(nil, RetryPolicy{
+		notify.NewTransport(nil, notify.RetryPolicy{
 			MaxAttempts: 3, BaseDelay: 1 * time.Millisecond, MaxDelay: 2 * time.Millisecond,
 		}),
 		[]notifytarget.NotifyTarget{{

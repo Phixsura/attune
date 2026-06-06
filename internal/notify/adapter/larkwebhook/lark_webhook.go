@@ -9,7 +9,7 @@
 // Two Lark destinations are configured statically via env (Wave 1 =
 // single tenant, single org). Per-tenant routing moves into the DB in
 // Wave 2 via the tenantID that already threads through every Push call.
-package notify
+package larkwebhook
 
 import (
 	"bytes"
@@ -28,6 +28,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
 )
 
 // LarkWebhook delivers Snapshot payloads to one or two Lark group bot
@@ -39,7 +40,7 @@ type LarkWebhook struct {
 	poolSecret  string
 	radarURL    string
 	radarSecret string
-	transport   *Transport
+	transport   *notify.Transport
 }
 
 // NewLarkWebhook returns a notifier wired to the given destinations.
@@ -56,7 +57,7 @@ func NewLarkWebhook(poolURL, poolSecret, radarURL, radarSecret string) *LarkWebh
 		poolSecret:  poolSecret,
 		radarURL:    radarURL,
 		radarSecret: radarSecret,
-		transport:   NewTransport(nil, NoRetry()),
+		transport:   notify.NewTransport(nil, notify.NoRetry()),
 	}
 }
 
@@ -111,7 +112,7 @@ func (l *LarkWebhook) send(ctx context.Context, dest, url, secret string, s doma
 	err := l.transport.Send(ctx, dest, build, checkLarkResponse(dest, s))
 	if err != nil {
 		reason := "transport"
-		if errors.Is(err, ErrTerminal) {
+		if errors.Is(err, notify.ErrTerminal) {
 			reason = "terminal"
 		}
 		metrics.NotifyFailuresTotal.WithLabelValues(dest, reason).Inc()
@@ -146,7 +147,7 @@ func (l *LarkWebhook) buildBody(secret string, s domain.Snapshot) ([]byte, error
 // Lark always responds 200 even on logical failure, embedding the real
 // status in {"code":N,"msg":"..."}. Non-zero code is treated as
 // terminal — retrying a malformed card or a revoked bot URL won't help.
-func checkLarkResponse(dest string, s domain.Snapshot) ResponseChecker {
+func checkLarkResponse(dest string, s domain.Snapshot) notify.ResponseChecker {
 	const where = "notify.checkLarkResponse"
 	return func(status int, body []byte) error {
 		var out struct {
@@ -161,7 +162,7 @@ func checkLarkResponse(dest string, s domain.Snapshot) ResponseChecker {
 			where, dest, s.ID, status, out.Code, out.Msg, truncate(string(body), 1024))
 		if status != http.StatusOK || out.Code != 0 {
 			return fmt.Errorf("%w: http=%d code=%d msg=%s body=%s",
-				ErrTerminal, status, out.Code, out.Msg, truncate(string(body), 200))
+				notify.ErrTerminal, status, out.Code, out.Msg, truncate(string(body), 200))
 		}
 		slog.InfoContext(context.Background(), "lark webhook pushed",
 			"dest", dest, "feedback_id", s.ID, "severity", s.Severity)

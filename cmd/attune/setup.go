@@ -17,7 +17,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/logext"
-	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/notify/adapter/larkwebhook"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/lark"
@@ -120,7 +120,7 @@ func buildNotifier(
 		slog.InfoContext(ctx, "no inline notifiers wired (lark webhook URLs empty)")
 		return nil, nil
 	}
-	lark := notify.NewLarkWebhook(
+	lark := larkwebhook.NewLarkWebhook(
 		cfg.FeedbackPoolWebhookURL, cfg.FeedbackPoolWebhookSecret,
 		cfg.DevRadarWebhookURL, cfg.DevRadarWebhookSecret,
 	)

@@ -18,6 +18,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/notify/adapter/githubissue"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
@@ -36,7 +37,7 @@ func (w *OutboxWorker) sendByDestType(
 	case notifytarget.DestRawWebhook:
 		return w.sendRawWebhook(ctx, row, target)
 	case notifytarget.DestGitHubIssue:
-		return notify.SendGitHubIssue(ctx, w.transport, target.URL, target.Secret, row.Payload)
+		return githubissue.SendGitHubIssue(ctx, w.transport, target.URL, target.Secret, row.Payload)
 	default:
 		// Should be unreachable because processRow filters first, but
 		// keep the explicit branch so a config drift gets logged loud.

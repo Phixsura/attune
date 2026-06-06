@@ -1,4 +1,4 @@
-package notify
+package rawwebhook
 
 import (
 	"bytes"
@@ -17,6 +17,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
@@ -38,7 +39,7 @@ const EventEnriched = "feedback.enriched"
 // them to DB so PMs can see "this customer's webhook has been failing
 // for 3 days".
 type RawWebhookRouter struct {
-	transport *Transport
+	transport *notify.Transport
 	// destinations: map[tenant_id]map[audience]*rawDestination
 	destinations map[string]map[string]*rawDestination
 }
@@ -58,7 +59,7 @@ type rawDestination struct {
 //
 // Passing a nil httpClient gives a 10s-per-call default. retry should
 // usually be DefaultRetry() for raw webhook (5 attempts with backoff).
-func NewRawWebhookRouter(transport *Transport, targets []notifytarget.NotifyTarget) *RawWebhookRouter {
+func NewRawWebhookRouter(transport *notify.Transport, targets []notifytarget.NotifyTarget) *RawWebhookRouter {
 	dests := make(map[string]map[string]*rawDestination)
 	for _, t := range targets {
 		if t.DestinationType != notifytarget.DestRawWebhook {
@@ -150,7 +151,7 @@ func (r *RawWebhookRouter) send(
 		msg := err.Error()
 		dest.lastError.Store(&msg)
 		reason := "transport"
-		if errors.Is(err, ErrTerminal) {
+		if errors.Is(err, notify.ErrTerminal) {
 			reason = "terminal"
 		}
 		metrics.NotifyFailuresTotal.
@@ -208,7 +209,7 @@ func signRawBody(body []byte, secret string) string {
 // Per §3.1 edge cases: 4xx (except 408 / 429) is terminal; everything
 // else (including network errors which never reach this checker) is
 // retryable up to the transport's MaxAttempts.
-func checkRawResponse(label string, s domain.Snapshot) ResponseChecker {
+func checkRawResponse(label string, s domain.Snapshot) notify.ResponseChecker {
 	const where = "notify.checkRawResponse"
 	return func(status int, body []byte) error {
 		// 上游响应日志(每 attempt 都有,truncate 1024 字节)。
@@ -225,7 +226,7 @@ func checkRawResponse(label string, s domain.Snapshot) ResponseChecker {
 				label, status, truncate(string(body), 200))
 		case status >= 400 && status < 500:
 			return fmt.Errorf("%w: raw webhook %s status=%d body=%s",
-				ErrTerminal, label, status, truncate(string(body), 200))
+				notify.ErrTerminal, label, status, truncate(string(body), 200))
 		default:
 			return fmt.Errorf("raw webhook %s status=%d body=%s",
 				label, status, truncate(string(body), 200))
