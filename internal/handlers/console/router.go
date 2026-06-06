@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
+	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
@@ -46,6 +47,7 @@ var (
 	NewNotifyTargetsHandler = notifytarget.NewNotifyTargetsHandler
 	NewFeedbackHandler      = feedback.NewFeedbackHandler
 	NewUsageHandler         = usage.NewUsageHandler
+	NewEnrichConfigHandler  = enrichconfig.NewHandler
 )
 
 // Router wires every console endpoint into a single chi.Router.
@@ -72,6 +74,9 @@ var (
 //	  GET    /feedback/stats       → feedback.Handler.Stats
 //	  GET    /feedback/{id}        → feedback.Handler.Get
 //	  GET    /usage                → usage.Handler.ServeHTTP
+//	  GET    /enrich-config        → enrichconfig.Handler.Get
+//	  PUT    /enrich-config        → enrichconfig.Handler.Update
+//	  POST   /enrich-config/preview → enrichconfig.Handler.Preview
 type Router struct {
 	signer        *session.Signer
 	oauth         *oauth.OAuthHandler
@@ -80,6 +85,7 @@ type Router struct {
 	notifyTargets *notifytarget.NotifyTargetsHandler
 	feedback      *feedback.FeedbackHandler
 	usage         *usage.UsageHandler
+	enrichConfig  *enrichconfig.Handler
 	devLogin      http.Handler // nil when ConsoleDevLogin is off
 }
 
@@ -91,6 +97,7 @@ func NewRouter(
 	notifyTargets *notifytarget.NotifyTargetsHandler,
 	feedback *feedback.FeedbackHandler,
 	usage *usage.UsageHandler,
+	enrichConfig *enrichconfig.Handler,
 	devLogin http.Handler,
 ) *Router {
 	return &Router{
@@ -101,6 +108,7 @@ func NewRouter(
 		notifyTargets: notifyTargets,
 		feedback:      feedback,
 		usage:         usage,
+		enrichConfig:  enrichConfig,
 		devLogin:      devLogin,
 	}
 }
@@ -144,6 +152,12 @@ func (r *Router) Mount() chi.Router {
 		})
 
 		m.Get("/usage", r.usage.ServeHTTP)
+
+		m.Route("/enrich-config", func(e chi.Router) {
+			e.Get("/", r.enrichConfig.Get)
+			e.Put("/", r.enrichConfig.Update)
+			e.Post("/preview", r.enrichConfig.Preview)
+		})
 	})
 
 	return mux
