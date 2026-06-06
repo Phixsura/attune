@@ -29,7 +29,7 @@ export function TopBar({ me }: TopBarProps) {
         <Link to="/" className="hover:opacity-80">
           <Logo />
         </Link>
-        <span className="text-sm text-muted-foreground">{me.tenant.name}</span>
+        <span className="text-sm text-muted-foreground">{me.tenant?.name}</span>
         <nav className="ml-6 flex items-center gap-4 text-sm">
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
           <NavLink to="/notify-targets">{t('nav.notify_targets')}</NavLink>
@@ -41,12 +41,12 @@ export function TopBar({ me }: TopBarProps) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="gap-2">
                 <User className="size-4" />
-                {me.user.name}
+                {me.user?.name}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                {me.user.role === 'admin' ? '管理员' : '成员'}
+                {me.user?.role === 'admin' ? '管理员' : '成员'}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

@@ -63,10 +63,10 @@ export function CreateNotifyDialog({
             // openapi-typescript treats fields with `default:` as required
             // even though the server fills them — pass explicitly.
             const body: NotifyTargetCreate = {
-              destination_type: type,
+              destinationType: type,
               url: url.trim(),
               audience: 'all',
-              timeout_seconds: timeout,
+              timeoutSeconds: timeout,
               disabled: false,
             }
             if (secret.trim()) body.secret = secret.trim()

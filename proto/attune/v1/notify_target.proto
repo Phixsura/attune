@@ -61,7 +61,7 @@ message CreateNotifyTargetRequest {
   string destination_type = 1 [(google.api.field_behavior) = REQUIRED];
   string audience = 2;  // defaults to "all"
   string url = 3 [(google.api.field_behavior) = REQUIRED];
-  string secret = 4;
+  optional string secret = 4;
   int32 timeout_seconds = 5;  // defaults to 10
   bool disabled = 6;
 }

@@ -139,26 +139,26 @@ function KeyTable({
       </TableHeader>
       <TableBody>
         {keys.map((k) => (
-          <TableRow key={k.id} className={k.is_active ? '' : 'opacity-50'}>
-            <TableCell className="font-mono text-xs">{k.key_prefix}…</TableCell>
+          <TableRow key={k.id} className={k.isActive ? '' : 'opacity-50'}>
+            <TableCell className="font-mono text-xs">{k.keyPrefix}…</TableCell>
             <TableCell>{k.label || '—'}</TableCell>
             <TableCell className="text-muted-foreground">
-              {formatDistanceToNow(new Date(k.created_at), { addSuffix: true, locale: zhCN })}
+              {formatDistanceToNow(new Date(k.createdAt), { addSuffix: true, locale: zhCN })}
             </TableCell>
             <TableCell className="text-muted-foreground">
-              {k.last_used_at
-                ? formatDistanceToNow(new Date(k.last_used_at), { addSuffix: true, locale: zhCN })
+              {k.lastUsedAt
+                ? formatDistanceToNow(new Date(k.lastUsedAt), { addSuffix: true, locale: zhCN })
                 : t('common.never')}
             </TableCell>
             <TableCell>
-              {k.is_active ? (
+              {k.isActive ? (
                 <span className="text-green-600">{t('api_keys.status.active')}</span>
               ) : (
                 <span className="text-muted-foreground">{t('api_keys.status.revoked')}</span>
               )}
             </TableCell>
             <TableCell className="text-right">
-              {k.is_active ? (
+              {k.isActive ? (
                 <Button
                   variant="ghost"
                   size="sm"

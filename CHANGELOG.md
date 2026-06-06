@@ -19,17 +19,37 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   single source of truth for the HTTP contract, generating Go (`internal/proto/`),
   TypeScript (`console/src/proto/`, via ts-proto) and OpenAPI (`docs/openapi/`).
   `make proto` regenerates all three; a CI `proto-sync` gate fails on drift.
-  `POST /v1/feedback/ingest` is migrated end-to-end (decoded/encoded via
-  `protojson`) as the first of an incremental, per-endpoint rollout.
+  Every HTTP endpoint is decoded/encoded via `protojson` against the generated
+  types: the public `POST /v1/feedback/ingest` plus the full console API
+  (session, API keys, notify-targets, feedback, usage).
+- **Unified error envelope** (#19) — every HTTP error now shares one shape,
+  `{"code","message","requestId"}` (`ErrorResponse` in
+  `proto/attune/v1/common.proto`), where `requestId` echoes the request's chi
+  correlation id for support triage.
 
 ### Changed
 
-- **`POST /v1/feedback/ingest` response `id` is now a JSON string**
-  (`{"id":"123"}`) — protoJSON serializes 64-bit integers as strings, which is
-  also safe for JavaScript clients (#19). All other ingest fields are unchanged.
+- **Console API responses are now lowerCamelCase** (#19, breaking) — protoJSON
+  renders fields in lowerCamelCase, so console endpoints under `/fb/v1/console/*`
+  now return `userId`, `createdAt`, `enrichedTitle`, … instead of the previous
+  snake_case (`user_id`, `created_at`, …). Request bodies still accept both
+  casings. The bundled console SPA is updated in lockstep; any out-of-tree
+  console API client must follow. (Pre-1.0 breaking change, flagged per §3.)
+- **64-bit integer fields are now JSON strings** (#19) — protoJSON serializes
+  `int64`/`uint64` as strings (`{"id":"123"}`), which is also safe for JavaScript
+  clients. Affects the ingest response `id`, the console feedback `id`, usage
+  totals/buckets, and feedback-stats counts.
 - Renamed the bundled Grafana dashboard "Attune Overview (Wave 1.2)" → "Attune
   Overview" and removed internal roadmap jargon from `observability/` and the
   `metrics` package doc (no metric names changed).
+
+### Removed
+
+- **`openapi-typescript` and the hand-written `openapi.yaml`** (#19) — console
+  TypeScript types are now generated from `.proto` via ts-proto, retiring the
+  hand-maintained `internal/handlers/console/openapi.yaml` and the
+  `openapi-typescript` dev dependency. The `gen:api` npm script is replaced by
+  `gen:proto` (→ `make proto`).
 
 ### Security
 

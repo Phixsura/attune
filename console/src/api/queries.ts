@@ -1,31 +1,34 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query'
+import type { ApiKey, CreateApiKeyResponse, ListApiKeysResponse } from '../proto/attune/v1/api_key'
+import type {
+  Feedback,
+  FeedbackDetail,
+  GetFeedbackStatsResponse,
+  ListFeedbackResponse,
+} from '../proto/attune/v1/ingest'
+import type {
+  CreateNotifyTargetRequest,
+  ListNotifyTargetsResponse,
+  NotifyTarget,
+  TestNotifyTargetResponse,
+  UpdateNotifyTargetRequest,
+} from '../proto/attune/v1/notify_target'
+import type { GetMeResponse } from '../proto/attune/v1/session'
+import type { GetUsageResponse } from '../proto/attune/v1/usage'
 import { api, setCsrfToken } from './client'
-import type { components, paths } from './types'
 
-// Strongly-typed alias for the /me response shape pulled from openapi.
-export type SessionMe =
-  paths['/fb/v1/console/me']['get']['responses']['200']['content']['application/json']
-
-// API-key types straight from openapi-typescript output.
-export type ApiKey = components['schemas']['ApiKey']
-export type NewApiKey = components['schemas']['NewApiKey']
-type ApiKeysListResponse =
-  paths['/fb/v1/console/api-keys']['get']['responses']['200']['content']['application/json']
-
-// notify-target types.
-export type NotifyTarget = components['schemas']['NotifyTarget']
-export type NotifyTargetCreate = components['schemas']['NotifyTargetCreate']
-export type NotifyTargetPatch = components['schemas']['NotifyTargetPatch']
-type NotifyTargetsListResponse =
-  paths['/fb/v1/console/notify-targets']['get']['responses']['200']['content']['application/json']
-export type NotifyTestResult =
-  paths['/fb/v1/console/notify-targets/{id}/test']['post']['responses']['200']['content']['application/json']
-
-// feedback types.
-export type Feedback = components['schemas']['Feedback']
-export type FeedbackDetail = components['schemas']['FeedbackDetail']
-type FeedbackListResponse =
-  paths['/fb/v1/console/feedback']['get']['responses']['200']['content']['application/json']
+// Stable aliases over the ts-proto-generated types so the rest of the console
+// imports names that don't change when the proto evolves.
+export type SessionMe = GetMeResponse
+export type { ApiKey }
+export type NewApiKey = CreateApiKeyResponse
+export type { NotifyTarget }
+export type NotifyTargetCreate = CreateNotifyTargetRequest
+export type NotifyTargetPatch = Omit<UpdateNotifyTargetRequest, 'id'>
+export type NotifyTestResult = TestNotifyTargetResponse
+export type { Feedback, FeedbackDetail }
+export type FeedbackStats = GetFeedbackStatsResponse
+export type Usage = GetUsageResponse
 
 export interface FeedbackListFilters {
   kind?: string
@@ -42,7 +45,7 @@ export const meQuery = () =>
     queryKey: ['console', 'me'],
     queryFn: async ({ signal }) => {
       const me = await api<SessionMe>('/fb/v1/console/me', { signal })
-      setCsrfToken(me.csrf_token)
+      setCsrfToken(me.csrfToken)
       return me
     },
     retry: false,
@@ -66,7 +69,7 @@ export const apiKeysQuery = () =>
   queryOptions({
     queryKey: ['console', 'api-keys'],
     queryFn: async ({ signal }) => {
-      const resp = await api<ApiKeysListResponse>('/fb/v1/console/api-keys', { signal })
+      const resp = await api<ListApiKeysResponse>('/fb/v1/console/api-keys', { signal })
       return resp.items
     },
     staleTime: 30_000,
@@ -99,7 +102,7 @@ export const notifyTargetsQuery = () =>
   queryOptions({
     queryKey: ['console', 'notify-targets'],
     queryFn: async ({ signal }) => {
-      const resp = await api<NotifyTargetsListResponse>('/fb/v1/console/notify-targets', {
+      const resp = await api<ListNotifyTargetsResponse>('/fb/v1/console/notify-targets', {
         signal,
       })
       return resp.items
@@ -166,15 +169,12 @@ export const feedbackListInfiniteQuery = (filters: FeedbackListFilters) => ({
     if (pageParam) params.set('cursor', pageParam)
     const qs = params.toString()
     const url = `/fb/v1/console/feedback${qs ? `?${qs}` : ''}`
-    return api<FeedbackListResponse>(url, { signal })
+    return api<ListFeedbackResponse>(url, { signal })
   },
   initialPageParam: null as string | null,
-  getNextPageParam: (last: FeedbackListResponse) => last.next_cursor ?? null,
+  getNextPageParam: (last: ListFeedbackResponse) => last.nextCursor ?? null,
   staleTime: 15_000,
 })
-
-export type FeedbackStats =
-  paths['/fb/v1/console/feedback/stats']['get']['responses']['200']['content']['application/json']
 
 export const feedbackStatsQuery = () =>
   queryOptions({
@@ -183,7 +183,7 @@ export const feedbackStatsQuery = () =>
     staleTime: 60_000,
   })
 
-export const feedbackDetailQuery = (id: number) =>
+export const feedbackDetailQuery = (id: string) =>
   queryOptions({
     queryKey: ['console', 'feedback', 'detail', id],
     queryFn: ({ signal }) => api<FeedbackDetail>(`/fb/v1/console/feedback/${id}`, { signal }),
@@ -191,8 +191,6 @@ export const feedbackDetailQuery = (id: number) =>
   })
 
 // ── Usage ────────────────────────────────────────────────────────────
-
-export type Usage = components['schemas']['Usage']
 
 export const usageQuery = () =>
   queryOptions({

@@ -43,7 +43,7 @@ function FeedbackPage() {
   const [severity, setSeverity] = useState<string>('')
   const [qInput, setQInput] = useState('')
   const qDeferred = useDeferredValue(qInput)
-  const [detailId, setDetailId] = useState<number | null>(null)
+  const [detailId, setDetailId] = useState<string | null>(null)
 
   const filters: FeedbackListFilters = useMemo(
     () => ({ kind, severity, q: qDeferred.trim() }),
@@ -61,13 +61,18 @@ function FeedbackPage() {
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t('feedback.subtitle')}</p>
       </div>
 
-      {stats.data && stats.data.total > 0 && (
+      {stats.data && Number(stats.data.total) > 0 && (
         <Card className="mt-6">
           <CardHeader>
             <CardTitle className="text-base">{t('feedback.donut_title')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <KindDonut byKind={stats.data.by_kind} total={stats.data.total} />
+            <KindDonut
+              byKind={Object.fromEntries(
+                Object.entries(stats.data.byKind).map(([k, v]) => [k, Number(v)]),
+              )}
+              total={Number(stats.data.total)}
+            />
           </CardContent>
         </Card>
       )}
@@ -191,7 +196,7 @@ function FeedbackTable({
   onRowClick,
 }: {
   items: import('@/api/queries').Feedback[]
-  onRowClick: (id: number) => void
+  onRowClick: (id: string) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -213,20 +218,20 @@ function FeedbackTable({
             className="cursor-pointer hover:bg-muted/40"
           >
             <TableCell className="max-w-[28rem]">
-              <div className="truncate font-medium">{f.enriched_title || `#${f.id}`}</div>
+              <div className="truncate font-medium">{f.enrichedTitle || `#${f.id}`}</div>
               <div className="truncate text-xs text-muted-foreground">{f.content}</div>
             </TableCell>
             <TableCell>
-              <KindBadge kind={f.enriched_kind} />
+              <KindBadge kind={f.enrichedKind} />
             </TableCell>
             <TableCell>
-              <SeverityBadge severity={f.enriched_severity} />
+              <SeverityBadge severity={f.enrichedSeverity} />
             </TableCell>
             <TableCell className="truncate font-mono text-xs text-muted-foreground">
-              {f.user_id || '—'}
+              {f.userId || '—'}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(f.created_at), { addSuffix: true, locale: zhCN })}
+              {formatDistanceToNow(new Date(f.createdAt), { addSuffix: true, locale: zhCN })}
             </TableCell>
           </TableRow>
         ))}

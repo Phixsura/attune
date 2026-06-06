@@ -1,5 +1,3 @@
-import type { paths } from './types'
-
 // CSRF token is set by /me's response body and stored here in module
 // state. The SPA NEVER writes it to a cookie — it must be JS-readable
 // but not auto-attached. Each fetch() pulls it from this closure.
@@ -34,7 +32,7 @@ interface FetchOpts {
 
 // api makes a typed fetch against /fb/v1/console/*. Returns parsed JSON
 // or throws ApiError for non-2xx (with code/message from the server's
-// {code, message, request_id} envelope when present).
+// unified {code, message, requestId} envelope when present).
 //
 // All non-GET requests automatically include X-CSRF-Token from the
 // module-level CSRF state. If the token is missing the request is sent
@@ -71,16 +69,13 @@ export async function api<T>(path: string, opts: FetchOpts = {}): Promise<T> {
     }
   }
   if (!res.ok) {
-    const envelope = parsed as { code?: string; message?: string; request_id?: string } | null
+    const envelope = parsed as { code?: string; message?: string; requestId?: string } | null
     throw apiError(
       res.status,
       envelope?.code ?? 'unknown',
       envelope?.message ?? `HTTP ${res.status}`,
-      envelope?.request_id,
+      envelope?.requestId,
     )
   }
   return parsed as T
 }
-
-// Convenience aliases for path-typed reads of the openapi paths map.
-export type ApiPaths = paths

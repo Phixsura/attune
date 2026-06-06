@@ -37,7 +37,9 @@ export interface CreateNotifyTargetRequest {
   /** defaults to "all" */
   audience: string;
   url: string;
-  secret: string;
+  secret?:
+    | string
+    | undefined;
   /** defaults to 10 */
   timeoutSeconds: number;
   disabled: boolean;

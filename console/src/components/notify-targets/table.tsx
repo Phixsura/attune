@@ -19,7 +19,7 @@ import {
 
 export interface TestState {
   id: string
-  result: NotifyTestResult | { ok: false; status_code?: number; message?: string }
+  result: NotifyTestResult | { ok: false; statusCode?: number; message?: string }
 }
 
 export function TargetTable({
@@ -56,7 +56,7 @@ export function TargetTable({
       <TableBody>
         {targets.map((tgt) => (
           <TableRow key={tgt.id} className={tgt.disabled ? 'opacity-50' : ''}>
-            <TableCell>{typeLabel[tgt.destination_type] ?? tgt.destination_type}</TableCell>
+            <TableCell>{typeLabel[tgt.destinationType] ?? tgt.destinationType}</TableCell>
             <TableCell className="max-w-[24rem] truncate font-mono text-xs" title={tgt.url}>
               {tgt.url}
               {lastTest?.id === tgt.id && (
@@ -72,7 +72,7 @@ export function TargetTable({
             <TableCell>
               <FailureBadge target={tgt} />
             </TableCell>
-            <TableCell className="text-muted-foreground">{tgt.timeout_seconds}s</TableCell>
+            <TableCell className="text-muted-foreground">{tgt.timeoutSeconds}s</TableCell>
             <TableCell className="text-right">
               <Button
                 variant="ghost"
@@ -113,16 +113,16 @@ export function TargetTable({
 
 function FailureBadge({ target }: { target: NotifyTarget }) {
   const { t } = useTranslation()
-  if (!target.last_failure_at) {
+  if (!target.lastFailureAt) {
     return <span className="text-xs text-green-600">{t('notify_targets.status_ok')}</span>
   }
-  const ago = formatDistanceToNow(new Date(target.last_failure_at), {
+  const ago = formatDistanceToNow(new Date(target.lastFailureAt), {
     addSuffix: false,
     locale: zhCN,
   })
   const tooltip = t('notify_targets.failure_tooltip', {
-    at: target.last_failure_at,
-    reason: target.last_error || '—',
+    at: target.lastFailureAt,
+    reason: target.lastError || '—',
   })
   return (
     <span

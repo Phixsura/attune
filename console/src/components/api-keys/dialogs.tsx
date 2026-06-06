@@ -131,7 +131,7 @@ export function RevokeKeyDialog({
         </DialogHeader>
         {target && (
           <p className="my-2 font-mono text-sm text-muted-foreground">
-            {target.key_prefix}… &nbsp; · &nbsp; {target.label || '—'}
+            {target.keyPrefix}… &nbsp; · &nbsp; {target.label || '—'}
           </p>
         )}
         <DialogFooter>

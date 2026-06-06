@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select'
 
 // EditNotifyDialog edits an existing notify-target.
-// destination_type is locked (changing type = different identity; the
+// destinationType is locked (changing type = different identity; the
 // server's PATCH schema doesn't accept it either).
 //
 // Sparse submit: only fields the user changed are sent. URL/audience/
@@ -53,7 +53,7 @@ export function EditNotifyDialog({
     if (!target) return
     setUrl(target.url ?? '')
     setAudience(target.audience as 'pool' | 'radar' | 'all')
-    setTimeoutSec(target.timeout_seconds ?? 10)
+    setTimeoutSec(target.timeoutSeconds ?? 10)
     setDisabled(target.disabled)
     setSecret('')
     setSecretCleared(false)
@@ -66,7 +66,7 @@ export function EditNotifyDialog({
     const patch: NotifyTargetPatch = {}
     if (url.trim() !== (target.url ?? '')) patch.url = url.trim()
     if (audience !== target.audience) patch.audience = audience
-    if (timeout !== (target.timeout_seconds ?? 10)) patch.timeout_seconds = timeout
+    if (timeout !== (target.timeoutSeconds ?? 10)) patch.timeoutSeconds = timeout
     if (disabled !== target.disabled) patch.disabled = disabled
     if (secret) patch.secret = secret
     else if (secretCleared) patch.secret = ''
@@ -85,7 +85,7 @@ export function EditNotifyDialog({
             <DialogTitle>{t('notify_targets.edit_dialog.title')}</DialogTitle>
             <DialogDescription>
               {t('notify_targets.edit_dialog.locked_type', {
-                type: target.destination_type,
+                type: target.destinationType,
               })}
             </DialogDescription>
           </DialogHeader>

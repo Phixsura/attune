@@ -73,7 +73,7 @@ function NotifyTargetsPage() {
     test.mutate(target.id, {
       onSuccess: (result) => {
         setLastTest({ id: target.id, result })
-        toast.success(t('notify_targets.test_result.ok', { ms: result.latency_ms }))
+        toast.success(t('notify_targets.test_result.ok', { ms: result.latencyMs }))
       },
       onError: (err) => {
         // The /test endpoint returns 502 with envelope on delivery failure;
@@ -81,7 +81,7 @@ function NotifyTargetsPage() {
         const apiErr = err as { status?: number; code?: string; message?: string }
         setLastTest({
           id: target.id,
-          result: { ok: false, status_code: apiErr.status, message: apiErr.message },
+          result: { ok: false, statusCode: apiErr.status, message: apiErr.message },
         })
         toast.error(
           t('notify_targets.test_result.fail', {
@@ -178,9 +178,9 @@ function Loading() {
 // up" (the create button takes them there).
 function LarkChip({ targets }: { targets: NotifyTarget[] }) {
   const { t } = useTranslation()
-  const larkBots = targets.filter((x) => x.destination_type === 'lark-bot')
+  const larkBots = targets.filter((x) => x.destinationType === 'lark-bot')
   if (larkBots.length === 0) return null
-  const healthy = larkBots.find((x) => !x.disabled && !x.last_failure_at)
+  const healthy = larkBots.find((x) => !x.disabled && !x.lastFailureAt)
   if (healthy) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
