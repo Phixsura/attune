@@ -31,7 +31,22 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - **Unified error envelope** (#19) — every HTTP error now shares one shape,
   `{"code","message","requestId"}` (`ErrorResponse` in
   `proto/attune/v1/common.proto`), where `requestId` echoes the request's chi
-  correlation id for support triage.
+  correlation id for support triage. The shared writer lives at
+  `internal/respond.Error` so handler subpackages and infra-layer
+  middlewares emit the same envelope; `internal/handlers/console/internal/respond`
+  re-exports it so existing console handlers don't change.
+
+### Fixed
+
+- **apikey middleware no longer leaks the legacy `{"error":"..."}` shape**
+  (#19) — caught by docker-compose smoke tests: `POST /v1/feedback/ingest`
+  without (or with an invalid) `X-API-Key` previously returned the old
+  one-key envelope — the only customer-facing endpoint that did. Now
+  emits `{code,message,requestId}` like every other path, with
+  `code=unauthenticated` on 401s and `code=internal` on lookup failures.
+  Covered by new `internal/infra/apikey/middleware_test.go` (4 cases:
+  missing header, invalid prefix, lookup-failure 500, happy-path
+  forwarding).
 
 ### Changed
 

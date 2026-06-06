@@ -1,50 +1,33 @@
-// Package respond holds the response/decode helpers shared by every
-// console handler subpackage. Lives under `internal/` so it's only
-// importable from within handlers/console/.
+// Package respond is the console-handler-internal view of the shared
+// response helpers. Proto / Error are re-exported from internal/respond
+// (the single canonical implementation, also used by infra middlewares
+// like apikey) so existing console handler imports stay the same and no
+// duplicate envelope writer can drift out of shape.
 //
-// Lives BELOW the handler subpackages in the import graph: each handler
-// imports respond (and session), but neither respond nor session import
-// any handler. The root handlers/console package wires them together via
-// router.go without creating a cycle.
+// Decode + ErrBodyTooLarge are console-specific (protoJSON request
+// bodies, 1 MiB cap on customer inputs) and live here.
 package respond
 
 import (
-	"context"
 	"errors"
 	"io"
-	"net/http"
 
-	"github.com/go-chi/chi/v5/middleware"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/respond"
 )
 
-// Proto writes a proto message as protoJSON — the wire contract for the
-// proto-migrated console endpoints (#19). Field names are lowerCamelCase
-// and int64s serialize as JSON strings, per the protoJSON spec.
-func Proto(w http.ResponseWriter, status int, m proto.Message) {
-	b, err := protojson.Marshal(m)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_, _ = w.Write(b)
-}
-
-// Error writes the unified ErrorResponse {code, message, requestId}
-// (request_id from the chi RequestID middleware). The single error
-// shape every console endpoint emits.
-func Error(ctx context.Context, w http.ResponseWriter, status int, code, message string) {
-	Proto(w, status, &attunev1.ErrorResponse{
-		Code:      code,
-		Message:   message,
-		RequestId: middleware.GetReqID(ctx),
-	})
-}
+// Proto / Error re-export the canonical implementations from
+// internal/respond. Console handlers reading these via
+// "console/internal/respond" find them at the same path with the same
+// signature, but the implementation is shared with infra-layer callers
+// (e.g. apikey middleware) — so every customer-facing error in attune
+// emits the {code, message, requestId} envelope.
+var (
+	Proto = respond.Proto
+	Error = respond.Error
+)
 
 var unmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
 

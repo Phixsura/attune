@@ -56,7 +56,9 @@ func TestIngestRequestDiscardUnknown(t *testing.T) {
 	}
 }
 
-// TestErrorResponseWire pins the error envelope: {"error": "..."}.
+// TestErrorResponseWire pins the unified error envelope: {code, message, requestId}.
+// The previous {"error":"..."} shape was removed when #19 unified errors;
+// the apikey middleware (the last leak, caught by E2E) now also emits this.
 func TestErrorResponseWire(t *testing.T) {
 	b, err := protojson.Marshal(&attunev1.ErrorResponse{Code: "validation", Message: "content is required"})
 	if err != nil {
