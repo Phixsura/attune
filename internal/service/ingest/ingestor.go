@@ -88,7 +88,7 @@ func (i *Ingestor) fireEnrich(inboundCtx context.Context, id int64, traceID stri
 	span := oteltrace.SpanFromContext(inboundCtx)
 	ctx, cancel := context.WithTimeout(
 		oteltrace.ContextWithSpanContext(context.Background(), span.SpanContext()),
-		60*time.Second,
+		90*time.Second,
 	)
 	defer cancel()
 	ctx = trace.WithID(ctx, traceID)

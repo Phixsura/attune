@@ -10,6 +10,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/eval"
 )
@@ -49,7 +50,7 @@ func runEval(args []string) error {
 	}
 	defer llm.Close()
 	enricher := enrich.NewEnricher(feedbackRepo, llm)
-	evaluator := eval.NewEvaluator(feedbackRepo, enricher)
+	evaluator := eval.NewEvaluator(feedbackRepo, tenant.NewTenant(pool), enricher)
 
 	switch *mode {
 	case "consistency":

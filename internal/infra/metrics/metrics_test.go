@@ -18,13 +18,15 @@ import (
 func TestRegisteredMetricsMatchDocumentedReference(t *testing.T) {
 	// Mirror of observability/README.md's metrics reference (the 7 families).
 	documented := map[string]bool{
-		"attune_ingest_total":            true,
-		"attune_enrich_duration_seconds": true,
-		"attune_notify_failures_total":   true,
-		"attune_outbox_lag_seconds":      true,
-		"attune_claim_contention_total":  true,
-		"attune_ingest_rate_limit_total": true,
-		"attune_triage_decisions_total":  true,
+		"attune_ingest_total":                  true,
+		"attune_enrich_duration_seconds":       true,
+		"attune_enrich_modules_dropped_total":  true,
+		"attune_enrich_suggested_modules_total": true,
+		"attune_notify_failures_total":         true,
+		"attune_outbox_lag_seconds":            true,
+		"attune_claim_contention_total":        true,
+		"attune_ingest_rate_limit_total":       true,
+		"attune_triage_decisions_total":        true,
 	}
 
 	got := registeredMetricNames(t)

@@ -12,6 +12,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
@@ -26,14 +27,15 @@ import (
 // ground-truth measure for对外宣传.
 type Evaluator struct {
 	repo     *feedback.FeedbackRepo
+	tenants  *tenant.TenantRepo
 	enricher *enrich.Enricher
 }
 
 // NewEvaluator wires the repo for sampling and the enricher's Classify
 // for re-running LLM. enricher must be non-nil — eval is meaningless
 // without an LLM connection.
-func NewEvaluator(r *feedback.FeedbackRepo, e *enrich.Enricher) *Evaluator {
-	return &Evaluator{repo: r, enricher: e}
+func NewEvaluator(r *feedback.FeedbackRepo, tenants *tenant.TenantRepo, e *enrich.Enricher) *Evaluator {
+	return &Evaluator{repo: r, tenants: tenants, enricher: e}
 }
 
 // EvalReport is the unified shape both consistency and score-human
@@ -88,7 +90,15 @@ func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample
 		SampleSize:  len(rows),
 	}
 	for _, r := range rows {
-		newEnriched, err := ev.enricher.Classify(ctx, r.Content)
+		cfg := enrich.ClassifyConfig{TenantID: r.TenantID}
+		if ev.tenants != nil {
+			tenantCfg, err := ev.tenants.GetEnrichConfig(ctx, r.TenantID)
+			if err == nil {
+				cfg.PromptTemplate = tenantCfg.PromptTemplate
+				cfg.Modules = tenantCfg.Modules
+			}
+		}
+		newEnriched, err := ev.enricher.Classify(ctx, r.Content, cfg)
 		if err != nil {
 			// LLM blip — skip this row, don't blow up the whole report.
 			continue

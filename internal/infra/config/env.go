@@ -24,6 +24,7 @@ func applyEnvOverrides(yc *yamlConfig) error {
 		dst *string
 	}{
 		{"FEEDBACK_API_DATABASE_URL", &yc.DatabaseURL},
+		{"FEEDBACK_API_LLM_PROTOCOL", &yc.LLMProtocol},
 		{"FEEDBACK_API_LLM_OPENAI_BASE_URL", &yc.LLMOpenAIBaseURL},
 		{"FEEDBACK_API_LLM_OPENAI_API_KEY", &yc.LLMOpenAIAPIKey},
 		{"FEEDBACK_API_LARK_SIGNING_SECRET", &yc.LarkSigningSecret},

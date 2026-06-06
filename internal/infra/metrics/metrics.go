@@ -1,4 +1,4 @@
-// Package metrics exposes attune's 7 Prometheus metrics — the telemetry contract
+// Package metrics exposes attune's Prometheus metrics — the telemetry contract
 // documented in observability/README.md. Any Prometheus-compatible backend can
 // scrape them at /metrics (OpenMetrics).
 //
@@ -28,8 +28,9 @@ var IngestTotal = prometheus.NewCounterVec(
 	[]string{"tenant", "source", "result"},
 )
 
-// EnrichDuration tracks AI enrichment wall time. result ∈ {ok,
-// llm_err, parse_err, other_err, db_err}. Use the histogram's
+// EnrichDuration tracks AI enrichment wall time. module_mode ∈
+// {freeform, constrained}; result ∈ {ok, llm_err, parse_err,
+// other_err, db_err}. Use the histogram's
 // attune_enrich_duration_seconds_bucket for p95 SLO tracking
 // (target p95 ≤ 30s).
 var EnrichDuration = prometheus.NewHistogramVec(
@@ -38,7 +39,27 @@ var EnrichDuration = prometheus.NewHistogramVec(
 		Help:    "End-to-end AI enrichment latency per row.",
 		Buckets: prometheus.ExponentialBuckets(0.5, 2, 8), // 0.5s..64s
 	},
-	[]string{"tenant", "result"},
+	[]string{"tenant", "module_mode", "result"},
+)
+
+// EnrichModulesDroppedTotal counts module labels removed by gate (2)
+// — the post-parse whitelist filter (#10).
+var EnrichModulesDroppedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_enrich_modules_dropped_total",
+		Help: "Module labels dropped by the enricher whitelist filter.",
+	},
+	[]string{"tenant"},
+)
+
+// EnrichSuggestedModulesTotal counts enrich rows where the model emitted
+// at least one off-list module under a configured whitelist (#10).
+var EnrichSuggestedModulesTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_enrich_suggested_modules_total",
+		Help: "Enrich rows with off-list module suggestions (whitelist active).",
+	},
+	[]string{"tenant"},
 )
 
 // NotifyFailuresTotal increments on every notifier push that didn't
@@ -109,6 +130,8 @@ var TriageDecisionsTotal = prometheus.NewCounterVec(
 var allMetrics = []prometheus.Collector{
 	IngestTotal,
 	EnrichDuration,
+	EnrichModulesDroppedTotal,
+	EnrichSuggestedModulesTotal,
 	NotifyFailuresTotal,
 	OutboxLagSeconds,
 	ClaimContentionTotal,

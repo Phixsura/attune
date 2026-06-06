@@ -26,14 +26,34 @@ import (
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
+	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
-// buildLLMClient wires the OpenAI-compatible LLM client used by the
-// enricher. Any /v1/chat/completions endpoint works — OpenAI, Azure
-// OpenAI, vllm, ollama, oneapi, etc. Config validation in config.Load
-// already ensures llm_openai_base_url is non-empty.
+// buildLLMClient picks an LLM backend from cfg.LLMProtocol. The four
+// supported protocols (#10):
+//
+//   - "openai-compat"     hand-rolled /v1/chat/completions client; covers
+//                         OpenAI / Azure / vLLM / ollama / oneapi.
+//   - "openai-responses"  openai-go/v3 client.Responses.New.
+//   - "anthropic"         anthropic-sdk-go with forced tool_use.
+//   - "gemini"            google.golang.org/genai responseJsonSchema.
+//
+// config.validate() enforces protocol legality and required URL/key for
+// each, so this function trusts cfg to be coherent.
+//
+// Users who need another provider implement llmclient.LLMClient and
+// wire it here — there is no plugin registry on purpose.
 func buildLLMClient(cfg *config.Config) (llmclient.LLMClient, error) {
-	return llmclient.NewOpenAI(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
+	switch cfg.LLMProtocol {
+	case "openai-responses":
+		return llmclient.NewOpenAIResponses(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
+	case "anthropic":
+		return llmclient.NewAnthropic(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
+	case "gemini":
+		return llmclient.NewGemini(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
+	default: // "openai-compat" — config.validate() already accepted the value
+		return llmclient.NewOpenAICompat(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
+	}
 }
 
 // syncCustomWebhooks upserts every entry in cfg.CustomWebhooks into
@@ -209,6 +229,7 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
 	feedback := console.NewFeedbackHandler(feedbackRepo)
 	usage := console.NewUsageHandler(feedbackRepo)
+	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
 
 	var devLogin http.Handler
 	if cfg.ConsoleDevLogin {
@@ -216,6 +237,6 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 		devLogin = console.NewDevLoginHandler(signer, tenantRepo, userRepo, cfg.ConsoleBaseURL)
 	}
 	return console.NewRouter(
-		signer, oauth, me, apiKeys, notifyTargets, feedback, usage, devLogin,
+		signer, oauth, me, apiKeys, notifyTargets, feedback, usage, enrichConfig, devLogin,
 	).Mount(), nil
 }

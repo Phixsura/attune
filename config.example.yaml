@@ -17,17 +17,30 @@ port: 8090
 database_url: "postgres://<user>:<password>@<host>:5432/attune?sslmode=require"
 
 # ── LLM endpoint ──────────────────────────────────────────────────
-# Enricher hits any OpenAI-compatible /v1/chat/completions endpoint.
-# Common base_url values:
+# LLM protocol. One of:
+#   openai-compat    — any OpenAI-compatible /v1/chat/completions endpoint
+#                      (OpenAI, Azure OpenAI, vLLM, ollama, oneapi, etc.)
+#   openai-responses — OpenAI Responses API (via official SDK)
+#   anthropic        — Anthropic Messages API (via official SDK)
+#   gemini           — Google Gemini API (via official SDK)
+# Default: openai-compat (backward compatible with existing deployments).
+# Env override: FEEDBACK_API_LLM_PROTOCOL
+llm_protocol: "openai-compat"
+
+# Base URL for the OpenAI-compatible backend (llm_protocol=openai-compat only).
+# Common values:
 #   OpenAI 官方:    https://api.openai.com
 #   Azure OpenAI:   https://<resource>.openai.azure.com/openai/deployments/<deployment>
 #   vllm local:     http://localhost:8000
 #   ollama local:   http://localhost:11434
 #   oneapi proxy:   http://your-oneapi-host:3000
 # Attune auto-appends "/v1/chat/completions" — don't include it in base_url.
+# Required when llm_protocol=openai-compat; ignored for other protocols.
 llm_openai_base_url: "https://api.openai.com"
 
-# Bearer token. Local ollama / vllm without auth may leave this blank.
+# API key / bearer token.
+# - openai-compat:    local ollama / vllm without auth may leave this blank.
+# - openai-responses, anthropic, gemini: required (used by the official SDK).
 # Prefer FEEDBACK_API_LLM_OPENAI_API_KEY env injection over committing to yaml.
 llm_openai_api_key: ""
 
