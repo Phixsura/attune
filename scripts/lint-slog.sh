@@ -4,7 +4,7 @@
 # A fast (≤ 1s) grep+awk pass that catches the three observability mistakes
 # most likely to silently break tracing. Ported from the parent monorepo's
 # bin/lint-slog.sh, trimmed to attune scope. Invoked by the pre-commit hook
-# (.husky/pre-commit, issue #3) and — once the known warnings below are cleared
+# (.husky/pre-commit, issue #3) and — with the known warnings cleared
 # (issue #9) — by CI in --strict mode (issue #1). See CLAUDE.md §1 / §7.
 #
 # ── Rules ───────────────────────────────────────────────────────────────────
@@ -39,6 +39,10 @@
 #   suppresses only that rule on that line. Use sparingly and only where the
 #   collision/omission is intentional (e.g. the canonical injector itself).
 #
+#   Facade internals — internal/observability/ and internal/logext/ — are
+#   auto-exempt from the business-field rules (rule-1, rule-2): they define and
+#   inject the reserved keys rather than misuse them. No per-line marker needed.
+#
 # ── Limitations (this is grep/awk, not a Go parser) ─────────────────────────
 #
 #   Pure `//` comment lines are skipped. NOT handled — use an exemption if hit:
@@ -56,10 +60,9 @@
 #   exit 1  --strict and ≥1 finding
 #   exit 2  usage error / not a git work tree
 #
-# Known warnings as of writing (Phase 1A; fixed in issue #9, intentionally NOT
-# pre-exempted here so they stay visible):
-#   internal/observability/slog.go:32,33      rule-2 (trace_id / span_id)
-#   internal/infra/llmclient/openai_backend.go:51   rule-3 (no Transport)
+# History (Phase 1A warnings, all cleared in issue #9):
+#   internal/infra/llmclient/openai_backend.go   rule-3 — fixed (#55: otelhttp Transport)
+#   internal/observability/slog.go:32,33         rule-2 — auto-exempt (facade internal)
 
 set -uo pipefail  # NOT -e: grep exits 1 on "no match", which is the happy path.
 
@@ -105,6 +108,16 @@ if [[ "${#files[@]}" -eq 0 ]]; then
   exit 2
 fi
 
+# facade internals (the slog facade + the OTel handler that *injects* the
+# reserved keys) are exempt from the business-field rules (rule-1, rule-2) —
+# they own those keys, not misuse them. #48 reuses this when it tightens rule-1.
+is_facade_internal() {
+  case "$1" in
+    internal/observability/*|internal/logext/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 warn=0
 
 # grep-based rule: $1=id $2=title $3=fix $4=extended-regex
@@ -115,6 +128,7 @@ check_grep() {
     [[ -z "$line" ]] && continue
     [[ "$line" == *"lint-slog:allow ${id}"* ]] && continue   # per-line exemption
     file="${line%%:*}"; tmp="${line#*:}"; ln="${tmp%%:*}"; code="${tmp#*:}"
+    is_facade_internal "$file" && continue                   # facade owns the reserved keys (#9; #48 reuses)
     [[ "$code" =~ ^[[:space:]]*// ]] && continue             # pure // comment line (URL-safe: anchored at line start)
     printf '    %s%s:%s%s\n' "$yellow" "$file" "$ln" "$reset"
     found=$((found + 1)); warn=$((warn + 1))

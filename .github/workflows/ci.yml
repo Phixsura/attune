@@ -16,8 +16,6 @@
 # Deliberately omitted for now:
 #   * docker-build — the Dockerfile still assumes the old monorepo layout
 #     (COPY gateway/ + listen/); deferred to a follow-up that builds standalone.
-#   * lint-slog   — scripts/lint-slog.sh now exists, but CI --strict gating is
-#     deferred until #9 clears the 3 known warnings; it is warn-only till then.
 #
 # govulncheck is informational (continue-on-error): its standard-library
 # findings track the Go toolchain version against a live DB, so they change
@@ -121,6 +119,18 @@ jobs:
       - uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         with:
           version: v2.12.2
+
+  # ── lint-slog: slog / OTel / http.Client static checks (CLAUDE.md §1 / §7) ──
+  # Pure bash/grep/awk — no Go toolchain. Scans all tracked *.go; --strict gates.
+  lint-slog:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - run: bash scripts/lint-slog.sh --strict
 
   # ── Lizard: complexity (CCN ≤ 15) + length (NLOC ≤ 100) ────────────────────
   lizard:
@@ -252,7 +262,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, golangci-lint, lizard, govulncheck, console, changelog, docker-build, compose-config]
+    needs: [changes, go-checks, golangci-lint, lint-slog, lizard, govulncheck, console, changelog, docker-build, compose-config]
     if: always()
     runs-on: ubuntu-latest
     steps:

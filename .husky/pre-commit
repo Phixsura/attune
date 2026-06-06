@@ -26,7 +26,7 @@
 #      is ~130 B → passes automatically), or a one-off bypass. We do NOT cap source
 #      LINES: Go/Google style cap functions not files (CI's lizard already does).
 #   ② go vet — packages touched by staged .go (blocks)
-#   ③ scripts/lint-slog.sh — slog/OTel lint (warn-only; never blocks)
+#   ③ scripts/lint-slog.sh — slog/OTel lint (--strict; blocks on any finding)
 #   ④ biome — staged console/src files (blocks, only if console deps present)
 
 set -uo pipefail  # NOT -e: we accumulate failures and decide the exit ourselves.
@@ -56,10 +56,10 @@ if [ -n "$go_files" ]; then
   go vet "${pkgs[@]}" || fail=1
 fi
 
-# ── ③ slog/OTel lint (warn-only; #4) ─────────────────────────────────────────
+# ── ③ slog/OTel lint (--strict gate; #4 / #9) ────────────────────────────────
 if [ -f scripts/lint-slog.sh ]; then
-  say "lint-slog (warn-only)"
-  bash scripts/lint-slog.sh || true
+  say "lint-slog (--strict)"
+  bash scripts/lint-slog.sh --strict || fail=1
 fi
 
 # ── ④ console biome — staged console/src only, guarded on installed deps ──────
