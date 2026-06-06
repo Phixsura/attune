@@ -2,10 +2,12 @@
 
 | Field    | Value |
 |----------|-------|
-| Issue    | TBD — per user choice, folded into PR #67 (issue #19's scope is being broadened; needs retitle) |
-| Status   | **Accepted** (2026-06-06) |
+| Issue    | #19 (host PR #67) — original IDL-contract scope was broadened per user direction to also land the architecture refactor |
+| Status   | **Implemented** (2026-06-06) — see §10 below for exactly what shipped vs deferred |
 | Started  | 2026-06-06 |
-| Related  | #19 (host PR #67) · #66 (inbound-adapter framework, deferred) · #10 (per-tenant enrich config, downstream) |
+| Shipped  | 2026-06-06 (PR #67, 13 commits, mergeState=CLEAN) |
+| Follow-ups | #68 (polish · 9 items) · #69 (handlers/console subpackage split, deferred) · #70 (altitude backlog · 3 items) |
+| Related  | #66 (inbound-adapter framework, separately deferred) · #10 (per-tenant enrich config, downstream) |
 
 > **Author's note.** Engineering recommendation was to defer the backend split until roadmap pressure showed `service/` had become a grab-bag, and to land architecture refactor in a separate PR from #19's IDL contract. User explicitly chose the more aggressive path on both counts after hearing the trade-offs. This proposal honors that choice and documents the costs in §6 so they are visible to future readers.
 
@@ -387,3 +389,42 @@ After commit 10:
 - CLAUDE.md §5 — current four-layer contract being preserved.
 - CLAUDE.md §10 — proposal acceptance gate this document satisfies.
 - `docs/proposals/2026-06-06-inbound-adapter-framework.md` — sibling proposal for #66 (de-rooting Lark), unrelated to this refactor but referenced because it would land *into* the new `handlers/` shape.
+
+---
+
+## 10 · Post-implementation notes (2026-06-06)
+
+Status flipped from **Accepted → Implemented**. What actually shipped vs the proposal, plus what we deliberately deferred and where to track it.
+
+### Delivered in PR #67 (13 commits, mergeState=CLEAN)
+
+| Proposal item | Status | Where |
+|---|---|---|
+| §4-A backend `service/` feature subpackages (`enrich, ingest, outbox, apikey, eval`) | ✅ | commit 7 of refactor |
+| §4-A backend `repo/` feature subpackages (`feedback, apikey, outbox, notifytarget, tenant, lark`) | ✅ | commit 8 |
+| §4-A `notify/adapter/` feature subpackages (`rawwebhook, larkwebhook, githubissue`) | ✅ | commit 9 |
+| §4-A `Notifier` interface moved to `service/enrich` (consumer-defines-interface) | ✅ | commit 7 (also see backlog #70 — long-term may move to `notify/` root) |
+| §4-A `apikeyrepo` / `outboxrepo` / `larkrepo` alias convention | ✅ | commits 7-9 |
+| §4-B console `src/features/<x>/{api,components}` (feedback, notify-targets, api-keys, usage, session) | ✅ | commits 3-5 |
+| §4-B React Query co-located per feature (queryOptions + hook per operation) | ✅ | commits 3-5 |
+| §4-B `dependency-cruiser` CI gate (4 rules, 0 violations on 72 modules / 228 deps) | ✅ | commits 2 + 6 |
+| §4-C `internal/observability/` → `internal/infra/observability/` | ✅ | commit 1 |
+| §4-D CLAUDE.md §5 + README + CHANGELOG updates | ✅ | commit 10 |
+| §1-4 all four §5 cross-layer rules verified clean by grep after every backend layer move | ✅ | per-commit |
+| Post-merge max-effort review (9 angles + verifier + sweep) | ✅ | 15 findings; 5 🔴 bugs fixed in #67 (commits `fb97e8d` + `9d47f97`) |
+
+### Deferred (tracked separately)
+
+- **`handlers/console/` feature subpackage split** (proposal §4-A — the §4-A target tree included it). Deferred because the `respond` / `auth` helpers shared across every handler would create a console root ↔ sub-package cycle that resolves only by adding an `handlers/console/internal/respond/` layer, with negligible §5 payoff vs the diff cost. Tracked in **#69**; trigger conditions documented there (Wave 3 RBAC / handler count > 25 / second shared util).
+
+### Follow-ups from post-merge review
+
+- **#68** — 9 polish items from review findings (data-race in fanOut, unbounded TouchLastUsed goroutine, rationale field, ResponseChecker ctx, github_issue_test global var, MultiNotifier doc drift, list-feedback-infinite queryOptions inconsistency, _authed.notify-targets dead comment, ~32 stale path/rule references in comments).
+- **#69** — handlers/console split (above).
+- **#70** — 3 long-term altitude improvements (Notifier interface relocation to notify root, `internal/notify/sig/` extraction for HMAC/envelope helpers, `internal/repo/pgxutil/` extraction for pgx helpers). Each item names its trigger condition.
+
+### Honest accounting
+
+- Engineering recommendation at the start of this proposal was to land architecture refactor in a separate PR from #19's IDL contract. User explicitly chose the more aggressive path. Final cost: PR #67 grew to 13 commits across 145 files. We avoided the predicted "refactor blocks IDL completion" risk because every commit was independently green, but the diff IS larger than what a calm code reviewer would prefer.
+- The bulk-sed approach in commit 8 (repo split) caused a class of corruption where method calls like `s.repo.X` were rewritten to `s.<feature>.X`. Caught by go build and fixed; documented in the commit message as a tooling-lesson note for future refactors (BSD sed + lack of `\b`; use `gofmt -r` for AST-aware identifier rewriting where possible).
+- Max-effort post-merge review surfaced 5 bugs that would have shipped to production had we trusted CI greenness alone. Every one of those 5 was fixed in #67's final two commits before the merge button.
