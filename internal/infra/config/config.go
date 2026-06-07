@@ -25,20 +25,20 @@ type Config struct {
 	EnricherInterval time.Duration `yaml:"-"`
 	EnricherBatch    int           `yaml:"enricher_batch"`
 
-	// LLM protocol selects which backend wire format to speak (#10):
-	// "openai-compat" (default) — OpenAI Chat Completions wire;
-	// covers OpenAI / Azure / vLLM / ollama / oneapi.
-	// "openai-responses" — OpenAI Responses API (/v1/responses).
-	// "anthropic" — Anthropic Messages (/v1/messages) with
-	// forced tool-use for structured output.
-	// "gemini" — Google generative-language.
+	// LLMProtocol selects which backend wire format to speak (#10).
+	// See llm_protocol.go for the typed constants —
+	// LLMProtocolOpenAICompat (default) covers OpenAI / Azure / vLLM /
+	// ollama / oneapi via Chat Completions; LLMProtocolOpenAIResponses
+	// hits /v1/responses via the official SDK; LLMProtocolAnthropic
+	// uses Messages with forced tool-use for structured output;
+	// LLMProtocolGemini uses Google generative-language.
 	//
 	// LLMOpenAIBaseURL / LLMOpenAIAPIKey are reused across protocols as
 	// "the LLM endpoint URL / bearer key" — the field name is historical
 	// and the docs explain the multi-protocol meaning.
-	LLMProtocol      string `yaml:"llm_protocol"`
-	LLMOpenAIBaseURL string `yaml:"llm_openai_base_url"`
-	LLMOpenAIAPIKey  string `yaml:"llm_openai_api_key"`
+	LLMProtocol      LLMProtocol `yaml:"llm_protocol"`
+	LLMOpenAIBaseURL string      `yaml:"llm_openai_base_url"`
+	LLMOpenAIAPIKey  string      `yaml:"llm_openai_api_key"`
 	// LLMModel overrides the hardcoded enrichment model id. Empty falls
 	// back to DefaultLLMModel — the operator only sets this when
 	// pointing at a gateway that aliases (or hosts) a non-default model.
@@ -146,7 +146,7 @@ func Load() (*Config, error) {
 	c := ptrext.Of(Config{
 		Port:                      yc.Port,
 		DatabaseURL:               yc.DatabaseURL,
-		LLMProtocol:               yc.LLMProtocol,
+		LLMProtocol:               LLMProtocol(yc.LLMProtocol),
 		LLMOpenAIBaseURL:          yc.LLMOpenAIBaseURL,
 		LLMOpenAIAPIKey:           yc.LLMOpenAIAPIKey,
 		LLMModel:                  yc.LLMModel,
@@ -224,25 +224,22 @@ func (c *Config) validate() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("config: database_url is required")
 	}
-	switch c.LLMProtocol {
-	case "openai-compat", "openai-responses", "anthropic", "gemini":
-	default:
+	if !c.LLMProtocol.Valid() {
 		return fmt.Errorf(
-			"config: llm_protocol %q is not one of "+
-				"openai-compat / openai-responses / anthropic / gemini",
-			c.LLMProtocol,
+			"config: llm_protocol %q is not one of %s",
+			c.LLMProtocol, joinForError(KnownLLMProtocols()),
 		)
 	}
 	// openai-compat needs an explicit base URL (Azure / vLLM / ollama / oneapi
 	// have no SDK default). The three SDK-backed protocols fall back to the
 	// vendor's default host when LLMOpenAIBaseURL is empty.
-	if c.LLMProtocol == "openai-compat" && c.LLMOpenAIBaseURL == "" {
-		return fmt.Errorf("config: llm_openai_base_url is required when llm_protocol=openai-compat")
+	if c.LLMProtocol == LLMProtocolOpenAICompat && c.LLMOpenAIBaseURL == "" {
+		return fmt.Errorf("config: llm_openai_base_url is required when llm_protocol=%s", LLMProtocolOpenAICompat)
 	}
 	// The three SDK-backed protocols refuse an empty bearer key in their
 	// constructors; surface that as a config error instead of a runtime
 	// failure on the first enrich call.
-	if c.LLMProtocol != "openai-compat" && c.LLMOpenAIAPIKey == "" {
+	if c.LLMProtocol != LLMProtocolOpenAICompat && c.LLMOpenAIAPIKey == "" {
 		return fmt.Errorf("config: llm_openai_api_key is required when llm_protocol=%s",
 			c.LLMProtocol)
 	}

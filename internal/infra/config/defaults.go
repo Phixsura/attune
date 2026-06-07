@@ -18,8 +18,8 @@ const (
 
 	// DefaultLLMProtocol — preserves pre-#10 behavior: every existing
 	// deployment routes through the OpenAI Chat Completions wire. Operators
-	// opt into openai-responses / anthropic / gemini explicitly in YAML.
-	DefaultLLMProtocol = "openai-compat"
+	// opt into the other three protocols explicitly in YAML.
+	DefaultLLMProtocol = LLMProtocolOpenAICompat
 
 	// DefaultLLMOpenAIBaseURL — only meaningful when LLMProtocol is
 	// openai-compat. The three SDK-backed protocols (openai-responses,

@@ -29,29 +29,29 @@ import (
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
-// buildLLMClient picks an LLM backend from cfg.LLMProtocol. The four
-// supported protocols (#10):
+// buildLLMClient picks an LLM backend from cfg.LLMProtocol (#10):
 //
-// - "openai-compat" hand-rolled /v1/chat/completions client; covers
-// OpenAI / Azure / vLLM / ollama / oneapi.
-// - "openai-responses" openai-go/v3 client.Responses.New.
-// - "anthropic" anthropic-sdk-go with forced tool_use.
-// - "gemini" google.golang.org/genai responseJsonSchema.
+//   - LLMProtocolOpenAICompat hand-rolled /v1/chat/completions; covers
+//     OpenAI / Azure / vLLM / ollama / oneapi.
+//   - LLMProtocolOpenAIResponses openai-go/v3 client.Responses.New.
+//   - LLMProtocolAnthropic anthropic-sdk-go with forced tool_use.
+//   - LLMProtocolGemini google.golang.org/genai responseJsonSchema.
 //
 // config.validate() enforces protocol legality and required URL/key for
 // each, so this function trusts cfg to be coherent.
 //
-// Users who need another provider implement llmclient.LLMClient and
-// wire it here — there is no plugin registry on purpose.
+// Adding a new backend is three edits: an entry in config.KnownLLMProtocols,
+// a constant in config/llm_protocol.go, and a case here. There is no
+// plugin registry on purpose.
 func buildLLMClient(cfg *config.Config) (llmclient.LLMClient, error) {
 	switch cfg.LLMProtocol {
-	case "openai-responses":
+	case config.LLMProtocolOpenAIResponses:
 		return llmclient.NewOpenAIResponses(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
-	case "anthropic":
+	case config.LLMProtocolAnthropic:
 		return llmclient.NewAnthropic(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
-	case "gemini":
+	case config.LLMProtocolGemini:
 		return llmclient.NewGemini(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
-	default: // "openai-compat" — config.validate() already accepted the value
+	default: // LLMProtocolOpenAICompat — config.validate() already accepted the value
 		return llmclient.NewOpenAICompat(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
 	}
 }
