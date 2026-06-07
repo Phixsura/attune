@@ -1,6 +1,7 @@
 package enrichconfig
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -63,7 +64,10 @@ func TestDimsProtoRoundTrip(t *testing.T) {
 			Kind:        domain.DimMulti,
 		},
 	}
-	got := dimsFromProto(dimsToProto(in))
+	got, err := dimsFromProto(dimsToProto(in))
+	if err != nil {
+		t.Fatalf("dimsFromProto: %v", err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("dim count: %d", len(got))
 	}
@@ -97,7 +101,10 @@ func TestDimsProtoRoundTrip_DimValidatesAfterRoundtrip(t *testing.T) {
 			UrgentSet: []string{"critical"},
 		},
 	}
-	got := dimsFromProto(dimsToProto(in))
+	got, err := dimsFromProto(dimsToProto(in))
+	if err != nil {
+		t.Fatalf("dimsFromProto: %v", err)
+	}
 	if err := got.Validate(); err != nil {
 		t.Errorf("round-tripped DimensionSet must still validate, got %v", err)
 	}
@@ -107,7 +114,7 @@ func TestEmptyDimsProtoIsNil(t *testing.T) {
 	if dimsToProto(nil) != nil {
 		t.Error("nil in → nil out")
 	}
-	if dimsFromProto(nil) != nil {
+	if got, err := dimsFromProto(nil); err != nil || got != nil {
 		t.Error("nil proto → nil domain")
 	}
 }
@@ -139,11 +146,33 @@ func TestDimsFromProto_ManualPayload(t *testing.T) {
 			},
 		},
 	}
-	got := dimsFromProto(in)
+	got, err := dimsFromProto(in)
+	if err != nil {
+		t.Fatalf("dimsFromProto: %v", err)
+	}
 	if len(got) != 1 || got[0].Name != "type" {
 		t.Errorf("manual payload decode: %+v", got)
 	}
 	if got[0].Kind != domain.DimSingle {
 		t.Errorf("kind: %v", got[0].Kind)
+	}
+}
+
+// Boundary check: an unknown kind on the wire must be rejected at the
+// proto→domain edge with domain.ErrDimensionKindInvalid, before the
+// value flows further into svc.Update. This is what lets the handler
+// route bad input straight to a 400 dim_kind_invalid.
+func TestDimsFromProto_UnknownKindRejected(t *testing.T) {
+	in := []*attunev1.Dimension{{
+		Name:        "x",
+		DisplayName: ptrext.Of(attunev1.I18NString{Entries: map[string]string{"default": "X"}}),
+		Kind:        "ranked", // not "single" / "multi"
+	}}
+	got, err := dimsFromProto(in)
+	if got != nil {
+		t.Errorf("expected nil DimensionSet on reject, got %+v", got)
+	}
+	if !errors.Is(err, domain.ErrDimensionKindInvalid) {
+		t.Errorf("err = %v; want wraps ErrDimensionKindInvalid", err)
 	}
 }

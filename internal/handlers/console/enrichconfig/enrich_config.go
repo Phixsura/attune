@@ -2,6 +2,7 @@ package enrichconfig
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -76,22 +77,34 @@ func i18nToProto(s domain.I18nString) *attunev1.I18NString {
 	return ptrext.Of(attunev1.I18NString{Entries: entries})
 }
 
-func dimsFromProto(in []*attunev1.Dimension) domain.DimensionSet {
+// dimsFromProto is the proto→domain Dimension boundary. The kind field
+// is the only one with a closed value set, so it's the only one that
+// would otherwise survive as a silently-typed DimensionKind("garbage")
+// sentinel and resurface as a deep-stack validation error later. Fail
+// fast here with the same error type the domain validator emits, so
+// handler error mapping (enrich.ErrToCode / ErrToMessage) routes both
+// shapes to the same response.
+func dimsFromProto(in []*attunev1.Dimension) (domain.DimensionSet, error) {
 	if len(in) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make(domain.DimensionSet, 0, len(in))
-	for _, d := range in {
+	for i, d := range in {
+		kind := domain.DimensionKind(d.GetKind())
+		if !kind.IsValid() {
+			return nil, fmt.Errorf("dimensions[%d].kind=%q: %w",
+				i, d.GetKind(), domain.ErrDimensionKindInvalid)
+		}
 		out = append(out, domain.Dimension{
 			Name:        d.GetName(),
 			DisplayName: i18nFromProto(d.GetDisplayName()),
-			Kind:        domain.DimensionKind(d.GetKind()),
+			Kind:        kind,
 			Taxonomy:    taxonomyFromProto(d.GetTaxonomy()),
 			UrgentSet:   d.GetUrgentSet(),
 			Required:    d.GetRequired(),
 		})
 	}
-	return out
+	return out, nil
 }
 
 func taxonomyFromProto(in []*attunev1.Taxonomy) []domain.Taxonomy {
@@ -148,7 +161,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "request body is not valid JSON")
 		return
 	}
-	in := enrich.View{Dimensions: dimsFromProto(req.GetDimensions())}
+	dims, err := dimsFromProto(req.GetDimensions())
+	if err != nil {
+		respond.Error(ctx, w, http.StatusBadRequest, enrich.ErrToCode(err), enrich.ErrToMessage(err))
+		return
+	}
+	in := enrich.View{Dimensions: dims}
 	if req.PromptTemplate != nil {
 		t := strings.TrimSpace(ptrext.Indirect(req.PromptTemplate))
 		if t == "" {
