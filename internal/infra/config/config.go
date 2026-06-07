@@ -166,7 +166,7 @@ func Load() (*Config, error) {
 	c.applyDefaults()
 
 	if yc.EnricherInterval == "" {
-		c.EnricherInterval = 30 * time.Second
+		c.EnricherInterval = DefaultEnricherInterval
 	} else {
 		d, err := time.ParseDuration(yc.EnricherInterval)
 		if err != nil {
@@ -185,26 +185,28 @@ func Load() (*Config, error) {
 
 // applyEnvOverrides lives in env.go to keep config.go scannable.
 
-// applyDefaults fills zero-valued fields with sensible defaults.
-// Extracted from Load to keep its CCN ≤ 15 (§1 quality gates).
+// applyDefaults fills zero-valued fields with the defaults declared in
+// defaults.go. Extracted from Load to keep its CCN ≤ 15 (§1 quality
+// gates); kept thin (only zero checks + assignment) so the rationale
+// for each value lives next to its `const` rather than inlined here.
 func (c *Config) applyDefaults() {
 	if c.Port == 0 {
-		c.Port = 8090
+		c.Port = DefaultPort
 	}
 	if c.LLMProtocol == "" {
-		c.LLMProtocol = "openai-compat"
+		c.LLMProtocol = DefaultLLMProtocol
 	}
-	if c.LLMOpenAIBaseURL == "" && c.LLMProtocol == "openai-compat" {
-		c.LLMOpenAIBaseURL = "https://api.openai.com"
+	if c.LLMOpenAIBaseURL == "" && c.LLMProtocol == DefaultLLMProtocol {
+		c.LLMOpenAIBaseURL = DefaultLLMOpenAIBaseURL
 	}
 	if c.EnricherBatch == 0 {
-		c.EnricherBatch = 10
+		c.EnricherBatch = DefaultEnricherBatch
 	}
 	if c.RateLimitPerMinute == 0 {
-		c.RateLimitPerMinute = 60
+		c.RateLimitPerMinute = DefaultRateLimitPerMinute
 	}
 	if c.RateLimitBurst == 0 {
-		c.RateLimitBurst = 300
+		c.RateLimitBurst = DefaultRateLimitBurst
 	}
 }
 
@@ -218,7 +220,8 @@ func (c *Config) validate() error {
 		return fmt.Errorf(
 			"config: llm_protocol %q is not one of "+
 				"openai-compat / openai-responses / anthropic / gemini",
-			c.LLMProtocol)
+			c.LLMProtocol,
+		)
 	}
 	// openai-compat needs an explicit base URL (Azure / vLLM / ollama / oneapi
 	// have no SDK default). The three SDK-backed protocols fall back to the
