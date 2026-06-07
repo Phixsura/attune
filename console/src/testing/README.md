@@ -42,7 +42,7 @@ server.use(
 
 ## Conventions
 
-- **`data-testid` over text matching.** Tests should not couple to `zh-CN.json`. If you find yourself writing `getByRole('button', { name: '保存' })`, add a testid to the source. Naming: `<feature>-<action>` (e.g. `edit-notify-save`, `create-key-submit`).
+- **`data-testid` over text matching.** Tests should not couple to `zh-CN.json`. If you find yourself writing `getByRole('button', { name: '<localized string>' })`, add a testid to the source instead. Naming: `<feature>-<action>` (e.g. `edit-notify-save`, `create-key-submit`).
 - **Reset module-level state.** `setCsrfToken(null)` in `beforeEach` for any test that exercises the api-client's CSRF state.
 - **One mock dialect.** MSW for network. `vi.spyOn(navigator.clipboard, 'writeText')` for clipboard (user-event v14 installs its own; spy after `renderWithProviders`). `vi.mock('sonner', ...)` for portal-based toasts (one carve-out — see `dialogs.test.tsx`).
 - **Threshold gates.** `vite.config.ts` carries per-file coverage thresholds for the high-trust paths. If your change drops coverage below the gate, the right move is to add the test — not lower the threshold.

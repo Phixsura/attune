@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Attune Stage B 自服务控制台 SPA。物理独立，不进主仓 pnpm workspace。",
+  "description": "Attune Stage B self-service console SPA. Physically independent — not part of the main repo's pnpm workspace.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
