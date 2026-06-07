@@ -89,6 +89,7 @@ describe('RevokeKeyDialog', () => {
     keyPrefix: 'sk_p_',
     createdAt: 'now',
     lastUsedAt: '',
+    isActive: true,
   }
 
   it('confirm calls onConfirm', async () => {

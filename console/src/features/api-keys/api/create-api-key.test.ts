@@ -26,11 +26,15 @@ describe('useCreateApiKey', () => {
       http.post('/fb/v1/console/api-keys', async ({ request }) => {
         observedBody = await request.json()
         return HttpResponse.json({
-          id: 'k-42',
-          label: (observedBody as { label: string }).label,
-          keyPrefix: 'sk_t_',
+          key: {
+            id: 'k-42',
+            label: (observedBody as { label: string }).label,
+            keyPrefix: 'sk_t_',
+            createdAt: '2026-06-07T00:00:00Z',
+            lastUsedAt: '',
+            isActive: true,
+          },
           secret: 'sk_t_supersecret',
-          createdAt: '2026-06-07T00:00:00Z',
         })
       }),
     )
@@ -39,7 +43,7 @@ describe('useCreateApiKey', () => {
     result.current.mutate('ci/automation')
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(observedBody).toEqual({ label: 'ci/automation' })
-    expect(result.current.data?.id).toBe('k-42')
+    expect(result.current.data?.key?.id).toBe('k-42')
     expect(result.current.data?.secret).toBe('sk_t_supersecret')
     qc.clear()
   })

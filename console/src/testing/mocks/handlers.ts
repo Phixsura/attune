@@ -20,15 +20,19 @@ export const defaultMe = {
 }
 
 // API keys -----------------------------------------------------------------
-// Field naming follows ListApiKeysResponse / CreateApiKeyResponse — `items`
-// on the list, plain shape on the create.
+// Field naming follows ListApiKeysResponse / CreateApiKeyResponse —
+// list returns { items }, create wraps the new key under { key, secret }.
 export const defaultApiKeysList = { items: [] as unknown[] }
 export const defaultCreateApiKey = {
-  id: 'k-new',
-  label: 'fresh',
-  keyPrefix: 'sk_test_',
+  key: {
+    id: 'k-new',
+    label: 'fresh',
+    keyPrefix: 'sk_test_',
+    createdAt: '2026-06-07T00:00:00Z',
+    lastUsedAt: '',
+    isActive: true,
+  },
   secret: 'sk_test_secret_value_redacted_in_real_envs',
-  createdAt: '2026-06-07T00:00:00Z',
 }
 
 // Notify targets -----------------------------------------------------------
@@ -37,12 +41,12 @@ export const defaultNotifyTargetsList = { items: [] as unknown[] }
 
 // Enrich config ------------------------------------------------------------
 export const defaultEnrichConfig = {
-  modules: [] as string[],
   promptTemplate: '',
+  defaultPromptTemplate: '',
   dimensions: [] as unknown[],
 }
 export const defaultGetEnrichConfig = { config: defaultEnrichConfig }
-export const defaultPreviewEnrichPrompt = { rendered: '' }
+export const defaultPreviewEnrichPrompt = { renderedPrompt: '' }
 
 // Feedback -----------------------------------------------------------------
 export const defaultFeedbackList = { items: [] as unknown[], nextCursor: null as string | null }
@@ -90,8 +94,16 @@ export const handlers = [
 
   http.get(`${BASE}/enrich-config`, () => HttpResponse.json(defaultGetEnrichConfig)),
   http.put(`${BASE}/enrich-config`, async ({ request }) => {
-    const body = (await request.json()) as { config?: typeof defaultEnrichConfig }
-    return HttpResponse.json({ config: body.config ?? defaultEnrichConfig })
+    // The PUT body is UpdateEnrichConfigRequest = { promptTemplate?, dimensions };
+    // the response wraps it in { config } via UpdateEnrichConfigResponse.
+    const body = (await request.json()) as { promptTemplate?: string; dimensions?: unknown[] }
+    return HttpResponse.json({
+      config: {
+        promptTemplate: body.promptTemplate ?? '',
+        defaultPromptTemplate: '',
+        dimensions: body.dimensions ?? [],
+      },
+    })
   }),
   http.post(`${BASE}/enrich-config/preview`, () => HttpResponse.json(defaultPreviewEnrichPrompt)),
 

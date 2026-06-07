@@ -19,21 +19,28 @@ describe('useUpdateEnrichConfig — cache write side effect', () => {
   it('PUT success writes resp.config into ["console","enrich-config"]', async () => {
     server.use(
       http.put('/fb/v1/console/enrich-config', async ({ request }) => {
-        const body = (await request.json()) as { config: Record<string, unknown> }
-        return HttpResponse.json({ config: { ...body.config, promptTemplate: 'echoed' } })
+        const body = (await request.json()) as { promptTemplate?: string; dimensions: unknown[] }
+        return HttpResponse.json({
+          config: {
+            promptTemplate: body.promptTemplate ?? 'echoed',
+            defaultPromptTemplate: 'DEFAULT',
+            dimensions: body.dimensions,
+          },
+        })
       }),
     )
     const { qc, wrapper } = wrap()
     const { result } = renderHook(() => useUpdateEnrichConfig(), { wrapper })
     result.current.mutate({
-      config: { modules: ['m1'], promptTemplate: 'tpl', dimensions: [] },
-    } as Parameters<typeof result.current.mutate>[0])
+      promptTemplate: 'tpl',
+      dimensions: [],
+    })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     // setQueryData per update-enrich-config.ts:17-19 — the cached
     // enrich-config now reflects the server's echoed shape.
     expect(qc.getQueryData(['console', 'enrich-config'])).toEqual({
-      modules: ['m1'],
-      promptTemplate: 'echoed',
+      promptTemplate: 'tpl',
+      defaultPromptTemplate: 'DEFAULT',
       dimensions: [],
     })
   })
@@ -45,12 +52,9 @@ describe('useUpdateEnrichConfig — cache write side effect', () => {
       ),
     )
     const { qc, wrapper } = wrap()
-    // Seed an existing cached value; assert it stays untouched.
     qc.setQueryData(['console', 'enrich-config'], { original: true })
     const { result } = renderHook(() => useUpdateEnrichConfig(), { wrapper })
-    result.current.mutate({
-      config: { modules: [], promptTemplate: '', dimensions: [] },
-    } as Parameters<typeof result.current.mutate>[0])
+    result.current.mutate({ promptTemplate: '', dimensions: [] })
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect(qc.getQueryData(['console', 'enrich-config'])).toEqual({ original: true })
   })

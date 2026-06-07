@@ -57,6 +57,11 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/testing/setup-tests.ts'],
+    // Disable parallel test-file execution: setup-tests.ts patches
+    // process-wide state (MSW server, navigator.clipboard, Element
+    // prototype shims). With parallel files those patches race and
+    // tests become flaky. Sub-second cost at this suite size.
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
       include: ['src/**'],

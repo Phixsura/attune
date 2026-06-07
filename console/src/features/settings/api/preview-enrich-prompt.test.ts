@@ -12,19 +12,16 @@ describe('usePreviewEnrichPrompt', () => {
     server.use(
       http.post('/fb/v1/console/enrich-config/preview', async ({ request }) => {
         observed = await request.json()
-        return HttpResponse.json({ rendered: '[rendered output]' })
+        return HttpResponse.json({ renderedPrompt: '[rendered output]' })
       }),
     )
     const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
     const wrapper = ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client: qc }, children)
     const { result } = renderHook(() => usePreviewEnrichPrompt(), { wrapper })
-    result.current.mutate({
-      content: 'sample',
-      modules: ['m1'],
-    } as Parameters<typeof result.current.mutate>[0])
+    result.current.mutate({ sampleContent: 'sample feedback content' })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(observed).toEqual({ content: 'sample', modules: ['m1'] })
-    expect(result.current.data?.rendered).toBe('[rendered output]')
+    expect(observed).toEqual({ sampleContent: 'sample feedback content' })
+    expect(result.current.data?.renderedPrompt).toBe('[rendered output]')
   })
 })

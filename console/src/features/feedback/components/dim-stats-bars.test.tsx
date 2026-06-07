@@ -34,8 +34,8 @@ describe('DimStatsBars', () => {
       {
         dim: 'severity',
         top: [
-          { value: 'P0', count: BigInt(7) },
-          { value: 'P1', count: BigInt(3) },
+          { value: 'P0', count: '7' },
+          { value: 'P1', count: '3' },
         ],
       },
     ]

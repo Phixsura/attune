@@ -10,8 +10,8 @@ describe('enrichConfigQuery', () => {
       http.get('/fb/v1/console/enrich-config', () =>
         HttpResponse.json({
           config: {
-            modules: ['payment', 'checkout'],
             promptTemplate: 'tpl',
+            defaultPromptTemplate: 'DEFAULT',
             dimensions: [],
           },
         }),
@@ -19,7 +19,7 @@ describe('enrichConfigQuery', () => {
     )
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const cfg = await qc.fetchQuery(enrichConfigQuery())
-    expect(cfg).toEqual({ modules: ['payment', 'checkout'], promptTemplate: 'tpl', dimensions: [] })
+    expect(cfg).toEqual({ promptTemplate: 'tpl', defaultPromptTemplate: 'DEFAULT', dimensions: [] })
   })
 
   it('error envelope surfaces (e.g. 500)', async () => {
