@@ -13,6 +13,7 @@ AI assistants (Claude Code, Cursor, etc.) working on this repository.
 
 | Check | Threshold | How |
 |---|---|---|
+| **Go** | | |
 | `go vet ./...` | 0 warnings | pre-commit + CI |
 | `go build ./...` | 0 errors | pre-commit + CI |
 | `go test -short ./...` | All pass on changed code | CI |
@@ -23,6 +24,11 @@ AI assistants (Claude Code, Cursor, etc.) working on this repository.
 | Outbound HTTP clients | must wrap with `otelhttp.NewTransport` | `scripts/lint-slog.sh` Rule 3 |
 | Logging | `logext.*` + `ctx` first | `scripts/lint-slog.sh` Rule 1 |
 | Raw pointer ops | 0 bare `*p` deref / `&x` address-of (use `internal/pkg/ptrext`) | `scripts/lint-rawptr.sh` |
+| **Console (TS / React)** | | |
+| `pnpm tsc -b --noEmit` | 0 errors | CI |
+| `pnpm biome check` | 0 errors | pre-commit (staged) + CI |
+| `pnpm vitest run --coverage` | All pass + per-file thresholds met (see `console/vite.config.ts`) | CI |
+| `pnpm arch` (dependency-cruiser) | 0 violations (shared → features → app, no cross-feature) | CI |
 
 The pre-commit hook enforces a subset locally; CI enforces all. Red gates =
 PR cannot merge.

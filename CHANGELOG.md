@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- **Console SPA test suite (#13).** Vitest (jsdom) + MSW + Testing
+  Library + v8 coverage. ~80 cases cover the api-client (CSRF
+  injection, error envelope, signal), the i18n resolver, the
+  `meQuery` CSRF side effect, the `_authed` route guard, the feedback
+  / settings / api-keys / notify-targets queries and mutations
+  (including the `EditNotifyDialog` sparse-PATCH diff and the
+  `useUpdateEnrichConfig` cache-write side effect), and the `dim`
+  components (`i18n-input` and `dimensions-editor`'s WeakMap-based
+  identity tracking). Per-file coverage thresholds on 17 surfaces
+  gate CI against regressions.
+
+### Removed
+
+- Unused `react-hook-form`, `zod`, `@hookform/resolvers` from
+  `console/dependencies` (no references in `console/src/**`).
+- Dead `pnpm gen:api` / `src/api/types.ts` references in
+  `console/.gitignore` and `console/biome.json` (abandoned
+  openapi-typescript plan; #19 made the contract proto-driven).
+
 ### Webhook consumer migration (raw-webhook & outbox v1 → v2)
 
 The `enriched` block in the outbox / raw-webhook envelope changes shape

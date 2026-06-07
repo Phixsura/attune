@@ -50,12 +50,21 @@
   },
   "overrides": [
     {
-      "includes": ["src/api/types.ts", "src/routeTree.gen.ts", "src/proto/**"],
+      "includes": ["src/routeTree.gen.ts", "src/proto/**"],
       "linter": {
         "enabled": false
       },
       "formatter": {
         "enabled": false
+      }
+    },
+    {
+      "includes": ["src/**/*.test.{ts,tsx}", "src/testing/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noExplicitAny": "off" },
+          "style": { "useImportType": "off" }
+        }
       }
     }
   ]

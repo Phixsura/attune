@@ -13,10 +13,10 @@
     --card-foreground: oklch(0.145 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.145 0 0);
-    /* 蜜橘 primary — warm reception. Layer 1 brand color: Attune is about
-       receiving signals, so warm orange reads like sunlight on attention.
-       Distinguishes the console from generic SaaS zinc+blue without
-       going aggressive-red. */
+    /* "Mikan" tangerine primary — warm reception. Layer 1 brand color:
+       Attune is about receiving signals, so warm orange reads like
+       sunlight on attention. Distinguishes the console from generic
+       SaaS zinc+blue without going aggressive-red. */
     --primary: oklch(0.68 0.17 55);
     --primary-foreground: oklch(1 0 0);
     --secondary: oklch(0.97 0 0);
@@ -40,8 +40,8 @@
     --card-foreground: oklch(0.985 0 0);
     --popover: oklch(0.205 0 0);
     --popover-foreground: oklch(0.985 0 0);
-    /* Lifted 蜜橘 in dark — same hue, higher L for contrast on near-
-       black backgrounds. Foreground stays dark so button text reads. */
+    /* Lifted tangerine in dark — same hue, higher L for contrast on
+       near-black backgrounds. Foreground stays dark so button text reads. */
     --primary: oklch(0.74 0.17 55);
     --primary-foreground: oklch(0.16 0 0);
     --secondary: oklch(0.269 0 0);

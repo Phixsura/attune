@@ -1,39 +1,51 @@
 # Attune Console
 
-Stage B 自服务控制台 SPA。物理独立于主仓 pnpm workspace
-（见 [`attune/docs/2026-05-15-console-tech-stack.md`](../docs/2026-05-15-console-tech-stack.md)）。
+The Stage B self-service console SPA. Physically independent from the main
+repo's pnpm workspace (see
+[`attune/docs/2026-05-15-console-tech-stack.md`](../docs/2026-05-15-console-tech-stack.md)).
 
 ## Stack
 
 Vite 6 · React 19 · TS 5.9 · TanStack Router · TanStack Query 5 · shadcn/ui
-+ Radix · Tailwind 4 · react-hook-form + zod 4 · react-i18next ·
-date-fns 3 · Biome 2.
++ Radix · Tailwind 4 · react-i18next · date-fns 3 · Biome 2 · Vitest 4
+\+ Testing Library + MSW (tests).
 
-## 跑
+## Run
 
 ```bash
 pnpm install
-pnpm gen:proto     # 触发仓库根的 `make proto` → 重新生成 src/proto/**
-pnpm dev           # :10092；/fb/v1 proxy 到本地 attune :8090
+pnpm gen:proto     # delegates to repo-root `make proto`; regenerates src/proto/**
+pnpm dev           # :10092; /fb/v1 proxied to local attune backend on :8090
 ```
 
-## API 契约同步
+## API contract sync
 
-`.proto` 文件(`../proto/attune/v1/*.proto`)是单一真理源(#19, CLAUDE.md §11):
+`.proto` files (`../proto/attune/v1/*.proto`) are the single source of truth
+(#19, CLAUDE.md §11):
 
 ```bash
-pnpm gen:proto                  # 等价于 cd .. && make proto
-git diff src/proto/             # 必须无 diff，否则 CI proto-sync 拒绝
+pnpm gen:proto                  # equivalent to `cd .. && make proto`
+git diff src/proto/             # must show no diff, else CI's proto-sync job fails
 ```
 
-ts-proto 把 proto 转成 TS 类型并落到 `src/proto/attune/v1/*.ts`(只读)。各
-feature 的 `src/features/<x>/api/*.ts` 把这些类型按消费场景重导出。
+ts-proto turns the proto files into TS types and writes them to
+`src/proto/attune/v1/*.ts` (read-only). Each feature's
+`src/features/<x>/api/*.ts` re-exports the types under
+consumption-stable names.
 
-## 架构边界
+## Architectural boundaries
 
-`pnpm arch` 跑 dependency-cruiser,强制 bulletproof-react 风格的单向 import:
-- `shared → features → app` 一向流
-- 禁跨 feature 互引
-- 无循环依赖
+`pnpm arch` runs dependency-cruiser, enforcing bulletproof-react-style
+unidirectional imports:
 
-详见 `.dependency-cruiser.cjs` 与 `docs/proposals/2026/06/2026-06-06-feature-organization.md`。
+- `shared → features → app`, one direction only
+- no cross-feature imports
+- no circular dependencies
+
+See `.dependency-cruiser.cjs` and
+[`docs/proposals/2026/06/2026-06-06-feature-organization.md`](../docs/proposals/2026/06/2026-06-06-feature-organization.md).
+
+## Tests
+
+See [`src/testing/README.md`](src/testing/README.md) for the testing
+cheat sheet (Vitest + jsdom + MSW + Testing Library).

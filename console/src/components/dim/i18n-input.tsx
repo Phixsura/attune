@@ -89,7 +89,13 @@ export function I18nInput({
           }}
           className="h-8 max-w-[160px] text-xs font-mono"
         />
-        <Button type="button" variant="ghost" size="sm" onClick={addLocale}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={addLocale}
+          data-testid="i18n-input-add-locale"
+        >
           <Plus className="h-3 w-3 mr-1" />
           {t('dim.i18n.add_locale')}
         </Button>
