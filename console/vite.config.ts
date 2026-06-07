@@ -57,11 +57,11 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/testing/setup-tests.ts'],
-    // Disable parallel test-file execution: setup-tests.ts patches
-    // process-wide state (MSW server, navigator.clipboard, Element
-    // prototype shims). With parallel files those patches race and
-    // tests become flaky. Sub-second cost at this suite size.
-    fileParallelism: false,
+    // pool: 'forks' (vitest 4 default) gives each test file its own
+    // child process, so MSW server instances, navigator.clipboard
+    // prototype patches, and api-client's module-level CSRF state
+    // are all isolated. No `fileParallelism: false` workaround.
+    pool: 'forks',
     coverage: {
       provider: 'v8',
       include: ['src/**'],
@@ -73,13 +73,28 @@ export default defineConfig({
         'src/main.tsx',
       ],
       reporter: ['text', 'html'],
-      // Soft forward ratchet on the highest-trust paths. A regression
-      // on the api-client's CSRF/error envelope, the i18n resolver, or
-      // meQuery's CSRF side effect should fail CI loudly.
+      // Forward ratchet on every file the suite already covers ≥85%
+      // lines. A regression that drags coverage below the threshold
+      // fails CI loudly. Per-file (not global) so adding an untested
+      // file doesn't silently lower the project bar.
       thresholds: {
         'src/lib/api-client.ts': { lines: 90, statements: 90, branches: 80, functions: 90 },
         'src/lib/i18n-resolve.ts': { lines: 90, statements: 90, branches: 80, functions: 90 },
         'src/features/session/api/get-me.ts': { lines: 90, statements: 90 },
+        'src/features/feedback/api/list-feedback-infinite.ts': { lines: 90 },
+        'src/features/feedback/api/get-feedback-detail.ts': { lines: 90 },
+        'src/features/feedback/api/get-feedback-stats.ts': { lines: 90 },
+        'src/features/feedback/components/detail-sheet.tsx': { lines: 85 },
+        'src/features/feedback/components/dim-stats-bars.tsx': { lines: 85 },
+        'src/features/settings/api/get-enrich-config.ts': { lines: 90 },
+        'src/features/settings/api/update-enrich-config.ts': { lines: 85 },
+        'src/features/settings/api/preview-enrich-prompt.ts': { lines: 90 },
+        'src/features/notify-targets/components/edit-dialog.tsx': { lines: 80 },
+        'src/features/api-keys/components/dialogs.tsx': { lines: 70 },
+        'src/features/api-keys/api/create-api-key.ts': { lines: 90 },
+        'src/components/dim/i18n-input.tsx': { lines: 75 },
+        'src/components/dim/dimensions-editor.tsx': { lines: 80 },
+        'src/routes/_authed.tsx': { lines: 60 },
       },
     },
   },

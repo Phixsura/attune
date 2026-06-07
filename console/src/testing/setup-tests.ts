@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom/vitest'
+import { cleanup } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest'
 import { server } from '@/testing/mocks/server'
 
@@ -7,7 +8,15 @@ import { server } from '@/testing/mocks/server'
 // "added an endpoint and forgot to mock it" fail loudly instead of
 // returning undefined.
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
-afterEach(() => server.resetHandlers())
+afterEach(() => {
+  // Explicit RTL cleanup — auto-cleanup relies on vitest's afterEach
+  // hook being installed, which can fail to register under certain
+  // pool/isolate combinations. Always unmount before resetting MSW
+  // so React state from the previous test doesn't survive into the
+  // next test's beforeEach DOM patches.
+  cleanup()
+  server.resetHandlers()
+})
 afterAll(() => server.close())
 
 beforeEach(() => {
