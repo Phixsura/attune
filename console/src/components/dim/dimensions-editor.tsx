@@ -156,13 +156,17 @@ function DimensionCard({
 
   return (
     <Card>
-      <CardHeader className="cursor-pointer select-none py-3" onClick={() => setOpen((v) => !v)}>
+      <CardHeader
+        className="cursor-pointer select-none py-3"
+        onClick={() => setOpen((v) => !v)}
+        data-testid="dim-card-header"
+      >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0">
               {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </Button>
-            <span className="font-medium truncate">
+            <span className="font-medium truncate" data-testid="dim-card-title">
               {displayOf(dim.displayName) || dim.name || t('dim.editor.unnamed')}
             </span>
             <span className="font-mono text-xs text-muted-foreground truncate">
@@ -237,7 +241,11 @@ function DimensionCard({
                 {t('dim.editor.add_value')}
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="dim-card-taxonomy-help"
+              data-kind={dim.kind}
+            >
               {dim.kind === 'multi'
                 ? t('dim.editor.taxonomy_help_multi')
                 : t('dim.editor.taxonomy_help_single')}
