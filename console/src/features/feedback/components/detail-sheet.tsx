@@ -15,22 +15,26 @@ import {
   type FeedbackDetail,
   feedbackDetailQuery,
 } from '@/features/feedback/api/get-feedback-detail'
-import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Dimension } from '@/proto/attune/v1/common'
 
+// `dims` is supplied by the parent route so this component does not
+// cross feature boundaries (the dim set is owned by the settings
+// feature). The route already calls enrichConfigQuery once for the
+// list/filter UI, so re-using that snapshot here avoids both the
+// cross-feature import AND a redundant network call.
 export function FeedbackDetailSheet({
   id,
+  dims,
   onOpenChange,
 }: {
   id: string | null
+  dims: Dimension[]
   onOpenChange: (v: boolean) => void
 }) {
   const { t } = useTranslation()
   const open = id !== null
   const detail = useQuery({ ...feedbackDetailQuery(id ?? ''), enabled: open })
-  const config = useQuery(enrichConfigQuery())
-  const dims = config.data?.dimensions ?? []
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">

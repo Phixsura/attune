@@ -123,7 +123,11 @@ function FeedbackPage() {
         </CardContent>
       </Card>
 
-      <FeedbackDetailSheet id={detailId} onOpenChange={(v) => !v && setDetailId(null)} />
+      <FeedbackDetailSheet
+        id={detailId}
+        dims={dims}
+        onOpenChange={(v) => !v && setDetailId(null)}
+      />
     </div>
   )
 }
