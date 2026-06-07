@@ -2,6 +2,8 @@ package enrich
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
@@ -11,49 +13,47 @@ import (
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/trace"
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
-const (
-	enrichmentModelID    = "gpt-4o-mini"
-	enrichmentSystemUser = "system-feedback-enricher"
-)
-
-const enrichPromptTmpl = `你是产品反馈分类助手。给你一段用户反馈原文，严格只输出一行 JSON 对象（不要 markdown 包裹，不要解释，不要前后空行），字段如下：
-
-{
-  "title": "10-30 字一句话摘要，不要标点结尾",
-  "kind": "bug | feature | ops | question | other 之一",
-  "modules": [识别到的产品模块名字符串数组，没识别到就空数组],
-  "severity": "P0 | P1 | P2 | P3 之一",
-  "rationale": "30 字以内为什么这么打"
+// attrsSizeBytes returns the JSON-encoded size of attrs without
+// persisting the bytes. Cheap (a few KiB of allocation per row) and
+// mirrors exactly what repo.feedback.marshalAttrs would compute.
+func attrsSizeBytes(a map[string]any) int {
+	if a == nil {
+		return 0
+	}
+	b, err := json.Marshal(a)
+	if err != nil {
+		return 0
+	}
+	return len(b)
 }
 
-严重度判断：P0=阻塞（不能用/丢钱/数据丢失）、P1=严重（关键功能失效但有 workaround）、P2=影响体验、P3=优化建议。
-
-用户反馈原文：
-"""
-%s
-"""`
+const (
+	enrichmentSystemUser = "system-feedback-enricher"
+)
 
 // Enricher classifies user_feedback rows via the LLM gateway. It owns
 // the claim-then-update loop but holds no SQL itself — repo does.
 //
-// Wave 1.2 wiring:
-//   - Lark webhook → inline call via notifier (best-effort, no retry)
-//   - raw-webhook → outbox row in same tx as MarkDone (at-least-once)
+// wiring:
+// - Lark webhook → inline call via notifier (best-effort, no retry)
+// - raw-webhook → outbox row in same tx as MarkDone (at-least-once)
 //
 // SetNotifier and SetOutbox are independent; either / both / neither
 // may be wired without code changes elsewhere.
 type Enricher struct {
-	repo *feedback.FeedbackRepo
-	llm  llmclient.LLMClient
+	repo  *feedback.FeedbackRepo
+	llm   llmclient.LLMClient
+	model string // resolved from config; "" → enricher rejects with 400-like error
 	// notifier is read from fanOut goroutines, written by SetNotifier
-	// (typically once at startup, but Wave 2 plans dynamic per-tenant
+	// (typically once at startup, but a follow-up plans dynamic per-tenant
 	// re-wiring). atomic.Pointer keeps the read race-free without
 	// per-call locking — fanOut takes a snapshot via .Load().
 	notifier atomic.Pointer[notify.Notifier]
@@ -61,8 +61,12 @@ type Enricher struct {
 	targets  *notifytarget.NotifyTargetRepo // optional, paired with outbox
 }
 
-func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient) *Enricher {
-	return &Enricher{repo: r, llm: llm}
+// NewEnricher takes the resolved enrichment model id (from config —
+// FEEDBACK_API_LLM_MODEL env / yaml `llm_model` / DefaultLLMModel) so
+// operators pointing at private gateways with aliased model names
+// don't have to fork the binary.
+func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient, model string) *Enricher {
+	return ptrext.Of(Enricher{repo: r, llm: llm, model: model})
 }
 
 // SetNotifier wires the inline webhook fan-out (Lark). nil = no
@@ -73,7 +77,7 @@ func (e *Enricher) SetNotifier(n notify.Notifier) {
 		e.notifier.Store(nil)
 		return
 	}
-	e.notifier.Store(&n)
+	e.notifier.Store(ptrext.Of(n))
 }
 
 // SetOutbox wires at-least-once delivery for raw-webhook destinations.
@@ -108,7 +112,7 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 	}
 	row, err := e.repo.LoadForEnrich(ctx, id)
 	if err != nil {
-		metrics.EnrichDuration.WithLabelValues("unknown", "db_err").Observe(0)
+		metrics.EnrichDuration.WithLabelValues("unknown", "freeform", "db_err").Observe(0)
 		logext.Errorf(ctx, "[%s] load failed,feedback_id:%d,err:%+v",
 			where, id, err.Error())
 		return err
@@ -116,9 +120,9 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 	logext.Infof(ctx, "[%s] start,feedback_id:%d,tenant_id:%s,content_len:%d",
 		where, id, row.TenantID, len(row.Content))
 
-	// Sprint 1.3 (Y1 工程): triage gate in front of the LLM call. Cheap
-	// rule-based filter that diverts noise to the ignore path (no LLM
-	// cost, no dispatch) and the future fast-path (Sprint 2.x).
+	// Triage gate in front of the LLM call. Cheap rule-based filter
+	// that diverts noise to the ignore path (no LLM cost, no dispatch)
+	// and a future fast-path slot for per-tenant deterministic rules.
 	decision := Triage(row.Content)
 	metrics.TriageDecisionsTotal.WithLabelValues(row.TenantID, string(decision.Mode)).Inc()
 
@@ -131,7 +135,7 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 		if decision.FastEnriched == nil {
 			return e.runFullEnrich(ctx, id, row)
 		}
-		return e.persistFromTriage(ctx, id, row, *decision.FastEnriched)
+		return e.persistFromTriage(ctx, id, row, ptrext.Indirect(decision.FastEnriched))
 	default:
 		return e.runFullEnrich(ctx, id, row)
 	}
@@ -142,64 +146,129 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 // EnrichOne stays one expression per branch.
 func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.EnrichInput) error {
 	start := time.Now()
-	enriched, err := e.classify(ctx, id, row.Content)
+	cfg := classifyConfigFromRow(row)
+	mode := dimsMode(cfg)
+	enriched, err := e.classify(ctx, id, row.Content, cfg)
 	if err != nil {
-		metrics.EnrichDuration.WithLabelValues(row.TenantID, classifyErrResult(err)).
+		metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, classifyErrResult(err)).
 			Observe(time.Since(start).Seconds())
 		return err
+	}
+	// Observe attrs payload size before persistence so the histogram
+	// captures every classification attempt, even ones rejected by the
+	// per-row size cap downstream.
+	if size := attrsSizeBytes(enriched.Attrs); size > 0 {
+		metrics.EnrichAttrsSizeBytes.WithLabelValues(row.TenantID).Observe(float64(size))
 	}
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
 	if err := e.persistEnriched(ctx, snapshot, enriched); err != nil {
-		metrics.EnrichDuration.WithLabelValues(row.TenantID, "db_err").
+		if errors.Is(err, feedback.ErrAttrsTooLarge) {
+			metrics.EnrichAttrsRejectedTotal.WithLabelValues(row.TenantID).Inc()
+		}
+		metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "db_err").
 			Observe(time.Since(start).Seconds())
 		return err
 	}
-	metrics.EnrichDuration.WithLabelValues(row.TenantID, "ok").
+	metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "ok").
 		Observe(time.Since(start).Seconds())
 	slog.InfoContext(ctx, "feedback enriched",
 		"inbound_trace_id", trace.FromContext(ctx),
 		"tenant_id", row.TenantID,
 		"feedback_id", id,
-		"kind", enriched.Kind,
-		"severity", enriched.Severity,
+		"attrs", enriched.Attrs,
+		"is_urgent", enriched.IsUrgent,
 		"title", enriched.Title)
 	if n := e.notifier.Load(); n != nil {
-		go e.fanOut(snapshot, *n)
+		go e.fanOut(snapshot, ptrext.Indirect(n))
 	}
 	return nil
 }
 
 // Classify is the public, side-effect-free LLM classification entry
-// point. eval CLI re-runs historical content through this without
+// point. `attune eval` re-runs historical content through this without
 // touching the DB. The internal classify wraps it with MarkFailed.
-func (e *Enricher) Classify(ctx context.Context, content string) (domain.Enriched, error) {
+//
+// IsUrgent is derived deterministically from the configured Dimension
+// set: for every dim, if any value the LLM picked falls into that
+// dim's UrgentSet, the row is urgent. The LLM never decides urgency
+// — that keeps routing under operator control and deterministic
+// across retries.
+func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyConfig) (domain.Enriched, error) {
 	const where = "service.Enricher.Classify"
-	prompt := fmt.Sprintf(enrichPromptTmpl, content)
-	out, err := e.llm.Chat(ctx, enrichmentSystemUser, enrichmentModelID, prompt, 0.0, 512)
+	prompt := renderPrompt(cfg, content)
+	req := llmclient.CompletionRequest{
+		Model:       e.model,
+		Prompt:      prompt,
+		Temperature: 0.0,
+		MaxTokens:   512,
+		UserID:      enrichmentSystemUser,
+	}
+	if cfg.HasConstrained() {
+		req.Schema = buildEnrichSchema(cfg.Dimensions)
+	}
+	resp, err := e.llm.Complete(ctx, req)
 	if err != nil {
-		logext.Errorf(ctx, "[%s] llm.Chat failed,model:%s,err:%+v",
-			where, enrichmentModelID, err.Error())
+		logext.Errorf(ctx, "[%s] llm.Complete failed,model:%s,err:%+v",
+			where, e.model, err.Error())
 		return domain.Enriched{}, fmt.Errorf("llm: %w", err)
 	}
-	parsed, err := parseEnrichJSON(out)
+	parsed, err := parseEnrichJSON(resp.Text)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] parse failed,err:%s,raw:%s",
-			where, err.Error(), truncate(out, 300))
-		return domain.Enriched{}, fmt.Errorf("parse: %w; raw=%s", err, truncate(out, 300))
+			where, err.Error(), truncate(resp.Text, 300))
+		return domain.Enriched{}, fmt.Errorf("parse: %w; raw=%s", err, truncate(resp.Text, 300))
 	}
-	parsed.Priority = domain.SeverityWeight[parsed.Severity]
+	tenant := cfg.TenantID
+	if tenant == "" {
+		tenant = "unknown"
+	}
+	parsed.Attrs = applyAttrsGate(ctx, tenant, parsed.Attrs, cfg.Dimensions)
+	parsed.IsUrgent = domain.ComputeIsUrgent(parsed.Attrs, cfg.Dimensions)
 	return parsed, nil
 }
 
 // classify calls Classify and, on failure, marks the row 'failed' so the
 // next sweep won't retry immediately. Used by the main enricher loop.
-func (e *Enricher) classify(ctx context.Context, id int64, content string) (domain.Enriched, error) {
-	parsed, err := e.Classify(ctx, content)
+func (e *Enricher) classify(ctx context.Context, id int64, content string, cfg ClassifyConfig) (domain.Enriched, error) {
+	parsed, err := e.Classify(ctx, content, cfg)
 	if err != nil {
 		e.repo.MarkFailed(ctx, id, err.Error())
 		return domain.Enriched{}, err
 	}
 	return parsed, nil
+}
+
+func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {
+	return ClassifyConfig{
+		TenantID:       row.TenantID,
+		PromptTemplate: row.PromptTemplate,
+		Dimensions:     row.Dimensions,
+	}
+}
+
+// applyAttrsGate runs gate (2) per dim and records observability for
+// off-list values. Returns the canonical kept attrs.
+func applyAttrsGate(ctx context.Context, tenantID string, produced map[string]any, dims domain.DimensionSet) map[string]any {
+	kept, dropped, suggested := domain.FilterAttrs(produced, dims)
+	if len(dropped) == 0 {
+		return kept
+	}
+	for dim, n := range dropped {
+		for i := 0; i < n; i++ {
+			metrics.EnrichAttrsDroppedTotal.WithLabelValues(tenantID, dim).Inc()
+		}
+	}
+	seen := make(map[string]bool, len(suggested))
+	for _, dim := range suggested {
+		if seen[dim] {
+			continue
+		}
+		seen[dim] = true
+		metrics.EnrichSuggestedAttrsTotal.WithLabelValues(tenantID, dim).Inc()
+	}
+	logext.Infof(ctx, "[service.Enricher.applyAttrsGate] suggested,tenant_id:%s,dropped:%v",
+		tenantID, dropped)
+	return kept
 }
 
 // fanOut pushes a freshly enriched snapshot to the snapshot of `notifier`
@@ -213,7 +282,7 @@ func (e *Enricher) fanOut(s domain.Snapshot, n notify.Notifier) {
 	if err := n.PushPool(ctx, s); err != nil {
 		slog.WarnContext(ctx, "notify pool failed", "id", s.ID, "err", err)
 	}
-	if s.IsHighSeverity() {
+	if s.IsUrgent {
 		if err := n.PushRadar(ctx, s); err != nil {
 			slog.WarnContext(ctx, "notify radar failed", "id", s.ID, "err", err)
 		}

@@ -1,9 +1,11 @@
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
+import { useTranslation } from 'react-i18next'
 
 // Sparkline — same data as UsageBarChart, narrower form for embedding
-// in a stat card. Phase 1.5 Layer 2: 让"本月已接收 X 条"那个大数字
-// 旁边有一条小趋势线，一眼看出"涨/平/降"。
+// in a stat card. Lets the headline number ("received X this month")
+// carry a tiny trend line beside it so the reader gets up/flat/down at
+// a glance without reading any axis.
 
 interface UsageBucket {
   bucket: string
@@ -16,6 +18,7 @@ const PAD_X = 2
 const PAD_Y = 4
 
 export function UsageSparkline({ series }: { series: UsageBucket[] }) {
+  const { t } = useTranslation()
   if (series.length === 0) return null
   const max = Math.max(...series.map((b) => b.value), 1)
   const barAreaW = WIDTH - PAD_X * 2
@@ -44,7 +47,10 @@ export function UsageSparkline({ series }: { series: UsageBucket[] }) {
             rx={0.5}
           >
             <title>
-              {format(new Date(b.bucket), 'M月d日', { locale: zhCN })} · {b.value} 条
+              {t('usage.bar_tooltip', {
+                date: format(new Date(b.bucket), t('usage.bar_date_format'), { locale: zhCN }),
+                count: b.value,
+              })}
             </title>
           </rect>
         )

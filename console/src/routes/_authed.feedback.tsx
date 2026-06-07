@@ -5,6 +5,7 @@ import { zhCN } from 'date-fns/locale'
 import { Inbox, Loader2 } from 'lucide-react'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
 import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -26,33 +27,38 @@ import {
 } from '@/components/ui/table'
 import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
 import {
+  type AttrFilterEntry,
   type Feedback,
   type FeedbackListFilters,
   feedbackListInfiniteQuery,
 } from '@/features/feedback/api/list-feedback-infinite'
-import { KindBadge, SeverityBadge } from '@/features/feedback/components/badges'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
-import { KindDonut } from '@/features/feedback/components/kind-donut'
+import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
+import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
+import { useDisplayName } from '@/lib/i18n-resolve'
+import type { Dimension } from '@/proto/attune/v1/common'
 
 export const Route = createFileRoute('/_authed/feedback')({
   component: FeedbackPage,
 })
 
-const KIND_OPTIONS = ['bug', 'feature', 'ops', 'question', 'other'] as const
-const SEVERITY_OPTIONS = ['P0', 'P1', 'P2', 'P3'] as const
-
 function FeedbackPage() {
   const { t } = useTranslation()
-  const [kind, setKind] = useState<string>('')
-  const [severity, setSeverity] = useState<string>('')
+  const config = useQuery(enrichConfigQuery())
+  const dims = config.data?.dimensions ?? []
+
+  const [attrFilters, setAttrFilters] = useState<Record<string, string>>({})
   const [qInput, setQInput] = useState('')
   const qDeferred = useDeferredValue(qInput)
   const [detailId, setDetailId] = useState<string | null>(null)
 
-  const filters: FeedbackListFilters = useMemo(
-    () => ({ kind, severity, q: qDeferred.trim() }),
-    [kind, severity, qDeferred],
-  )
+  const filters: FeedbackListFilters = useMemo(() => {
+    const attrs: AttrFilterEntry[] = Object.entries(attrFilters)
+      .filter(([, v]) => v && v !== '__all')
+      .map(([dim, value]) => ({ dim, value }))
+    return { attrs, q: qDeferred.trim() }
+  }, [attrFilters, qDeferred])
+
   const list = useInfiniteQuery(feedbackListInfiniteQuery(filters))
   const items = list.data?.pages.flatMap((p) => p.items) ?? []
   const total = items.length
@@ -68,25 +74,19 @@ function FeedbackPage() {
       {stats.data && Number(stats.data.total) > 0 && (
         <Card className="mt-6">
           <CardHeader>
-            <CardTitle className="text-base">{t('feedback.donut_title')}</CardTitle>
+            <CardTitle className="text-base">{t('feedback.stats.title')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <KindDonut
-              byKind={Object.fromEntries(
-                Object.entries(stats.data.byKind).map(([k, v]) => [k, Number(v)]),
-              )}
-              total={Number(stats.data.total)}
-            />
+            <DimStatsBars dims={dims} stats={stats.data.dims} total={Number(stats.data.total)} />
           </CardContent>
         </Card>
       )}
 
       <FilterBar
-        kind={kind}
-        severity={severity}
+        dims={dims}
+        attrFilters={attrFilters}
         q={qInput}
-        onKind={setKind}
-        onSeverity={setSeverity}
+        onAttrChange={(dim, value) => setAttrFilters((m) => ({ ...m, [dim]: value }))}
         onQ={setQInput}
       />
 
@@ -99,7 +99,7 @@ function FeedbackPage() {
           {list.isPending ? (
             <Loading />
           ) : items.length > 0 ? (
-            <FeedbackTable items={items} onRowClick={setDetailId} />
+            <FeedbackTable items={items} dims={dims} onRowClick={setDetailId} />
           ) : (
             <EmptyState
               icon={Inbox}
@@ -123,7 +123,11 @@ function FeedbackPage() {
         </CardContent>
       </Card>
 
-      <FeedbackDetailSheet id={detailId} onOpenChange={(v) => !v && setDetailId(null)} />
+      <FeedbackDetailSheet
+        id={detailId}
+        dims={dims}
+        onOpenChange={(v) => !v && setDetailId(null)}
+      />
     </div>
   )
 }
@@ -138,52 +142,50 @@ function Loading() {
   )
 }
 
+// FilterBar renders one Select per single-kind dim with a non-empty
+// taxonomy (the only shape where a dropdown filter makes sense). Multi
+// dims and freeform dims are skipped — they'd need a chip-picker that
+// isn't worth the complexity until customer feedback asks for it.
 function FilterBar({
-  kind,
-  severity,
+  dims,
+  attrFilters,
   q,
-  onKind,
-  onSeverity,
+  onAttrChange,
   onQ,
 }: {
-  kind: string
-  severity: string
+  dims: Dimension[]
+  attrFilters: Record<string, string>
   q: string
-  onKind: (v: string) => void
-  onSeverity: (v: string) => void
+  onAttrChange: (dim: string, value: string) => void
   onQ: (v: string) => void
 }) {
   const { t } = useTranslation()
+  const displayOf = useDisplayName()
   return (
     <div className="mt-6 flex flex-wrap items-center gap-2">
-      <Select value={kind || 'all'} onValueChange={(v) => onKind(v === 'all' ? '' : v)}>
-        <SelectTrigger className="w-[160px]">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">{t('feedback.filter.kind_all')}</SelectItem>
-          {KIND_OPTIONS.map((k) => (
-            <SelectItem key={k} value={k}>
-              {t(`feedback.kind.${k}`)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select value={severity || 'all'} onValueChange={(v) => onSeverity(v === 'all' ? '' : v)}>
-        <SelectTrigger className="w-[160px]">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">{t('feedback.filter.severity_all')}</SelectItem>
-          {SEVERITY_OPTIONS.map((s) => (
-            <SelectItem key={s} value={s}>
-              {t(`feedback.severity.${s}`)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
+      {dims
+        .filter((d) => d.kind === 'single' && d.taxonomy.length > 0)
+        .map((d) => (
+          <Select
+            key={d.name}
+            value={attrFilters[d.name] || '__all'}
+            onValueChange={(v) => onAttrChange(d.name, v)}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder={displayOf(d.displayName) || d.name} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all">
+                {t('feedback.filter.all', { dim: displayOf(d.displayName) || d.name })}
+              </SelectItem>
+              {d.taxonomy.map((tax) => (
+                <SelectItem key={tax.value} value={tax.value}>
+                  {displayOf(tax.displayName) || tax.value}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ))}
       <Input
         type="search"
         placeholder={t('feedback.filter.search_placeholder')}
@@ -197,19 +199,25 @@ function FilterBar({
 
 function FeedbackTable({
   items,
+  dims,
   onRowClick,
 }: {
   items: Feedback[]
+  dims: Dimension[]
   onRowClick: (id: string) => void
 }) {
   const { t } = useTranslation()
+  const displayOf = useDisplayName()
   return (
     <Table>
       <TableHeader>
         <TableRow>
           <TableHead>{t('feedback.table.title')}</TableHead>
-          <TableHead className="w-[100px]">{t('feedback.table.kind')}</TableHead>
-          <TableHead className="w-[110px]">{t('feedback.table.severity')}</TableHead>
+          {dims.map((d) => (
+            <TableHead key={d.name} className="w-[140px]">
+              {displayOf(d.displayName) || d.name}
+            </TableHead>
+          ))}
           <TableHead className="w-[120px]">{t('feedback.table.user')}</TableHead>
           <TableHead className="w-[120px]">{t('feedback.table.time')}</TableHead>
         </TableRow>
@@ -222,15 +230,20 @@ function FeedbackTable({
             className="cursor-pointer hover:bg-muted/40"
           >
             <TableCell className="max-w-[28rem]">
-              <div className="truncate font-medium">{f.enrichedTitle || `#${f.id}`}</div>
+              <div className="flex items-center gap-1 truncate font-medium">
+                <UrgentDot urgent={f.isUrgent} />
+                {f.enrichedTitle || `#${f.id}`}
+              </div>
               <div className="truncate text-xs text-muted-foreground">{f.content}</div>
             </TableCell>
-            <TableCell>
-              <KindBadge kind={f.enrichedKind} />
-            </TableCell>
-            <TableCell>
-              <SeverityBadge severity={f.enrichedSeverity} />
-            </TableCell>
+            {dims.map((d) => (
+              <TableCell key={d.name}>
+                <DimensionChips
+                  dim={d}
+                  value={(f.enrichedAttrs as Record<string, unknown> | undefined)?.[d.name]}
+                />
+              </TableCell>
+            ))}
             <TableCell className="truncate font-mono text-xs text-muted-foreground">
               {f.userId || '—'}
             </TableCell>

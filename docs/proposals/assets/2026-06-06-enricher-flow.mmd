@@ -1,0 +1,51 @@
+flowchart TB
+    classDef issue fill:#bb9af7,stroke:#16161e,color:#16161e,stroke-width:2px;
+    classDef warn fill:#f7768e,stroke:#16161e,color:#16161e;
+
+    subgraph UP[上游 · 写入]
+        direction LR
+        API[HTTP API ingest]
+        LARK[Lark 事件]
+        ING[Ingestor.IngestRow]
+        POLL[背景轮询 poller]
+    end
+
+    TCFG[(tenants 表 ★ 新增 模板+模块 两列)]
+
+    subgraph CORE[Enricher 核心 · 热路径 · Classify 纯函数供 eval 复用]
+        EONE[EnrichOne · TryClaim]
+        LOAD[LoadForEnrich · 带回 tenant_id]
+        TRIAGE{Triage}
+        P1[★1 prompt 渲染 go-template]
+        LLM[llm.Chat · 解析 JSON · 仅校验 kind severity]
+        P2[★2 modules 白名单过滤]
+        PERSIST[persistEnriched · 单一咽喉点]
+    end
+
+    subgraph DOWN[下游 · 消费 enriched 输出]
+        direction LR
+        DB[(① DB enriched_modules)]
+        CARD[② Lark 卡片]
+        OBX[③ Outbox webhook+issue]
+        CON[④ Console proto]
+        DIG[⑤ 周报 top-modules]
+        EVAL[⑥ eval 度量]
+    end
+
+    API --> ING
+    LARK --> ING
+    ING -->|go fireEnrich| EONE
+    POLL --> EONE
+    EONE --> LOAD --> TRIAGE -->|full| P1 --> LLM --> P2 --> PERSIST
+    TCFG -.模板.-> P1
+    TCFG -.白名单.-> P2
+    PERSIST --> DB
+    PERSIST -->|inline| CARD
+    PERSIST -->|同 tx| OBX
+    DB --> CON
+    DB --> DIG
+    DB --> EVAL
+    EVAL -.复用.-> P1
+
+    class TCFG,P1,P2 issue
+    class OBX warn

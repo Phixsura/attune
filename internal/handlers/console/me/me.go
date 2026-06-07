@@ -7,7 +7,8 @@ import (
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
@@ -23,7 +24,7 @@ type MeHandler struct {
 }
 
 func NewMeHandler(signer *session.Signer, tenants *tenant.TenantRepo, users *tenant.TenantUserRepo) *MeHandler {
-	return &MeHandler{signer: signer, tenants: tenants, users: users}
+	return ptrext.Of(MeHandler{signer: signer, tenants: tenants, users: users})
 }
 
 // Me handles GET /fb/v1/console/me.
@@ -40,13 +41,13 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 			// cookie and 401 so the SPA bounces to /login.
 			logext.Warnf(ctx, "[%s] reject: user gone,user_id:%s", where, auth.UserID)
 			h.signer.ClearSessionCookie(w)
-			respond.Error(ctx, w, http.StatusUnauthorized, "user_gone", "用户已停用或被删除")
+			respond.Error(ctx, w, http.StatusUnauthorized, "user_gone", "user is disabled or deleted")
 			return
 		}
 		slog.ErrorContext(ctx, "/me: load user", "err", err, "user_id", auth.UserID)
 		logext.Errorf(ctx, "[%s] users.GetByID failed,user_id:%s,err:%+v",
 			where, auth.UserID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "加载用户失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load user")
 		return
 	}
 	// Local name avoids shadowing the imported `tenant` package — code added
@@ -56,7 +57,7 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "/me: load tenant", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] tenants.GetByID failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "加载 tenant 失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load tenant")
 		return
 	}
 
@@ -65,24 +66,24 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 		slog.DebugContext(ctx, "/me: touch last_seen", "err", err)
 	}
 
-	me := &attunev1.GetMeResponse{
-		Tenant: &attunev1.Tenant{
+	me := ptrext.Of(attunev1.GetMeResponse{
+		Tenant: ptrext.Of(attunev1.Tenant{
 			Id:            tenantRow.ID,
 			Slug:          tenantRow.Slug,
 			Name:          tenantRow.Name,
 			LarkTenantKey: tenantRow.LarkTenantKey,
 			Locale:        tenantRow.Locale,
 			Timezone:      tenantRow.Timezone,
-		},
-		User: &attunev1.SessionUser{
+		}),
+		User: ptrext.Of(attunev1.SessionUser{
 			OpenId: user.OpenID,
 			Name:   user.Name,
 			Role:   user.Role,
-		},
+		}),
 		CsrfToken: h.signer.CSRFToken(user.ID),
-	}
+	})
 	if user.AvatarURL != "" {
-		me.User.AvatarUrl = &user.AvatarURL
+		me.User.AvatarUrl = ptrext.Of(user.AvatarURL)
 	}
 	respond.Proto(w, http.StatusOK, me)
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,user_id:%s,role:%s",

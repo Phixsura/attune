@@ -1,4 +1,4 @@
-// Package metrics exposes attune's 7 Prometheus metrics — the telemetry contract
+// Package metrics exposes attune's Prometheus metrics — the telemetry contract
 // documented in observability/README.md. Any Prometheus-compatible backend can
 // scrape them at /metrics (OpenMetrics).
 //
@@ -28,8 +28,9 @@ var IngestTotal = prometheus.NewCounterVec(
 	[]string{"tenant", "source", "result"},
 )
 
-// EnrichDuration tracks AI enrichment wall time. result ∈ {ok,
-// llm_err, parse_err, other_err, db_err}. Use the histogram's
+// EnrichDuration tracks AI enrichment wall time. label_mode ∈
+// {freeform, constrained}; result ∈ {ok, llm_err, parse_err,
+// other_err, db_err}. Use the histogram's
 // attune_enrich_duration_seconds_bucket for p95 SLO tracking
 // (target p95 ≤ 30s).
 var EnrichDuration = prometheus.NewHistogramVec(
@@ -38,7 +39,55 @@ var EnrichDuration = prometheus.NewHistogramVec(
 		Help:    "End-to-end AI enrichment latency per row.",
 		Buckets: prometheus.ExponentialBuckets(0.5, 2, 8), // 0.5s..64s
 	},
-	[]string{"tenant", "result"},
+	[]string{"tenant", "dims_mode", "result"},
+)
+
+// EnrichAttrsDroppedTotal counts per-dim values removed by gate (2) —
+// the post-parse whitelist filter (#10 → E3 metadata-driven Dimensions).
+// One increment per dropped value.
+var EnrichAttrsDroppedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_enrich_attrs_dropped_total",
+		Help: "Per-dim attribute values dropped by the enricher whitelist filter.",
+	},
+	[]string{"tenant", "dim"},
+)
+
+// EnrichSuggestedAttrsTotal counts enrich rows where the model emitted
+// at least one off-list value for a given dim under a configured
+// taxonomy. One increment per row, per dim (not per dropped value).
+var EnrichSuggestedAttrsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_enrich_suggested_attrs_total",
+		Help: "Enrich rows with off-list attribute suggestions, per dim.",
+	},
+	[]string{"tenant", "dim"},
+)
+
+// EnrichAttrsSizeBytes tracks the serialized size of the enriched_attrs
+// JSONB payload (#10 → E3). Operators watch the histogram's p95/p99
+// to size the per-row hard cap (repo.feedback.MaxAttrsBytes); the
+// `_count` series correlates with rejection spikes from the cap.
+// Buckets sized for the OSS seed (~256B) to a runaway client (~16 KiB).
+var EnrichAttrsSizeBytes = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_enrich_attrs_size_bytes",
+		Help:    "Serialized enriched_attrs JSONB size, per tenant.",
+		Buckets: prometheus.ExponentialBuckets(256, 2, 8), // 256B..32KiB
+	},
+	[]string{"tenant"},
+)
+
+// EnrichAttrsRejectedTotal counts rows where MarkDone refused the
+// payload for exceeding MaxAttrsBytes. Non-zero traffic on this metric
+// is operator-actionable: either bump the cap or surface a per-tenant
+// dim-set audit.
+var EnrichAttrsRejectedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_enrich_attrs_rejected_total",
+		Help: "Enrich rows rejected because enriched_attrs exceeded MaxAttrsBytes.",
+	},
+	[]string{"tenant"},
 )
 
 // NotifyFailuresTotal increments on every notifier push that didn't
@@ -90,11 +139,11 @@ var IngestRateLimitTotal = prometheus.NewCounterVec(
 //
 // Labels:
 //
-//	tenant   — TEXT tenant id (matches IngestTotal's labels)
+//	tenant — TEXT tenant id (matches IngestTotal's labels)
 //	decision — "ignore" | "fast" | "full"
-//	  • ignore: skipped (noise / too short / spam) — no LLM cost
-//	  • fast:   matched a per-tenant rule, no LLM call
-//	  • full:   passed to the full LLM enrich stage
+//	 • ignore: skipped (noise / too short / spam) — no LLM cost
+//	 • fast: matched a per-tenant rule, no LLM call
+//	 • full: passed to the full LLM enrich stage
 var TriageDecisionsTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "attune_triage_decisions_total",
@@ -109,6 +158,10 @@ var TriageDecisionsTotal = prometheus.NewCounterVec(
 var allMetrics = []prometheus.Collector{
 	IngestTotal,
 	EnrichDuration,
+	EnrichAttrsDroppedTotal,
+	EnrichSuggestedAttrsTotal,
+	EnrichAttrsSizeBytes,
+	EnrichAttrsRejectedTotal,
 	NotifyFailuresTotal,
 	OutboxLagSeconds,
 	ClaimContentionTotal,

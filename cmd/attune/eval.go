@@ -9,16 +9,34 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/eval"
 )
 
 // runEval dispatches the `attune eval` CLI. Three modes:
 //
-//	consistency       re-run LLM on N rows; report match rate
-//	export-for-human  write CSV for offline human labeling
-//	score-human       read filled CSV; report human-vs-AI accuracy
+//	consistency re-run LLM on N rows; report match rate
+//	export-for-human write CSV for offline human labeling
+//	score-human read filled CSV; report human-vs-AI accuracy
+//
+// --tenant <id> is REQUIRED for export-for-human and score-human (the
+// CSV header is derived from that tenant's DimensionSet). consistency
+// mode infers the dim set per-row from the sampled tenant_id.
+//
+// Examples:
+//
+//	# Match rate across all tenants since 2026-05-01 (50 rows by default).
+//	attune eval --mode consistency --since 2026-05-01
+//
+//	# Export 100 rows for a human to label, scoped to one tenant.
+//	attune eval --mode export-for-human --tenant demo --sample 100 \
+//	 --since 2026-05-01 --output ./labels.csv
+//
+//	# Score the filled-in CSV against the AI's columns.
+//	attune eval --mode score-human --tenant demo --input ./labels.csv
 func runEval(args []string) error {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	mode := fs.String("mode", "consistency", "consistency | export-for-human | score-human")
@@ -26,6 +44,9 @@ func runEval(args []string) error {
 	sample := fs.Int("sample", 50, "sample size (consistency / export-for-human)")
 	output := fs.String("output", "", "write report or CSV to file (default stdout)")
 	input := fs.String("input", "", "labeled CSV path (score-human mode)")
+	tenantID := fs.String("tenant", "",
+		"tenant slug or id — REQUIRED for export-for-human and score-human. "+
+			"The CSV header is derived from that tenant's DimensionSet.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -48,18 +69,24 @@ func runEval(args []string) error {
 		return fmt.Errorf("llm backend: %w", err)
 	}
 	defer llm.Close()
-	enricher := enrich.NewEnricher(feedbackRepo, llm)
-	evaluator := eval.NewEvaluator(feedbackRepo, enricher)
+	enricher := enrich.NewEnricher(feedbackRepo, llm, cfg.LLMModel)
+	evaluator := eval.NewEvaluator(feedbackRepo, tenant.NewTenant(pool), enricher)
 
-	switch *mode {
+	switch ptrext.Indirect(mode) {
 	case "consistency":
-		return runEvalConsistency(ctx, evaluator, *since, *sample, *output)
+		return runEvalConsistency(ctx, evaluator, ptrext.Indirect(since), ptrext.Indirect(sample), ptrext.Indirect(output))
 	case "export-for-human":
-		return runEvalExport(ctx, evaluator, *since, *sample, *output)
+		if ptrext.Indirect(tenantID) == "" {
+			return fmt.Errorf("--tenant is required for export-for-human (dim set is per-tenant)")
+		}
+		return runEvalExport(ctx, evaluator, ptrext.Indirect(tenantID), ptrext.Indirect(since), ptrext.Indirect(sample), ptrext.Indirect(output))
 	case "score-human":
-		return runEvalScore(evaluator, *input, *output)
+		if ptrext.Indirect(tenantID) == "" {
+			return fmt.Errorf("--tenant is required for score-human (dim set is per-tenant)")
+		}
+		return runEvalScore(evaluator, ptrext.Indirect(tenantID), ptrext.Indirect(input), ptrext.Indirect(output))
 	default:
-		return fmt.Errorf("unknown --mode %q", *mode)
+		return fmt.Errorf("unknown --mode %q", ptrext.Indirect(mode))
 	}
 }
 
@@ -82,7 +109,7 @@ func runEvalConsistency(
 func runEvalExport(
 	ctx context.Context,
 	ev *eval.Evaluator,
-	sinceStr string, sample int, output string,
+	tenantID, sinceStr string, sample int, output string,
 ) error {
 	since, err := parseSince(sinceStr)
 	if err != nil {
@@ -93,7 +120,7 @@ func runEvalExport(
 		return err
 	}
 	defer closer()
-	n, err := ev.ExportForHuman(ctx, since, sample, w)
+	n, err := ev.ExportForHuman(ctx, tenantID, since, sample, w)
 	if err != nil {
 		return err
 	}
@@ -103,7 +130,7 @@ func runEvalExport(
 	return nil
 }
 
-func runEvalScore(ev *eval.Evaluator, inputPath, output string) error {
+func runEvalScore(ev *eval.Evaluator, tenantID, inputPath, output string) error {
 	if inputPath == "" {
 		return fmt.Errorf("--input is required for score-human")
 	}
@@ -112,7 +139,7 @@ func runEvalScore(ev *eval.Evaluator, inputPath, output string) error {
 		return fmt.Errorf("open input: %w", err)
 	}
 	defer f.Close()
-	rep, err := ev.ScoreHuman(context.Background(), f)
+	rep, err := ev.ScoreHuman(context.Background(), tenantID, f)
 	if err != nil {
 		return err
 	}

@@ -9,18 +9,18 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
 // selfReportDead pushes a one-shot text card to the tenant's lark-bot
 // describing the dead delivery. Skipped silently if:
-//   - the dead target was itself a lark-bot (sending to a sibling lark-
-//     bot would be confusing; alert-of-alert is mostly noise);
-//   - the tenant has no active lark-bot configured;
-//   - the lark-bot send itself errors (we log + carry on, no recursion).
+// - the dead target was itself a lark-bot (sending to a sibling lark-
+// bot would be confusing; alert-of-alert is mostly noise);
+// - the tenant has no active lark-bot configured;
+// - the lark-bot send itself errors (we log + carry on, no recursion).
 func (w *OutboxWorker) selfReportDead(ctx context.Context, row outboxrepo.OutboxRow, reason string) {
 	const where = "service.OutboxWorker.selfReportDead"
 	if row.DestinationType == notifytarget.DestLarkBot {
@@ -38,7 +38,7 @@ func (w *OutboxWorker) selfReportDead(ctx context.Context, row outboxrepo.Outbox
 		return // no chat to alert
 	}
 	text := fmt.Sprintf(
-		"⚠️ 通知投递失败\n类型：%s\nURL：%s\n原因：%s\nAttune已停止重试此目标，请到控制台修改配置后再发布。",
+		"⚠️ Notify delivery failed\nType: %s\nURL: %s\nReason: %s\nAttune has stopped retrying this target. Update the configuration in the console and re-enable.",
 		row.DestinationType, row.DestinationTarget, truncateStr(reason, 200),
 	)
 	// Use the first bot only — repeated alerts to every bot would spam

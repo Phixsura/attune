@@ -14,7 +14,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 )
 
@@ -40,7 +41,7 @@ type APIKeys struct {
 const touchInterval = 30 * time.Second
 
 func NewAPIKeys(r *apikeyrepo.APIKeyRepo) *APIKeys {
-	return &APIKeys{repo: r}
+	return ptrext.Of(APIKeys{repo: r})
 }
 
 // Issue mints a key for the given tenant and returns the raw value
@@ -129,6 +130,10 @@ func generate() (raw string, hash []byte, prefix string, err error) {
 		return "", nil, "", fmt.Errorf("rand: %w", err)
 	}
 	raw = domain.APIKeyPrefix + hex.EncodeToString(buf)
+	// SHA-256 is appropriate here: we are hashing API keys (not user passwords)
+	// for lookup verification. The raw key is a 192-bit random value —
+	// preimage resistance of SHA-256 is sufficient; we are not defending
+	// against offline brute-force of low-entropy secrets.
 	sum := sha256.Sum256([]byte(raw))
 	hash = sum[:]
 	if len(raw) >= displayPrefLen {

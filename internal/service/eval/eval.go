@@ -3,71 +3,93 @@ package eval
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
-// Evaluator runs the attune eval CLI's three modes:
+// Evaluator runs the `attune eval` subcommand's three modes:
 //
-//	consistency        re-run LLM on N historical rows, compare new vs old
-//	export-for-human   dump N rows to CSV for offline human labeling
-//	score-human        read labeled CSV, score AI predictions
+//	consistency re-run LLM on N historical rows, compare new vs old
+//	export-for-human dump N rows to CSV for offline human labeling
+//	score-human read labeled CSV, score AI predictions
 //
-// All three answer the W6 闸门 question "is AI accurate enough?" — the
-// consistency mode is the cheap automated check; score-human is the
-// ground-truth measure for对外宣传.
+// All three answer the gate question "is the AI accurate enough?" —
+// consistency is the cheap automated check; score-human is the
+// ground-truth measure for external claims.
+//
+// Post-E3 (metadata-driven Dimensions): scoring is per-dim. Single-kind
+// dims contribute to an accuracy count; multi-kind dims contribute to
+// a Jaccard IoU sum (averaged out in reporting). Both metrics live in
+// one DimScore map keyed by Dimension.Name.
 type Evaluator struct {
 	repo     *feedback.FeedbackRepo
+	tenants  *tenant.TenantRepo
 	enricher *enrich.Enricher
 }
 
-// NewEvaluator wires the repo for sampling and the enricher's Classify
-// for re-running LLM. enricher must be non-nil — eval is meaningless
-// without an LLM connection.
-func NewEvaluator(r *feedback.FeedbackRepo, e *enrich.Enricher) *Evaluator {
-	return &Evaluator{repo: r, enricher: e}
+func NewEvaluator(r *feedback.FeedbackRepo, tenants *tenant.TenantRepo, e *enrich.Enricher) *Evaluator {
+	return ptrext.Of(Evaluator{repo: r, tenants: tenants, enricher: e})
+}
+
+// DimScore aggregates one dim's matches across all sampled rows.
+// For single-kind: Match counts rows where new == old.
+// For multi-kind: SumIoU sums per-row Jaccard; average = SumIoU/Total.
+type DimScore struct {
+	Name   string               `json:"name"`
+	Kind   domain.DimensionKind `json:"kind"`
+	Total  int                  `json:"total"`   // rows scored for this dim
+	Match  int                  `json:"match"`   // single-kind: rows where new == old
+	SumIoU float64              `json:"sum_iou"` // multi-kind: sum of per-row Jaccard
 }
 
 // EvalReport is the unified shape both consistency and score-human
-// produce. Mode + LabelSource make the distinction.
+// produce. Mode + LabelSource distinguish them.
 type EvalReport struct {
-	Mode         string // "consistency" | "score-human"
-	LabelSource  string // "ai-rerun" | "human-labeled"
-	GeneratedAt  time.Time
-	Since        time.Time
-	SampleSize   int
-	KindMatches  int
-	SevMatches   int
-	ModuleSumIoU float64 // sum of per-row Jaccard; report shows avg = / SampleSize
-	LLMCostYuan  float64 // cost estimate; 0 if not tracked
-	Mismatches   []Mismatch
+	Mode        string              `json:"mode"`         // "consistency" | "score-human"
+	LabelSource string              `json:"label_source"` // "ai-rerun" | "human-labeled"
+	GeneratedAt time.Time           `json:"generated_at"`
+	Since       time.Time           `json:"since"`
+	SampleSize  int                 `json:"sample_size"`
+	Dims        map[string]DimScore `json:"dims"`
+	LLMCostYuan float64             `json:"llm_cost_yuan"`
+	Mismatches  []Mismatch          `json:"mismatches,omitempty"`
 }
 
-// Mismatch is one row where new ≠ old (consistency) or AI ≠ human
-// (score-human). modules diff via Jaccard so small set deltas surface.
+// Mismatch is one row where the AI's freshly-computed attrs differ
+// from the baseline (either the old persisted attrs in consistency
+// mode, or the human-labeled attrs in score-human mode).
 type Mismatch struct {
-	FeedbackID    int64
-	Content       string
-	OldKind       string
-	NewKind       string
-	OldSeverity   string
-	NewSeverity   string
-	OldModules    []string
-	NewModules    []string
-	ModuleJaccard float64
+	FeedbackID int64              `json:"feedback_id"`
+	Content    string             `json:"content"`
+	Diffs      map[string]DimDiff `json:"diffs"`
+}
+
+// DimDiff is the per-dim diff payload inside one Mismatch. Old / New
+// carry raw `any` because single-kind dims are strings and multi-kind
+// dims are arrays — both shapes round-trip through JSON cleanly.
+type DimDiff struct {
+	Kind  domain.DimensionKind `json:"kind"`
+	Old   any                  `json:"old"`
+	New   any                  `json:"new"`
+	IoU   float64              `json:"iou,omitempty"`
+	Match bool                 `json:"match,omitempty"`
 }
 
 // RunConsistency re-runs LLM classification on a random sample of rows
-// enriched since `since`, compares new vs old labels, and returns a
-// report. Estimated LLM cost: ~¥0.008/row × sample size (Wave 1 prompt).
+// enriched since `since`, compares new attrs vs old, and returns a
+// per-dim score report. Estimated LLM cost: ~¥0.008/row × sample size.
 func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample int) (*EvalReport, error) {
 	const where = "service.Evaluator.RunConsistency"
 	logext.Infof(ctx, "[%s] start,since:%s,sample:%d", where, since.Format(time.RFC3339), sample)
@@ -80,39 +102,52 @@ func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample
 		logext.Errorf(ctx, "[%s] sample failed,err:%+v", where, err.Error())
 		return nil, fmt.Errorf("sample: %w", err)
 	}
-	report := &EvalReport{
+	report := ptrext.Of(EvalReport{
 		Mode:        "consistency",
 		LabelSource: "ai-rerun",
 		GeneratedAt: time.Now(),
 		Since:       since,
 		SampleSize:  len(rows),
-	}
+		Dims:        map[string]DimScore{},
+	})
 	for _, r := range rows {
-		newEnriched, err := ev.enricher.Classify(ctx, r.Content)
+		cfg := enrich.ClassifyConfig{TenantID: r.TenantID}
+		if ev.tenants != nil {
+			tenantCfg, err := ev.tenants.GetEnrichConfig(ctx, r.TenantID)
+			if err == nil {
+				cfg.PromptTemplate = tenantCfg.PromptTemplate
+				cfg.Dimensions = tenantCfg.Dimensions
+			}
+		}
+		newEnriched, err := ev.enricher.Classify(ctx, r.Content, cfg)
 		if err != nil {
 			// LLM blip — skip this row, don't blow up the whole report.
 			continue
 		}
-		scoreRow(report, r, newEnriched)
+		scoreRow(report, r, newEnriched.Attrs, cfg.Dimensions)
 	}
 	report.LLMCostYuan = float64(report.SampleSize) * 0.008
 	sortMismatches(report.Mismatches)
-	logext.Infof(ctx, "[%s] OK,sample:%d,kind_matches:%d,sev_matches:%d,cost_yuan:%.2f",
-		where, report.SampleSize, report.KindMatches, report.SevMatches, report.LLMCostYuan)
+	logext.Infof(ctx, "[%s] OK,sample:%d,dims:%d,cost_yuan:%.2f",
+		where, report.SampleSize, len(report.Dims), report.LLMCostYuan)
 	return report, nil
 }
 
-// ExportForHuman writes a CSV that a human reviewer fills in. Columns
-// match feedback.SampleRow + four blank human_* columns the reviewer fills.
+// ExportForHuman writes a CSV that a human reviewer fills in. The
+// header is data-driven from the tenant's DimensionSet:
 //
-//	id, content, ai_kind, ai_severity, ai_modules, ai_priority,
-//	human_kind, human_severity, human_modules, human_notes
+//	id, content, ai_<dim1>, ai_<dim2>, ..., human_<dim1>, human_<dim2>, ..., human_notes
 //
-// Caller writes the result to a file (or stdout); this method only
-// requires an io.Writer.
-func (ev *Evaluator) ExportForHuman(ctx context.Context, since time.Time, sample int, w io.Writer) (int, error) {
+// For multi-kind dims the cell holds pipe-joined Values
+// (`payment|ux`); for single-kind dims the cell is the bare Value.
+func (ev *Evaluator) ExportForHuman(ctx context.Context, tenantID string, since time.Time, sample int, w io.Writer) (int, error) {
 	const where = "service.Evaluator.ExportForHuman"
-	logext.Infof(ctx, "[%s] start,since:%s,sample:%d", where, since.Format(time.RFC3339), sample)
+	logext.Infof(ctx, "[%s] start,tenant_id:%s,since:%s,sample:%d",
+		where, tenantID, since.Format(time.RFC3339), sample)
+	cfg, err := ev.tenants.GetEnrichConfig(ctx, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("read dim cfg: %w", err)
+	}
 	rows, err := ev.repo.SampleEnriched(ctx, since, sample)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] sample failed,err:%+v", where, err.Error())
@@ -120,20 +155,27 @@ func (ev *Evaluator) ExportForHuman(ctx context.Context, since time.Time, sample
 	}
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
-	if err := cw.Write([]string{
-		"id", "content", "ai_kind", "ai_severity", "ai_modules", "ai_priority",
-		"human_kind", "human_severity", "human_modules", "human_notes",
-	}); err != nil {
+	header := []string{"id", "content"}
+	for _, d := range cfg.Dimensions {
+		header = append(header, "ai_"+d.Name)
+	}
+	for _, d := range cfg.Dimensions {
+		header = append(header, "human_"+d.Name)
+	}
+	header = append(header, "human_notes")
+	if err := cw.Write(header); err != nil {
 		return 0, err
 	}
 	for _, r := range rows {
-		if err := cw.Write([]string{
-			strconv.FormatInt(r.ID, 10),
-			r.Content,
-			r.Kind, r.Severity, strings.Join(r.Modules, "|"),
-			strconv.FormatFloat(r.Priority, 'f', 1, 64),
-			"", "", "", "",
-		}); err != nil {
+		row := []string{strconv.FormatInt(r.ID, 10), r.Content}
+		for _, d := range cfg.Dimensions {
+			row = append(row, formatAttrCell(d, r.Attrs[d.Name]))
+		}
+		for range cfg.Dimensions {
+			row = append(row, "") // empty human_ column
+		}
+		row = append(row, "")
+		if err := cw.Write(row); err != nil {
 			return 0, err
 		}
 	}
@@ -141,26 +183,36 @@ func (ev *Evaluator) ExportForHuman(ctx context.Context, since time.Time, sample
 }
 
 // ScoreHuman reads a CSV produced by ExportForHuman (with the
-// human_* columns filled in) and computes accuracy against AI.
-// Returns the same EvalReport shape as RunConsistency; LabelSource is
+// human_* columns filled in) and computes per-dim accuracy / IoU
+// against the AI columns. Mode is "score-human", LabelSource is
 // "human-labeled".
-func (ev *Evaluator) ScoreHuman(ctx context.Context, r io.Reader) (*EvalReport, error) {
+func (ev *Evaluator) ScoreHuman(ctx context.Context, tenantID string, r io.Reader) (*EvalReport, error) {
+	cfg, err := ev.tenants.GetEnrichConfig(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("read dim cfg: %w", err)
+	}
 	cr := csv.NewReader(r)
 	header, err := cr.Read()
 	if err != nil {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
 	idx := headerIndex(header)
-	for _, col := range []string{"id", "ai_kind", "ai_severity", "ai_modules", "human_kind", "human_severity", "human_modules"} {
+	// Require id + per-dim ai_/human_ columns.
+	required := []string{"id"}
+	for _, d := range cfg.Dimensions {
+		required = append(required, "ai_"+d.Name, "human_"+d.Name)
+	}
+	for _, col := range required {
 		if _, ok := idx[col]; !ok {
 			return nil, fmt.Errorf("csv missing column %q", col)
 		}
 	}
-	report := &EvalReport{
+	report := ptrext.Of(EvalReport{
 		Mode:        "score-human",
 		LabelSource: "human-labeled",
 		GeneratedAt: time.Now(),
-	}
+		Dims:        map[string]DimScore{},
+	})
 	for {
 		rec, err := cr.Read()
 		if err == io.EOF {
@@ -169,65 +221,80 @@ func (ev *Evaluator) ScoreHuman(ctx context.Context, r io.Reader) (*EvalReport, 
 		if err != nil {
 			return nil, fmt.Errorf("read row: %w", err)
 		}
-		if rec[idx["human_kind"]] == "" {
-			// Reviewer skipped this row — exclude from the score.
+		// Require at least one human cell to be non-empty; otherwise
+		// reviewer skipped this row.
+		if !hasAnyHuman(rec, idx, cfg.Dimensions) {
 			continue
 		}
 		id, _ := strconv.ParseInt(rec[idx["id"]], 10, 64)
 		row := feedback.SampleRow{
-			ID:       id,
-			Content:  safeColumn(rec, idx, "content"),
-			Kind:     rec[idx["ai_kind"]],
-			Severity: rec[idx["ai_severity"]],
-			Modules:  splitModules(rec[idx["ai_modules"]]),
+			ID:      id,
+			Content: safeColumn(rec, idx, "content"),
+			Attrs:   readAttrCells(rec, idx, "ai_", cfg.Dimensions),
 		}
-		humanLabel := domain.Enriched{
-			Kind:     rec[idx["human_kind"]],
-			Severity: rec[idx["human_severity"]],
-			Modules:  splitModules(rec[idx["human_modules"]]),
-		}
+		human := readAttrCells(rec, idx, "human_", cfg.Dimensions)
 		report.SampleSize++
-		scoreRow(report, row, humanLabel)
+		scoreRow(report, row, human, cfg.Dimensions)
 	}
 	sortMismatches(report.Mismatches)
 	return report, nil
 }
 
-func scoreRow(rep *EvalReport, old feedback.SampleRow, fresh domain.Enriched) {
-	jaccard := moduleJaccard(old.Modules, fresh.Modules)
-	rep.ModuleSumIoU += jaccard
-	kindMatch := old.Kind == fresh.Kind
-	sevMatch := old.Severity == fresh.Severity
-	if kindMatch {
-		rep.KindMatches++
+// scoreRow updates the report with one row's per-dim score. Old comes
+// from the sampled row's persisted attrs; new comes from the
+// freshly-computed (or human-labeled) attrs.
+func scoreRow(rep *EvalReport, old feedback.SampleRow, fresh map[string]any, dims domain.DimensionSet) {
+	mis := Mismatch{FeedbackID: old.ID, Content: old.Content, Diffs: map[string]DimDiff{}}
+	hasDiff := false
+	for _, d := range dims {
+		score, ok := rep.Dims[d.Name]
+		if !ok {
+			score = DimScore{Name: d.Name, Kind: d.Kind}
+		}
+		score.Total++
+		switch d.Kind {
+		case domain.DimSingle:
+			oldVal := stringAttr(old.Attrs[d.Name])
+			newVal := stringAttr(fresh[d.Name])
+			match := oldVal == newVal
+			if match {
+				score.Match++
+			} else {
+				mis.Diffs[d.Name] = DimDiff{
+					Kind: d.Kind, Old: oldVal, New: newVal, Match: false,
+				}
+				hasDiff = true
+			}
+		case domain.DimMulti:
+			oldArr := stringArrAttr(old.Attrs[d.Name])
+			newArr := stringArrAttr(fresh[d.Name])
+			j := jaccard(oldArr, newArr)
+			score.SumIoU += j
+			if j < 1.0 {
+				mis.Diffs[d.Name] = DimDiff{
+					Kind: d.Kind, Old: oldArr, New: newArr, IoU: j,
+				}
+				hasDiff = true
+			}
+		}
+		rep.Dims[d.Name] = score
 	}
-	if sevMatch {
-		rep.SevMatches++
-	}
-	if !kindMatch || !sevMatch || jaccard < 1.0 {
-		rep.Mismatches = append(rep.Mismatches, Mismatch{
-			FeedbackID:    old.ID,
-			Content:       old.Content,
-			OldKind:       old.Kind,
-			NewKind:       fresh.Kind,
-			OldSeverity:   old.Severity,
-			NewSeverity:   fresh.Severity,
-			OldModules:    old.Modules,
-			NewModules:    fresh.Modules,
-			ModuleJaccard: jaccard,
-		})
+	if hasDiff {
+		rep.Mismatches = append(rep.Mismatches, mis)
 	}
 }
 
-func moduleJaccard(a, b []string) float64 {
+// jaccard computes set-Jaccard for two []string. Empty ∩ empty = 1.0
+// (vacuously matching); otherwise |A∩B| / |A∪B|.
+func jaccard(a, b []string) float64 {
 	if len(a) == 0 && len(b) == 0 {
 		return 1.0
 	}
-	set := make(map[string]struct{}, len(a)+len(b))
-	intersect := 0
+	set := make(map[string]struct{})
 	for _, x := range a {
 		set[x] = struct{}{}
 	}
+	intersect := 0
 	for _, y := range b {
 		if _, ok := set[y]; ok {
 			intersect++
@@ -244,4 +311,120 @@ func moduleJaccard(a, b []string) float64 {
 		return 1.0
 	}
 	return float64(intersect) / float64(union)
+}
+
+// stringAttr coerces an `any` attr value to a stable string. Anything
+// non-string (nil, int, array) becomes "".
+func stringAttr(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+// stringArrAttr coerces an `any` attr value to []string. Accepts
+// []string, []any (json-decoded), or nil. Single string becomes
+// a 1-element slice; everything else returns nil.
+func stringArrAttr(v any) []string {
+	switch x := v.(type) {
+	case []string:
+		return x
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, e := range x {
+			if s, ok := e.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		if x == "" {
+			return nil
+		}
+		return []string{x}
+	default:
+		return nil
+	}
+}
+
+// formatAttrCell renders one attrs[dim.Name] value into a CSV cell.
+// Single-kind → bare string; multi-kind → pipe-joined ("payment|ux").
+func formatAttrCell(d domain.Dimension, v any) string {
+	switch d.Kind {
+	case domain.DimSingle:
+		return stringAttr(v)
+	case domain.DimMulti:
+		return strings.Join(stringArrAttr(v), "|")
+	}
+	return ""
+}
+
+// readAttrCells walks the CSV record for one prefix ("ai_" or "human_")
+// and builds an attrs map keyed by dim.Name. Multi-kind cells are
+// pipe-split; empty cells skip the dim entirely.
+func readAttrCells(rec []string, idx map[string]int, prefix string, dims domain.DimensionSet) map[string]any {
+	out := map[string]any{}
+	for _, d := range dims {
+		col := prefix + d.Name
+		i, ok := idx[col]
+		if !ok || i >= len(rec) {
+			continue
+		}
+		cell := strings.TrimSpace(rec[i])
+		if cell == "" {
+			continue
+		}
+		switch d.Kind {
+		case domain.DimSingle:
+			out[d.Name] = cell
+		case domain.DimMulti:
+			parts := strings.Split(cell, "|")
+			vals := make([]string, 0, len(parts))
+			for _, p := range parts {
+				if p = strings.TrimSpace(p); p != "" {
+					vals = append(vals, p)
+				}
+			}
+			out[d.Name] = vals
+		}
+	}
+	return out
+}
+
+// hasAnyHuman returns true when the human reviewer filled in at least
+// one human_<dim> cell — used to skip rows the reviewer didn't touch.
+func hasAnyHuman(rec []string, idx map[string]int, dims domain.DimensionSet) bool {
+	for _, d := range dims {
+		i, ok := idx["human_"+d.Name]
+		if !ok || i >= len(rec) {
+			continue
+		}
+		if strings.TrimSpace(rec[i]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// FormatJSON renders a report as pretty JSON for the CLI output.
+func (r *EvalReport) FormatJSON() ([]byte, error) {
+	return json.MarshalIndent(r, "", " ")
+}
+
+// sortMismatches orders by feedback ID for stable output.
+func sortMismatches(in []Mismatch) {
+	sort.Slice(in, func(i, j int) bool { return in[i].FeedbackID < in[j].FeedbackID })
+}
+
+func headerIndex(header []string) map[string]int {
+	out := make(map[string]int, len(header))
+	for i, c := range header {
+		out[c] = i
+	}
+	return out
+}
+
+func safeColumn(rec []string, idx map[string]int, col string) string {
+	if i, ok := idx[col]; ok && i < len(rec) {
+		return rec[i]
+	}
+	return ""
 }

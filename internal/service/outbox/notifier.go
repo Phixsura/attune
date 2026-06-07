@@ -13,13 +13,14 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // MultiNotifier fans one Push call out to every wired member. Per-
 // member errors are collected via errors.Join but a single failure
 // never blocks the others — webhook outages must not cascade.
 //
-// Today production wiring builds a single LarkWebhook (raw-webhook delivers via outbox, not inline) — MultiNotifier is reserved for future multi-channel fanout. Wave 3 adds
+// Today production wiring builds a single LarkWebhook (raw-webhook delivers via outbox, not inline) — MultiNotifier is reserved for future multi-channel fanout. A follow-up adds
 // Slack / Discord adapters using the same Notifier shape.
 type MultiNotifier struct {
 	members []notify.Notifier
@@ -35,7 +36,7 @@ func NewMultiNotifier(members ...notify.Notifier) *MultiNotifier {
 			live = append(live, m)
 		}
 	}
-	return &MultiNotifier{members: live}
+	return ptrext.Of(MultiNotifier{members: live})
 }
 
 // PushPool fans out PushPool to every member. Returns errors.Join of

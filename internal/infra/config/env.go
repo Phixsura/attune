@@ -1,3 +1,11 @@
+// ptrext:file-allow — applyEnvOverrides uses an out-parameter table:
+// each {env, dst *string} entry's *string MUST alias the corresponding
+// yamlConfig field so the inner  *o.dst = v  writes back into the original
+// struct. Wrapping with ptrext.Of would write into a copy and silently drop
+// every environment override. Same shape applies to the bool-override block
+// further down. The lint exemption is documented at the package level
+// rather than per line because every override entry follows it identically.
+
 package config
 
 import (
@@ -8,7 +16,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // applyEnvOverrides mutates yc in place, letting env vars trump YAML.
@@ -24,8 +32,10 @@ func applyEnvOverrides(yc *yamlConfig) error {
 		dst *string
 	}{
 		{"FEEDBACK_API_DATABASE_URL", &yc.DatabaseURL},
+		{"FEEDBACK_API_LLM_PROTOCOL", &yc.LLMProtocol},
 		{"FEEDBACK_API_LLM_OPENAI_BASE_URL", &yc.LLMOpenAIBaseURL},
 		{"FEEDBACK_API_LLM_OPENAI_API_KEY", &yc.LLMOpenAIAPIKey},
+		{"FEEDBACK_API_LLM_MODEL", &yc.LLMModel},
 		{"FEEDBACK_API_LARK_SIGNING_SECRET", &yc.LarkSigningSecret},
 		{"FEEDBACK_API_LARK_VERIFICATION_TOKEN", &yc.LarkVerificationToken},
 		{"FEEDBACK_API_LARK_DEFAULT_TENANT_SLUG", &yc.LarkDefaultTenantSlug},

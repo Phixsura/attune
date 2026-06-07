@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/respond"
 )
 
@@ -47,9 +47,9 @@ const (
 //
 // Failure modes, all emitting the unified ErrorResponse envelope
 // {code, message, requestId}:
-//   - missing / malformed header  → 401 code=unauthenticated message="missing or malformed api key"
-//   - unknown / revoked key       → 401 code=unauthenticated message="invalid api key"
-//   - unexpected DB / IO failure  → 500 code=internal      message="api key lookup failed"
+// - missing / malformed header → 401 code=unauthenticated message="missing or malformed api key"
+// - unknown / revoked key → 401 code=unauthenticated message="invalid api key"
+// - unexpected DB / IO failure → 500 code=internal message="api key lookup failed"
 func Middleware(v Verifier) func(http.Handler) http.Handler {
 	const where = "apikey.Middleware"
 	return func(next http.Handler) http.Handler {

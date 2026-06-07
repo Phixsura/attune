@@ -8,16 +8,17 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
 // runOutbox dispatches `attune outbox <subcmd> [flags]`.
 //
-//	attune outbox prune --older-than 1h   Mark every pending/failed row
-//	                                       older than 1h as 'dead'.
-//	                                       Reads DB URL from FEEDBACK_API_*
-//	                                       env vars / config.yaml exactly
-//	                                       like `server`.
+//	attune outbox prune --older-than 1h Mark every pending/failed row
+//	 older than 1h as 'dead'.
+//	 Reads DB URL from FEEDBACK_API_*
+//	 env vars / config.yaml exactly
+//	 like `server`.
 //
 // Designed for one-shot cleanup after the pgx-encode-bug era left
 // orphan rows in pending state (commit 2054e71 fixed the bug; legacy
@@ -57,11 +58,11 @@ func runOutboxPrune(args []string) error {
 	}
 	defer pool.Close()
 
-	before := time.Now().Add(-*olderThan)
-	n, err := outboxrepo.NewOutbox(pool).PruneStalePending(ctx, before, *reason)
+	before := time.Now().Add(-ptrext.Indirect(olderThan))
+	n, err := outboxrepo.NewOutbox(pool).PruneStalePending(ctx, before, ptrext.Indirect(reason))
 	if err != nil {
 		return err
 	}
-	fmt.Printf("pruned %d outbox rows (older than %s, reason=%q)\n", n, *olderThan, *reason)
+	fmt.Printf("pruned %d outbox rows (older than %s, reason=%q)\n", n, ptrext.Indirect(olderThan), ptrext.Indirect(reason))
 	return nil
 }

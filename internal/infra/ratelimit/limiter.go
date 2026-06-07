@@ -1,19 +1,19 @@
 // Package ratelimit is the per-tenant token bucket guarding the ingest
 // API. Phase 3.3 ships a single global default; per-SKU + per-tenant
-// overrides come at Wave 3 billing.
+// overrides come at billing.
 //
 // Design：
-//   - Token bucket via golang.org/x/time/rate (battle-tested algorithm
-//     used by net/http2, grpc, kubernetes).
-//   - One bucket per tenant_id, keyed in a sync.Map. Buckets never
-//     evict: Y1 < 400 tenants ≈ < 50KB memory, GC isn't worth the code.
-//   - State is in-memory only. A attune restart drops all bucket
-//     state — short-lived bursts immediately after deploy can exceed
-//     the limit. Acceptable trade-off: zero new infra (no Redis), zero
-//     DB writes per request.
-//   - Rate is "requests per minute"; burst is the bucket capacity.
-//     A sustained 60/min limit with 300 burst means: clients can fire
-//     300 in a single instant, then must average 1/sec thereafter.
+// - Token bucket via golang.org/x/time/rate (battle-tested algorithm
+// used by net/http2, grpc, kubernetes).
+// - One bucket per tenant_id, keyed in a sync.Map. Buckets never
+// evict: Y1 < 400 tenants ≈ < 50KB memory, GC isn't worth the code.
+// - State is in-memory only. A attune restart drops all bucket
+// state — short-lived bursts immediately after deploy can exceed
+// the limit. Acceptable trade-off: zero new infra (no Redis), zero
+// DB writes per request.
+// - Rate is "requests per minute"; burst is the bucket capacity.
+// A sustained 60/min limit with 300 burst means: clients can fire
+// 300 in a single instant, then must average 1/sec thereafter.
 package ratelimit
 
 import (
@@ -23,7 +23,8 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/Phixsura/attune/internal/infra/apikey"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // Limiter is the per-tenant rate limiter. Construct once, share via
@@ -43,13 +44,13 @@ type Limiter struct {
 // turn this on later" moments). onLimit fires once each time a
 // request is rejected — wire to a Prometheus counter.
 func New(perMinute, burst int, disabled bool, onLimit func(string)) *Limiter {
-	return &Limiter{
+	return ptrext.Of(Limiter{
 		perMinute: perMinute,
 		burst:     burst,
 		disabled:  disabled,
 		onLimit:   onLimit,
 		tenants:   make(map[string]*rate.Limiter),
-	}
+	})
 }
 
 // limiterFor returns (or lazily creates) the per-tenant limiter. Hot
@@ -93,7 +94,7 @@ func (l *Limiter) Allow(tenantID string) bool {
 // Middleware returns the HTTP wrapper. Mount AFTER api-key middleware
 // so context already carries tenant_id.
 //
-// Hot path: success silent (tight loop discipline);只 log reject。
+// Hot path: success is silent (tight-loop discipline) — only rejects log.
 func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	const where = "ratelimit.Middleware"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +106,7 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 			w.Header().Set("Retry-After", "30")
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":"rate_limited","message":"提交过快，请 30 秒后再试"}`))
+			_, _ = w.Write([]byte(`{"error":"rate_limited","message":"submission too frequent, retry in 30 seconds"}`))
 			return
 		}
 		next.ServeHTTP(w, r)

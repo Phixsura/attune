@@ -45,7 +45,13 @@ export interface IngestResponse {
   enrichmentStatus: string;
 }
 
-/** Feedback is a console feedback list row. */
+/**
+ * Feedback is a console feedback list row. Post-E3 (metadata-driven
+ * Dimensions): the per-row classification lives in `enriched_attrs`, a
+ * map<dim.name, value> where value is a JSON string (single-kind dim)
+ * or a JSON string array (multi-kind dim). `is_urgent` is a derived
+ * boolean persisted at write time.
+ */
 export interface Feedback {
   /** → JSON string */
   id: string;
@@ -57,16 +63,9 @@ export interface Feedback {
   enrichedTitle?:
     | string
     | undefined;
-  /** bug | feature | ops | question | other */
-  enrichedKind?:
-    | string
-    | undefined;
-  /** P0 | P1 | P2 | P3 */
-  enrichedSeverity?: string | undefined;
-  enrichedModules: string[];
-  enrichedPriority?:
-    | number
-    | undefined;
+  /** map<dim.name, string | repeated string> — the LLM-emitted values. */
+  enrichedAttrs?: { [key: string]: any } | undefined;
+  isUrgent: boolean;
   /** pending | enriching | done | failed */
   enrichmentStatus: string;
   /** RFC3339 */
@@ -82,10 +81,8 @@ export interface FeedbackDetail {
   userId: string;
   pageUrl: string;
   enrichedTitle?: string | undefined;
-  enrichedKind?: string | undefined;
-  enrichedSeverity?: string | undefined;
-  enrichedModules: string[];
-  enrichedPriority?: number | undefined;
+  enrichedAttrs?: { [key: string]: any } | undefined;
+  isUrgent: boolean;
   enrichmentStatus: string;
   createdAt: string;
   sourceMeta?: { [key: string]: any } | undefined;
@@ -94,7 +91,15 @@ export interface FeedbackDetail {
     | string
     | undefined;
   /** RFC3339 */
-  enrichedAt?: string | undefined;
+  enrichedAt?:
+    | string
+    | undefined;
+  /**
+   * LLM's short "why these values" justification. Already delivered
+   * via the outbox envelope; persisted to user_feedback.enriched_rationale
+   * by migration 013.
+   */
+  enrichedRationale?: string | undefined;
 }
 
 export interface Attachment {
@@ -103,13 +108,29 @@ export interface Attachment {
   size?: string | undefined;
 }
 
+/**
+ * AttrFilter is one per-dim filter in a console list query. The
+ * `dim` is a Dimension.Name; `value` is a stable Taxonomy.Value;
+ * `multi` says whether the dim is multi-kind (needed because the
+ * SQL containment shape differs).
+ */
+export interface AttrFilter {
+  dim: string;
+  value: string;
+  multi: boolean;
+}
+
 export interface ListFeedbackRequest {
   /** last row id; opaque to the client */
   cursor?: string | undefined;
-  limit?: number | undefined;
-  kind?: string | undefined;
-  severity?:
-    | string
+  limit?:
+    | number
+    | undefined;
+  /** Per-dim filters, AND-composed via JSONB containment. */
+  attrs: AttrFilter[];
+  /** nil = no filter; true = only urgent; false = only non-urgent. */
+  urgent?:
+    | boolean
     | undefined;
   /** full-text query */
   q?: string | undefined;
@@ -129,16 +150,26 @@ export interface GetFeedbackRequest {
 export interface GetFeedbackStatsRequest {
 }
 
+/** ValueCount is one bucket of a per-dim distribution. */
+export interface ValueCount {
+  value: string;
+  count: string;
+}
+
+/** DimStats is the per-dim top-values distribution for the stats view. */
+export interface DimStats {
+  dim: string;
+  top: ValueCount[];
+}
+
 export interface GetFeedbackStatsResponse {
   periodStart: string;
   periodEnd: string;
   total: string;
-  byKind: { [key: string]: string };
-}
-
-export interface GetFeedbackStatsResponse_ByKindEntry {
-  key: string;
-  value: string;
+  /** One per-dim distribution for every dim the tenant has configured. */
+  dims: DimStats[];
+  /** Count of is_urgent = true rows within the window. */
+  urgentCount: string;
 }
 
 /**

@@ -69,7 +69,11 @@ message IngestResponse {
   string enrichment_status = 2;
 }
 
-// Feedback is a console feedback list row.
+// Feedback is a console feedback list row. Post-E3 (metadata-driven
+// Dimensions): the per-row classification lives in `enriched_attrs`, a
+// map<dim.name, value> where value is a JSON string (single-kind dim)
+// or a JSON string array (multi-kind dim). `is_urgent` is a derived
+// boolean persisted at write time.
 message Feedback {
   int64 id = 1;  // → JSON string
   string content = 2;
@@ -78,12 +82,11 @@ message Feedback {
   string user_id = 5;
   string page_url = 6;
   optional string enriched_title = 7;
-  optional string enriched_kind = 8;      // bug | feature | ops | question | other
-  optional string enriched_severity = 9;  // P0 | P1 | P2 | P3
-  repeated string enriched_modules = 10;
-  optional double enriched_priority = 11;
-  string enrichment_status = 12;  // pending | enriching | done | failed
-  string created_at = 13;         // RFC3339
+  // map<dim.name, string | repeated string> — the LLM-emitted values.
+  google.protobuf.Struct enriched_attrs = 8;
+  bool is_urgent = 9;
+  string enrichment_status = 10;  // pending | enriching | done | failed
+  string created_at = 11;         // RFC3339
 }
 
 // FeedbackDetail is the single-row view: the list fields plus extras (flat).
@@ -95,16 +98,18 @@ message FeedbackDetail {
   string user_id = 5;
   string page_url = 6;
   optional string enriched_title = 7;
-  optional string enriched_kind = 8;
-  optional string enriched_severity = 9;
-  repeated string enriched_modules = 10;
-  optional double enriched_priority = 11;
-  string enrichment_status = 12;
-  string created_at = 13;
-  google.protobuf.Struct source_meta = 14;
-  repeated Attachment attachments = 15;
-  optional string enrichment_error = 16;
-  optional string enriched_at = 17;  // RFC3339
+  google.protobuf.Struct enriched_attrs = 8;
+  bool is_urgent = 9;
+  string enrichment_status = 10;
+  string created_at = 11;
+  google.protobuf.Struct source_meta = 12;
+  repeated Attachment attachments = 13;
+  optional string enrichment_error = 14;
+  optional string enriched_at = 15;  // RFC3339
+  // LLM's short "why these values" justification. Already delivered
+  // via the outbox envelope; persisted to user_feedback.enriched_rationale
+  // by migration 013.
+  optional string enriched_rationale = 16;
 }
 
 message Attachment {
@@ -113,11 +118,23 @@ message Attachment {
   optional int64 size = 3;
 }
 
+// AttrFilter is one per-dim filter in a console list query. The
+// `dim` is a Dimension.Name; `value` is a stable Taxonomy.Value;
+// `multi` says whether the dim is multi-kind (needed because the
+// SQL containment shape differs).
+message AttrFilter {
+  string dim = 1;
+  string value = 2;
+  bool multi = 3;
+}
+
 message ListFeedbackRequest {
   optional string cursor = 1;  // last row id; opaque to the client
   optional int32 limit = 2;
-  optional string kind = 3;
-  optional string severity = 4;
+  // Per-dim filters, AND-composed via JSONB containment.
+  repeated AttrFilter attrs = 3;
+  // nil = no filter; true = only urgent; false = only non-urgent.
+  optional bool urgent = 4;
   optional string q = 5;  // full-text query
 }
 
@@ -132,9 +149,24 @@ message GetFeedbackRequest {
 
 message GetFeedbackStatsRequest {}
 
+// ValueCount is one bucket of a per-dim distribution.
+message ValueCount {
+  string value = 1;
+  int64 count = 2;
+}
+
+// DimStats is the per-dim top-values distribution for the stats view.
+message DimStats {
+  string dim = 1;
+  repeated ValueCount top = 2;
+}
+
 message GetFeedbackStatsResponse {
   string period_start = 1;
   string period_end = 2;
   int64 total = 3;
-  map<string, int64> by_kind = 4;
+  // One per-dim distribution for every dim the tenant has configured.
+  repeated DimStats dims = 4;
+  // Count of is_urgent = true rows within the window.
+  int64 urgent_count = 5;
 }

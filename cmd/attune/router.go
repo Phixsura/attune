@@ -1,6 +1,6 @@
 // router.go builds the HTTP router for `attune server`: the OTel root span +
 // X-Trace-Id middleware, the standard chi middleware chain, health/metrics, the
-// /v1 API surface, and the optional Stage B console mount. Split out of
+// /v1 API surface, and the optional Console mount. Split out of
 // server.go to keep each file under the 300-line cap (CLAUDE.md §1).
 package main
 
@@ -28,7 +28,7 @@ import (
 // buildRouter wires the chi router: OTel root span + X-Trace-Id, the standard
 // middleware chain, /healthz, /metrics, the /v1 API (lark webhook + api-key /
 // rate-limited feedback ingest), and — when CONSOLE_SESSION_KEY is set — the
-// Stage B console under /fb/v1/console.
+// Console under /fb/v1/console.
 func buildRouter(
 	ctx context.Context,
 	cfg *config.Config,
@@ -38,15 +38,18 @@ func buildRouter(
 	pool *pgxpool.Pool,
 ) (chi.Router, error) {
 	r := chi.NewRouter()
-	// otelchi 入口产 root span(从客户端 traceparent 继承 or 兜底生成可读 trace_id)。
-	// 必须最先。按 /health 前缀过滤,避免心跳塞满 trace —— 该前缀覆盖 /healthz,
-	// 并顺带把任何残留 /health 探活(现已 404)挡在 trace 之外。
+	// otelchi opens the root span — continued from a client-supplied
+	// traceparent when present, generated from our readable trace_id
+	// format otherwise. It must run first. The /health prefix filter
+	// covers /healthz plus any leftover /health probes (now 404) so
+	// liveness checks don't flood the trace backend.
 	r.Use(otelchi.Middleware("attune", otelchi.WithFilter(func(r *http.Request) bool {
 		return !strings.HasPrefix(r.URL.Path, "/health") && !strings.HasPrefix(r.URL.Path, "/metrics")
 	})))
-	// X-Trace-Id 响应头(对客户 optional debug,API 契约不强制)
+	// X-Trace-Id response header — optional debug aid for clients; the
+	// API contract does not require it.
 	r.Use(traceIDResponseHeader)
-	r.Use(middleware.RequestID) // chi 自己的 X-Request-ID(向后兼容,跟 X-Trace-Id 并存)
+	r.Use(middleware.RequestID) // chi's own X-Request-ID — kept alongside X-Trace-Id for back-compat
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
@@ -65,8 +68,8 @@ func buildRouter(
 		})
 	})
 
-	// Stage B 控制台 (console). Mounted under /fb/v1/console; gateway/
-	// nginx reverse-proxies external traffic here. Disabled gracefully
+	// Console UI. Mounted under /fb/v1/console; the reverse
+	// proxy forwards external traffic here. Disabled gracefully
 	// when ConsoleSessionKey is empty (single-process dev defaults).
 	if cfg.ConsoleSessionKey != "" {
 		consoleRouter, err := buildConsoleRouter(cfg, pool)
@@ -93,8 +96,9 @@ func mountHealth(r chi.Router) {
 	})
 }
 
-// traceIDResponseHeader 把 OTel trace_id 写到 X-Trace-Id 响应头(给客户 debug 用)。
-// 必须在 otelchi 之后(否则 SpanContext 不可见)。
+// traceIDResponseHeader writes the active OTel trace_id into the
+// X-Trace-Id response header so clients can correlate from their side.
+// Must run AFTER otelchi — otherwise SpanContext is not yet populated.
 func traceIDResponseHeader(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		span := trace.SpanFromContext(r.Context())

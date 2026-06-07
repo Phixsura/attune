@@ -9,7 +9,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
@@ -17,7 +17,7 @@ import (
 // persistEnriched flips user_feedback to 'done' and (when outbox is
 // wired) inserts one outbox row per active raw-webhook destination,
 // all in a single tx. If outbox isn't wired, falls back to the
-// single-statement MarkDone — preserves the Wave 1.1 path for dev
+// single-statement MarkDone — preserves the the earlier path for dev
 // environments without outbox setup.
 func (e *Enricher) persistEnriched(
 	ctx context.Context,
@@ -114,7 +114,7 @@ func selectOutboxTargets(targets []notifytarget.NotifyTarget, s domain.Snapshot)
 		case notifytarget.AudiencePool:
 			out = append(out, t)
 		case notifytarget.AudienceRadar:
-			if s.IsHighSeverity() {
+			if s.IsUrgent {
 				out = append(out, t)
 			}
 		}
@@ -146,13 +146,11 @@ func extractTraceID(ctx context.Context) string {
 // preserves struct field order — change with caution.
 func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 	type enrichedOut struct {
-		Title      string   `json:"title"`
-		Kind       string   `json:"kind"`
-		Severity   string   `json:"severity"`
-		Modules    []string `json:"modules"`
-		Priority   float64  `json:"priority"`
-		Rationale  string   `json:"rationale"`
-		EnrichedAt string   `json:"enriched_at"`
+		Title      string         `json:"title"`
+		Attrs      map[string]any `json:"attrs"`
+		IsUrgent   bool           `json:"is_urgent"`
+		Rationale  string         `json:"rationale"`
+		EnrichedAt string         `json:"enriched_at"`
 	}
 	type feedbackOut struct {
 		ID          int64       `json:"id"`
@@ -171,8 +169,13 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 		Feedback    feedbackOut `json:"feedback"`
 	}
 	at := s.EnrichedAt.UTC().Format(time.RFC3339)
+	submittedAt := s.SubmittedAt.UTC().Format(time.RFC3339)
+	attrs := s.Attrs
+	if attrs == nil {
+		attrs = map[string]any{}
+	}
 	env := envelopeOut{
-		Version:     "1",
+		Version:     "2", // E3 metadata-driven dims: enriched = {title, attrs, is_urgent, rationale}
 		EventType:   "feedback.enriched",
 		DeliveredAt: at,
 		TraceID:     traceID,
@@ -182,13 +185,11 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 			Content:     s.Content,
 			Source:      s.Source,
 			UserID:      s.UserID,
-			SubmittedAt: at,
+			SubmittedAt: submittedAt, // #82: actual ingest time, not enrichment time
 			Enriched: enrichedOut{
 				Title:      s.Title,
-				Kind:       s.Kind,
-				Severity:   s.Severity,
-				Modules:    s.Modules,
-				Priority:   s.Priority,
+				Attrs:      attrs,
+				IsUrgent:   s.IsUrgent,
 				Rationale:  s.Rationale,
 				EnrichedAt: at,
 			},

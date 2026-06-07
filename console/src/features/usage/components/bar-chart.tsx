@@ -1,9 +1,11 @@
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
+import { useTranslation } from 'react-i18next'
 
 // Lean SVG bar chart. We don't need recharts/visx for a single page
 // showing daily ingest counts — viewBox + rect[] is 30 lines and ships
-// 0 KB. Phase 5 周报 dashboard may justify a chart lib; not now.
+// 0 KB. The weekly-digest dashboard may justify a real chart lib later;
+// today, hand-rolled SVG is enough.
 
 interface UsageBucket {
   bucket: string // RFC3339
@@ -16,6 +18,7 @@ const PAD_X = 20
 const PAD_Y = 12
 
 export function UsageBarChart({ series }: { series: UsageBucket[] }) {
+  const { t } = useTranslation()
   if (series.length === 0) return null
   const max = Math.max(...series.map((b) => b.value), 1)
   const barAreaW = WIDTH - PAD_X * 2
@@ -44,7 +47,10 @@ export function UsageBarChart({ series }: { series: UsageBucket[] }) {
         return (
           <rect key={b.bucket} x={x} y={y} width={barW} height={h} className="fill-primary" rx={1}>
             <title>
-              {format(new Date(b.bucket), 'M月d日', { locale: zhCN })} · {b.value} 条
+              {t('usage.bar_tooltip', {
+                date: format(new Date(b.bucket), t('usage.bar_date_format'), { locale: zhCN }),
+                count: b.value,
+              })}
             </title>
           </rect>
         )

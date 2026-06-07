@@ -20,3 +20,44 @@ message ErrorResponse {
   // The request id (chi X-Request-ID) for support / log correlation.
   string request_id = 3;
 }
+
+// I18nString is attune's per-locale display map (E3 metadata-driven
+// Dimensions, proposal 2026-06-07-flat-labels.md). Keys are BCP 47
+// locale tags ("zh", "en", "ja", "zh-Hant", ...) plus the reserved
+// "default" key used as the universal fallback. Resolution chain
+// (handled in the console SPA): preferred locale list → "default" →
+// any non-empty entry. The backend never resolves — it returns the
+// full map so the same payload serves every caller.
+message I18nString {
+  map<string, string> entries = 1;
+}
+
+// Taxonomy is one allowed value for a Dimension. `value` is the
+// stable machine identifier the LLM emits and SQL filters use;
+// `display_name` is the i18n surface the console renders and the
+// operator freely edits without affecting persisted data or wire
+// contracts.
+message Taxonomy {
+  string value = 1;
+  I18nString display_name = 2;
+}
+
+// Dimension is one enrichment axis the LLM populates for each row.
+// Per-tenant DimensionSet is open in count and closed in shape —
+// adding any new dim is a Settings edit, not a code change.
+message Dimension {
+  // Stable machine key: ^[a-z][a-z0-9_]{0,30}$. Immutable after
+  // creation; rename = delete + recreate.
+  string name = 1;
+  // Per-locale display surface for the dim itself.
+  I18nString display_name = 2;
+  // "single" — LLM picks one value (or none if !required).
+  // "multi"  — LLM picks 0..N values.
+  string kind = 3;
+  // Allowed values; empty + kind=multi = freeform (GitHub-labels style).
+  repeated Taxonomy taxonomy = 4;
+  // Subset of taxonomy.value whose presence on a row flips is_urgent.
+  repeated string urgent_set = 5;
+  // When true, the LLM's JSON schema marks this property required.
+  bool required = 6;
+}

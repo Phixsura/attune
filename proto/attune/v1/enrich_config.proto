@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "attune/v1/common.proto";
+
+// EnrichConfigService manages per-tenant enricher prompt + the
+// metadata-driven Dimension set (#10 → E3 proposal
+// docs/proposals/2026/06/2026-06-07-flat-labels.md).
+service EnrichConfigService {
+  // GET /fb/v1/console/enrich-config
+  rpc GetEnrichConfig(GetEnrichConfigRequest) returns (GetEnrichConfigResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/enrich-config"};
+  }
+  // PUT /fb/v1/console/enrich-config
+  rpc UpdateEnrichConfig(UpdateEnrichConfigRequest) returns (UpdateEnrichConfigResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/enrich-config"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/enrich-config/preview
+  rpc PreviewEnrichPrompt(PreviewEnrichPromptRequest) returns (PreviewEnrichPromptResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/enrich-config/preview"
+      body: "*"
+    };
+  }
+}
+
+message EnrichConfig {
+  // Tenant override; unset = use default_prompt_template.
+  optional string prompt_template = 1;
+  // Built-in default prompt body, always returned so the console can
+  // offer a "restore default" affordance.
+  string default_prompt_template = 2;
+  // Per-tenant Dimension set. Migration 014 seeds 3 dims (type +
+  // severity + labels) on every fresh tenant; operators may add /
+  // remove / edit any dim from here.
+  repeated Dimension dimensions = 3;
+}
+
+message GetEnrichConfigRequest {}
+
+message GetEnrichConfigResponse {
+  EnrichConfig config = 1;
+}
+
+message UpdateEnrichConfigRequest {
+  // Omit / null to restore the built-in default prompt.
+  optional string prompt_template = 1;
+  // Empty list clears all dims (LLM still emits title + rationale).
+  repeated Dimension dimensions = 2;
+}
+
+message UpdateEnrichConfigResponse {
+  EnrichConfig config = 1;
+}
+
+message PreviewEnrichPromptRequest {
+  string sample_content = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message PreviewEnrichPromptResponse {
+  string rendered_prompt = 1;
+}

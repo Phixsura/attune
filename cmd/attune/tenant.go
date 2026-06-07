@@ -9,11 +9,12 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
-// runTenant dispatches `attune tenant <verb>` subcommands. Wave 1.2
-// only exposes `create`; Wave 2 control plane will add `list / activate /
+// runTenant dispatches `attune tenant <verb>` subcommands.
+// only exposes `create`; a follow-up control plane will add `list / activate /
 // deactivate / set-lark-key` once the OAuth flow lands.
 func runTenant(args []string) error {
 	if len(args) == 0 {
@@ -38,7 +39,7 @@ func runTenantCreate(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *slug == "" {
+	if ptrext.Indirect(slug) == "" {
 		return fmt.Errorf("--slug is required")
 	}
 
@@ -55,7 +56,7 @@ func runTenantCreate(args []string) error {
 	defer pool.Close()
 
 	tenants := tenant.NewTenant(pool)
-	id, err := tenants.Create(ctx, *slug, *name)
+	id, err := tenants.Create(ctx, ptrext.Indirect(slug), ptrext.Indirect(name))
 	if errors.Is(err, tenant.ErrTenantSlugTaken) {
 		return err
 	}
@@ -64,12 +65,12 @@ func runTenantCreate(args []string) error {
 	}
 	fmt.Printf(`Tenant created:
 
-  slug: %s
-  name: %s
-  id:   %s
+ slug: %s
+ name: %s
+ id: %s
 
 Next:
-  attune keys issue --tenant %s [--label <label>]
-`, *slug, *name, id, *slug)
+ attune keys issue --tenant %s [--label <label>]
+`, ptrext.Indirect(slug), ptrext.Indirect(name), id, ptrext.Indirect(slug))
 	return nil
 }

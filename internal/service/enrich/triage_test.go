@@ -13,15 +13,28 @@ func TestTriage_IgnoreEmptyAndTooShort(t *testing.T) {
 		{"", "empty"},
 		{"   ", "empty"},
 		{"\t\n  ", "empty"},
-		{"a", "too short"},
-		{"hi", "too short"},
-		{"你好", "too short"}, // 2 runes
+		{"a", "too short"},  // 1 rune
 		{" ?", "too short"}, // trims then 1 rune
 	}
 	for _, c := range cases {
 		d := Triage(c.in)
 		if d.Mode != TriageIgnore {
 			t.Errorf("Triage(%q): want ignore, got %s (reason=%s)", c.in, d.Mode, d.Reason)
+		}
+	}
+}
+
+// TestTriage_TwoRuneCJKFeedbackPassesThrough guards #85 R7 — 2-rune CJK
+// feedback ("崩了" / "闪退" / "卡死") is among the most common shapes
+// Chinese users use for severe bug reports and must reach the LLM. The
+// 2-rune ASCII side effects ("ok" / "no" / "hi") are accepted: the LLM
+// will correctly classify them as low-signal at negligible cost.
+func TestTriage_TwoRuneCJKFeedbackPassesThrough(t *testing.T) {
+	for _, in := range []string{"崩了", "闪退", "卡死", "你好", "ok", "no", "hi"} {
+		d := Triage(in)
+		if d.Mode == TriageIgnore {
+			t.Errorf("Triage(%q): want pass to LLM, got Ignore (reason=%s)",
+				in, d.Reason)
 		}
 	}
 }

@@ -35,6 +35,7 @@ export function TopBar({ me }: TopBarProps) {
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
           <NavLink to="/notify-targets">{t('nav.notify_targets')}</NavLink>
           <NavLink to="/api-keys">{t('nav.api_keys')}</NavLink>
+          <NavLink to="/settings">{t('nav.settings')}</NavLink>
           <NavLink to="/usage">{t('nav.usage')}</NavLink>
         </nav>
         <div className="ml-auto">
@@ -47,7 +48,7 @@ export function TopBar({ me }: TopBarProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                {me.user?.role === 'admin' ? '管理员' : '成员'}
+                {t(me.user?.role === 'admin' ? 'auth.role.admin' : 'auth.role.member')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

@@ -9,7 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
@@ -22,7 +23,7 @@ type OutboxRepo struct {
 }
 
 func NewOutbox(pool *pgxpool.Pool) *OutboxRepo {
-	return &OutboxRepo{pool: pool}
+	return ptrext.Of(OutboxRepo{pool: pool})
 }
 
 // Outbox statuses — keep in lockstep with the CHECK constraint in
@@ -58,7 +59,7 @@ var ErrOutboxNotFound = errors.New("outbox row not found")
 // canonical pattern.
 //
 // payload is the fully-built envelope JSON ready to POST (modulo the
-// per-attempt signature header). Wave 1.2 stores the envelope at
+// per-attempt signature header). Today's worker stores the envelope at
 // insertion time so a destination URL/secret change doesn't change
 // what gets resent.
 func (r *OutboxRepo) Insert(
@@ -71,8 +72,8 @@ func (r *OutboxRepo) Insert(
 	err := tx.QueryRow(
 		ctx, `
 		INSERT INTO notify_outbox
-		  (feedback_id, tenant_id, destination_type, destination_target,
-		   audience, payload, status, trace_id)
+		 (feedback_id, tenant_id, destination_type, destination_target,
+		 audience, payload, status, trace_id)
 		VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
 		RETURNING id`,
 		row.FeedbackID, row.TenantID, row.DestinationType,
@@ -96,18 +97,18 @@ func (r *OutboxRepo) Insert(
 func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int) ([]OutboxRow, error) {
 	rows, err := r.pool.Query(ctx, `
 		UPDATE notify_outbox
-		   SET claimed_at = NOW()
+		 SET claimed_at = NOW()
 		 WHERE id IN (
-		     SELECT id FROM notify_outbox
-		      WHERE status IN ('pending', 'failed')
-		        AND next_retry_at <= NOW()
-		      ORDER BY next_retry_at ASC
-		      LIMIT $1
-		      FOR UPDATE SKIP LOCKED
+		 SELECT id FROM notify_outbox
+		 WHERE status IN ('pending', 'failed')
+		 AND next_retry_at <= NOW()
+		 ORDER BY next_retry_at ASC
+		 LIMIT $1
+		 FOR UPDATE SKIP LOCKED
 		 )
 		 RETURNING id, feedback_id, tenant_id, destination_type,
-		           destination_target, audience, payload, status,
-		           attempts, trace_id, COALESCE(last_error, '')`,
+		 destination_target, audience, payload, status,
+		 attempts, trace_id, COALESCE(last_error, '')`,
 		n)
 	if err != nil {
 		return nil, fmt.Errorf("claim outbox batch: %w", err)
@@ -134,10 +135,10 @@ func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int) ([]OutboxRow, error)
 func (r *OutboxRepo) MarkDelivered(ctx context.Context, id int64) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notify_outbox
-		   SET status = 'delivered',
-		       delivered_at = NOW(),
-		       claimed_at = NULL,
-		       last_error = NULL
+		 SET status = 'delivered',
+		 delivered_at = NOW(),
+		 claimed_at = NULL,
+		 last_error = NULL
 		 WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("mark delivered %d: %w", id, err)
@@ -159,11 +160,11 @@ func (r *OutboxRepo) MarkFailed(ctx context.Context, id int64, errMsg string, ne
 	const where = "repo.OutboxRepo.MarkFailed"
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notify_outbox
-		   SET status = 'failed',
-		       attempts = attempts + 1,
-		       last_error = $2,
-		       next_retry_at = NOW() + make_interval(secs => $3),
-		       claimed_at = NULL
+		 SET status = 'failed',
+		 attempts = attempts + 1,
+		 last_error = $2,
+		 next_retry_at = NOW() + make_interval(secs => $3),
+		 claimed_at = NULL
 		 WHERE id = $1`,
 		id, pgxutil.Truncate(errMsg, 1000), int(nextDelay.Seconds()))
 	if err != nil {
@@ -174,15 +175,15 @@ func (r *OutboxRepo) MarkFailed(ctx context.Context, id int64, errMsg string, ne
 }
 
 // MarkDead writes a terminal failure: status='dead', stores the reason
-// so Wave 2 console / ops can review. Caller invokes this on
+// so the console can review. Caller invokes this on
 // ErrTerminal from the notifier OR when attempts exceeds the max.
 func (r *OutboxRepo) MarkDead(ctx context.Context, id int64, reason string) error {
 	const where = "repo.OutboxRepo.MarkDead"
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notify_outbox
-		   SET status = 'dead',
-		       dead_reason = $2,
-		       claimed_at = NULL
+		 SET status = 'dead',
+		 dead_reason = $2,
+		 claimed_at = NULL
 		 WHERE id = $1`, id, pgxutil.Truncate(reason, 1000))
 	if err != nil {
 		logext.Errorf(ctx, "[%s] mark dead failed,id:%d,err:%+v", where, id, err.Error())
@@ -206,11 +207,11 @@ func (r *OutboxRepo) PruneStalePending(ctx context.Context, before time.Time, re
 	tag, err := r.pool.Exec(
 		ctx, `
 		UPDATE notify_outbox
-		   SET status      = 'dead',
-		       dead_reason = $2,
-		       claimed_at  = NULL
+		 SET status = 'dead',
+		 dead_reason = $2,
+		 claimed_at = NULL
 		 WHERE status IN ('pending', 'failed')
-		   AND created_at < $1`,
+		 AND created_at < $1`,
 		before, pgxutil.Truncate(reason, 1000),
 	)
 	if err != nil {
@@ -226,10 +227,10 @@ func (r *OutboxRepo) PruneStalePending(ctx context.Context, before time.Time, re
 func (r *OutboxRepo) ResetStaleClaims(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE notify_outbox
-		   SET claimed_at = NULL
+		 SET claimed_at = NULL
 		 WHERE claimed_at IS NOT NULL
-		   AND claimed_at < NOW() - INTERVAL '10 minutes'
-		   AND status IN ('pending', 'failed')`)
+		 AND claimed_at < NOW() - INTERVAL '10 minutes'
+		 AND status IN ('pending', 'failed')`)
 	if err != nil {
 		return 0, fmt.Errorf("reset stale claims: %w", err)
 	}
@@ -243,7 +244,7 @@ func (r *OutboxRepo) OldestPendingAge(ctx context.Context) (time.Duration, error
 	var ageSec *float64
 	err := r.pool.QueryRow(ctx, `
 		SELECT EXTRACT(EPOCH FROM (NOW() - MIN(created_at)))
-		  FROM notify_outbox
+		 FROM notify_outbox
 		 WHERE status IN ('pending', 'failed')`).Scan(&ageSec)
 	if err != nil {
 		return 0, fmt.Errorf("oldest pending age: %w", err)
@@ -251,5 +252,5 @@ func (r *OutboxRepo) OldestPendingAge(ctx context.Context) (time.Duration, error
 	if ageSec == nil {
 		return 0, nil
 	}
-	return time.Duration(*ageSec * float64(time.Second)), nil
+	return time.Duration(ptrext.Indirect(ageSec) * float64(time.Second)), nil
 }

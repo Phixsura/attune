@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
 import {
   Sheet,
   SheetContent,
@@ -14,13 +15,21 @@ import {
   type FeedbackDetail,
   feedbackDetailQuery,
 } from '@/features/feedback/api/get-feedback-detail'
-import { KindBadge, SeverityBadge } from '@/features/feedback/components/badges'
+import { useDisplayName } from '@/lib/i18n-resolve'
+import type { Dimension } from '@/proto/attune/v1/common'
 
+// `dims` is supplied by the parent route so this component does not
+// cross feature boundaries (the dim set is owned by the settings
+// feature). The route already calls enrichConfigQuery once for the
+// list/filter UI, so re-using that snapshot here avoids both the
+// cross-feature import AND a redundant network call.
 export function FeedbackDetailSheet({
   id,
+  dims,
   onOpenChange,
 }: {
   id: string | null
+  dims: Dimension[]
   onOpenChange: (v: boolean) => void
 }) {
   const { t } = useTranslation()
@@ -30,12 +39,27 @@ export function FeedbackDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
         <SheetHeader>
-          <SheetTitle>{detail.data?.enrichedTitle || `#${id ?? '?'}`}</SheetTitle>
+          <SheetTitle>
+            <span className="inline-flex items-center gap-2">
+              <UrgentDot urgent={detail.data?.isUrgent} />
+              {detail.data?.enrichedTitle || `#${id ?? '?'}`}
+            </span>
+          </SheetTitle>
           <SheetDescription>
             {detail.data && (
-              <span className="flex items-center gap-2 text-xs">
-                <KindBadge kind={detail.data.enrichedKind} />
-                <SeverityBadge severity={detail.data.enrichedSeverity} />
+              <span className="flex flex-wrap items-center gap-2 text-xs">
+                {dims.map((dim) => (
+                  <DimensionChips
+                    key={dim.name}
+                    dim={dim}
+                    value={
+                      (detail.data?.enrichedAttrs as Record<string, unknown> | undefined)?.[
+                        dim.name
+                      ]
+                    }
+                    emptyDash={false}
+                  />
+                ))}
                 <span className="text-muted-foreground">
                   {format(new Date(detail.data.createdAt), 'PPP HH:mm', { locale: zhCN })}
                 </span>
@@ -50,35 +74,47 @@ export function FeedbackDetailSheet({
               {t('app.loading')}
             </div>
           )}
-          {detail.data && <DetailBody data={detail.data} />}
+          {detail.data && <DetailBody data={detail.data} dims={dims} />}
         </div>
       </SheetContent>
     </Sheet>
   )
 }
 
-function DetailBody({ data }: { data: FeedbackDetail }) {
+function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] }) {
   const { t } = useTranslation()
+  const displayOf = useDisplayName()
+  const attrs = (data.enrichedAttrs ?? {}) as Record<string, unknown>
   return (
     <div className="space-y-6">
       <Section label={t('feedback.detail.raw_content')}>
         <p className="whitespace-pre-wrap break-words">{data.content}</p>
       </Section>
 
-      {data.enrichedModules && data.enrichedModules.length > 0 ? (
-        <Section label={t('feedback.detail.modules')}>
-          <div className="flex flex-wrap gap-1">
-            {data.enrichedModules.map((m) => (
-              <span
-                key={m}
-                className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-xs"
-              >
-                {m}
-              </span>
-            ))}
-          </div>
+      {data.enrichedRationale ? (
+        <Section label={t('feedback.detail.ai_rationale')}>
+          <p className="rounded-md border border-border bg-muted/40 p-3 whitespace-pre-wrap break-words text-muted-foreground">
+            {data.enrichedRationale}
+          </p>
         </Section>
       ) : null}
+
+      {dims.length > 0 && (
+        <Section label={t('feedback.detail.attrs')}>
+          <dl className="space-y-2">
+            {dims.map((dim) => (
+              <div key={dim.name} className="flex items-start gap-3">
+                <dt className="w-28 shrink-0 text-xs text-muted-foreground">
+                  {displayOf(dim.displayName) || dim.name}
+                </dt>
+                <dd className="flex-1 text-sm">
+                  <DimensionChips dim={dim} value={attrs[dim.name]} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Section>
+      )}
 
       <Section label={t('feedback.detail.source')}>
         <p className="font-mono text-xs text-muted-foreground">

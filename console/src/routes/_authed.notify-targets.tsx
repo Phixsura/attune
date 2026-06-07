@@ -180,11 +180,12 @@ function Loading() {
   )
 }
 
-// LarkChip shows green "✓ 飞书已接入" near the header when the tenant
-// has at least one active, healthy lark-bot target. Disabled or failing
-// lark-bot targets fall back to a softer "已配置但已暂停" hint. No chip
-// when no lark-bot exists — silence is the right signal for "go set one
-// up" (the create button takes them there).
+// LarkChip shows a green "Lark connected" pill near the header when
+// the tenant has at least one active, healthy lark-bot target.
+// Disabled or failing lark-bot targets fall back to a softer
+// "configured but paused" hint. No chip when no lark-bot exists —
+// silence is the right cue that the operator should create one (the
+// create button leads them there).
 function LarkChip({ targets }: { targets: NotifyTarget[] }) {
   const { t } = useTranslation()
   const larkBots = targets.filter((x) => x.destinationType === 'lark-bot')

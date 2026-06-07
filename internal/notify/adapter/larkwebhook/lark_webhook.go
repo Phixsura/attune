@@ -1,8 +1,9 @@
-// Package larkwebhook pushes enriched feedback to a Lark/Feishu custom
-// group bot webhook (the "自定义机器人" of any Lark chat). One of three
-// notify adapter implementations alongside rawwebhook and githubissue.
+// Package larkwebhook pushes enriched feedback to a Lark / Feishu
+// custom group-bot webhook (the per-chat "Custom Bot" the chat admin
+// configures). One of three notify adapter implementations alongside
+// rawwebhook and githubissue.
 //
-// Per-tenant routing arrives in Wave 2; today two Lark destinations
+// Per-tenant routing arrives in a follow-up; today two Lark destinations
 // (pool + radar) are configured statically via env and the tenantID
 // threads through every Push call for future per-tenant lookup.
 package larkwebhook
@@ -20,9 +21,10 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/metrics"
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/notify/sig"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // LarkWebhook delivers Snapshot payloads to one or two Lark group bot
@@ -39,27 +41,27 @@ type LarkWebhook struct {
 
 // NewLarkWebhook returns a notifier wired to the given destinations.
 // Pass "" for any URL to disable that destination. Secrets are
-// optional — set them only if the Lark bot has 签名校验 enabled in the
-// chat settings.
+// optional — set them only if the Lark bot has signature verification
+// enabled in the chat settings.
 //
 // Retry policy is NoRetry: Lark group bots are at-most-once by
-// convention (duplicate cards would spam the chat). Wave 1.2's raw
+// convention (duplicate cards would spam the chat). 's raw
 // webhook flips on DefaultRetry.
 func NewLarkWebhook(poolURL, poolSecret, radarURL, radarSecret string) *LarkWebhook {
-	return &LarkWebhook{
+	return ptrext.Of(LarkWebhook{
 		poolURL:     poolURL,
 		poolSecret:  poolSecret,
 		radarURL:    radarURL,
 		radarSecret: radarSecret,
 		transport:   notify.NewTransport(nil, notify.NoRetry()),
-	}
+	})
 }
 
 // PoolEnabled / RadarEnabled report whether each destination is wired.
 func (l *LarkWebhook) PoolEnabled() bool  { return l != nil && l.poolURL != "" }
 func (l *LarkWebhook) RadarEnabled() bool { return l != nil && l.radarURL != "" }
 
-// PushPool delivers s to the 反馈池 group (every enriched row).
+// PushPool delivers s to the "feedback pool" group (every enriched row).
 // Returns nil if the pool destination is unconfigured.
 func (l *LarkWebhook) PushPool(ctx context.Context, s domain.Snapshot) error {
 	if !l.PoolEnabled() {
@@ -68,9 +70,10 @@ func (l *LarkWebhook) PushPool(ctx context.Context, s domain.Snapshot) error {
 	return l.send(ctx, "lark-pool", l.poolURL, l.poolSecret, s)
 }
 
-// PushRadar delivers s to the 研发雷达 group (P0 / P1 only — callers
-// should filter, but we don't reject other severities to keep the
-// notifier shape simple). Returns nil if radar is unconfigured.
+// PushRadar delivers s to the "engineering radar" group (urgent rows
+// only — callers should filter, but we don't reject non-urgent
+// snapshots here to keep the notifier shape simple). Returns nil if
+// radar is unconfigured.
 func (l *LarkWebhook) PushRadar(ctx context.Context, s domain.Snapshot) error {
 	if !l.RadarEnabled() {
 		return nil
@@ -85,8 +88,8 @@ func (l *LarkWebhook) PushRadar(ctx context.Context, s domain.Snapshot) error {
 // Lark returns HTTP 200 even on logical failure.
 func (l *LarkWebhook) send(ctx context.Context, dest, url, secret string, s domain.Snapshot) error {
 	const where = "notify.LarkWebhook.send"
-	logext.Infof(ctx, "[%s] start,dest:%s,feedback_id:%d,severity:%s,tenant_id:%s",
-		where, dest, s.ID, s.Severity, s.TenantID)
+	logext.Infof(ctx, "[%s] start,dest:%s,feedback_id:%d,urgent:%t,tenant_id:%s",
+		where, dest, s.ID, s.IsUrgent, s.TenantID)
 	build := func(ctx context.Context) (*http.Request, error) {
 		body, err := l.buildBody(secret, s)
 		if err != nil {
@@ -97,8 +100,9 @@ func (l *LarkWebhook) send(ctx context.Context, dest, url, secret string, s doma
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-		// 上游请求 body (skip secret/Authorization 类敏感头) — see CLAUDE.md
-		// upstream-log 纪律,truncate 1024 字节避免大 card 撑爆日志。
+		// Upstream request body — secret / Authorization headers are
+		// intentionally not logged. Body is truncated at 1024 bytes so
+		// a large card body never blows the log buffer.
 		logext.Infof(ctx, "[%s] upstream req,dest:%s,url:%s,body:%s",
 			where, dest, url, truncate(string(body), 1024))
 		return req, nil
@@ -149,8 +153,8 @@ func checkLarkResponse(dest string, s domain.Snapshot) notify.ResponseChecker {
 			Msg  string `json:"msg"`
 		}
 		_ = json.Unmarshal(body, &out)
-		// ResponseChecker 不接 ctx,用 Background 保留对上游响应的可观测性
-		// (跟既有 slog 行为一致)。Body truncate 1024 字节。
+		// Upstream response log — body truncated at 1024 bytes so a
+		// runaway response body never blows the log buffer.
 		logext.Infof(ctx,
 			"[%s] upstream resp,dest:%s,feedback_id:%d,status:%d,code:%d,msg:%s,body:%s",
 			where, dest, s.ID, status, out.Code, out.Msg, truncate(string(body), 1024))
@@ -159,7 +163,7 @@ func checkLarkResponse(dest string, s domain.Snapshot) notify.ResponseChecker {
 				notify.ErrTerminal, status, out.Code, out.Msg, truncate(string(body), 200))
 		}
 		slog.InfoContext(ctx, "lark webhook pushed",
-			"dest", dest, "feedback_id", s.ID, "severity", s.Severity)
+			"dest", dest, "feedback_id", s.ID, "urgent", s.IsUrgent)
 		return nil
 	}
 }

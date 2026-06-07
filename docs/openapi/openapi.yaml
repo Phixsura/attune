@@ -74,6 +74,74 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrich-config:
+        get:
+            tags:
+                - EnrichConfigService
+            description: GET /fb/v1/console/enrich-config
+            operationId: EnrichConfigService_GetEnrichConfig
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetEnrichConfigResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        put:
+            tags:
+                - EnrichConfigService
+            description: PUT /fb/v1/console/enrich-config
+            operationId: EnrichConfigService_UpdateEnrichConfig
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateEnrichConfigRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateEnrichConfigResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrich-config/preview:
+        post:
+            tags:
+                - EnrichConfigService
+            description: POST /fb/v1/console/enrich-config/preview
+            operationId: EnrichConfigService_PreviewEnrichPrompt
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PreviewEnrichPromptRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreviewEnrichPromptResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback:
         get:
             tags:
@@ -90,14 +158,11 @@ paths:
                   schema:
                     type: integer
                     format: int32
-                - name: kind
+                - name: urgent
                   in: query
+                  description: nil = no filter; true = only urgent; false = only non-urgent.
                   schema:
-                    type: string
-                - name: severity
-                  in: query
-                  schema:
-                    type: string
+                    type: boolean
                 - name: q
                   in: query
                   schema:
@@ -453,6 +518,69 @@ components:
         DeleteNotifyTargetResponse:
             type: object
             properties: {}
+        DimStats:
+            type: object
+            properties:
+                dim:
+                    type: string
+                top:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ValueCount'
+            description: DimStats is the per-dim top-values distribution for the stats view.
+        Dimension:
+            type: object
+            properties:
+                name:
+                    type: string
+                    description: |-
+                        Stable machine key: ^[a-z][a-z0-9_]{0,30}$. Immutable after
+                         creation; rename = delete + recreate.
+                displayName:
+                    allOf:
+                        - $ref: '#/components/schemas/I18nString'
+                    description: Per-locale display surface for the dim itself.
+                kind:
+                    type: string
+                    description: |-
+                        "single" — LLM picks one value (or none if !required).
+                         "multi"  — LLM picks 0..N values.
+                taxonomy:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Taxonomy'
+                    description: Allowed values; empty + kind=multi = freeform (GitHub-labels style).
+                urgentSet:
+                    type: array
+                    items:
+                        type: string
+                    description: Subset of taxonomy.value whose presence on a row flips is_urgent.
+                required:
+                    type: boolean
+                    description: When true, the LLM's JSON schema marks this property required.
+            description: |-
+                Dimension is one enrichment axis the LLM populates for each row.
+                 Per-tenant DimensionSet is open in count and closed in shape —
+                 adding any new dim is a Settings edit, not a code change.
+        EnrichConfig:
+            type: object
+            properties:
+                promptTemplate:
+                    type: string
+                    description: Tenant override; unset = use default_prompt_template.
+                defaultPromptTemplate:
+                    type: string
+                    description: |-
+                        Built-in default prompt body, always returned so the console can
+                         offer a "restore default" affordance.
+                dimensions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Dimension'
+                    description: |-
+                        Per-tenant Dimension set. Migration 014 seeds 3 dims (type +
+                         severity + labels) on every fresh tenant; operators may add /
+                         remove / edit any dim from here.
         Feedback:
             type: object
             properties:
@@ -470,22 +598,21 @@ components:
                     type: string
                 enrichedTitle:
                     type: string
-                enrichedKind:
-                    type: string
-                enrichedSeverity:
-                    type: string
-                enrichedModules:
-                    type: array
-                    items:
-                        type: string
-                enrichedPriority:
-                    type: number
-                    format: double
+                enrichedAttrs:
+                    type: object
+                    description: map<dim.name, string | repeated string> — the LLM-emitted values.
+                isUrgent:
+                    type: boolean
                 enrichmentStatus:
                     type: string
                 createdAt:
                     type: string
-            description: Feedback is a console feedback list row.
+            description: |-
+                Feedback is a console feedback list row. Post-E3 (metadata-driven
+                 Dimensions): the per-row classification lives in `enriched_attrs`, a
+                 map<dim.name, value> where value is a JSON string (single-kind dim)
+                 or a JSON string array (multi-kind dim). `is_urgent` is a derived
+                 boolean persisted at write time.
         FeedbackDetail:
             type: object
             properties:
@@ -503,17 +630,10 @@ components:
                     type: string
                 enrichedTitle:
                     type: string
-                enrichedKind:
-                    type: string
-                enrichedSeverity:
-                    type: string
-                enrichedModules:
-                    type: array
-                    items:
-                        type: string
-                enrichedPriority:
-                    type: number
-                    format: double
+                enrichedAttrs:
+                    type: object
+                isUrgent:
+                    type: boolean
                 enrichmentStatus:
                     type: string
                 createdAt:
@@ -528,7 +648,18 @@ components:
                     type: string
                 enrichedAt:
                     type: string
+                enrichedRationale:
+                    type: string
+                    description: |-
+                        LLM's short "why these values" justification. Already delivered
+                         via the outbox envelope; persisted to user_feedback.enriched_rationale
+                         by migration 013.
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
+        GetEnrichConfigResponse:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/EnrichConfig'
         GetFeedbackStatsResponse:
             type: object
             properties:
@@ -538,10 +669,14 @@ components:
                     type: string
                 total:
                     type: string
-                byKind:
-                    type: object
-                    additionalProperties:
-                        type: string
+                dims:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/DimStats'
+                    description: One per-dim distribution for every dim the tenant has configured.
+                urgentCount:
+                    type: string
+                    description: Count of is_urgent = true rows within the window.
         GetMeResponse:
             type: object
             properties:
@@ -578,6 +713,21 @@ components:
                     description: The type of the serialized message.
             additionalProperties: true
             description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message.
+        I18nString:
+            type: object
+            properties:
+                entries:
+                    type: object
+                    additionalProperties:
+                        type: string
+            description: |-
+                I18nString is attune's per-locale display map (E3 metadata-driven
+                 Dimensions, proposal 2026-06-07-flat-labels.md). Keys are BCP 47
+                 locale tags ("zh", "en", "ja", "zh-Hant", ...) plus the reserved
+                 "default" key used as the universal fallback. Resolution chain
+                 (handled in the console SPA): preferred locale list → "default" →
+                 any non-empty entry. The backend never resolves — it returns the
+                 full map so the same payload serves every caller.
         IngestRequest:
             required:
                 - content
@@ -671,6 +821,18 @@ components:
                 lastError:
                     type: string
             description: NotifyTarget never carries the secret — it is write-only once stored.
+        PreviewEnrichPromptRequest:
+            required:
+                - sampleContent
+            type: object
+            properties:
+                sampleContent:
+                    type: string
+        PreviewEnrichPromptResponse:
+            type: object
+            properties:
+                renderedPrompt:
+                    type: string
         SessionUser:
             type: object
             properties:
@@ -699,6 +861,19 @@ components:
                         $ref: '#/components/schemas/GoogleProtobufAny'
                     description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
             description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
+        Taxonomy:
+            type: object
+            properties:
+                value:
+                    type: string
+                displayName:
+                    $ref: '#/components/schemas/I18nString'
+            description: |-
+                Taxonomy is one allowed value for a Dimension. `value` is the
+                 stable machine identifier the LLM emits and SQL filters use;
+                 `display_name` is the i18n surface the console renders and the
+                 operator freely edits without affecting persisted data or wire
+                 contracts.
         Tenant:
             type: object
             properties:
@@ -730,6 +905,22 @@ components:
                     format: int32
                 latencyMs:
                     type: string
+        UpdateEnrichConfigRequest:
+            type: object
+            properties:
+                promptTemplate:
+                    type: string
+                    description: Omit / null to restore the built-in default prompt.
+                dimensions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Dimension'
+                    description: Empty list clears all dims (LLM still emits title + rationale).
+        UpdateEnrichConfigResponse:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/EnrichConfig'
         UpdateNotifyTargetRequest:
             type: object
             properties:
@@ -755,9 +946,22 @@ components:
                 value:
                     type: string
                     description: Rows in the bucket. (int64 → JSON string.)
+        ValueCount:
+            type: object
+            properties:
+                value:
+                    type: string
+                count:
+                    type: string
+            description: ValueCount is one bucket of a per-dim distribution.
 tags:
     - name: ApiKeyService
       description: ApiKeyService manages a tenant's external ingest API keys (console).
+    - name: EnrichConfigService
+      description: |-
+        EnrichConfigService manages per-tenant enricher prompt + the
+         metadata-driven Dimension set (#10 → E3 proposal
+         docs/proposals/2026/06/2026-06-07-flat-labels.md).
     - name: FeedbackService
       description: |-
         FeedbackService is attune's feedback API. Today it exposes Ingest

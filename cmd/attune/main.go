@@ -1,7 +1,7 @@
 // attune is the public-facing ingest service for AI-classified user
 // feedback (operationally still deployed as "feedback-api"). Subcommands:
 //
-//	attune server                     # run the HTTP server (default)
+//	attune server # run the HTTP server (default)
 //	attune keys issue --tenant <slug> # mint a new external API key
 //
 // main.go is the CLI entrypoint: it installs the slog handler and dispatches
@@ -21,6 +21,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/observability"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
@@ -39,14 +40,15 @@ var subcommands = map[string]func([]string) error{
 }
 
 func main() {
-	// slog handler:默认 JSON(prod 安全默认,SLS 字段索引必需)。
-	// 本地开发显式设 ENV=dev 才用 text(docker logs 可读)。
-	// 详见 docs/observability-trace-design.md
+	// slog handler: JSON by default (production-safe, structured for log
+	// aggregators that key on field names). Local dev opts into the text
+	// handler via ENV=dev for human-readable `docker logs` output.
+	// Full rationale: docs/observability-trace-design.md.
 	var inner slog.Handler
 	if os.Getenv("ENV") == "dev" {
-		inner = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+		inner = slog.NewTextHandler(os.Stdout, ptrext.Of(slog.HandlerOptions{Level: slog.LevelInfo}))
 	} else {
-		inner = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+		inner = slog.NewJSONHandler(os.Stdout, ptrext.Of(slog.HandlerOptions{Level: slog.LevelInfo}))
 	}
 	slog.SetDefault(slog.New(observability.NewTraceIDHandler(inner)))
 
@@ -76,12 +78,12 @@ func printUsage() {
 	fmt.Fprint(os.Stderr, `attune
 
 Usage:
-  attune server                                       Run the HTTP server (default)
-  attune tenant create --slug <s> [--name <n>]        Create a new tenant
-  attune keys issue --tenant <slug> [--label <s>]     Mint an API key
-  attune eval --mode <m> [--since <date>] ...         AI accuracy report
-  attune outbox prune --older-than <dur>              Mark stale pending rows dead
-  attune digest run --tenant <slug>                   Send weekly digest now (smoke)
+ attune server Run the HTTP server (default)
+ attune tenant create --slug <s> [--name <n>] Create a new tenant
+ attune keys issue --tenant <slug> [--label <s>] Mint an API key
+ attune eval --mode <m> [--tenant <slug>] ... AI accuracy report (--tenant required for export-for-human / score-human)
+ attune outbox prune --older-than <dur> Mark stale pending rows dead
+ attune digest run --tenant <slug> Send weekly digest now (smoke)
 `)
 }
 
@@ -97,7 +99,7 @@ func runKeys(args []string) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	if *tenantSlug == "" {
+	if ptrext.Indirect(tenantSlug) == "" {
 		return fmt.Errorf("--tenant is required")
 	}
 
@@ -113,26 +115,26 @@ func runKeys(args []string) error {
 	}
 	defer pool.Close()
 
-	tenantID, err := tenant.NewTenant(pool).ResolveSlug(ctx, *tenantSlug)
+	tenantID, err := tenant.NewTenant(pool).ResolveSlug(ctx, ptrext.Indirect(tenantSlug))
 	if errors.Is(err, tenant.ErrTenantNotFound) {
-		return fmt.Errorf("tenant slug %q not found or inactive", *tenantSlug)
+		return fmt.Errorf("tenant slug %q not found or inactive", ptrext.Indirect(tenantSlug))
 	}
 	if err != nil {
 		return err
 	}
 
 	svc := apikey.NewAPIKeys(apikeyrepo.NewAPIKey(pool))
-	raw, keyID, err := svc.Issue(ctx, tenantID, *label)
+	raw, keyID, err := svc.Issue(ctx, tenantID, ptrext.Indirect(label))
 	if err != nil {
 		return err
 	}
 	fmt.Printf(`API key issued for tenant %s (%s):
 
-  key:    %s
-  label:  %s
-  id:     %s
+ key: %s
+ label: %s
+ id: %s
 
 Store this key now — it is not recoverable.
-`, *tenantSlug, tenantID, raw, *label, keyID)
+`, ptrext.Indirect(tenantSlug), tenantID, raw, ptrext.Indirect(label), keyID)
 	return nil
 }

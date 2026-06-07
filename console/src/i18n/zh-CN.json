@@ -22,13 +22,68 @@
   "auth": {
     "login_with_lark": "用飞书登录",
     "logging_in": "登录中…",
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "login_hint_tenant": "{{action}}前请确认你的飞书账号已加入对应租户。",
+    "login_hint_first_user": "首次接入会自动建立租户与用户记录，可以在控制台邀请其他成员。",
+    "role": {
+      "admin": "管理员",
+      "member": "成员"
+    }
   },
   "nav": {
     "feedback": "反馈",
     "notify_targets": "通知目标",
     "api_keys": "API key",
+    "settings": "分类设置",
     "usage": "用量"
+  },
+  "settings": {
+    "subtitle": "自定义 AI 分类提示词与维度元数据。维度可任意增删改、跨语言展示。",
+    "prompt_title": "分类提示词",
+    "prompt_label": "提示词模板",
+    "prompt_help": "使用 {{content}} 插入反馈原文，{{dimensions}} 插入维度元数据",
+    "prompt_tokens": "必须包含 {{content}}；JSON 输出格式由服务端固定，不可覆盖。",
+    "restore_default": "恢复默认模板",
+    "dimensions_title": "维度（Dimensions）",
+    "dimensions_help": "每个维度对应 AI 输出的一个字段。单选维度只能命中一个值；多选维度可命中 0 到多个。命中 UrgentSet 的行会自动标记紧急。",
+    "mode_freeform": "自由识别（无限制）",
+    "mode_constrained": "白名单约束",
+    "preview_title": "预览",
+    "preview_help": "服务端渲染，与线上 enricher 使用同一函数。",
+    "preview_sample_label": "样例反馈",
+    "preview_sample_placeholder": "粘贴一段用户反馈…",
+    "preview_sample_default": "结账页一直转圈，付不了款",
+    "preview_button": "生成预览",
+    "saved": "已保存"
+  },
+  "dim": {
+    "editor": {
+      "add_dim": "+ 添加维度",
+      "delete_dim": "删除维度",
+      "unnamed": "未命名维度",
+      "name_label": "Name（稳定 key）",
+      "name_help": "小写英文 + 数字 + 下划线，创建后不可改",
+      "kind_label": "Kind",
+      "kind_single": "single（单选）",
+      "kind_multi": "multi（多选）",
+      "kind_help": "创建后不可改",
+      "display_name_label": "DisplayName（多语言）",
+      "display_name_help": "界面展示用，可任意改；default 是 fallback。",
+      "taxonomy_label": "可选值（Taxonomy）",
+      "add_value": "添加值",
+      "remove_value": "删除值",
+      "taxonomy_help_single": "AI 在以下值里挑一个；为空时强制要求 AI 填",
+      "taxonomy_help_multi": "AI 在以下值里挑 0 到多个；为空时自由识别（任意短字符串）",
+      "taxonomy_empty_single": "未配置值——AI 输出将自由识别字符串",
+      "taxonomy_empty_multi": "未配置值——AI 自由出多个短字符串（GitHub label 风格）",
+      "urgent_set_label": "Urgent Set（紧急路由）",
+      "urgent_set_help": "命中这里任一值的反馈，is_urgent 自动设为 true（推送到雷达）"
+    },
+    "i18n": {
+      "add_locale": "添加语言",
+      "add_locale_placeholder": "locale 如 zh / en",
+      "remove_locale": "移除 {{locale}}"
+    }
   },
   "api_keys": {
     "subtitle": "签发与撤销开发者 API key。明文 key 仅在签发时返回一次，丢失只能撤销重铸。",
@@ -117,24 +172,10 @@
     "lark_chip_disabled": "飞书已配置但已暂停"
   },
   "feedback": {
-    "subtitle": "你产品里来自用户的所有反馈。AI 自动分类 + 严重度评估。",
+    "subtitle": "你产品里来自用户的所有反馈。AI 自动分类。维度由你在「分类设置」自定义。",
     "filter": {
-      "kind_all": "所有类型",
-      "severity_all": "所有严重度",
+      "all": "所有 {{dim}}",
       "search_placeholder": "搜索内容或标题..."
-    },
-    "kind": {
-      "bug": "Bug",
-      "feature": "需求",
-      "ops": "运维",
-      "question": "咨询",
-      "other": "其他"
-    },
-    "severity": {
-      "P0": "P0 阻塞",
-      "P1": "P1 严重",
-      "P2": "P2 中等",
-      "P3": "P3 一般"
     },
     "status": {
       "pending": "待处理",
@@ -146,39 +187,34 @@
     "load_more": "加载更多",
     "table": {
       "title": "标题 / 内容",
-      "kind": "类型",
-      "severity": "严重度",
       "user": "用户",
       "time": "时间"
     },
     "detail": {
       "ai_summary": "AI 摘要",
+      "ai_rationale": "AI 解读",
       "raw_content": "原始内容",
       "source": "来源",
       "sourceMeta": "元数据",
       "attachments": "附件",
-      "modules": "相关模块",
-      "no_modules": "（未识别模块）",
+      "attrs": "AI 分类",
       "enrichmentError": "AI 富化失败原因",
       "enrichedAt": "富化于"
     },
     "empty_title": "还没有反馈",
     "empty_body": "把 API key 接到你的产品里。新反馈到了 1 分钟内会出现在这里，飞书群也会同步。",
-    "donut_title": "本月分布",
-    "donut_total_label": "本月",
-    "kind_label": {
-      "bug": "缺陷",
-      "feature": "功能",
-      "ops": "运维",
-      "question": "咨询",
-      "other": "其他",
-      "unknown": "未分类"
+    "stats": {
+      "title": "本月分布",
+      "summary": "汇总",
+      "total": "总数"
     }
   },
   "usage": {
     "subtitle": "本月反馈接收量统计。Wave 3+ 加配额 + 计费对接。",
     "total_card": "本月已接收",
     "unit": "条",
+    "bar_tooltip": "{{date}} · {{count}} 条",
+    "bar_date_format": "M月d日",
     "quota_unset": "暂未设置配额",
     "period": "周期：{{start}} — {{end}}",
     "by_day": "每日分布",

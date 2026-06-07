@@ -8,17 +8,18 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/infra/metrics"
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
-// OutboxWorker drains the notify_outbox queue. Wave 1.2 scope: only
+// OutboxWorker drains the notify_outbox queue. Today's scope: only
 // raw-webhook destinations go through outbox (external customers need
 // at-least-once). Lark stays inline because its failure mode = a
 // missed card to an internal PM, not a missed delivery to a paying
-// customer. Wave 2-3 may unify if Lark per-tenant routing arrives.
+// customer. a follow-up may unify if Lark per-tenant routing arrives.
 type OutboxWorker struct {
 	outbox    *outboxrepo.OutboxRepo
 	targets   *notifytarget.NotifyTargetRepo
@@ -36,18 +37,18 @@ func NewOutboxWorker(
 	targets *notifytarget.NotifyTargetRepo,
 	transport *notify.Transport,
 ) *OutboxWorker {
-	return &OutboxWorker{
+	return ptrext.Of(OutboxWorker{
 		outbox:       outbox,
 		targets:      targets,
 		transport:    transport,
 		pollInterval: 5 * time.Second,
 		batchSize:    10,
 		maxAttempts:  5,
-	}
+	})
 }
 
 // Configure overrides defaults. nil-valued fields keep their default.
-// Wave 2 console will call this when ops adjusts knobs at runtime.
+// the console will call this when ops adjusts knobs at runtime.
 func (w *OutboxWorker) Configure(pollInterval time.Duration, batchSize, maxAttempts int) {
 	if pollInterval > 0 {
 		w.pollInterval = pollInterval
@@ -194,10 +195,10 @@ func (w *OutboxWorker) failOrDead(ctx context.Context, row outboxrepo.OutboxRow,
 // should look at the dead queue periodically.
 //
 // Phase 3.2 side effects on the dead path:
-//   - mark the originating notify_target row as currently-failing so the
-//     console UI surfaces "your webhook has been failing for X" badge;
-//   - push a self-report card to the tenant's lark-bot (if any) so a
-//     human sees "your raw-webhook stopped" without staring at console.
+// - mark the originating notify_target row as currently-failing so the
+// console UI surfaces "your webhook has been failing for X" badge;
+// - push a self-report card to the tenant's lark-bot (if any) so a
+// human sees "your raw-webhook stopped" without staring at console.
 //
 // Self-report failures are logged but never propagated — we don't want
 // alert-of-alert recursion when a tenant's lark-bot is also broken.

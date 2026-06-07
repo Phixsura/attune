@@ -16,7 +16,7 @@ const router = createRouter({
   routeTree,
   basepath,
   context: { queryClient },
-  // For Stage B the SPA owns the URL; nginx serves index.html for
+  // For the console the SPA owns the URL; nginx serves index.html for
   // anything under /console/*.
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,

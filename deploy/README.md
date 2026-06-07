@@ -3,7 +3,7 @@
 One-command **attune + Postgres** stack for self-hosting. Requires Docker with
 the Compose plugin (`docker compose version`).
 
-> Full tutorial lands with #7; this is the minimal ordered path.
+> Full tutorial: [`docs/private-deploy.md`](../docs/private-deploy.md) — includes monitoring, SSL, upgrades, backup, troubleshooting, and per-tenant module configuration.
 
 ## 1. Configure
 

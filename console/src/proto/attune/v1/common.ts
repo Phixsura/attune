@@ -28,3 +28,61 @@ export interface ErrorResponse {
   /** The request id (chi X-Request-ID) for support / log correlation. */
   requestId: string;
 }
+
+/**
+ * I18nString is attune's per-locale display map (E3 metadata-driven
+ * Dimensions, proposal 2026-06-07-flat-labels.md). Keys are BCP 47
+ * locale tags ("zh", "en", "ja", "zh-Hant", ...) plus the reserved
+ * "default" key used as the universal fallback. Resolution chain
+ * (handled in the console SPA): preferred locale list → "default" →
+ * any non-empty entry. The backend never resolves — it returns the
+ * full map so the same payload serves every caller.
+ */
+export interface I18nString {
+  entries: { [key: string]: string };
+}
+
+export interface I18nString_EntriesEntry {
+  key: string;
+  value: string;
+}
+
+/**
+ * Taxonomy is one allowed value for a Dimension. `value` is the
+ * stable machine identifier the LLM emits and SQL filters use;
+ * `display_name` is the i18n surface the console renders and the
+ * operator freely edits without affecting persisted data or wire
+ * contracts.
+ */
+export interface Taxonomy {
+  value: string;
+  displayName?: I18nString | undefined;
+}
+
+/**
+ * Dimension is one enrichment axis the LLM populates for each row.
+ * Per-tenant DimensionSet is open in count and closed in shape —
+ * adding any new dim is a Settings edit, not a code change.
+ */
+export interface Dimension {
+  /**
+   * Stable machine key: ^[a-z][a-z0-9_]{0,30}$. Immutable after
+   * creation; rename = delete + recreate.
+   */
+  name: string;
+  /** Per-locale display surface for the dim itself. */
+  displayName?:
+    | I18nString
+    | undefined;
+  /**
+   * "single" — LLM picks one value (or none if !required).
+   * "multi"  — LLM picks 0..N values.
+   */
+  kind: string;
+  /** Allowed values; empty + kind=multi = freeform (GitHub-labels style). */
+  taxonomy: Taxonomy[];
+  /** Subset of taxonomy.value whose presence on a row flips is_urgent. */
+  urgentSet: string[];
+  /** When true, the LLM's JSON schema marks this property required. */
+  required: boolean;
+}

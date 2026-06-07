@@ -13,13 +13,14 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/metrics"
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/notify/sig"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
-// EventEnriched is the only event_type Wave 1.2 emits. Wave 2 adds
+// EventEnriched is the only event_type emits. a follow-up will add
 // "feedback.updated" / "feedback.deleted" — handlers should switch on
 // this field, not rely on field shape.
 const EventEnriched = "feedback.enriched"
@@ -29,7 +30,7 @@ const EventEnriched = "feedback.enriched"
 // can have at most one (destination_type=raw-webhook, audience=<a>)
 // row per audience.
 //
-// Failure counters are kept in-memory only — Wave 2 console persists
+// Failure counters are kept in-memory only — a follow-up will persist
 // them to DB so PMs can see "this customer's webhook has been failing
 // for 3 days".
 type RawWebhookRouter struct {
@@ -48,7 +49,7 @@ type rawDestination struct {
 }
 
 // NewRawWebhookRouter builds the router from active rows in
-// tenant_notify_targets. Wave 1.2: env→DB sync at startup populates the
+// tenant_notify_targets. : env→DB sync at startup populates the
 // table; this constructor is called after that sync.
 //
 // Passing a nil httpClient gives a 10s-per-call default. retry should
@@ -71,13 +72,13 @@ func NewRawWebhookRouter(transport *notify.Transport, targets []notifytarget.Not
 		if timeout <= 0 {
 			timeout = 10 * time.Second
 		}
-		dests[t.TenantID][t.Audience] = &rawDestination{
+		dests[t.TenantID][t.Audience] = ptrext.Of(rawDestination{
 			url:     t.URL,
 			secret:  t.Secret,
 			timeout: timeout,
-		}
+		})
 	}
-	return &RawWebhookRouter{transport: transport, destinations: dests}
+	return ptrext.Of(RawWebhookRouter{transport: transport, destinations: dests})
 }
 
 // PushPool delivers s to the tenant's audience=pool destination (or
@@ -134,7 +135,8 @@ func (r *RawWebhookRouter) send(
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
 		req.Header.Set("X-Attune-Signature", sig.SignRaw(body, dest.secret))
 		req.Header.Set("User-Agent", "attune/1.0")
-		// 上游 req body 截断 1024 字节; X-Attune-Signature 头 skip(签名敏感)。
+		// Upstream request body — truncated at 1024 bytes; the
+		// X-Attune-Signature header is intentionally not logged.
 		logext.Infof(ctx, "[%s] upstream req,label:%s,body:%s",
 			where, label, truncate(string(body), 1024))
 		return req, nil
@@ -142,8 +144,7 @@ func (r *RawWebhookRouter) send(
 	err := r.transport.Send(ctx, label, build, checkRawResponse(label, s))
 	if err != nil {
 		dest.failures.Add(1)
-		msg := err.Error()
-		dest.lastError.Store(&msg)
+		dest.lastError.Store(ptrext.Of(err.Error()))
 		reason := "transport"
 		if errors.Is(err, notify.ErrTerminal) {
 			reason = "terminal"
@@ -154,15 +155,14 @@ func (r *RawWebhookRouter) send(
 			where, label, s.ID, reason, err.Error())
 		return err
 	}
-	now := time.Now()
-	dest.lastSuccess.Store(&now)
+	dest.lastSuccess.Store(ptrext.Of(time.Now()))
 	logext.Infof(ctx, "[%s] OK,label:%s,feedback_id:%d", where, label, s.ID)
 	return nil
 }
 
 // buildRawEnvelope serializes a Snapshot into the v1 envelope JSON.
 // trace_id is left empty here; the outbox worker fills it from the
-// outbox row before calling this. Wave 1.2 inline path (no outbox yet)
+// outbox row before calling this. the inline path (no outbox yet)
 // leaves it empty until §3.6 lands.
 func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 	env := rawEnvelope{
@@ -175,13 +175,11 @@ func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 			Content:     s.Content,
 			Source:      s.Source,
 			UserID:      s.UserID,
-			SubmittedAt: s.EnrichedAt.UTC().Format(time.RFC3339), // best approx without ingest_at
+			SubmittedAt: s.SubmittedAt.UTC().Format(time.RFC3339), // #82: actual ingest time (user_feedback.created_at)
 			Enriched: rawEnriched{
 				Title:      s.Title,
-				Kind:       s.Kind,
-				Severity:   s.Severity,
-				Modules:    s.Modules,
-				Priority:   s.Priority,
+				Attrs:      nilSafeAttrs(s.Attrs),
+				IsUrgent:   s.IsUrgent,
 				Rationale:  s.Rationale,
 				EnrichedAt: s.EnrichedAt.UTC().Format(time.RFC3339),
 			},
@@ -202,7 +200,7 @@ func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 func checkRawResponse(label string, s domain.Snapshot) notify.ResponseChecker {
 	const where = "notify.checkRawResponse"
 	return func(ctx context.Context, status int, body []byte) error {
-		// 上游响应日志(每 attempt 都有,truncate 1024 字节)。
+		// Upstream response log — fires per attempt; body truncated at 1024 bytes.
 		logext.Infof(ctx,
 			"[%s] upstream resp,label:%s,feedback_id:%d,status:%d,body:%s",
 			where, label, s.ID, status, truncate(string(body), 1024))
@@ -246,11 +244,18 @@ type rawFeedback struct {
 }
 
 type rawEnriched struct {
-	Title      string   `json:"title"`
-	Kind       string   `json:"kind"`
-	Severity   string   `json:"severity"`
-	Modules    []string `json:"modules"`
-	Priority   float64  `json:"priority"`
-	Rationale  string   `json:"rationale"`
-	EnrichedAt string   `json:"enriched_at"`
+	Title      string         `json:"title"`
+	Attrs      map[string]any `json:"attrs"`
+	IsUrgent   bool           `json:"is_urgent"`
+	Rationale  string         `json:"rationale"`
+	EnrichedAt string         `json:"enriched_at"`
+}
+
+// nilSafeAttrs guarantees a non-nil map so the JSON encodes as `{}`
+// instead of `null`. Customers' verifiers may type-check the field.
+func nilSafeAttrs(a map[string]any) map[string]any {
+	if a == nil {
+		return map[string]any{}
+	}
+	return a
 }

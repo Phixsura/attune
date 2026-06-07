@@ -1,15 +1,15 @@
 // Package lark is a thin client over the Lark Open API endpoints attune
 // actually needs. It is intentionally small — no global SDK
-// abstractions, just typed wrappers around the 3 calls Stage B uses:
+// abstractions, just typed wrappers around the 3 calls the console uses:
 //
-//   - GetAppAccessToken — `auth/v3/app_access_token/internal`. Cached
-//     in-memory with expiry; refresh on demand.
-//   - ExchangeUserCode — `authen/v1/oidc/access_token`. Turns an OAuth
-//     `code` into a user_access_token + open_id + tenant_key.
-//   - GetUserInfo — `authen/v1/user_info` (using user_access_token).
-//     Returns name + avatar for /me rendering.
+// - GetAppAccessToken — `auth/v3/app_access_token/internal`. Cached
+// in-memory with expiry; refresh on demand.
+// - ExchangeUserCode — `authen/v1/oidc/access_token`. Turns an OAuth
+// `code` into a user_access_token + open_id + tenant_key.
+// - GetUserInfo — `authen/v1/user_info` (using user_access_token).
+// Returns name + avatar for /me rendering.
 //
-// Wave 3 will add /chats, /im/v1/messages, etc. — each gets its own
+// A follow-up will add /chats, /im/v1/messages, etc. — each gets its own
 // method here, never an inline call in handlers.
 package lark
 
@@ -25,11 +25,13 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
-// upstreamBodyLogCap —— 飞书 API 上游 body 截断阈值(4KB),memory:upstream_http_log_info。
-// 不 log Authorization header(在 postJSON 里 set 后不会进 body)。
+// upstreamBodyLogCap caps the bytes logged when echoing a Lark API
+// upstream request/response body. The Authorization header set in
+// postJSON never enters the body and is never logged.
 const upstreamBodyLogCap = 4096
 
 const (
@@ -52,12 +54,12 @@ type Client struct {
 }
 
 func New(appID, appSecret string) *Client {
-	return &Client{
-		httpClient: &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport), Timeout: 10 * time.Second},
+	return ptrext.Of(Client{
+		httpClient: ptrext.Of(http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport), Timeout: 10 * time.Second}),
 		baseURL:    defaultBase,
 		appID:      appID,
 		appSecret:  appSecret,
-	}
+	})
 }
 
 // UserTokenResponse is the decoded body of the OIDC exchange. Attune
@@ -118,7 +120,7 @@ func (c *Client) ExchangeUserCode(ctx context.Context, code string) (*UserTokenR
 	}
 	logext.Infof(ctx, "[%s] OK,open_id:%s,tenant_key:%s", where,
 		resp.Data.OpenID, resp.Data.TenantKey)
-	return &UserTokenResponse{
+	return ptrext.Of(UserTokenResponse{
 		AccessToken:      resp.Data.AccessToken,
 		AccessExpiresIn:  resp.Data.ExpiresIn,
 		RefreshToken:     resp.Data.RefreshToken,
@@ -126,7 +128,7 @@ func (c *Client) ExchangeUserCode(ctx context.Context, code string) (*UserTokenR
 		OpenID:           resp.Data.OpenID,
 		TenantKey:        resp.Data.TenantKey,
 		Scope:            resp.Data.Scope,
-	}, nil
+	}), nil
 }
 
 // GetUserInfo uses a user_access_token (NOT app_access_token) to fetch
@@ -169,15 +171,15 @@ func (c *Client) GetUserInfo(ctx context.Context, userAccessToken string) (*User
 		return nil, fmt.Errorf("lark user_info: code=%d msg=%q", body.Code, body.Msg)
 	}
 	logext.Infof(ctx, "[%s] OK,open_id:%s,name:%s", where, body.Data.OpenID, body.Data.Name)
-	return &UserInfo{
+	return ptrext.Of(UserInfo{
 		OpenID:    body.Data.OpenID,
 		Name:      body.Data.Name,
 		AvatarURL: body.Data.AvatarURL,
 		Email:     body.Data.Email,
-	}, nil
+	}), nil
 }
 
-// truncateBytes —— body 日志截断,跟 gateway provider.http_log.go 同实现。
+// truncateBytes truncates a body to `limit` bytes for log emission.
 func truncateBytes(b []byte, limit int) string {
 	if len(b) <= limit {
 		return string(b)
@@ -231,7 +233,8 @@ func (c *Client) postJSON(
 		return fmt.Errorf("marshal request body: %w", err)
 	}
 	url := c.baseURL + path
-	// Upstream REQUEST body 必须落盘(memory: upstream_http_log_info)。 Bearer token 不进 body。
+	// Upstream request body is logged for ops; the Bearer token sits
+	// in a header (postJSON sets it) and never enters the body.
 	logext.Infof(ctx, "[%s] upstream REQUEST,url:%s,body_bytes:%d,body:%s",
 		where, url, len(buf), truncateBytes(buf, upstreamBodyLogCap))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))

@@ -16,9 +16,9 @@ import (
 	larkclient "github.com/Phixsura/attune/internal/infra/lark"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/notify/adapter/larkwebhook"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/lark"
@@ -26,21 +26,41 @@ import (
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
+	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
-// buildLLMClient wires the OpenAI-compatible LLM client used by the
-// enricher. Any /v1/chat/completions endpoint works — OpenAI, Azure
-// OpenAI, vllm, ollama, oneapi, etc. Config validation in config.Load
-// already ensures llm_openai_base_url is non-empty.
+// buildLLMClient picks an LLM backend from cfg.LLMProtocol (#10):
+//
+//   - LLMProtocolOpenAICompat hand-rolled /v1/chat/completions; covers
+//     OpenAI / Azure / vLLM / ollama / oneapi.
+//   - LLMProtocolOpenAIResponses openai-go/v3 client.Responses.New.
+//   - LLMProtocolAnthropic anthropic-sdk-go with forced tool_use.
+//   - LLMProtocolGemini google.golang.org/genai responseJsonSchema.
+//
+// config.validate() enforces protocol legality and required URL/key for
+// each, so this function trusts cfg to be coherent.
+//
+// Adding a new backend is three edits: an entry in config.KnownLLMProtocols,
+// a constant in config/llm_protocol.go, and a case here. There is no
+// plugin registry on purpose.
 func buildLLMClient(cfg *config.Config) (llmclient.LLMClient, error) {
-	return llmclient.NewOpenAI(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
+	switch cfg.LLMProtocol {
+	case config.LLMProtocolOpenAIResponses:
+		return llmclient.NewOpenAIResponses(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
+	case config.LLMProtocolAnthropic:
+		return llmclient.NewAnthropic(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
+	case config.LLMProtocolGemini:
+		return llmclient.NewGemini(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
+	default: // LLMProtocolOpenAICompat — config.validate() already accepted the value
+		return llmclient.NewOpenAICompat(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
+	}
 }
 
 // syncCustomWebhooks upserts every entry in cfg.CustomWebhooks into
 // tenant_notify_targets. Slug is resolved against the tenants table;
 // unknown slugs abort startup so misconfigurations don't ship silently.
 //
-// Wave 1.2: this is the only writer to tenant_notify_targets. Wave 2
+// : this is the only writer to tenant_notify_targets. a follow-up
 // adds a console UI but the same upsert semantics still apply.
 func syncCustomWebhooks(
 	ctx context.Context,
@@ -94,12 +114,12 @@ func syncCustomWebhooks(
 	return nil
 }
 
-// buildNotifier composes the active outbound chain. Wave 1.2 returns
+// buildNotifier composes the active outbound chain. returns
 // either a single LarkWebhook, a MultiNotifier (Lark + Raw), or nil
 // (everything disabled). enricher must tolerate nil — Lark / Raw both
 // disabled is a valid dev configuration.
 //
-// Wave 2 will load Lark per-tenant from the same notify_targets table,
+// a follow-up will load Lark per-tenant from the same notify_targets table,
 // at which point this function becomes "build MultiNotifier from
 // notify_targets".
 func buildNotifier(
@@ -161,15 +181,15 @@ func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 	metrics.OutboxLagSeconds.Set(age.Seconds())
 }
 
-// buildConsoleRouter wires the Stage B console (auth + OAuth + /me +
+// buildConsoleRouter wires the Console (auth + OAuth + /me +
 // /logout for now; resource endpoints land in subsequent commits). Keeps
 // console wiring isolated from the main ingest path so the legacy API
 // continues to boot even if console config is incomplete.
 //
 // Two HTTP-only escape hatches activate together when their config flags
 // are set, and ONLY together:
-//   - ConsoleInsecureCookies=true  → Secure cookie flag dropped
-//   - ConsoleDevLogin=true         → /install/dev-login backdoor mounted
+// - ConsoleInsecureCookies=true → Secure cookie flag dropped
+// - ConsoleDevLogin=true → /install/dev-login backdoor mounted
 //
 // They MUST be off in any real TLS-fronted deployment. The combined check
 // here makes "accidentally enable just one" impossible.
@@ -207,8 +227,9 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 	me := console.NewMeHandler(signer, tenantRepo, userRepo)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
-	feedback := console.NewFeedbackHandler(feedbackRepo)
+	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
 	usage := console.NewUsageHandler(feedbackRepo)
+	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
 
 	var devLogin http.Handler
 	if cfg.ConsoleDevLogin {
@@ -216,6 +237,6 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 		devLogin = console.NewDevLoginHandler(signer, tenantRepo, userRepo, cfg.ConsoleBaseURL)
 	}
 	return console.NewRouter(
-		signer, oauth, me, apiKeys, notifyTargets, feedback, usage, devLogin,
+		signer, oauth, me, apiKeys, notifyTargets, feedback, usage, enrichConfig, devLogin,
 	).Mount(), nil
 }

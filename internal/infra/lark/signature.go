@@ -1,8 +1,7 @@
 // Package lark is the infra-layer adapter for Lark/Feishu webhook
 // events: signature verification and envelope decoding. Handlers
 // depend on this package to translate raw HTTP bytes into typed
-// Event values — keeping protocol details out of the HTTP layer
-// (CLAUDE.md 律 8).
+// Event values — keeping protocol details out of the HTTP layer.
 package lark
 
 import (

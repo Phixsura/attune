@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // fakeNotifier records every Push call so tests can assert fanout
@@ -40,7 +41,7 @@ func TestMultiNotifier_NoMembers(t *testing.T) {
 }
 
 func TestMultiNotifier_NilMembersSkipped(t *testing.T) {
-	a := &fakeNotifier{}
+	a := ptrext.Of(fakeNotifier{})
 	m := NewMultiNotifier(nil, a, nil)
 	_ = m.PushPool(context.Background(), domain.Snapshot{})
 	if a.poolCalls.Load() != 1 {
@@ -49,7 +50,7 @@ func TestMultiNotifier_NilMembersSkipped(t *testing.T) {
 }
 
 func TestMultiNotifier_AllSuccess(t *testing.T) {
-	a, b := &fakeNotifier{}, &fakeNotifier{}
+	a, b := ptrext.Of(fakeNotifier{}), ptrext.Of(fakeNotifier{})
 	m := NewMultiNotifier(a, b)
 	if err := m.PushPool(context.Background(), domain.Snapshot{}); err != nil {
 		t.Fatalf("want nil, got %v", err)
@@ -62,8 +63,8 @@ func TestMultiNotifier_AllSuccess(t *testing.T) {
 
 func TestMultiNotifier_PartialFailureContinues(t *testing.T) {
 	// Critical invariant: one failure must not skip the next member.
-	failA := &fakeNotifier{poolErr: errors.New("a is down")}
-	okB := &fakeNotifier{}
+	failA := ptrext.Of(fakeNotifier{poolErr: errors.New("a is down")})
+	okB := ptrext.Of(fakeNotifier{})
 	m := NewMultiNotifier(failA, okB)
 	err := m.PushPool(context.Background(), domain.Snapshot{})
 	if err == nil {
@@ -81,7 +82,7 @@ func TestMultiNotifier_PartialFailureContinues(t *testing.T) {
 func TestMultiNotifier_RadarHonoredSeparately(t *testing.T) {
 	// PushRadar must use radar callbacks, not pool. (Easy regression
 	// trap with copy-paste fanout code.)
-	a := &fakeNotifier{}
+	a := ptrext.Of(fakeNotifier{})
 	m := NewMultiNotifier(a)
 	_ = m.PushRadar(context.Background(), domain.Snapshot{})
 	if a.radarCalls.Load() != 1 {
@@ -93,8 +94,8 @@ func TestMultiNotifier_RadarHonoredSeparately(t *testing.T) {
 }
 
 func TestMultiNotifier_BothMembersFailReturnsJoined(t *testing.T) {
-	a := &fakeNotifier{poolErr: errors.New("a-err")}
-	b := &fakeNotifier{poolErr: errors.New("b-err")}
+	a := ptrext.Of(fakeNotifier{poolErr: errors.New("a-err")})
+	b := ptrext.Of(fakeNotifier{poolErr: errors.New("b-err")})
 	m := NewMultiNotifier(a, b)
 	err := m.PushPool(context.Background(), domain.Snapshot{})
 	if err == nil {

@@ -13,7 +13,8 @@ import (
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
@@ -34,12 +35,12 @@ type NotifyTargetsHandler struct {
 }
 
 func NewNotifyTargetsHandler(r notifyTargetRepo) *NotifyTargetsHandler {
-	return &NotifyTargetsHandler{repo: r}
+	return ptrext.Of(NotifyTargetsHandler{repo: r})
 }
 
 // toNotifyProto drops Secret (write-only) + TenantID (known via session).
 func toNotifyProto(row notifytarget.NotifyTarget) *attunev1.NotifyTarget {
-	t := &attunev1.NotifyTarget{
+	t := ptrext.Of(attunev1.NotifyTarget{
 		Id:              row.ID.String(),
 		DestinationType: row.DestinationType,
 		Audience:        row.Audience,
@@ -48,10 +49,9 @@ func toNotifyProto(row notifytarget.NotifyTarget) *attunev1.NotifyTarget {
 		Disabled:        row.Disabled,
 		CreatedAt:       row.CreatedAt.UTC().Format(time.RFC3339),
 		LastError:       row.LastError,
-	}
+	})
 	if row.LastFailureAt != nil {
-		s := row.LastFailureAt.UTC().Format(time.RFC3339)
-		t.LastFailureAt = &s
+		t.LastFailureAt = ptrext.Of(row.LastFailureAt.UTC().Format(time.RFC3339))
 	}
 	return t
 }
@@ -67,14 +67,14 @@ func (h *NotifyTargetsHandler) List(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "notify-targets list", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] notifytarget.ListByTenant failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "查询通知目标失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to list notify targets")
 		return
 	}
 	items := make([]*attunev1.NotifyTarget, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toNotifyProto(row))
 	}
-	respond.Proto(w, http.StatusOK, &attunev1.ListNotifyTargetsResponse{Items: items})
+	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.ListNotifyTargetsResponse{Items: items}))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
 }
 
@@ -97,34 +97,34 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := respond.Decode(r.Body, &req); err != nil {
 		if errors.Is(err, respond.ErrBodyTooLarge) {
 			logext.Warnf(ctx, "[%s] reject: body too large,tenant_id:%s", where, auth.TenantID)
-			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, "body_too_large", "请求体超过 1 MiB 上限")
+			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds the 1 MiB limit")
 			return
 		}
 		logext.Warnf(ctx, "[%s] reject: bad json,tenant_id:%s,err:%s",
 			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "请求体不是合法 JSON")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "request body is not valid JSON")
 		return
 	}
-	nreq := &createNotifyRequest{
+	nreq := ptrext.Of(createNotifyRequest{
 		DestinationType: req.GetDestinationType(),
 		Audience:        req.GetAudience(),
 		URL:             req.GetUrl(),
 		Secret:          req.GetSecret(),
 		TimeoutSeconds:  int(req.GetTimeoutSeconds()),
 		Disabled:        req.GetDisabled(),
-	}
+	})
 	if err := validateNotifyCreate(nreq); err != nil {
 		logext.Warnf(ctx, "[%s] reject: validation,tenant_id:%s,err:%s",
 			where, auth.TenantID, err.Error())
 		respond.Error(ctx, w, http.StatusBadRequest, "validation", err.Error())
 		return
 	}
-	// Phase 1 only ships lark-bot + raw-webhook adapters.
+	// Today only ships lark-bot + raw-webhook adapters.
 	if nreq.DestinationType == notifytarget.DestSlackBot || nreq.DestinationType == notifytarget.DestEmail {
 		logext.Warnf(ctx, "[%s] reject: not implemented,tenant_id:%s,dest:%s",
 			where, auth.TenantID, nreq.DestinationType)
 		respond.Error(ctx, w, http.StatusNotImplemented, "not_implemented",
-			"destination_type "+nreq.DestinationType+" 尚未实现（Wave 3+）")
+			"destination_type "+nreq.DestinationType+" is not implemented yet")
 		return
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,dest:%s,audience:%s",
@@ -145,13 +145,13 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 			logext.Warnf(ctx, "[%s] reject: conflict,tenant_id:%s,dest:%s,audience:%s",
 				where, auth.TenantID, nreq.DestinationType, nreq.Audience)
 			respond.Error(ctx, w, http.StatusConflict, "conflict",
-				"同一 (destination_type, audience) 组合下已有目标；先删除旧的再建")
+				"a target already exists for this (destination_type, audience) combination — delete the old one first")
 			return
 		}
 		slog.ErrorContext(ctx, "notify-targets insert", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] repo.Insert failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "新建通知目标失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to create notify target")
 		return
 	}
 	target.ID = id
@@ -166,36 +166,36 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 	req.DestinationType = strings.TrimSpace(req.DestinationType)
 	req.URL = strings.TrimSpace(req.URL)
 	if req.DestinationType == "" {
-		return errors.New("destination_type 不能为空")
+		return errors.New("destination_type must not be empty")
 	}
 	switch req.DestinationType {
 	case notifytarget.DestLarkBot, notifytarget.DestRawWebhook, notifytarget.DestSlackBot, notifytarget.DestEmail:
 	default:
-		return errors.New("destination_type 取值非法")
+		return errors.New("destination_type value is not allowed")
 	}
 	if req.URL == "" {
-		return errors.New("url 不能为空")
+		return errors.New("url must not be empty")
 	}
 	u, err := url.Parse(req.URL)
 	if err != nil {
-		return errors.New("url 必须是 https://… 或本地 loopback http://127.0.0.1")
+		return errors.New("url must be https://… or a loopback http://127.0.0.1")
 	}
 	loopbackHTTP := u.Scheme == "http" && isLoopback(u.Hostname())
 	if u.Scheme != "https" && !loopbackHTTP {
-		return errors.New("url 必须是 https://… 或本地 loopback http://127.0.0.1")
+		return errors.New("url must be https://… or a loopback http://127.0.0.1")
 	}
 	switch req.Audience {
 	case "":
 		req.Audience = notifytarget.AudienceAll
 	case notifytarget.AudiencePool, notifytarget.AudienceRadar, notifytarget.AudienceAll:
 	default:
-		return errors.New("audience 取值非法")
+		return errors.New("audience value is not allowed")
 	}
 	if req.TimeoutSeconds == 0 {
 		req.TimeoutSeconds = 10
 	}
 	if req.TimeoutSeconds < 1 || req.TimeoutSeconds > 60 {
-		return errors.New("timeout_seconds 必须在 1-60 之间")
+		return errors.New("timeout_seconds must be between 1 and 60")
 	}
 	return nil
 }

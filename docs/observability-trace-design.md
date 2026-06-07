@@ -102,7 +102,7 @@ the time straight off the ID:
 | rule-2 | business code re-emitting a reserved key (`trace_id`, …) | drop it — the handler injects it |
 | rule-3 | `&http.Client{}` without `otelhttp.NewTransport` | wrap the transport (outbound spans) |
 
-**Facade exemption.** `internal/infra/observability/` and `internal/logext/` are exempt
+**Facade exemption.** `internal/infra/observability/` and `internal/pkg/logext/` are exempt
 from the business-field rules (1, 2): they *define and inject* the reserved keys
 rather than misuse them. `TraceIDHandler` setting `trace_id` is the canonical
 source, not a rule-2 violation. The linter runs `--strict` in pre-commit and CI.

@@ -20,17 +20,17 @@ import (
 // value so the notifier can outlive any DB tx or HTTP scope.
 func buildSnapshot(id int64, row *feedback.EnrichInput, e domain.Enriched, at time.Time) domain.Snapshot {
 	return domain.Snapshot{
-		ID:         id,
-		TenantID:   row.TenantID,
-		Content:    row.Content,
-		Source:     row.Source,
-		UserID:     row.UserID,
-		Title:      e.Title,
-		Kind:       e.Kind,
-		Modules:    e.Modules,
-		Severity:   e.Severity,
-		Priority:   e.Priority,
-		EnrichedAt: at,
+		ID:          id,
+		TenantID:    row.TenantID,
+		Content:     row.Content,
+		Source:      row.Source,
+		UserID:      row.UserID,
+		Title:       e.Title,
+		Attrs:       e.Attrs,
+		IsUrgent:    e.IsUrgent,
+		Rationale:   e.Rationale,
+		SubmittedAt: row.CreatedAt, // #82: actual user submission time, not enrichment time
+		EnrichedAt:  at,
 	}
 }
 
@@ -39,14 +39,20 @@ func buildSnapshot(id int64, row *feedback.EnrichInput, e domain.Enriched, at ti
 // purpose — for the enrich prompt we expect exactly one object.
 var jsonObjRe = regexp.MustCompile(`(?s)\{.*\}`)
 
-// parseEnrichJSON validates and decodes the LLM's reply. Returns a
-// user-facing error string (the eval CLI reports it back to the
-// human auditing accuracy), so keep the messages short and precise.
+// markdownFenceRe strips markdown code fences (case-insensitive, any
+// language tag) so the LLM's ```json / ```JSON / ``` are all handled.
+var markdownFenceRe = regexp.MustCompile("(?is)^```(?:\\w*)\\s*\n?|```\\s*$")
+
+// parseEnrichJSON decodes the LLM's reply into the dimensions-driven
+// Enriched shape. The LLM emits a flat object whose top-level keys
+// are `title`, `rationale`, and one entry per configured Dimension.
+// We pull `title` and `rationale` out by name and treat everything
+// else as the raw attrs map — gate (2) downstream filters those
+// entries against the tenant's DimensionSet so unknown / off-list
+// keys are dropped without rejecting the whole row.
 func parseEnrichJSON(s string) (domain.Enriched, error) {
 	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
+	s = markdownFenceRe.ReplaceAllString(s, "")
 	s = strings.TrimSpace(s)
 	if !strings.HasPrefix(s, "{") {
 		m := jsonObjRe.FindString(s)
@@ -55,20 +61,22 @@ func parseEnrichJSON(s string) (domain.Enriched, error) {
 		}
 		s = m
 	}
-	var r domain.Enriched
-	if err := json.Unmarshal([]byte(s), &r); err != nil {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(s), &raw); err != nil {
 		return domain.Enriched{}, err
 	}
-	if r.Title == "" || r.Kind == "" || r.Severity == "" {
-		return domain.Enriched{}, fmt.Errorf("missing required fields")
+	title, _ := raw["title"].(string)
+	if title == "" {
+		return domain.Enriched{}, fmt.Errorf("missing required field: title")
 	}
-	if !domain.ValidKinds[r.Kind] {
-		return domain.Enriched{}, fmt.Errorf("invalid kind: %s", r.Kind)
-	}
-	if !domain.ValidSeverities[r.Severity] {
-		return domain.Enriched{}, fmt.Errorf("invalid severity: %s", r.Severity)
-	}
-	return r, nil
+	rationale, _ := raw["rationale"].(string)
+	delete(raw, "title")
+	delete(raw, "rationale")
+	return domain.Enriched{
+		Title:     title,
+		Rationale: rationale,
+		Attrs:     raw,
+	}, nil
 }
 
 // classifyErrResult buckets classify failures for the duration
@@ -92,5 +100,9 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n]
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
 }

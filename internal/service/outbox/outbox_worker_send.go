@@ -13,10 +13,10 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/notify/adapter/githubissue"
 	"github.com/Phixsura/attune/internal/notify/sig"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
@@ -65,7 +65,8 @@ func (w *OutboxWorker) sendRawWebhook(
 		req.Header.Set("X-Attune-Signature", sig.SignRaw(row.Payload, target.Secret))
 		req.Header.Set("X-Trace-ID", row.TraceID)
 		req.Header.Set("User-Agent", "attune/1.0")
-		// 上游 req body truncate 1024 字节; X-Attune-Signature 签名头 skip。
+		// Upstream request body — truncated at 1024 bytes; the
+		// X-Attune-Signature header is intentionally not logged.
 		logext.Infof(ctx, "[%s] upstream req,label:%s,url:%s,body:%s",
 			where, label, target.URL, truncateStr(string(row.Payload), 1024))
 		return req, nil
@@ -84,7 +85,7 @@ func (w *OutboxWorker) sendRawWebhook(
 func checkOutboxResponse(label string, row outboxrepo.OutboxRow) notify.ResponseChecker {
 	const where = "service.checkOutboxResponse"
 	return func(ctx context.Context, status int, body []byte) error {
-		// 上游响应日志(每 attempt 都有,truncate 1024 字节)。
+		// Upstream response log — fires per attempt; body truncated at 1024 bytes.
 		logext.Infof(ctx,
 			"[%s] upstream resp,label:%s,id:%d,status:%d,body:%s",
 			where, label, row.ID, status, truncateStr(string(body), 1024))

@@ -29,13 +29,13 @@ function LoginPage() {
       <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 shadow-sm">
         <h1 className="text-xl font-semibold tracking-tight">{t('app.title')}</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          {t('auth.login_with_lark')}前请确认你的飞书账号已加入对应租户。
+          {t('auth.login_hint_tenant', { action: t('auth.login_with_lark') })}
         </p>
         <Button asChild className="mt-6 w-full" size="lg">
           <a href={startURL}>{t('auth.login_with_lark')}</a>
         </Button>
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          首次接入会自动建立租户与用户记录，Wave 3 起支持邀请其他成员。
+          {t('auth.login_hint_first_user')}
         </p>
       </div>
     </main>

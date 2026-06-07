@@ -1,22 +1,28 @@
-// idgen.go — ReadableIDGenerator 产生人类可读时间戳前缀的 trace_id。
+// idgen.go — ReadableIDGenerator emits trace_ids whose 14-char prefix
+// is a human-readable UTC timestamp.
 //
-// trace_id 格式(W3C 兼容,32 lowercase hex chars):
+// trace_id format (W3C-compatible, 32 lowercase hex chars):
 //
 //	20260515193045a1b2c3d40005f3e7a8
-//	└──yyyyMMddHHmmss──┘└────18 字符随机────┘
-//	  时间戳 (UTC, 14 hex chars = 7 bytes)
+//	└──yyyyMMddHHmmss──┘└────18-char random suffix────┘
+//	 timestamp (UTC, 14 hex chars = 7 bytes)
 //
-// 客服看到 trace_id → 肉眼读出时间 → 在 SLS 用 trace_id 全量查或时间窗筛选。
+// Support staff can read the timestamp off a trace_id by eye, then
+// pivot to the trace backend by exact id or time window.
 //
-// Entropy: 72-bit 随机后缀。一天 10M trace 撞概率 ~ 10^-6,够用。
-// 字典序 = 时间序,SLS Trace UI 默认按 trace_id 升序就是时间升序。
+// Entropy: 72 random bits in the suffix. 10M traces in a day collide
+// with probability ~10^-6 — sufficient. The lexicographic order
+// matches time order, so trace_id ASC in any UI is also time ASC.
 //
-// FE 是 trace_id 真正源头(浏览器 OTel SDK 用 ReadableIdGenerator 同格式生成,
-// traceparent 透传到 BE/Gateway,服务端继承不重新生成)。本 generator 给
-// curl / cron / 第三方 webhook 等无 traceparent 入站场景兜底生成。
+// The FE is the real source of truth for trace_id (the browser OTel
+// SDK uses an identical ReadableIdGenerator and passes the trace
+// through traceparent to BE / gateway, which inherits without
+// regenerating). This generator covers inbound paths without a
+// traceparent — curl, cron, third-party webhooks.
 //
-// ⚠ 采样:当前 AlwaysSample()。未来切 TraceIDRatioBased 时,同秒 trace 会被
-// 同 sampling 决策。需要 ratio 采样时,把时间戳挪到 TraceID 尾部。
+// Sampling: currently AlwaysSample(). Switching to TraceIDRatioBased
+// later would bias every trace from the same second toward the same
+// sample decision; move the timestamp to the suffix if that matters.
 package observability
 
 import (
@@ -34,14 +40,15 @@ func (g *ReadableIDGenerator) NewIDs(ctx context.Context) (trace.TraceID, trace.
 	var tid trace.TraceID
 	var sid trace.SpanID
 
-	// 前 7 字节(14 hex chars)= yyyyMMddHHmmss 的 ASCII hex 编码
-	// 注:"20260515" 这种全是 0-9 字符,本身就是合法 hex
+	// First 7 bytes (14 hex chars) carry yyyyMMddHHmmss as ASCII —
+	// every digit 0-9 is itself a valid hex char so the timestamp
+	// substring is already lowercase hex without further encoding.
 	ts := time.Now().UTC().Format("20060102150405")
 	tsBytes, err := hex.DecodeString(ts)
 	if err == nil && len(tsBytes) == 7 {
 		copy(tid[:7], tsBytes)
 	}
-	// 后 9 字节随机
+	// trailing 9 bytes are random
 	_, _ = rand.Read(tid[7:])
 
 	_, _ = rand.Read(sid[:])

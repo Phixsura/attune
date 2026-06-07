@@ -9,6 +9,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -17,10 +18,10 @@ import (
 
 // runDigest dispatches `attune digest <subcmd>`.
 //
-//	attune digest run --tenant <slug>   Send one digest right now to
-//	                                     the tenant's first lark-bot.
-//	                                     Used for prod smoke + manual
-//	                                     catch-up when scheduler missed.
+//	attune digest run --tenant <slug> Send one digest right now to
+//	 the tenant's first lark-bot.
+//	 Used for prod smoke + manual
+//	 catch-up when scheduler missed.
 //
 // Bypasses the cutoff (last_digest_sent_at < cutoff) — always sends.
 // Updates last_digest_sent_at on success exactly like the scheduler,
@@ -43,7 +44,7 @@ func runDigestSend(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *slug == "" {
+	if ptrext.Indirect(slug) == "" {
 		return errors.New("--tenant is required")
 	}
 
@@ -60,7 +61,7 @@ func runDigestSend(args []string) error {
 	defer pool.Close()
 
 	tenants := tenant.NewTenant(pool)
-	tenantID, err := tenants.ResolveSlug(ctx, *slug)
+	tenantID, err := tenants.ResolveSlug(ctx, ptrext.Indirect(slug))
 	if err != nil {
 		return fmt.Errorf("resolve tenant: %w", err)
 	}
