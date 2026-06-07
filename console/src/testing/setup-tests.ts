@@ -40,8 +40,15 @@ beforeEach(() => {
   if (!Element.prototype.releasePointerCapture) Element.prototype.releasePointerCapture = vi.fn()
   if (!Element.prototype.setPointerCapture) Element.prototype.setPointerCapture = vi.fn()
 
-  // SecretKeyDialog uses navigator.clipboard; jsdom has none.
-  Object.assign(navigator, {
-    clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+  // SecretKeyDialog uses navigator.clipboard; jsdom defines clipboard
+  // as a getter on Navigator.prototype, so instance-level defineProperty
+  // doesn't reliably take precedence. Patch the prototype getter to
+  // return a fresh stub each time the property is read.
+  const stub = { writeText: vi.fn().mockResolvedValue(undefined) }
+  Object.defineProperty(Object.getPrototypeOf(navigator), 'clipboard', {
+    configurable: true,
+    get() {
+      return stub
+    },
   })
 })

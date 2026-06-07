@@ -20,7 +20,9 @@ export const defaultMe = {
 }
 
 // API keys -----------------------------------------------------------------
-export const defaultApiKeysList = { keys: [] as unknown[] }
+// Field naming follows ListApiKeysResponse / CreateApiKeyResponse — `items`
+// on the list, plain shape on the create.
+export const defaultApiKeysList = { items: [] as unknown[] }
 export const defaultCreateApiKey = {
   id: 'k-new',
   label: 'fresh',
@@ -30,7 +32,8 @@ export const defaultCreateApiKey = {
 }
 
 // Notify targets -----------------------------------------------------------
-export const defaultNotifyTargetsList = { targets: [] as unknown[] }
+// Field naming follows ListNotifyTargetsResponse (`items`).
+export const defaultNotifyTargetsList = { items: [] as unknown[] }
 
 // Enrich config ------------------------------------------------------------
 export const defaultEnrichConfig = {
@@ -73,7 +76,7 @@ export const handlers = [
 
   http.get(`${BASE}/api-keys`, () => HttpResponse.json(defaultApiKeysList)),
   http.post(`${BASE}/api-keys`, () => HttpResponse.json(defaultCreateApiKey)),
-  http.post(`${BASE}/api-keys/:id/revoke`, () => new HttpResponse(null, { status: 204 })),
+  http.delete(`${BASE}/api-keys/:id`, () => new HttpResponse(null, { status: 204 })),
 
   http.get(`${BASE}/notify-targets`, () => HttpResponse.json(defaultNotifyTargetsList)),
   http.post(`${BASE}/notify-targets`, async ({ request }) =>
