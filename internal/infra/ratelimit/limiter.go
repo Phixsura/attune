@@ -24,6 +24,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // Limiter is the per-tenant rate limiter. Construct once, share via
@@ -43,13 +44,13 @@ type Limiter struct {
 // turn this on later" moments). onLimit fires once each time a
 // request is rejected — wire to a Prometheus counter.
 func New(perMinute, burst int, disabled bool, onLimit func(string)) *Limiter {
-	return &Limiter{
+	return ptrext.Of(Limiter{
 		perMinute: perMinute,
 		burst:     burst,
 		disabled:  disabled,
 		onLimit:   onLimit,
 		tenants:   make(map[string]*rate.Limiter),
-	}
+	})
 }
 
 // limiterFor returns (or lazily creates) the per-tenant limiter. Hot

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -39,7 +40,7 @@ type Evaluator struct {
 }
 
 func NewEvaluator(r *feedback.FeedbackRepo, tenants *tenant.TenantRepo, e *enrich.Enricher) *Evaluator {
-	return &Evaluator{repo: r, tenants: tenants, enricher: e}
+	return ptrext.Of(Evaluator{repo: r, tenants: tenants, enricher: e})
 }
 
 // DimScore aggregates one dim's matches across all sampled rows.
@@ -101,14 +102,14 @@ func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample
 		logext.Errorf(ctx, "[%s] sample failed,err:%+v", where, err.Error())
 		return nil, fmt.Errorf("sample: %w", err)
 	}
-	report := &EvalReport{
+	report := ptrext.Of(EvalReport{
 		Mode:        "consistency",
 		LabelSource: "ai-rerun",
 		GeneratedAt: time.Now(),
 		Since:       since,
 		SampleSize:  len(rows),
 		Dims:        map[string]DimScore{},
-	}
+	})
 	for _, r := range rows {
 		cfg := enrich.ClassifyConfig{TenantID: r.TenantID}
 		if ev.tenants != nil {
@@ -206,12 +207,12 @@ func (ev *Evaluator) ScoreHuman(ctx context.Context, tenantID string, r io.Reade
 			return nil, fmt.Errorf("csv missing column %q", col)
 		}
 	}
-	report := &EvalReport{
+	report := ptrext.Of(EvalReport{
 		Mode:        "score-human",
 		LabelSource: "human-labeled",
 		GeneratedAt: time.Now(),
 		Dims:        map[string]DimScore{},
-	}
+	})
 	for {
 		rec, err := cr.Read()
 		if err == io.EOF {

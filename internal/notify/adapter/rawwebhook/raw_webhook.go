@@ -16,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/notify/sig"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
@@ -71,13 +72,13 @@ func NewRawWebhookRouter(transport *notify.Transport, targets []notifytarget.Not
 		if timeout <= 0 {
 			timeout = 10 * time.Second
 		}
-		dests[t.TenantID][t.Audience] = &rawDestination{
+		dests[t.TenantID][t.Audience] = ptrext.Of(rawDestination{
 			url:     t.URL,
 			secret:  t.Secret,
 			timeout: timeout,
-		}
+		})
 	}
-	return &RawWebhookRouter{transport: transport, destinations: dests}
+	return ptrext.Of(RawWebhookRouter{transport: transport, destinations: dests})
 }
 
 // PushPool delivers s to the tenant's audience=pool destination (or
@@ -143,8 +144,7 @@ func (r *RawWebhookRouter) send(
 	err := r.transport.Send(ctx, label, build, checkRawResponse(label, s))
 	if err != nil {
 		dest.failures.Add(1)
-		msg := err.Error()
-		dest.lastError.Store(&msg)
+		dest.lastError.Store(ptrext.Of(err.Error()))
 		reason := "transport"
 		if errors.Is(err, notify.ErrTerminal) {
 			reason = "terminal"
@@ -155,8 +155,7 @@ func (r *RawWebhookRouter) send(
 			where, label, s.ID, reason, err.Error())
 		return err
 	}
-	now := time.Now()
-	dest.lastSuccess.Store(&now)
+	dest.lastSuccess.Store(ptrext.Of(time.Now()))
 	logext.Infof(ctx, "[%s] OK,label:%s,feedback_id:%d", where, label, s.ID)
 	return nil
 }

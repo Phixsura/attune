@@ -15,6 +15,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
@@ -26,7 +27,7 @@ type FeedbackRepo struct {
 }
 
 func NewFeedback(pool *pgxpool.Pool) *FeedbackRepo {
-	return &FeedbackRepo{pool: pool}
+	return ptrext.Of(FeedbackRepo{pool: pool})
 }
 
 // Insert creates one row and returns its new id. userID is the composed
@@ -130,7 +131,7 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 			return nil, fmt.Errorf("decode enrich dimensions for %d: %w", id, err)
 		}
 	}
-	return &in, nil
+	return ptrext.Of(in), nil
 }
 
 // markDoneSQL is the body of MarkDone[/Tx]. Extracted so both flavors

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/lark"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/ingest"
 )
@@ -40,11 +41,11 @@ func NewLarkHandler(
 	ingestor *ingest.Ingestor,
 	signingSecret, verificationToken, defaultTenantSlug string,
 ) (*LarkHandler, error) {
-	h := &LarkHandler{
+	h := ptrext.Of(LarkHandler{
 		signingSecret:     signingSecret,
 		verificationToken: verificationToken,
 		ingestor:          ingestor,
-	}
+	})
 	if signingSecret == "" {
 		return h, nil
 	}

@@ -14,14 +14,14 @@ import (
 // average IoU for multi).
 func FormatReport(rep *EvalReport) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# attune eval report · %s\n\n", rep.GeneratedAt.Format(time.RFC3339))
-	fmt.Fprintf(&b, "- mode: %s\n- label source: %s\n", rep.Mode, rep.LabelSource)
+	b.WriteString(fmt.Sprintf("# attune eval report · %s\n\n", rep.GeneratedAt.Format(time.RFC3339)))
+	b.WriteString(fmt.Sprintf("- mode: %s\n- label source: %s\n", rep.Mode, rep.LabelSource))
 	if !rep.Since.IsZero() {
-		fmt.Fprintf(&b, "- since: %s\n", rep.Since.Format(time.RFC3339))
+		b.WriteString(fmt.Sprintf("- since: %s\n", rep.Since.Format(time.RFC3339)))
 	}
-	fmt.Fprintf(&b, "- sample size: %d\n", rep.SampleSize)
+	b.WriteString(fmt.Sprintf("- sample size: %d\n", rep.SampleSize))
 	if rep.LLMCostYuan > 0 {
-		fmt.Fprintf(&b, "- LLM cost (est): ¥%.2f\n", rep.LLMCostYuan)
+		b.WriteString(fmt.Sprintf("- LLM cost (est): ¥%.2f\n", rep.LLMCostYuan))
 	}
 	if rep.SampleSize == 0 {
 		b.WriteString("\n(no rows sampled — widen --since or check enrichment_status='done' rows exist)\n")
@@ -35,11 +35,11 @@ func FormatReport(rep *EvalReport) string {
 		switch score.Kind {
 		case domain.DimSingle:
 			pct := 100.0 * float64(score.Match) / float64(score.Total)
-			fmt.Fprintf(&b, "| %s | single | match rate %.1f%% (%d/%d) | 80%% |\n",
-				name, pct, score.Match, score.Total)
+			b.WriteString(fmt.Sprintf("| %s | single | match rate %.1f%% (%d/%d) | 80%% |\n",
+				name, pct, score.Match, score.Total))
 		case domain.DimMulti:
 			avg := score.SumIoU / float64(score.Total)
-			fmt.Fprintf(&b, "| %s | multi | avg IoU %.2f | 0.75 |\n", name, avg)
+			b.WriteString(fmt.Sprintf("| %s | multi | avg IoU %.2f | 0.75 |\n", name, avg))
 		}
 	}
 	if len(rep.Mismatches) == 0 {
@@ -52,8 +52,8 @@ func FormatReport(rep *EvalReport) string {
 		if i >= 10 {
 			break
 		}
-		fmt.Fprintf(&b, "| %d | %s | %s |\n",
-			m.FeedbackID, summarizeDiffs(m.Diffs), truncateForReport(m.Content, 60))
+		b.WriteString(fmt.Sprintf("| %d | %s | %s |\n",
+			m.FeedbackID, summarizeDiffs(m.Diffs), truncateForReport(m.Content, 60)))
 	}
 	return b.String()
 }

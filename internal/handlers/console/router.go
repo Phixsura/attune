@@ -27,6 +27,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
 	"github.com/Phixsura/attune/internal/handlers/console/oauth"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // Re-exports so cmd/attune can keep a single `console.X` surface even
@@ -100,7 +101,7 @@ func NewRouter(
 	enrichConfig *enrichconfig.Handler,
 	devLogin http.Handler,
 ) *Router {
-	return &Router{
+	return ptrext.Of(Router{
 		signer:        signer,
 		oauth:         oauth,
 		me:            me,
@@ -110,7 +111,7 @@ func NewRouter(
 		usage:         usage,
 		enrichConfig:  enrichConfig,
 		devLogin:      devLogin,
-	}
+	})
 }
 
 func (r *Router) Mount() chi.Router {

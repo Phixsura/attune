@@ -9,6 +9,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -21,15 +22,15 @@ type Handler struct {
 }
 
 func NewHandler(svc *enrich.ConfigService) *Handler {
-	return &Handler{svc: svc}
+	return ptrext.Of(Handler{svc: svc})
 }
 
 func toProtoConfig(v enrich.View) *attunev1.EnrichConfig {
-	return &attunev1.EnrichConfig{
+	return ptrext.Of(attunev1.EnrichConfig{
 		PromptTemplate:        v.PromptTemplate,
 		DefaultPromptTemplate: enrich.DefaultPromptTemplate(),
 		Dimensions:            dimsToProto(v.Dimensions),
-	}
+	})
 }
 
 func dimsToProto(dims domain.DimensionSet) []*attunev1.Dimension {
@@ -38,14 +39,14 @@ func dimsToProto(dims domain.DimensionSet) []*attunev1.Dimension {
 	}
 	out := make([]*attunev1.Dimension, 0, len(dims))
 	for _, d := range dims {
-		out = append(out, &attunev1.Dimension{
+		out = append(out, ptrext.Of(attunev1.Dimension{
 			Name:        d.Name,
 			DisplayName: i18nToProto(d.DisplayName),
 			Kind:        string(d.Kind),
 			Taxonomy:    taxonomyToProto(d.Taxonomy),
 			UrgentSet:   d.UrgentSet,
 			Required:    d.Required,
-		})
+		}))
 	}
 	return out
 }
@@ -56,23 +57,23 @@ func taxonomyToProto(tax []domain.Taxonomy) []*attunev1.Taxonomy {
 	}
 	out := make([]*attunev1.Taxonomy, 0, len(tax))
 	for _, t := range tax {
-		out = append(out, &attunev1.Taxonomy{
+		out = append(out, ptrext.Of(attunev1.Taxonomy{
 			Value:       t.Value,
 			DisplayName: i18nToProto(t.DisplayName),
-		})
+		}))
 	}
 	return out
 }
 
 func i18nToProto(s domain.I18nString) *attunev1.I18NString {
 	if len(s) == 0 {
-		return &attunev1.I18NString{Entries: map[string]string{}}
+		return ptrext.Of(attunev1.I18NString{Entries: map[string]string{}})
 	}
 	entries := make(map[string]string, len(s))
 	for k, v := range s {
 		entries[k] = v
 	}
-	return &attunev1.I18NString{Entries: entries}
+	return ptrext.Of(attunev1.I18NString{Entries: entries})
 }
 
 func dimsFromProto(in []*attunev1.Dimension) domain.DimensionSet {
@@ -134,7 +135,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to read enrich config")
 		return
 	}
-	respond.Proto(w, http.StatusOK, &attunev1.GetEnrichConfigResponse{Config: toProtoConfig(v)})
+	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.GetEnrichConfigResponse{Config: toProtoConfig(v)}))
 }
 
 // Update handles PUT /fb/v1/console/enrich-config.
@@ -149,11 +150,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	in := enrich.View{Dimensions: dimsFromProto(req.GetDimensions())}
 	if req.PromptTemplate != nil {
-		t := strings.TrimSpace(*req.PromptTemplate)
+		t := strings.TrimSpace(ptrext.Indirect(req.PromptTemplate))
 		if t == "" {
 			in.PromptTemplate = nil
 		} else {
-			in.PromptTemplate = &t
+			in.PromptTemplate = ptrext.Of(t)
 		}
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,has_template:%t,dims_n:%d",
@@ -180,7 +181,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to read enrich config")
 		return
 	}
-	respond.Proto(w, http.StatusOK, &attunev1.UpdateEnrichConfigResponse{Config: toProtoConfig(v)})
+	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.UpdateEnrichConfigResponse{Config: toProtoConfig(v)}))
 }
 
 // Preview handles POST /fb/v1/console/enrich-config/preview.
@@ -208,7 +209,7 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "preview failed")
 		return
 	}
-	respond.Proto(w, http.StatusOK, &attunev1.PreviewEnrichPromptResponse{RenderedPrompt: rendered})
+	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.PreviewEnrichPromptResponse{RenderedPrompt: rendered}))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,sample_len:%d,rendered_len:%d",
 		where, auth.TenantID, len(sample), len(rendered))
 }

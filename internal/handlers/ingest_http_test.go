@@ -14,6 +14,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/apikey"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // fakeIngestor records the mapped input and returns a canned (id, err) so the
@@ -65,7 +66,7 @@ func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 // (Decision 1), camelCase status (Decision 2), and the proto body maps cleanly
 // into the domain input.
 func TestIngestHTTP_Success(t *testing.T) {
-	fake := &fakeIngestor{id: 4242}
+	fake := ptrext.Of(fakeIngestor{id: 4242})
 	rec := doIngest(t, ingestTestServer(fake),
 		`{"content":"hello","source":"web","sourceUser":"u","pageUrl":"/p"}`)
 
@@ -87,7 +88,7 @@ func TestIngestHTTP_Success(t *testing.T) {
 
 // An empty source defaults to "api" (behaviour preserved from the pre-proto handler).
 func TestIngestHTTP_SourceDefault(t *testing.T) {
-	fake := &fakeIngestor{id: 1}
+	fake := ptrext.Of(fakeIngestor{id: 1})
 	if rec := doIngest(t, ingestTestServer(fake), `{"content":"x"}`); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (%s)", rec.Code, rec.Body)
 	}
@@ -98,7 +99,7 @@ func TestIngestHTTP_SourceDefault(t *testing.T) {
 
 // Unknown fields are ignored end-to-end (Decision 6: DiscardUnknown).
 func TestIngestHTTP_DiscardUnknown(t *testing.T) {
-	rec := doIngest(t, ingestTestServer(&fakeIngestor{id: 1}), `{"content":"x","legacyExtra":42}`)
+	rec := doIngest(t, ingestTestServer(ptrext.Of(fakeIngestor{id: 1})), `{"content":"x","legacyExtra":42}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unknown field should be ignored; status = %d (%s)", rec.Code, rec.Body)
 	}
@@ -106,7 +107,7 @@ func TestIngestHTTP_DiscardUnknown(t *testing.T) {
 
 // Malformed JSON → 400 with the {"error": …} envelope.
 func TestIngestHTTP_InvalidJSON(t *testing.T) {
-	rec := doIngest(t, ingestTestServer(&fakeIngestor{}), `{not json`)
+	rec := doIngest(t, ingestTestServer(ptrext.Of(fakeIngestor{})), `{not json`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body)
 	}
@@ -117,7 +118,7 @@ func TestIngestHTTP_InvalidJSON(t *testing.T) {
 
 // A business (validation) error from the ingestor → 400 with the error message.
 func TestIngestHTTP_IngestError(t *testing.T) {
-	fake := &fakeIngestor{err: errors.New("content is required")}
+	fake := ptrext.Of(fakeIngestor{err: errors.New("content is required")})
 	rec := doIngest(t, ingestTestServer(fake), `{"content":""}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body)
@@ -131,7 +132,7 @@ func TestIngestHTTP_IngestError(t *testing.T) {
 func TestIngestHTTP_NoAPIKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(`{"content":"x"}`))
 	rec := httptest.NewRecorder()
-	ingestTestServer(&fakeIngestor{}).ServeHTTP(rec, req)
+	ingestTestServer(ptrext.Of(fakeIngestor{})).ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}

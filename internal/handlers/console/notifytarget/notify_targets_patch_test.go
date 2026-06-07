@@ -16,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // fakeNotifyRepo implements notifyTargetRepo for tests. Each method
@@ -41,8 +42,7 @@ func (f *fakeNotifyRepo) GetByID(_ context.Context, _ string, _ uuid.UUID) (*not
 }
 
 func (f *fakeNotifyRepo) UpdateByID(_ context.Context, _ string, _ uuid.UUID, t notifytarget.NotifyTarget) error {
-	tCopy := t
-	f.updateCalledWith = &tCopy
+	f.updateCalledWith = ptrext.Of(t)
 	return f.updateErr
 }
 
@@ -61,14 +61,14 @@ func authCtxRequest(method, body string, id uuid.UUID) *http.Request {
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", id.String())
 	ctx := context.WithValue(r.Context(), chi.RouteCtxKey, rctx)
-	ctx = session.WithAuthCtx(ctx, &session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"})
+	ctx = session.WithAuthCtx(ctx, ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}))
 	return r.WithContext(ctx)
 }
 
 func TestPatch_Happy(t *testing.T) {
 	id := uuid.New()
-	fake := &fakeNotifyRepo{
-		getRow: &notifytarget.NotifyTarget{
+	fake := ptrext.Of(fakeNotifyRepo{
+		getRow: ptrext.Of(notifytarget.NotifyTarget{
 			ID:              id,
 			TenantID:        "tenant-1",
 			DestinationType: "raw-webhook",
@@ -76,8 +76,8 @@ func TestPatch_Happy(t *testing.T) {
 			URL:             "https://example.com/old",
 			TimeoutSeconds:  10,
 			Disabled:        false,
-		},
-	}
+		}),
+	})
 	h := NewNotifyTargetsHandler(fake)
 
 	body := `{"url":"https://example.com/new","disabled":true}`
@@ -113,7 +113,7 @@ func TestPatch_Happy(t *testing.T) {
 
 func TestPatch_404_GetReturnsNotFound(t *testing.T) {
 	id := uuid.New()
-	fake := &fakeNotifyRepo{getErr: notifytarget.ErrNotifyTargetNotFound}
+	fake := ptrext.Of(fakeNotifyRepo{getErr: notifytarget.ErrNotifyTargetNotFound})
 	h := NewNotifyTargetsHandler(fake)
 
 	w := httptest.NewRecorder()
@@ -129,17 +129,17 @@ func TestPatch_404_GetReturnsNotFound(t *testing.T) {
 
 func TestPatch_409_UpdateConflict(t *testing.T) {
 	id := uuid.New()
-	fake := &fakeNotifyRepo{
-		getRow: &notifytarget.NotifyTarget{
+	fake := ptrext.Of(fakeNotifyRepo{
+		getRow: ptrext.Of(notifytarget.NotifyTarget{
 			ID:              id,
 			TenantID:        "tenant-1",
 			DestinationType: "raw-webhook",
 			Audience:        "pool",
 			URL:             "https://example.com/x",
 			TimeoutSeconds:  10,
-		},
+		}),
 		updateErr: notifytarget.ErrNotifyTargetConflict,
-	}
+	})
 	h := NewNotifyTargetsHandler(fake)
 
 	// Patch changes audience to "all" — would collide with sibling row.
@@ -156,7 +156,7 @@ func TestPatch_409_UpdateConflict(t *testing.T) {
 
 func TestPatch_BadJSON(t *testing.T) {
 	id := uuid.New()
-	fake := &fakeNotifyRepo{}
+	fake := ptrext.Of(fakeNotifyRepo{})
 	h := NewNotifyTargetsHandler(fake)
 
 	w := httptest.NewRecorder()

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
@@ -26,7 +27,7 @@ type ConfigService struct {
 }
 
 func NewConfigService(tenants *tenant.TenantRepo) *ConfigService {
-	return &ConfigService{tenants: tenants}
+	return ptrext.Of(ConfigService{tenants: tenants})
 }
 
 // View is the console-facing enrich config shape — exactly the
@@ -64,7 +65,7 @@ func (s *ConfigService) Get(ctx context.Context, tenantID string) (View, error) 
 func (s *ConfigService) Update(ctx context.Context, tenantID string, in View) error {
 	const where = "service.enrich.ConfigService.Update"
 	if in.PromptTemplate != nil {
-		if err := ValidatePromptTemplate(*in.PromptTemplate); err != nil {
+		if err := ValidatePromptTemplate(ptrext.Indirect(in.PromptTemplate)); err != nil {
 			return err
 		}
 	}

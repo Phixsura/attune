@@ -26,6 +26,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
@@ -133,11 +134,11 @@ func runServer() error {
 
 	go enricher.RunBackground(ctx, cfg.EnricherInterval, cfg.EnricherBatch)
 
-	srv := &http.Server{
+	srv := ptrext.Of(http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
-	}
+	})
 	slog.InfoContext(ctx, "attune server listening", "addr", srv.Addr)
 
 	errCh := make(chan error, 1)

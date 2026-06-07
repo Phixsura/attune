@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
@@ -65,7 +66,7 @@ type Enricher struct {
 // operators pointing at private gateways with aliased model names
 // don't have to fork the binary.
 func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient, model string) *Enricher {
-	return &Enricher{repo: r, llm: llm, model: model}
+	return ptrext.Of(Enricher{repo: r, llm: llm, model: model})
 }
 
 // SetNotifier wires the inline webhook fan-out (Lark). nil = no
@@ -76,7 +77,7 @@ func (e *Enricher) SetNotifier(n notify.Notifier) {
 		e.notifier.Store(nil)
 		return
 	}
-	e.notifier.Store(&n)
+	e.notifier.Store(ptrext.Of(n))
 }
 
 // SetOutbox wires at-least-once delivery for raw-webhook destinations.
@@ -134,7 +135,7 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 		if decision.FastEnriched == nil {
 			return e.runFullEnrich(ctx, id, row)
 		}
-		return e.persistFromTriage(ctx, id, row, *decision.FastEnriched)
+		return e.persistFromTriage(ctx, id, row, ptrext.Indirect(decision.FastEnriched))
 	default:
 		return e.runFullEnrich(ctx, id, row)
 	}
@@ -178,7 +179,7 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 		"is_urgent", enriched.IsUrgent,
 		"title", enriched.Title)
 	if n := e.notifier.Load(); n != nil {
-		go e.fanOut(snapshot, *n)
+		go e.fanOut(snapshot, ptrext.Indirect(n))
 	}
 	return nil
 }

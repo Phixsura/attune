@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -32,7 +33,9 @@ type TenantUserRepo struct {
 	pool *pgxpool.Pool
 }
 
-func NewTenantUserRepo(pool *pgxpool.Pool) *TenantUserRepo { return &TenantUserRepo{pool: pool} }
+func NewTenantUserRepo(pool *pgxpool.Pool) *TenantUserRepo {
+	return ptrext.Of(TenantUserRepo{pool: pool})
+}
 
 // Upsert idempotently inserts a tenant_user. If the (tenant_id, open_id)
 // pair already exists, name + avatar + last_seen_at are refreshed (the
@@ -85,7 +88,7 @@ func (r *TenantUserRepo) GetByID(ctx context.Context, id string) (*TenantUser, e
 	if err != nil {
 		return nil, fmt.Errorf("get tenant_user %s: %w", id, err)
 	}
-	return &u, nil
+	return ptrext.Of(u), nil
 }
 
 // TouchLastSeen is a fire-and-forget call on every authed request so we

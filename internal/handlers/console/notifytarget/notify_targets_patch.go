@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
@@ -76,21 +77,21 @@ func (h *NotifyTargetsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reuse Create's invariant checks on the post-merge state.
-	if err := validateNotifyCreate(&createNotifyRequest{
+	if err := validateNotifyCreate(ptrext.Of(createNotifyRequest{
 		DestinationType: cur.DestinationType,
 		Audience:        cur.Audience,
 		URL:             cur.URL,
 		Secret:          cur.Secret,
 		TimeoutSeconds:  cur.TimeoutSeconds,
 		Disabled:        cur.Disabled,
-	}); err != nil {
+	})); err != nil {
 		logext.Warnf(ctx, "[%s] reject: validation,tenant_id:%s,id:%s,err:%s",
 			where, auth.TenantID, id, err.Error())
 		respond.Error(ctx, w, http.StatusBadRequest, "validation", err.Error())
 		return
 	}
 
-	if err := h.repo.UpdateByID(ctx, auth.TenantID, id, *cur); err != nil {
+	if err := h.repo.UpdateByID(ctx, auth.TenantID, id, ptrext.Indirect(cur)); err != nil {
 		if errors.Is(err, notifytarget.ErrNotifyTargetConflict) {
 			logext.Warnf(ctx, "[%s] reject: conflict,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
@@ -111,6 +112,6 @@ func (h *NotifyTargetsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond.Proto(w, http.StatusOK, toNotifyProto(*cur))
+	respond.Proto(w, http.StatusOK, toNotifyProto(ptrext.Indirect(cur)))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s", where, auth.TenantID, id)
 }

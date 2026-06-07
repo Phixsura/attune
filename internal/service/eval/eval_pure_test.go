@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
@@ -166,7 +167,7 @@ func TestHasAnyHuman_AllEmpty(t *testing.T) {
 }
 
 func TestScoreRow_PerDimSingleAccuracy(t *testing.T) {
-	rep := &EvalReport{Dims: map[string]DimScore{}}
+	rep := ptrext.Of(EvalReport{Dims: map[string]DimScore{}})
 	old := feedback.SampleRow{ID: 1, Attrs: map[string]any{"type": "bug"}}
 	fresh := map[string]any{"type": "bug"}
 	dims := domain.DimensionSet{{Name: "type", Kind: domain.DimSingle}}
@@ -180,7 +181,7 @@ func TestScoreRow_PerDimSingleAccuracy(t *testing.T) {
 }
 
 func TestScoreRow_RecordsMismatchOnSingle(t *testing.T) {
-	rep := &EvalReport{Dims: map[string]DimScore{}}
+	rep := ptrext.Of(EvalReport{Dims: map[string]DimScore{}})
 	old := feedback.SampleRow{ID: 2, Attrs: map[string]any{"type": "bug"}}
 	fresh := map[string]any{"type": "feature"}
 	dims := domain.DimensionSet{{Name: "type", Kind: domain.DimSingle}}
@@ -198,7 +199,7 @@ func TestScoreRow_RecordsMismatchOnSingle(t *testing.T) {
 }
 
 func TestScoreRow_MultiIoUAccumulates(t *testing.T) {
-	rep := &EvalReport{Dims: map[string]DimScore{}}
+	rep := ptrext.Of(EvalReport{Dims: map[string]DimScore{}})
 	old := feedback.SampleRow{ID: 3, Attrs: map[string]any{"labels": []string{"a", "b"}}}
 	fresh := map[string]any{"labels": []string{"a", "b"}}
 	dims := domain.DimensionSet{{Name: "labels", Kind: domain.DimMulti}}
@@ -212,7 +213,7 @@ func TestScoreRow_MultiIoUAccumulates(t *testing.T) {
 }
 
 func TestScoreRow_MultiPartialOverlap(t *testing.T) {
-	rep := &EvalReport{Dims: map[string]DimScore{}}
+	rep := ptrext.Of(EvalReport{Dims: map[string]DimScore{}})
 	old := feedback.SampleRow{ID: 4, Attrs: map[string]any{"labels": []string{"a", "b"}}}
 	fresh := map[string]any{"labels": []string{"b", "c"}}
 	dims := domain.DimensionSet{{Name: "labels", Kind: domain.DimMulti}}

@@ -16,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/infra/lark"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	larkrepo "github.com/Phixsura/attune/internal/repo/lark"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
@@ -48,7 +49,7 @@ func NewOAuthHandler(
 	installs *larkrepo.LarkInstallRepo,
 	appID, baseURL string,
 ) *OAuthHandler {
-	return &OAuthHandler{
+	return ptrext.Of(OAuthHandler{
 		signer:       signer,
 		lark:         larkClient,
 		tenants:      tenants,
@@ -57,7 +58,7 @@ func NewOAuthHandler(
 		appID:        appID,
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		authorizeURL: "https://open.feishu.cn/open-apis/authen/v1/authorize",
-	}
+	})
 }
 
 // Start handles GET /fb/v1/console/install/start.
@@ -80,7 +81,7 @@ func (h *OAuthHandler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 	state := nonce + ":" + base64.RawURLEncoding.EncodeToString([]byte(postLogin))
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, ptrext.Of(http.Cookie{
 		Name:     session.OAuthStateCookie,
 		Value:    nonce,
 		Path:     "/fb/v1/console/install/",
@@ -88,7 +89,7 @@ func (h *OAuthHandler) Start(w http.ResponseWriter, r *http.Request) {
 		Secure:   !h.signer.Insecure(),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(session.OAuthStateTTL),
-	})
+	}))
 
 	q := url.Values{}
 	q.Set("app_id", h.appID)
@@ -126,10 +127,10 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Wipe the state cookie — it has served its purpose.
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, ptrext.Of(http.Cookie{
 		Name: session.OAuthStateCookie, Value: "", Path: "/fb/v1/console/install/",
 		HttpOnly: true, Secure: !h.signer.Insecure(), SameSite: http.SameSiteLaxMode, MaxAge: -1,
-	})
+	}))
 
 	// 1-5. Exchange code, upsert tenant/user/install.
 	tenantID, userID, created, err := h.resolveAndUpsert(ctx, code)
@@ -181,13 +182,13 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "redirect failed")
 		return
 	}
-	dst := &url.URL{
+	dst := ptrext.Of(url.URL{
 		Scheme:   base.Scheme,
 		Host:     base.Host,
 		Path:     rel.Path,
 		RawQuery: rel.RawQuery,
 		Fragment: rel.Fragment,
-	}
+	})
 	http.Redirect(w, r, dst.String(), http.StatusFound)
 }
 
@@ -222,7 +223,7 @@ func (h *OAuthHandler) resolveAndUpsert(ctx context.Context, code string) (tenan
 	}
 	// 5. Persist Lark install (tokens for outbound API calls).
 	now := time.Now()
-	if err := h.installs.Upsert(ctx, &larkrepo.LarkInstall{
+	if err := h.installs.Upsert(ctx, ptrext.Of(larkrepo.LarkInstall{
 		TenantID:              tenantID,
 		LarkTenantKey:         tok.TenantKey,
 		AppID:                 h.appID,
@@ -231,7 +232,7 @@ func (h *OAuthHandler) resolveAndUpsert(ctx context.Context, code string) (tenan
 		RefreshToken:          tok.RefreshToken,
 		RefreshTokenExpiresAt: now.Add(time.Duration(tok.RefreshExpiresIn) * time.Second),
 		Scopes:                tok.Scope,
-	}); err != nil {
+	})); err != nil {
 		return "", "", false, fmt.Errorf("install_upsert_failed")
 	}
 	return tenantID, userID, created, nil

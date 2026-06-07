@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
@@ -85,7 +86,7 @@ func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithResource(res),
 			sdktrace.WithSampler(sdktrace.AlwaysSample()),
-			sdktrace.WithIDGenerator(&ReadableIDGenerator{}), // timestamp-prefix trace_id
+			sdktrace.WithIDGenerator(ptrext.Of(ReadableIDGenerator{})), // timestamp-prefix trace_id
 			// No SpanProcessor — ended spans are discarded.
 		)
 		otel.SetTracerProvider(tp)
@@ -117,7 +118,7 @@ func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
 		sdktrace.WithResource(res),
 		// Small fleet — sample everything. Move to ParentBased(TraceIDRatioBased(...)) when costs warrant.
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithIDGenerator(&ReadableIDGenerator{}), // timestamp-prefix trace_id
+		sdktrace.WithIDGenerator(ptrext.Of(ReadableIDGenerator{})), // timestamp-prefix trace_id
 	)
 	otel.SetTracerProvider(tp)
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -71,21 +72,21 @@ func runEval(args []string) error {
 	enricher := enrich.NewEnricher(feedbackRepo, llm, cfg.LLMModel)
 	evaluator := eval.NewEvaluator(feedbackRepo, tenant.NewTenant(pool), enricher)
 
-	switch *mode {
+	switch ptrext.Indirect(mode) {
 	case "consistency":
-		return runEvalConsistency(ctx, evaluator, *since, *sample, *output)
+		return runEvalConsistency(ctx, evaluator, ptrext.Indirect(since), ptrext.Indirect(sample), ptrext.Indirect(output))
 	case "export-for-human":
-		if *tenantID == "" {
+		if ptrext.Indirect(tenantID) == "" {
 			return fmt.Errorf("--tenant is required for export-for-human (dim set is per-tenant)")
 		}
-		return runEvalExport(ctx, evaluator, *tenantID, *since, *sample, *output)
+		return runEvalExport(ctx, evaluator, ptrext.Indirect(tenantID), ptrext.Indirect(since), ptrext.Indirect(sample), ptrext.Indirect(output))
 	case "score-human":
-		if *tenantID == "" {
+		if ptrext.Indirect(tenantID) == "" {
 			return fmt.Errorf("--tenant is required for score-human (dim set is per-tenant)")
 		}
-		return runEvalScore(evaluator, *tenantID, *input, *output)
+		return runEvalScore(evaluator, ptrext.Indirect(tenantID), ptrext.Indirect(input), ptrext.Indirect(output))
 	default:
-		return fmt.Errorf("unknown --mode %q", *mode)
+		return fmt.Errorf("unknown --mode %q", ptrext.Indirect(mode))
 	}
 }
 

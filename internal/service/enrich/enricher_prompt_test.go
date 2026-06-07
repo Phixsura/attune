@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func sevDim() domain.Dimension {
@@ -45,9 +46,8 @@ func TestRenderPrompt_SubstitutesBothTokens(t *testing.T) {
 }
 
 func TestRenderPrompt_CustomTemplateRespected(t *testing.T) {
-	tmpl := "custom: {{content}} | dims:\n{{dimensions}}"
 	cfg := ClassifyConfig{
-		PromptTemplate: &tmpl,
+		PromptTemplate: ptrext.Of("custom: {{content}} | dims:\n{{dimensions}}"),
 		Dimensions:     domain.DimensionSet{sevDim()},
 	}
 	out := renderPrompt(cfg, "hi")

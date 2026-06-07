@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // APIKeyRepo wraps the external_api_keys table.
@@ -20,7 +21,7 @@ type APIKeyRepo struct {
 }
 
 func NewAPIKey(pool *pgxpool.Pool) *APIKeyRepo {
-	return &APIKeyRepo{pool: pool}
+	return ptrext.Of(APIKeyRepo{pool: pool})
 }
 
 // APIKeyRow is what LookupByHash returns. Callers must hmac-compare
@@ -75,7 +76,7 @@ func (r *APIKeyRepo) LookupByHash(ctx context.Context, hash []byte) (*APIKeyRow,
 	if err != nil {
 		return nil, fmt.Errorf("lookup api key: %w", err)
 	}
-	return &row, nil
+	return ptrext.Of(row), nil
 }
 
 // TouchLastUsed bumps last_used_at to NOW. Fire-and-forget from

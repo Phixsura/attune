@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
@@ -22,7 +23,7 @@ type NotifyTargetRepo struct {
 }
 
 func NewNotifyTarget(pool *pgxpool.Pool) *NotifyTargetRepo {
-	return &NotifyTargetRepo{pool: pool}
+	return ptrext.Of(NotifyTargetRepo{pool: pool})
 }
 
 // Destination types — keep in lockstep with the CHECK constraint in

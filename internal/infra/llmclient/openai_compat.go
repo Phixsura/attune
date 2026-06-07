@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // openaiHTTPTimeout — OpenAI-compatible endpoint HTTP timeout. 60s
@@ -54,14 +55,14 @@ func NewOpenAICompat(baseURL, apiKey string) (*OpenAICompatBackend, error) {
 	trimmed := strings.TrimRight(baseURL, "/")
 	logext.Infof(context.Background(), "[%s] OK,base_url:%s,api_key_set:%t",
 		where, trimmed, apiKey != "")
-	return &OpenAICompatBackend{
+	return ptrext.Of(OpenAICompatBackend{
 		baseURL: trimmed,
 		apiKey:  apiKey,
-		client: &http.Client{
+		client: ptrext.Of(http.Client{
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 			Timeout:   openaiHTTPTimeout,
-		},
-	}, nil
+		}),
+	}), nil
 }
 
 // Close is a no-op — net/http has nothing to release at the client
@@ -133,14 +134,14 @@ func (b *OpenAICompatBackend) Complete(
 		body.MaxTokens = req.MaxTokens
 	}
 	if req.Schema != nil {
-		body.ResponseFormat = &openaiResponseFormat{
+		body.ResponseFormat = ptrext.Of(openaiResponseFormat{
 			Type: "json_schema",
-			JSONSchema: &openaiJSONSchema{
+			JSONSchema: ptrext.Of(openaiJSONSchema{
 				Name:   req.Schema.Name,
 				Strict: true,
 				Schema: req.Schema.Schema,
-			},
-		}
+			}),
+		})
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {

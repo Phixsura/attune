@@ -19,6 +19,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
@@ -61,9 +62,9 @@ func Proto(w http.ResponseWriter, status int, m proto.Message) {
 // function — the previous {"error":"..."} shape from apikey middleware
 // and similar ad-hoc handlers is the bug class this exists to prevent.
 func Error(ctx context.Context, w http.ResponseWriter, status int, code, message string) {
-	Proto(w, status, &attunev1.ErrorResponse{
+	Proto(w, status, ptrext.Of(attunev1.ErrorResponse{
 		Code:      code,
 		Message:   message,
 		RequestId: middleware.GetReqID(ctx),
-	})
+	}))
 }

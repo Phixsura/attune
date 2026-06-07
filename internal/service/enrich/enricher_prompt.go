@@ -24,6 +24,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // defaultPromptTmpl is the built-in classification prompt. Tokens
@@ -88,8 +89,8 @@ func (c ClassifyConfig) HasConstrained() bool {
 // substitution.
 func renderPrompt(cfg ClassifyConfig, content string) string {
 	body := defaultPromptTmpl
-	if cfg.PromptTemplate != nil && *cfg.PromptTemplate != "" {
-		body = *cfg.PromptTemplate
+	if cfg.PromptTemplate != nil && ptrext.Indirect(cfg.PromptTemplate) != "" {
+		body = ptrext.Indirect(cfg.PromptTemplate)
 	}
 	return strings.NewReplacer(
 		"{{content}}", content,
@@ -111,12 +112,12 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 	}
 	var b strings.Builder
 	for _, d := range dims {
-		fmt.Fprintf(&b, " // %s (%s)\n", d.Name, d.Kind)
+		b.WriteString(fmt.Sprintf(" // %s (%s)\n", d.Name, d.Kind))
 		if len(d.Taxonomy) == 0 {
 			if d.Kind == domain.DimMulti {
-				fmt.Fprintf(&b, " \"%s\": [/* freeform: any short string labels */],\n", d.Name)
+				b.WriteString(fmt.Sprintf(" \"%s\": [/* freeform: any short string labels */],\n", d.Name))
 			} else {
-				fmt.Fprintf(&b, " \"%s\": \"...\",\n", d.Name)
+				b.WriteString(fmt.Sprintf(" \"%s\": \"...\",\n", d.Name))
 			}
 			continue
 		}
@@ -135,11 +136,11 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 			}
 		}
 		if d.Kind == domain.DimSingle {
-			fmt.Fprintf(&b, " // pick one: %s\n", strings.Join(opts, " | "))
-			fmt.Fprintf(&b, " \"%s\": \"<one value>\",\n", d.Name)
+			b.WriteString(fmt.Sprintf(" // pick one: %s\n", strings.Join(opts, " | ")))
+			b.WriteString(fmt.Sprintf(" \"%s\": \"<one value>\",\n", d.Name))
 		} else {
-			fmt.Fprintf(&b, " // pick zero or more: %s\n", strings.Join(opts, " | "))
-			fmt.Fprintf(&b, " \"%s\": [/* values */],\n", d.Name)
+			b.WriteString(fmt.Sprintf(" // pick zero or more: %s\n", strings.Join(opts, " | ")))
+			b.WriteString(fmt.Sprintf(" \"%s\": [/* values */],\n", d.Name))
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
@@ -173,7 +174,7 @@ func buildEnrichSchema(dims domain.DimensionSet) *llmclient.OutputSchema {
 		props[d.Name] = dimPropertySchema(d)
 		required = append(required, d.Name)
 	}
-	return &llmclient.OutputSchema{
+	return ptrext.Of(llmclient.OutputSchema{
 		Name: "attune_enriched_v2",
 		Schema: map[string]any{
 			"type":                 "object",
@@ -181,7 +182,7 @@ func buildEnrichSchema(dims domain.DimensionSet) *llmclient.OutputSchema {
 			"required":             required,
 			"additionalProperties": false,
 		},
-	}
+	})
 }
 
 // dimPropertySchema renders one Dimension as a JSON-Schema property.

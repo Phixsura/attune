@@ -12,6 +12,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
@@ -26,7 +27,7 @@ type Ingestor struct {
 }
 
 func NewIngestor(r *feedback.FeedbackRepo, e *enrich.Enricher) *Ingestor {
-	return &Ingestor{repo: r, enricher: e}
+	return ptrext.Of(Ingestor{repo: r, enricher: e})
 }
 
 // IngestRow validates input, persists it, and fires off best-effort

@@ -21,6 +21,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/observability"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
@@ -45,9 +46,9 @@ func main() {
 	// Full rationale: docs/observability-trace-design.md.
 	var inner slog.Handler
 	if os.Getenv("ENV") == "dev" {
-		inner = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+		inner = slog.NewTextHandler(os.Stdout, ptrext.Of(slog.HandlerOptions{Level: slog.LevelInfo}))
 	} else {
-		inner = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+		inner = slog.NewJSONHandler(os.Stdout, ptrext.Of(slog.HandlerOptions{Level: slog.LevelInfo}))
 	}
 	slog.SetDefault(slog.New(observability.NewTraceIDHandler(inner)))
 
@@ -98,7 +99,7 @@ func runKeys(args []string) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	if *tenantSlug == "" {
+	if ptrext.Indirect(tenantSlug) == "" {
 		return fmt.Errorf("--tenant is required")
 	}
 
@@ -114,16 +115,16 @@ func runKeys(args []string) error {
 	}
 	defer pool.Close()
 
-	tenantID, err := tenant.NewTenant(pool).ResolveSlug(ctx, *tenantSlug)
+	tenantID, err := tenant.NewTenant(pool).ResolveSlug(ctx, ptrext.Indirect(tenantSlug))
 	if errors.Is(err, tenant.ErrTenantNotFound) {
-		return fmt.Errorf("tenant slug %q not found or inactive", *tenantSlug)
+		return fmt.Errorf("tenant slug %q not found or inactive", ptrext.Indirect(tenantSlug))
 	}
 	if err != nil {
 		return err
 	}
 
 	svc := apikey.NewAPIKeys(apikeyrepo.NewAPIKey(pool))
-	raw, keyID, err := svc.Issue(ctx, tenantID, *label)
+	raw, keyID, err := svc.Issue(ctx, tenantID, ptrext.Indirect(label))
 	if err != nil {
 		return err
 	}
@@ -134,6 +135,6 @@ func runKeys(args []string) error {
  id: %s
 
 Store this key now — it is not recoverable.
-`, *tenantSlug, tenantID, raw, *label, keyID)
+`, ptrext.Indirect(tenantSlug), tenantID, raw, ptrext.Indirect(label), keyID)
 	return nil
 }

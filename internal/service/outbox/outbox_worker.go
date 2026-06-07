@@ -10,6 +10,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
@@ -36,14 +37,14 @@ func NewOutboxWorker(
 	targets *notifytarget.NotifyTargetRepo,
 	transport *notify.Transport,
 ) *OutboxWorker {
-	return &OutboxWorker{
+	return ptrext.Of(OutboxWorker{
 		outbox:       outbox,
 		targets:      targets,
 		transport:    transport,
 		pollInterval: 5 * time.Second,
 		batchSize:    10,
 		maxAttempts:  5,
-	}
+	})
 }
 
 // Configure overrides defaults. nil-valued fields keep their default.

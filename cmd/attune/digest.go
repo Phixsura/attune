@@ -9,6 +9,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -43,7 +44,7 @@ func runDigestSend(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *slug == "" {
+	if ptrext.Indirect(slug) == "" {
 		return errors.New("--tenant is required")
 	}
 
@@ -60,7 +61,7 @@ func runDigestSend(args []string) error {
 	defer pool.Close()
 
 	tenants := tenant.NewTenant(pool)
-	tenantID, err := tenants.ResolveSlug(ctx, *slug)
+	tenantID, err := tenants.ResolveSlug(ctx, ptrext.Indirect(slug))
 	if err != nil {
 		return fmt.Errorf("resolve tenant: %w", err)
 	}

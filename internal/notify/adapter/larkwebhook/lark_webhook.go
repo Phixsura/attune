@@ -24,6 +24,7 @@ import (
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/notify/sig"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // LarkWebhook delivers Snapshot payloads to one or two Lark group bot
@@ -47,13 +48,13 @@ type LarkWebhook struct {
 // convention (duplicate cards would spam the chat). 's raw
 // webhook flips on DefaultRetry.
 func NewLarkWebhook(poolURL, poolSecret, radarURL, radarSecret string) *LarkWebhook {
-	return &LarkWebhook{
+	return ptrext.Of(LarkWebhook{
 		poolURL:     poolURL,
 		poolSecret:  poolSecret,
 		radarURL:    radarURL,
 		radarSecret: radarSecret,
 		transport:   notify.NewTransport(nil, notify.NoRetry()),
-	}
+	})
 }
 
 // PoolEnabled / RadarEnabled report whether each destination is wired.

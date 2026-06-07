@@ -13,6 +13,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
@@ -54,7 +55,7 @@ func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedbac
 		"attrs", enriched.Attrs,
 		"is_urgent", enriched.IsUrgent)
 	if n := e.notifier.Load(); n != nil {
-		go e.fanOut(snapshot, *n)
+		go e.fanOut(snapshot, ptrext.Indirect(n))
 	}
 	return nil
 }

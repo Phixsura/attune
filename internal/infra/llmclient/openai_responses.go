@@ -13,6 +13,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // OpenAIResponsesBackend posts to OpenAI's /v1/responses endpoint via
@@ -41,10 +42,10 @@ func NewOpenAIResponses(baseURL, apiKey string) (*OpenAIResponsesBackend, error)
 	if apiKey == "" {
 		return nil, fmt.Errorf("openai-responses backend: api_key is required")
 	}
-	httpClient := &http.Client{
+	httpClient := ptrext.Of(http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 		Timeout:   openaiHTTPTimeout,
-	}
+	})
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 		option.WithHTTPClient(httpClient),
@@ -61,7 +62,7 @@ func NewOpenAIResponses(baseURL, apiKey string) (*OpenAIResponsesBackend, error)
 	}
 	logext.Infof(context.Background(), "[%s] OK,base_url:%s,api_key_set:%t",
 		where, baseURL, apiKey != "")
-	return &OpenAIResponsesBackend{client: openai.NewClient(opts...)}, nil
+	return ptrext.Of(OpenAIResponsesBackend{client: openai.NewClient(opts...)}), nil
 }
 
 // Close is a no-op — the SDK uses an *http.Client we don't need to

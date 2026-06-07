@@ -9,6 +9,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
@@ -38,7 +39,7 @@ func runTenantCreate(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *slug == "" {
+	if ptrext.Indirect(slug) == "" {
 		return fmt.Errorf("--slug is required")
 	}
 
@@ -55,7 +56,7 @@ func runTenantCreate(args []string) error {
 	defer pool.Close()
 
 	tenants := tenant.NewTenant(pool)
-	id, err := tenants.Create(ctx, *slug, *name)
+	id, err := tenants.Create(ctx, ptrext.Indirect(slug), ptrext.Indirect(name))
 	if errors.Is(err, tenant.ErrTenantSlugTaken) {
 		return err
 	}
@@ -70,6 +71,6 @@ func runTenantCreate(args []string) error {
 
 Next:
  attune keys issue --tenant %s [--label <label>]
-`, *slug, *name, id, *slug)
+`, ptrext.Indirect(slug), ptrext.Indirect(name), id, ptrext.Indirect(slug))
 	return nil
 }

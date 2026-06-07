@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // AttrFilter is one per-dim filter in a console list query. The Dim
@@ -84,7 +85,7 @@ func (r *FeedbackRepo) ListForConsole(
 		where += " AND enriched_attrs @> " + addArg(clause) + "::jsonb"
 	}
 	if opts.Urgent != nil {
-		where += " AND is_urgent = " + addArg(*opts.Urgent)
+		where += " AND is_urgent = " + addArg(ptrext.Indirect(opts.Urgent))
 	}
 	if opts.Q != "" {
 		p := addArg("%" + opts.Q + "%")
@@ -187,5 +188,5 @@ func (r *FeedbackRepo) GetForConsole(
 			where, tenantID, id, err.Error())
 		return nil, fmt.Errorf("get feedback for console: %w", err)
 	}
-	return &row, nil
+	return ptrext.Of(row), nil
 }

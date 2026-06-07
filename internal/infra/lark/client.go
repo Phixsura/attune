@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // upstreamBodyLogCap caps the bytes logged when echoing a Lark API
@@ -53,12 +54,12 @@ type Client struct {
 }
 
 func New(appID, appSecret string) *Client {
-	return &Client{
-		httpClient: &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport), Timeout: 10 * time.Second},
+	return ptrext.Of(Client{
+		httpClient: ptrext.Of(http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport), Timeout: 10 * time.Second}),
 		baseURL:    defaultBase,
 		appID:      appID,
 		appSecret:  appSecret,
-	}
+	})
 }
 
 // UserTokenResponse is the decoded body of the OIDC exchange. Attune
@@ -119,7 +120,7 @@ func (c *Client) ExchangeUserCode(ctx context.Context, code string) (*UserTokenR
 	}
 	logext.Infof(ctx, "[%s] OK,open_id:%s,tenant_key:%s", where,
 		resp.Data.OpenID, resp.Data.TenantKey)
-	return &UserTokenResponse{
+	return ptrext.Of(UserTokenResponse{
 		AccessToken:      resp.Data.AccessToken,
 		AccessExpiresIn:  resp.Data.ExpiresIn,
 		RefreshToken:     resp.Data.RefreshToken,
@@ -127,7 +128,7 @@ func (c *Client) ExchangeUserCode(ctx context.Context, code string) (*UserTokenR
 		OpenID:           resp.Data.OpenID,
 		TenantKey:        resp.Data.TenantKey,
 		Scope:            resp.Data.Scope,
-	}, nil
+	}), nil
 }
 
 // GetUserInfo uses a user_access_token (NOT app_access_token) to fetch
@@ -170,12 +171,12 @@ func (c *Client) GetUserInfo(ctx context.Context, userAccessToken string) (*User
 		return nil, fmt.Errorf("lark user_info: code=%d msg=%q", body.Code, body.Msg)
 	}
 	logext.Infof(ctx, "[%s] OK,open_id:%s,name:%s", where, body.Data.OpenID, body.Data.Name)
-	return &UserInfo{
+	return ptrext.Of(UserInfo{
 		OpenID:    body.Data.OpenID,
 		Name:      body.Data.Name,
 		AvatarURL: body.Data.AvatarURL,
 		Email:     body.Data.Email,
-	}, nil
+	}), nil
 }
 
 // truncateBytes truncates a body to `limit` bytes for log emission.

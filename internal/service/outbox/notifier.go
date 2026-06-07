@@ -13,6 +13,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // MultiNotifier fans one Push call out to every wired member. Per-
@@ -35,7 +36,7 @@ func NewMultiNotifier(members ...notify.Notifier) *MultiNotifier {
 			live = append(live, m)
 		}
 	}
-	return &MultiNotifier{members: live}
+	return ptrext.Of(MultiNotifier{members: live})
 }
 
 // PushPool fans out PushPool to every member. Returns errors.Join of

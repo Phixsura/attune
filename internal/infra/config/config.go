@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 const (
@@ -138,11 +139,11 @@ func Load() (*Config, error) {
 		logext.Errorf(ctx, "[%s] read file failed,path:%s,err:%+v", where, path, err.Error())
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
-	if err := applyEnvOverrides(&yc); err != nil {
+	if err := applyEnvOverrides(&yc); err != nil { // ptrext:allow out-param
 		logext.Errorf(ctx, "[%s] env overrides failed,err:%+v", where, err.Error())
 		return nil, err
 	}
-	c := &Config{
+	c := ptrext.Of(Config{
 		Port:                      yc.Port,
 		DatabaseURL:               yc.DatabaseURL,
 		LLMProtocol:               yc.LLMProtocol,
@@ -167,7 +168,7 @@ func Load() (*Config, error) {
 		RateLimitPerMinute:        yc.RateLimitPerMinute,
 		RateLimitBurst:            yc.RateLimitBurst,
 		RateLimitDisabled:         yc.RateLimitDisabled,
-	}
+	})
 	// defaults — extracted to keep Load's CCN ≤ 15 (§1).
 	c.applyDefaults()
 

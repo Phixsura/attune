@@ -14,6 +14,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -25,7 +26,7 @@ type TraceIDHandler struct {
 
 // NewTraceIDHandler wraps an existing slog.Handler.
 func NewTraceIDHandler(h slog.Handler) *TraceIDHandler {
-	return &TraceIDHandler{Handler: h}
+	return ptrext.Of(TraceIDHandler{Handler: h})
 }
 
 func (h *TraceIDHandler) Handle(ctx context.Context, r slog.Record) error {
@@ -40,9 +41,9 @@ func (h *TraceIDHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (h *TraceIDHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &TraceIDHandler{Handler: h.Handler.WithAttrs(attrs)}
+	return ptrext.Of(TraceIDHandler{Handler: h.Handler.WithAttrs(attrs)})
 }
 
 func (h *TraceIDHandler) WithGroup(name string) slog.Handler {
-	return &TraceIDHandler{Handler: h.Handler.WithGroup(name)}
+	return ptrext.Of(TraceIDHandler{Handler: h.Handler.WithGroup(name)})
 }

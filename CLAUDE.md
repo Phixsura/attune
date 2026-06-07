@@ -22,6 +22,7 @@ AI assistants (Claude Code, Cursor, etc.) working on this repository.
 | Internal info | 0 leaks (IPs, /opt paths, brand names) | grep |
 | Outbound HTTP clients | must wrap with `otelhttp.NewTransport` | `scripts/lint-slog.sh` Rule 3 |
 | Logging | `logext.*` + `ctx` first | `scripts/lint-slog.sh` Rule 1 |
+| Raw pointer ops | 0 bare `*p` deref / `&x` address-of (use `internal/pkg/ptrext`) | `scripts/lint-rawptr.sh` |
 
 The pre-commit hook enforces a subset locally; CI enforces all. Red gates =
 PR cannot merge.
@@ -146,6 +147,43 @@ For the full layout, see [`README.md`](README.md).
   naming pattern (`attune_<area>_<thing>_<unit>`).
 - Sensitive fields (API keys, secrets, raw token values) are never logged
   in clear text. Hash or `truncate()` them at the call site.
+
+---
+
+## 7b · Pointer hygiene — `internal/pkg/ptrext`
+
+Reading and creating pointers goes through `internal/pkg/ptrext`. Bare
+`*p` dereference and `&x` address-of are flagged by `scripts/lint-rawptr.sh`
+and blocked in CI.
+
+| Pattern | Use |
+|---|---|
+| `s := V; obj.F = &s` | `obj.F = ptrext.Of(V)` |
+| `&MyStruct{…}` | `ptrext.Of(MyStruct{…})` |
+| `v := *p` | `v := ptrext.Indirect(p)` (nil → zero) |
+| `if p != nil { x = *p } else { x = fb }` | `x := ptrext.IndirectOr(p, fb)` |
+
+Cases the lint explicitly allows — wrapping would break correctness, so
+they stay raw:
+
+- `*T` in any **type** position (params / return / struct field / type
+  assertion / method receiver).
+- `*p = v` on the LHS of an assignment (Go has no expression form for
+  "addressable indirect").
+- `&xs[i]` addressing a slice element.
+- `&x` passed to a known **out-parameter** API (`json.Unmarshal`,
+  `*Row.Scan`, `flag.*Var`, `errors.As`, `encoding/binary.Read`,
+  attune's `postJSON`, …). The matched callee name list is in
+  `cmd/lint-rawptr/main.go` — add new helpers there rather than
+  per-call markers.
+
+When wrapping would copy an identity-bearing value (a `sync.Mutex`
+embedded in a proto message, a `strings.Builder` you're still writing
+to, a captured `*[]byte` write-back slot), escape per-line with
+`// ptrext:allow <one-word reason>`. For files where the whole pattern
+is endemic — config-binding tables, test mock fixtures — use the
+file-level directive `// ptrext:file-allow <one-line reason>` at the
+top of the file.
 
 ---
 

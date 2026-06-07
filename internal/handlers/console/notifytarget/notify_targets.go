@@ -14,6 +14,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
@@ -34,12 +35,12 @@ type NotifyTargetsHandler struct {
 }
 
 func NewNotifyTargetsHandler(r notifyTargetRepo) *NotifyTargetsHandler {
-	return &NotifyTargetsHandler{repo: r}
+	return ptrext.Of(NotifyTargetsHandler{repo: r})
 }
 
 // toNotifyProto drops Secret (write-only) + TenantID (known via session).
 func toNotifyProto(row notifytarget.NotifyTarget) *attunev1.NotifyTarget {
-	t := &attunev1.NotifyTarget{
+	t := ptrext.Of(attunev1.NotifyTarget{
 		Id:              row.ID.String(),
 		DestinationType: row.DestinationType,
 		Audience:        row.Audience,
@@ -48,10 +49,9 @@ func toNotifyProto(row notifytarget.NotifyTarget) *attunev1.NotifyTarget {
 		Disabled:        row.Disabled,
 		CreatedAt:       row.CreatedAt.UTC().Format(time.RFC3339),
 		LastError:       row.LastError,
-	}
+	})
 	if row.LastFailureAt != nil {
-		s := row.LastFailureAt.UTC().Format(time.RFC3339)
-		t.LastFailureAt = &s
+		t.LastFailureAt = ptrext.Of(row.LastFailureAt.UTC().Format(time.RFC3339))
 	}
 	return t
 }
@@ -74,7 +74,7 @@ func (h *NotifyTargetsHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		items = append(items, toNotifyProto(row))
 	}
-	respond.Proto(w, http.StatusOK, &attunev1.ListNotifyTargetsResponse{Items: items})
+	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.ListNotifyTargetsResponse{Items: items}))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
 }
 
@@ -105,14 +105,14 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "request body is not valid JSON")
 		return
 	}
-	nreq := &createNotifyRequest{
+	nreq := ptrext.Of(createNotifyRequest{
 		DestinationType: req.GetDestinationType(),
 		Audience:        req.GetAudience(),
 		URL:             req.GetUrl(),
 		Secret:          req.GetSecret(),
 		TimeoutSeconds:  int(req.GetTimeoutSeconds()),
 		Disabled:        req.GetDisabled(),
-	}
+	})
 	if err := validateNotifyCreate(nreq); err != nil {
 		logext.Warnf(ctx, "[%s] reject: validation,tenant_id:%s,err:%s",
 			where, auth.TenantID, err.Error())

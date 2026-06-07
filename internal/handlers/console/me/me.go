@@ -8,6 +8,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
@@ -23,7 +24,7 @@ type MeHandler struct {
 }
 
 func NewMeHandler(signer *session.Signer, tenants *tenant.TenantRepo, users *tenant.TenantUserRepo) *MeHandler {
-	return &MeHandler{signer: signer, tenants: tenants, users: users}
+	return ptrext.Of(MeHandler{signer: signer, tenants: tenants, users: users})
 }
 
 // Me handles GET /fb/v1/console/me.
@@ -65,24 +66,24 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 		slog.DebugContext(ctx, "/me: touch last_seen", "err", err)
 	}
 
-	me := &attunev1.GetMeResponse{
-		Tenant: &attunev1.Tenant{
+	me := ptrext.Of(attunev1.GetMeResponse{
+		Tenant: ptrext.Of(attunev1.Tenant{
 			Id:            tenantRow.ID,
 			Slug:          tenantRow.Slug,
 			Name:          tenantRow.Name,
 			LarkTenantKey: tenantRow.LarkTenantKey,
 			Locale:        tenantRow.Locale,
 			Timezone:      tenantRow.Timezone,
-		},
-		User: &attunev1.SessionUser{
+		}),
+		User: ptrext.Of(attunev1.SessionUser{
 			OpenId: user.OpenID,
 			Name:   user.Name,
 			Role:   user.Role,
-		},
+		}),
 		CsrfToken: h.signer.CSRFToken(user.ID),
-	}
+	})
 	if user.AvatarURL != "" {
-		me.User.AvatarUrl = &user.AvatarURL
+		me.User.AvatarUrl = ptrext.Of(user.AvatarURL)
 	}
 	respond.Proto(w, http.StatusOK, me)
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,user_id:%s,role:%s",

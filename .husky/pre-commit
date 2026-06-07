@@ -72,7 +72,13 @@ if [ -f scripts/lint-slog.sh ]; then
   bash scripts/lint-slog.sh --strict || fail=1
 fi
 
-# ── ④ console biome — staged console/src only, guarded on installed deps ──────
+# ── ④ raw-pointer lint — bans bare *p / &x in favour of internal/pkg/ptrext ──
+if [ -f scripts/lint-rawptr.sh ]; then
+  say "lint-rawptr"
+  bash scripts/lint-rawptr.sh || fail=1
+fi
+
+# ── ⑤ console biome — staged console/src only, guarded on installed deps ──────
 con=$(git diff --cached --name-only --diff-filter=ACM -- 'console/src/**' \
       | grep -E '\.(ts|tsx|js|jsx|json)$' || true)
 if [ -n "$con" ]; then

@@ -14,6 +14,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
@@ -75,7 +76,7 @@ func (h *NotifyTargetsHandler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := notify.TestSend(ctx, *target)
+	result := notify.TestSend(ctx, ptrext.Indirect(target))
 	if !result.OK {
 		logext.Warnf(ctx, "[%s] reject: delivery failed,tenant_id:%s,id:%s,status:%d,latency_ms:%d,err:%s",
 			where, auth.TenantID, id, result.StatusCode, result.LatencyMs, errMessage(result.Err))
@@ -84,11 +85,11 @@ func (h *NotifyTargetsHandler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 	sc := int32(result.StatusCode)
 	lat := result.LatencyMs
-	respond.Proto(w, http.StatusOK, &attunev1.TestNotifyTargetResponse{
+	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.TestNotifyTargetResponse{
 		Ok:         true,
-		StatusCode: &sc,
-		LatencyMs:  &lat,
-	})
+		StatusCode: ptrext.Of(sc),
+		LatencyMs:  ptrext.Of(lat),
+	}))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s,status:%d,latency_ms:%d",
 		where, auth.TenantID, id, result.StatusCode, result.LatencyMs)
 }

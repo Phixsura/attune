@@ -15,6 +15,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 )
 
@@ -40,7 +41,7 @@ type APIKeys struct {
 const touchInterval = 30 * time.Second
 
 func NewAPIKeys(r *apikeyrepo.APIKeyRepo) *APIKeys {
-	return &APIKeys{repo: r}
+	return ptrext.Of(APIKeys{repo: r})
 }
 
 // Issue mints a key for the given tenant and returns the raw value

@@ -10,6 +10,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // GeminiBackend talks to Google's generative-language endpoint via the
@@ -31,15 +32,15 @@ func NewGemini(baseURL, apiKey string) (*GeminiBackend, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("gemini backend: api_key is required")
 	}
-	httpClient := &http.Client{
+	httpClient := ptrext.Of(http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 		Timeout:   openaiHTTPTimeout,
-	}
-	cfg := &genai.ClientConfig{
+	})
+	cfg := ptrext.Of(genai.ClientConfig{
 		APIKey:     apiKey,
 		Backend:    genai.BackendGeminiAPI,
 		HTTPClient: httpClient,
-	}
+	})
 	if baseURL != "" {
 		cfg.HTTPOptions.BaseURL = strings.TrimRight(baseURL, "/")
 	}
@@ -49,7 +50,7 @@ func NewGemini(baseURL, apiKey string) (*GeminiBackend, error) {
 	}
 	logext.Infof(context.Background(), "[%s] OK,base_url:%s,api_key_set:%t",
 		where, baseURL, apiKey != "")
-	return &GeminiBackend{client: client}, nil
+	return ptrext.Of(GeminiBackend{client: client}), nil
 }
 
 func (b *GeminiBackend) Close() error { return nil }
@@ -65,12 +66,11 @@ func (b *GeminiBackend) Complete(
 ) (CompletionResponse, error) {
 	const where = "llmclient.GeminiBackend.Complete"
 
-	cfg := &genai.GenerateContentConfig{}
+	cfg := ptrext.Of(genai.GenerateContentConfig{})
 	if req.System != "" {
 		cfg.SystemInstruction = genai.NewContentFromText(req.System, genai.RoleUser)
 	}
-	temp := float32(req.Temperature)
-	cfg.Temperature = &temp
+	cfg.Temperature = ptrext.Of(float32(req.Temperature))
 	if req.MaxTokens > 0 {
 		cfg.MaxOutputTokens = req.MaxTokens
 	}

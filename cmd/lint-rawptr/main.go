@@ -18,12 +18,16 @@
 //     the API contract (the callee would write into a fresh copy)
 //   - the ptrext package itself (it implements the helpers)
 //   - generated files (// Code generated …)
-//   - lines marked  // ptrext:allow
+//   - files containing the directive  // ptrext:file-allow  (whole file
+//     skipped — use for config-binding tables and test mock-capture
+//     fixtures where the out-param pattern is endemic)
+//   - lines marked  // ptrext:allow  (single-site override)
 //
 // Exit 1 on any finding so pre-commit / CI fails red.
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"go/ast"
@@ -32,7 +36,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -78,12 +84,17 @@ var outParamMethods = map[string]struct{}{
 	"BoolVarP":     {},
 	"IntVarP":      {},
 	"DurationVarP": {},
+
+	// attune internal decoders that fan into json.Unmarshal — same contract
+	// as the stdlib ones, just wrapped behind a helper.
+	"postJSON": {}, // internal/infra/lark/client.go
 }
 
 var (
 	excludeRe    = regexp.MustCompile(`(?:\.pb\.go$|/proto/gen/|/migrations/|/testdata/)`)
 	generatedRe  = regexp.MustCompile(`(?m)^// Code generated .* DO NOT EDIT\.`)
 	allowLinePat = regexp.MustCompile(`//\s*ptrext:allow\b`)
+	fileAllowPat = regexp.MustCompile(`//\s*ptrext:file-allow\b`)
 )
 
 type finding struct {
@@ -94,6 +105,7 @@ type finding struct {
 
 func main() {
 	verbose := flag.Bool("v", false, "verbose: also print allowed sites")
+	fix := flag.Bool("fix", false, "rewrite files: &x → ptrext.Of(x), *p → ptrext.Indirect(p)")
 	flag.Parse()
 	paths := flag.Args()
 	if len(paths) == 0 {
@@ -108,22 +120,37 @@ func main() {
 
 	fset := token.NewFileSet()
 	var all []finding
+	fixed := 0
 	for _, f := range files {
 		fnd, err := analyzeFile(fset, f, *verbose)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, f, ":", err)
 			continue
 		}
+		if *fix && len(fnd) > 0 {
+			n, err := applyFix(f)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, f, ":", err)
+				continue
+			}
+			fixed += n
+			// re-analyze; what's left is non-mechanical
+			fnd, _ = analyzeFile(fset, f, *verbose)
+		}
 		all = append(all, fnd...)
 	}
 
-	// Stable ordering — file:line:col.
 	for _, f := range all {
 		fmt.Printf("%s:%d:%d: %s — %s\n", f.Pos.Filename, f.Pos.Line, f.Pos.Column, f.Rule, f.Msg)
 	}
 
+	if *fix {
+		fmt.Fprintf(os.Stderr, "\nlint-rawptr: fixed %d site(s), %d remain\n", fixed, len(all))
+	}
 	if n := len(all); n > 0 {
-		fmt.Fprintf(os.Stderr, "\nlint-rawptr: %d finding(s)\n", n)
+		if !*fix {
+			fmt.Fprintf(os.Stderr, "\nlint-rawptr: %d finding(s)\n", n)
+		}
 		os.Exit(1)
 	}
 	fmt.Fprintln(os.Stderr, "lint-rawptr: clean")
@@ -178,6 +205,9 @@ func analyzeFile(fset *token.FileSet, path string, verbose bool) ([]finding, err
 	if generatedRe.Match(src) {
 		return nil, nil
 	}
+	if fileAllowPat.Match(src) {
+		return nil, nil
+	}
 	file, err := parser.ParseFile(fset, path, src, parser.ParseComments)
 	if err != nil {
 		return nil, err
@@ -212,144 +242,171 @@ func allowLineSet(file *ast.File, fset *token.FileSet) map[int]bool {
 // classifyTypeStars — pre-pass: every StarExpr appearing in a TYPE position
 // (vs a deref expression position). We walk explicitly so each child gets
 // the right context — ast.Walk's single-Visitor model can't differentiate
-// per-child.
+// per-child. The walk is split into per-shape helpers to keep individual
+// function complexity bounded; each helper returns true when it consumes
+// the node so the next one can be tried.
 func classifyTypeStars(root ast.Node) map[*ast.StarExpr]struct{} {
-	set := map[*ast.StarExpr]struct{}{}
-	var walk func(n ast.Node, inType bool)
-	walk = func(n ast.Node, inType bool) {
-		if n == nil {
-			return
-		}
-		switch x := n.(type) {
-		case *ast.StarExpr:
-			if inType {
-				set[x] = struct{}{}
-				walk(x.X, true)
-			} else {
-				walk(x.X, false)
-			}
-		case *ast.FuncDecl:
-			if x.Recv != nil {
-				walk(x.Recv, true)
-			}
-			if x.Type != nil {
-				walk(x.Type, inType)
-			}
-			if x.Body != nil {
-				walk(x.Body, false)
-			}
-		case *ast.FuncType:
-			if x.TypeParams != nil {
-				walk(x.TypeParams, true)
-			}
-			if x.Params != nil {
-				walk(x.Params, true)
-			}
-			if x.Results != nil {
-				walk(x.Results, true)
-			}
-		case *ast.FuncLit:
-			if x.Type != nil {
-				walk(x.Type, false)
-			} // FuncType handles its own children
-			if x.Body != nil {
-				walk(x.Body, false)
-			}
-		case *ast.FieldList:
-			for _, f := range x.List {
-				walk(f, inType)
-			}
-		case *ast.Field:
-			if x.Type != nil {
-				walk(x.Type, true)
-			}
-		case *ast.MapType:
-			walk(x.Key, true)
-			walk(x.Value, true)
-		case *ast.ChanType:
-			walk(x.Value, true)
-		case *ast.ArrayType:
-			if x.Len != nil {
-				walk(x.Len, false)
-			}
-			walk(x.Elt, true)
-		case *ast.StructType:
-			walk(x.Fields, true)
-		case *ast.InterfaceType:
-			walk(x.Methods, true)
-		case *ast.TypeAssertExpr:
-			walk(x.X, false)
-			if x.Type != nil {
-				walk(x.Type, true)
-			}
-		case *ast.ValueSpec:
-			if x.Type != nil {
-				walk(x.Type, true)
-			}
-			for _, v := range x.Values {
-				walk(v, false)
-			}
-		case *ast.TypeSpec:
-			if x.TypeParams != nil {
-				walk(x.TypeParams, true)
-			}
-			if x.Type != nil {
-				walk(x.Type, true)
-			}
-		case *ast.CompositeLit:
-			if x.Type != nil {
-				walk(x.Type, true)
-			}
-			for _, elt := range x.Elts {
-				walk(elt, false)
-			}
-		case *ast.CallExpr:
-			// (*T)(x) — conversion. Fun is a type.
-			if isTypeExpr(x.Fun) {
-				walk(x.Fun, true)
-			} else {
-				walk(x.Fun, false)
-			}
-			for _, a := range x.Args {
-				walk(a, false)
-			}
-		case *ast.ParenExpr:
-			walk(x.X, inType)
-		case *ast.SelectorExpr:
-			walk(x.X, false)
-			// Sel is just an ident; no recursion needed
-		case *ast.IndexExpr:
-			walk(x.X, inType)
-			walk(x.Index, false)
-		case *ast.IndexListExpr:
-			walk(x.X, inType)
-			for _, ix := range x.Indices {
-				walk(ix, false)
-			}
-		default:
-			// Recurse via ast.Walk with same inType — covers BlockStmt, ExprStmt,
-			// AssignStmt, BinaryExpr, UnaryExpr, IfStmt, ForStmt, RangeStmt,
-			// ReturnStmt, KeyValueExpr, etc. None of these are type-defining.
-			ast.Inspect(n, func(c ast.Node) bool {
-				if c == nil || c == n {
-					return c != nil
-				}
-				switch c.(type) {
-				case *ast.StarExpr, *ast.FuncDecl, *ast.FuncType, *ast.FuncLit,
-					*ast.FieldList, *ast.Field, *ast.MapType, *ast.ChanType,
-					*ast.ArrayType, *ast.StructType, *ast.InterfaceType,
-					*ast.TypeAssertExpr, *ast.ValueSpec, *ast.TypeSpec,
-					*ast.CompositeLit, *ast.CallExpr, *ast.ParenExpr,
-					*ast.SelectorExpr, *ast.IndexExpr, *ast.IndexListExpr:
-					walk(c, false)
-					return false
-				}
-				return true
-			})
-		}
+	c := &typeClassifier{set: map[*ast.StarExpr]struct{}{}}
+	c.walk(root, false)
+	return c.set
+}
+
+type typeClassifier struct {
+	set map[*ast.StarExpr]struct{}
+}
+
+// isNilNode catches both untyped nil and typed-nil (e.g. a (*ast.FieldList)(nil)
+// carried in an ast.Node interface, which is what ast fields like FuncType.Recv
+// look like when unset).
+func isNilNode(n ast.Node) bool {
+	if n == nil {
+		return true
 	}
-	walk(root, false)
-	return set
+	v := reflect.ValueOf(n)
+	return v.Kind() == reflect.Ptr && v.IsNil()
+}
+
+func (c *typeClassifier) walk(n ast.Node, inType bool) {
+	if isNilNode(n) {
+		return
+	}
+	if star, ok := n.(*ast.StarExpr); ok {
+		if inType {
+			c.set[star] = struct{}{}
+		}
+		c.walk(star.X, inType)
+		return
+	}
+	if c.walkFuncish(n, inType) {
+		return
+	}
+	if c.walkTypeContainer(n, inType) {
+		return
+	}
+	if c.walkSpecOrLit(n, inType) {
+		return
+	}
+	if c.walkExprChild(n, inType) {
+		return
+	}
+	c.walkDefault(n)
+}
+
+// walkFuncish handles function-shaped nodes whose receivers/params/results
+// are types but whose body is not.
+func (c *typeClassifier) walkFuncish(n ast.Node, inType bool) bool {
+	switch x := n.(type) {
+	case *ast.FuncDecl:
+		c.walk(x.Recv, true)
+		c.walk(x.Type, inType)
+		c.walk(x.Body, false)
+	case *ast.FuncType:
+		c.walk(x.TypeParams, true)
+		c.walk(x.Params, true)
+		c.walk(x.Results, true)
+	case *ast.FuncLit:
+		c.walk(x.Type, false) // FuncType handles its own children
+		c.walk(x.Body, false)
+	default:
+		return false
+	}
+	return true
+}
+
+// walkTypeContainer handles nodes whose direct children are all in type
+// position (or trivially so — TypeAssertExpr.X is the exception).
+func (c *typeClassifier) walkTypeContainer(n ast.Node, _ bool) bool {
+	switch x := n.(type) {
+	case *ast.FieldList:
+		for _, f := range x.List {
+			c.walk(f, true)
+		}
+	case *ast.Field:
+		c.walk(x.Type, true)
+	case *ast.MapType:
+		c.walk(x.Key, true)
+		c.walk(x.Value, true)
+	case *ast.ChanType:
+		c.walk(x.Value, true)
+	case *ast.ArrayType:
+		c.walk(x.Len, false)
+		c.walk(x.Elt, true)
+	case *ast.StructType:
+		c.walk(x.Fields, true)
+	case *ast.InterfaceType:
+		c.walk(x.Methods, true)
+	case *ast.TypeAssertExpr:
+		c.walk(x.X, false)
+		c.walk(x.Type, true)
+	default:
+		return false
+	}
+	return true
+}
+
+// walkSpecOrLit handles declarations and composite-shape nodes that mix
+// type and value positions.
+func (c *typeClassifier) walkSpecOrLit(n ast.Node, _ bool) bool {
+	switch x := n.(type) {
+	case *ast.ValueSpec:
+		c.walk(x.Type, true)
+		for _, v := range x.Values {
+			c.walk(v, false)
+		}
+	case *ast.TypeSpec:
+		c.walk(x.TypeParams, true)
+		c.walk(x.Type, true)
+	case *ast.CompositeLit:
+		c.walk(x.Type, true)
+		for _, elt := range x.Elts {
+			c.walk(elt, false)
+		}
+	case *ast.CallExpr:
+		c.walk(x.Fun, isTypeExpr(x.Fun))
+		for _, a := range x.Args {
+			c.walk(a, false)
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+// walkExprChild handles plain expression-context nodes that need targeted
+// recursion (paren/selector/index forms).
+func (c *typeClassifier) walkExprChild(n ast.Node, inType bool) bool {
+	switch x := n.(type) {
+	case *ast.ParenExpr:
+		c.walk(x.X, inType)
+	case *ast.SelectorExpr:
+		c.walk(x.X, false)
+	case *ast.IndexExpr:
+		c.walk(x.X, inType)
+		c.walk(x.Index, false)
+	case *ast.IndexListExpr:
+		c.walk(x.X, inType)
+		for _, ix := range x.Indices {
+			c.walk(ix, false)
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+// walkDefault — fallthrough recursion via ast.Inspect for the structural
+// nodes none of the above cared about (BlockStmt, ExprStmt, AssignStmt,
+// BinaryExpr, UnaryExpr, IfStmt, ForStmt, RangeStmt, ReturnStmt,
+// KeyValueExpr, ...). They're all non-type-defining, so their children
+// inherit inType=false.
+func (c *typeClassifier) walkDefault(n ast.Node) {
+	ast.Inspect(n, func(child ast.Node) bool {
+		if child == nil || child == n {
+			return child != nil
+		}
+		c.walk(child, false)
+		return false
+	})
 }
 
 func isTypeExpr(e ast.Expr) bool {
@@ -497,4 +554,282 @@ func (a *analyzer) report(pos token.Pos, rule, msg string) {
 		Rule: rule,
 		Msg:  msg,
 	})
+}
+
+// =============================================================================
+//   -fix mode  —  AST-guided text rewriter
+// =============================================================================
+//
+// Re-parses the file and re-runs the same allowlist as the linter, but emits
+// byte-offset edit ops instead of human-readable findings. The streaming
+// applier walks the source once, applying ops in offset order — nested
+// address-of (e.g. &Outer{X: &Inner{}}) just works because each op's offset
+// is its own, no shift bookkeeping needed.
+//
+// Each flagged site contributes two ops:
+//
+//	1) at  opPos:  delete 1 byte (& or *), insert "ptrext.Of(" / "ptrext.Indirect("
+//	2) at  exprEnd: insert ")"
+//
+// Operands intentionally NOT rewritten (left for human review):
+//   - ParenExpr operands (`&(x)` / `*(x)`): the parens carry intent the tool
+//     can't read — author may have meant grouping for a downstream expression
+//   - StarExpr nested inside StarExpr (`**p`): rare, easier to hand-judge
+
+type edit struct {
+	rule    string
+	opPos   token.Pos
+	exprEnd token.Pos
+}
+
+func applyFix(path string) (int, error) {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	if generatedRe.Match(src) || fileAllowPat.Match(src) {
+		return 0, nil
+	}
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, src, parser.ParseComments)
+	if err != nil {
+		return 0, err
+	}
+
+	typeStars := classifyTypeStars(file)
+	allow := allowLineSet(file, fset)
+
+	c := &collector{
+		fset:      fset,
+		file:      file,
+		typeStars: typeStars,
+		allow:     allow,
+	}
+	c.walk(file, nil)
+	if len(c.edits) == 0 {
+		return 0, nil
+	}
+
+	// Build insert/delete ops, stream them in offset order.
+	type op struct {
+		off    int
+		del    int
+		text   string
+		closer bool // closers come BEFORE openers at same offset
+	}
+	var ops []op
+	for _, e := range c.edits {
+		var prefix string
+		switch e.rule {
+		case ruleAddr:
+			prefix = "ptrext.Of("
+		case ruleDeref:
+			prefix = "ptrext.Indirect("
+		default:
+			continue
+		}
+		ops = append(ops, op{
+			off:  fset.Position(e.opPos).Offset,
+			del:  1,
+			text: prefix,
+		})
+		ops = append(ops, op{
+			off:    fset.Position(e.exprEnd).Offset,
+			text:   ")",
+			closer: true,
+		})
+	}
+	sort.SliceStable(ops, func(i, j int) bool {
+		if ops[i].off != ops[j].off {
+			return ops[i].off < ops[j].off
+		}
+		return ops[i].closer && !ops[j].closer
+	})
+
+	var buf bytes.Buffer
+	srcPos := 0
+	for _, o := range ops {
+		buf.Write(src[srcPos:o.off])
+		buf.WriteString(o.text)
+		srcPos = o.off + o.del
+	}
+	buf.Write(src[srcPos:])
+	out := buf.Bytes()
+
+	out = ensurePtrextImport(out, file, fset)
+	return len(c.edits), os.WriteFile(path, out, 0o644)
+}
+
+// collector — same AST walk as analyzer, but instead of producing human-
+// readable findings it produces structured edit records.
+type collector struct {
+	fset      *token.FileSet
+	file      *ast.File
+	typeStars map[*ast.StarExpr]struct{}
+	allow     map[int]bool
+	edits     []edit
+	stack     []ast.Node
+}
+
+func (c *collector) walk(n ast.Node, parent ast.Node) {
+	if n == nil {
+		return
+	}
+	if parent != nil {
+		c.stack = append(c.stack, parent)
+		defer func() { c.stack = c.stack[:len(c.stack)-1] }()
+	}
+
+	switch x := n.(type) {
+	case *ast.StarExpr:
+		if _, isType := c.typeStars[x]; !isType {
+			if !c.isAssignLHS(x) {
+				if !c.allow[c.fset.Position(x.Star).Line] {
+					if c.isRewritableDeref(x.X) {
+						c.edits = append(c.edits, edit{
+							rule:    ruleDeref,
+							opPos:   x.Star,
+							exprEnd: x.X.End(),
+						})
+					}
+				}
+			}
+		}
+	case *ast.UnaryExpr:
+		if x.Op == token.AND {
+			if _, ok := x.X.(*ast.IndexExpr); !ok {
+				if !c.isOutParamArg(x) {
+					if !c.allow[c.fset.Position(x.OpPos).Line] {
+						if c.isRewritableOperand(x.X) {
+							c.edits = append(c.edits, edit{
+								rule:    ruleAddr,
+								opPos:   x.OpPos,
+								exprEnd: x.X.End(),
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	ast.Inspect(n, func(child ast.Node) bool {
+		if child == nil || child == n {
+			return child != nil
+		}
+		c.walk(child, n)
+		return false
+	})
+}
+
+// isRewritableOperand — the autofix is conservative on purpose. It only
+// rewrites operands whose value is FRESH (newly constructed) at the &/* site
+// — composite literals and call results. Wrapping &Ident or &SelectorExpr is
+// unsafe whenever the named variable carries IDENTITY (sync.Mutex,
+// strings.Builder, bytes.Buffer accumulating writes, or any local passed to
+// a function that writes back through the pointer) — collapse to a copy and
+// the value semantics break in subtle ways. The lint still flags those
+// sites; the human picks ptrext.Of vs // ptrext:allow.
+//
+// rule-deref operands are always rewrite-safe (rvalue *p is a copy either
+// way — Indirect just adds nil-safety).
+func (c *collector) isRewritableOperand(e ast.Expr) bool {
+	switch e.(type) {
+	case *ast.CompositeLit, *ast.CallExpr:
+		return true
+	}
+	return false
+}
+
+// isRewritableDeref — broader allow list for *p rvalue (no identity concern,
+// just a value read; nil-safety is a strict win).
+func (c *collector) isRewritableDeref(e ast.Expr) bool {
+	switch e.(type) {
+	case *ast.Ident,
+		*ast.SelectorExpr,
+		*ast.CompositeLit,
+		*ast.CallExpr,
+		*ast.IndexExpr,
+		*ast.IndexListExpr,
+		*ast.TypeAssertExpr:
+		return true
+	}
+	return false
+}
+
+func (c *collector) isAssignLHS(star *ast.StarExpr) bool {
+	if len(c.stack) == 0 {
+		return false
+	}
+	parent := c.stack[len(c.stack)-1]
+	as, ok := parent.(*ast.AssignStmt)
+	if !ok {
+		return false
+	}
+	for _, l := range as.Lhs {
+		if l == star {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *collector) isOutParamArg(amp *ast.UnaryExpr) bool {
+	if len(c.stack) == 0 {
+		return false
+	}
+	parent := c.stack[len(c.stack)-1]
+	call, ok := parent.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	inArgs := false
+	for _, arg := range call.Args {
+		if arg == amp {
+			inArgs = true
+			break
+		}
+	}
+	if !inArgs {
+		return false
+	}
+	name := calleeName(call.Fun)
+	_, ok = outParamMethods[name]
+	return ok
+}
+
+// ensurePtrextImport — append the ptrext import to the first import block
+// found if it's not already present.
+func ensurePtrextImport(src []byte, file *ast.File, fset *token.FileSet) []byte {
+	const importPath = `"github.com/Phixsura/attune/internal/pkg/ptrext"`
+	if bytes.Contains(src, []byte(importPath)) {
+		return src
+	}
+	for _, decl := range file.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.IMPORT {
+			continue
+		}
+		if !gd.Lparen.IsValid() {
+			// single-import: `import "x"` — expand to a block
+			off := fset.Position(gd.Pos()).Offset
+			endOff := fset.Position(gd.End()).Offset
+			existing := string(src[off:endOff])
+			rest := strings.TrimPrefix(existing, "import ")
+			replacement := "import (\n\t" + rest + "\n\n\t" + importPath + "\n)"
+			out := make([]byte, 0, len(src)+len(replacement)-len(existing))
+			out = append(out, src[:off]...)
+			out = append(out, replacement...)
+			out = append(out, src[endOff:]...)
+			return out
+		}
+		rparenOff := fset.Position(gd.Rparen).Offset
+		ins := "\t" + importPath + "\n"
+		out := make([]byte, 0, len(src)+len(ins))
+		out = append(out, src[:rparenOff]...)
+		out = append(out, ins...)
+		out = append(out, src[rparenOff:]...)
+		return out
+	}
+	return src
 }

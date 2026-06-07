@@ -13,6 +13,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // AnthropicBackend talks to /v1/messages via the official
@@ -39,10 +40,10 @@ func NewAnthropic(baseURL, apiKey string) (*AnthropicBackend, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("anthropic backend: api_key is required")
 	}
-	httpClient := &http.Client{
+	httpClient := ptrext.Of(http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 		Timeout:   openaiHTTPTimeout,
-	}
+	})
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 		option.WithHTTPClient(httpClient),
@@ -52,7 +53,7 @@ func NewAnthropic(baseURL, apiKey string) (*AnthropicBackend, error) {
 	}
 	logext.Infof(context.Background(), "[%s] OK,base_url:%s,api_key_set:%t",
 		where, baseURL, apiKey != "")
-	return &AnthropicBackend{client: anthropic.NewClient(opts...)}, nil
+	return ptrext.Of(AnthropicBackend{client: anthropic.NewClient(opts...)}), nil
 }
 
 func (b *AnthropicBackend) Close() error { return nil }
@@ -85,10 +86,10 @@ func (b *AnthropicBackend) Complete(
 	params.Temperature = anthropic.Float(req.Temperature)
 	if req.Schema != nil {
 		params.Tools = []anthropic.ToolUnionParam{{
-			OfTool: &anthropic.ToolParam{
+			OfTool: ptrext.Of(anthropic.ToolParam{
 				Name:        req.Schema.Name,
 				InputSchema: schemaToAnthropicInput(req.Schema.Schema),
-			},
+			}),
 		}}
 		params.ToolChoice = anthropic.ToolChoiceParamOfTool(req.Schema.Name)
 	}

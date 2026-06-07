@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // LarkInstall is a row in tenant_lark_install — one tenant's
@@ -37,7 +38,9 @@ type LarkInstallRepo struct {
 	pool *pgxpool.Pool
 }
 
-func NewLarkInstallRepo(pool *pgxpool.Pool) *LarkInstallRepo { return &LarkInstallRepo{pool: pool} }
+func NewLarkInstallRepo(pool *pgxpool.Pool) *LarkInstallRepo {
+	return ptrext.Of(LarkInstallRepo{pool: pool})
+}
 
 // Upsert sets the install row for a tenant. Re-installing overwrites
 // (token rotation also goes through here when refresh succeeds).
@@ -96,7 +99,7 @@ func (r *LarkInstallRepo) Get(ctx context.Context, tenantID string) (*LarkInstal
 	if err != nil {
 		return nil, fmt.Errorf("get tenant_lark_install: %w", err)
 	}
-	return &i, nil
+	return ptrext.Of(i), nil
 }
 
 // GetByLarkTenantKey is used by the OAuth callback before tenant_id is
@@ -124,5 +127,5 @@ func (r *LarkInstallRepo) GetByLarkTenantKey(
 	if err != nil {
 		return nil, fmt.Errorf("get tenant_lark_install by key: %w", err)
 	}
-	return &i, nil
+	return ptrext.Of(i), nil
 }

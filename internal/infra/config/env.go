@@ -1,3 +1,11 @@
+// ptrext:file-allow — applyEnvOverrides uses an out-parameter table:
+// each {env, dst *string} entry's *string MUST alias the corresponding
+// yamlConfig field so the inner  *o.dst = v  writes back into the original
+// struct. Wrapping with ptrext.Of would write into a copy and silently drop
+// every environment override. Same shape applies to the bool-override block
+// further down. The lint exemption is documented at the package level
+// rather than per line because every override entry follows it identically.
+
 package config
 
 import (

@@ -158,6 +158,24 @@ jobs:
           persist-credentials: false
       - run: bash scripts/lint-slog.sh --strict
 
+  # ── lint-rawptr: bans bare *p / &x — funnel via internal/pkg/ptrext  ──────
+  # AST-aware Go linter (cmd/lint-rawptr/). Type-position *T, &xs[i],
+  # out-param &arg (json.Unmarshal / *Row.Scan / flag.*Var / errors.As / …),
+  # and per-site // ptrext:allow / // ptrext:file-allow markers are exempt.
+  lint-rawptr:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: bash scripts/lint-rawptr.sh
+
   # ── Lizard: complexity (CCN ≤ 15) + length (NLOC ≤ 100) ────────────────────
   lizard:
     needs: changes
@@ -315,7 +333,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, go-integration, golangci-lint, lint-slog, lizard, govulncheck, console, changelog, docker-build, compose-config, proto]
+    needs: [changes, go-checks, go-integration, golangci-lint, lint-slog, lint-rawptr, lizard, govulncheck, console, changelog, docker-build, compose-config, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:

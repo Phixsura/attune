@@ -13,6 +13,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/service/apikey"
@@ -26,24 +27,22 @@ type APIKeysHandler struct {
 }
 
 func NewAPIKeysHandler(svc *apikey.APIKeys) *APIKeysHandler {
-	return &APIKeysHandler{svc: svc}
+	return ptrext.Of(APIKeysHandler{svc: svc})
 }
 
 func toProtoAPIKey(row apikeyrepo.APIKeyListRow) *attunev1.ApiKey {
-	k := &attunev1.ApiKey{
+	k := ptrext.Of(attunev1.ApiKey{
 		Id:        row.ID.String(),
 		KeyPrefix: row.KeyPrefix,
 		Label:     row.Label,
 		IsActive:  row.IsActive,
 		CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
-	}
+	})
 	if row.LastUsedAt != nil {
-		s := row.LastUsedAt.UTC().Format(time.RFC3339)
-		k.LastUsedAt = &s
+		k.LastUsedAt = ptrext.Of(row.LastUsedAt.UTC().Format(time.RFC3339))
 	}
 	if row.RevokedAt != nil {
-		s := row.RevokedAt.UTC().Format(time.RFC3339)
-		k.RevokedAt = &s
+		k.RevokedAt = ptrext.Of(row.RevokedAt.UTC().Format(time.RFC3339))
 	}
 	return k
 }
@@ -66,7 +65,7 @@ func (h *APIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		items = append(items, toProtoAPIKey(row))
 	}
-	respond.Proto(w, http.StatusOK, &attunev1.ListApiKeysResponse{Items: items})
+	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.ListApiKeysResponse{Items: items}))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
 }
 
@@ -122,10 +121,10 @@ func (h *APIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	respond.Proto(w, http.StatusCreated, &attunev1.CreateApiKeyResponse{
+	respond.Proto(w, http.StatusCreated, ptrext.Of(attunev1.CreateApiKeyResponse{
 		Key:    toProtoAPIKey(newRow),
 		Secret: raw,
-	})
+	}))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,key_id:%s", where, auth.TenantID, id)
 }
 

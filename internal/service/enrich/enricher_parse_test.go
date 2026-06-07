@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
@@ -126,13 +127,13 @@ func TestParseEnrichJSON_ExtraDimsPassThrough(t *testing.T) {
 }
 
 func TestBuildSnapshot_CopiesAttrs(t *testing.T) {
-	row := &feedback.EnrichInput{
+	row := ptrext.Of(feedback.EnrichInput{
 		Content:   "c",
 		Source:    "s",
 		UserID:    "u",
 		TenantID:  "t",
 		CreatedAt: time.Now(),
-	}
+	})
 	enriched := domain.Enriched{
 		Title:     "t",
 		Attrs:     map[string]any{"type": "bug"},

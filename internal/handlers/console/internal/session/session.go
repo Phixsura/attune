@@ -23,6 +23,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // Cookie + header names. attune_session is HttpOnly; csrf token lives
@@ -71,7 +72,7 @@ func NewSigner(key string, insecure bool) (*Signer, error) {
 	if len(key) < 32 {
 		return nil, fmt.Errorf("console_session_key must be at least 32 bytes (got %d)", len(key))
 	}
-	return &Signer{key: []byte(key), insecure: insecure}, nil
+	return ptrext.Of(Signer{key: []byte(key), insecure: insecure}), nil
 }
 
 // Insecure reports whether this Signer was created with the
@@ -110,7 +111,7 @@ func (s *Signer) VerifySession(cookie string) (*Payload, error) {
 	if time.Now().Unix() > p.ExpiresAt {
 		return nil, errors.New("session expired")
 	}
-	return &p, nil
+	return ptrext.Of(p), nil
 }
 
 // CSRFToken derives a token from the user id alone. Stable over the
@@ -142,7 +143,7 @@ func (s *Signer) IssueSessionCookie(w http.ResponseWriter, tenantID, userID stri
 	if err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, ptrext.Of(http.Cookie{
 		Name:     SessionCookieName,
 		Value:    val,
 		Path:     "/",
@@ -150,7 +151,7 @@ func (s *Signer) IssueSessionCookie(w http.ResponseWriter, tenantID, userID stri
 		Secure:   !s.insecure,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(SessionTTL),
-	})
+	}))
 	return nil
 }
 
@@ -158,7 +159,7 @@ func (s *Signer) IssueSessionCookie(w http.ResponseWriter, tenantID, userID stri
 // Mirrors IssueSessionCookie's Secure setting so the browser matches the
 // cookie identity (path/secure must match for SetCookie to overwrite).
 func (s *Signer) ClearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, ptrext.Of(http.Cookie{
 		Name:     SessionCookieName,
 		Value:    "",
 		Path:     "/",
@@ -166,7 +167,7 @@ func (s *Signer) ClearSessionCookie(w http.ResponseWriter) {
 		Secure:   !s.insecure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
-	})
+	}))
 }
 
 // RequireSession is the chi-style middleware that gates all /console
@@ -198,11 +199,11 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 				return
 			}
 		}
-		newCtx := context.WithValue(r.Context(), ctxKey{}, &AuthCtx{
+		newCtx := context.WithValue(r.Context(), ctxKey{}, ptrext.Of(AuthCtx{
 			TenantID: p.TenantID,
 			UserID:   p.UserID,
 			ExpAt:    time.Unix(p.ExpiresAt, 0),
-		})
+		}))
 		next.ServeHTTP(w, r.WithContext(newCtx))
 	})
 }

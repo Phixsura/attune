@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -33,14 +34,14 @@ type FeedbackHandler struct {
 }
 
 func NewFeedbackHandler(r *feedback.FeedbackRepo, t *tenant.TenantRepo) *FeedbackHandler {
-	return &FeedbackHandler{repo: r, tenants: t}
+	return ptrext.Of(FeedbackHandler{repo: r, tenants: t})
 }
 
 func nullableString(s string) *string {
 	if s == "" {
 		return nil
 	}
-	return &s
+	return ptrext.Of(s)
 }
 
 // attrsToStruct decodes the raw JSONB attrs payload into a structpb
@@ -65,7 +66,7 @@ func attrsToStruct(raw []byte) *structpb.Struct {
 }
 
 func toProtoFeedback(row feedback.ConsoleListRow) *attunev1.Feedback {
-	return &attunev1.Feedback{
+	return ptrext.Of(attunev1.Feedback{
 		Id:               row.ID,
 		Content:          row.Content,
 		Source:           row.Source,
@@ -77,7 +78,7 @@ func toProtoFeedback(row feedback.ConsoleListRow) *attunev1.Feedback {
 		IsUrgent:         row.IsUrgent,
 		EnrichmentStatus: row.EnrichmentStatus,
 		CreatedAt:        row.CreatedAt.UTC().Format(time.RFC3339),
-	}
+	})
 }
 
 // List handles GET /fb/v1/console/feedback.
@@ -114,8 +115,7 @@ func (h *FeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if u := q.Get("urgent"); u != "" {
-		b := u == "true" || u == "1"
-		opts.Urgent = &b
+		opts.Urgent = ptrext.Of(u == "true" || u == "1")
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,attrs_n:%d,limit:%d,cursor:%d",
 		where, auth.TenantID, len(opts.Attrs), opts.Limit, opts.Cursor)
@@ -132,10 +132,9 @@ func (h *FeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		items = append(items, toProtoFeedback(row))
 	}
-	resp := &attunev1.ListFeedbackResponse{Items: items}
+	resp := ptrext.Of(attunev1.ListFeedbackResponse{Items: items})
 	if opts.Limit > 0 && len(rows) == opts.Limit {
-		s := strconv.FormatInt(rows[len(rows)-1].ID, 10)
-		resp.NextCursor = &s
+		resp.NextCursor = ptrext.Of(strconv.FormatInt(rows[len(rows)-1].ID, 10))
 	}
 	respond.Proto(w, http.StatusOK, resp)
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
@@ -204,7 +203,7 @@ func (h *FeedbackHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	f := toProtoFeedback(row.ConsoleListRow)
-	detail := &attunev1.FeedbackDetail{
+	detail := ptrext.Of(attunev1.FeedbackDetail{
 		Id:                f.GetId(),
 		Content:           f.GetContent(),
 		Source:            f.GetSource(),
@@ -218,7 +217,7 @@ func (h *FeedbackHandler) Get(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:         f.GetCreatedAt(),
 		EnrichmentError:   nullableString(row.EnrichmentError),
 		EnrichedRationale: nullableString(row.EnrichedRationale),
-	}
+	})
 	if len(row.SourceMeta) > 0 {
 		var m map[string]any
 		if json.Unmarshal(row.SourceMeta, &m) == nil {
@@ -235,17 +234,16 @@ func (h *FeedbackHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.Unmarshal(row.Attachments, &atts) == nil {
 			for _, a := range atts {
-				detail.Attachments = append(detail.Attachments, &attunev1.Attachment{
+				detail.Attachments = append(detail.Attachments, ptrext.Of(attunev1.Attachment{
 					Url:  a.URL,
 					Mime: a.Mime,
 					Size: a.Size,
-				})
+				}))
 			}
 		}
 	}
 	if row.EnrichedAt != nil {
-		s := row.EnrichedAt.UTC().Format(time.RFC3339)
-		detail.EnrichedAt = &s
+		detail.EnrichedAt = ptrext.Of(row.EnrichedAt.UTC().Format(time.RFC3339))
 	}
 	respond.Proto(w, http.StatusOK, detail)
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%d", where, auth.TenantID, id)
@@ -294,20 +292,20 @@ func (h *FeedbackHandler) Stats(w http.ResponseWriter, r *http.Request) {
 				where, auth.TenantID, d.Name, err.Error())
 			continue
 		}
-		bucket := &attunev1.DimStats{Dim: d.Name}
+		bucket := ptrext.Of(attunev1.DimStats{Dim: d.Name})
 		for _, v := range top {
-			bucket.Top = append(bucket.Top, &attunev1.ValueCount{Value: v.Value, Count: v.Count})
+			bucket.Top = append(bucket.Top, ptrext.Of(attunev1.ValueCount{Value: v.Value, Count: v.Count}))
 		}
 		dims = append(dims, bucket)
 	}
 
-	respond.Proto(w, http.StatusOK, &attunev1.GetFeedbackStatsResponse{
+	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.GetFeedbackStatsResponse{
 		PeriodStart: from.Format(time.RFC3339),
 		PeriodEnd:   to.Format(time.RFC3339),
 		Total:       totalIngest,
 		Dims:        dims,
 		UrgentCount: urgent,
-	})
+	}))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,total:%d,urgent:%d,dims:%d",
 		where, auth.TenantID, totalIngest, urgent, len(dims))
 }

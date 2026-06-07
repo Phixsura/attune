@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
@@ -21,7 +22,7 @@ type TenantRepo struct {
 }
 
 func NewTenant(pool *pgxpool.Pool) *TenantRepo {
-	return &TenantRepo{pool: pool}
+	return ptrext.Of(TenantRepo{pool: pool})
 }
 
 // ErrTenantNotFound signals the slug doesn't exist or is inactive.
@@ -110,7 +111,7 @@ func (r *TenantRepo) GetByID(ctx context.Context, id string) (*Tenant, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get tenant %s: %w", id, err)
 	}
-	return &t, nil
+	return ptrext.Of(t), nil
 }
 
 // UpsertByLarkKey is the OAuth-install entry point. If a tenant already

@@ -1,3 +1,7 @@
+// ptrext:file-allow — see anthropic_test.go for the rationale: mock
+// servers capture the request body via *capture = body and need &gotBody
+// at the call site to alias the test's local.
+
 package llmclient
 
 import (

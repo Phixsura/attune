@@ -8,6 +8,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
@@ -57,11 +58,11 @@ func runOutboxPrune(args []string) error {
 	}
 	defer pool.Close()
 
-	before := time.Now().Add(-*olderThan)
-	n, err := outboxrepo.NewOutbox(pool).PruneStalePending(ctx, before, *reason)
+	before := time.Now().Add(-ptrext.Indirect(olderThan))
+	n, err := outboxrepo.NewOutbox(pool).PruneStalePending(ctx, before, ptrext.Indirect(reason))
 	if err != nil {
 		return err
 	}
-	fmt.Printf("pruned %d outbox rows (older than %s, reason=%q)\n", n, *olderThan, *reason)
+	fmt.Printf("pruned %d outbox rows (older than %s, reason=%q)\n", n, ptrext.Indirect(olderThan), ptrext.Indirect(reason))
 	return nil
 }

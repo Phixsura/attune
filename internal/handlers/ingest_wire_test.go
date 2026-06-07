@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
@@ -13,7 +14,7 @@ import (
 //   - Decision 1: int64 id serializes as a JSON *string* (JS-safe).
 //   - Decision 2: fields are lowerCamelCase (enrichmentStatus).
 func TestIngestResponseWire(t *testing.T) {
-	b, err := protojson.Marshal(&attunev1.IngestResponse{Id: 12345, EnrichmentStatus: "pending"})
+	b, err := protojson.Marshal(ptrext.Of(attunev1.IngestResponse{Id: 12345, EnrichmentStatus: "pending"}))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -46,7 +47,7 @@ func TestIngestRequestDiscardUnknown(t *testing.T) {
 	}
 	if req.GetContent() != "hi" || req.GetSource() != "web" ||
 		req.GetSourceUser() != "u" || req.GetPageUrl() != "/p" {
-		t.Errorf("field mapping wrong: %+v", &req)
+		t.Errorf("field mapping wrong: %+v", &req) // ptrext:allow proto-message-with-mutex
 	}
 
 	// Without DiscardUnknown, the same body must fail — proving the option is
@@ -60,7 +61,7 @@ func TestIngestRequestDiscardUnknown(t *testing.T) {
 // The previous {"error":"..."} shape was removed when #19 unified errors;
 // the apikey middleware (the last leak, caught by E2E) now also emits this.
 func TestErrorResponseWire(t *testing.T) {
-	b, err := protojson.Marshal(&attunev1.ErrorResponse{Code: "validation", Message: "content is required"})
+	b, err := protojson.Marshal(ptrext.Of(attunev1.ErrorResponse{Code: "validation", Message: "content is required"}))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

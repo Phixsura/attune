@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -79,12 +80,12 @@ var ErrTerminal = errors.New("terminal failure")
 // nil httpClient falls back to a sensible default (10s per-call timeout).
 func NewTransport(httpClient *http.Client, retry RetryPolicy) *Transport {
 	if httpClient == nil {
-		httpClient = &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport), Timeout: 10 * time.Second}
+		httpClient = ptrext.Of(http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport), Timeout: 10 * time.Second})
 	}
 	if retry.MaxAttempts < 1 {
 		retry.MaxAttempts = 1
 	}
-	return &Transport{httpClient: httpClient, retry: retry}
+	return ptrext.Of(Transport{httpClient: httpClient, retry: retry})
 }
 
 // Send executes the build/post/check cycle inside a retry loop. Returns

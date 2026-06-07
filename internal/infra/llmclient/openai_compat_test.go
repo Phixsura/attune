@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -148,7 +149,7 @@ func TestOpenAICompat_Complete_StructuredOutput(t *testing.T) {
 	if _, err := b.Complete(context.Background(), CompletionRequest{
 		Model:  "gpt-4o-mini",
 		Prompt: "classify",
-		Schema: &OutputSchema{Name: "enriched_v1", Schema: schema},
+		Schema: ptrext.Of(OutputSchema{Name: "enriched_v1", Schema: schema}),
 	}); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}

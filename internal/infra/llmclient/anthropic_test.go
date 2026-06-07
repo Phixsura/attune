@@ -1,3 +1,8 @@
+// ptrext:file-allow — mockAnthropicServer uses an out-parameter capture
+// (*capture = body inside the handler), so every &gotBody at a call site
+// must alias the test's local. Wrapping copies the slice header and the
+// captured body never reaches the assertion.
+
 package llmclient
 
 import (

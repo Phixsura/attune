@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
@@ -128,12 +129,12 @@ func TestDimsFromProto_ManualPayload(t *testing.T) {
 	in := []*attunev1.Dimension{
 		{
 			Name:        "type",
-			DisplayName: &attunev1.I18NString{Entries: map[string]string{"default": "Type"}},
+			DisplayName: ptrext.Of(attunev1.I18NString{Entries: map[string]string{"default": "Type"}}),
 			Kind:        "single",
 			Taxonomy: []*attunev1.Taxonomy{
 				{
 					Value:       "bug",
-					DisplayName: &attunev1.I18NString{Entries: map[string]string{"default": "Bug"}},
+					DisplayName: ptrext.Of(attunev1.I18NString{Entries: map[string]string{"default": "Bug"}}),
 				},
 			},
 		},

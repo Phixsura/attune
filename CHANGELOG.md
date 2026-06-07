@@ -80,6 +80,22 @@ authored — wire-stable, never auto-renamed.
 
 ### Added
 
+- **`scripts/lint-rawptr.sh` (and `cmd/lint-rawptr/`) — bans bare `*p`
+  deref and `&x` address-of, redirecting authors to `internal/pkg/ptrext`
+  helpers.** Adds a new CI gate (`lint-rawptr`) and a pre-commit hook step.
+  The AST-aware linter correctly skips `*T` in type position, `*p = v`
+  on the LHS of an assignment, `&xs[i]` slice-element addressing, and
+  `&arg` passed to known out-parameter APIs (`json.Unmarshal`, `*Row.Scan`,
+  `flag.*Var`, `errors.As`, `encoding/binary.Read`, attune's `postJSON`).
+  Per-line `// ptrext:allow <reason>` and per-file `// ptrext:file-allow
+  <reason>` escape hatches cover identity-bearing values (sync.Mutex
+  in proto messages, strings.Builder accumulators, out-parameter capture
+  fixtures) where wrapping would break correctness. The same binary
+  ships a `-fix` mode that text-rewrites the safe cases (`&CompositeLit{…}`
+  → `ptrext.Of(CompositeLit{…})`; `*p` → `ptrext.Indirect(p)`) and adds
+  the ptrext import; the in-tree sweep applied 178 mechanical rewrites
+  and 30+ hand fixes across 92 files. See CLAUDE.md §7b for the policy.
+
 - **`internal/pkg/` umbrella for stdlib-extension packages.** `logext` moves
   here (was `internal/logext`); new sibling `ptrext` ships small generic
   pointer helpers (`Of`, `Indirect`, `IndirectOr`, `OfNotZero`, `OfPositive`,

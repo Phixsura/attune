@@ -11,6 +11,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
@@ -40,12 +41,12 @@ func NewDevLoginHandler(
 	users *tenant.TenantUserRepo,
 	baseURL string,
 ) *DevLoginHandler {
-	return &DevLoginHandler{
+	return ptrext.Of(DevLoginHandler{
 		signer:  signer,
 		tenants: tenants,
 		users:   users,
 		baseURL: strings.TrimRight(baseURL, "/"),
-	}
+	})
 }
 
 // ServeHTTP handles GET /fb/v1/console/install/dev-login.

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
@@ -22,7 +23,7 @@ type OutboxRepo struct {
 }
 
 func NewOutbox(pool *pgxpool.Pool) *OutboxRepo {
-	return &OutboxRepo{pool: pool}
+	return ptrext.Of(OutboxRepo{pool: pool})
 }
 
 // Outbox statuses — keep in lockstep with the CHECK constraint in
@@ -251,5 +252,5 @@ func (r *OutboxRepo) OldestPendingAge(ctx context.Context) (time.Duration, error
 	if ageSec == nil {
 		return 0, nil
 	}
-	return time.Duration(*ageSec * float64(time.Second)), nil
+	return time.Duration(ptrext.Indirect(ageSec) * float64(time.Second)), nil
 }

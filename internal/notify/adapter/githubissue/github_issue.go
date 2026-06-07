@@ -252,7 +252,7 @@ func formatAttrRows(attrs map[string]any) string {
 	sort.Strings(names)
 	var b strings.Builder
 	for _, n := range names {
-		fmt.Fprintf(&b, "| %s | %s |\n", n, formatAttrValue(attrs[n]))
+		b.WriteString(fmt.Sprintf("| %s | %s |\n", n, formatAttrValue(attrs[n])))
 	}
 	return b.String()
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/trace"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
@@ -35,7 +36,7 @@ type IngestHandler struct {
 }
 
 func NewIngestHandler(ingestor ingestRower) *IngestHandler {
-	return &IngestHandler{ingestor: ingestor}
+	return ptrext.Of(IngestHandler{ingestor: ingestor})
 }
 
 func (h *IngestHandler) Routes() chi.Router {
@@ -103,10 +104,10 @@ func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 		"tenant_id", tenantID,
 		"feedback_id", id,
 		"source", in.Source)
-	writeJSONProto(w, http.StatusOK, &attunev1.IngestResponse{
+	writeJSONProto(w, http.StatusOK, ptrext.Of(attunev1.IngestResponse{
 		Id:               id,
 		EnrichmentStatus: "pending",
-	})
+	}))
 }
 
 // errInternal is a sentinel for IngestRow internal failures we want to map to 500.
@@ -138,11 +139,11 @@ func writeJSONProto(w http.ResponseWriter, code int, m proto.Message) {
 // every proto-migrated endpoint (#19). request_id comes from the chi RequestID
 // middleware (X-Request-ID) for support / log correlation.
 func writeError(ctx context.Context, w http.ResponseWriter, status int, code, message string) {
-	writeJSONProto(w, status, &attunev1.ErrorResponse{
+	writeJSONProto(w, status, ptrext.Of(attunev1.ErrorResponse{
 		Code:      code,
 		Message:   message,
 		RequestId: middleware.GetReqID(ctx),
-	})
+	}))
 }
 
 // boundedSource keeps attune_ingest_total's `source` label bounded to known

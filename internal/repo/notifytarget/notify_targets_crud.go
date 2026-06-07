@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
@@ -39,7 +40,7 @@ func (r *NotifyTargetRepo) GetByID(
 	if err != nil {
 		return nil, fmt.Errorf("get notify target: %w", err)
 	}
-	return &t, nil
+	return ptrext.Of(t), nil
 }
 
 // Delete removes the row, scoped by tenant. Hard delete is OK because
@@ -122,5 +123,5 @@ func (r *NotifyTargetRepo) GetByTenantAudience(
 	if err != nil {
 		return nil, fmt.Errorf("get notify target: %w", err)
 	}
-	return &t, nil
+	return ptrext.Of(t), nil
 }
