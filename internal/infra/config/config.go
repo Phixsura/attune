@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -224,10 +225,15 @@ func (c *Config) validate() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("config: database_url is required")
 	}
-	if !c.LLMProtocol.Valid() {
+	if !c.LLMProtocol.IsValid() {
+		known := KnownLLMProtocols()
+		names := make([]string, len(known))
+		for i, k := range known {
+			names[i] = string(k)
+		}
 		return fmt.Errorf(
 			"config: llm_protocol %q is not one of %s",
-			c.LLMProtocol, joinForError(KnownLLMProtocols()),
+			c.LLMProtocol, strings.Join(names, " / "),
 		)
 	}
 	// openai-compat needs an explicit base URL (Azure / vLLM / ollama / oneapi

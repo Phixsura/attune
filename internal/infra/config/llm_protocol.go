@@ -1,7 +1,5 @@
 package config
 
-import "strings"
-
 // LLMProtocol is the wire format selector for the enrichment backend
 // (#10). It's an alias around string so YAML unmarshal continues to
 // work, but giving it a distinct type lets switch/case land on
@@ -31,22 +29,14 @@ func KnownLLMProtocols() []LLMProtocol {
 	}
 }
 
-// Valid reports whether p is one of the known backends.
-func (p LLMProtocol) Valid() bool {
+// IsValid reports whether p is one of the known backends. Named to match
+// the convention used by sibling typed-string enums in the repo (e.g.
+// domain.DimensionKind.IsValid).
+func (p LLMProtocol) IsValid() bool {
 	for _, k := range KnownLLMProtocols() {
 		if p == k {
 			return true
 		}
 	}
 	return false
-}
-
-// joinForError renders the protocol list as "openai-compat / openai-responses / …"
-// for the validate error message.
-func joinForError(ps []LLMProtocol) string {
-	parts := make([]string, len(ps))
-	for i, p := range ps {
-		parts[i] = string(p)
-	}
-	return strings.Join(parts, " / ")
 }
