@@ -8,6 +8,15 @@ import { server } from '@/testing/mocks/server'
 // "added an endpoint and forgot to mock it" fail loudly instead of
 // returning undefined.
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeEach(() => {
+  // Reset call history on every vi.fn (including module-level mocks
+  // hoisted by vi.mock at file top — e.g. the sonner mock in
+  // dialogs.test.tsx). Without this, a vi.fn defined at module scope
+  // accumulates calls across tests, and any future
+  // `expect(fn).not.toHaveBeenCalled()` reads as "called" because of
+  // a prior test's invocation. Mock IMPLEMENTATIONS are preserved.
+  vi.clearAllMocks()
+})
 afterEach(() => {
   // Explicit RTL cleanup — auto-cleanup relies on vitest's afterEach
   // hook being installed, which can fail to register under certain
@@ -15,6 +24,10 @@ afterEach(() => {
   // so React state from the previous test doesn't survive into the
   // next test's beforeEach DOM patches.
   cleanup()
+  // Reverse any vi.stubGlobal('fetch', ...) / vi.stubGlobal('navigator', ...)
+  // from the previous test. Without this, an early-throwing test that
+  // stubbed a global leaks the stub into the next test silently.
+  vi.unstubAllGlobals()
   server.resetHandlers()
 })
 afterAll(() => server.close())

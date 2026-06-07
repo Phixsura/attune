@@ -163,6 +163,7 @@ export function EditNotifyDialog({
                 value={timeout}
                 onChange={(e) => setTimeoutSec(Number(e.target.value))}
                 disabled={pending}
+                data-testid="edit-notify-timeout"
               />
             </div>
 
@@ -172,6 +173,7 @@ export function EditNotifyDialog({
                 checked={disabled}
                 onChange={(e) => setDisabled(e.target.checked)}
                 disabled={pending}
+                data-testid="edit-notify-disabled"
               />
               {t('notify_targets.edit_dialog.disabled_field')}
             </label>

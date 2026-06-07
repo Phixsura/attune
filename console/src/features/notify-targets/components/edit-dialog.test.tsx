@@ -77,6 +77,32 @@ describe('EditNotifyDialog sparse PATCH diff', () => {
     expect(patch).toEqual({ secret: '' })
   })
 
+  it('timeout change → patch contains ONLY { timeoutSeconds }', async () => {
+    const target = makeTarget({ timeoutSeconds: 10 })
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <EditNotifyDialog target={target} onClose={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+    const timeoutInput = screen.getByTestId('edit-notify-timeout') as HTMLInputElement
+    await user.clear(timeoutInput)
+    await user.type(timeoutInput, '30')
+    await user.click(screen.getByTestId('edit-notify-save'))
+    const patch = onSubmit.mock.calls[0][0] as NotifyTargetPatch
+    expect(patch).toEqual({ timeoutSeconds: 30 })
+  })
+
+  it('disabled toggle → patch contains ONLY { disabled: true }', async () => {
+    const target = makeTarget({ disabled: false })
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <EditNotifyDialog target={target} onClose={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+    await user.click(screen.getByTestId('edit-notify-disabled'))
+    await user.click(screen.getByTestId('edit-notify-save'))
+    const patch = onSubmit.mock.calls[0][0] as NotifyTargetPatch
+    expect(patch).toEqual({ disabled: true })
+  })
+
   it('clear-then-type resets the cleared bit → patch.secret = typed value (not empty)', async () => {
     // Real "typed wins over cleared" requires CLEARING FIRST, then typing —
     // because the input's onChange handler resets secretCleared on every

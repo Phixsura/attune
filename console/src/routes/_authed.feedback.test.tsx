@@ -122,4 +122,47 @@ describe('_authed.feedback route — user flow smoke', () => {
       expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
     })
   })
+
+  it('500 from /feedback → empty state (not crash) — documents current behavior', async () => {
+    // Backend errors currently render as "no feedback" rather than a
+    // distinct error UI — debatable UX, but it's the actual behavior
+    // and this test locks it in so a change is intentional. If/when
+    // an error UI lands, this test FAILS and gets updated alongside.
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: [] },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ code: 'internal', message: 'boom' }, { status: 500 }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '0',
+          dims: [],
+          urgentCount: '0',
+        }),
+      ),
+    )
+    const FeedbackPage = FeedbackRoute.options.component as React.ComponentType & {
+      preload?: () => Promise<unknown>
+    }
+    if (FeedbackPage.preload) await FeedbackPage.preload()
+    renderWithProviders(
+      <Suspense fallback={null}>
+        <FeedbackPage />
+      </Suspense>,
+    )
+    // The empty-state copy is i18n-controlled; wait for it via the
+    // EmptyState's Inbox icon's `lucide-inbox` data attribute (stable
+    // across i18n). The point of this assertion is "page rendered,
+    // didn't crash, didn't show a Toast/Error UI".
+    await waitFor(() => {
+      const emptyIcon = document.querySelector('svg.lucide-inbox')
+      expect(emptyIcon).not.toBeNull()
+    })
+  })
 })
