@@ -2,9 +2,28 @@ package feedback
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestMarshalAttrs_RejectsOversizedPayload(t *testing.T) {
+	// One giant freeform label that pushes the JSON payload past the cap.
+	big := strings.Repeat("a", MaxAttrsBytes+1)
+	_, err := marshalAttrs(map[string]any{"labels": []string{big}})
+	if !errors.Is(err, ErrAttrsTooLarge) {
+		t.Errorf("want ErrAttrsTooLarge, got %v", err)
+	}
+}
+
+func TestMarshalAttrs_AcceptsPayloadAtCap(t *testing.T) {
+	// Padding sized so the resulting JSON sits right under the limit.
+	pad := strings.Repeat("a", MaxAttrsBytes-32)
+	_, err := marshalAttrs(map[string]any{"x": pad})
+	if err != nil {
+		t.Errorf("payload under cap should marshal: %v", err)
+	}
+}
 
 func TestMarshalAttrs_NilBecomesEmptyObject(t *testing.T) {
 	got, err := marshalAttrs(nil)

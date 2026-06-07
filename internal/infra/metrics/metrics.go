@@ -64,6 +64,32 @@ var EnrichSuggestedAttrsTotal = prometheus.NewCounterVec(
 	[]string{"tenant", "dim"},
 )
 
+// EnrichAttrsSizeBytes tracks the serialized size of the enriched_attrs
+// JSONB payload (#10 → E3). Operators watch the histogram's p95/p99
+// to size the per-row hard cap (repo.feedback.MaxAttrsBytes); the
+// `_count` series correlates with rejection spikes from the cap.
+// Buckets sized for the OSS seed (~256B) to a runaway client (~16 KiB).
+var EnrichAttrsSizeBytes = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_enrich_attrs_size_bytes",
+		Help:    "Serialized enriched_attrs JSONB size, per tenant.",
+		Buckets: prometheus.ExponentialBuckets(256, 2, 8), // 256B..32KiB
+	},
+	[]string{"tenant"},
+)
+
+// EnrichAttrsRejectedTotal counts rows where MarkDone refused the
+// payload for exceeding MaxAttrsBytes. Non-zero traffic on this metric
+// is operator-actionable: either bump the cap or surface a per-tenant
+// dim-set audit.
+var EnrichAttrsRejectedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_enrich_attrs_rejected_total",
+		Help: "Enrich rows rejected because enriched_attrs exceeded MaxAttrsBytes.",
+	},
+	[]string{"tenant"},
+)
+
 // NotifyFailuresTotal increments on every notifier push that didn't
 // return nil. destination_type ∈ {lark-pool, lark-radar, raw-webhook};
 // reason is the error class (transport | terminal).
@@ -134,6 +160,8 @@ var allMetrics = []prometheus.Collector{
 	EnrichDuration,
 	EnrichAttrsDroppedTotal,
 	EnrichSuggestedAttrsTotal,
+	EnrichAttrsSizeBytes,
+	EnrichAttrsRejectedTotal,
 	NotifyFailuresTotal,
 	OutboxLagSeconds,
 	ClaimContentionTotal,

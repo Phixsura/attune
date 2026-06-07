@@ -20,6 +20,22 @@ import (
 //	consistency       re-run LLM on N rows; report match rate
 //	export-for-human  write CSV for offline human labeling
 //	score-human       read filled CSV; report human-vs-AI accuracy
+//
+// --tenant <id> is REQUIRED for export-for-human and score-human (the
+// CSV header is derived from that tenant's DimensionSet). consistency
+// mode infers the dim set per-row from the sampled tenant_id.
+//
+// Examples:
+//
+//	# Match rate across all tenants since 2026-05-01 (50 rows by default).
+//	attune eval --mode consistency --since 2026-05-01
+//
+//	# Export 100 rows for a human to label, scoped to one tenant.
+//	attune eval --mode export-for-human --tenant demo --sample 100 \
+//	    --since 2026-05-01 --output ./labels.csv
+//
+//	# Score the filled-in CSV against the AI's columns.
+//	attune eval --mode score-human --tenant demo --input ./labels.csv
 func runEval(args []string) error {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	mode := fs.String("mode", "consistency", "consistency | export-for-human | score-human")
@@ -27,7 +43,9 @@ func runEval(args []string) error {
 	sample := fs.Int("sample", 50, "sample size (consistency / export-for-human)")
 	output := fs.String("output", "", "write report or CSV to file (default stdout)")
 	input := fs.String("input", "", "labeled CSV path (score-human mode)")
-	tenantID := fs.String("tenant", "", "tenant id (required for export-for-human / score-human; dim set comes from this tenant)")
+	tenantID := fs.String("tenant", "",
+		"tenant slug or id — REQUIRED for export-for-human and score-human. "+
+			"The CSV header is derived from that tenant's DimensionSet.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

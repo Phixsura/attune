@@ -22,6 +22,8 @@ func TestRegisteredMetricsMatchDocumentedReference(t *testing.T) {
 		"attune_enrich_duration_seconds":      true,
 		"attune_enrich_attrs_dropped_total":   true,
 		"attune_enrich_suggested_attrs_total": true,
+		"attune_enrich_attrs_size_bytes":      true,
+		"attune_enrich_attrs_rejected_total":  true,
 		"attune_notify_failures_total":        true,
 		"attune_outbox_lag_seconds":           true,
 		"attune_claim_contention_total":       true,

@@ -79,7 +79,7 @@ Usage:
   attune server                                       Run the HTTP server (default)
   attune tenant create --slug <s> [--name <n>]        Create a new tenant
   attune keys issue --tenant <slug> [--label <s>]     Mint an API key
-  attune eval --mode <m> [--since <date>] ...         AI accuracy report
+  attune eval --mode <m> [--tenant <slug>] ...        AI accuracy report (--tenant required for export-for-human / score-human)
   attune outbox prune --older-than <dur>              Mark stale pending rows dead
   attune digest run --tenant <slug>                   Send weekly digest now (smoke)
 `)

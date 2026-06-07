@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { I18nInput } from '@/components/dim/i18n-input'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,16 @@ import {
 import { useDisplayName } from '@/lib/i18n-resolve'
 import { cn } from '@/lib/utils'
 import type { Dimension, Taxonomy } from '@/proto/attune/v1/common'
+
+// dimRefKey is a wire-safe identity for a Dimension *during editing*. It
+// isn't the Dimension.Name (which would be empty on a brand-new card) and
+// it isn't the array index (unstable across remove operations). Instead,
+// the editor maintains a WeakMap of Dimension objects → opaque ids; new
+// cards get a fresh id, persisted cards reuse one tied to the loaded
+// reference. This is what differentiates a persisted dim (Name + Kind
+// locked) from a brand-new one (Name + Kind editable) — independent of
+// the operator's chosen Name.
+type DimRefKey = string
 
 // DimensionsEditor is the Settings page's editor surface. It is
 // metadata-driven: any number of Dimensions, each with i18n
@@ -34,35 +44,68 @@ export function DimensionsEditor({
   onChange: (next: Dimension[]) => void
 }) {
   const { t } = useTranslation()
+  const baseId = useId()
+  // WeakMap: Dimension reference → stable opaque id. Each Dimension
+  // object created locally (addDim) goes into newDimIds; dims loaded
+  // from the server are tracked too but classified as "not new".
+  const refs = useRef<WeakMap<Dimension, DimRefKey>>(new WeakMap())
+  const newDimIds = useRef<Set<DimRefKey>>(new Set())
+  const seqRef = useRef(0)
+
+  const idOf = (dim: Dimension): DimRefKey => {
+    const existing = refs.current.get(dim)
+    if (existing) return existing
+    seqRef.current += 1
+    const id = `${baseId}-${seqRef.current}`
+    refs.current.set(dim, id)
+    return id
+  }
 
   const updateDim = (i: number, patch: Partial<Dimension>) => {
+    const prev = value[i]
     const next = [...value]
-    next[i] = { ...next[i], ...patch }
+    const merged = { ...prev, ...patch }
+    next[i] = merged
+    // Identity transfers: the merged object is "the same dim" as prev
+    // for the purposes of new-vs-persisted classification.
+    const id = refs.current.get(prev)
+    if (id) {
+      refs.current.set(merged, id)
+      if (newDimIds.current.has(id)) {
+        // remains new
+      }
+    }
     onChange(next)
   }
   const addDim = () => {
-    onChange([...value, emptyDimension(`dim_${value.length + 1}`)])
+    const fresh = emptyDimension()
+    const id = idOf(fresh)
+    newDimIds.current.add(id)
+    onChange([...value, fresh])
   }
   const removeDim = (i: number) => {
+    const dropped = value[i]
+    const id = refs.current.get(dropped)
+    if (id) newDimIds.current.delete(id)
     onChange(value.filter((_, idx) => idx !== i))
   }
 
   return (
     <div className="space-y-4">
-      {value.map((dim, i) => (
-        <DimensionCard
-          // Index composite key: new dims may share placeholder names
-          // ("dim_1"…"dim_2"). On save the rows always end with unique
-          // operator-chosen names; until then the index suffix keeps
-          // React from collapsing two new rows into one.
-          // biome-ignore lint/suspicious/noArrayIndexKey: see comment
-          key={`${dim.name}-${i}`}
-          dim={dim}
-          isNew={dim.name === '' || dim.name.startsWith('dim_')}
-          onChange={(patch) => updateDim(i, patch)}
-          onRemove={() => removeDim(i)}
-        />
-      ))}
+      {value.map((dim, i) => {
+        const id = idOf(dim)
+        const isNew = newDimIds.current.has(id)
+        return (
+          <DimensionCard
+            // Stable per-card id — survives Name edits and array reordering.
+            key={id}
+            dim={dim}
+            isNew={isNew}
+            onChange={(patch) => updateDim(i, patch)}
+            onRemove={() => removeDim(i)}
+          />
+        )
+      })}
       <Button type="button" variant="outline" onClick={addDim}>
         <Plus className="h-4 w-4 mr-1" />
         {t('dim.editor.add_dim')}
@@ -85,15 +128,30 @@ function DimensionCard({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const displayOf = useDisplayName()
+  // Same identity trick as the parent: track newly-added Taxonomy
+  // entries by object reference so Value editability survives renames
+  // and array reorders, without needing a "value_*" placeholder prefix.
+  const baseId = useId()
+  const taxRefs = useRef<WeakMap<Taxonomy, string>>(new WeakMap())
+  const newTaxIds = useRef<Set<string>>(new Set())
+  const taxSeq = useRef(0)
+  const taxIdOf = (tax: Taxonomy): string => {
+    const existing = taxRefs.current.get(tax)
+    if (existing) return existing
+    taxSeq.current += 1
+    const id = `${baseId}-tax-${taxSeq.current}`
+    taxRefs.current.set(tax, id)
+    return id
+  }
 
   const setTaxonomy = (taxonomy: Taxonomy[]) => onChange({ taxonomy })
   const setUrgentSet = (urgentSet: string[]) => onChange({ urgentSet })
 
   const addTaxonomy = () => {
-    setTaxonomy([
-      ...dim.taxonomy,
-      { value: `value_${dim.taxonomy.length + 1}`, displayName: { entries: { default: '' } } },
-    ])
+    const fresh: Taxonomy = { value: '', displayName: { entries: { default: '' } } }
+    const id = taxIdOf(fresh)
+    newTaxIds.current.add(id)
+    setTaxonomy([...dim.taxonomy, fresh])
   }
 
   return (
@@ -184,23 +242,35 @@ function DimensionCard({
                 : t('dim.editor.taxonomy_help_single')}
             </p>
             <div className="space-y-3 pl-3 border-l-2 border-border">
-              {dim.taxonomy.map((tax, taxIdx) => (
-                <TaxonomyRow
-                  // biome-ignore lint/suspicious/noArrayIndexKey: same placeholder-value reasoning as DimensionsEditor above.
-                  key={`${tax.value}-${taxIdx}`}
-                  tax={tax}
-                  isNew={tax.value.startsWith('value_')}
-                  onChange={(patch) => {
-                    const next = [...dim.taxonomy]
-                    next[taxIdx] = { ...next[taxIdx], ...patch }
-                    setTaxonomy(next)
-                  }}
-                  onRemove={() => {
-                    setTaxonomy(dim.taxonomy.filter((_, i) => i !== taxIdx))
-                    setUrgentSet(dim.urgentSet.filter((v) => v !== tax.value))
-                  }}
-                />
-              ))}
+              {dim.taxonomy.map((tax, taxIdx) => {
+                const id = taxIdOf(tax)
+                const isNewTax = newTaxIds.current.has(id)
+                return (
+                  <TaxonomyRow
+                    key={id}
+                    tax={tax}
+                    isNew={isNewTax}
+                    onChange={(patch) => {
+                      const prev = dim.taxonomy[taxIdx]
+                      const merged = { ...prev, ...patch }
+                      // Carry the identity (and "new" flag) over to the
+                      // merged object so Value remains editable across edits.
+                      const prevId = taxRefs.current.get(prev)
+                      if (prevId) taxRefs.current.set(merged, prevId)
+                      const next = [...dim.taxonomy]
+                      next[taxIdx] = merged
+                      setTaxonomy(next)
+                    }}
+                    onRemove={() => {
+                      const dropped = dim.taxonomy[taxIdx]
+                      const droppedId = taxRefs.current.get(dropped)
+                      if (droppedId) newTaxIds.current.delete(droppedId)
+                      setTaxonomy(dim.taxonomy.filter((_, i) => i !== taxIdx))
+                      setUrgentSet(dim.urgentSet.filter((v) => v !== tax.value))
+                    }}
+                  />
+                )
+              })}
               {dim.taxonomy.length === 0 && (
                 <p className="text-xs italic text-muted-foreground">
                   {dim.kind === 'multi'
@@ -294,9 +364,13 @@ function TaxonomyRow({
   )
 }
 
-function emptyDimension(stub: string): Dimension {
+// emptyDimension returns the blank-slate Dimension a fresh editor card
+// starts with. Name + DisplayName are empty; the operator types them
+// before Save. The identity-tracking WeakMap (newDimIds) is what marks
+// the row as "new" — not a `dim_<n>` placeholder name like before.
+function emptyDimension(): Dimension {
   return {
-    name: stub,
+    name: '',
     displayName: { entries: { default: '' } },
     kind: 'single',
     taxonomy: [],

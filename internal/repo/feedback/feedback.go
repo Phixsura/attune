@@ -181,9 +181,23 @@ func (r *FeedbackRepo) MarkDoneTx(ctx context.Context, tx pgx.Tx, id int64, e do
 	return nil
 }
 
+// MaxAttrsBytes is the upper bound on a single row's enriched_attrs
+// JSONB payload before MarkDone refuses the write. The default 32 KiB
+// fits any sensible per-tenant dim set (the OSS seed comes in under
+// 1 KiB) and shields the table from rogue clients that try to stuff
+// thousands of labels into one row. Operators with genuinely larger
+// taxonomies can bump this constant; the schema's hard cap is 1 GiB
+// (Postgres JSONB max).
+const MaxAttrsBytes = 32 * 1024
+
+// ErrAttrsTooLarge signals MarkDone refused the payload. Surfaced
+// through the enricher as a parse_err-style failure so the row goes to
+// status=failed instead of poisoning the table with truncated data.
+var ErrAttrsTooLarge = fmt.Errorf("enriched_attrs exceeds %d bytes", MaxAttrsBytes)
+
 // marshalAttrs canonicalizes a nil Attrs map to an empty JSONB object
 // so the DB column is never NULL nor "null" — keeps GIN containment
-// queries and scan paths uniform.
+// queries and scan paths uniform — and enforces the per-row size cap.
 func marshalAttrs(a map[string]any) ([]byte, error) {
 	if a == nil {
 		return []byte("{}"), nil
@@ -191,6 +205,9 @@ func marshalAttrs(a map[string]any) ([]byte, error) {
 	b, err := json.Marshal(a)
 	if err != nil {
 		return nil, fmt.Errorf("marshal enriched_attrs: %w", err)
+	}
+	if len(b) > MaxAttrsBytes {
+		return nil, fmt.Errorf("%w (got %d)", ErrAttrsTooLarge, len(b))
 	}
 	return b, nil
 }

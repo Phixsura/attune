@@ -2,6 +2,8 @@ package enrich
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
@@ -17,6 +19,20 @@ import (
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
+
+// attrsSizeBytes returns the JSON-encoded size of attrs without
+// persisting the bytes. Cheap (a few KiB of allocation per row) and
+// mirrors exactly what repo.feedback.marshalAttrs would compute.
+func attrsSizeBytes(a map[string]any) int {
+	if a == nil {
+		return 0
+	}
+	b, err := json.Marshal(a)
+	if err != nil {
+		return 0
+	}
+	return len(b)
+}
 
 const (
 	enrichmentSystemUser = "system-feedback-enricher"
@@ -137,8 +153,17 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 			Observe(time.Since(start).Seconds())
 		return err
 	}
+	// Observe attrs payload size before persistence so the histogram
+	// captures every classification attempt, even ones rejected by the
+	// per-row size cap downstream.
+	if size := attrsSizeBytes(enriched.Attrs); size > 0 {
+		metrics.EnrichAttrsSizeBytes.WithLabelValues(row.TenantID).Observe(float64(size))
+	}
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
 	if err := e.persistEnriched(ctx, snapshot, enriched); err != nil {
+		if errors.Is(err, feedback.ErrAttrsTooLarge) {
+			metrics.EnrichAttrsRejectedTotal.WithLabelValues(row.TenantID).Inc()
+		}
 		metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "db_err").
 			Observe(time.Since(start).Seconds())
 		return err

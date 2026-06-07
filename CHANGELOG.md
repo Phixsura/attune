@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Webhook consumer migration (raw-webhook & outbox v1 → v2)
+
+The `enriched` block in the outbox / raw-webhook envelope changes shape
+this release. The top-level `version` field goes from `"1"` to `"2"` so
+consumers can branch decoding by version.
+
+**Before (v1):**
+```json
+{
+  "version": "1",
+  "event_type": "feedback.enriched",
+  "feedback": {
+    "id": 42,
+    "content": "...",
+    "enriched": {
+      "title": "Payment failed",
+      "kind": "bug",
+      "severity": "P0",
+      "modules": ["payment", "checkout"],
+      "priority": 1.0,
+      "rationale": "...",
+      "enriched_at": "2026-06-07T..."
+    }
+  }
+}
+```
+
+**After (v2):**
+```json
+{
+  "version": "2",
+  "event_type": "feedback.enriched",
+  "feedback": {
+    "id": 42,
+    "content": "...",
+    "enriched": {
+      "title": "Payment failed",
+      "attrs": {
+        "type": "bug",
+        "severity": "critical",
+        "labels": ["payment", "checkout"]
+      },
+      "is_urgent": true,
+      "rationale": "...",
+      "enriched_at": "2026-06-07T..."
+    }
+  }
+}
+```
+
+Concrete consumer changes:
+
+- `enriched.kind` → `enriched.attrs.type` (Value is now operator-owned; the
+  default seed keeps `bug`/`feature`/`question`/`other`)
+- `enriched.severity` (was `P0`..`P3`) → `enriched.attrs.severity` (Value is
+  now operator-owned; the default seed is `critical`/`major`/`minor`)
+- `enriched.modules` (array) → `enriched.attrs.labels` (array; per-tenant
+  taxonomy, freeform by default)
+- `enriched.priority` (float) → REMOVED; use the derived `enriched.is_urgent`
+  boolean for routing (`severity.urgent_set=["critical"]` is the default
+  seed, so any `severity == "critical"` row carries `is_urgent: true`)
+- Any consumer that walked `enriched` by hand must switch to
+  `enriched.attrs[<dim.name>]`. Operators may add or remove dims from the
+  console Settings page at runtime, so consumers should be tolerant of
+  unknown keys in `attrs` and missing keys (a dim was deleted or the LLM
+  declined an optional dim).
+
+The example values above are the DEFAULT OSS seed. Once operators edit
+their dim set via Settings, attribute Values become whatever the operator
+authored — wire-stable, never auto-renamed.
+
+### Added
+
+- **`FEEDBACK_API_LLM_MODEL` env override / `llm_model` YAML key** for the
+  enrichment model id. Default remains `gpt-4o-mini`; set this when your
+  LLM gateway aliases the model name (e.g. corporate gateway exposes
+  `gpt-5.5` for an OpenAI-compat endpoint). The previous hardcoded
+  constant forced operators to fork the binary; this change keeps every
+  knob in one config layer.
+
 ### Changed
 
 - **BREAKING — enrichment classification pivots to metadata-driven `Dimension`s
