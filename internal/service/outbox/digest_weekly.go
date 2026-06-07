@@ -173,12 +173,12 @@ func composeDigest(
 	dims domain.DimensionSet,
 	dimTops map[string][]feedback.ValueCount,
 ) string {
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Attune weekly digest · %s\n", displayName))
-	b.WriteString(fmt.Sprintf("Window: %s ~ %s\n", from.Format("01-02"), to.Format("01-02")))
-	b.WriteString(fmt.Sprintf("Total feedback received: %d\n", total))
+	b := ptrext.Of(strings.Builder{})
+	fmt.Fprintf(b, "Attune weekly digest · %s\n", displayName)
+	fmt.Fprintf(b, "Window: %s ~ %s\n", from.Format("01-02"), to.Format("01-02"))
+	fmt.Fprintf(b, "Total feedback received: %d\n", total)
 	if urgent > 0 {
-		b.WriteString(fmt.Sprintf("Urgent rows: %d\n", urgent))
+		fmt.Fprintf(b, "Urgent rows: %d\n", urgent)
 	}
 	for _, d := range dims {
 		tops := dimTops[d.Name]
@@ -189,10 +189,10 @@ func composeDigest(
 		if label == "" {
 			label = d.Name
 		}
-		b.WriteString(fmt.Sprintf("\nTop %s:\n", label))
+		fmt.Fprintf(b, "\nTop %s:\n", label)
 		// dimTops is already DESC by count from the repo.
 		for _, vc := range tops {
-			b.WriteString(fmt.Sprintf(" - %s: %d\n", displayForValue(d, vc.Value), vc.Count))
+			fmt.Fprintf(b, " - %s: %d\n", displayForValue(d, vc.Value), vc.Count)
 		}
 	}
 	b.WriteString("\n→ Open the Attune console for details.")

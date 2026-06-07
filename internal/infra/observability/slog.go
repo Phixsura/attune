@@ -14,8 +14,9 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // TraceIDHandler wraps an underlying slog.Handler and adds trace_id/span_id

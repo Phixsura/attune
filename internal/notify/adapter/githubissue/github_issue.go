@@ -35,6 +35,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	// OTel-aware logging convention — see docs/observability-sop.md.
 )
 
@@ -250,9 +251,9 @@ func formatAttrRows(attrs map[string]any) string {
 		names = append(names, k)
 	}
 	sort.Strings(names)
-	var b strings.Builder
+	b := ptrext.Of(strings.Builder{})
 	for _, n := range names {
-		b.WriteString(fmt.Sprintf("| %s | %s |\n", n, formatAttrValue(attrs[n])))
+		fmt.Fprintf(b, "| %s | %s |\n", n, formatAttrValue(attrs[n]))
 	}
 	return b.String()
 }

@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // TestOpenAICompat_Complete_HappyPath exercises the full request/response cycle:

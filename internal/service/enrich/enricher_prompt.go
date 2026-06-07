@@ -110,14 +110,14 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 	if len(dims) == 0 {
 		return ""
 	}
-	var b strings.Builder
+	b := ptrext.Of(strings.Builder{})
 	for _, d := range dims {
-		b.WriteString(fmt.Sprintf(" // %s (%s)\n", d.Name, d.Kind))
+		fmt.Fprintf(b, " // %s (%s)\n", d.Name, d.Kind)
 		if len(d.Taxonomy) == 0 {
 			if d.Kind == domain.DimMulti {
-				b.WriteString(fmt.Sprintf(" \"%s\": [/* freeform: any short string labels */],\n", d.Name))
+				fmt.Fprintf(b, " \"%s\": [/* freeform: any short string labels */],\n", d.Name)
 			} else {
-				b.WriteString(fmt.Sprintf(" \"%s\": \"...\",\n", d.Name))
+				fmt.Fprintf(b, " \"%s\": \"...\",\n", d.Name)
 			}
 			continue
 		}
@@ -136,11 +136,11 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 			}
 		}
 		if d.Kind == domain.DimSingle {
-			b.WriteString(fmt.Sprintf(" // pick one: %s\n", strings.Join(opts, " | ")))
-			b.WriteString(fmt.Sprintf(" \"%s\": \"<one value>\",\n", d.Name))
+			fmt.Fprintf(b, " // pick one: %s\n", strings.Join(opts, " | "))
+			fmt.Fprintf(b, " \"%s\": \"<one value>\",\n", d.Name)
 		} else {
-			b.WriteString(fmt.Sprintf(" // pick zero or more: %s\n", strings.Join(opts, " | ")))
-			b.WriteString(fmt.Sprintf(" \"%s\": [/* values */],\n", d.Name))
+			fmt.Fprintf(b, " // pick zero or more: %s\n", strings.Join(opts, " | "))
+			fmt.Fprintf(b, " \"%s\": [/* values */],\n", d.Name)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

@@ -9,8 +9,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // Transport is the common outbound POST mechanism shared by every

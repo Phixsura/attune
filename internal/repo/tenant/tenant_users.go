@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // TenantUser is a row in the tenant_users table — one Lark user inside
