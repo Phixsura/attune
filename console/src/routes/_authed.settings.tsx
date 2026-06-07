@@ -4,6 +4,7 @@ import { Loader2, RotateCcw, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { DimensionsEditor } from '@/components/dim/dimensions-editor'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -11,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
+import type { Dimension } from '@/proto/attune/v1/common'
 
 export const Route = createFileRoute('/_authed/settings')({
   component: SettingsPage,
@@ -24,15 +26,14 @@ function SettingsPage() {
   const preview = usePreviewEnrichPrompt()
 
   const [prompt, setPrompt] = useState('')
-  const [modules, setModules] = useState<string[]>([])
-  const [moduleInput, setModuleInput] = useState('')
+  const [dimensions, setDimensions] = useState<Dimension[]>([])
   const [sample, setSample] = useState('')
   const [previewText, setPreviewText] = useState('')
 
   useEffect(() => {
     if (!cfg.data) return
     setPrompt(cfg.data.promptTemplate ?? cfg.data.defaultPromptTemplate)
-    setModules(cfg.data.modules ?? [])
+    setDimensions(cfg.data.dimensions ?? [])
   }, [cfg.data])
 
   const handleRestoreDefault = () => {
@@ -41,28 +42,19 @@ function SettingsPage() {
     }
   }
 
-  const handleAddModule = () => {
-    const name = moduleInput.trim()
-    if (!name) return
-    if (modules.some((m) => m.toLowerCase() === name.toLowerCase())) {
-      setModuleInput('')
-      return
-    }
-    setModules((prev) => [...prev, name])
-    setModuleInput('')
-  }
-
   const handleSave = () => {
     const defaultTmpl = cfg.data?.defaultPromptTemplate ?? ''
     const isDefaultPrompt = prompt.trim() === defaultTmpl.trim()
-    const body = {
-      modules,
-      promptTemplate: isDefaultPrompt ? undefined : prompt,
-    }
-    save.mutate(body, {
-      onSuccess: () => toast.success(t('settings.saved')),
-      onError: (err) => toast.error(err instanceof Error ? err.message : 'failed'),
-    })
+    save.mutate(
+      {
+        dimensions,
+        promptTemplate: isDefaultPrompt ? undefined : prompt,
+      },
+      {
+        onSuccess: () => toast.success(t('settings.saved')),
+        onError: (err) => toast.error(err instanceof Error ? err.message : 'failed'),
+      },
+    )
   }
 
   const handlePreview = () => {
@@ -85,15 +77,8 @@ function SettingsPage() {
     )
   }
 
-  // Derive the mode label from the modules list rather than the
-  // moduleMode enum: protojson serialises proto enums as their string
-  // names ("MODULE_MODE_CONSTRAINED"), but ts-proto generates a numeric
-  // TS enum, so the obvious `=== ModuleMode.MODULE_MODE_CONSTRAINED`
-  // comparison is always false. The modules-length view is also the
-  // server-side derivation (service.enrich.moduleMode), so the two
-  // stay in lockstep regardless of how protojson serialises the field.
-  const modeLabel =
-    modules.length > 0 ? t('settings.mode_constrained') : t('settings.mode_freeform')
+  const constrained = dimensions.some((d) => d.taxonomy.length > 0)
+  const modeLabel = constrained ? t('settings.mode_constrained') : t('settings.mode_freeform')
 
   return (
     <div className="space-y-6">
@@ -129,44 +114,11 @@ function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t('settings.modules_title')}</CardTitle>
-          <CardDescription>{t('settings.modules_help')}</CardDescription>
+          <CardTitle>{t('settings.dimensions_title')}</CardTitle>
+          <CardDescription>{t('settings.dimensions_help')}</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {modules.map((m) => (
-              <span
-                key={m}
-                className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-sm"
-              >
-                {m}
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={() => setModules((prev) => prev.filter((x) => x !== m))}
-                  aria-label={t('settings.remove_module', { name: m })}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <Input
-              placeholder={t('settings.module_placeholder')}
-              value={moduleInput}
-              onChange={(e) => setModuleInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  handleAddModule()
-                }
-              }}
-            />
-            <Button type="button" variant="secondary" onClick={handleAddModule}>
-              {t('settings.add_module')}
-            </Button>
-          </div>
+        <CardContent>
+          <DimensionsEditor value={dimensions} onChange={setDimensions} />
         </CardContent>
       </Card>
 

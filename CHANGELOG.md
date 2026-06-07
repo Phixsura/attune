@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — enrichment classification pivots to metadata-driven `Dimension`s
+  with first-class i18n** (#10, supersedes the original kind/severity/modules
+  axes and the intermediate flat-labels iteration). Modelled on the
+  industry-converged Custom Fields / Tags / Properties layer (Jira / Linear
+  2024 / Sentry / Datadog / GitHub Projects v2 — see proposal §Top-repo
+  benchmarking). Each `Dimension` has a stable `Name`
+  (`^[a-z][a-z0-9_]{0,30}$`, immutable), an i18n `DisplayName`, a `Kind ∈
+  {single, multi}`, a `Taxonomy` of `{Value, DisplayName: I18nString}`
+  entries, an `UrgentSet` of stable values that derive `is_urgent`, and a
+  `Required` flag. Adding a new axis is now a Settings edit, not a code
+  change.
+  - **Wire shape** (envelope `version` bumped `"1" → "2"`): `enriched.attrs`
+    is a `map<dim.name, string | [string]>` replacing the old `kind` /
+    `severity` / `modules` / `priority` keys; `enriched.is_urgent` replaces
+    P0/P1 routing. Raw-webhook / outbox / lark / github-issue all emit the
+    new shape — customer consumers must update their decoders.
+  - **Schema**: migration `014_enrich_dimensions.sql` drops the old columns
+    (`enriched_kind` / `enriched_severity` / `enriched_modules` /
+    `enriched_priority` / `tenants.enrich_modules`) and introduces
+    `tenants.enrich_dimensions JSONB` (dim metadata) + `user_feedback.
+    enriched_attrs JSONB` (LLM-emitted values) + `is_urgent BOOLEAN`
+    (snapshot at write time). GIN `jsonb_path_ops` index on
+    `enriched_attrs` powers `?type=bug&severity=critical&labels=payment`
+    containment filters. The migration seeds three default dimensions
+    (`type` / `severity` / `labels`) with `default` / `zh` / `en` display
+    names; `severity.urgent_set = ["critical"]` so radar routing is
+    non-empty out of the box. Pre-1.0 DROP — no 015 cleanup tail.
+  - **i18n** is first-class on every operator-authored display:
+    `Dimension.DisplayName` and every `Taxonomy.DisplayName` are
+    `map<locale, string>` with BCP 47 keys + a `"default"` fallback. The
+    SPA resolves at render time (`useDisplayName` walks user locale →
+    `"default"` → first non-empty), so a bilingual team can configure
+    both languages once without parallel pipelines. The LLM prompt prints
+    `Value (zh | en)` hints to disambiguate Chinese content against
+    English Values; the LLM always emits stable Values, and `attrs` JSONB
+    stores only those.
+  - **Identifier discipline**: `Dimension.Name` and `Taxonomy.Value` are
+    immutable after creation. Renaming = delete + recreate (operator owns
+    the migration of any consumers / dashboards). `DisplayName` is freely
+    editable; UI-only.
+  - **Domain / service**: `domain.Enriched` and `Snapshot` carry
+    `Attrs map[string]any` (replaces `Labels []string`); prompt rendering,
+    JSON schema generation, post-parse whitelist filter (`FilterAttrs` per
+    dim), and urgency derivation (`ComputeIsUrgent` ORs every dim's
+    `UrgentSet`) all driven by the tenant's `DimensionSet`. No hard-coded
+    per-axis code in the enricher.
+  - **Console**: `Settings` becomes a metadata editor — add / remove dims,
+    edit i18n `DisplayName`, edit `Taxonomy` (with per-entry i18n), edit
+    `UrgentSet`, toggle `Required`. `Feedback` list / detail render
+    `<DimensionChips>` for every configured dim, with stable `Value` going
+    through containment filters and resolved `DisplayName` rendered in
+    the user's locale. Per-dim "top values" replaces the old single-axis
+    kind donut.
+  - **Metrics**: `attune_enrich_attrs_dropped_total{tenant, dim}` and
+    `attune_enrich_suggested_attrs_total{tenant, dim}` replace the
+    `labels_dropped` / `suggested_labels` counters;
+    `attune_enrich_duration_seconds` carries `dims_mode`
+    (`freeform` / `constrained`) instead of `module_mode`.
+  - **`attune eval`**: per-dim `AttrAccuracy` (single) + `AttrSumIoU`
+    (multi); CSV header is data-driven from the tenant's dim set
+    (`--tenant <id>` flag required for `export-for-human` /
+    `score-human`).
+  - Proposal: `docs/proposals/2026/06/2026-06-07-flat-labels.md`.
+
 ### Added
 
 - **Per-tenant enricher prompt + module whitelist** (#10) — tenants can

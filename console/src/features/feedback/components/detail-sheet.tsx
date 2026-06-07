@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
 import {
   Sheet,
   SheetContent,
@@ -14,7 +15,9 @@ import {
   type FeedbackDetail,
   feedbackDetailQuery,
 } from '@/features/feedback/api/get-feedback-detail'
-import { KindBadge, SeverityBadge } from '@/features/feedback/components/badges'
+import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
+import { useDisplayName } from '@/lib/i18n-resolve'
+import type { Dimension } from '@/proto/attune/v1/common'
 
 export function FeedbackDetailSheet({
   id,
@@ -26,16 +29,33 @@ export function FeedbackDetailSheet({
   const { t } = useTranslation()
   const open = id !== null
   const detail = useQuery({ ...feedbackDetailQuery(id ?? ''), enabled: open })
+  const config = useQuery(enrichConfigQuery())
+  const dims = config.data?.dimensions ?? []
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
         <SheetHeader>
-          <SheetTitle>{detail.data?.enrichedTitle || `#${id ?? '?'}`}</SheetTitle>
+          <SheetTitle>
+            <span className="inline-flex items-center gap-2">
+              <UrgentDot urgent={detail.data?.isUrgent} />
+              {detail.data?.enrichedTitle || `#${id ?? '?'}`}
+            </span>
+          </SheetTitle>
           <SheetDescription>
             {detail.data && (
-              <span className="flex items-center gap-2 text-xs">
-                <KindBadge kind={detail.data.enrichedKind} />
-                <SeverityBadge severity={detail.data.enrichedSeverity} />
+              <span className="flex flex-wrap items-center gap-2 text-xs">
+                {dims.map((dim) => (
+                  <DimensionChips
+                    key={dim.name}
+                    dim={dim}
+                    value={
+                      (detail.data?.enrichedAttrs as Record<string, unknown> | undefined)?.[
+                        dim.name
+                      ]
+                    }
+                    emptyDash={false}
+                  />
+                ))}
                 <span className="text-muted-foreground">
                   {format(new Date(detail.data.createdAt), 'PPP HH:mm', { locale: zhCN })}
                 </span>
@@ -50,15 +70,17 @@ export function FeedbackDetailSheet({
               {t('app.loading')}
             </div>
           )}
-          {detail.data && <DetailBody data={detail.data} />}
+          {detail.data && <DetailBody data={detail.data} dims={dims} />}
         </div>
       </SheetContent>
     </Sheet>
   )
 }
 
-function DetailBody({ data }: { data: FeedbackDetail }) {
+function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] }) {
   const { t } = useTranslation()
+  const displayOf = useDisplayName()
+  const attrs = (data.enrichedAttrs ?? {}) as Record<string, unknown>
   return (
     <div className="space-y-6">
       <Section label={t('feedback.detail.raw_content')}>
@@ -73,20 +95,22 @@ function DetailBody({ data }: { data: FeedbackDetail }) {
         </Section>
       ) : null}
 
-      {data.enrichedModules && data.enrichedModules.length > 0 ? (
-        <Section label={t('feedback.detail.modules')}>
-          <div className="flex flex-wrap gap-1">
-            {data.enrichedModules.map((m) => (
-              <span
-                key={m}
-                className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-xs"
-              >
-                {m}
-              </span>
+      {dims.length > 0 && (
+        <Section label={t('feedback.detail.attrs')}>
+          <dl className="space-y-2">
+            {dims.map((dim) => (
+              <div key={dim.name} className="flex items-start gap-3">
+                <dt className="w-28 shrink-0 text-xs text-muted-foreground">
+                  {displayOf(dim.displayName) || dim.name}
+                </dt>
+                <dd className="flex-1 text-sm">
+                  <DimensionChips dim={dim} value={attrs[dim.name]} />
+                </dd>
+              </div>
             ))}
-          </div>
+          </dl>
         </Section>
-      ) : null}
+      )}
 
       <Section label={t('feedback.detail.source')}>
         <p className="font-mono text-xs text-muted-foreground">
