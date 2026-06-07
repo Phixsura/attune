@@ -35,3 +35,4 @@
 .agents/
 .claude/
 skills-lock.json
+deploy/docker-compose.override.yml

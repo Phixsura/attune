@@ -27,6 +27,12 @@ const (
 	// LLMOpenAIBaseURL is empty, so we deliberately do not seed them here.
 	DefaultLLMOpenAIBaseURL = "https://api.openai.com"
 
+	// DefaultLLMModel — the enrichment model id used when LLMModel is
+	// empty in YAML / env. gpt-4o-mini is the cost/quality sweet spot for
+	// short text classification; private gateways that alias names
+	// (e.g. company internal "gpt-5.5") override this via FEEDBACK_API_LLM_MODEL.
+	DefaultLLMModel = "gpt-4o-mini"
+
 	// DefaultEnricherBatch — one sweep classifies up to N rows
 	// sequentially. At ~5s/LLM-call (gpt-4o-mini, typical content), 10
 	// rows complete in ~50s, leaving headroom inside the 30s polling

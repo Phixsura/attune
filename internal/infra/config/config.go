@@ -38,6 +38,10 @@ type Config struct {
 	LLMProtocol      string `yaml:"llm_protocol"`
 	LLMOpenAIBaseURL string `yaml:"llm_openai_base_url"`
 	LLMOpenAIAPIKey  string `yaml:"llm_openai_api_key"`
+	// LLMModel overrides the hardcoded enrichment model id. Empty falls
+	// back to DefaultLLMModel — the operator only sets this when
+	// pointing at a gateway that aliases (or hosts) a non-default model.
+	LLMModel string `yaml:"llm_model"`
 
 	LarkSigningSecret     string `yaml:"lark_signing_secret"`
 	LarkVerificationToken string `yaml:"lark_verification_token"`
@@ -89,6 +93,7 @@ type yamlConfig struct {
 	LLMProtocol               string              `yaml:"llm_protocol"`
 	LLMOpenAIBaseURL          string              `yaml:"llm_openai_base_url"`
 	LLMOpenAIAPIKey           string              `yaml:"llm_openai_api_key"`
+	LLMModel                  string              `yaml:"llm_model"`
 	EnricherInterval          string              `yaml:"enricher_interval"`
 	EnricherBatch             int                 `yaml:"enricher_batch"`
 	LarkSigningSecret         string              `yaml:"lark_signing_secret"`
@@ -143,6 +148,7 @@ func Load() (*Config, error) {
 		LLMProtocol:               yc.LLMProtocol,
 		LLMOpenAIBaseURL:          yc.LLMOpenAIBaseURL,
 		LLMOpenAIAPIKey:           yc.LLMOpenAIAPIKey,
+		LLMModel:                  yc.LLMModel,
 		EnricherBatch:             yc.EnricherBatch,
 		LarkSigningSecret:         yc.LarkSigningSecret,
 		LarkVerificationToken:     yc.LarkVerificationToken,
@@ -198,6 +204,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.LLMOpenAIBaseURL == "" && c.LLMProtocol == DefaultLLMProtocol {
 		c.LLMOpenAIBaseURL = DefaultLLMOpenAIBaseURL
+	}
+	if c.LLMModel == "" {
+		c.LLMModel = DefaultLLMModel
 	}
 	if c.EnricherBatch == 0 {
 		c.EnricherBatch = DefaultEnricherBatch

@@ -27,6 +27,7 @@ func applyEnvOverrides(yc *yamlConfig) error {
 		{"FEEDBACK_API_LLM_PROTOCOL", &yc.LLMProtocol},
 		{"FEEDBACK_API_LLM_OPENAI_BASE_URL", &yc.LLMOpenAIBaseURL},
 		{"FEEDBACK_API_LLM_OPENAI_API_KEY", &yc.LLMOpenAIAPIKey},
+		{"FEEDBACK_API_LLM_MODEL", &yc.LLMModel},
 		{"FEEDBACK_API_LARK_SIGNING_SECRET", &yc.LarkSigningSecret},
 		{"FEEDBACK_API_LARK_VERIFICATION_TOKEN", &yc.LarkVerificationToken},
 		{"FEEDBACK_API_LARK_DEFAULT_TENANT_SLUG", &yc.LarkDefaultTenantSlug},

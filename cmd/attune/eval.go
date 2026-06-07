@@ -50,7 +50,7 @@ func runEval(args []string) error {
 		return fmt.Errorf("llm backend: %w", err)
 	}
 	defer llm.Close()
-	enricher := enrich.NewEnricher(feedbackRepo, llm)
+	enricher := enrich.NewEnricher(feedbackRepo, llm, cfg.LLMModel)
 	evaluator := eval.NewEvaluator(feedbackRepo, tenant.NewTenant(pool), enricher)
 
 	switch *mode {

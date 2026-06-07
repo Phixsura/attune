@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	enrichmentModelID    = "gpt-4o-mini"
 	enrichmentSystemUser = "system-feedback-enricher"
 )
 
@@ -33,8 +32,9 @@ const (
 // SetNotifier and SetOutbox are independent; either / both / neither
 // may be wired without code changes elsewhere.
 type Enricher struct {
-	repo *feedback.FeedbackRepo
-	llm  llmclient.LLMClient
+	repo  *feedback.FeedbackRepo
+	llm   llmclient.LLMClient
+	model string // resolved from config; "" → enricher rejects with 400-like error
 	// notifier is read from fanOut goroutines, written by SetNotifier
 	// (typically once at startup, but Wave 2 plans dynamic per-tenant
 	// re-wiring). atomic.Pointer keeps the read race-free without
@@ -44,8 +44,12 @@ type Enricher struct {
 	targets  *notifytarget.NotifyTargetRepo // optional, paired with outbox
 }
 
-func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient) *Enricher {
-	return &Enricher{repo: r, llm: llm}
+// NewEnricher takes the resolved enrichment model id (from config —
+// FEEDBACK_API_LLM_MODEL env / yaml `llm_model` / DefaultLLMModel) so
+// operators pointing at private gateways with aliased model names
+// don't have to fork the binary.
+func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient, model string) *Enricher {
+	return &Enricher{repo: r, llm: llm, model: model}
 }
 
 // SetNotifier wires the inline webhook fan-out (Lark). nil = no
@@ -167,7 +171,7 @@ func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyCon
 	const where = "service.Enricher.Classify"
 	prompt := renderPrompt(cfg, content)
 	req := llmclient.CompletionRequest{
-		Model:       enrichmentModelID,
+		Model:       e.model,
 		Prompt:      prompt,
 		Temperature: 0.0,
 		MaxTokens:   512,
@@ -179,7 +183,7 @@ func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyCon
 	resp, err := e.llm.Complete(ctx, req)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] llm.Complete failed,model:%s,err:%+v",
-			where, enrichmentModelID, err.Error())
+			where, e.model, err.Error())
 		return domain.Enriched{}, fmt.Errorf("llm: %w", err)
 	}
 	parsed, err := parseEnrichJSON(resp.Text)

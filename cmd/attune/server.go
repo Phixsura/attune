@@ -82,7 +82,7 @@ func runServer() error {
 	tenantRepo := tenant.NewTenant(pool)
 	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
 	outboxRepo := outboxrepo.NewOutbox(pool)
-	enricher := enrich.NewEnricher(feedbackRepo, llm)
+	enricher := enrich.NewEnricher(feedbackRepo, llm, cfg.LLMModel)
 	ingestor := ingest.NewIngestor(feedbackRepo, enricher)
 	apiKeys := apikey.NewAPIKeys(apikeyRepo)
 
