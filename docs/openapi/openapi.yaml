@@ -617,6 +617,13 @@ components:
                     type: string
                 enrichedAt:
                     type: string
+                enrichedRationale:
+                    type: string
+                    description: |-
+                        The LLM's short "why this kind/severity" justification — surfaced
+                         to console reviewers so they can audit the AI's reasoning. Already
+                         delivered to webhook consumers via the outbox envelope; persisted
+                         to user_feedback.enriched_rationale by migration 013.
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         GetEnrichConfigResponse:
             type: object

@@ -105,6 +105,11 @@ message FeedbackDetail {
   repeated Attachment attachments = 15;
   optional string enrichment_error = 16;
   optional string enriched_at = 17;  // RFC3339
+  // The LLM's short "why this kind/severity" justification — surfaced
+  // to console reviewers so they can audit the AI's reasoning. Already
+  // delivered to webhook consumers via the outbox envelope; persisted
+  // to user_feedback.enriched_rationale by migration 013.
+  optional string enriched_rationale = 18;
 }
 
 message Attachment {

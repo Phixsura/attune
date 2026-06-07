@@ -133,10 +133,11 @@ const markDoneSQL = `
 	    enriched_modules = $3,
 	    enriched_severity = $4,
 	    enriched_priority = $5,
+	    enriched_rationale = $6,
 	    enrichment_status = 'done',
 	    enrichment_error = NULL,
 	    enriched_at = NOW()
-	WHERE id = $6`
+	WHERE id = $7`
 
 // MarkDone persists the LLM classification and flips the row to 'done'.
 // Caller computed Priority from Severity already. Single-statement; no
@@ -146,7 +147,7 @@ func (r *FeedbackRepo) MarkDone(ctx context.Context, id int64, e domain.Enriched
 	modulesJSON, _ := json.Marshal(e.Modules)
 	if _, err := r.pool.Exec(
 		ctx, markDoneSQL,
-		e.Title, e.Kind, modulesJSON, e.Severity, e.Priority, id,
+		e.Title, e.Kind, modulesJSON, e.Severity, e.Priority, e.Rationale, id,
 	); err != nil {
 		return fmt.Errorf("update enrichment row %d: %w", id, err)
 	}
@@ -161,7 +162,7 @@ func (r *FeedbackRepo) MarkDoneTx(ctx context.Context, tx pgx.Tx, id int64, e do
 	modulesJSON, _ := json.Marshal(e.Modules)
 	if _, err := tx.Exec(
 		ctx, markDoneSQL,
-		e.Title, e.Kind, modulesJSON, e.Severity, e.Priority, id,
+		e.Title, e.Kind, modulesJSON, e.Severity, e.Priority, e.Rationale, id,
 	); err != nil {
 		return fmt.Errorf("update enrichment row %d (tx): %w", id, err)
 	}

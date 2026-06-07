@@ -94,7 +94,16 @@ export interface FeedbackDetail {
     | string
     | undefined;
   /** RFC3339 */
-  enrichedAt?: string | undefined;
+  enrichedAt?:
+    | string
+    | undefined;
+  /**
+   * The LLM's short "why this kind/severity" justification — surfaced
+   * to console reviewers so they can audit the AI's reasoning. Already
+   * delivered to webhook consumers via the outbox envelope; persisted
+   * to user_feedback.enriched_rationale by migration 013.
+   */
+  enrichedRationale?: string | undefined;
 }
 
 export interface Attachment {

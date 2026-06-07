@@ -112,13 +112,14 @@ func (r *FeedbackRepo) ListForConsole(
 }
 
 // ConsoleDetailRow extends ConsoleListRow with full content (source_meta,
-// attachments, enrichment_error, enriched_at).
+// attachments, enrichment_error, enriched_at, enriched_rationale).
 type ConsoleDetailRow struct {
 	ConsoleListRow
-	SourceMeta      []byte // raw JSONB
-	Attachments     []byte // raw JSONB
-	EnrichmentError string
-	EnrichedAt      *time.Time
+	SourceMeta        []byte // raw JSONB
+	Attachments       []byte // raw JSONB
+	EnrichmentError   string
+	EnrichedAt        *time.Time
+	EnrichedRationale string // LLM's short "why this kind/severity"; empty when not classified
 }
 
 // ErrFeedbackNotFound returned by GetForConsole when id doesn't match
@@ -139,7 +140,8 @@ func (r *FeedbackRepo) GetForConsole(
 		       enrichment_status, created_at,
 		       source_meta, attachments,
 		       COALESCE(enrichment_error, ''),
-		       enriched_at
+		       enriched_at,
+		       COALESCE(enriched_rationale, '')
 		  FROM user_feedback
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
@@ -150,6 +152,7 @@ func (r *FeedbackRepo) GetForConsole(
 		&row.EnrichmentStatus, &row.CreatedAt,
 		&row.SourceMeta, &row.Attachments,
 		&row.EnrichmentError, &row.EnrichedAt,
+		&row.EnrichedRationale,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrFeedbackNotFound

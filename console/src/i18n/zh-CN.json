@@ -176,6 +176,7 @@
     },
     "detail": {
       "ai_summary": "AI 摘要",
+      "ai_rationale": "AI 解读",
       "raw_content": "原始内容",
       "source": "来源",
       "sourceMeta": "元数据",

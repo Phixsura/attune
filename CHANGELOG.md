@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `/settings` (GET/PUT `/enrich-config`, POST `/enrich-config/preview`).
   Migration `012_enricher_per_tenant_prompt.sql`; proposal
   `docs/proposals/2026-06-06-enricher-per-tenant-prompt.md`.
+- **AI rationale surfaced on the console feedback detail sheet** (#10
+  follow-up) — the LLM's short "why this kind/severity" justification
+  was already on the wire to webhook consumers via the outbox envelope
+  (`Snapshot.Rationale`), but `MarkDone` silently dropped it on the SQL
+  write path so console reviewers never got to audit the AI's
+  reasoning. Five-layer fix: migration `013_enriched_rationale.sql`
+  adds the column; `markDoneSQL` persists it; `GetForConsole` selects
+  it into `ConsoleDetailRow.EnrichedRationale`; proto adds
+  `optional string enriched_rationale = 18` to `FeedbackDetail`; the
+  detail sheet renders it under a new "AI 解读" section. Webhook
+  envelope shape unchanged. Surfaced during the #10 browser smoke
+  walk-through.
 - **CI architectural-boundary gate for the console SPA** (#19) — runs
   `dependency-cruiser` on every console PR with four rules: no cross-feature
   imports, shared layers (components/lib/proto) may not reach into features/

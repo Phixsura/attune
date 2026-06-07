@@ -149,9 +149,10 @@ func (h *FeedbackHandler) Get(w http.ResponseWriter, r *http.Request) {
 		EnrichedSeverity: f.EnrichedSeverity,
 		EnrichedModules:  f.GetEnrichedModules(),
 		EnrichedPriority: f.EnrichedPriority,
-		EnrichmentStatus: f.GetEnrichmentStatus(),
-		CreatedAt:        f.GetCreatedAt(),
-		EnrichmentError:  nullableString(row.EnrichmentError),
+		EnrichmentStatus:  f.GetEnrichmentStatus(),
+		CreatedAt:         f.GetCreatedAt(),
+		EnrichmentError:   nullableString(row.EnrichmentError),
+		EnrichedRationale: nullableString(row.EnrichedRationale),
 	}
 	if len(row.SourceMeta) > 0 {
 		var m map[string]any

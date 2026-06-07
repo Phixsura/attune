@@ -65,6 +65,14 @@ function DetailBody({ data }: { data: FeedbackDetail }) {
         <p className="whitespace-pre-wrap break-words">{data.content}</p>
       </Section>
 
+      {data.enrichedRationale ? (
+        <Section label={t('feedback.detail.ai_rationale')}>
+          <p className="rounded-md border border-border bg-muted/40 p-3 whitespace-pre-wrap break-words text-muted-foreground">
+            {data.enrichedRationale}
+          </p>
+        </Section>
+      ) : null}
+
       {data.enrichedModules && data.enrichedModules.length > 0 ? (
         <Section label={t('feedback.detail.modules')}>
           <div className="flex flex-wrap gap-1">
