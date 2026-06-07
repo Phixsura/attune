@@ -40,3 +40,10 @@ test-live-list: ## Show which live backends would run given current env.
 	@for v in E2E_OPENAI_COMPAT_KEY E2E_OPENAI_RESPONSES_KEY E2E_ANTHROPIC_KEY E2E_GEMINI_KEY; do \
 		if [ -n "$${!v}" ]; then echo "  ✓ $$v set"; else echo "  ✗ $$v unset (test would skip)"; fi; \
 	done
+
+# IO integration tier — spins up real Postgres via testcontainers-go.
+# Requires a running Docker daemon; CI runs this in a separate job.
+.PHONY: test-integration
+
+test-integration: ## IO tier — real Postgres in a testcontainer. Needs Docker running.
+	go test -tags=integration -count=1 -timeout=10m ./...

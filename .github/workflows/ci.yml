@@ -82,6 +82,25 @@ jobs:
               - 'buf.lock'
               - '.github/workflows/ci.yml'
 
+  # ── Go: integration tier — real Postgres via testcontainers-go ────────────
+  # Gated behind the `integration` build tag so the unit tier (go-checks)
+  # stays fast. Each test spins up postgres:17-alpine inside the runner's
+  # Docker daemon; the whole suite takes well under a minute on a warm cache.
+  go-integration:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Integration tests (real Postgres)
+        run: make test-integration
+
   # ── Go: vet / build / test ─────────────────────────────────────────────────
   go-checks:
     needs: changes
@@ -296,7 +315,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, golangci-lint, lint-slog, lizard, govulncheck, console, changelog, docker-build, compose-config, proto]
+    needs: [changes, go-checks, go-integration, golangci-lint, lint-slog, lizard, govulncheck, console, changelog, docker-build, compose-config, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:
