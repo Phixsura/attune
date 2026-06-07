@@ -23,7 +23,13 @@ export default defineConfig({
   plugins: [
     // Order matters: router plugin must run before react plugin so the
     // generated routeTree.gen.ts exists when JSX is compiled.
-    TanStackRouterVite({ target: 'react', autoCodeSplitting: true }),
+    TanStackRouterVite({
+      target: 'react',
+      autoCodeSplitting: true,
+      // Exclude colocated *.test.{ts,tsx} files in src/routes/ from the
+      // generated route tree — they don't export a Route and aren't pages.
+      routeFileIgnorePattern: '\\.test\\.(ts|tsx)$',
+    }),
     react(),
     tailwindcss(),
   ],
