@@ -57,6 +57,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   emits `user_feedback.created_at` plumbed through `EnrichInput.CreatedAt`
   → `Snapshot.SubmittedAt`. Consumers doing time-series ordering or SLA
   calculation see the real timeline.
+  - **Action for raw-webhook consumers**: JSON shape and field names are
+    unchanged, but the `submitted_at` *value* now differs from
+    `enriched_at` by enrichment latency. Consumers that previously
+    treated the two as interchangeable (e.g. used `submitted_at` to
+    derive a "time-to-classification" duration) should switch to
+    `enriched_at - submitted_at` for that metric — they are now
+    correctly distinguishable for the first time.
 - **Triage no longer discards 2-rune CJK feedback** (#85 R7) — `runeCount
   < 3` previously dropped "崩了" / "闪退" / "卡死" (among the most common
   Chinese severe-bug shapes) before reaching the LLM. Threshold lowered
