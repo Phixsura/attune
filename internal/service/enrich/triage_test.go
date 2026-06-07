@@ -13,7 +13,7 @@ func TestTriage_IgnoreEmptyAndTooShort(t *testing.T) {
 		{"", "empty"},
 		{"   ", "empty"},
 		{"\t\n  ", "empty"},
-		{"a", "too short"}, // 1 rune
+		{"a", "too short"},  // 1 rune
 		{" ?", "too short"}, // trims then 1 rune
 	}
 	for _, c := range cases {

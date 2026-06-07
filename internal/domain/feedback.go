@@ -114,16 +114,16 @@ type Enriched struct {
 // Notifier after a row finishes classification. Copy-by-value so the
 // notifier can outlive any DB transaction or HTTP request scope.
 type Snapshot struct {
-	ID         int64
-	TenantID   string
-	Content    string
-	Source     string
-	UserID     string
-	Title      string
-	Kind       string
-	Modules    []string
-	Severity   string
-	Priority   float64
+	ID        int64
+	TenantID  string
+	Content   string
+	Source    string
+	UserID    string
+	Title     string
+	Kind      string
+	Modules   []string
+	Severity  string
+	Priority  float64
 	Rationale string // LLM's short explanation; surfaced in outbox envelopes
 	// SubmittedAt is the user's original submission time
 	// (user_feedback.created_at), independent of when the LLM finished
