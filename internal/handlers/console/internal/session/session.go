@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // Cookie + header names. attune_session is HttpOnly; csrf token lives

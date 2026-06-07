@@ -23,7 +23,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 //go:embed migrations/*.sql

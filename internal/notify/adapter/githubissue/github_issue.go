@@ -33,8 +33,8 @@ import (
 	"strings"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	// OTel-aware logging convention — see docs/observability-sop.md.
 )
 

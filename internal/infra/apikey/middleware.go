@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/respond"
 )
 

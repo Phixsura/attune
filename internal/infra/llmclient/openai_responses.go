@@ -12,7 +12,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // OpenAIResponsesBackend posts to OpenAI's /v1/responses endpoint via

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // applyEnvOverrides mutates yc in place, letting env vars trump YAML.

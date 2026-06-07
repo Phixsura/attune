@@ -12,8 +12,8 @@ import (
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )

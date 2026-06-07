@@ -9,7 +9,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )

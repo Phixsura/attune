@@ -80,6 +80,16 @@ authored — wire-stable, never auto-renamed.
 
 ### Added
 
+- **`internal/pkg/` umbrella for stdlib-extension packages.** `logext` moves
+  here (was `internal/logext`); new sibling `ptrext` ships small generic
+  pointer helpers (`Of`, `Indirect`, `IndirectOr`, `OfNotZero`, `OfPositive`,
+  `IsNil`/`IsNotNil`/`IsNilOrZero`, `HasZeroValue`/`HasNonZeroValue`, `Equal`,
+  `EqualTo`, `Clone`/`CloneBy`, `Map`). Zero external deps — pure stdlib +
+  `cmp.Ordered`. `pkg/` is reserved for stateless language/stdlib extensions;
+  cross-cutting infrastructure (DB, observability, HTTP middleware) stays
+  under `infra/`. The `internal/logext` → `internal/pkg/logext` move is a
+  pure import-path rename — no behaviour change.
+
 - **`FEEDBACK_API_LLM_MODEL` env override / `llm_model` YAML key** for the
   enrichment model id. Default remains `gpt-4o-mini`; set this when your
   LLM gateway aliases the model name (e.g. corporate gateway exposes

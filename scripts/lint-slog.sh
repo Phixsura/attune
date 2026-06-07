@@ -39,7 +39,7 @@
 #   suppresses only that rule on that line. Use sparingly and only where the
 #   collision/omission is intentional (e.g. the canonical injector itself).
 #
-#   Facade internals — internal/infra/observability/ and internal/logext/ — are
+#   Facade internals — internal/infra/observability/ and internal/pkg/logext/ — are
 #   auto-exempt from the business-field rules (rule-1, rule-2): they define and
 #   inject the reserved keys rather than misuse them. No per-line marker needed.
 #
@@ -113,7 +113,7 @@ fi
 # they own those keys, not misuse them. #48 reuses this when it tightens rule-1.
 is_facade_internal() {
   case "$1" in
-    internal/infra/observability/*|internal/logext/*) return 0 ;;
+    internal/infra/observability/*|internal/pkg/logext/*) return 0 ;;
     *) return 1 ;;
   esac
 }

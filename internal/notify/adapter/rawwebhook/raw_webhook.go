@@ -13,9 +13,9 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/metrics"
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/notify/sig"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 

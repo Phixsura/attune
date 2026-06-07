@@ -17,7 +17,7 @@ import (
 	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // NewPool constructs a pgxpool with the otelpgx tracer attached.

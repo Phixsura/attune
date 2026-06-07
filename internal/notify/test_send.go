@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify/sig"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 

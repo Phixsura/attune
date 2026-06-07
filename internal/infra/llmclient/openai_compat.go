@@ -12,7 +12,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // openaiHTTPTimeout — OpenAI-compatible endpoint HTTP timeout. 60s

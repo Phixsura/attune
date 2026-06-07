@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	"github.com/Phixsura/attune/internal/repo/tenant"

@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Phixsura/attune/internal/logext"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )

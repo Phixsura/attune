@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // EnrichConfig is the per-tenant override of the enricher's prompt and

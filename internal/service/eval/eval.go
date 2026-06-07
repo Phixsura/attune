@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"

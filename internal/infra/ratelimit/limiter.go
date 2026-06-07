@@ -23,7 +23,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/Phixsura/attune/internal/infra/apikey"
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // Limiter is the per-tenant rate limiter. Construct once, share via

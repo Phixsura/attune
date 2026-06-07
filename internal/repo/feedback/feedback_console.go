@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Phixsura/attune/internal/logext"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // AttrFilter is one per-dim filter in a console list query. The Dim
