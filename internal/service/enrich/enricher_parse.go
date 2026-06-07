@@ -20,18 +20,19 @@ import (
 // value so the notifier can outlive any DB tx or HTTP scope.
 func buildSnapshot(id int64, row *feedback.EnrichInput, e domain.Enriched, at time.Time) domain.Snapshot {
 	return domain.Snapshot{
-		ID:         id,
-		TenantID:   row.TenantID,
-		Content:    row.Content,
-		Source:     row.Source,
-		UserID:     row.UserID,
-		Title:      e.Title,
-		Kind:       e.Kind,
-		Modules:    e.Modules,
-		Severity:   e.Severity,
-		Priority:   e.Priority,
-		Rationale:  e.Rationale,
-		EnrichedAt: at,
+		ID:          id,
+		TenantID:    row.TenantID,
+		Content:     row.Content,
+		Source:      row.Source,
+		UserID:      row.UserID,
+		Title:       e.Title,
+		Kind:        e.Kind,
+		Modules:     e.Modules,
+		Severity:    e.Severity,
+		Priority:    e.Priority,
+		Rationale:   e.Rationale,
+		SubmittedAt: row.CreatedAt, // #82: actual user submission time, not enrichment time
+		EnrichedAt:  at,
 	}
 }
 

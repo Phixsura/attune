@@ -175,7 +175,7 @@ func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 			Content:     s.Content,
 			Source:      s.Source,
 			UserID:      s.UserID,
-			SubmittedAt: s.EnrichedAt.UTC().Format(time.RFC3339), // best approx without ingest_at
+			SubmittedAt: s.SubmittedAt.UTC().Format(time.RFC3339), // #82: actual ingest time (user_feedback.created_at)
 			Enriched: rawEnriched{
 				Title:      s.Title,
 				Kind:       s.Kind,

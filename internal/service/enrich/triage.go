@@ -67,11 +67,14 @@ func Triage(content string) TriageDecision {
 		return TriageDecision{Mode: TriageIgnore, Reason: "empty content"}
 	}
 
-	// Rule 2: too short to carry any information. 3 runes is the cut —
-	// "bug" is 3 chars and meaningful, "hi" / "1" / "?" are not. Counted
-	// by rune so 你好 (2 hanzi) gets the same treatment as 2 ASCII chars.
-	if runeCount(trimmed) < 3 {
-		return TriageDecision{Mode: TriageIgnore, Reason: "content too short (<3 runes)"}
+	// Rule 2: too short to carry any information. 2 runes is the cut so
+	// 2-character CJK feedback like "崩了" / "闪退" / "卡死" passes through
+	// to the LLM — these are the most common shapes Chinese users use
+	// for severe bug reports. 2-character ASCII ("ok" / "no" / "hi")
+	// also passes; the LLM correctly classifies them as low-signal at
+	// negligible cost. Only single-rune content is dropped (#85).
+	if runeCount(trimmed) < 2 {
+		return TriageDecision{Mode: TriageIgnore, Reason: "content too short (<2 runes)"}
 	}
 
 	// Rule 3: pure punctuation / emoji / symbols. Filters out things

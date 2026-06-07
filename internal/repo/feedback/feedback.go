@@ -74,7 +74,7 @@ func (r *FeedbackRepo) TryClaim(ctx context.Context, id int64) (bool, error) {
 		WHERE id = $1
 		  AND (enrichment_status IN ('pending','failed')
 		       OR (enrichment_status = 'enriching'
-		           AND enrichment_claimed_at < NOW() - INTERVAL '15 minutes'))`, id)
+		           AND enrichment_claimed_at < NOW() - INTERVAL '5 minutes'))`, id)
 	if err != nil {
 		return false, fmt.Errorf("claim feedback %d: %w", id, err)
 	}
@@ -87,11 +87,16 @@ func (r *FeedbackRepo) TryClaim(ctx context.Context, id int64) (bool, error) {
 // PromptTemplate / Modules come from the per-tenant override on the
 // tenants row (#10). Both may be nil; the service layer falls back to
 // the default prompt and free-form modules respectively.
+//
+// CreatedAt is the user's actual submission time, surfaced through
+// Snapshot.SubmittedAt into outbound envelopes (#82) so consumers see
+// the real timeline instead of an enrichment-delayed timestamp.
 type EnrichInput struct {
 	Content        string
 	Source         string
 	UserID         string
 	TenantID       string
+	CreatedAt      time.Time
 	PromptTemplate *string
 	Modules        []string
 }
@@ -106,12 +111,12 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 	var in EnrichInput
 	err := r.pool.QueryRow(
 		ctx,
-		`SELECT uf.content, uf.source, uf.user_id, uf.tenant_id,
+		`SELECT uf.content, uf.source, uf.user_id, uf.tenant_id, uf.created_at,
 		        t.enrich_prompt_template, t.enrich_modules
 		   FROM user_feedback uf
 		   LEFT JOIN tenants t ON t.id = uf.tenant_id
 		  WHERE uf.id = $1`, id,
-	).Scan(&in.Content, &in.Source, &in.UserID, &in.TenantID,
+	).Scan(&in.Content, &in.Source, &in.UserID, &in.TenantID, &in.CreatedAt,
 		&in.PromptTemplate, &in.Modules)
 	if err != nil {
 		return nil, fmt.Errorf("load feedback %d: %w", id, err)

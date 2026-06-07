@@ -171,6 +171,7 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 		Feedback    feedbackOut `json:"feedback"`
 	}
 	at := s.EnrichedAt.UTC().Format(time.RFC3339)
+	submittedAt := s.SubmittedAt.UTC().Format(time.RFC3339)
 	env := envelopeOut{
 		Version:     "1",
 		EventType:   "feedback.enriched",
@@ -182,7 +183,7 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 			Content:     s.Content,
 			Source:      s.Source,
 			UserID:      s.UserID,
-			SubmittedAt: at,
+			SubmittedAt: submittedAt, // #82: actual ingest time, not enrichment time
 			Enriched: enrichedOut{
 				Title:      s.Title,
 				Kind:       s.Kind,

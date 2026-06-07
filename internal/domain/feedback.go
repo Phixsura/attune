@@ -124,8 +124,14 @@ type Snapshot struct {
 	Modules    []string
 	Severity   string
 	Priority   float64
-	Rationale  string // LLM's short explanation; surfaced in outbox envelopes
-	EnrichedAt time.Time
+	Rationale string // LLM's short explanation; surfaced in outbox envelopes
+	// SubmittedAt is the user's original submission time
+	// (user_feedback.created_at), independent of when the LLM finished
+	// classifying. Surfaced in outbound envelopes so consumers doing
+	// time-series ordering or SLA calculation see the real timeline,
+	// not the enrichment-induced delay.
+	SubmittedAt time.Time
+	EnrichedAt  time.Time
 }
 
 // IsHighSeverity reports whether this snapshot should also be routed

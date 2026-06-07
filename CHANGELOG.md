@@ -48,6 +48,29 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Outbound `submitted_at` reflects actual ingest time** (#82) — both the
+  outbox webhook envelope (`internal/service/enrich/enricher_outbox.go`)
+  and the inline raw-webhook envelope
+  (`internal/notify/adapter/rawwebhook/raw_webhook.go`) previously emitted
+  `submitted_at = EnrichedAt` (LLM completion time), offset from real
+  submission by enrichment latency (typically seconds to minutes). Now
+  emits `user_feedback.created_at` plumbed through `EnrichInput.CreatedAt`
+  → `Snapshot.SubmittedAt`. Consumers doing time-series ordering or SLA
+  calculation see the real timeline.
+- **Triage no longer discards 2-rune CJK feedback** (#85 R7) — `runeCount
+  < 3` previously dropped "崩了" / "闪退" / "卡死" (among the most common
+  Chinese severe-bug shapes) before reaching the LLM. Threshold lowered
+  to `< 2`; 2-rune ASCII ("ok" / "no") also passes and is correctly
+  classified as low-signal by the LLM at negligible cost. Covered by
+  `TestTriage_TwoRuneCJKFeedbackPassesThrough`.
+- **Claim stale-threshold unified to 5 minutes** (#85 R8) — `TryClaim`
+  (`internal/repo/feedback/feedback.go`) previously refused to steal
+  stuck `enriching` rows until 15 minutes, while `ListPending` listed
+  them as stale at 5 minutes. Result: a stuck row produced spurious
+  `attune_claim_contention_total` increments every 30s tick for 9
+  minutes until the 15-minute window opened. Both operations now use
+  5 minutes, matching the documented invariant and the LLM 60s timeout
+  envelope.
 - **apikey middleware no longer leaks the legacy `{"error":"..."}` shape**
   (#19) — caught by docker-compose smoke tests: `POST /v1/feedback/ingest`
   without (or with an invalid) `X-API-Key` previously returned the old
