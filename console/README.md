@@ -6,8 +6,8 @@ Stage B 自服务控制台 SPA。物理独立于主仓 pnpm workspace
 ## Stack
 
 Vite 6 · React 19 · TS 5.9 · TanStack Router · TanStack Query 5 · shadcn/ui
-+ Radix · Tailwind 4 · react-hook-form + zod 4 · react-i18next ·
-date-fns 3 · Biome 2.
++ Radix · Tailwind 4 · react-i18next · date-fns 3 · Biome 2 · Vitest 4
+\+ Testing Library + MSW (tests).
 
 ## 跑
 
