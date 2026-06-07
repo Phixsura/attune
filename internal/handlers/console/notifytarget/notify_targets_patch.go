@@ -29,14 +29,14 @@ func (h *NotifyTargetsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad uuid,tenant_id:%s", where, auth.TenantID)
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id 不是 UUID")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id is not a UUID")
 		return
 	}
 	var patch attunev1.UpdateNotifyTargetRequest
 	if err := respond.Decode(r.Body, &patch); err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad json,tenant_id:%s,id:%s,err:%s",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "请求体不是合法 JSON")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "request body is not valid JSON")
 		return
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,id:%s", where, auth.TenantID, id)
@@ -47,13 +47,13 @@ func (h *NotifyTargetsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
 			respond.Error(ctx, w, http.StatusNotFound, "not_found",
-				"通知目标不存在或不属于当前 tenant")
+				"notify target not found or not owned by tenant")
 			return
 		}
 		slog.ErrorContext(ctx, "notify-targets patch get", "err", err)
 		logext.Errorf(ctx, "[%s] repo.GetByID failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "读取通知目标失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to read notify target")
 		return
 	}
 
@@ -95,19 +95,19 @@ func (h *NotifyTargetsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			logext.Warnf(ctx, "[%s] reject: conflict,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
 			respond.Error(ctx, w, http.StatusConflict, "conflict",
-				"audience 与同 destination_type 下另一目标冲突；改回去或先删那条")
+				"audience conflicts with another target of the same destination_type — revert or delete the other one first")
 			return
 		}
 		if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found pre-update,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
-			respond.Error(ctx, w, http.StatusNotFound, "not_found", "通知目标在更新前被删除")
+			respond.Error(ctx, w, http.StatusNotFound, "not_found", "notify target was deleted before the update could apply")
 			return
 		}
 		slog.ErrorContext(ctx, "notify-targets patch update", "err", err)
 		logext.Errorf(ctx, "[%s] repo.UpdateByID failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "更新通知目标失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to update notify target")
 		return
 	}
 

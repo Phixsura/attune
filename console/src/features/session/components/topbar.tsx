@@ -48,7 +48,7 @@ export function TopBar({ me }: TopBarProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                {me.user?.role === 'admin' ? '管理员' : '成员'}
+                {t(me.user?.role === 'admin' ? 'auth.role.admin' : 'auth.role.member')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

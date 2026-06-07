@@ -40,13 +40,13 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 			// cookie and 401 so the SPA bounces to /login.
 			logext.Warnf(ctx, "[%s] reject: user gone,user_id:%s", where, auth.UserID)
 			h.signer.ClearSessionCookie(w)
-			respond.Error(ctx, w, http.StatusUnauthorized, "user_gone", "用户已停用或被删除")
+			respond.Error(ctx, w, http.StatusUnauthorized, "user_gone", "user is disabled or deleted")
 			return
 		}
 		slog.ErrorContext(ctx, "/me: load user", "err", err, "user_id", auth.UserID)
 		logext.Errorf(ctx, "[%s] users.GetByID failed,user_id:%s,err:%+v",
 			where, auth.UserID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "加载用户失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load user")
 		return
 	}
 	// Local name avoids shadowing the imported `tenant` package — code added
@@ -56,7 +56,7 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "/me: load tenant", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] tenants.GetByID failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "加载 tenant 失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load tenant")
 		return
 	}
 

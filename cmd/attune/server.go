@@ -50,14 +50,15 @@ func runServer() error {
 	defer cancel()
 	logext.Infof(ctx, "[%s] start,port:%d", where, cfg.Port)
 
-	// OpenTelemetry tracer。endpoint 空 = noop(本地能跑),prod 部署后通过 .env
-	// 配 OTEL_EXPORTER_OTLP_ENDPOINT 才真上报 SLS Trace。详见
-	// docs/observability-trace-design.md
+	// OpenTelemetry tracer. Empty endpoint = noop (local dev works
+	// without config); set OTEL_EXPORTER_OTLP_ENDPOINT in .env to ship
+	// spans to a real collector. Details: docs/observability-trace-design.md.
 	//
-	// Attune 是对外服务(私有化部署 / SaaS),OTel 完全非侵入:
-	//   - 客户端可选传 W3C traceparent,不传也工作
-	//   - 响应头 X-Trace-Id 是 optional debug 字段,API 契约不变
-	//   - 内部业务日志带 trace_id 仅供运维 / SLS 用,客户不感知
+	// attune is a customer-facing service (private-deploy / SaaS), so
+	// OTel stays non-invasive:
+	//   - clients may pass a W3C traceparent header; if absent we generate one
+	//   - the X-Trace-Id response header is an optional debug aid, not contract
+	//   - business logs carry trace_id for operators; clients don't see it
 	otelShutdown, err := setupTracing(ctx)
 	if err != nil {
 		return fmt.Errorf("otel init: %w", err)
@@ -156,10 +157,13 @@ func runServer() error {
 	}
 }
 
-// setupTracing builds the OpenTelemetry tracer from env. endpoint 空 = noop
-// (本地能跑);prod 配 OTEL_EXPORTER_OTLP_ENDPOINT 才真上报 SLS Trace。OTel 对
-// 客户完全非侵入:可选 W3C traceparent、响应头 X-Trace-Id 仅 debug、内部日志
-// trace_id 仅运维用。详见 docs/observability-trace-design.md。
+// setupTracing builds the OpenTelemetry tracer from env. An empty
+// endpoint reduces to a no-op (so local dev runs without extra
+// configuration); set OTEL_EXPORTER_OTLP_ENDPOINT in prod to ship
+// spans. OTel stays non-invasive to attune's API contract — clients
+// may pass W3C traceparent, the X-Trace-Id response header is an
+// operator debug aid, and trace_id in internal logs serves operators
+// only. Details: docs/observability-trace-design.md.
 func setupTracing(ctx context.Context) (func(context.Context) error, error) {
 	return observability.InitTracer(ctx, observability.Options{
 		ServiceName:    "attune",

@@ -1,13 +1,16 @@
-// attrs.go — 跨服务统一的日志字段名常量。
+// attrs.go — shared constants for log field names.
 //
-// 设计原则:
-//  1. 字段语义跨协议本来就不同。HTTP 跟 gRPC 是两个维度,不强行用同名。
-//  2. 命名照 OTel Semantic Conventions(https://opentelemetry.io/docs/specs/semconv/)。
-//     OTel SemConv 用 dot notation 如 `http.method`,SLS 把 `.` 当字段分隔会
-//     自动 flatten,我们直接用 `_` 形式避免歧义。
-//  3. 用 const 而非 string literal,业务代码任何字段名漂移在编译期就阻断。
+// Rules:
+//  1. HTTP and gRPC carry semantically different fields; don't force
+//     them onto a single name just because they look similar.
+//  2. Names follow OTel Semantic Conventions
+//     (https://opentelemetry.io/docs/specs/semconv/). OTel uses dot
+//     notation like `http.method`; some log backends flatten `.`,
+//     so we substitute `_` to avoid downstream ambiguity.
+//  3. Use these constants instead of string literals — any drift in
+//     field naming is then caught at compile time.
 //
-// 业务代码用法:
+// Usage from business code:
 //
 //	slog.InfoContext(ctx, "request",
 //	    observability.AttrHTTPMethod, r.Method,
@@ -17,64 +20,65 @@
 //	)
 package observability
 
-// ── 通用字段(所有服务共享)──
+// ── Shared fields (every service uses these) ──
 
-// AttrTraceID 跟 OTel SpanContext.TraceID 同源,由 TraceIDHandler 自动注入。
+// AttrTraceID mirrors OTel SpanContext.TraceID; injected by TraceIDHandler.
 const AttrTraceID = "trace_id"
 
-// AttrSpanID 跟 OTel SpanContext.SpanID 同源,由 TraceIDHandler 自动注入。
+// AttrSpanID mirrors OTel SpanContext.SpanID; injected by TraceIDHandler.
 const AttrSpanID = "span_id"
 
-// AttrDurationMs 单位毫秒,整数。跟 BE/Gateway/Attune 一致,SLS 可 SQL 聚合 P99。
+// AttrDurationMs is an integer millisecond duration. Stable across
+// services so the log backend can run a single P99 query.
 const AttrDurationMs = "duration_ms"
 
-// AttrService 服务名,如 "attune"。InitTracer 时已注入
-// Resource,业务代码一般不用手动加。
+// AttrService — service name, e.g. "attune". Injected by InitTracer.
+// Resource; business code rarely sets it directly.
 const AttrService = "service"
 
-// AttrError 错误对象。slog 自动序列化为字符串。
+// AttrError — the error value; slog stringifies it automatically.
 const AttrError = "error"
 
-// ── HTTP 协议字段(BE / Attune)──
+// ── HTTP protocol fields ──
 
-// AttrHTTPMethod HTTP 请求方法 GET/POST/PUT/DELETE/...
+// AttrHTTPMethod — the HTTP method (GET / POST / PUT / DELETE / ...).
 const AttrHTTPMethod = "http_method"
 
-// AttrHTTPRoute HTTP 路径(可含路径模板 /api/v1/projects/{id})。
+// AttrHTTPRoute — request path; may carry a route template like /api/v1/projects/{id}.
 const AttrHTTPRoute = "http_route"
 
-// AttrHTTPStatus HTTP 响应状态码 200/4xx/5xx。
+// AttrHTTPStatus — HTTP status code (200, 4xx, 5xx, ...).
 const AttrHTTPStatus = "http_status_code"
 
-// AttrHTTPUserAgent HTTP User-Agent header。
+// AttrHTTPUserAgent — the HTTP User-Agent header value.
 const AttrHTTPUserAgent = "http_user_agent"
 
-// AttrClientIP 客户端 IP(从 X-Forwarded-For / X-Real-IP / RemoteAddr 提取)。
+// AttrClientIP — client IP, derived from X-Forwarded-For / X-Real-IP / RemoteAddr.
 const AttrClientIP = "client_ip"
 
-// ── gRPC 协议字段 ──
+// ── gRPC protocol fields ──
 
-// AttrRPCService gRPC service 全限定名,如 "auth.v1.Auth"。
+// AttrRPCService — fully-qualified gRPC service, e.g. "auth.v1.Auth".
 const AttrRPCService = "rpc_service"
 
-// AttrRPCMethod gRPC method 名,如 "ChatCompletion"。
+// AttrRPCMethod — gRPC method name, e.g. "ChatCompletion".
 const AttrRPCMethod = "rpc_method"
 
-// AttrRPCGRPCStatus gRPC status code(OK/InvalidArgument/Unauthenticated/...)。
+// AttrRPCGRPCStatus — gRPC status code (OK / InvalidArgument / Unauthenticated / ...).
 const AttrRPCGRPCStatus = "rpc_grpc_status"
 
-// ── 业务字段(跨服务通用业务概念)──
+// ── Business fields (shared identity / domain concepts) ──
 
-// AttrUserID 业务用户 ID(BE 解 JWT 后注入)。
+// AttrUserID — application user id; injected after JWT verification.
 const AttrUserID = "user_id"
 
-// AttrTenantID 业务租户 ID。
+// AttrTenantID — application tenant id.
 const AttrTenantID = "tenant_id"
 
-// AttrShotID storyboard shot ID。
+// AttrShotID — storyboard shot id (carried over from upstream services).
 const AttrShotID = "shot_id"
 
-// AttrEpisodeID storyboard episode ID。
+// AttrEpisodeID — storyboard episode id (carried over from upstream services).
 const AttrEpisodeID = "episode_id"
 
 // AttrTaskID gateway task ID。

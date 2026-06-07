@@ -28,8 +28,9 @@ import (
 	"github.com/Phixsura/attune/internal/logext"
 )
 
-// upstreamBodyLogCap —— 飞书 API 上游 body 截断阈值(4KB),memory:upstream_http_log_info。
-// 不 log Authorization header(在 postJSON 里 set 后不会进 body)。
+// upstreamBodyLogCap caps the bytes logged when echoing a Lark API
+// upstream request/response body. The Authorization header set in
+// postJSON never enters the body and is never logged.
 const upstreamBodyLogCap = 4096
 
 const (
@@ -177,7 +178,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userAccessToken string) (*User
 	}, nil
 }
 
-// truncateBytes —— body 日志截断,跟 gateway provider.http_log.go 同实现。
+// truncateBytes truncates a body to `limit` bytes for log emission.
 func truncateBytes(b []byte, limit int) string {
 	if len(b) <= limit {
 		return string(b)
@@ -231,7 +232,8 @@ func (c *Client) postJSON(
 		return fmt.Errorf("marshal request body: %w", err)
 	}
 	url := c.baseURL + path
-	// Upstream REQUEST body 必须落盘(memory: upstream_http_log_info)。 Bearer token 不进 body。
+	// Upstream request body is logged for ops; the Bearer token sits
+	// in a header (postJSON sets it) and never enters the body.
 	logext.Infof(ctx, "[%s] upstream REQUEST,url:%s,body_bytes:%d,body:%s",
 		where, url, len(buf), truncateBytes(buf, upstreamBodyLogCap))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))

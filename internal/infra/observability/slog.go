@@ -1,10 +1,13 @@
-// slog.go — TraceIDHandler 自动从 OTel context 提取 trace_id / span_id 注入到 slog.
+// slog.go — TraceIDHandler decorates any slog.Handler so trace_id and
+// span_id from the OTel SpanContext on the call's ctx land as
+// attributes on every record.
 //
-// 设计:wrap 任何 slog.Handler(JSON / Text 都行),在 Handle 时检查 ctx 是否有
-// 有效的 OTel SpanContext,有的话把 trace_id 和 span_id 作为 attribute 加到 record.
+// The wrapper is transparent to JSON / Text handlers — Handle inspects
+// ctx, attaches the IDs when a valid SpanContext is present, and
+// delegates to the inner handler unchanged.
 //
-// 业务代码用 slog.InfoContext(ctx, ...) 触发 ctx 传递,handler 才能拿到 span.
-// 如果业务用 slog.InfoContext(ctx, ...) 不传 ctx → 拿不到 trace_id,字段为空。
+// Business code must call slog.InfoContext(ctx, ...) (not slog.Info)
+// for the ctx to be threaded through; otherwise the IDs are absent.
 package observability
 
 import (

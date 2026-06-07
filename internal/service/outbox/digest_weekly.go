@@ -13,7 +13,7 @@
 //     mute. Wave 3 can add a column when a customer asks.
 //   - UTC week boundary, ignores tenants.timezone. Acceptable until
 //     billing-grade accuracy.
-//   - Empty week → skip send (silent week is less noise than "0 条").
+//   - Empty week → skip send (silent week is less noise than a "0 rows" digest).
 package outbox
 
 import (

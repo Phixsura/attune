@@ -2,7 +2,7 @@ package githubissue
 
 // github_issue.go — native GitHub Issue dispatch.
 //
-// Sprint 1 of Y1 工程 (2026-05-17): the first real Dispatch Plugin beyond
+// Sprint 1 (2026-05-17): the first real Dispatch Plugin beyond
 // lark-bot. Until this lands the only way to push feedback to GitHub was
 // the generic raw-webhook framework — i.e. the customer had to host an
 // HTTP receiver and translate it themselves. With this in place, a
@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/Phixsura/attune/internal/domain"
@@ -100,7 +101,7 @@ func SendGitHubIssue(
 		req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
 		req.Header.Set("User-Agent", "attune/1.0")
-		// 上游 req body 截断 1024 字节; Authorization 头 skip(已遵规)。
+		// Upstream request body — truncated at 1024 bytes; Authorization header skipped.
 		logext.Infof(ctx, "[%s] upstream req,label:%s,body:%s",
 			where, label, truncate(string(body), 1024))
 		return req, nil
@@ -141,9 +142,10 @@ func ParseGitHubRepoURL(raw string) (owner, repo string, err error) {
 	return owner, repo, nil
 }
 
-// attuneEnvelope mirrors the v1 envelope service/enricher_outbox.go writes.
-// Kept unexported because the outbox payload is the contract — if it
-// changes, both senders must update.
+// attuneEnvelope mirrors the v2 envelope service/enricher_outbox.go
+// writes (#10 → E3 metadata-driven Dimensions). Kept unexported
+// because the outbox payload IS the contract — the GitHub Issue
+// formatter is in lockstep with whatever the outbox writer emits.
 type attuneEnvelope struct {
 	Version   string         `json:"version"`
 	EventType string         `json:"event_type"`
@@ -162,13 +164,11 @@ type attuneFeedback struct {
 }
 
 type attuneEnriched struct {
-	Title      string   `json:"title"`
-	Kind       string   `json:"kind"`
-	Severity   string   `json:"severity"`
-	Modules    []string `json:"modules"`
-	Priority   float64  `json:"priority"`
-	Rationale  string   `json:"rationale"`
-	EnrichedAt string   `json:"enriched_at"`
+	Title      string         `json:"title"`
+	Attrs      map[string]any `json:"attrs"`
+	IsUrgent   bool           `json:"is_urgent"`
+	Rationale  string         `json:"rationale"`
+	EnrichedAt string         `json:"enriched_at"`
 }
 
 func unmarshalAttuneEnvelope(p []byte) (attuneEnvelope, error) {
@@ -192,11 +192,13 @@ type ghIssueBody struct {
 	Labels []string `json:"labels,omitempty"`
 }
 
-// buildIssueBody renders the attune envelope into a GitHub issue. Title
-// is prefixed with [Severity] for at-a-glance triage in the GitHub UI;
-// body keeps every field a developer might want when triaging without
-// jumping back to the attune console. Labels follow attune/* prefix so
-// they don't collide with the repo's own taxonomy.
+// buildIssueBody renders the attune envelope into a GitHub issue.
+// The title is prefixed with [Urgent] when the snapshot is urgent
+// for at-a-glance triage in the GitHub UI; the body table lists every
+// classification attribute the LLM emitted so a developer can triage
+// without bouncing back to the attune console. Labels follow the
+// attune/* prefix so they don't collide with the repo's own taxonomy
+// (e.g. an attribute "type=bug" lands as label `attune/type-bug`).
 func buildIssueBody(env attuneEnvelope) ([]byte, error) {
 	f := env.Feedback
 	e := f.Enriched
@@ -204,41 +206,114 @@ func buildIssueBody(env attuneEnvelope) ([]byte, error) {
 	if user == "" {
 		user = "(anonymous)"
 	}
-	modules := strings.Join(e.Modules, ", ")
-	if modules == "" {
-		modules = "-"
-	}
 	rationale := e.Rationale
 	if rationale == "" {
 		rationale = "-"
 	}
-	title := fmt.Sprintf("[%s] %s", e.Severity, e.Title)
+	title := e.Title
+	if e.IsUrgent {
+		title = "[Urgent] " + title
+	}
 	sourceLabel := fmt.Sprintf("%s (`%s`)", domain.SourceDisplayName(f.Source), f.Source)
 	body := fmt.Sprintf(
-		"> 来自 Attune 用户反馈 · 自动转单\n\n"+
-			"| 字段 | 值 |\n"+
+		"> Forwarded automatically from Attune user feedback.\n\n"+
+			"| Field | Value |\n"+
 			"| --- | --- |\n"+
-			"| 用户 | `%s` |\n"+
-			"| 严重度 | **%s** (priority=%.0f) |\n"+
-			"| 类型 | %s |\n"+
-			"| 模块 | %s |\n"+
-			"| 来源 | %s |\n"+
-			"| AI 分类理由 | %s |\n\n"+
-			"## 原始反馈\n\n%s\n\n"+
+			"| User | `%s` |\n"+
+			"| Urgent | %t |\n"+
+			"%s"+ // attribute rows
+			"| Source | %s |\n"+
+			"| AI rationale | %s |\n\n"+
+			"## Original feedback\n\n%s\n\n"+
 			"---\n*Attune feedback id: `#%d` · enriched at %s · trace `%s`*",
-		user, e.Severity, e.Priority, e.Kind, modules, sourceLabel, rationale,
+		user, e.IsUrgent, formatAttrRows(e.Attrs),
+		sourceLabel, rationale,
 		f.Content, f.ID, e.EnrichedAt, env.TraceID,
 	)
 	out := ghIssueBody{
-		Title: title,
-		Body:  body,
-		Labels: []string{
-			"attune/feedback",
-			"attune/kind-" + e.Kind,
-			"attune/severity-" + e.Severity,
-		},
+		Title:  title,
+		Body:   body,
+		Labels: buildLabels(e.Attrs, e.IsUrgent),
 	}
 	return json.Marshal(out)
+}
+
+// formatAttrRows renders the LLM-emitted attrs as Markdown table rows.
+// Stable alphabetical order keeps the output deterministic so two issues
+// from semantically-identical rows aren't gratuitously different.
+func formatAttrRows(attrs map[string]any) string {
+	if len(attrs) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(attrs))
+	for k := range attrs {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for _, n := range names {
+		fmt.Fprintf(&b, "| %s | %s |\n", n, formatAttrValue(attrs[n]))
+	}
+	return b.String()
+}
+
+// formatAttrValue mirrors the Lark card's per-value formatter:
+// strings pass through, slices become slash-joined, everything else
+// falls back to %v.
+func formatAttrValue(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []string:
+		return strings.Join(x, " / ")
+	case []any:
+		parts := make([]string, 0, len(x))
+		for _, e := range x {
+			if s, ok := e.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, " / ")
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// buildLabels promotes attribute values into GitHub issue labels with
+// the attune/* prefix. Single-kind dims become `attune/<dim>-<value>`;
+// multi-kind dims contribute one label per value. Urgent rows get a
+// dedicated `attune/urgent` label so reviewers can subscribe to it.
+func buildLabels(attrs map[string]any, urgent bool) []string {
+	out := []string{"attune/feedback"}
+	if urgent {
+		out = append(out, "attune/urgent")
+	}
+	names := make([]string, 0, len(attrs))
+	for k := range attrs {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		switch v := attrs[n].(type) {
+		case string:
+			if v != "" {
+				out = append(out, fmt.Sprintf("attune/%s-%s", n, v))
+			}
+		case []string:
+			for _, x := range v {
+				if x != "" {
+					out = append(out, fmt.Sprintf("attune/%s-%s", n, x))
+				}
+			}
+		case []any:
+			for _, e := range v {
+				if s, ok := e.(string); ok && s != "" {
+					out = append(out, fmt.Sprintf("attune/%s-%s", n, s))
+				}
+			}
+		}
+	}
+	return out
 }
 
 // checkGitHubResponse maps GitHub API responses to nil / retryable /
@@ -252,7 +327,7 @@ func buildIssueBody(env attuneEnvelope) ([]byte, error) {
 func checkGitHubResponse(label string, env attuneEnvelope) notify.ResponseChecker {
 	const where = "notify.checkGitHubResponse"
 	return func(ctx context.Context, status int, body []byte) error {
-		// 上游响应日志(每次 attempt 都有,truncate 1024 字节)。
+		// Upstream response log — fires per attempt; body truncated at 1024 bytes.
 		logext.Infof(ctx,
 			"[%s] upstream resp,label:%s,feedback_id:%d,status:%d,body:%s",
 			where, label, env.Feedback.ID, status, truncate(string(body), 1024))

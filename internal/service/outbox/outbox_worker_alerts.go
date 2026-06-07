@@ -38,7 +38,7 @@ func (w *OutboxWorker) selfReportDead(ctx context.Context, row outboxrepo.Outbox
 		return // no chat to alert
 	}
 	text := fmt.Sprintf(
-		"⚠️ 通知投递失败\n类型：%s\nURL：%s\n原因：%s\nAttune已停止重试此目标，请到控制台修改配置后再发布。",
+		"⚠️ Notify delivery failed\nType: %s\nURL: %s\nReason: %s\nAttune has stopped retrying this target. Update the configuration in the console and re-enable.",
 		row.DestinationType, row.DestinationTarget, truncateStr(reason, 200),
 	)
 	// Use the first bot only — repeated alerts to every bot would spam

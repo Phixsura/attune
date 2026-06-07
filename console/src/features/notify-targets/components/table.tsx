@@ -14,9 +14,9 @@ import {
 import type { NotifyTarget } from '@/features/notify-targets/api/list-notify-targets'
 import type { NotifyTestResult } from '@/features/notify-targets/api/test-notify-target'
 
-// Extracted from _authed.notify-targets.tsx to keep that route ≤300 lines
-// (CLAUDE.md 律 2). Pure presentation — no queries, no state; parent
-// owns lastTest + mutation pending flags and passes them in.
+// Extracted from _authed.notify-targets.tsx to keep that route under
+// the 300-line cap. Pure presentation — no queries, no state; the
+// parent owns lastTest + mutation pending flags and passes them in.
 
 export interface TestState {
   id: string

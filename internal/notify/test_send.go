@@ -100,7 +100,8 @@ func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult 
 	for k, v := range extraHeaders {
 		req.Header.Set(k, v)
 	}
-	// 上游 req body (truncate 1024 字节; X-Attune-Signature 等签名头 skip)。
+	// Upstream request body — truncated at 1024 bytes; signature
+	// headers (X-Attune-Signature, etc.) are intentionally not logged.
 	logext.Infof(ctx, "[%s] upstream req,dest_type:%s,url:%s,body:%s",
 		where, target.DestinationType, target.URL, truncate(string(body), 1024))
 
@@ -114,7 +115,7 @@ func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult 
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
-	// 上游 resp (truncate 1024 字节)。
+	// Upstream response body — truncated at 1024 bytes.
 	logext.Infof(ctx, "[%s] upstream resp,url:%s,status:%d,latency_ms:%d,body:%s",
 		where, target.URL, resp.StatusCode, latencyMs, truncate(string(raw), 1024))
 	if checkErr := checkResponse(resp.StatusCode, raw); checkErr != nil {
@@ -127,12 +128,12 @@ func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult 
 	return TestResult{OK: true, StatusCode: resp.StatusCode, LatencyMs: latencyMs}
 }
 
-// buildLarkTestBody constructs a minimal text message envelope. Avoid
-// an interactive card here — a simple "Attune连通性测试" text is more
-// recognizable to the human staring at the group chat trying to verify.
+// buildLarkTestBody constructs a minimal text-message envelope. We use
+// plain text rather than an interactive card so the operator staring
+// at the chat instantly recognizes it as the "test" payload.
 func buildLarkTestBody(secret string) ([]byte, error) {
 	return buildLarkTextBody(
-		"🔔 Attune连通性测试 — 如果你看到这条，notify target 已配通。",
+		"🔔 Attune connectivity test — if you see this, the notify target is wired up.",
 		secret,
 	)
 }
@@ -176,7 +177,7 @@ func buildRawTestBody() ([]byte, error) {
 		"version":      sig.EnvelopeVersion,
 		"event_type":   "test",
 		"delivered_at": time.Now().UTC().Format(time.RFC3339),
-		"note":         "连通性测试 — 此事件由Attune控制台「测试」按钮触发",
+		"note":         "Connectivity test — emitted by the Attune console 'Test' button.",
 	}
 	return json.Marshal(env)
 }

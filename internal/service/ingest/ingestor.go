@@ -51,10 +51,11 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d", where, tenantID, id)
 	if i.enricher != nil {
-		// Capture inbound trace_id (业务: Lark / customer webhook trace_id)
-		// + OTel SpanContext(自家 trace_id),让 async enrich goroutine
-		// 同时继承"客户 trace"和"自家 OTel trace",enricher 调 gateway
-		// LLM 时 traceparent 透传,SLS 上 trace_id 串联 attune + gateway。
+		// Capture the inbound trace_id (Lark / customer webhook) and
+		// the OTel SpanContext (attune's own trace) so the async
+		// enrich goroutine inherits both. Downstream the enricher
+		// propagates traceparent on its LLM call, which lets the
+		// trace backend join attune's spans with the gateway's.
 		go i.fireEnrich(ctx, id, trace.FromContext(ctx))
 	}
 	return id, nil
@@ -74,17 +75,20 @@ func composeUserID(keyID uuid.UUID, sourceUser string) string {
 // fireEnrich runs enrichment in a fresh, bounded context so a slow LLM
 // call cannot pin the inbound HTTP request goroutine.
 //
-// traceID(业务): inbound webhook trace id,透传到 customer envelope。
-// inboundCtx: 原始 HTTP ctx,我们从中提取 OTel SpanContext,detach 后接到
-// 新的 timeout ctx 上,让 enricher 调 gateway 时 OTel trace_id 串联。
+// traceID is the inbound webhook trace id; we propagate it onto the
+// customer envelope downstream.
+// inboundCtx is the original HTTP request ctx. We extract the OTel
+// SpanContext, detach it from the HTTP cancellation, and reattach it
+// onto a fresh timeout ctx so the enricher's outbound call shares the
+// inbound trace.
 //
 // Errors are only logged — the row stays 'pending' and the background
 // poller will pick it up on the next tick.
 func (i *Ingestor) fireEnrich(inboundCtx context.Context, id int64, traceID string) {
-	// Detach OTel SpanContext 到新的 bounded ctx:
-	//   - 新 ctx 不受 inbound HTTP request 关闭影响(60s timeout)
-	//   - OTel SpanContext 跟着走,trace_id 保持串联
-	//   - 业务 trace_id (Lark / customer 来源) 仍通过 trace.WithID 传
+	// Detach the OTel SpanContext onto a fresh bounded ctx:
+	//   - the new ctx survives the inbound HTTP request closing (60s timeout);
+	//   - the OTel SpanContext rides along, keeping trace_id stitched;
+	//   - the inbound business trace_id (Lark / customer) is propagated via trace.WithID.
 	span := oteltrace.SpanFromContext(inboundCtx)
 	ctx, cancel := context.WithTimeout(
 		oteltrace.ContextWithSpanContext(context.Background(), span.SpanContext()),

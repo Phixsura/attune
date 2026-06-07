@@ -39,7 +39,7 @@ func (h *UsageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "usage", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] feedback.UsageByDay failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "查询用量失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to read usage")
 		return
 	}
 

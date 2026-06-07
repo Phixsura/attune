@@ -6,7 +6,7 @@ import { lazy, Suspense } from 'react'
 import { Toaster } from 'sonner'
 
 // QueryClient is owned by the root so loaders + components share one cache.
-// Keep config minimal until we hit a real edge case (CLAUDE.md 律 6).
+// Keep the config minimal until we hit a real edge case.
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

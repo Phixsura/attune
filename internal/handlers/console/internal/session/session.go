@@ -60,7 +60,7 @@ type ctxKey struct{}
 // It is safe for concurrent use.
 //
 // Insecure=true drops the `Secure` cookie flag — required for plain-HTTP
-// dev/preview deployments (e.g. IP-only prod 闭环 before TLS lands).
+// dev/preview deployments (e.g. IP-only setup before TLS lands).
 // MUST be false in any real TLS-fronted production.
 type Signer struct {
 	key      []byte
@@ -179,14 +179,14 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 		ck, err := r.Cookie(SessionCookieName)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] reject: missing cookie,path:%s", where, r.URL.Path)
-			respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "未登录或 session 已过期")
+			respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "not logged in or session expired")
 			return
 		}
 		p, err := s.VerifySession(ck.Value)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] reject: verify session failed,path:%s,err:%s",
 				where, r.URL.Path, err.Error())
-			respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "session 校验失败")
+			respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "session verification failed")
 			return
 		}
 		// CSRF check for state-changing methods. GET/HEAD bypass.
@@ -194,7 +194,7 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 			if !s.VerifyCSRF(p.UserID, r.Header.Get(CSRFHeader)) {
 				logext.Warnf(ctx, "[%s] reject: csrf invalid,path:%s,user_id:%s",
 					where, r.URL.Path, p.UserID)
-				respond.Error(ctx, w, http.StatusForbidden, "csrf_invalid", "CSRF token 无效")
+				respond.Error(ctx, w, http.StatusForbidden, "csrf_invalid", "invalid CSRF token")
 				return
 			}
 		}

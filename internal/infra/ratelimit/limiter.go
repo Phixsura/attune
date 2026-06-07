@@ -93,7 +93,7 @@ func (l *Limiter) Allow(tenantID string) bool {
 // Middleware returns the HTTP wrapper. Mount AFTER api-key middleware
 // so context already carries tenant_id.
 //
-// Hot path: success silent (tight loop discipline);只 log reject。
+// Hot path: success is silent (tight-loop discipline) — only rejects log.
 func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	const where = "ratelimit.Middleware"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +105,7 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 			w.Header().Set("Retry-After", "30")
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":"rate_limited","message":"提交过快，请 30 秒后再试"}`))
+			_, _ = w.Write([]byte(`{"error":"rate_limited","message":"submission too frequent, retry in 30 seconds"}`))
 			return
 		}
 		next.ServeHTTP(w, r)

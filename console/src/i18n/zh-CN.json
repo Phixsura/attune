@@ -22,7 +22,13 @@
   "auth": {
     "login_with_lark": "用飞书登录",
     "logging_in": "登录中…",
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "login_hint_tenant": "{{action}}前请确认你的飞书账号已加入对应租户。",
+    "login_hint_first_user": "首次接入会自动建立租户与用户记录，可以在控制台邀请其他成员。",
+    "role": {
+      "admin": "管理员",
+      "member": "成员"
+    }
   },
   "nav": {
     "feedback": "反馈",
@@ -207,6 +213,8 @@
     "subtitle": "本月反馈接收量统计。Wave 3+ 加配额 + 计费对接。",
     "total_card": "本月已接收",
     "unit": "条",
+    "bar_tooltip": "{{date}} · {{count}} 条",
+    "bar_date_format": "M月d日",
     "quota_unset": "暂未设置配额",
     "period": "周期：{{start}} — {{end}}",
     "by_day": "每日分布",

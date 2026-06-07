@@ -15,7 +15,7 @@ import (
 )
 
 // DevLoginHandler implements the backdoor /install/dev-login endpoint
-// for HTTP IP-only prod 闭环 testing — bypasses 飞书 OAuth entirely so
+// for HTTP-only end-to-end smoke testing — bypasses the Lark OAuth flow so
 // we can verify the SPA + session middleware + tenant_users + 4 stub
 // pages end-to-end before real OAuth is wired (which needs HTTPS +
 // registered domain).
@@ -66,7 +66,7 @@ func (h *DevLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	role := r.URL.Query().Get("role")
 	if slug == "" {
 		logext.Warnf(ctx, "[%s] reject: missing tenant slug", where)
-		respond.Error(ctx, w, http.StatusBadRequest, "missing_tenant", "需要 ?tenant=<slug>")
+		respond.Error(ctx, w, http.StatusBadRequest, "missing_tenant", "missing ?tenant=<slug>")
 		return
 	}
 	if name == "" {
@@ -83,13 +83,13 @@ func (h *DevLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, tenant.ErrTenantNotFound) {
 			logext.Warnf(ctx, "[%s] reject: tenant not found,slug:%s", where, slug)
 			respond.Error(ctx, w, http.StatusNotFound, "tenant_not_found",
-				"tenant '"+slug+"' 不存在；请先用 `attune tenant create` 建好")
+				"tenant '"+slug+"' does not exist; create it first via `attune tenant create`")
 			return
 		}
 		slog.ErrorContext(ctx, "dev-login: resolve tenant", "err", err)
 		logext.Errorf(ctx, "[%s] tenants.ResolveSlug failed,slug:%s,err:%+v",
 			where, slug, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "resolve tenant 失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to resolve tenant")
 		return
 	}
 
@@ -103,7 +103,7 @@ func (h *DevLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "dev-login: upsert user", "err", err)
 		logext.Errorf(ctx, "[%s] users.Upsert failed,tenant_id:%s,open_id:%s,err:%+v",
 			where, tenantID, openID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "upsert user 失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to upsert user")
 		return
 	}
 
@@ -111,7 +111,7 @@ func (h *DevLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "dev-login: sign session", "err", err)
 		logext.Errorf(ctx, "[%s] signer.IssueSessionCookie failed,user_id:%s,err:%+v",
 			where, userID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "sign session 失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to sign session")
 		return
 	}
 

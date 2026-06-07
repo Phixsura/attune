@@ -1,15 +1,17 @@
 package enrich
 
-// triage.go — Triage Agent v0 (Sprint 1.3, Y1 工程 2026-05-18).
+// triage.go — Triage Agent v0 (2026-05-18).
 //
-// Until this lands, the enricher made one expensive LLM call per row
+// Before this lands, the enricher made one expensive LLM call per row
 // regardless of whether the row was real signal or noise. This split
 // puts a cheap rule-based gate in front of the LLM so:
 //
-//   1. ignore-able rows (spam, emoji-only, 5 字以下纯噪声) cost 0 LLM
-//      tokens and don't pollute the enriched view;
-//   2. v1 can plug fast-path rules (per-tenant 关键词 → 固定 enrichment)
-//      to skip the LLM for high-frequency known patterns;
+//   1. ignore-able rows (spam, emoji-only, very short noise of fewer
+//      than 5 characters) cost 0 LLM tokens and don't pollute the
+//      enriched view;
+//   2. a future fast-path can plug per-tenant keyword rules that map
+//      directly to a fixed enrichment, skipping the LLM for
+//      high-frequency known patterns;
 //   3. the full LLM path stays unchanged so existing behavior is the
 //      "default unless triage matched a shortcut".
 //
@@ -67,12 +69,12 @@ func Triage(content string) TriageDecision {
 		return TriageDecision{Mode: TriageIgnore, Reason: "empty content"}
 	}
 
-	// Rule 2: too short to carry any information. 2 runes is the cut so
-	// 2-character CJK feedback like "崩了" / "闪退" / "卡死" passes through
-	// to the LLM — these are the most common shapes Chinese users use
-	// for severe bug reports. 2-character ASCII ("ok" / "no" / "hi")
-	// also passes; the LLM correctly classifies them as low-signal at
-	// negligible cost. Only single-rune content is dropped (#85).
+	// Rule 2: too short to carry any information. The cut is 2 runes so
+	// 2-character CJK feedback (common shape for severe bug reports —
+	// e.g. "crashed", "closed", "stuck" written in Chinese) still
+	// reaches the LLM. 2-character ASCII ("ok" / "no" / "hi") passes
+	// too; the LLM classifies them as low-signal at negligible cost.
+	// Only single-rune content is dropped (#85).
 	if runeCount(trimmed) < 2 {
 		return TriageDecision{Mode: TriageIgnore, Reason: "content too short (<2 runes)"}
 	}
@@ -85,7 +87,7 @@ func Triage(content string) TriageDecision {
 	}
 
 	// Rule 4: spam pattern — same character repeated 10+ times in a row.
-	// Catches "aaaaaaaaaa" / "....." / "测测测测测测测测测测" without
+	// Catches "aaaaaaaaaa" / "....." / repeated single-character noise without
 	// reaching for regex. Cheap O(n) pass.
 	if hasLongRunOfSameRune(trimmed, 10) {
 		return TriageDecision{Mode: TriageIgnore, Reason: "long run of same rune (likely spam)"}

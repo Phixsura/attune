@@ -134,7 +134,8 @@ func (r *RawWebhookRouter) send(
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
 		req.Header.Set("X-Attune-Signature", sig.SignRaw(body, dest.secret))
 		req.Header.Set("User-Agent", "attune/1.0")
-		// 上游 req body 截断 1024 字节; X-Attune-Signature 头 skip(签名敏感)。
+		// Upstream request body — truncated at 1024 bytes; the
+		// X-Attune-Signature header is intentionally not logged.
 		logext.Infof(ctx, "[%s] upstream req,label:%s,body:%s",
 			where, label, truncate(string(body), 1024))
 		return req, nil
@@ -200,7 +201,7 @@ func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 func checkRawResponse(label string, s domain.Snapshot) notify.ResponseChecker {
 	const where = "notify.checkRawResponse"
 	return func(ctx context.Context, status int, body []byte) error {
-		// 上游响应日志(每 attempt 都有,truncate 1024 字节)。
+		// Upstream response log — fires per attempt; body truncated at 1024 bytes.
 		logext.Infof(ctx,
 			"[%s] upstream resp,label:%s,feedback_id:%d,status:%d,body:%s",
 			where, label, s.ID, status, truncate(string(body), 1024))

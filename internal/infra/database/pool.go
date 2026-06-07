@@ -1,11 +1,13 @@
-// pool.go — pgxpool helper,统一加 OTel pgx tracer。
+// pool.go — pgxpool helper that wires in the OTel pgx tracer for
+// every connection.
 //
-// 用法(取代 pgxpool.New(...)):
+// Use it instead of pgxpool.New(...):
 //
 //	pool, err := database.NewPool(ctx, cfg.DatabaseURL)
 //
-// 自动给每个 SQL query 加 child span,ARMS 拓扑图把 RDS 显示成下游节点,
-// trace UI 能看到 SQL duration / db.statement / db.operation。
+// Each SQL query then opens a child span — db.statement, db.operation,
+// and duration land in the trace backend so the DB shows up as a real
+// downstream node in service topology views.
 package database
 
 import (
@@ -18,7 +20,8 @@ import (
 	"github.com/Phixsura/attune/internal/logext"
 )
 
-// NewPool 建 pgxpool + otelpgx tracer。attune 子命令 / server 都用这个。
+// NewPool constructs a pgxpool with the otelpgx tracer attached.
+// Used by every attune subcommand and the long-running server.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	const where = "database.NewPool"
 	cfg, err := pgxpool.ParseConfig(databaseURL)

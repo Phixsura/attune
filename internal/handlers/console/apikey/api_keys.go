@@ -59,7 +59,7 @@ func (h *APIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "api-keys list", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] svc.List failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "查询 API key 失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to list API keys")
 		return
 	}
 	items := make([]*attunev1.ApiKey, 0, len(rows))
@@ -81,19 +81,19 @@ func (h *APIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := respond.Decode(r.Body, &req); err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad json,tenant_id:%s,err:%s",
 			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "请求体不是合法 JSON")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "request body is not valid JSON")
 		return
 	}
 	label := strings.TrimSpace(req.GetLabel())
 	if label == "" {
 		logext.Warnf(ctx, "[%s] reject: missing label,tenant_id:%s", where, auth.TenantID)
-		respond.Error(ctx, w, http.StatusBadRequest, "missing_label", "label 不能为空")
+		respond.Error(ctx, w, http.StatusBadRequest, "missing_label", "label must not be empty")
 		return
 	}
 	if len(label) > 200 {
 		logext.Warnf(ctx, "[%s] reject: label too long,tenant_id:%s,len:%d",
 			where, auth.TenantID, len(label))
-		respond.Error(ctx, w, http.StatusBadRequest, "label_too_long", "label 不能超过 200 字符")
+		respond.Error(ctx, w, http.StatusBadRequest, "label_too_long", "label must not exceed 200 characters")
 		return
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,label:%s", where, auth.TenantID, label)
@@ -103,7 +103,7 @@ func (h *APIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "api-keys issue", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] svc.Issue failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "签发 API key 失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to issue API key")
 		return
 	}
 
@@ -140,7 +140,7 @@ func (h *APIKeysHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad id,tenant_id:%s,id_str:%s",
 			where, auth.TenantID, idStr)
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id 不是 UUID")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id is not a UUID")
 		return
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,key_id:%s", where, auth.TenantID, id)
@@ -148,13 +148,13 @@ func (h *APIKeysHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, apikeyrepo.ErrAPIKeyNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,key_id:%s",
 				where, auth.TenantID, id)
-			respond.Error(ctx, w, http.StatusNotFound, "not_found", "API key 不存在或不属于当前 tenant")
+			respond.Error(ctx, w, http.StatusNotFound, "not_found", "API key not found or not owned by tenant")
 			return
 		}
 		slog.ErrorContext(ctx, "api-keys revoke", "err", err, "id", id, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] svc.Revoke failed,tenant_id:%s,key_id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "撤销失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "revoke failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

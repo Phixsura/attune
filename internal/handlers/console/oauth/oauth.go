@@ -71,7 +71,7 @@ func (h *OAuthHandler) Start(w http.ResponseWriter, r *http.Request) {
 	nonce, err := randomNonce(24)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] randomNonce failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "无法生成 state")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to generate state")
 		return
 	}
 	postLogin := r.URL.Query().Get("redirect_uri")
@@ -108,7 +108,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	if code == "" || state == "" {
 		logext.Warnf(ctx, "[%s] reject: missing code/state", where)
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "缺少 code 或 state")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "missing code or state")
 		return
 	}
 	logext.Infof(ctx, "[%s] start", where)
@@ -116,13 +116,13 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	stateNonce, postLogin, err := parseState(state)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: parse state failed,err:%s", where, err.Error())
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "state 不合法")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "invalid state")
 		return
 	}
 	ck, err := r.Cookie(session.OAuthStateCookie)
 	if err != nil || ck.Value != stateNonce {
 		logext.Warnf(ctx, "[%s] reject: state cookie mismatch", where)
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "state cookie 不匹配，请重新发起登录")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "state cookie mismatch — please retry login")
 		return
 	}
 	// Wipe the state cookie — it has served its purpose.
@@ -135,7 +135,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	tenantID, userID, created, err := h.resolveAndUpsert(ctx, code)
 	if err != nil {
 		slog.ErrorContext(ctx, "oauth: exchange/upsert failed", "err", err)
-		respond.Error(ctx, w, http.StatusBadGateway, err.Error(), "向飞书交换/登记失败")
+		respond.Error(ctx, w, http.StatusBadGateway, err.Error(), "Lark token exchange or upsert failed")
 		return
 	}
 	// 6. Sign session, redirect.
@@ -143,7 +143,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(ctx, "oauth: sign session", "err", err)
 		logext.Errorf(ctx, "[%s] signer.IssueSessionCookie failed,user_id:%s,err:%+v",
 			where, userID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "session_sign_failed", "签 session 失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "session_sign_failed", "failed to sign session")
 		return
 	}
 	slog.InfoContext(ctx, "console: oauth login",
@@ -155,13 +155,13 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	// Validate it is a same-origin path and redirect.
 	if !redirectIsSafe(h.baseURL, postLogin) {
 		logext.Errorf(ctx, "[%s] reject: redirect escapes base URL", where)
-		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "重定向失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "redirect failed")
 		return
 	}
 	base, err := url.Parse(h.baseURL)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] reject: invalid base URL", where)
-		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "重定向失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "redirect failed")
 		return
 	}
 	// Parse postLogin in isolation so we can lift its Path / RawQuery /
@@ -173,12 +173,12 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	rel, err := url.Parse(strings.ReplaceAll(postLogin, "\\", "/"))
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: invalid post-login redirect,err:%s", where, err.Error())
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "state 不合法")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "invalid state")
 		return
 	}
 	if !strings.HasPrefix(rel.Path, "/console") {
 		logext.Errorf(ctx, "[%s] reject: redirect path outside /console", where)
-		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "重定向失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "redirect failed")
 		return
 	}
 	dst := &url.URL{
@@ -207,7 +207,7 @@ func (h *OAuthHandler) resolveAndUpsert(ctx context.Context, code string) (tenan
 	}
 	// 3. Upsert tenant by lark_tenant_key (creates row on first install)
 	defaultSlug := "lark-" + shortHash(tok.TenantKey)
-	tenantID, created, err = h.tenants.UpsertByLarkKey(ctx, tok.TenantKey, info.Name+" 的工作区", defaultSlug)
+	tenantID, created, err = h.tenants.UpsertByLarkKey(ctx, tok.TenantKey, info.Name+"'s workspace", defaultSlug)
 	if err != nil {
 		return "", "", false, fmt.Errorf("tenant_upsert_failed")
 	}

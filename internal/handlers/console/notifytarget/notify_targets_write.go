@@ -26,7 +26,7 @@ func (h *NotifyTargetsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad uuid,tenant_id:%s", where, auth.TenantID)
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id 不是 UUID")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id is not a UUID")
 		return
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,id:%s", where, auth.TenantID, id)
@@ -34,13 +34,13 @@ func (h *NotifyTargetsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
-			respond.Error(ctx, w, http.StatusNotFound, "not_found", "通知目标不存在或不属于当前 tenant")
+			respond.Error(ctx, w, http.StatusNotFound, "not_found", "notify target not found or not owned by tenant")
 			return
 		}
 		slog.ErrorContext(ctx, "notify-targets delete", "err", err)
 		logext.Errorf(ctx, "[%s] repo.Delete failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "删除失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "delete failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -56,7 +56,7 @@ func (h *NotifyTargetsHandler) Test(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad uuid,tenant_id:%s", where, auth.TenantID)
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id 不是 UUID")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id is not a UUID")
 		return
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,id:%s", where, auth.TenantID, id)
@@ -65,13 +65,13 @@ func (h *NotifyTargetsHandler) Test(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
-			respond.Error(ctx, w, http.StatusNotFound, "not_found", "通知目标不存在或不属于当前 tenant")
+			respond.Error(ctx, w, http.StatusNotFound, "not_found", "notify target not found or not owned by tenant")
 			return
 		}
 		slog.ErrorContext(ctx, "notify-targets test load", "err", err)
 		logext.Errorf(ctx, "[%s] repo.GetByID failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "加载目标失败")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load target")
 		return
 	}
 

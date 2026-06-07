@@ -1,15 +1,16 @@
-// Package observability initializes OpenTelemetry tracing for BE.
+// Package observability initializes OpenTelemetry tracing for the backend.
 //
-// 设计原则(详见 docs/observability-trace-design.md):
-//   - OTel 是基础设施,跟"业务用户"身份完全解耦
-//   - Resource 只描述 service-level 常量(service.name / service.version /
-//     deployment.environment),不放 user.id / tenant.id
-//   - user.id 由 auth.JWTMiddleware 在每个 span 上动态 SetAttributes,不是 resource
-//   - InitTracer 一次性 init,跟 user login/logout 无关
+// Design (see docs/observability-trace-design.md):
+//   - OTel is infrastructure — decoupled from the notion of a business user.
+//   - Resource holds service-level constants only (service.name /
+//     service.version / deployment.environment); never user.id / tenant.id.
+//   - The auth middleware attaches user identity per span via
+//     SetAttributes, not via the resource.
+//   - InitTracer runs once at startup; it is unrelated to login state.
 //
-// PR-1a 阶段:OTLP endpoint 留空也能正常启动(noop tracer)。
-//   - prod 部署后在 .env 配 OTEL_EXPORTER_OTLP_ENDPOINT 才真上报到 SLS Trace
-//   - 本地开发不配 endpoint,仍产 trace_id(slog 注入),只是不上报
+// An empty OTLP endpoint is supported: the tracer reduces to a no-op
+// and the service still runs. Local dev gets trace_ids in logs (slog
+// injects them) without shipping spans anywhere.
 package observability
 
 import (
@@ -28,30 +29,30 @@ import (
 
 // Options for InitTracer.
 type Options struct {
-	// ServiceName 服务名,如 "attune"。
+	// ServiceName — the OTel resource service name, e.g. "attune".
 	ServiceName string
-	// ServiceVersion 服务版本(通常是 git commit hash),如 "5d6ea83"。
+	// ServiceVersion — typically the git commit hash, e.g. "5d6ea83".
 	ServiceVersion string
-	// Environment 部署环境,如 "prod" / "dev"。
+	// Environment — deployment tier, e.g. "prod" / "dev".
 	Environment string
 
-	// Endpoint OTLP HTTP 端点的 host(不带 path)。空字符串 = noop tracer
-	// (不上报,但仍产 trace_id 注入到 slog)。
-	// 例: "otel-collector.example.com:4318" 或任意自托管 OTLP HTTP 端点。
+	// Endpoint — host of the OTLP HTTP receiver (no path). Empty string ⇒ noop tracer.
+	// (trace_ids still get injected into slog, just not exported).
+	// e.g. "otel-collector.example.com:4318" or any self-hosted OTLP HTTP endpoint.
 	Endpoint string
-	// URLPath OTLP HTTP 路径。SLS Trace 服务用 "/opentelemetry/v1/traces"。
+	// URLPath — the OTLP HTTP path, e.g. "/opentelemetry/v1/traces".
 	URLPath string
-	// Headers OTLP 请求头(SLS 走自定义 header,如 x-sls-otel-project)。
+	// Headers — extra OTLP request headers required by the receiver.
 	Headers map[string]string
-	// Insecure 用 HTTP(true)还是 HTTPS(false)。SLS 内网入口用 HTTP。
+	// Insecure — true for plain HTTP, false for HTTPS.
 	Insecure bool
 }
 
-// ShutdownFunc 进程退出前调用,刷干 buffer。
+// ShutdownFunc — call at process shutdown to flush buffered spans.
 type ShutdownFunc func(context.Context) error
 
-// InitTracer 初始化全局 OTel TracerProvider + propagator。
-// Endpoint 空时返回 noop tracer(本地开发可用),不向 SLS 上报。
+// InitTracer wires the global OTel TracerProvider + propagator.
+// An empty Endpoint yields a noop tracer (suitable for local dev) that doesn't export.
 func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
 	res, err := resource.New(
 		ctx,
@@ -60,31 +61,32 @@ func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
 			semconv.ServiceVersion(opts.ServiceVersion),
 			semconv.DeploymentEnvironmentName(opts.Environment),
 		),
-		resource.WithFromEnv(), // 允许 env 补充 OTEL_RESOURCE_ATTRIBUTES
-		resource.WithProcess(), // 自动加 process.pid / process.runtime
+		resource.WithFromEnv(), // allow env to add to OTEL_RESOURCE_ATTRIBUTES
+		resource.WithProcess(), // auto-add process.pid / process.runtime
 		resource.WithTelemetrySDK(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("otel resource: %w", err)
 	}
 
-	// W3C tracecontext propagator(跨进程透传)。Baggage 留口子,业务想透传
-	// 自定义字段(如 tenant_id)可以加。
+	// W3C tracecontext propagator for cross-process propagation. Baggage is
+	// included so business code can attach custom fields (e.g. tenant_id).
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
 
-	// Endpoint 空 → noop tracer。仍创建 TracerProvider 让 SpanFromContext 能
-	// 拿到有效 SpanContext,但 BatchSpanProcessor 用 noop exporter 直接丢弃。
+	// Empty Endpoint → noop tracer. We still create a TracerProvider so
+	// SpanFromContext returns a valid SpanContext; without a BatchSpanProcessor
+	// every ended span is simply discarded.
 	if opts.Endpoint == "" {
 		slog.InfoContext(ctx, "otel: noop tracer (no OTEL_EXPORTER_OTLP_ENDPOINT)",
 			"service", opts.ServiceName)
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithResource(res),
 			sdktrace.WithSampler(sdktrace.AlwaysSample()),
-			sdktrace.WithIDGenerator(&ReadableIDGenerator{}), // 时间戳前缀 trace_id
-			// 不加 SpanProcessor → span End 后直接丢
+			sdktrace.WithIDGenerator(&ReadableIDGenerator{}), // timestamp-prefix trace_id
+			// No SpanProcessor — ended spans are discarded.
 		)
 		otel.SetTracerProvider(tp)
 		return tp.Shutdown, nil
@@ -113,9 +115,9 @@ func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
 			sdktrace.WithMaxExportBatchSize(512),
 		),
 		sdktrace.WithResource(res),
-		// 体量小,先全采。月费失控时改 ParentBased(TraceIDRatioBased(0.1))。
+		// Small fleet — sample everything. Move to ParentBased(TraceIDRatioBased(...)) when costs warrant.
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithIDGenerator(&ReadableIDGenerator{}), // 时间戳前缀 trace_id
+		sdktrace.WithIDGenerator(&ReadableIDGenerator{}), // timestamp-prefix trace_id
 	)
 	otel.SetTracerProvider(tp)
 

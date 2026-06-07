@@ -39,9 +39,10 @@ var subcommands = map[string]func([]string) error{
 }
 
 func main() {
-	// slog handler:默认 JSON(prod 安全默认,SLS 字段索引必需)。
-	// 本地开发显式设 ENV=dev 才用 text(docker logs 可读)。
-	// 详见 docs/observability-trace-design.md
+	// slog handler: JSON by default (production-safe, structured for log
+	// aggregators that key on field names). Local dev opts into the text
+	// handler via ENV=dev for human-readable `docker logs` output.
+	// Full rationale: docs/observability-trace-design.md.
 	var inner slog.Handler
 	if os.Getenv("ENV") == "dev" {
 		inner = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})

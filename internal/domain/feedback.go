@@ -1,8 +1,9 @@
 // Package domain holds the pure types shared across attune's layered
-// architecture (律 8). Files in this package MUST NOT depend on any other
-// attune/internal/* package and MUST NOT import pgx, net/http, gRPC, or
-// any I/O — keeping the boundary clean prevents cycles when handlers,
-// service, repo, and notify all need to talk about the same shape.
+// architecture. Files in this package MUST NOT depend on any other
+// attune/internal/* package and MUST NOT import pgx, net/http, gRPC,
+// or any I/O — keeping the boundary clean prevents cycles when
+// handlers, service, repo, and notify all need to talk about the
+// same shape.
 package domain
 
 import (
@@ -17,23 +18,23 @@ const MaxContentLen = 5000
 // Source enums — kept as plain strings so they round-trip cleanly
 // through JSON and SQL without enum machinery.
 //
-// Sprint 1.2 (Y1 工程, 2026-05-17) added 4 飞书-native source enums so
-// customers can pipe 飞书审批 / 多维表格 / 服务台 / 表单评论 directly
-// into attune via 飞书自动化 → POST /v1/feedback/ingest (no extra
-// attune-side endpoint needed). See README.md "飞书原生 source 接入"
-// for per-source configuration snippets.
+// Sprint 1.2 (2026-05-17) added four Lark-native source enums so
+// customers can pipe Lark Approval / Bitable / Helpdesk / Form items
+// directly into attune via a no-code automation → POST /v1/feedback/ingest
+// (no extra attune-side endpoint needed). See README.md for the
+// per-source configuration snippets.
 //
 // (Pre-flat-labels: ValidKinds and ValidSeverities lived here too. The
-// flat-labels refactor — proposal 2026-06-07-flat-labels.md, #10 — moved
-// classification to a per-tenant label taxonomy, so the axes no longer
-// have a global vocabulary to validate against.)
+// proposal 2026-06-07-flat-labels.md, #10 moved classification to a
+// per-tenant Dimension taxonomy, so the axes no longer have a global
+// vocabulary to validate against.)
 var ValidSources = map[string]bool{
 	"api":           true, // generic API client (default for /v1/feedback/ingest)
-	"lark-group":    true, // 飞书群消息 webhook (handled by /v1/lark/event)
-	"lark-bitable":  true, // Sprint 1.2: 飞书多维表格记录 (自动化 → POST ingest)
-	"lark-approval": true, // Sprint 1.2: 飞书审批实例 (自动化 → POST ingest)
-	"lark-helpdesk": true, // Sprint 1.2: 飞书服务台工单 (event subscription → POST ingest)
-	"lark-form":     true, // Sprint 1.2: 飞书表单 / 文档评论 (自动化 → POST ingest)
+	"lark-group":    true, // Lark group chat webhook (handled by /v1/lark/event)
+	"lark-bitable":  true, // Lark Bitable record (automation → POST ingest)
+	"lark-approval": true, // Lark Approval instance (automation → POST ingest)
+	"lark-helpdesk": true, // Lark Helpdesk ticket (event subscription → POST ingest)
+	"lark-form":     true, // Lark Form / Doc comment (automation → POST ingest)
 	"email":         true, // mailbox poller (Sprint 1.3+)
 	"web":           true, // in-app JS feedback widget
 	"other":         true, // catch-all for misc integrations
@@ -41,29 +42,33 @@ var ValidSources = map[string]bool{
 
 // SourceDisplayName returns the human-facing label for a source enum.
 // Used by dispatch envelopes (github-issue body, lark-card, raw-webhook
-// envelope) so downstream readers see "飞书多维表格 #recXXX" instead
+// envelope) so downstream readers see "Lark Bitable #recXXX" instead
 // of the bare "lark-bitable" technical key. Falls back to the raw key
 // when unknown — never returns empty, never panics on unseen sources.
+//
+// The display strings are English-canonical by design; localizing
+// them per-tenant requires threading locale into the notify path and is
+// tracked as a follow-up i18n enhancement.
 func SourceDisplayName(source string) string {
 	switch source {
 	case "api":
-		return "API 客户端"
+		return "API client"
 	case "lark-group":
-		return "飞书群消息"
+		return "Lark Group Chat"
 	case "lark-bitable":
-		return "飞书多维表格"
+		return "Lark Bitable"
 	case "lark-approval":
-		return "飞书审批"
+		return "Lark Approval"
 	case "lark-helpdesk":
-		return "飞书服务台"
+		return "Lark Helpdesk"
 	case "lark-form":
-		return "飞书表单 / 文档评论"
+		return "Lark Form / Doc Comment"
 	case "email":
-		return "邮件"
+		return "Email"
 	case "web":
-		return "Web 反馈控件"
+		return "Web Widget"
 	case "other":
-		return "其他"
+		return "Other"
 	default:
 		return source
 	}

@@ -119,9 +119,9 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 	logext.Infof(ctx, "[%s] start,feedback_id:%d,tenant_id:%s,content_len:%d",
 		where, id, row.TenantID, len(row.Content))
 
-	// Sprint 1.3 (Y1 工程): triage gate in front of the LLM call. Cheap
-	// rule-based filter that diverts noise to the ignore path (no LLM
-	// cost, no dispatch) and the future fast-path (Sprint 2.x).
+	// Triage gate in front of the LLM call. Cheap rule-based filter
+	// that diverts noise to the ignore path (no LLM cost, no dispatch)
+	// and a future fast-path slot for per-tenant deterministic rules.
 	decision := Triage(row.Content)
 	metrics.TriageDecisionsTotal.WithLabelValues(row.TenantID, string(decision.Mode)).Inc()
 
