@@ -3,9 +3,9 @@
 | | |
 |---|---|
 | **Issue** | #10 |
-| **Status** | Accepted |
+| **Status** | Implemented |
 | **Started** | 2026-06-07 13:30 CST |
-| **Updated** | 2026-06-07 — pivoted from "flat labels + urgent boolean" (B) to **metadata-driven Dimensions with per-display i18n** (E3) after reviewer directions: "borrow the industry's principles wholesale, take it all the way, keep it extensible" and "display_name supports i18n". |
+| **Updated** | 2026-06-07 — pivoted from "flat labels + urgent boolean" (B) to **metadata-driven Dimensions with per-display i18n** (E3) after reviewer directions: "borrow the industry's principles wholesale, take it all the way, keep it extensible" and "display_name supports i18n". Landed on PR #86. |
 | **Related** | supersedes part of `docs/proposals/2026/06/2026-06-06-enricher-per-tenant-prompt.md` (the kind/severity Non-goal) |
 
 > attune is Apache-2.0 OSS and this proposal is the canonical English
