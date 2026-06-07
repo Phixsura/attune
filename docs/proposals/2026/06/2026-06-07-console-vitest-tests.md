@@ -3,9 +3,10 @@
 | Field    | Value |
 |----------|-------|
 | Issue    | #13 |
-| Status   | **Implemented** |
+| Status   | **Accepted** |
 | Started  | 2026-06-07 |
-| Updated  | 2026-06-07 — second scope expansion: `dimensions-editor.tsx` test coverage folded back in per user direction, supersedes the original "deferred to follow-up #88" decision. PR now covers it directly; #88 closed as merged.<br>2026-06-08 — Implemented. Final shape: 17 test files, 79 tests, ~3120 net LOC. Per-file forward-ratchet thresholds on `api-client.ts` / `i18n-resolve.ts` / `get-me.ts` all green. `fileParallelism: false` set in `vite.config.ts` because `setup-tests.ts` patches process-wide globals (MSW server, navigator.clipboard, Element prototype shims) that race across parallel files. |
+| Updated  | 2026-06-07 — second scope expansion: `dimensions-editor.tsx` test coverage folded back in per user direction, supersedes the original "deferred to follow-up #88" decision. PR now covers it directly; #88 closed as merged.<br>2026-06-08 — Implementation landed on `test/console-vitest-suite` ([#89](https://github.com/Phixsura/attune/pull/89)); self-review caught 10 issues, fix-up commits address all of them: real coverage of `_authed.tsx` via importing the production Route, proto-typed MSW fixtures, `data-testid` based test queries (decoupled from zh-CN strings), explicit RTL `cleanup()` to fix parallel-file races (replaces the earlier `fileParallelism: false` workaround), and per-file coverage thresholds expanded from 3 to 17 surfaces. |
+| Shipped  | _(filled when PR #89 merges)_ |
 | Related  | #1 (vitest wired with `--passWithNoTests` as a placeholder in PR #11) · #19 (feature-based console layout, dependency-cruiser rules — testing layout must coexist with the existing `shared → features → app` arrows) · CLAUDE.md §9 (AI assistants must add tests for new behavior) · #88 (originally filed as the `dimensions-editor` follow-up; now closed-as-merged) |
 
 > attune is Apache-2.0 OSS and proposals are the canonical English record so external contributors can read them cold.

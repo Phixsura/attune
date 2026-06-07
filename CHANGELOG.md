@@ -9,31 +9,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
-- **Console SPA test suite (#13).** Vitest jsdom + MSW + Testing
-  Library infrastructure plus 79 cases across 17 files covering the
-  api-client (CSRF injection + `{code, message, requestId}` envelope
-  + signal), the i18n resolver + `useDisplayName` hook, `meQuery`'s
-  CSRF side effect, the api-keys create mutation + 3 dialogs, the
-  notify-targets `EditNotifyDialog` sparse-PATCH diff, the feedback
-  list infinite query URL builder + detail + stats, the
-  feedback `detail-sheet` + `dim-stats-bars` components, the
-  settings `EnrichConfig` get/update (with cache-write side effect)
-  + prompt preview hooks, the dim `i18n-input` + `dimensions-editor`
-  (incl. WeakMap-based identity tracking, persisted-row readonly
-  lock, urgent-set sync on remove-taxonomy), and the `_authed`
-  route-guard `beforeLoad` redirect to `/login` on 401. `v8` code
-  coverage with per-file forward-ratchet thresholds gated in CI on
-  `api-client.ts`, `i18n-resolve.ts`, and `get-me.ts` (≥90% lines).
-  `--passWithNoTests` removed from the console CI step.
+- **Console SPA test suite (#13).** Vitest (jsdom) + MSW + Testing
+  Library + v8 coverage. ~80 cases cover the api-client (CSRF
+  injection, error envelope, signal), the i18n resolver, the
+  `meQuery` CSRF side effect, the `_authed` route guard, the feedback
+  / settings / api-keys / notify-targets queries and mutations
+  (including the `EditNotifyDialog` sparse-PATCH diff and the
+  `useUpdateEnrichConfig` cache-write side effect), and the `dim`
+  components (`i18n-input` and `dimensions-editor`'s WeakMap-based
+  identity tracking). Per-file coverage thresholds on 17 surfaces
+  gate CI against regressions.
 
 ### Removed
 
-- Unused `react-hook-form`, `zod`, and `@hookform/resolvers` from
-  `console/dependencies` (zero references in `console/src/**`).
-- Dead `pnpm gen:api` / `src/api/types.ts` references from
-  `console/.gitignore` and `console/biome.json` (left over from an
-  abandoned openapi-typescript plan; the API contract is driven by
-  `.proto` → ts-proto under `src/proto/**` per #19).
+- Unused `react-hook-form`, `zod`, `@hookform/resolvers` from
+  `console/dependencies` (no references in `console/src/**`).
+- Dead `pnpm gen:api` / `src/api/types.ts` references in
+  `console/.gitignore` and `console/biome.json` (abandoned
+  openapi-typescript plan; #19 made the contract proto-driven).
 
 ### Webhook consumer migration (raw-webhook & outbox v1 → v2)
 
