@@ -48,6 +48,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Empty list / scalar fields now emit on console proto responses**
+  (post-#19) — `internal/respond.Proto` was using protojson's default
+  marshal options, which OMIT zero-valued fields. The wire shape for
+  `ListFooResponse{ Items: nil }` was therefore `{}` (no `items` key),
+  and every SPA query that ran `return resp.items` got `undefined`,
+  tripping react-query's "data cannot be undefined" guard. The
+  symptom: every console tab except `/settings` and `/login` crashed
+  on a fresh tenant (the four list / stats pages — feedback,
+  notify-targets, api-keys, usage). Fix: opt the canonical marshaler
+  into `EmitUnpopulated: true`. Empty repeated / message / scalar
+  fields now emit their zero value (`"items":[]`, `"count":"0"`,
+  `"series":[]`); proto3 explicit `optional` fields are not affected
+  (their underlying oneof is intentionally exempt). Surfaced during
+  the #10 browser smoke walk-through.
 - **Outbound `submitted_at` reflects actual ingest time** (#82) — both the
   outbox webhook envelope (`internal/service/enrich/enricher_outbox.go`)
   and the inline raw-webhook envelope
