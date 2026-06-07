@@ -233,7 +233,10 @@ func moduleJaccard(a, b []string) float64 {
 	if len(a) == 0 && len(b) == 0 {
 		return 1.0
 	}
-	set := make(map[string]struct{}, len(a)+len(b))
+	// No size hint: modules lists are small (typically <50 each), so
+	// the cost of map grow is negligible, and a hand-computed cap
+	// from len(a)+len(b) trips CodeQL's allocation-overflow analyser.
+	set := make(map[string]struct{})
 	intersect := 0
 	for _, x := range a {
 		set[x] = struct{}{}

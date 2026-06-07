@@ -164,18 +164,29 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "重定向失败")
 		return
 	}
-	normalized := strings.ReplaceAll(postLogin, "\\", "/")
-	rel, err := url.Parse(normalized)
+	// Parse postLogin in isolation so we can lift its Path / RawQuery /
+	// Fragment, then build a fresh target URL whose Scheme and Host are
+	// explicitly inherited from baseURL. This makes it structurally
+	// impossible for postLogin to influence the redirect origin — and
+	// it gives CodeQL a sanitisation path it can track (the user-tainted
+	// rel.Path/RawQuery/Fragment never reach Scheme/Host).
+	rel, err := url.Parse(strings.ReplaceAll(postLogin, "\\", "/"))
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: invalid post-login redirect,err:%s", where, err.Error())
 		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "state 不合法")
 		return
 	}
-	dst := base.ResolveReference(rel)
-	if dst.Scheme != base.Scheme || dst.Host != base.Host || !strings.HasPrefix(dst.Path, "/console") {
-		logext.Errorf(ctx, "[%s] reject: redirect escapes base URL", where)
+	if !strings.HasPrefix(rel.Path, "/console") {
+		logext.Errorf(ctx, "[%s] reject: redirect path outside /console", where)
 		respond.Error(ctx, w, http.StatusInternalServerError, "redirect_failed", "重定向失败")
 		return
+	}
+	dst := &url.URL{
+		Scheme:   base.Scheme,
+		Host:     base.Host,
+		Path:     rel.Path,
+		RawQuery: rel.RawQuery,
+		Fragment: rel.Fragment,
 	}
 	http.Redirect(w, r, dst.String(), http.StatusFound)
 }
@@ -230,9 +241,19 @@ func (h *OAuthHandler) resolveAndUpsert(ctx context.Context, code string) (tenan
 // configured base URL stays within the same origin. postLogin originates
 // from the OAuth state we ourselves generated, so it is trusted content,
 // but CodeQL demands explicit origin validation.
+//
+// Second-character check: both '/' (protocol-relative URL) and '\\'
+// (browser-quirk path that some clients interpret as host) must be
+// rejected at position 1 — otherwise "/\evil.com" would slip through
+// as a same-origin path here and become an open redirect downstream.
 func redirectIsSafe(baseURL, postLogin string) bool {
-	// postLogin must be a path (starts with /) and not a protocol-relative URL.
-	if !strings.HasPrefix(postLogin, "/") || strings.HasPrefix(postLogin, "//") {
+	// postLogin must be a non-empty path that starts with a single '/',
+	// rejecting both '//host' (protocol-relative) and '/\host'
+	// (browser-quirk authority).
+	if len(postLogin) == 0 || postLogin[0] != '/' {
+		return false
+	}
+	if len(postLogin) >= 2 && (postLogin[1] == '/' || postLogin[1] == '\\') {
 		return false
 	}
 	// It must not contain newlines or other control characters that could
@@ -281,11 +302,14 @@ func parseState(state string) (nonce, postLogin string, err error) {
 // isSafeRelativeURL allows only relative paths under /console — prevents
 // open-redirect attacks where state could be crafted to bounce a user
 // to an attacker domain after login.
+//
+// Second-character check parallels redirectIsSafe: reject both
+// '//host' and '/\host' authority-style paths.
 func isSafeRelativeURL(u string) bool {
-	if u == "" {
+	if len(u) == 0 || u[0] != '/' {
 		return false
 	}
-	if !strings.HasPrefix(u, "/") || strings.HasPrefix(u, "//") {
+	if len(u) >= 2 && (u[1] == '/' || u[1] == '\\') {
 		return false
 	}
 	if !strings.HasPrefix(u, "/console") {
