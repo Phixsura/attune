@@ -4,8 +4,11 @@ package attune.v1;
 
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
+import "attune/v1/common.proto";
 
-// EnrichConfigService manages per-tenant enricher prompt + module whitelist (#10).
+// EnrichConfigService manages per-tenant enricher prompt + the
+// metadata-driven Dimension set (#10 → E3 proposal
+// docs/proposals/2026/06/2026-06-07-flat-labels.md).
 service EnrichConfigService {
   // GET /fb/v1/console/enrich-config
   rpc GetEnrichConfig(GetEnrichConfigRequest) returns (GetEnrichConfigResponse) {
@@ -28,17 +31,15 @@ service EnrichConfigService {
 }
 
 message EnrichConfig {
-  // Tenant override; unset means "use default_prompt_template".
+  // Tenant override; unset = use default_prompt_template.
   optional string prompt_template = 1;
-  // Built-in default — always returned so the console can restore it.
+  // Built-in default prompt body, always returned so the console can
+  // offer a "restore default" affordance.
   string default_prompt_template = 2;
-  repeated string modules = 3;
-  // Derived mode: "freeform" when modules is empty, "constrained"
-  // otherwise. Returned as a `string` (not a proto enum) per the #19
-  // "domain value-sets stay string" contract — keeps the protojson wire
-  // form and the generated TS type aligned, avoids the ts-proto
-  // numeric-enum vs JSON-string mismatch.
-  string module_mode = 4;
+  // Per-tenant Dimension set. Migration 014 seeds 3 dims (type +
+  // severity + labels) on every fresh tenant; operators may add /
+  // remove / edit any dim from here.
+  repeated Dimension dimensions = 3;
 }
 
 message GetEnrichConfigRequest {}
@@ -48,10 +49,10 @@ message GetEnrichConfigResponse {
 }
 
 message UpdateEnrichConfigRequest {
-  // Omit or null to restore the built-in default prompt.
+  // Omit / null to restore the built-in default prompt.
   optional string prompt_template = 1;
-  // Empty clears the whitelist (free-form mode).
-  repeated string modules = 2;
+  // Empty list clears all dims (LLM still emits title + rationale).
+  repeated Dimension dimensions = 2;
 }
 
 message UpdateEnrichConfigResponse {

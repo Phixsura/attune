@@ -2,6 +2,7 @@ package larkwebhook
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Phixsura/attune/internal/domain"
@@ -11,9 +12,13 @@ import (
 // follows Lark Open Platform card v2: title bar + content elements + an
 // action row pointing to whatever URL we want PMs/devs to click into
 // (Wave 1 has none yet, so the action is omitted).
+//
+// Post-flat-labels (#10): header color is driven by IsUrgent (red when
+// urgent, blue otherwise) — no more P0/P1/P2/P3 palette. The field row
+// renders the label list instead of kind/severity/priority.
 func buildCard(s domain.Snapshot) map[string]any {
 	header := map[string]any{
-		"template": severityTemplate(s.Severity),
+		"template": urgencyTemplate(s.IsUrgent),
 		"title": map[string]any{
 			"tag":     "plain_text",
 			"content": cardTitle(s),
@@ -39,42 +44,80 @@ func buildCard(s domain.Snapshot) map[string]any {
 func cardTitle(s domain.Snapshot) string {
 	title := s.Title
 	if title == "" {
-		title = "(无 AI 标题)"
+		title = "(no AI title)"
 	}
-	return fmt.Sprintf("[%s] %s", s.Severity, title)
+	if s.IsUrgent {
+		return "[Urgent] " + title
+	}
+	return title
 }
 
-// severityTemplate picks the card header color. Lark accepts a fixed
-// palette ("red" / "orange" / "blue" / "grey" / etc).
-func severityTemplate(sev string) string {
-	switch sev {
-	case "P0":
+// urgencyTemplate picks the card header color. Lark accepts a fixed
+// palette; "red" for urgent items so they pop in the chat, "blue" for
+// the normal pool.
+func urgencyTemplate(urgent bool) string {
+	if urgent {
 		return "red"
-	case "P1":
-		return "orange"
-	case "P2":
-		return "blue"
-	case "P3":
-		return "grey"
-	default:
-		return "blue"
 	}
+	return "blue"
 }
 
 func fieldRow(s domain.Snapshot) map[string]any {
-	fields := []any{
-		shortField("**类型**\n" + s.Kind),
-		shortField("**优先级**\n" + formatPriority(s.Priority)),
+	fields := []any{}
+	// Render each dim's value(s) as one short field. We can't resolve
+	// i18n display here (the snapshot doesn't carry the DimensionSet),
+	// so we show stable Values directly — which is what customers'
+	// downstream consumers see anyway.
+	for _, dim := range stableDimOrder(s.Attrs) {
+		fields = append(fields, shortField(formatAttr(dim, s.Attrs[dim])))
 	}
-	if len(s.Modules) > 0 {
-		fields = append(fields, shortField("**模块**\n"+strings.Join(s.Modules, " / ")))
+	if s.IsUrgent {
+		fields = append(fields, shortField("**Urgency**\nurgent"))
 	}
 	if s.Source != "" {
-		fields = append(fields, shortField("**来源**\n"+domain.SourceDisplayName(s.Source)))
+		fields = append(fields, shortField("**Source**\n"+domain.SourceDisplayName(s.Source)))
+	}
+	if len(fields) == 0 {
+		fields = append(fields, shortField("**Attrs**\n(empty)"))
 	}
 	return map[string]any{
 		"tag":    "div",
 		"fields": fields,
+	}
+}
+
+// stableDimOrder returns the dim names from an attrs map in sorted
+// order so the card layout is deterministic across deliveries.
+func stableDimOrder(attrs map[string]any) []string {
+	if len(attrs) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(attrs))
+	for k := range attrs {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// formatAttr renders one dim's value for the Lark card. Strings come
+// out as `**name**\n<value>`; arrays as `**name**\n<v1> / <v2> / ...`.
+func formatAttr(dim string, v any) string {
+	switch x := v.(type) {
+	case string:
+		return fmt.Sprintf("**%s**\n%s", dim, x)
+	case []string:
+		return fmt.Sprintf("**%s**\n%s", dim, strings.Join(x, " / "))
+	case []any:
+		parts := make([]string, 0, len(x))
+		for _, e := range x {
+			if s, ok := e.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		return fmt.Sprintf("**%s**\n%s", dim, strings.Join(parts, " / "))
+	default:
+		return fmt.Sprintf("**%s**\n%v", dim, v)
 	}
 }
 
@@ -93,7 +136,7 @@ func shortField(text string) map[string]any {
 func quoteBlock(content string) map[string]any {
 	display := content
 	if display == "" {
-		display = "(空)"
+		display = "(empty)"
 	}
 	// Cards have a soft body limit around 30k chars; truncate generously
 	// so we never blow the cap on a runaway paste.
@@ -145,11 +188,4 @@ func shortenUserID(uid string) string {
 		return uid[i+1:]
 	}
 	return uid
-}
-
-func formatPriority(p float64) string {
-	if p == float64(int(p)) {
-		return fmt.Sprintf("%d", int(p))
-	}
-	return fmt.Sprintf("%.1f", p)
 }

@@ -1,15 +1,12 @@
-// Package repo — console-scoped projections of user_feedback.
-// Kept separate from feedback.go to honor the no-grab-bag-files guidance
-// rule and to keep "ingest path SQL" decoupled from
-// "read path SQL" — the latter only the console reads.
-//
-// This file holds the list + detail read path. The analytics/aggregate
-// queries (usage-by-day, kind counts, top modules) live in
-// feedback_console_stats.go to keep both files under the line cap.
+// Package repo — console-scoped projections of user_feedback. Kept
+// separate from feedback.go so the ingest-path SQL stays decoupled
+// from the read-path SQL (only the console reads the latter). The
+// analytics/aggregate queries live in feedback_console_stats.go.
 package feedback
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -19,17 +16,31 @@ import (
 	"github.com/Phixsura/attune/internal/logext"
 )
 
+// AttrFilter is one per-dim filter in a console list query. The Dim
+// is the stable Dimension.Name; the Value is the stable
+// Taxonomy.Value. For multi-kind dims, the SQL is
+// `enriched_attrs @> '{"<dim>": ["<value>"]}'`; for single-kind dims,
+// `enriched_attrs @> '{"<dim>": "<value>"}'`. The caller knows the
+// kind via the tenant's DimensionSet.
+type AttrFilter struct {
+	Dim   string
+	Value string
+	Multi bool
+}
+
 // ConsoleListOpts is the filter set the console UI sends. Each field
 // is optional; empty means no filter. Limit is bounded by the handler.
 type ConsoleListOpts struct {
-	Kind     string // enriched_kind exact match
-	Severity string // enriched_severity exact match
-	Q        string // ILIKE on content + enriched_title
-	Cursor   int64  // last id seen; 0 = first page
-	Limit    int
+	Attrs  []AttrFilter // per-dim filters, AND-composed via JSONB containment
+	Urgent *bool        // nil = no filter; true = is_urgent only; false = not urgent only
+	Q      string       // ILIKE on content + enriched_title
+	Cursor int64        // last id seen; 0 = first page
+	Limit  int
 }
 
 // ConsoleListRow is the projection sent to the console list view.
+// EnrichedAttrs is returned as a raw JSONB byte slice — the handler
+// decodes it into a structpb.Struct for the proto wire shape.
 type ConsoleListRow struct {
 	ID               int64
 	Content          string
@@ -38,17 +49,15 @@ type ConsoleListRow struct {
 	UserID           string
 	PageURL          string
 	EnrichedTitle    string
-	EnrichedKind     string
-	EnrichedSeverity string
-	EnrichedModules  []byte // raw JSONB; DTO unmarshals to []string
-	EnrichedPriority *float64
+	EnrichedAttrs    []byte // raw JSONB
+	IsUrgent         bool
 	EnrichmentStatus string
 	CreatedAt        time.Time
 }
 
 // ListForConsole returns one page newest-first, scoped to tenant. Uses
-// the idx_user_feedback_tenant_created index. Filters compose
-// conjunctively; empty string = no filter.
+// the idx_user_feedback_tenant_created index for the ORDER BY and the
+// jsonb_path_ops GIN index for any AttrFilter containment.
 func (r *FeedbackRepo) ListForConsole(
 	ctx context.Context, tenantID string, opts ConsoleListOpts,
 ) ([]ConsoleListRow, error) {
@@ -64,11 +73,18 @@ func (r *FeedbackRepo) ListForConsole(
 	if opts.Cursor > 0 {
 		where += " AND id < " + addArg(opts.Cursor)
 	}
-	if opts.Kind != "" {
-		where += " AND enriched_kind = " + addArg(opts.Kind)
+	for _, f := range opts.Attrs {
+		if f.Dim == "" || f.Value == "" {
+			continue
+		}
+		clause, err := containmentClause(f)
+		if err != nil {
+			return nil, err
+		}
+		where += " AND enriched_attrs @> " + addArg(clause) + "::jsonb"
 	}
-	if opts.Severity != "" {
-		where += " AND enriched_severity = " + addArg(opts.Severity)
+	if opts.Urgent != nil {
+		where += " AND is_urgent = " + addArg(*opts.Urgent)
 	}
 	if opts.Q != "" {
 		p := addArg("%" + opts.Q + "%")
@@ -77,10 +93,8 @@ func (r *FeedbackRepo) ListForConsole(
 	sql := `
 		SELECT id, content, source, type, user_id, page_url,
 		       COALESCE(enriched_title, ''),
-		       COALESCE(enriched_kind, ''),
-		       COALESCE(enriched_severity, ''),
-		       enriched_modules,
-		       enriched_priority,
+		       COALESCE(enriched_attrs, '{}'::jsonb),
+		       is_urgent,
 		       enrichment_status,
 		       created_at
 		  FROM user_feedback
@@ -100,8 +114,7 @@ func (r *FeedbackRepo) ListForConsole(
 		var row ConsoleListRow
 		if err := rows.Scan(
 			&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.PageURL,
-			&row.EnrichedTitle, &row.EnrichedKind, &row.EnrichedSeverity,
-			&row.EnrichedModules, &row.EnrichedPriority,
+			&row.EnrichedTitle, &row.EnrichedAttrs, &row.IsUrgent,
 			&row.EnrichmentStatus, &row.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan feedback row: %w", err)
@@ -109,6 +122,19 @@ func (r *FeedbackRepo) ListForConsole(
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+// containmentClause builds a JSONB fragment for the `@>` operator from
+// one AttrFilter. We marshal through encoding/json so any Unicode in
+// the dim name / value is escaped correctly — never concatenate raw.
+func containmentClause(f AttrFilter) ([]byte, error) {
+	var payload map[string]any
+	if f.Multi {
+		payload = map[string]any{f.Dim: []string{f.Value}}
+	} else {
+		payload = map[string]any{f.Dim: f.Value}
+	}
+	return json.Marshal(payload)
 }
 
 // ConsoleDetailRow extends ConsoleListRow with full content (source_meta,
@@ -119,7 +145,7 @@ type ConsoleDetailRow struct {
 	Attachments       []byte // raw JSONB
 	EnrichmentError   string
 	EnrichedAt        *time.Time
-	EnrichedRationale string // LLM's short "why this kind/severity"; empty when not classified
+	EnrichedRationale string // LLM's short "why these values"; empty when not classified
 }
 
 // ErrFeedbackNotFound returned by GetForConsole when id doesn't match
@@ -134,9 +160,8 @@ func (r *FeedbackRepo) GetForConsole(
 		ctx, `
 		SELECT id, content, source, type, user_id, page_url,
 		       COALESCE(enriched_title, ''),
-		       COALESCE(enriched_kind, ''),
-		       COALESCE(enriched_severity, ''),
-		       enriched_modules, enriched_priority,
+		       COALESCE(enriched_attrs, '{}'::jsonb),
+		       is_urgent,
 		       enrichment_status, created_at,
 		       source_meta, attachments,
 		       COALESCE(enrichment_error, ''),
@@ -147,8 +172,7 @@ func (r *FeedbackRepo) GetForConsole(
 		id, tenantID,
 	).Scan(
 		&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.PageURL,
-		&row.EnrichedTitle, &row.EnrichedKind, &row.EnrichedSeverity,
-		&row.EnrichedModules, &row.EnrichedPriority,
+		&row.EnrichedTitle, &row.EnrichedAttrs, &row.IsUrgent,
 		&row.EnrichmentStatus, &row.CreatedAt,
 		&row.SourceMeta, &row.Attachments,
 		&row.EnrichmentError, &row.EnrichedAt,

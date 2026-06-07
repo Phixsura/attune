@@ -27,6 +27,7 @@ func runEval(args []string) error {
 	sample := fs.Int("sample", 50, "sample size (consistency / export-for-human)")
 	output := fs.String("output", "", "write report or CSV to file (default stdout)")
 	input := fs.String("input", "", "labeled CSV path (score-human mode)")
+	tenantID := fs.String("tenant", "", "tenant id (required for export-for-human / score-human; dim set comes from this tenant)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -56,9 +57,15 @@ func runEval(args []string) error {
 	case "consistency":
 		return runEvalConsistency(ctx, evaluator, *since, *sample, *output)
 	case "export-for-human":
-		return runEvalExport(ctx, evaluator, *since, *sample, *output)
+		if *tenantID == "" {
+			return fmt.Errorf("--tenant is required for export-for-human (dim set is per-tenant)")
+		}
+		return runEvalExport(ctx, evaluator, *tenantID, *since, *sample, *output)
 	case "score-human":
-		return runEvalScore(evaluator, *input, *output)
+		if *tenantID == "" {
+			return fmt.Errorf("--tenant is required for score-human (dim set is per-tenant)")
+		}
+		return runEvalScore(evaluator, *tenantID, *input, *output)
 	default:
 		return fmt.Errorf("unknown --mode %q", *mode)
 	}
@@ -83,7 +90,7 @@ func runEvalConsistency(
 func runEvalExport(
 	ctx context.Context,
 	ev *eval.Evaluator,
-	sinceStr string, sample int, output string,
+	tenantID, sinceStr string, sample int, output string,
 ) error {
 	since, err := parseSince(sinceStr)
 	if err != nil {
@@ -94,7 +101,7 @@ func runEvalExport(
 		return err
 	}
 	defer closer()
-	n, err := ev.ExportForHuman(ctx, since, sample, w)
+	n, err := ev.ExportForHuman(ctx, tenantID, since, sample, w)
 	if err != nil {
 		return err
 	}
@@ -104,7 +111,7 @@ func runEvalExport(
 	return nil
 }
 
-func runEvalScore(ev *eval.Evaluator, inputPath, output string) error {
+func runEvalScore(ev *eval.Evaluator, tenantID, inputPath, output string) error {
 	if inputPath == "" {
 		return fmt.Errorf("--input is required for score-human")
 	}
@@ -113,7 +120,7 @@ func runEvalScore(ev *eval.Evaluator, inputPath, output string) error {
 		return fmt.Errorf("open input: %w", err)
 	}
 	defer f.Close()
-	rep, err := ev.ScoreHuman(context.Background(), f)
+	rep, err := ev.ScoreHuman(context.Background(), tenantID, f)
 	if err != nil {
 		return err
 	}

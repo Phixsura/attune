@@ -14,29 +14,30 @@ import (
 // Beyond this size the ingest path rejects with 400.
 const MaxContentLen = 5000
 
-// Source / Kind / Severity enums. Kept as plain strings so they round-
-// trip cleanly through JSON and SQL without enum machinery.
+// Source enums — kept as plain strings so they round-trip cleanly
+// through JSON and SQL without enum machinery.
 //
 // Sprint 1.2 (Y1 工程, 2026-05-17) added 4 飞书-native source enums so
 // customers can pipe 飞书审批 / 多维表格 / 服务台 / 表单评论 directly
 // into attune via 飞书自动化 → POST /v1/feedback/ingest (no extra
 // attune-side endpoint needed). See README.md "飞书原生 source 接入"
 // for per-source configuration snippets.
-var (
-	ValidSources = map[string]bool{
-		"api":           true, // generic API client (default for /v1/feedback/ingest)
-		"lark-group":    true, // 飞书群消息 webhook (handled by /v1/lark/event)
-		"lark-bitable":  true, // Sprint 1.2: 飞书多维表格记录 (自动化 → POST ingest)
-		"lark-approval": true, // Sprint 1.2: 飞书审批实例 (自动化 → POST ingest)
-		"lark-helpdesk": true, // Sprint 1.2: 飞书服务台工单 (event subscription → POST ingest)
-		"lark-form":     true, // Sprint 1.2: 飞书表单 / 文档评论 (自动化 → POST ingest)
-		"email":         true, // mailbox poller (Sprint 1.3+)
-		"web":           true, // in-app JS feedback widget
-		"other":         true, // catch-all for misc integrations
-	}
-	ValidKinds      = map[string]bool{"bug": true, "feature": true, "ops": true, "question": true, "other": true}
-	ValidSeverities = map[string]bool{"P0": true, "P1": true, "P2": true, "P3": true}
-)
+//
+// (Pre-flat-labels: ValidKinds and ValidSeverities lived here too. The
+// flat-labels refactor — proposal 2026-06-07-flat-labels.md, #10 — moved
+// classification to a per-tenant label taxonomy, so the axes no longer
+// have a global vocabulary to validate against.)
+var ValidSources = map[string]bool{
+	"api":           true, // generic API client (default for /v1/feedback/ingest)
+	"lark-group":    true, // 飞书群消息 webhook (handled by /v1/lark/event)
+	"lark-bitable":  true, // Sprint 1.2: 飞书多维表格记录 (自动化 → POST ingest)
+	"lark-approval": true, // Sprint 1.2: 飞书审批实例 (自动化 → POST ingest)
+	"lark-helpdesk": true, // Sprint 1.2: 飞书服务台工单 (event subscription → POST ingest)
+	"lark-form":     true, // Sprint 1.2: 飞书表单 / 文档评论 (自动化 → POST ingest)
+	"email":         true, // mailbox poller (Sprint 1.3+)
+	"web":           true, // in-app JS feedback widget
+	"other":         true, // catch-all for misc integrations
+}
 
 // SourceDisplayName returns the human-facing label for a source enum.
 // Used by dispatch envelopes (github-issue body, lark-card, raw-webhook
@@ -68,10 +69,6 @@ func SourceDisplayName(source string) string {
 	}
 }
 
-// SeverityWeight maps the P0..P3 codes to the numeric priority column.
-// Higher = more urgent; used for ORDER BY in the future ranking views.
-var SeverityWeight = map[string]float64{"P0": 4, "P1": 3, "P2": 2, "P3": 1}
-
 // IngestInput is the canonical shape every ingest path normalizes to
 // before hitting the database. Handlers fill it, service.Ingestor
 // validates and persists.
@@ -101,13 +98,20 @@ func (in IngestInput) Validate() error {
 // Enriched is the AI-derived classification for one feedback row.
 // Built by service.Enricher from the LLM response, then persisted via
 // repo.MarkDone and fanned out via notify.
+//
+// Metadata-driven Dimensions model (proposal
+// 2026-06-07-flat-labels.md, E3): the LLM emits one entry per
+// configured Dimension keyed by Dimension.Name. Single-kind dims
+// store `string`; multi-kind dims store `[]string`. `IsUrgent` is
+// derived by the enricher (NOT the LLM): true iff any dim's
+// configured UrgentSet intersects the value(s) the LLM picked. The
+// boolean is persisted at write time so historical urgent/non-urgent
+// status is a snapshot of the operator's policy at classification.
 type Enriched struct {
-	Title     string   `json:"title"`
-	Kind      string   `json:"kind"`
-	Modules   []string `json:"modules"`
-	Severity  string   `json:"severity"`
-	Rationale string   `json:"rationale"`
-	Priority  float64  `json:"-"` // derived from Severity, not from LLM
+	Title     string         `json:"title"`
+	Attrs     map[string]any `json:"attrs"`      // map<dim.Name, string|[]string>
+	IsUrgent  bool           `json:"is_urgent"`  // derived; never set by the LLM
+	Rationale string         `json:"rationale"`
 }
 
 // Snapshot is the wire-format handed from service.Enricher to a
@@ -120,11 +124,9 @@ type Snapshot struct {
 	Source    string
 	UserID    string
 	Title     string
-	Kind      string
-	Modules   []string
-	Severity  string
-	Priority  float64
-	Rationale string // LLM's short explanation; surfaced in outbox envelopes
+	Attrs     map[string]any // map<dim.Name, string|[]string>
+	IsUrgent  bool           // routes to the radar channel when true
+	Rationale string         // LLM's short explanation; surfaced in outbox envelopes
 	// SubmittedAt is the user's original submission time
 	// (user_feedback.created_at), independent of when the LLM finished
 	// classifying. Surfaced in outbound envelopes so consumers doing
@@ -132,10 +134,4 @@ type Snapshot struct {
 	// not the enrichment-induced delay.
 	SubmittedAt time.Time
 	EnrichedAt  time.Time
-}
-
-// IsHighSeverity reports whether this snapshot should also be routed
-// to the 研发雷达 channel (P0 / P1 only).
-func (s Snapshot) IsHighSeverity() bool {
-	return s.Severity == "P0" || s.Severity == "P1"
 }

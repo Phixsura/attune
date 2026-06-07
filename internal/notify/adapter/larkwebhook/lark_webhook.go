@@ -85,8 +85,8 @@ func (l *LarkWebhook) PushRadar(ctx context.Context, s domain.Snapshot) error {
 // Lark returns HTTP 200 even on logical failure.
 func (l *LarkWebhook) send(ctx context.Context, dest, url, secret string, s domain.Snapshot) error {
 	const where = "notify.LarkWebhook.send"
-	logext.Infof(ctx, "[%s] start,dest:%s,feedback_id:%d,severity:%s,tenant_id:%s",
-		where, dest, s.ID, s.Severity, s.TenantID)
+	logext.Infof(ctx, "[%s] start,dest:%s,feedback_id:%d,urgent:%t,tenant_id:%s",
+		where, dest, s.ID, s.IsUrgent, s.TenantID)
 	build := func(ctx context.Context) (*http.Request, error) {
 		body, err := l.buildBody(secret, s)
 		if err != nil {
@@ -159,7 +159,7 @@ func checkLarkResponse(dest string, s domain.Snapshot) notify.ResponseChecker {
 				notify.ErrTerminal, status, out.Code, out.Msg, truncate(string(body), 200))
 		}
 		slog.InfoContext(ctx, "lark webhook pushed",
-			"dest", dest, "feedback_id", s.ID, "severity", s.Severity)
+			"dest", dest, "feedback_id", s.ID, "urgent", s.IsUrgent)
 		return nil
 	}
 }

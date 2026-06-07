@@ -126,7 +126,7 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.EnrichInput) error {
 	start := time.Now()
 	cfg := classifyConfigFromRow(row)
-	mode := moduleMode(cfg)
+	mode := dimsMode(cfg)
 	enriched, err := e.classify(ctx, id, row.Content, cfg)
 	if err != nil {
 		metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, classifyErrResult(err)).
@@ -145,8 +145,8 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 		"inbound_trace_id", trace.FromContext(ctx),
 		"tenant_id", row.TenantID,
 		"feedback_id", id,
-		"kind", enriched.Kind,
-		"severity", enriched.Severity,
+		"attrs", enriched.Attrs,
+		"is_urgent", enriched.IsUrgent,
 		"title", enriched.Title)
 	if n := e.notifier.Load(); n != nil {
 		go e.fanOut(snapshot, *n)
@@ -155,8 +155,14 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 }
 
 // Classify is the public, side-effect-free LLM classification entry
-// point. eval CLI re-runs historical content through this without
+// point. `attune eval` re-runs historical content through this without
 // touching the DB. The internal classify wraps it with MarkFailed.
+//
+// IsUrgent is derived deterministically from the configured Dimension
+// set: for every dim, if any value the LLM picked falls into that
+// dim's UrgentSet, the row is urgent. The LLM never decides urgency
+// — that keeps routing under operator control and deterministic
+// across retries.
 func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyConfig) (domain.Enriched, error) {
 	const where = "service.Enricher.Classify"
 	prompt := renderPrompt(cfg, content)
@@ -167,8 +173,8 @@ func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyCon
 		MaxTokens:   512,
 		UserID:      enrichmentSystemUser,
 	}
-	if cfg.IsConstrained() {
-		req.Schema = buildEnrichSchema(cfg.Modules)
+	if cfg.HasConstrained() {
+		req.Schema = buildEnrichSchema(cfg.Dimensions)
 	}
 	resp, err := e.llm.Complete(ctx, req)
 	if err != nil {
@@ -186,8 +192,8 @@ func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyCon
 	if tenant == "" {
 		tenant = "unknown"
 	}
-	parsed.Modules, _ = applyModuleGate(ctx, tenant, parsed.Modules, cfg.Modules)
-	parsed.Priority = domain.SeverityWeight[parsed.Severity]
+	parsed.Attrs = applyAttrsGate(ctx, tenant, parsed.Attrs, cfg.Dimensions)
+	parsed.IsUrgent = domain.ComputeIsUrgent(parsed.Attrs, cfg.Dimensions)
 	return parsed, nil
 }
 
@@ -206,24 +212,33 @@ func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {
 	return ClassifyConfig{
 		TenantID:       row.TenantID,
 		PromptTemplate: row.PromptTemplate,
-		Modules:        row.Modules,
+		Dimensions:     row.Dimensions,
 	}
 }
 
-// applyModuleGate runs gate (2) and records observability for dropped /
-// suggested modules. Returns the canonical kept list.
-func applyModuleGate(ctx context.Context, tenantID string, produced, allowed []string) (kept, dropped []string) {
-	kept, dropped = filterModules(produced, allowed)
+// applyAttrsGate runs gate (2) per dim and records observability for
+// off-list values. Returns the canonical kept attrs.
+func applyAttrsGate(ctx context.Context, tenantID string, produced map[string]any, dims domain.DimensionSet) map[string]any {
+	kept, dropped, suggested := domain.FilterAttrs(produced, dims)
 	if len(dropped) == 0 {
-		return kept, dropped
+		return kept
 	}
-	for range dropped {
-		metrics.EnrichModulesDroppedTotal.WithLabelValues(tenantID).Inc()
+	for dim, n := range dropped {
+		for i := 0; i < n; i++ {
+			metrics.EnrichAttrsDroppedTotal.WithLabelValues(tenantID, dim).Inc()
+		}
 	}
-	metrics.EnrichSuggestedModulesTotal.WithLabelValues(tenantID).Inc()
-	logext.Infof(ctx, "[service.Enricher.applyModuleGate] suggested_module,tenant_id:%s,dropped:%v",
+	seen := make(map[string]bool, len(suggested))
+	for _, dim := range suggested {
+		if seen[dim] {
+			continue
+		}
+		seen[dim] = true
+		metrics.EnrichSuggestedAttrsTotal.WithLabelValues(tenantID, dim).Inc()
+	}
+	logext.Infof(ctx, "[service.Enricher.applyAttrsGate] suggested,tenant_id:%s,dropped:%v",
 		tenantID, dropped)
-	return kept, dropped
+	return kept
 }
 
 // fanOut pushes a freshly enriched snapshot to the snapshot of `notifier`
@@ -237,7 +252,7 @@ func (e *Enricher) fanOut(s domain.Snapshot, n notify.Notifier) {
 	if err := n.PushPool(ctx, s); err != nil {
 		slog.WarnContext(ctx, "notify pool failed", "id", s.ID, "err", err)
 	}
-	if s.IsHighSeverity() {
+	if s.IsUrgent {
 		if err := n.PushRadar(ctx, s); err != nil {
 			slog.WarnContext(ctx, "notify radar failed", "id", s.ID, "err", err)
 		}

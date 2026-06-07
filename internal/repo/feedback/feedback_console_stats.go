@@ -1,8 +1,8 @@
 // Package repo — console analytics/aggregate queries over user_feedback.
-// Split from feedback_console.go to honor the no-grab-bag-files guidance
-// . These power the dashboard widgets + weekly digest
-// (usage bars, kind donut, top-modules line); the list/detail read path
-// stays in feedback_console.go.
+// Split from feedback_console.go so neither file becomes a grab-bag.
+// These power the dashboard widgets + weekly digest (usage bars,
+// top-values-per-dim, urgent ratio); the list/detail read path stays
+// in feedback_console.go.
 package feedback
 
 import (
@@ -12,7 +12,7 @@ import (
 )
 
 // UsageBucket is one day's ingest count, returned by UsageByDay for the
-// /usage endpoint. Wave 3+ billing pivots these into invoice line items.
+// /usage endpoint.
 type UsageBucket struct {
 	Bucket time.Time
 	Value  int64
@@ -21,9 +21,7 @@ type UsageBucket struct {
 // UsageByDay returns daily ingest counts for tenant in [from, to). Zero-row
 // days are NOT in the result — the SPA fills gaps as empty bars.
 //
-// Timezone: bucket boundaries are UTC days. Asia/Shanghai tenants may see
-// up to 8h of "first-day" rows attributed to the prior day. Acceptable
-// until billing-grade accuracy lands at Wave 3.
+// Timezone: bucket boundaries are UTC days.
 func (r *FeedbackRepo) UsageByDay(
 	ctx context.Context, tenantID string, from, to time.Time,
 ) ([]UsageBucket, error) {
@@ -53,77 +51,82 @@ func (r *FeedbackRepo) UsageByDay(
 	return out, rows.Err()
 }
 
-// KindCounts returns the count of feedback rows per enriched_kind within
-// the [from, to) window, scoped to tenant. Unenriched rows
-// (enriched_kind IS NULL) bucket under the key "unknown" so the donut
-// never has a silent gap.
-func (r *FeedbackRepo) KindCounts(
-	ctx context.Context, tenantID string, from, to time.Time,
-) (map[string]int64, error) {
-	rows, err := r.pool.Query(
-		ctx, `
-		SELECT COALESCE(enriched_kind, 'unknown') AS kind, COUNT(*)
+// ValueCount is one row of TopValuesByDim.
+type ValueCount struct {
+	Value string
+	Count int64
+}
+
+// TopValuesByDim returns the top-N stable Value strings emitted under
+// `dim` within [from, to), DESC by occurrence count. Powers the weekly
+// digest "top values" line and the feedback dashboard distribution
+// charts. Works uniformly for single-kind (`-> 'dim'`) and multi-kind
+// (`jsonb_path_query`) dims: callers indicate which via `multi`.
+func (r *FeedbackRepo) TopValuesByDim(
+	ctx context.Context, tenantID, dim string, multi bool, from, to time.Time, n int,
+) ([]ValueCount, error) {
+	if n <= 0 {
+		n = 5
+	}
+	var sql string
+	if multi {
+		sql = `
+		SELECT v::text AS val, COUNT(*) AS c
+		  FROM user_feedback,
+		       jsonb_array_elements_text(COALESCE(enriched_attrs -> $4, '[]'::jsonb)) AS v
+		 WHERE tenant_id = $1
+		   AND created_at >= $2
+		   AND created_at <  $3
+		 GROUP BY val
+		 ORDER BY c DESC
+		 LIMIT $5`
+	} else {
+		sql = `
+		SELECT (enriched_attrs ->> $4) AS val, COUNT(*) AS c
 		  FROM user_feedback
 		 WHERE tenant_id = $1
 		   AND created_at >= $2
-		   AND created_at < $3
-		 GROUP BY kind`,
-		tenantID, from, to,
-	)
+		   AND created_at <  $3
+		   AND enriched_attrs ? $4
+		 GROUP BY val
+		 ORDER BY c DESC
+		 LIMIT $5`
+	}
+	rows, err := r.pool.Query(ctx, sql, tenantID, from, to, dim, n)
 	if err != nil {
-		return nil, fmt.Errorf("kind counts: %w", err)
+		return nil, fmt.Errorf("top values for dim %q: %w", dim, err)
 	}
 	defer rows.Close()
-	out := make(map[string]int64, 6)
+	var out []ValueCount
 	for rows.Next() {
-		var k string
-		var n int64
-		if err := rows.Scan(&k, &n); err != nil {
-			return nil, fmt.Errorf("scan kind count: %w", err)
+		var vc ValueCount
+		if err := rows.Scan(&vc.Value, &vc.Count); err != nil {
+			return nil, fmt.Errorf("scan top value: %w", err)
 		}
-		out[k] = n
+		out = append(out, vc)
 	}
 	return out, rows.Err()
 }
 
-// TopModulesByTenant returns the top-N module strings (flattened from
-// enriched_modules JSONB array) by occurrence count, within [from, to).
-// Powers the weekly digest "top modules" line.
-//
-// Uses jsonb_array_elements_text to unnest the JSONB array — cheap on
-// Y1 data sizes; switch to a materialized view at Wave 3 if it becomes
-// a hot path.
-func (r *FeedbackRepo) TopModulesByTenant(
-	ctx context.Context, tenantID string, from, to time.Time, n int,
-) ([]string, error) {
-	if n <= 0 {
-		n = 3
-	}
-	rows, err := r.pool.Query(
+// UrgentCount returns the count of rows with is_urgent = true within
+// [from, to). Powers the weekly digest "urgent count" headline and
+// the feedback dashboard urgent ratio.
+func (r *FeedbackRepo) UrgentCount(
+	ctx context.Context, tenantID string, from, to time.Time,
+) (int64, error) {
+	var n int64
+	err := r.pool.QueryRow(
 		ctx, `
-		SELECT module, COUNT(*) AS c
-		  FROM user_feedback,
-		       LATERAL jsonb_array_elements_text(COALESCE(enriched_modules, '[]'::jsonb)) AS module
+		SELECT COUNT(*)
+		  FROM user_feedback
 		 WHERE tenant_id = $1
 		   AND created_at >= $2
-		   AND created_at <  $3
-		 GROUP BY module
-		 ORDER BY c DESC
-		 LIMIT $4`,
-		tenantID, from, to, n,
-	)
+		   AND created_at < $3
+		   AND is_urgent = TRUE`,
+		tenantID, from, to,
+	).Scan(&n)
 	if err != nil {
-		return nil, fmt.Errorf("top modules: %w", err)
+		return 0, fmt.Errorf("urgent count: %w", err)
 	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var m string
-		var c int64
-		if err := rows.Scan(&m, &c); err != nil {
-			return nil, fmt.Errorf("scan top module: %w", err)
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
+	return n, nil
 }

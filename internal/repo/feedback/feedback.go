@@ -1,4 +1,4 @@
-// Package repo is the data-access layer (律 8). It owns every SQL
+// Package repo is the data-access layer. It owns every SQL
 // statement that touches user_feedback and exposes only typed methods
 // to service/. Handlers and notifiers MUST NOT import this package —
 // they go through service.
@@ -84,9 +84,10 @@ func (r *FeedbackRepo) TryClaim(ctx context.Context, id int64) (bool, error) {
 // EnrichInput is the row data the enricher needs to call the LLM.
 // Returned by LoadForEnrich after a successful TryClaim.
 //
-// PromptTemplate / Modules come from the per-tenant override on the
-// tenants row (#10). Both may be nil; the service layer falls back to
-// the default prompt and free-form modules respectively.
+// PromptTemplate and Dimensions come from the per-tenant override on
+// the tenants row (#10 → E3 proposal). PromptTemplate may be nil
+// (fall back to the built-in default). Dimensions may be empty (the
+// LLM still emits title + rationale but no per-dim values).
 //
 // CreatedAt is the user's actual submission time, surfaced through
 // Snapshot.SubmittedAt into outbound envelopes (#82) so consumers see
@@ -98,7 +99,7 @@ type EnrichInput struct {
 	TenantID       string
 	CreatedAt      time.Time
 	PromptTemplate *string
-	Modules        []string
+	Dimensions     domain.DimensionSet
 }
 
 // LoadForEnrich returns the columns the LLM prompt and the downstream
@@ -108,18 +109,26 @@ type EnrichInput struct {
 // query — saves a round-trip and means the enricher never needs to
 // import the tenant repo.
 func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInput, error) {
-	var in EnrichInput
+	var (
+		in      EnrichInput
+		dimsRaw []byte
+	)
 	err := r.pool.QueryRow(
 		ctx,
 		`SELECT uf.content, uf.source, uf.user_id, uf.tenant_id, uf.created_at,
-		        t.enrich_prompt_template, t.enrich_modules
+		        t.enrich_prompt_template, t.enrich_dimensions
 		   FROM user_feedback uf
 		   LEFT JOIN tenants t ON t.id = uf.tenant_id
 		  WHERE uf.id = $1`, id,
 	).Scan(&in.Content, &in.Source, &in.UserID, &in.TenantID, &in.CreatedAt,
-		&in.PromptTemplate, &in.Modules)
+		&in.PromptTemplate, &dimsRaw)
 	if err != nil {
 		return nil, fmt.Errorf("load feedback %d: %w", id, err)
+	}
+	if len(dimsRaw) > 0 {
+		if err := json.Unmarshal(dimsRaw, &in.Dimensions); err != nil {
+			return nil, fmt.Errorf("decode enrich dimensions for %d: %w", id, err)
+		}
 	}
 	return &in, nil
 }
@@ -129,25 +138,25 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 const markDoneSQL = `
 	UPDATE user_feedback
 	SET enriched_title = $1,
-	    enriched_kind = $2,
-	    enriched_modules = $3,
-	    enriched_severity = $4,
-	    enriched_priority = $5,
-	    enriched_rationale = $6,
+	    enriched_attrs = $2::jsonb,
+	    is_urgent = $3,
+	    enriched_rationale = $4,
 	    enrichment_status = 'done',
 	    enrichment_error = NULL,
 	    enriched_at = NOW()
-	WHERE id = $7`
+	WHERE id = $5`
 
 // MarkDone persists the LLM classification and flips the row to 'done'.
-// Caller computed Priority from Severity already. Single-statement; no
-// outer tx needed. Use MarkDoneTx when this UPDATE must be atomic with
-// other writes (e.g. outbox insertion).
+// Single-statement; no outer tx needed. Use MarkDoneTx when this
+// UPDATE must be atomic with other writes (e.g. outbox insertion).
 func (r *FeedbackRepo) MarkDone(ctx context.Context, id int64, e domain.Enriched) error {
-	modulesJSON, _ := json.Marshal(e.Modules)
+	attrsJSON, err := marshalAttrs(e.Attrs)
+	if err != nil {
+		return err
+	}
 	if _, err := r.pool.Exec(
 		ctx, markDoneSQL,
-		e.Title, e.Kind, modulesJSON, e.Severity, e.Priority, e.Rationale, id,
+		e.Title, attrsJSON, e.IsUrgent, e.Rationale, id,
 	); err != nil {
 		return fmt.Errorf("update enrichment row %d: %w", id, err)
 	}
@@ -156,17 +165,34 @@ func (r *FeedbackRepo) MarkDone(ctx context.Context, id int64, e domain.Enriched
 
 // MarkDoneTx is MarkDone inside a caller-supplied transaction. The
 // enricher uses this to flip user_feedback + INSERT outbox in one
-// atomic step (律 7 — model is "feedback is enriched IFF outbox is
-// queued", anything else is undefined state).
+// atomic step (model is "feedback is enriched IFF outbox is queued",
+// anything else is undefined state).
 func (r *FeedbackRepo) MarkDoneTx(ctx context.Context, tx pgx.Tx, id int64, e domain.Enriched) error {
-	modulesJSON, _ := json.Marshal(e.Modules)
+	attrsJSON, err := marshalAttrs(e.Attrs)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(
 		ctx, markDoneSQL,
-		e.Title, e.Kind, modulesJSON, e.Severity, e.Priority, e.Rationale, id,
+		e.Title, attrsJSON, e.IsUrgent, e.Rationale, id,
 	); err != nil {
 		return fmt.Errorf("update enrichment row %d (tx): %w", id, err)
 	}
 	return nil
+}
+
+// marshalAttrs canonicalizes a nil Attrs map to an empty JSONB object
+// so the DB column is never NULL nor "null" — keeps GIN containment
+// queries and scan paths uniform.
+func marshalAttrs(a map[string]any) ([]byte, error) {
+	if a == nil {
+		return []byte("{}"), nil
+	}
+	b, err := json.Marshal(a)
+	if err != nil {
+		return nil, fmt.Errorf("marshal enriched_attrs: %w", err)
+	}
+	return b, nil
 }
 
 // BeginTx opens a transaction on the underlying pool. Exposed here
@@ -214,29 +240,24 @@ func (r *FeedbackRepo) ListPending(ctx context.Context, n int) ([]int64, error) 
 }
 
 // SampleRow is one historical enriched row, returned by SampleEnriched
-// for the eval CLI. modules is the JSONB array materialized into Go.
+// for the `attune eval` subcommand.
 type SampleRow struct {
 	ID       int64
 	TenantID string
 	Content  string
-	Kind     string
-	Severity string
-	Modules  []string
-	Priority float64
+	Attrs    map[string]any // decoded from enriched_attrs JSONB
+	IsUrgent bool
 }
 
 // SampleEnriched returns up to n randomly-sampled rows that completed
 // enrichment after `since`. Used by `attune eval` to feed re-run /
 // human-label workflows. Order is random per call (ORDER BY RANDOM())
-// — fine for a 50-row sample; Wave 3 may switch to TABLESAMPLE if
-// the table grows past a few million rows.
+// — fine for a 50-row sample.
 func (r *FeedbackRepo) SampleEnriched(ctx context.Context, since time.Time, n int) ([]SampleRow, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, content,
-		       COALESCE(enriched_kind,''),
-		       COALESCE(enriched_severity,''),
-		       COALESCE(enriched_modules, '[]'::jsonb),
-		       COALESCE(enriched_priority, 0)
+		       COALESCE(enriched_attrs, '{}'::jsonb),
+		       is_urgent
 		  FROM user_feedback
 		 WHERE enrichment_status = 'done'
 		   AND enriched_at >= $1
@@ -248,16 +269,20 @@ func (r *FeedbackRepo) SampleEnriched(ctx context.Context, since time.Time, n in
 	defer rows.Close()
 	var out []SampleRow
 	for rows.Next() {
-		var s SampleRow
-		var modulesRaw []byte
+		var (
+			s        SampleRow
+			attrsRaw []byte
+		)
 		if err := rows.Scan(
 			&s.ID, &s.TenantID, &s.Content,
-			&s.Kind, &s.Severity, &modulesRaw, &s.Priority,
+			&attrsRaw, &s.IsUrgent,
 		); err != nil {
 			return nil, fmt.Errorf("scan sample row: %w", err)
 		}
-		if len(modulesRaw) > 0 {
-			_ = json.Unmarshal(modulesRaw, &s.Modules)
+		if len(attrsRaw) > 0 {
+			if err := json.Unmarshal(attrsRaw, &s.Attrs); err != nil {
+				return nil, fmt.Errorf("decode sample attrs: %w", err)
+			}
 		}
 		out = append(out, s)
 	}

@@ -23,11 +23,9 @@ import (
 func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.EnrichInput, reason string) error {
 	enriched := domain.Enriched{
 		Title:     "[triage-ignored]",
-		Kind:      "other",
-		Severity:  "P3",
-		Modules:   []string{},
+		Attrs:     map[string]any{},
+		IsUrgent:  false,
 		Rationale: "triage v0: " + reason,
-		Priority:  domain.SeverityWeight["P3"],
 	}
 	if err := e.repo.MarkDone(ctx, id, enriched); err != nil {
 		return fmt.Errorf("mark ignored row done: %w", err)
@@ -45,7 +43,6 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.E
 // LLM. Same downstream behavior as runFullEnrich (persist + fan out),
 // just without the LLM call.
 func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedback.EnrichInput, enriched domain.Enriched) error {
-	enriched.Priority = domain.SeverityWeight[enriched.Severity]
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
 	if err := e.persistEnriched(ctx, snapshot, enriched); err != nil {
 		return err
@@ -54,8 +51,8 @@ func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedbac
 		"inbound_trace_id", trace.FromContext(ctx),
 		"tenant_id", row.TenantID,
 		"feedback_id", id,
-		"kind", enriched.Kind,
-		"severity", enriched.Severity)
+		"attrs", enriched.Attrs,
+		"is_urgent", enriched.IsUrgent)
 	if n := e.notifier.Load(); n != nil {
 		go e.fanOut(snapshot, *n)
 	}

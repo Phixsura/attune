@@ -5,25 +5,26 @@
 // source: attune/v1/enrich_config.proto
 
 /* eslint-disable */
+import { type Dimension } from "./common";
 
 export const protobufPackage = "attune.v1";
 
 export interface EnrichConfig {
-  /** Tenant override; unset means "use default_prompt_template". */
+  /** Tenant override; unset = use default_prompt_template. */
   promptTemplate?:
     | string
     | undefined;
-  /** Built-in default — always returned so the console can restore it. */
-  defaultPromptTemplate: string;
-  modules: string[];
   /**
-   * Derived mode: "freeform" when modules is empty, "constrained"
-   * otherwise. Returned as a `string` (not a proto enum) per the #19
-   * "domain value-sets stay string" contract — keeps the protojson wire
-   * form and the generated TS type aligned, avoids the ts-proto
-   * numeric-enum vs JSON-string mismatch.
+   * Built-in default prompt body, always returned so the console can
+   * offer a "restore default" affordance.
    */
-  moduleMode: string;
+  defaultPromptTemplate: string;
+  /**
+   * Per-tenant Dimension set. Migration 014 seeds 3 dims (type +
+   * severity + labels) on every fresh tenant; operators may add /
+   * remove / edit any dim from here.
+   */
+  dimensions: Dimension[];
 }
 
 export interface GetEnrichConfigRequest {
@@ -34,12 +35,12 @@ export interface GetEnrichConfigResponse {
 }
 
 export interface UpdateEnrichConfigRequest {
-  /** Omit or null to restore the built-in default prompt. */
+  /** Omit / null to restore the built-in default prompt. */
   promptTemplate?:
     | string
     | undefined;
-  /** Empty clears the whitelist (free-form mode). */
-  modules: string[];
+  /** Empty list clears all dims (LLM still emits title + rationale). */
+  dimensions: Dimension[];
 }
 
 export interface UpdateEnrichConfigResponse {
@@ -54,7 +55,11 @@ export interface PreviewEnrichPromptResponse {
   renderedPrompt: string;
 }
 
-/** EnrichConfigService manages per-tenant enricher prompt + module whitelist (#10). */
+/**
+ * EnrichConfigService manages per-tenant enricher prompt + the
+ * metadata-driven Dimension set (#10 → E3 proposal
+ * docs/proposals/2026/06/2026-06-07-flat-labels.md).
+ */
 export interface EnrichConfigService {
   /** GET /fb/v1/console/enrich-config */
   GetEnrichConfig(request: GetEnrichConfigRequest): Promise<GetEnrichConfigResponse>;

@@ -114,7 +114,7 @@ func selectOutboxTargets(targets []notifytarget.NotifyTarget, s domain.Snapshot)
 		case notifytarget.AudiencePool:
 			out = append(out, t)
 		case notifytarget.AudienceRadar:
-			if s.IsHighSeverity() {
+			if s.IsUrgent {
 				out = append(out, t)
 			}
 		}
@@ -146,13 +146,11 @@ func extractTraceID(ctx context.Context) string {
 // preserves struct field order — change with caution.
 func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 	type enrichedOut struct {
-		Title      string   `json:"title"`
-		Kind       string   `json:"kind"`
-		Severity   string   `json:"severity"`
-		Modules    []string `json:"modules"`
-		Priority   float64  `json:"priority"`
-		Rationale  string   `json:"rationale"`
-		EnrichedAt string   `json:"enriched_at"`
+		Title      string         `json:"title"`
+		Attrs      map[string]any `json:"attrs"`
+		IsUrgent   bool           `json:"is_urgent"`
+		Rationale  string         `json:"rationale"`
+		EnrichedAt string         `json:"enriched_at"`
 	}
 	type feedbackOut struct {
 		ID          int64       `json:"id"`
@@ -172,8 +170,12 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 	}
 	at := s.EnrichedAt.UTC().Format(time.RFC3339)
 	submittedAt := s.SubmittedAt.UTC().Format(time.RFC3339)
+	attrs := s.Attrs
+	if attrs == nil {
+		attrs = map[string]any{}
+	}
 	env := envelopeOut{
-		Version:     "1",
+		Version:     "2", // E3 metadata-driven dims: enriched = {title, attrs, is_urgent, rationale}
 		EventType:   "feedback.enriched",
 		DeliveredAt: at,
 		TraceID:     traceID,
@@ -186,10 +188,8 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 			SubmittedAt: submittedAt, // #82: actual ingest time, not enrichment time
 			Enriched: enrichedOut{
 				Title:      s.Title,
-				Kind:       s.Kind,
-				Severity:   s.Severity,
-				Modules:    s.Modules,
-				Priority:   s.Priority,
+				Attrs:      attrs,
+				IsUrgent:   s.IsUrgent,
 				Rationale:  s.Rationale,
 				EnrichedAt: at,
 			},

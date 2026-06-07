@@ -5,10 +5,13 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Phixsura/attune/internal/domain"
 )
 
-// FormatReport renders a markdown report from an EvalReport. Output
-// matches design doc v0.4 §4.6.
+// FormatReport renders a Markdown report from an EvalReport — one row
+// per Dimension with the appropriate metric (match rate for single,
+// average IoU for multi).
 func FormatReport(rep *EvalReport) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# attune eval report · %s\n\n", rep.GeneratedAt.Format(time.RFC3339))
@@ -24,66 +27,69 @@ func FormatReport(rep *EvalReport) string {
 		b.WriteString("\n(no rows sampled — widen --since or check enrichment_status='done' rows exist)\n")
 		return b.String()
 	}
-	kindPct := 100.0 * float64(rep.KindMatches) / float64(rep.SampleSize)
-	sevPct := 100.0 * float64(rep.SevMatches) / float64(rep.SampleSize)
-	moduleAvg := rep.ModuleSumIoU / float64(rep.SampleSize)
-	b.WriteString("\n## agreement\n\n")
-	b.WriteString("| dimension | match rate | red line |\n")
-	b.WriteString("|-----------|-----------|---------|\n")
-	fmt.Fprintf(&b, "| kind | %.1f%% (%d/%d) | 80%% |\n", kindPct, rep.KindMatches, rep.SampleSize)
-	fmt.Fprintf(&b, "| severity | %.1f%% (%d/%d) | 80%% |\n", sevPct, rep.SevMatches, rep.SampleSize)
-	fmt.Fprintf(&b, "| module Jaccard | avg %.2f | 0.75 |\n", moduleAvg)
+	b.WriteString("\n## agreement (per dimension)\n\n")
+	b.WriteString("| dimension | kind | metric | red line |\n")
+	b.WriteString("|-----------|------|--------|---------|\n")
+	for _, name := range sortedDimNames(rep.Dims) {
+		score := rep.Dims[name]
+		switch score.Kind {
+		case domain.DimSingle:
+			pct := 100.0 * float64(score.Match) / float64(score.Total)
+			fmt.Fprintf(&b, "| %s | single | match rate %.1f%% (%d/%d) | 80%% |\n",
+				name, pct, score.Match, score.Total)
+		case domain.DimMulti:
+			avg := score.SumIoU / float64(score.Total)
+			fmt.Fprintf(&b, "| %s | multi | avg IoU %.2f | 0.75 |\n", name, avg)
+		}
+	}
 	if len(rep.Mismatches) == 0 {
 		return b.String()
 	}
 	b.WriteString("\n## top 10 mismatches\n\n")
-	b.WriteString("| id | old kind | new kind | old sev | new sev | content |\n")
-	b.WriteString("|----|---------|---------|--------|--------|--------|\n")
+	b.WriteString("| id | dim diffs | content |\n")
+	b.WriteString("|----|----------|--------|\n")
 	for i, m := range rep.Mismatches {
 		if i >= 10 {
 			break
 		}
-		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s |\n",
-			m.FeedbackID, m.OldKind, m.NewKind, m.OldSeverity, m.NewSeverity,
-			truncateForReport(m.Content, 60))
+		fmt.Fprintf(&b, "| %d | %s | %s |\n",
+			m.FeedbackID, summarizeDiffs(m.Diffs), truncateForReport(m.Content, 60))
 	}
 	return b.String()
 }
 
-func sortMismatches(ms []Mismatch) {
-	// Sort by "worst" first: lower Jaccard means more module divergence.
-	sort.Slice(ms, func(i, j int) bool {
-		return ms[i].ModuleJaccard < ms[j].ModuleJaccard
-	})
-}
-
-func headerIndex(header []string) map[string]int {
-	m := make(map[string]int, len(header))
-	for i, h := range header {
-		m[strings.TrimSpace(h)] = i
+func summarizeDiffs(diffs map[string]DimDiff) string {
+	if len(diffs) == 0 {
+		return ""
 	}
-	return m
-}
-
-func safeColumn(rec []string, idx map[string]int, col string) string {
-	if i, ok := idx[col]; ok && i < len(rec) {
-		return rec[i]
-	}
-	return ""
-}
-
-func splitModules(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, "|")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
+	parts := make([]string, 0, len(diffs))
+	for _, name := range sortedDiffNames(diffs) {
+		d := diffs[name]
+		switch d.Kind {
+		case domain.DimSingle:
+			parts = append(parts, fmt.Sprintf("%s: %v→%v", name, d.Old, d.New))
+		case domain.DimMulti:
+			parts = append(parts, fmt.Sprintf("%s: IoU %.2f", name, d.IoU))
 		}
 	}
+	return strings.Join(parts, "; ")
+}
+
+func sortedDimNames(scores map[string]DimScore) []string {
+	out := make([]string, 0, len(scores))
+	for k := range scores {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedDiffNames(diffs map[string]DimDiff) []string {
+	out := make([]string, 0, len(diffs))
+	for k := range diffs {
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }
 

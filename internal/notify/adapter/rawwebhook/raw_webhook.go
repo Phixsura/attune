@@ -178,10 +178,8 @@ func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 			SubmittedAt: s.SubmittedAt.UTC().Format(time.RFC3339), // #82: actual ingest time (user_feedback.created_at)
 			Enriched: rawEnriched{
 				Title:      s.Title,
-				Kind:       s.Kind,
-				Severity:   s.Severity,
-				Modules:    s.Modules,
-				Priority:   s.Priority,
+				Attrs:      nilSafeAttrs(s.Attrs),
+				IsUrgent:   s.IsUrgent,
 				Rationale:  s.Rationale,
 				EnrichedAt: s.EnrichedAt.UTC().Format(time.RFC3339),
 			},
@@ -246,11 +244,18 @@ type rawFeedback struct {
 }
 
 type rawEnriched struct {
-	Title      string   `json:"title"`
-	Kind       string   `json:"kind"`
-	Severity   string   `json:"severity"`
-	Modules    []string `json:"modules"`
-	Priority   float64  `json:"priority"`
-	Rationale  string   `json:"rationale"`
-	EnrichedAt string   `json:"enriched_at"`
+	Title      string         `json:"title"`
+	Attrs      map[string]any `json:"attrs"`
+	IsUrgent   bool           `json:"is_urgent"`
+	Rationale  string         `json:"rationale"`
+	EnrichedAt string         `json:"enriched_at"`
+}
+
+// nilSafeAttrs guarantees a non-nil map so the JSON encodes as `{}`
+// instead of `null`. Customers' verifiers may type-check the field.
+func nilSafeAttrs(a map[string]any) map[string]any {
+	if a == nil {
+		return map[string]any{}
+	}
+	return a
 }

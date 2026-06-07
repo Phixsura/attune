@@ -227,7 +227,7 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 	me := console.NewMeHandler(signer, tenantRepo, userRepo)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
-	feedback := console.NewFeedbackHandler(feedbackRepo)
+	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
 	usage := console.NewUsageHandler(feedbackRepo)
 	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
 
