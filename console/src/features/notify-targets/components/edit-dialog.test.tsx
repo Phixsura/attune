@@ -13,16 +13,15 @@ import { renderWithProviders, screen } from '@/testing/test-utils'
 function makeTarget(over: Partial<NotifyTarget> = {}): NotifyTarget {
   return {
     id: 'nt-1',
-    destinationType: 'raw_webhook',
+    destinationType: 'raw-webhook',
     url: 'https://hook.example.com',
     audience: 'all',
     timeoutSeconds: 10,
     disabled: false,
-    secretSet: true,
     createdAt: '2026-06-07T00:00:00Z',
-    updatedAt: '2026-06-07T00:00:00Z',
+    lastError: '',
     ...over,
-  } as NotifyTarget
+  }
 }
 
 describe('EditNotifyDialog sparse PATCH diff', () => {
@@ -33,8 +32,7 @@ describe('EditNotifyDialog sparse PATCH diff', () => {
     const { user } = renderWithProviders(
       <EditNotifyDialog target={target} onClose={onClose} onSubmit={onSubmit} pending={false} />,
     )
-    // Click Save without touching any field.
-    await user.click(screen.getByRole('button', { name: '保存' }))
+    await user.click(screen.getByTestId('edit-notify-save'))
     expect(onSubmit).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalledTimes(1)
   })
@@ -45,10 +43,10 @@ describe('EditNotifyDialog sparse PATCH diff', () => {
     const { user } = renderWithProviders(
       <EditNotifyDialog target={target} onClose={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
-    const urlInput = screen.getByLabelText(/Webhook URL/i) as HTMLInputElement
+    const urlInput = screen.getByTestId('edit-notify-url') as HTMLInputElement
     await user.clear(urlInput)
     await user.type(urlInput, '  https://new.example.com  ')
-    await user.click(screen.getByRole('button', { name: '保存' }))
+    await user.click(screen.getByTestId('edit-notify-save'))
     expect(onSubmit).toHaveBeenCalledTimes(1)
     const patch = onSubmit.mock.calls[0][0] as NotifyTargetPatch
     expect(patch).toEqual({ url: 'https://new.example.com' })
@@ -60,9 +58,9 @@ describe('EditNotifyDialog sparse PATCH diff', () => {
     const { user } = renderWithProviders(
       <EditNotifyDialog target={target} onClose={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
-    const secretInput = screen.getByLabelText(/签名 secret/i) as HTMLInputElement
+    const secretInput = screen.getByTestId('edit-notify-secret') as HTMLInputElement
     await user.type(secretInput, 'fresh-secret')
-    await user.click(screen.getByRole('button', { name: '保存' }))
+    await user.click(screen.getByTestId('edit-notify-save'))
     const patch = onSubmit.mock.calls[0][0] as NotifyTargetPatch
     expect(patch).toEqual({ secret: 'fresh-secret' })
   })
@@ -73,28 +71,33 @@ describe('EditNotifyDialog sparse PATCH diff', () => {
     const { user } = renderWithProviders(
       <EditNotifyDialog target={target} onClose={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
-    // Find the "clear secret" checkbox by its bound label text fragment.
-    const clearCheckbox = screen.getByRole('checkbox', { name: /清.*secret|clear/i })
-    await user.click(clearCheckbox)
-    await user.click(screen.getByRole('button', { name: '保存' }))
+    await user.click(screen.getByTestId('edit-notify-secret-clear'))
+    await user.click(screen.getByTestId('edit-notify-save'))
     const patch = onSubmit.mock.calls[0][0] as NotifyTargetPatch
     expect(patch).toEqual({ secret: '' })
   })
 
-  it('typing then toggling clear → typed value wins (cleared bit reset on type)', async () => {
+  it('clear-then-type resets the cleared bit → patch.secret = typed value (not empty)', async () => {
+    // Real "typed wins over cleared" requires CLEARING FIRST, then typing —
+    // because the input's onChange handler resets secretCleared on every
+    // keystroke (edit-dialog.tsx:135). This is the only sequence that
+    // exercises the priority of the `if (secret)` branch over the
+    // `else if (secretCleared)` branch (edit-dialog.tsx:72-73).
     const target = makeTarget()
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const { user } = renderWithProviders(
       <EditNotifyDialog target={target} onClose={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
-    const secretInput = screen.getByLabelText(/签名 secret/i) as HTMLInputElement
-    await user.type(secretInput, 'typed-value')
-    // The "clear" checkbox in this UI doesn't OVERRIDE a typed value if the user
-    // clears the checkbox before submit — the bit is bool, the input is the
-    // value of record. Per edit-dialog.tsx:72-73: `if (secret) patch.secret =
-    // secret; else if (secretCleared) patch.secret = ''`. Typed value wins.
-    await user.click(screen.getByRole('button', { name: '保存' }))
+    // Step 1: toggle clear ON → secretCleared=true, secret stays ''.
+    await user.click(screen.getByTestId('edit-notify-secret-clear'))
+    // Step 2: toggle OFF so the secret input is no longer disabled (the
+    // cleared bit gates disabled at edit-dialog.tsx:137).
+    await user.click(screen.getByTestId('edit-notify-secret-clear'))
+    // Step 3: type → onChange runs setSecret(value) AND setSecretCleared(false).
+    const secretInput = screen.getByTestId('edit-notify-secret') as HTMLInputElement
+    await user.type(secretInput, 'rotation')
+    await user.click(screen.getByTestId('edit-notify-save'))
     const patch = onSubmit.mock.calls[0][0] as NotifyTargetPatch
-    expect(patch).toEqual({ secret: 'typed-value' })
+    expect(patch).toEqual({ secret: 'rotation' })
   })
 })
