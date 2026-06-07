@@ -1,107 +1,79 @@
 import { QueryClient } from '@tanstack/react-query'
-import {
-  createRootRouteWithContext,
-  createRoute,
-  Outlet,
-  RouterProvider,
-  redirect,
-} from '@tanstack/react-router'
-import { waitFor } from '@testing-library/react'
+import { isRedirect } from '@tanstack/react-router'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
-import { meQuery } from '@/features/session/api/get-me'
 import { setCsrfToken } from '@/lib/api-client'
+import { Route as AuthedRoute } from '@/routes/_authed'
 import { server } from '@/testing/mocks/server'
-import { makeTestRouter } from '@/testing/router-utils'
-import { renderWithProviders } from '@/testing/test-utils'
 
-// Mirrors the production _authed.tsx beforeLoad guard — the contract
-// the test wants to lock in. If the real route file ever diverges from
-// this shape, the divergence is intentional and this test (or its
-// production peer) needs an update.
-function buildRouteTree() {
-  const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-    component: () => <Outlet />,
-  })
-  const loginRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: '/login',
-    validateSearch: (search: Record<string, unknown>) => ({
-      redirect: typeof search.redirect === 'string' ? search.redirect : undefined,
-    }),
-    component: () => <div data-testid="login-page">login</div>,
-  })
-  const authedRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    id: '_authed',
-    beforeLoad: async ({ context, location }) => {
-      try {
-        await context.queryClient.ensureQueryData(meQuery())
-      } catch {
-        throw redirect({ to: '/login', search: { redirect: location.pathname } })
-      }
-    },
-    component: () => <Outlet />,
-  })
-  const feedbackRoute = createRoute({
-    getParentRoute: () => authedRoute,
-    path: '/feedback',
-    component: () => <div data-testid="feedback-page">feedback</div>,
-  })
-  const apiKeysRoute = createRoute({
-    getParentRoute: () => authedRoute,
-    path: '/api-keys',
-    component: () => <div data-testid="api-keys-page">api-keys</div>,
-  })
-  return rootRoute.addChildren([loginRoute, authedRoute.addChildren([feedbackRoute, apiKeysRoute])])
+// Direct test of the production beforeLoad — we import the Route from
+// _authed.tsx and call its options.beforeLoad() with a mocked context.
+// This is what makes the production source actually covered in
+// coverage reports (an earlier iteration of this file built a parallel
+// route tree, which let _authed.tsx rot at 0% covered).
+
+type BeforeLoadFn = NonNullable<typeof AuthedRoute.options.beforeLoad>
+type BeforeLoadCtx = Parameters<BeforeLoadFn>[0]
+
+// `redirect()` throws an object whose external shape is { options: ... }.
+// The TanStack Router type for the Redirect class hides the internals;
+// the test only needs to read the user-supplied to/search.
+interface ThrownRedirect {
+  options: { to: string; search: { redirect?: string }; statusCode?: number }
 }
 
-describe('_authed route guard', () => {
-  it('401 from /me → redirect to /login with redirect=<original path>', async () => {
+function makeContext(pathname: string): BeforeLoadCtx {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return {
+    context: { queryClient },
+    location: { pathname } as BeforeLoadCtx['location'],
+  } as BeforeLoadCtx
+}
+
+async function callBeforeLoad(pathname: string): Promise<unknown> {
+  const beforeLoad = AuthedRoute.options.beforeLoad as BeforeLoadFn
+  try {
+    await beforeLoad(makeContext(pathname))
+    return null
+  } catch (err) {
+    return err
+  }
+}
+
+describe('_authed Route.options.beforeLoad (production source)', () => {
+  it('401 from /me throws redirect to /login with redirect=<pathname>', async () => {
     setCsrfToken(null)
     server.use(http.get('/fb/v1/console/me', () => new HttpResponse(null, { status: 401 })))
-    const { router, queryClient } = makeTestRouter({
-      routeTree: buildRouteTree(),
-      initialEntries: ['/feedback'],
-    })
-    const { findByTestId } = renderWithProviders(<RouterProvider router={router} />, {
-      queryClient,
-    })
-    await findByTestId('login-page')
-    expect(router.state.location.pathname).toBe('/login')
-    expect((router.state.location.search as { redirect?: string }).redirect).toBe('/feedback')
+    const thrown = await callBeforeLoad('/feedback')
+    expect(isRedirect(thrown)).toBe(true)
+    const r = thrown as ThrownRedirect
+    expect(r.options.to).toBe('/login')
+    expect(r.options.search.redirect).toBe('/feedback')
   })
 
-  it('200 from /me → renders the authed child (no redirect)', async () => {
+  it('200 from /me resolves without throwing (page proceeds)', async () => {
+    setCsrfToken(null)
     server.use(
       http.get('/fb/v1/console/me', () =>
         HttpResponse.json({
-          tenant: { id: 't', name: 'T', slug: 't' },
-          user: { id: 'u', email: 'u@e.com', displayName: 'U' },
+          tenant: { id: 't', name: 'T', slug: 't', locale: 'zh-CN', timezone: 'UTC' },
+          user: { openId: 'u', name: 'U', role: 'admin' },
           csrfToken: 'tok',
         }),
       ),
     )
-    const { router, queryClient } = makeTestRouter({
-      routeTree: buildRouteTree(),
-      initialEntries: ['/feedback'],
-    })
-    const { findByTestId } = renderWithProviders(<RouterProvider router={router} />, {
-      queryClient,
-    })
-    await findByTestId('feedback-page')
-    expect(router.state.location.pathname).toBe('/feedback')
+    expect(await callBeforeLoad('/feedback')).toBeNull()
   })
 
-  it('/api-keys while unauthenticated lands at /login?redirect=/api-keys', async () => {
+  it('captures the exact requested pathname (/api-keys → redirect=/api-keys)', async () => {
     setCsrfToken(null)
     server.use(http.get('/fb/v1/console/me', () => new HttpResponse(null, { status: 401 })))
-    const { router, queryClient } = makeTestRouter({
-      routeTree: buildRouteTree(),
-      initialEntries: ['/api-keys'],
-    })
-    renderWithProviders(<RouterProvider router={router} />, { queryClient })
-    await waitFor(() => expect(router.state.location.pathname).toBe('/login'))
-    expect((router.state.location.search as { redirect?: string }).redirect).toBe('/api-keys')
+    const thrown = await callBeforeLoad('/api-keys')
+    expect(isRedirect(thrown)).toBe(true)
+    const r = thrown as ThrownRedirect
+    expect(r.options.to).toBe('/login')
+    expect(r.options.search.redirect).toBe('/api-keys')
   })
 })
