@@ -1,5 +1,9 @@
+import { renderHook } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { I18nextProvider } from 'react-i18next'
 import { describe, expect, it } from 'vitest'
-import { resolveI18n } from '@/lib/i18n-resolve'
+import i18n from '@/i18n'
+import { resolveI18n, useDisplayName } from '@/lib/i18n-resolve'
 
 describe('resolveI18n', () => {
   const m = { 'zh-CN': '中文', zh: '中', en: 'English', default: 'fallback' }
@@ -38,5 +42,33 @@ describe('resolveI18n', () => {
 
   it('returns "" for a wrapper with an empty entries map', () => {
     expect(resolveI18n({ entries: {} }, ['en'])).toBe('')
+  })
+})
+
+describe('useDisplayName', () => {
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <I18nextProvider i18n={i18n}>{children}</I18nextProvider>
+  )
+
+  it('builds chain "zh-CN → zh → en" from i18n.language=zh-CN and resolves accordingly', async () => {
+    // i18n is initialized at module load with lng='zh-CN' (see src/i18n/index.ts).
+    await i18n.changeLanguage('zh-CN')
+    const { result } = renderHook(() => useDisplayName(), { wrapper })
+    expect(result.current({ 'zh-CN': '中文', en: 'E' })).toBe('中文')
+    // No zh-CN/zh hit; en in chain.
+    expect(result.current({ en: 'E' })).toBe('E')
+    // No locale in chain matches → falls through to default.
+    expect(result.current({ default: 'D' })).toBe('D')
+    // Empty map → ''.
+    expect(result.current({})).toBe('')
+  })
+
+  it('handles a bare language tag (no dash) by chaining "fr → en"', async () => {
+    await i18n.changeLanguage('fr')
+    const { result } = renderHook(() => useDisplayName(), { wrapper })
+    expect(result.current({ fr: 'Bonjour', en: 'Hi' })).toBe('Bonjour')
+    expect(result.current({ en: 'Hi' })).toBe('Hi')
+    // restore default for the rest of the suite
+    await i18n.changeLanguage('zh-CN')
   })
 })
