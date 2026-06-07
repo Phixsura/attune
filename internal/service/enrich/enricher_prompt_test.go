@@ -122,7 +122,9 @@ func TestRenderDimensionsClause_NoEnglishHintFallsBackCleanly(t *testing.T) {
 	}
 }
 
-func TestBuildEnrichSchema_SingleAddsEnum(t *testing.T) {
+func TestBuildEnrichSchema_OptionalSingleAllowsNull(t *testing.T) {
+	// sevDim() is Required=false → must accept null both as type and as
+	// an enum value (OpenAI strict mode contract).
 	schema := buildEnrichSchema(domain.DimensionSet{sevDim()})
 	if schema == nil {
 		t.Fatal("nil schema")
@@ -132,12 +134,33 @@ func TestBuildEnrichSchema_SingleAddsEnum(t *testing.T) {
 	_ = json.Unmarshal(raw, &got)
 	props := got["properties"].(map[string]any)
 	sev := props["severity"].(map[string]any)
-	if sev["type"] != "string" {
-		t.Errorf("expected severity.type=string, got %v", sev["type"])
+	types, _ := sev["type"].([]any)
+	if len(types) != 2 || types[0] != "string" || types[1] != "null" {
+		t.Errorf(`expected type=["string","null"], got %v`, sev["type"])
 	}
-	enum, ok := sev["enum"].([]any)
-	if !ok || len(enum) != 2 {
-		t.Errorf("expected 2-value enum, got %v", sev["enum"])
+	enum, _ := sev["enum"].([]any)
+	if len(enum) != 3 {
+		t.Errorf("expected 3-entry enum (2 values + null), got %v", enum)
+	}
+	if enum[len(enum)-1] != nil {
+		t.Errorf("trailing enum entry should be null, got %v", enum[len(enum)-1])
+	}
+}
+
+func TestBuildEnrichSchema_RequiredSingleStaysScalar(t *testing.T) {
+	d := sevDim()
+	d.Required = true
+	schema := buildEnrichSchema(domain.DimensionSet{d})
+	raw, _ := json.Marshal(schema.Schema)
+	var got map[string]any
+	_ = json.Unmarshal(raw, &got)
+	sev := got["properties"].(map[string]any)["severity"].(map[string]any)
+	if sev["type"] != "string" {
+		t.Errorf("required single must keep type=string, got %v", sev["type"])
+	}
+	enum := sev["enum"].([]any)
+	if len(enum) != 2 {
+		t.Errorf("required single must NOT add null to enum, got %v", enum)
 	}
 }
 
@@ -182,9 +205,12 @@ func TestBuildEnrichSchema_FreeformOmitsEnum(t *testing.T) {
 	}
 }
 
-func TestBuildEnrichSchema_RequiredDimAddedToRequired(t *testing.T) {
-	d := sevDim()
-	d.Required = true
+func TestBuildEnrichSchema_AllDimsInRequiredForStrictMode(t *testing.T) {
+	// OpenAI strict structured-output rejects schemas where
+	// `additionalProperties: false` coexists with any property that
+	// isn't in `required`. Every dim (Required=true OR false) must
+	// land in `required`; optionality lives in the type union.
+	d := sevDim() // Required = false
 	schema := buildEnrichSchema(domain.DimensionSet{d})
 	raw, _ := json.Marshal(schema.Schema)
 	var got map[string]any
@@ -197,7 +223,7 @@ func TestBuildEnrichSchema_RequiredDimAddedToRequired(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("required dim not in 'required' list: %v", required)
+		t.Errorf("every dim must be in 'required' for strict mode, got %v", required)
 	}
 }
 

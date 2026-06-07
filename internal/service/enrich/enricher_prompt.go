@@ -150,8 +150,12 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 //
 //   - single-kind  → {"type": "string"} + optional "enum"
 //   - multi-kind   → {"type": "array", "items": {"type": "string"} + optional "enum"}
-//   - Required dims add to the schema's "required" list; all dims also
-//     allowed by additionalProperties: false at the top.
+//   - All properties land in the schema's "required" list because
+//     OpenAI's strict structured-output mode rejects schemas where
+//     `additionalProperties: false` coexists with any non-required
+//     property. Non-required dims (Required=false) express
+//     "may be omitted" by accepting null as the value type — the gate
+//     (2) post-parse filter drops null entries before persistence.
 //
 // When the backend honours this, the model cannot emit off-list values
 // at all — but gate (2) still runs because some gateways silently
@@ -161,26 +165,13 @@ func buildEnrichSchema(dims domain.DimensionSet) *llmclient.OutputSchema {
 		"title":     map[string]any{"type": "string"},
 		"rationale": map[string]any{"type": "string"},
 	}
+	// Strict mode: every property in `properties` must appear in
+	// `required`. Optionality is encoded in the property type itself
+	// (string|null for single; array (with empty arr allowed) for multi).
 	required := []string{"title", "rationale"}
 	for _, d := range dims {
-		var p map[string]any
-		switch d.Kind {
-		case domain.DimSingle:
-			p = map[string]any{"type": "string"}
-			if vals := taxonomyEnum(d); len(vals) > 0 {
-				p["enum"] = vals
-			}
-		case domain.DimMulti:
-			items := map[string]any{"type": "string"}
-			if vals := taxonomyEnum(d); len(vals) > 0 {
-				items["enum"] = vals
-			}
-			p = map[string]any{"type": "array", "items": items}
-		}
-		props[d.Name] = p
-		if d.Required {
-			required = append(required, d.Name)
-		}
+		props[d.Name] = dimPropertySchema(d)
+		required = append(required, d.Name)
 	}
 	return &llmclient.OutputSchema{
 		Name: "attune_enriched_v2",
@@ -191,6 +182,37 @@ func buildEnrichSchema(dims domain.DimensionSet) *llmclient.OutputSchema {
 			"additionalProperties": false,
 		},
 	}
+}
+
+// dimPropertySchema renders one Dimension as a JSON-Schema property.
+// Single-kind dims that are optional become a union ["string", "null"]
+// so OpenAI strict mode accepts the schema while still letting the LLM
+// signal "no value picked"; multi-kind dims always use array (empty
+// array is the no-value form, so no null union needed).
+func dimPropertySchema(d domain.Dimension) map[string]any {
+	switch d.Kind {
+	case domain.DimSingle:
+		p := map[string]any{}
+		if d.Required {
+			p["type"] = "string"
+		} else {
+			p["type"] = []string{"string", "null"}
+		}
+		if vals := taxonomyEnum(d); len(vals) > 0 {
+			if !d.Required {
+				vals = append(vals, nil) // allow null in the enum too
+			}
+			p["enum"] = vals
+		}
+		return p
+	case domain.DimMulti:
+		items := map[string]any{"type": "string"}
+		if vals := taxonomyEnum(d); len(vals) > 0 {
+			items["enum"] = vals
+		}
+		return map[string]any{"type": "array", "items": items}
+	}
+	return map[string]any{}
 }
 
 // taxonomyEnum returns the Value list from a dim's taxonomy as `[]any`
