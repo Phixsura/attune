@@ -44,7 +44,21 @@ func e2eSchema() *OutputSchema {
 	}
 }
 
-// ── OpenAI Compatible (gpt-5.4) ──────────────────────────────────────
+// e2eModel returns the model id to use for a given backend's e2e test,
+// preferring the environment variable so operators can pin a model the
+// remote endpoint actually serves without editing source. The fallback
+// is a known-good 2026-06-era model that should be live at the major
+// providers; operators on private fleets (vLLM, Bedrock, Vertex, etc.)
+// will almost certainly override it.
+func e2eModel(t *testing.T, envVar, fallback string) string {
+	t.Helper()
+	if m := os.Getenv(envVar); m != "" {
+		return m
+	}
+	return fallback
+}
+
+// ── OpenAI Compatible ─────────────────────────────────────────────────
 
 func TestE2E_OpenAICompat_FreeForm(t *testing.T) {
 	base := e2eBase(t)
@@ -52,6 +66,7 @@ func TestE2E_OpenAICompat_FreeForm(t *testing.T) {
 	if key == "" {
 		t.Skip("E2E_OPENAI_COMPAT_KEY not set")
 	}
+	model := e2eModel(t, "E2E_OPENAI_COMPAT_MODEL", "gpt-4o-mini")
 	backend, err := NewOpenAICompat(base, key)
 	if err != nil {
 		t.Fatalf("NewOpenAICompat: %v", err)
@@ -60,7 +75,7 @@ func TestE2E_OpenAICompat_FreeForm(t *testing.T) {
 	defer cancel()
 
 	resp, err := backend.Complete(ctx, CompletionRequest{
-		Model:       "gpt-5.4",
+		Model:       model,
 		Prompt:      "Classify this user feedback. Return JSON: {kind, severity, modules, sentiment, language}. Feedback: " + e2eContent,
 		Temperature: 0.1,
 		MaxTokens:   512,
@@ -68,7 +83,7 @@ func TestE2E_OpenAICompat_FreeForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete failed: %v", err)
 	}
-	t.Logf("[gpt-5.4 openai-compat freeform]\n  text:  %s\n  usage: %+v", resp.Text, resp.Usage)
+	t.Logf("[%s openai-compat freeform]\n  text:  %s\n  usage: %+v", model, resp.Text, resp.Usage)
 	if resp.Text == "" {
 		t.Fatal("empty response")
 	}
@@ -80,6 +95,7 @@ func TestE2E_OpenAICompat_Structured(t *testing.T) {
 	if key == "" {
 		t.Skip("E2E_OPENAI_COMPAT_KEY not set")
 	}
+	model := e2eModel(t, "E2E_OPENAI_COMPAT_MODEL", "gpt-4o-mini")
 	backend, err := NewOpenAICompat(base, key)
 	if err != nil {
 		t.Fatalf("NewOpenAICompat: %v", err)
@@ -88,7 +104,7 @@ func TestE2E_OpenAICompat_Structured(t *testing.T) {
 	defer cancel()
 
 	resp, err := backend.Complete(ctx, CompletionRequest{
-		Model:       "gpt-5.4",
+		Model:       model,
 		Prompt:      "Classify this user feedback. Feedback: " + e2eContent,
 		Schema:      e2eSchema(),
 		Temperature: 0.1,
@@ -97,21 +113,13 @@ func TestE2E_OpenAICompat_Structured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete failed: %v", err)
 	}
-	t.Logf("[gpt-5.4 openai-compat structured]\n  text:  %s\n  usage: %+v", resp.Text, resp.Usage)
+	t.Logf("[%s openai-compat structured]\n  text:  %s\n  usage: %+v", model, resp.Text, resp.Usage)
 	if resp.Text == "" {
 		t.Fatal("empty response")
 	}
 }
 
-// ── OpenAI Responses (o3-pro) ────────────────────────────────────────
-
-func e2eModel(t *testing.T, envVar, fallback string) string {
-	t.Helper()
-	if m := os.Getenv(envVar); m != "" {
-		return m
-	}
-	return fallback
-}
+// ── OpenAI Responses ──────────────────────────────────────────────────
 
 func TestE2E_OpenAIResponses_FreeForm(t *testing.T) {
 	base := e2eBase(t)
@@ -119,7 +127,7 @@ func TestE2E_OpenAIResponses_FreeForm(t *testing.T) {
 	if key == "" {
 		t.Skip("E2E_OPENAI_RESPONSES_KEY not set")
 	}
-	model := e2eModel(t, "E2E_OPENAI_RESPONSES_MODEL", "o3-pro")
+	model := e2eModel(t, "E2E_OPENAI_RESPONSES_MODEL", "gpt-4o-mini")
 	backend, err := NewOpenAIResponses(base, key)
 	if err != nil {
 		t.Fatalf("NewOpenAIResponses: %v", err)
@@ -149,7 +157,7 @@ func TestE2E_OpenAIResponses_Structured(t *testing.T) {
 	if key == "" {
 		t.Skip("E2E_OPENAI_RESPONSES_KEY not set")
 	}
-	model := e2eModel(t, "E2E_OPENAI_RESPONSES_MODEL", "o3-pro")
+	model := e2eModel(t, "E2E_OPENAI_RESPONSES_MODEL", "gpt-4o-mini")
 	backend, err := NewOpenAIResponses(base, key)
 	if err != nil {
 		t.Fatalf("NewOpenAIResponses: %v", err)
@@ -174,7 +182,7 @@ func TestE2E_OpenAIResponses_Structured(t *testing.T) {
 	}
 }
 
-// ── Anthropic (claude-opus-4-6) ──────────────────────────────────────
+// ── Anthropic ─────────────────────────────────────────────────────────
 
 func TestE2E_Anthropic_FreeForm(t *testing.T) {
 	base := e2eBase(t)
@@ -182,6 +190,7 @@ func TestE2E_Anthropic_FreeForm(t *testing.T) {
 	if key == "" {
 		t.Skip("E2E_ANTHROPIC_KEY not set")
 	}
+	model := e2eModel(t, "E2E_ANTHROPIC_MODEL", "claude-sonnet-4-5")
 	backend, err := NewAnthropic(base, key)
 	if err != nil {
 		t.Fatalf("NewAnthropic: %v", err)
@@ -191,7 +200,7 @@ func TestE2E_Anthropic_FreeForm(t *testing.T) {
 	defer cancel()
 
 	resp, err := backend.Complete(ctx, CompletionRequest{
-		Model:       "claude-opus-4-6",
+		Model:       model,
 		Prompt:      "Classify this user feedback. Return JSON: {kind, severity, modules, sentiment, language}. Feedback: " + e2eContent,
 		Temperature: 0.1,
 		MaxTokens:   512,
@@ -199,7 +208,7 @@ func TestE2E_Anthropic_FreeForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete failed: %v", err)
 	}
-	t.Logf("[claude-opus-4-6 anthropic freeform]\n  text:  %s\n  usage: %+v", resp.Text, resp.Usage)
+	t.Logf("[%s anthropic freeform]\n  text:  %s\n  usage: %+v", model, resp.Text, resp.Usage)
 	if resp.Text == "" {
 		t.Fatal("empty response")
 	}
@@ -211,6 +220,7 @@ func TestE2E_Anthropic_Structured(t *testing.T) {
 	if key == "" {
 		t.Skip("E2E_ANTHROPIC_KEY not set")
 	}
+	model := e2eModel(t, "E2E_ANTHROPIC_MODEL", "claude-sonnet-4-5")
 	backend, err := NewAnthropic(base, key)
 	if err != nil {
 		t.Fatalf("NewAnthropic: %v", err)
@@ -220,7 +230,7 @@ func TestE2E_Anthropic_Structured(t *testing.T) {
 	defer cancel()
 
 	resp, err := backend.Complete(ctx, CompletionRequest{
-		Model:       "claude-opus-4-6",
+		Model:       model,
 		Prompt:      "Classify this user feedback. Feedback: " + e2eContent,
 		Schema:      e2eSchema(),
 		Temperature: 0.1,
@@ -229,13 +239,13 @@ func TestE2E_Anthropic_Structured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete failed: %v", err)
 	}
-	t.Logf("[claude-opus-4-6 anthropic structured]\n  text:  %s\n  usage: %+v", resp.Text, resp.Usage)
+	t.Logf("[%s anthropic structured]\n  text:  %s\n  usage: %+v", model, resp.Text, resp.Usage)
 	if resp.Text == "" {
 		t.Fatal("empty response")
 	}
 }
 
-// ── Gemini (gemini-3.1-pro-preview) ──────────────────────────────────
+// ── Gemini ────────────────────────────────────────────────────────────
 
 func TestE2E_Gemini_FreeForm(t *testing.T) {
 	base := e2eBase(t)
@@ -243,6 +253,7 @@ func TestE2E_Gemini_FreeForm(t *testing.T) {
 	if key == "" {
 		t.Skip("E2E_GEMINI_KEY not set")
 	}
+	model := e2eModel(t, "E2E_GEMINI_MODEL", "gemini-2.0-flash")
 	backend, err := NewGemini(base, key)
 	if err != nil {
 		t.Fatalf("NewGemini: %v", err)
@@ -252,7 +263,7 @@ func TestE2E_Gemini_FreeForm(t *testing.T) {
 	defer cancel()
 
 	resp, err := backend.Complete(ctx, CompletionRequest{
-		Model:       "gemini-3.1-pro-preview",
+		Model:       model,
 		Prompt:      "Classify this user feedback. Return JSON: {kind, severity, modules, sentiment, language}. Feedback: " + e2eContent,
 		Temperature: 0.1,
 		MaxTokens:   512,
@@ -260,7 +271,7 @@ func TestE2E_Gemini_FreeForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete failed: %v", err)
 	}
-	t.Logf("[gemini-3.1-pro-preview freeform]\n  text:  %s\n  usage: %+v", resp.Text, resp.Usage)
+	t.Logf("[%s gemini freeform]\n  text:  %s\n  usage: %+v", model, resp.Text, resp.Usage)
 	if resp.Text == "" {
 		t.Fatal("empty response")
 	}
@@ -272,6 +283,7 @@ func TestE2E_Gemini_Structured(t *testing.T) {
 	if key == "" {
 		t.Skip("E2E_GEMINI_KEY not set")
 	}
+	model := e2eModel(t, "E2E_GEMINI_MODEL", "gemini-2.0-flash")
 	backend, err := NewGemini(base, key)
 	if err != nil {
 		t.Fatalf("NewGemini: %v", err)
@@ -281,7 +293,7 @@ func TestE2E_Gemini_Structured(t *testing.T) {
 	defer cancel()
 
 	resp, err := backend.Complete(ctx, CompletionRequest{
-		Model:       "gemini-3.1-pro-preview",
+		Model:       model,
 		Prompt:      "Classify this user feedback. Feedback: " + e2eContent,
 		Schema:      e2eSchema(),
 		Temperature: 0.1,
@@ -290,7 +302,7 @@ func TestE2E_Gemini_Structured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete failed: %v", err)
 	}
-	t.Logf("[gemini-3.1-pro-preview structured]\n  text:  %s\n  usage: %+v", resp.Text, resp.Usage)
+	t.Logf("[%s gemini structured]\n  text:  %s\n  usage: %+v", model, resp.Text, resp.Usage)
 	if resp.Text == "" {
 		t.Fatal("empty response")
 	}
