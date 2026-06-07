@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { DimensionsEditor } from '@/components/dim/dimensions-editor'
 import type { Dimension, Taxonomy } from '@/proto/attune/v1/common'
-import { renderWithProviders, screen, within } from '@/testing/test-utils'
+import { renderWithProviders, screen } from '@/testing/test-utils'
 
 // Builders ----------------------------------------------------------------
 
@@ -72,7 +72,7 @@ describe('DimensionsEditor — identity tracking + sparse edits', () => {
   it('"Add dimension" appends a blank Dimension to onChange', async () => {
     const onChange = vi.fn()
     const { user } = renderWithProviders(<Harness initial={[]} onChange={onChange} />)
-    await user.click(screen.getByRole('button', { name: '+ 添加维度' }))
+    await user.click(screen.getByTestId('dim-editor-add-dim'))
     expect(onChange).toHaveBeenCalledTimes(1)
     const next = onChange.mock.calls[0][0] as Dimension[]
     expect(next).toHaveLength(1)
@@ -90,7 +90,7 @@ describe('DimensionsEditor — identity tracking + sparse edits', () => {
     const dims = [makeDim({ name: 'a' }), makeDim({ name: 'b' })]
     const { user } = renderWithProviders(<Harness initial={dims} onChange={onChange} />)
     // Both cards have aria-label="删除维度". Click the first.
-    const trashButtons = screen.getAllByRole('button', { name: '删除维度' })
+    const trashButtons = screen.getAllByTestId('dim-editor-delete-dim')
     expect(trashButtons).toHaveLength(2)
     await user.click(trashButtons[0])
     const next = onChange.mock.calls[0][0] as Dimension[]
@@ -115,7 +115,7 @@ describe('DimensionsEditor — identity tracking + sparse edits', () => {
   it('NEW dim (added via button): Name input is editable, Kind enabled', async () => {
     const onChange = vi.fn()
     const { user } = renderWithProviders(<Harness initial={[]} onChange={onChange} />)
-    await user.click(screen.getByRole('button', { name: '+ 添加维度' }))
+    await user.click(screen.getByTestId('dim-editor-add-dim'))
     // Card has empty display name → falls back to 未命名维度.
     await user.click(screen.getByText('未命名维度'))
     // Name input id="dim-name-" (empty name).
@@ -127,7 +127,7 @@ describe('DimensionsEditor — identity tracking + sparse edits', () => {
 
   it("identity transfer: editing a NEW dim's name keeps Name editable on next render", async () => {
     const { user } = renderWithProviders(<Harness initial={[]} />)
-    await user.click(screen.getByRole('button', { name: '+ 添加维度' }))
+    await user.click(screen.getByTestId('dim-editor-add-dim'))
     await user.click(screen.getByText('未命名维度'))
     const nameInput = document.getElementById('dim-name-') as HTMLInputElement
     await user.type(nameInput, 'sev')
@@ -149,7 +149,7 @@ describe('DimensionsEditor — identity tracking + sparse edits', () => {
     const { user } = renderWithProviders(<Harness initial={[dim]} onChange={onChange} />)
     await user.click(screen.getByText('Severity'))
     // Remove the P0 taxonomy row (which is in urgentSet).
-    const removeButtons = screen.getAllByRole('button', { name: '删除值' })
+    const removeButtons = screen.getAllByTestId('dim-editor-remove-value')
     expect(removeButtons.length).toBeGreaterThanOrEqual(2)
     await user.click(removeButtons[0])
     // Two onChange calls: setTaxonomy (drops P0) then setUrgentSet (drops 'P0' from urgentSet).
@@ -197,7 +197,3 @@ describe('DimensionsEditor — identity tracking + sparse edits', () => {
     ).toBeInTheDocument()
   })
 })
-
-// Silence the noUnusedImports rule for `within` while keeping it available
-// for future tests that need scoped queries inside a single card.
-void within

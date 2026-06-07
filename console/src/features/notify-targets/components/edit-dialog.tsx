@@ -100,6 +100,7 @@ export function EditNotifyDialog({
                 onChange={(e) => setUrl(e.target.value)}
                 disabled={pending}
                 required
+                data-testid="edit-notify-url"
               />
             </div>
 
@@ -135,6 +136,7 @@ export function EditNotifyDialog({
                   setSecretCleared(false)
                 }}
                 disabled={pending || secretCleared}
+                data-testid="edit-notify-secret"
               />
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
                 <input
@@ -145,6 +147,7 @@ export function EditNotifyDialog({
                     if (e.target.checked) setSecret('')
                   }}
                   disabled={pending}
+                  data-testid="edit-notify-secret-clear"
                 />
                 {t('notify_targets.edit_dialog.secret_clear')}
               </label>
@@ -175,10 +178,16 @@ export function EditNotifyDialog({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onClose}
+              disabled={pending}
+              data-testid="edit-notify-cancel"
+            >
               {t('common.cancel')}
             </Button>
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" disabled={pending} data-testid="edit-notify-save">
               {pending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
               {t('common.save')}
             </Button>

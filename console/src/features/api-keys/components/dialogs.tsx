@@ -60,10 +60,15 @@ export function CreateKeyDialog({
               variant="ghost"
               onClick={() => onOpenChange(false)}
               disabled={pending}
+              data-testid="create-key-cancel"
             >
               {t('common.cancel')}
             </Button>
-            <Button type="submit" disabled={pending || !label.trim()}>
+            <Button
+              type="submit"
+              disabled={pending || !label.trim()}
+              data-testid="create-key-submit"
+            >
               {pending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
               {t('common.create')}
             </Button>
@@ -98,7 +103,7 @@ export function SecretKeyDialog({
         {issued && (
           <div className="my-4 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
             <code className="flex-1 break-all font-mono text-xs">{issued.secret}</code>
-            <Button size="sm" variant="ghost" onClick={onCopy}>
+            <Button size="sm" variant="ghost" onClick={onCopy} data-testid="secret-copy">
               <Copy className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -136,10 +141,20 @@ export function RevokeKeyDialog({
           </p>
         )}
         <DialogFooter>
-          <Button variant="ghost" onClick={onCancel} disabled={pending}>
+          <Button
+            variant="ghost"
+            onClick={onCancel}
+            disabled={pending}
+            data-testid="revoke-key-cancel"
+          >
             {t('common.cancel')}
           </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={pending}>
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={pending}
+            data-testid="revoke-key-confirm"
+          >
             {pending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
             {t('api_keys.revoke_button')}
           </Button>

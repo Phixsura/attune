@@ -33,7 +33,7 @@ describe('I18nInput', () => {
     const addTagInput = tagFields[tagFields.length - 1]
     await user.type(addTagInput, 'ja')
     // The add button text is the resolved `dim.i18n.add_locale` ("添加语言").
-    await user.click(screen.getByRole('button', { name: /添加语言/ }))
+    await user.click(screen.getByTestId('i18n-input-add-locale'))
     expect(onChange).toHaveBeenLastCalledWith({ default: 'D', ja: '' })
   })
 })

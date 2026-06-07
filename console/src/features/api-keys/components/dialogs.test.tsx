@@ -6,26 +6,20 @@ import {
 } from '@/features/api-keys/components/dialogs'
 import { renderWithProviders, screen } from '@/testing/test-utils'
 
-// Sonner uses React portals + animation. Mock at module boundary so the
+// Sonner uses React portals + animation; mock at module boundary so the
 // assertion is "toast was called", not "toast DOM eventually appears".
-// This is the one carve-out from the network-boundary mock principle
-// (proposal §4-J Tier 2 / §6 Risks).
+// One documented carve-out from network-boundary mocking (proposal §4-J).
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
-// "Action buttons" — buttons we own — excludes Radix Dialog's auto-
-// rendered close button (`[data-slot="dialog-close"]`).
-const actionButtons = () =>
-  screen.getAllByRole('button').filter((b) => b.getAttribute('data-slot') !== 'dialog-close')
-
 describe('CreateKeyDialog', () => {
-  it('Create button disabled while label is empty or whitespace', async () => {
+  it('submit button disabled when label is empty or whitespace', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const { user } = renderWithProviders(
       <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
-    const submit = screen.getByRole('button', { name: '新建' })
+    const submit = screen.getByTestId('create-key-submit')
     expect(submit).toBeDisabled()
     await user.type(screen.getByRole('textbox'), '   ')
     expect(submit).toBeDisabled()
@@ -39,7 +33,7 @@ describe('CreateKeyDialog', () => {
     )
     const input = screen.getByRole('textbox') as HTMLInputElement
     await user.type(input, '  ci/automation  ')
-    await user.click(screen.getByRole('button', { name: '新建' }))
+    await user.click(screen.getByTestId('create-key-submit'))
     expect(onSubmit).toHaveBeenCalledWith('ci/automation')
     await vi.waitFor(() => expect(input.value).toBe(''))
   })
@@ -49,30 +43,29 @@ describe('CreateKeyDialog', () => {
       <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={vi.fn()} pending={true} />,
     )
     expect(screen.getByRole('textbox')).toBeDisabled()
-    for (const btn of actionButtons()) expect(btn).toBeDisabled()
+    expect(screen.getByTestId('create-key-submit')).toBeDisabled()
+    expect(screen.getByTestId('create-key-cancel')).toBeDisabled()
   })
 })
 
 describe('SecretKeyDialog', () => {
   const issued = {
-    id: 'k-1',
-    label: 'one',
-    keyPrefix: 'sk_t_',
+    key: {
+      id: 'k-1',
+      label: 'one',
+      keyPrefix: 'sk_t_',
+      isActive: true,
+      createdAt: '2026-06-07T00:00:00Z',
+    },
     secret: 'sk_t_the-secret-value',
-    createdAt: 'now',
   }
 
   it('clicking the copy icon fires navigator.clipboard.writeText(secret)', async () => {
-    // user-event v14's setup() installs its own clipboard mock that
-    // is NOT a vitest spy. Spy AFTER renderWithProviders (which calls
-    // userEvent.setup) so we wrap whatever user-event installed.
     const { user } = renderWithProviders(<SecretKeyDialog issued={issued} onClose={vi.fn()} />)
+    // user-event v14's setup() installs its own (non-vitest) clipboard mock;
+    // spy AFTER renderWithProviders to wrap whatever user-event installed.
     const writeSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
-
-    const buttons = actionButtons()
-    const copyBtn = buttons.find((b) => b.querySelector('svg') && b.textContent === '')
-    expect(copyBtn).toBeDefined()
-    if (copyBtn) await user.click(copyBtn)
+    await user.click(screen.getByTestId('secret-copy'))
     expect(writeSpy).toHaveBeenCalledWith(issued.secret)
   })
 
@@ -87,9 +80,8 @@ describe('RevokeKeyDialog', () => {
     id: 'k-1',
     label: 'one',
     keyPrefix: 'sk_p_',
-    createdAt: 'now',
-    lastUsedAt: '',
     isActive: true,
+    createdAt: '2026-06-07T00:00:00Z',
   }
 
   it('confirm calls onConfirm', async () => {
@@ -97,7 +89,7 @@ describe('RevokeKeyDialog', () => {
     const { user } = renderWithProviders(
       <RevokeKeyDialog target={target} onCancel={vi.fn()} onConfirm={onConfirm} pending={false} />,
     )
-    await user.click(screen.getByRole('button', { name: '撤销' }))
+    await user.click(screen.getByTestId('revoke-key-confirm'))
     expect(onConfirm).toHaveBeenCalledTimes(1)
   })
 
@@ -106,7 +98,7 @@ describe('RevokeKeyDialog', () => {
     const { user } = renderWithProviders(
       <RevokeKeyDialog target={target} onCancel={onCancel} onConfirm={vi.fn()} pending={false} />,
     )
-    await user.click(screen.getByRole('button', { name: '取消' }))
+    await user.click(screen.getByTestId('revoke-key-cancel'))
     expect(onCancel).toHaveBeenCalledTimes(1)
   })
 
@@ -114,6 +106,7 @@ describe('RevokeKeyDialog', () => {
     renderWithProviders(
       <RevokeKeyDialog target={target} onCancel={vi.fn()} onConfirm={vi.fn()} pending={true} />,
     )
-    for (const btn of actionButtons()) expect(btn).toBeDisabled()
+    expect(screen.getByTestId('revoke-key-confirm')).toBeDisabled()
+    expect(screen.getByTestId('revoke-key-cancel')).toBeDisabled()
   })
 })

@@ -106,7 +106,7 @@ export function DimensionsEditor({
           />
         )
       })}
-      <Button type="button" variant="outline" onClick={addDim}>
+      <Button type="button" variant="outline" onClick={addDim} data-testid="dim-editor-add-dim">
         <Plus className="h-4 w-4 mr-1" />
         {t('dim.editor.add_dim')}
       </Button>
@@ -179,6 +179,7 @@ function DimensionCard({
               onRemove()
             }}
             aria-label={t('dim.editor.delete_dim')}
+            data-testid="dim-editor-delete-dim"
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -348,6 +349,7 @@ function TaxonomyRow({
           className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
           onClick={onRemove}
           aria-label={t('dim.editor.remove_value')}
+          data-testid="dim-editor-remove-value"
         >
           <Trash2 className="h-3 w-3" />
         </Button>
