@@ -237,7 +237,7 @@ jobs:
       # TanStack Router plugin) that tsc needs — and doubles as a build smoke test.
       - run: pnpm exec vite build
       - run: pnpm tsc -b --noEmit
-      - run: pnpm vitest run --passWithNoTests
+      - run: pnpm vitest run --coverage
       # dependency-cruiser enforces architectural import boundaries (#19):
       # no cross-feature imports, shared → features → app one-way,
       # no circular deps. See console/.dependency-cruiser.cjs.
