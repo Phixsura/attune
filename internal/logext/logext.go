@@ -1,7 +1,7 @@
 // Package logext — printf-style wrappers over slog plus a small
 // JSON-AsLogParam helper.
 //
-// Why: the slog API ``slog.InfoContext(ctx, "msg", "k1", v1, "k2", v2)``
+// Why: the slog API “slog.InfoContext(ctx, "msg", "k1", v1, "k2", v2)“
 // is structured key/value, great for log aggregators but verbose when
 // a human is reading one line in `docker logs`. These wrappers accept
 // printf format + args so single-line debug output stays readable.

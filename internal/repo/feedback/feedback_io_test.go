@@ -30,7 +30,8 @@ func newPGPool(t *testing.T) (*pgxpool.Pool, func()) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	pg, err := tcpg.Run(ctx,
+	pg, err := tcpg.Run(
+		ctx,
 		"postgres:17-alpine",
 		tcpg.WithDatabase("attune"),
 		tcpg.WithUsername("attune"),
