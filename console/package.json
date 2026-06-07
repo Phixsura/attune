@@ -18,7 +18,6 @@
     "arch": "depcruise --config .dependency-cruiser.cjs src"
   },
   "dependencies": {
-    "@hookform/resolvers": "^3.10.0",
     "@tanstack/react-query": "^5.62.0",
     "@tanstack/react-router": "^1.95.0",
     "class-variance-authority": "^0.7.1",
@@ -30,11 +29,9 @@
     "radix-ui": "^1.4.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-hook-form": "^7.54.0",
     "react-i18next": "^15.4.0",
     "sonner": "^1.7.4",
-    "tailwind-merge": "^3.6.0",
-    "zod": "^4.0.0"
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
