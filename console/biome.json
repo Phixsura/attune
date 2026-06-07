@@ -57,6 +57,15 @@
       "formatter": {
         "enabled": false
       }
+    },
+    {
+      "includes": ["src/**/*.test.{ts,tsx}", "src/testing/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noExplicitAny": "off" },
+          "style": { "useImportType": "off" }
+        }
+      }
     }
   ]
 }
