@@ -8,13 +8,6 @@
 
 export const protobufPackage = "attune.v1";
 
-export enum ModuleMode {
-  MODULE_MODE_UNSPECIFIED = 0,
-  MODULE_MODE_FREEFORM = 1,
-  MODULE_MODE_CONSTRAINED = 2,
-  UNRECOGNIZED = -1,
-}
-
 export interface EnrichConfig {
   /** Tenant override; unset means "use default_prompt_template". */
   promptTemplate?:
@@ -23,7 +16,14 @@ export interface EnrichConfig {
   /** Built-in default — always returned so the console can restore it. */
   defaultPromptTemplate: string;
   modules: string[];
-  moduleMode: ModuleMode;
+  /**
+   * Derived mode: "freeform" when modules is empty, "constrained"
+   * otherwise. Returned as a `string` (not a proto enum) per the #19
+   * "domain value-sets stay string" contract — keeps the protojson wire
+   * form and the generated TS type aligned, avoids the ts-proto
+   * numeric-enum vs JSON-string mismatch.
+   */
+  moduleMode: string;
 }
 
 export interface GetEnrichConfigRequest {

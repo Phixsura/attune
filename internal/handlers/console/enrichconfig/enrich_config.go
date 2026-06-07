@@ -23,18 +23,14 @@ func NewHandler(svc *enrich.ConfigService) *Handler {
 }
 
 func toProtoConfig(v enrich.View) *attunev1.EnrichConfig {
-	mode := attunev1.ModuleMode_MODULE_MODE_UNSPECIFIED
-	switch v.ModuleMode {
-	case "constrained":
-		mode = attunev1.ModuleMode_MODULE_MODE_CONSTRAINED
-	case "freeform":
-		mode = attunev1.ModuleMode_MODULE_MODE_FREEFORM
-	}
 	return &attunev1.EnrichConfig{
 		PromptTemplate:        v.PromptTemplate,
 		DefaultPromptTemplate: enrich.DefaultPromptTemplate(),
 		Modules:               v.Modules,
-		ModuleMode:            mode,
+		// v.ModuleMode is already the canonical string ("freeform" /
+		// "constrained") produced by service.enrich.moduleMode, so no
+		// translation is needed.
+		ModuleMode: v.ModuleMode,
 	}
 }
 

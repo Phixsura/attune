@@ -535,12 +535,13 @@ components:
                     items:
                         type: string
                 moduleMode:
-                    enum:
-                        - MODULE_MODE_UNSPECIFIED
-                        - MODULE_MODE_FREEFORM
-                        - MODULE_MODE_CONSTRAINED
                     type: string
-                    format: enum
+                    description: |-
+                        Derived mode: "freeform" when modules is empty, "constrained"
+                         otherwise. Returned as a `string` (not a proto enum) per the #19
+                         "domain value-sets stay string" contract — keeps the protojson wire
+                         form and the generated TS type aligned, avoids the ts-proto
+                         numeric-enum vs JSON-string mismatch.
         Feedback:
             type: object
             properties:

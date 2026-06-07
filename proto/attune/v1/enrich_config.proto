@@ -27,19 +27,18 @@ service EnrichConfigService {
   }
 }
 
-enum ModuleMode {
-  MODULE_MODE_UNSPECIFIED = 0;
-  MODULE_MODE_FREEFORM = 1;
-  MODULE_MODE_CONSTRAINED = 2;
-}
-
 message EnrichConfig {
   // Tenant override; unset means "use default_prompt_template".
   optional string prompt_template = 1;
   // Built-in default — always returned so the console can restore it.
   string default_prompt_template = 2;
   repeated string modules = 3;
-  ModuleMode module_mode = 4;
+  // Derived mode: "freeform" when modules is empty, "constrained"
+  // otherwise. Returned as a `string` (not a proto enum) per the #19
+  // "domain value-sets stay string" contract — keeps the protojson wire
+  // form and the generated TS type aligned, avoids the ts-proto
+  // numeric-enum vs JSON-string mismatch.
+  string module_mode = 4;
 }
 
 message GetEnrichConfigRequest {}
