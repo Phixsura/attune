@@ -232,7 +232,8 @@ func TestFilterAttrs(t *testing.T) {
 
 	t.Run("keeps only on-list multi values", func(t *testing.T) {
 		kept, dropped, _ := FilterAttrs(
-			map[string]any{"labels": []string{"payment", "bogus", "ui", "payment"}}, dims)
+			map[string]any{"labels": []string{"payment", "bogus", "ui", "payment"}}, dims,
+		)
 		got, _ := kept["labels"].([]string)
 		want := []string{"payment", "ui"}
 		if len(got) != len(want) {
@@ -250,7 +251,8 @@ func TestFilterAttrs(t *testing.T) {
 
 	t.Run("freeform multi passes through dedup", func(t *testing.T) {
 		kept, dropped, _ := FilterAttrs(
-			map[string]any{"freeform_labels": []string{"x", "y", "x"}}, dims)
+			map[string]any{"freeform_labels": []string{"x", "y", "x"}}, dims,
+		)
 		got, _ := kept["freeform_labels"].([]string)
 		if len(got) != 2 || got[0] != "x" || got[1] != "y" {
 			t.Errorf("freeform should dedup but pass, got %v", got)

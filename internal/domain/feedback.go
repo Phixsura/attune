@@ -109,8 +109,8 @@ func (in IngestInput) Validate() error {
 // status is a snapshot of the operator's policy at classification.
 type Enriched struct {
 	Title     string         `json:"title"`
-	Attrs     map[string]any `json:"attrs"`      // map<dim.Name, string|[]string>
-	IsUrgent  bool           `json:"is_urgent"`  // derived; never set by the LLM
+	Attrs     map[string]any `json:"attrs"`     // map<dim.Name, string|[]string>
+	IsUrgent  bool           `json:"is_urgent"` // derived; never set by the LLM
 	Rationale string         `json:"rationale"`
 }
 

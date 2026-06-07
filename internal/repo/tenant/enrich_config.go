@@ -79,7 +79,8 @@ func (r *TenantRepo) UpdateEnrichConfig(
 	if err != nil {
 		return fmt.Errorf("marshal dimensions: %w", err)
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.pool.Exec(
+		ctx, `
 		UPDATE tenants
 		   SET enrich_prompt_template = $2,
 		       enrich_dimensions      = $3,

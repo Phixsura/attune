@@ -46,11 +46,11 @@ func NewEvaluator(r *feedback.FeedbackRepo, tenants *tenant.TenantRepo, e *enric
 // For single-kind: Match counts rows where new == old.
 // For multi-kind: SumIoU sums per-row Jaccard; average = SumIoU/Total.
 type DimScore struct {
-	Name    string                `json:"name"`
-	Kind    domain.DimensionKind  `json:"kind"`
-	Total   int                   `json:"total"`   // rows scored for this dim
-	Match   int                   `json:"match"`   // single-kind: rows where new == old
-	SumIoU  float64               `json:"sum_iou"` // multi-kind: sum of per-row Jaccard
+	Name   string               `json:"name"`
+	Kind   domain.DimensionKind `json:"kind"`
+	Total  int                  `json:"total"`   // rows scored for this dim
+	Match  int                  `json:"match"`   // single-kind: rows where new == old
+	SumIoU float64              `json:"sum_iou"` // multi-kind: sum of per-row Jaccard
 }
 
 // EvalReport is the unified shape both consistency and score-human

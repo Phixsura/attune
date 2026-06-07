@@ -43,16 +43,16 @@ func TestDimensionName_RegexBoundaries(t *testing.T) {
 		{"a1", true},
 		{"a_b", true},
 		{"a_b_c_1_2", true},
-		{strings.Repeat("a", 31), true},   // max length
-		{strings.Repeat("a", 32), false},  // over max
-		{"", false},                       // empty
-		{"A", false},                      // uppercase rejected
-		{"1abc", false},                   // digit start rejected
-		{"_abc", false},                   // underscore start rejected
-		{"a-b", false},                    // dash rejected
-		{"a.b", false},                    // dot rejected
-		{"a b", false},                    // whitespace rejected
-		{"严重", false},                     // unicode rejected
+		{strings.Repeat("a", 31), true},  // max length
+		{strings.Repeat("a", 32), false}, // over max
+		{"", false},                      // empty
+		{"A", false},                     // uppercase rejected
+		{"1abc", false},                  // digit start rejected
+		{"_abc", false},                  // underscore start rejected
+		{"a-b", false},                   // dash rejected
+		{"a.b", false},                   // dot rejected
+		{"a b", false},                   // whitespace rejected
+		{"严重", false},                    // unicode rejected
 	}
 	for _, c := range cases {
 		d := validDim(c.name, DimSingle, "x")

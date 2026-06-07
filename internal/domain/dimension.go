@@ -217,51 +217,67 @@ func FilterAttrs(produced map[string]any, dims DimensionSet) (
 		if !ok {
 			continue
 		}
-		allowedValues := taxonomyValues(d.Taxonomy)
-		freeform := len(allowedValues) == 0
 		switch d.Kind {
 		case DimSingle:
-			s, ok := v.(string)
-			if !ok || s == "" {
-				continue
+			if dropN := filterSingle(d, v, kept); dropN > 0 {
+				dropped[d.Name] += dropN
+				suggested = append(suggested, d.Name)
 			}
-			if freeform || containsString(allowedValues, s) {
-				kept[d.Name] = s
-				continue
-			}
-			dropped[d.Name]++
-			suggested = append(suggested, d.Name)
 		case DimMulti:
-			arr, ok := toStringSlice(v)
-			if !ok {
-				continue
-			}
-			if freeform {
-				kept[d.Name] = dedupeStrings(arr)
-				continue
-			}
-			outKept := make([]string, 0, len(arr))
-			outDropped := 0
-			seen := make(map[string]bool, len(arr))
-			for _, x := range arr {
-				if x == "" || seen[x] {
-					continue
-				}
-				seen[x] = true
-				if containsString(allowedValues, x) {
-					outKept = append(outKept, x)
-				} else {
-					outDropped++
-				}
-			}
-			kept[d.Name] = outKept
-			if outDropped > 0 {
-				dropped[d.Name] += outDropped
+			if dropN := filterMulti(d, v, kept); dropN > 0 {
+				dropped[d.Name] += dropN
 				suggested = append(suggested, d.Name)
 			}
 		}
 	}
 	return kept, dropped, suggested
+}
+
+// filterSingle writes the kept value for one single-kind dim into kept
+// and returns how many values were dropped (0 or 1). Off-list / wrong-
+// type / empty values are dropped; freeform single-kind keeps anything
+// non-empty.
+func filterSingle(d Dimension, v any, kept map[string]any) int {
+	s, ok := v.(string)
+	if !ok || s == "" {
+		return 0
+	}
+	allowed := taxonomyValues(d.Taxonomy)
+	if len(allowed) == 0 || containsString(allowed, s) {
+		kept[d.Name] = s
+		return 0
+	}
+	return 1
+}
+
+// filterMulti writes the kept values for one multi-kind dim into kept
+// and returns how many values were dropped (always 0 for freeform).
+func filterMulti(d Dimension, v any, kept map[string]any) int {
+	arr, ok := toStringSlice(v)
+	if !ok {
+		return 0
+	}
+	allowed := taxonomyValues(d.Taxonomy)
+	if len(allowed) == 0 {
+		kept[d.Name] = dedupeStrings(arr)
+		return 0
+	}
+	outKept := make([]string, 0, len(arr))
+	outDropped := 0
+	seen := make(map[string]bool, len(arr))
+	for _, x := range arr {
+		if x == "" || seen[x] {
+			continue
+		}
+		seen[x] = true
+		if containsString(allowed, x) {
+			outKept = append(outKept, x)
+		} else {
+			outDropped++
+		}
+	}
+	kept[d.Name] = outKept
+	return outDropped
 }
 
 // taxonomyValues extracts the Value list from a taxonomy slice.

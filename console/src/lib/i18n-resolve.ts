@@ -66,8 +66,21 @@ function buildLocaleChain(language: string): string[] {
 // (generated when `I18nString` is a message), others receive the raw
 // map (Go side serializes the map directly). Accept both shapes so
 // migrating between them doesn't require call-site changes.
+//
+// The wrapper vs raw-map check is intentionally structural: an
+// I18nString is `Record<string, string>`, which technically permits
+// `entries` as a locale key whose value is a string. The wrapper
+// distinguishes itself by having `entries` be a nested object, so we
+// gate on the runtime type before treating `m` as the wrapper.
 function unwrap(m: I18nString | { entries?: I18nString } | null | undefined): I18nString | null {
   if (!m) return null
-  if (typeof m === 'object' && 'entries' in m && m.entries) return m.entries
+  if (
+    typeof m === 'object' &&
+    'entries' in m &&
+    typeof m.entries === 'object' &&
+    m.entries !== null
+  ) {
+    return m.entries as I18nString
+  }
   return m as I18nString
 }
