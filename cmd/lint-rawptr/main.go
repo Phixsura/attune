@@ -27,7 +27,6 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"go/ast"
@@ -38,7 +37,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"sort"
 	"strings"
 )
 
@@ -105,7 +103,6 @@ type finding struct {
 
 func main() {
 	verbose := flag.Bool("v", false, "verbose: also print allowed sites")
-	fix := flag.Bool("fix", false, "rewrite files: &x → ptrext.Of(x), *p → ptrext.Indirect(p)")
 	flag.Parse()
 	paths := flag.Args()
 	if len(paths) == 0 {
@@ -120,22 +117,11 @@ func main() {
 
 	fset := token.NewFileSet()
 	var all []finding
-	fixed := 0
 	for _, f := range files {
 		fnd, err := analyzeFile(fset, f, *verbose)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, f, ":", err)
 			continue
-		}
-		if *fix && len(fnd) > 0 {
-			n, err := applyFix(f)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, f, ":", err)
-				continue
-			}
-			fixed += n
-			// re-analyze; what's left is non-mechanical
-			fnd, _ = analyzeFile(fset, f, *verbose)
 		}
 		all = append(all, fnd...)
 	}
@@ -144,13 +130,8 @@ func main() {
 		fmt.Printf("%s:%d:%d: %s — %s\n", f.Pos.Filename, f.Pos.Line, f.Pos.Column, f.Rule, f.Msg)
 	}
 
-	if *fix {
-		fmt.Fprintf(os.Stderr, "\nlint-rawptr: fixed %d site(s), %d remain\n", fixed, len(all))
-	}
 	if n := len(all); n > 0 {
-		if !*fix {
-			fmt.Fprintf(os.Stderr, "\nlint-rawptr: %d finding(s)\n", n)
-		}
+		fmt.Fprintf(os.Stderr, "\nlint-rawptr: %d finding(s)\n", n)
 		os.Exit(1)
 	}
 	fmt.Fprintln(os.Stderr, "lint-rawptr: clean")
@@ -554,282 +535,4 @@ func (a *analyzer) report(pos token.Pos, rule, msg string) {
 		Rule: rule,
 		Msg:  msg,
 	})
-}
-
-// =============================================================================
-//   -fix mode  —  AST-guided text rewriter
-// =============================================================================
-//
-// Re-parses the file and re-runs the same allowlist as the linter, but emits
-// byte-offset edit ops instead of human-readable findings. The streaming
-// applier walks the source once, applying ops in offset order — nested
-// address-of (e.g. &Outer{X: &Inner{}}) just works because each op's offset
-// is its own, no shift bookkeeping needed.
-//
-// Each flagged site contributes two ops:
-//
-//	1) at  opPos:  delete 1 byte (& or *), insert "ptrext.Of(" / "ptrext.Indirect("
-//	2) at  exprEnd: insert ")"
-//
-// Operands intentionally NOT rewritten (left for human review):
-//   - ParenExpr operands (`&(x)` / `*(x)`): the parens carry intent the tool
-//     can't read — author may have meant grouping for a downstream expression
-//   - StarExpr nested inside StarExpr (`**p`): rare, easier to hand-judge
-
-type edit struct {
-	rule    string
-	opPos   token.Pos
-	exprEnd token.Pos
-}
-
-func applyFix(path string) (int, error) {
-	src, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-	if generatedRe.Match(src) || fileAllowPat.Match(src) {
-		return 0, nil
-	}
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, src, parser.ParseComments)
-	if err != nil {
-		return 0, err
-	}
-
-	typeStars := classifyTypeStars(file)
-	allow := allowLineSet(file, fset)
-
-	c := &collector{
-		fset:      fset,
-		file:      file,
-		typeStars: typeStars,
-		allow:     allow,
-	}
-	c.walk(file, nil)
-	if len(c.edits) == 0 {
-		return 0, nil
-	}
-
-	// Build insert/delete ops, stream them in offset order.
-	type op struct {
-		off    int
-		del    int
-		text   string
-		closer bool // closers come BEFORE openers at same offset
-	}
-	var ops []op
-	for _, e := range c.edits {
-		var prefix string
-		switch e.rule {
-		case ruleAddr:
-			prefix = "ptrext.Of("
-		case ruleDeref:
-			prefix = "ptrext.Indirect("
-		default:
-			continue
-		}
-		ops = append(ops, op{
-			off:  fset.Position(e.opPos).Offset,
-			del:  1,
-			text: prefix,
-		})
-		ops = append(ops, op{
-			off:    fset.Position(e.exprEnd).Offset,
-			text:   ")",
-			closer: true,
-		})
-	}
-	sort.SliceStable(ops, func(i, j int) bool {
-		if ops[i].off != ops[j].off {
-			return ops[i].off < ops[j].off
-		}
-		return ops[i].closer && !ops[j].closer
-	})
-
-	var buf bytes.Buffer
-	srcPos := 0
-	for _, o := range ops {
-		buf.Write(src[srcPos:o.off])
-		buf.WriteString(o.text)
-		srcPos = o.off + o.del
-	}
-	buf.Write(src[srcPos:])
-	out := buf.Bytes()
-
-	out = ensurePtrextImport(out, file, fset)
-	return len(c.edits), os.WriteFile(path, out, 0o644)
-}
-
-// collector — same AST walk as analyzer, but instead of producing human-
-// readable findings it produces structured edit records.
-type collector struct {
-	fset      *token.FileSet
-	file      *ast.File
-	typeStars map[*ast.StarExpr]struct{}
-	allow     map[int]bool
-	edits     []edit
-	stack     []ast.Node
-}
-
-func (c *collector) walk(n ast.Node, parent ast.Node) {
-	if n == nil {
-		return
-	}
-	if parent != nil {
-		c.stack = append(c.stack, parent)
-		defer func() { c.stack = c.stack[:len(c.stack)-1] }()
-	}
-
-	switch x := n.(type) {
-	case *ast.StarExpr:
-		if _, isType := c.typeStars[x]; !isType {
-			if !c.isAssignLHS(x) {
-				if !c.allow[c.fset.Position(x.Star).Line] {
-					if c.isRewritableDeref(x.X) {
-						c.edits = append(c.edits, edit{
-							rule:    ruleDeref,
-							opPos:   x.Star,
-							exprEnd: x.X.End(),
-						})
-					}
-				}
-			}
-		}
-	case *ast.UnaryExpr:
-		if x.Op == token.AND {
-			if _, ok := x.X.(*ast.IndexExpr); !ok {
-				if !c.isOutParamArg(x) {
-					if !c.allow[c.fset.Position(x.OpPos).Line] {
-						if c.isRewritableOperand(x.X) {
-							c.edits = append(c.edits, edit{
-								rule:    ruleAddr,
-								opPos:   x.OpPos,
-								exprEnd: x.X.End(),
-							})
-						}
-					}
-				}
-			}
-		}
-	}
-
-	ast.Inspect(n, func(child ast.Node) bool {
-		if child == nil || child == n {
-			return child != nil
-		}
-		c.walk(child, n)
-		return false
-	})
-}
-
-// isRewritableOperand — the autofix is conservative on purpose. It only
-// rewrites operands whose value is FRESH (newly constructed) at the &/* site
-// — composite literals and call results. Wrapping &Ident or &SelectorExpr is
-// unsafe whenever the named variable carries IDENTITY (sync.Mutex,
-// strings.Builder, bytes.Buffer accumulating writes, or any local passed to
-// a function that writes back through the pointer) — collapse to a copy and
-// the value semantics break in subtle ways. The lint still flags those
-// sites; the human picks ptrext.Of vs // ptrext:allow.
-//
-// rule-deref operands are always rewrite-safe (rvalue *p is a copy either
-// way — Indirect just adds nil-safety).
-func (c *collector) isRewritableOperand(e ast.Expr) bool {
-	switch e.(type) {
-	case *ast.CompositeLit, *ast.CallExpr:
-		return true
-	}
-	return false
-}
-
-// isRewritableDeref — broader allow list for *p rvalue (no identity concern,
-// just a value read; nil-safety is a strict win).
-func (c *collector) isRewritableDeref(e ast.Expr) bool {
-	switch e.(type) {
-	case *ast.Ident,
-		*ast.SelectorExpr,
-		*ast.CompositeLit,
-		*ast.CallExpr,
-		*ast.IndexExpr,
-		*ast.IndexListExpr,
-		*ast.TypeAssertExpr:
-		return true
-	}
-	return false
-}
-
-func (c *collector) isAssignLHS(star *ast.StarExpr) bool {
-	if len(c.stack) == 0 {
-		return false
-	}
-	parent := c.stack[len(c.stack)-1]
-	as, ok := parent.(*ast.AssignStmt)
-	if !ok {
-		return false
-	}
-	for _, l := range as.Lhs {
-		if l == star {
-			return true
-		}
-	}
-	return false
-}
-
-func (c *collector) isOutParamArg(amp *ast.UnaryExpr) bool {
-	if len(c.stack) == 0 {
-		return false
-	}
-	parent := c.stack[len(c.stack)-1]
-	call, ok := parent.(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	inArgs := false
-	for _, arg := range call.Args {
-		if arg == amp {
-			inArgs = true
-			break
-		}
-	}
-	if !inArgs {
-		return false
-	}
-	name := calleeName(call.Fun)
-	_, ok = outParamMethods[name]
-	return ok
-}
-
-// ensurePtrextImport — append the ptrext import to the first import block
-// found if it's not already present.
-func ensurePtrextImport(src []byte, file *ast.File, fset *token.FileSet) []byte {
-	const importPath = `"github.com/Phixsura/attune/internal/pkg/ptrext"`
-	if bytes.Contains(src, []byte(importPath)) {
-		return src
-	}
-	for _, decl := range file.Decls {
-		gd, ok := decl.(*ast.GenDecl)
-		if !ok || gd.Tok != token.IMPORT {
-			continue
-		}
-		if !gd.Lparen.IsValid() {
-			// single-import: `import "x"` — expand to a block
-			off := fset.Position(gd.Pos()).Offset
-			endOff := fset.Position(gd.End()).Offset
-			existing := string(src[off:endOff])
-			rest := strings.TrimPrefix(existing, "import ")
-			replacement := "import (\n\t" + rest + "\n\n\t" + importPath + "\n)"
-			out := make([]byte, 0, len(src)+len(replacement)-len(existing))
-			out = append(out, src[:off]...)
-			out = append(out, replacement...)
-			out = append(out, src[endOff:]...)
-			return out
-		}
-		rparenOff := fset.Position(gd.Rparen).Offset
-		ins := "\t" + importPath + "\n"
-		out := make([]byte, 0, len(src)+len(ins))
-		out = append(out, src[:rparenOff]...)
-		out = append(out, ins...)
-		out = append(out, src[rparenOff:]...)
-		return out
-	}
-	return src
 }

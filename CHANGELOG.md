@@ -90,11 +90,11 @@ authored — wire-stable, never auto-renamed.
   Per-line `// ptrext:allow <reason>` and per-file `// ptrext:file-allow
   <reason>` escape hatches cover identity-bearing values (sync.Mutex
   in proto messages, strings.Builder accumulators, out-parameter capture
-  fixtures) where wrapping would break correctness. The same binary
-  ships a `-fix` mode that text-rewrites the safe cases (`&CompositeLit{…}`
-  → `ptrext.Of(CompositeLit{…})`; `*p` → `ptrext.Indirect(p)`) and adds
-  the ptrext import; the in-tree sweep applied 178 mechanical rewrites
-  and 30+ hand fixes across 92 files. See CLAUDE.md §7b for the policy.
+  fixtures) where wrapping would break correctness. The in-tree sweep
+  rewrote 261 sites across 92 files. See CLAUDE.md §7b for the policy.
+  (A one-shot `-fix` AST rewriter assisted the initial sweep; it lived
+  briefly in commit 44d4545 and was removed once the tree was clean —
+  cherry-pick it from there if a future mass migration needs it.)
 
 - **`internal/pkg/` umbrella for stdlib-extension packages.** `logext` moves
   here (was `internal/logext`); new sibling `ptrext` ships small generic
