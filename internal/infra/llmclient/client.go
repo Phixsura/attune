@@ -7,16 +7,16 @@
 //
 // Four backends implement LLMClient (#10):
 //
-//   - openai_compat.go  — POST /v1/chat/completions over hand-rolled HTTP;
-//     covers OpenAI / Azure OpenAI / vLLM / ollama / oneapi / any
-//     OpenAI-compatible endpoint, with optional response_format json_schema
-//     for structured output.
-//   - openai_responses.go — github.com/openai/openai-go/v3 /v1/responses,
-//     text.format json_schema.
-//   - anthropic.go      — github.com/anthropics/anthropic-sdk-go
-//     /v1/messages with forced tool_use for structured output.
-//   - gemini.go         — google.golang.org/genai generateContent with
-//     responseSchema + responseMimeType="application/json".
+// - openai_compat.go — POST /v1/chat/completions over hand-rolled HTTP;
+// covers OpenAI / Azure OpenAI / vLLM / ollama / oneapi / any
+// OpenAI-compatible endpoint, with optional response_format json_schema
+// for structured output.
+// - openai_responses.go — github.com/openai/openai-go/v3 /v1/responses,
+// text.format json_schema.
+// - anthropic.go — github.com/anthropics/anthropic-sdk-go
+// /v1/messages with forced tool_use for structured output.
+// - gemini.go — google.golang.org/genai generateContent with
+// responseSchema + responseMimeType="application/json".
 //
 // Backend selection is wired by cmd/attune (config llm_protocol).
 // Users can plug their own backend by implementing LLMClient and

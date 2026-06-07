@@ -17,10 +17,10 @@ import (
 
 // runDigest dispatches `attune digest <subcmd>`.
 //
-//	attune digest run --tenant <slug>   Send one digest right now to
-//	                                     the tenant's first lark-bot.
-//	                                     Used for prod smoke + manual
-//	                                     catch-up when scheduler missed.
+//	attune digest run --tenant <slug> Send one digest right now to
+//	 the tenant's first lark-bot.
+//	 Used for prod smoke + manual
+//	 catch-up when scheduler missed.
 //
 // Bypasses the cutoff (last_digest_sent_at < cutoff) — always sends.
 // Updates last_digest_sent_at on success exactly like the scheduler,

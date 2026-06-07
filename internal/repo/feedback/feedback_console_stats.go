@@ -28,10 +28,10 @@ func (r *FeedbackRepo) UsageByDay(
 	rows, err := r.pool.Query(
 		ctx, `
 		SELECT date_trunc('day', created_at) AS bucket, COUNT(*)
-		  FROM user_feedback
+		 FROM user_feedback
 		 WHERE tenant_id = $1
-		   AND created_at >= $2
-		   AND created_at < $3
+		 AND created_at >= $2
+		 AND created_at < $3
 		 GROUP BY bucket
 		 ORDER BY bucket ASC`,
 		tenantID, from, to,
@@ -72,22 +72,22 @@ func (r *FeedbackRepo) TopValuesByDim(
 	if multi {
 		sql = `
 		SELECT v::text AS val, COUNT(*) AS c
-		  FROM user_feedback,
-		       jsonb_array_elements_text(COALESCE(enriched_attrs -> $4, '[]'::jsonb)) AS v
+		 FROM user_feedback,
+		 jsonb_array_elements_text(COALESCE(enriched_attrs -> $4, '[]'::jsonb)) AS v
 		 WHERE tenant_id = $1
-		   AND created_at >= $2
-		   AND created_at <  $3
+		 AND created_at >= $2
+		 AND created_at < $3
 		 GROUP BY val
 		 ORDER BY c DESC
 		 LIMIT $5`
 	} else {
 		sql = `
 		SELECT (enriched_attrs ->> $4) AS val, COUNT(*) AS c
-		  FROM user_feedback
+		 FROM user_feedback
 		 WHERE tenant_id = $1
-		   AND created_at >= $2
-		   AND created_at <  $3
-		   AND enriched_attrs ? $4
+		 AND created_at >= $2
+		 AND created_at < $3
+		 AND enriched_attrs ? $4
 		 GROUP BY val
 		 ORDER BY c DESC
 		 LIMIT $5`
@@ -118,11 +118,11 @@ func (r *FeedbackRepo) UrgentCount(
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT COUNT(*)
-		  FROM user_feedback
+		 FROM user_feedback
 		 WHERE tenant_id = $1
-		   AND created_at >= $2
-		   AND created_at < $3
-		   AND is_urgent = TRUE`,
+		 AND created_at >= $2
+		 AND created_at < $3
+		 AND is_urgent = TRUE`,
 		tenantID, from, to,
 	).Scan(&n)
 	if err != nil {

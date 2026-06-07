@@ -13,8 +13,8 @@ import (
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
-// TenantRepo wraps the tenants table. Wave 1 only needs slug → id
-// resolution at startup; Wave 2 will grow this with OAuth-install
+// TenantRepo wraps the tenants table. earlier wiring only needs slug → id
+// resolution at startup; a follow-up will grow this with OAuth-install
 // rows and per-tenant notify config.
 type TenantRepo struct {
 	pool *pgxpool.Pool
@@ -101,7 +101,7 @@ func (r *TenantRepo) GetByID(ctx context.Context, id string) (*Tenant, error) {
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT id, slug, name, lark_tenant_key, locale, timezone, is_active
-		  FROM tenants
+		 FROM tenants
 		 WHERE id = $1`, id,
 	).Scan(&t.ID, &t.Slug, &t.Name, &t.LarkTenantKey, &t.Locale, &t.Timezone, &t.IsActive)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -192,9 +192,9 @@ func (r *TenantRepo) TenantsNeedingDigest(
 	rows, err := r.pool.Query(
 		ctx, `
 		SELECT id, slug, name, timezone
-		  FROM tenants
+		 FROM tenants
 		 WHERE is_active = TRUE
-		   AND (last_digest_sent_at IS NULL OR last_digest_sent_at < $1)
+		 AND (last_digest_sent_at IS NULL OR last_digest_sent_at < $1)
 		 ORDER BY COALESCE(last_digest_sent_at, '0001-01-01') ASC`,
 		cutoff,
 	)

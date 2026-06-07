@@ -56,9 +56,9 @@ func runServer() error {
 	//
 	// attune is a customer-facing service (private-deploy / SaaS), so
 	// OTel stays non-invasive:
-	//   - clients may pass a W3C traceparent header; if absent we generate one
-	//   - the X-Trace-Id response header is an optional debug aid, not contract
-	//   - business logs carry trace_id for operators; clients don't see it
+	// - clients may pass a W3C traceparent header; if absent we generate one
+	// - the X-Trace-Id response header is an optional debug aid, not contract
+	// - business logs carry trace_id for operators; clients don't see it
 	otelShutdown, err := setupTracing(ctx)
 	if err != nil {
 		return fmt.Errorf("otel init: %w", err)
@@ -109,7 +109,7 @@ func runServer() error {
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
 
-	// Phase 5 M6 weekly digest scheduler. Ticks every 30 min; scans
+	// weekly digest weekly digest scheduler. Ticks every 30 min; scans
 	// tenants whose last_digest_sent_at < now-6d AND has at least one
 	// active lark-bot; composes 7-day summary + sends via SendAlert.
 	go outbox.NewDigestService(tenantRepo, feedbackRepo, notifyTargetRepo).Run(ctx)

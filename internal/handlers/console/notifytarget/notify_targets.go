@@ -119,7 +119,7 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusBadRequest, "validation", err.Error())
 		return
 	}
-	// Phase 1 only ships lark-bot + raw-webhook adapters.
+	// Today only ships lark-bot + raw-webhook adapters.
 	if nreq.DestinationType == notifytarget.DestSlackBot || nreq.DestinationType == notifytarget.DestEmail {
 		logext.Warnf(ctx, "[%s] reject: not implemented,tenant_id:%s,dest:%s",
 			where, auth.TenantID, nreq.DestinationType)

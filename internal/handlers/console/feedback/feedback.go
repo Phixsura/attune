@@ -83,10 +83,10 @@ func toProtoFeedback(row feedback.ConsoleListRow) *attunev1.Feedback {
 // List handles GET /fb/v1/console/feedback.
 //
 // Query params:
-//   - cursor / limit / q / urgent: standard pagination + free-text + urgent toggle
-//   - any dim name (e.g. `?severity=critical&labels=payment`): per-dim
-//     containment filter. Repeated params build multiple filters
-//     AND-composed via JSONB `@>`.
+// - cursor / limit / q / urgent: standard pagination + free-text + urgent toggle
+// - any dim name (e.g. `?severity=critical&labels=payment`): per-dim
+// containment filter. Repeated params build multiple filters
+// AND-composed via JSONB `@>`.
 func (h *FeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 	const where = "console.FeedbackHandler.List"
 	ctx := r.Context()

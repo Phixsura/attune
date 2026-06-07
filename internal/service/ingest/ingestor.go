@@ -86,9 +86,9 @@ func composeUserID(keyID uuid.UUID, sourceUser string) string {
 // poller will pick it up on the next tick.
 func (i *Ingestor) fireEnrich(inboundCtx context.Context, id int64, traceID string) {
 	// Detach the OTel SpanContext onto a fresh bounded ctx:
-	//   - the new ctx survives the inbound HTTP request closing (60s timeout);
-	//   - the OTel SpanContext rides along, keeping trace_id stitched;
-	//   - the inbound business trace_id (Lark / customer) is propagated via trace.WithID.
+	// - the new ctx survives the inbound HTTP request closing (60s timeout);
+	// - the OTel SpanContext rides along, keeping trace_id stitched;
+	// - the inbound business trace_id (Lark / customer) is propagated via trace.WithID.
 	span := oteltrace.SpanFromContext(inboundCtx)
 	ctx, cancel := context.WithTimeout(
 		oteltrace.ContextWithSpanContext(context.Background(), span.SpanContext()),

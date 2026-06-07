@@ -1,8 +1,8 @@
 // Package database runs attune's own schema migrations against its
-// dedicated PostgreSQL database (`attune` on Aliyun RDS as of Wave 1.2).
+// dedicated PostgreSQL database .
 //
-// History: pre-Wave 1.2 attune shared the main backend's PG and migrations
-// 001..003 were no-op + ALTER-style increments. Wave 1.2 split attune to
+// History: pre- attune shared the main backend's PG and migrations
+// 001..003 were no-op + ALTER-style increments. the 2026-Q2 split moved attune to
 // its own DB; migration 001 was rewritten to build the full schema from
 // scratch (tenants / user_feedback / external_api_keys). 002..005 are
 // kept verbatim and remain idempotent (IF NOT EXISTS / IF EXISTS), so a
@@ -38,8 +38,8 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	logext.Infof(ctx, "[%s] start", where)
 	if _, err := pool.Exec(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
-			version    INT         PRIMARY KEY,
-			filename   TEXT        NOT NULL,
+			version INT PRIMARY KEY,
+			filename TEXT NOT NULL,
 			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`, trackerTable)); err != nil {
 		logext.Errorf(ctx, "[%s] create tracker failed,err:%+v", where, err.Error())

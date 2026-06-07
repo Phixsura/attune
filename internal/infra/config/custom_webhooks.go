@@ -14,12 +14,12 @@ import (
 // running service reads from the DB after that, so this struct is only
 // touched at boot.
 type CustomWebhookDest struct {
-	TenantSlug     string `yaml:"tenant_slug"     json:"tenant_slug"`
-	Audience       string `yaml:"audience"        json:"audience"` // pool / radar / all (default pool)
-	URL            string `yaml:"url"             json:"url"`
-	Secret         string `yaml:"secret"          json:"secret"`
+	TenantSlug     string `yaml:"tenant_slug" json:"tenant_slug"`
+	Audience       string `yaml:"audience" json:"audience"` // pool / radar / all (default pool)
+	URL            string `yaml:"url" json:"url"`
+	Secret         string `yaml:"secret" json:"secret"`
 	TimeoutSeconds int    `yaml:"timeout_seconds" json:"timeout_seconds"` // 0 → default 10
-	Disabled       bool   `yaml:"disabled"        json:"disabled"`
+	Disabled       bool   `yaml:"disabled" json:"disabled"`
 }
 
 // validateCustomWebhooks enforces the contract documented in

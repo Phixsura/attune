@@ -25,13 +25,13 @@ const openaiHTTPTimeout = 60 * time.Second
 // hand-rolled net/http. One transport covers every wire-compatible
 // endpoint:
 //
-//   - OpenAI:        https://api.openai.com
-//   - Azure OpenAI:  https://<resource>.openai.azure.com/openai/deployments/<dep>
-//     (the deployment-style path / api-version query is left to a
-//     reverse-proxy — not the backend's responsibility)
-//   - vLLM:          http://localhost:8000
-//   - ollama:        http://localhost:11434
-//   - oneapi:        http://your-oneapi-host:3000
+// - OpenAI: https://api.openai.com
+// - Azure OpenAI: https://<resource>.openai.azure.com/openai/deployments/<dep>
+// (the deployment-style path / api-version query is left to a
+// reverse-proxy — not the backend's responsibility)
+// - vLLM: http://localhost:8000
+// - ollama: http://localhost:11434
+// - oneapi: http://your-oneapi-host:3000
 //
 // Structured output is requested via response_format json_schema (#10).
 // Backends never feature-detect — the post-parse modules whitelist

@@ -14,18 +14,18 @@ import (
 
 // Transport is the common outbound POST mechanism shared by every
 // notify destination (Lark group webhook today; raw HTTPS webhook in
-// Wave 1.2; future Slack / Discord / Linear adapters).
+// ; future Slack / Discord / Linear adapters).
 //
 // Each destination provides two callbacks to Send:
 //
-//   - RequestBuilder constructs a fresh *http.Request for one attempt.
-//     Called once per retry — implementations whose signature includes
-//     a timestamp must regenerate it here so each attempt carries a
-//     fresh, in-window signature.
+// - RequestBuilder constructs a fresh *http.Request for one attempt.
+// Called once per retry — implementations whose signature includes
+// a timestamp must regenerate it here so each attempt carries a
+// fresh, in-window signature.
 //
-//   - ResponseChecker maps an HTTP response to nil (success), a
-//     retry-worthy error (transport will back off and retry), or
-//     ErrTerminal (transport stops immediately).
+// - ResponseChecker maps an HTTP response to nil (success), a
+// retry-worthy error (transport will back off and retry), or
+// ErrTerminal (transport stops immediately).
 //
 // This split keeps protocol details (Lark's body-embedded signature,
 // raw webhook's header signature, payload validation, in-band error

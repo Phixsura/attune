@@ -5,7 +5,7 @@
 //
 //	20260515193045a1b2c3d40005f3e7a8
 //	└──yyyyMMddHHmmss──┘└────18-char random suffix────┘
-//	  timestamp (UTC, 14 hex chars = 7 bytes)
+//	 timestamp (UTC, 14 hex chars = 7 bytes)
 //
 // Support staff can read the timestamp off a trace_id by eye, then
 // pivot to the trace backend by exact id or time window.

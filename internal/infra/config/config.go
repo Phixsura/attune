@@ -25,12 +25,12 @@ type Config struct {
 	EnricherBatch    int           `yaml:"enricher_batch"`
 
 	// LLM protocol selects which backend wire format to speak (#10):
-	//   "openai-compat"     (default) — OpenAI Chat Completions wire;
-	//                       covers OpenAI / Azure / vLLM / ollama / oneapi.
-	//   "openai-responses"  — OpenAI Responses API (/v1/responses).
-	//   "anthropic"         — Anthropic Messages (/v1/messages) with
-	//                       forced tool-use for structured output.
-	//   "gemini"            — Google generative-language.
+	// "openai-compat" (default) — OpenAI Chat Completions wire;
+	// covers OpenAI / Azure / vLLM / ollama / oneapi.
+	// "openai-responses" — OpenAI Responses API (/v1/responses).
+	// "anthropic" — Anthropic Messages (/v1/messages) with
+	// forced tool-use for structured output.
+	// "gemini" — Google generative-language.
 	//
 	// LLMOpenAIBaseURL / LLMOpenAIAPIKey are reused across protocols as
 	// "the LLM endpoint URL / bearer key" — the field name is historical
@@ -70,9 +70,9 @@ type Config struct {
 	ConsoleBaseURL    string `yaml:"console_base_url"`
 
 	// Per-tenant token-bucket rate limit guarding ingest.
-	//   RateLimitPerMinute  sustained req/min (default 60)
-	//   RateLimitBurst      bucket capacity (default 300)
-	//   RateLimitDisabled   true → bypass everything (test/migration only)
+	// RateLimitPerMinute sustained req/min (default 60)
+	// RateLimitBurst bucket capacity (default 300)
+	// RateLimitDisabled true → bypass everything (test/migration only)
 	RateLimitPerMinute int  `yaml:"rate_limit_per_minute"`
 	RateLimitBurst     int  `yaml:"rate_limit_burst"`
 	RateLimitDisabled  bool `yaml:"rate_limit_disabled"`

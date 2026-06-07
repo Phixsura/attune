@@ -25,12 +25,12 @@ func (r *NotifyTargetRepo) TouchFailure(
 	_, err := r.pool.Exec(
 		ctx, `
 		UPDATE tenant_notify_targets
-		   SET last_failure_at = NOW(),
-		       last_error = $5
+		 SET last_failure_at = NOW(),
+		 last_error = $5
 		 WHERE tenant_id = $1
-		   AND destination_type = $2
-		   AND url = $3
-		   AND audience = $4`,
+		 AND destination_type = $2
+		 AND url = $3
+		 AND audience = $4`,
 		tenantID, destType, url, audience, pgxutil.Truncate(errMsg, 1000),
 	)
 	if err != nil {
@@ -47,12 +47,12 @@ func (r *NotifyTargetRepo) ClearFailure(
 	_, err := r.pool.Exec(
 		ctx, `
 		UPDATE tenant_notify_targets
-		   SET last_failure_at = NULL, last_error = ''
+		 SET last_failure_at = NULL, last_error = ''
 		 WHERE tenant_id = $1
-		   AND destination_type = $2
-		   AND url = $3
-		   AND audience = $4
-		   AND last_failure_at IS NOT NULL`,
+		 AND destination_type = $2
+		 AND url = $3
+		 AND audience = $4
+		 AND last_failure_at IS NOT NULL`,
 		tenantID, destType, url, audience,
 	)
 	if err != nil {
@@ -69,11 +69,11 @@ func (r *NotifyTargetRepo) ListLarkBots(
 ) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       last_failure_at, last_error
-		  FROM tenant_notify_targets
+		 last_failure_at, last_error
+		 FROM tenant_notify_targets
 		 WHERE tenant_id = $1
-		   AND destination_type = $2
-		   AND disabled = FALSE`, tenantID, DestLarkBot)
+		 AND destination_type = $2
+		 AND disabled = FALSE`, tenantID, DestLarkBot)
 	if err != nil {
 		return nil, fmt.Errorf("list lark bots: %w", err)
 	}

@@ -14,12 +14,12 @@
 //
 //	const where = "notify.PushToTarget"
 //	logext.Warnf(ctx, "[%s] push failed,target_id:%s,err:%+v",
-//	    where, target.ID, err.Error())
+//	 where, target.ID, err.Error())
 //
 // For struct payloads in a log line, use AsLogParam:
 //
 //	logext.Infof(ctx, "[%s] req:%s,resp:%s", where,
-//	    logext.AsLogParam(req), logext.AsLogParam(resp))
+//	 logext.AsLogParam(req), logext.AsLogParam(resp))
 package logext
 
 import (
@@ -55,9 +55,9 @@ func Errorf(ctx context.Context, format string, args ...any) {
 // in the log path outweighs strict error propagation.
 //
 // Versus fmt's %+v:
-//   - %+v: Go reflect dump; emits unexported fields and is verbose.
-//   - AsLogParam: JSON, exported fields only, honours `json:` tags
-//     (proto-generated types render cleanly).
+// - %+v: Go reflect dump; emits unexported fields and is verbose.
+// - AsLogParam: JSON, exported fields only, honours `json:` tags
+// (proto-generated types render cleanly).
 func AsLogParam(v any) string {
 	if v == nil {
 		return "null"

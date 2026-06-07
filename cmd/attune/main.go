@@ -1,7 +1,7 @@
 // attune is the public-facing ingest service for AI-classified user
 // feedback (operationally still deployed as "feedback-api"). Subcommands:
 //
-//	attune server                     # run the HTTP server (default)
+//	attune server # run the HTTP server (default)
 //	attune keys issue --tenant <slug> # mint a new external API key
 //
 // main.go is the CLI entrypoint: it installs the slog handler and dispatches
@@ -77,12 +77,12 @@ func printUsage() {
 	fmt.Fprint(os.Stderr, `attune
 
 Usage:
-  attune server                                       Run the HTTP server (default)
-  attune tenant create --slug <s> [--name <n>]        Create a new tenant
-  attune keys issue --tenant <slug> [--label <s>]     Mint an API key
-  attune eval --mode <m> [--tenant <slug>] ...        AI accuracy report (--tenant required for export-for-human / score-human)
-  attune outbox prune --older-than <dur>              Mark stale pending rows dead
-  attune digest run --tenant <slug>                   Send weekly digest now (smoke)
+ attune server Run the HTTP server (default)
+ attune tenant create --slug <s> [--name <n>] Create a new tenant
+ attune keys issue --tenant <slug> [--label <s>] Mint an API key
+ attune eval --mode <m> [--tenant <slug>] ... AI accuracy report (--tenant required for export-for-human / score-human)
+ attune outbox prune --older-than <dur> Mark stale pending rows dead
+ attune digest run --tenant <slug> Send weekly digest now (smoke)
 `)
 }
 
@@ -129,9 +129,9 @@ func runKeys(args []string) error {
 	}
 	fmt.Printf(`API key issued for tenant %s (%s):
 
-  key:    %s
-  label:  %s
-  id:     %s
+ key: %s
+ label: %s
+ id: %s
 
 Store this key now — it is not recoverable.
 `, *tenantSlug, tenantID, raw, *label, keyID)

@@ -20,9 +20,9 @@ import (
 
 // Evaluator runs the `attune eval` subcommand's three modes:
 //
-//	consistency        re-run LLM on N historical rows, compare new vs old
-//	export-for-human   dump N rows to CSV for offline human labeling
-//	score-human        read labeled CSV, score AI predictions
+//	consistency re-run LLM on N historical rows, compare new vs old
+//	export-for-human dump N rows to CSV for offline human labeling
+//	score-human read labeled CSV, score AI predictions
 //
 // All three answer the gate question "is the AI accurate enough?" —
 // consistency is the cheap automated check; score-human is the
@@ -405,7 +405,7 @@ func hasAnyHuman(rec []string, idx map[string]int, dims domain.DimensionSet) boo
 
 // FormatJSON renders a report as pretty JSON for the CLI output.
 func (r *EvalReport) FormatJSON() ([]byte, error) {
-	return json.MarshalIndent(r, "", "  ")
+	return json.MarshalIndent(r, "", " ")
 }
 
 // sortMismatches orders by feedback ID for stable output.

@@ -11,7 +11,7 @@ import (
 // buildCard renders fb into a Lark interactive card payload. The schema
 // follows Lark Open Platform card v2: title bar + content elements + an
 // action row pointing to whatever URL we want PMs/devs to click into
-// (Wave 1 has none yet, so the action is omitted).
+// (earlier wiring has none yet, so the action is omitted).
 //
 // Post-flat-labels (#10): header color is driven by IsUrgent (red when
 // urgent, blue otherwise) — no more P0/P1/P2/P3 palette. The field row

@@ -63,10 +63,10 @@ func (r *APIKeyRepo) LookupByHash(ctx context.Context, hash []byte) (*APIKeyRow,
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT id, tenant_id, key_hash
-		  FROM external_api_keys
+		 FROM external_api_keys
 		 WHERE key_hash = $1
-		   AND is_active = TRUE
-		   AND revoked_at IS NULL`,
+		 AND is_active = TRUE
+		 AND revoked_at IS NULL`,
 		hash,
 	).Scan(&row.ID, &row.TenantID, &row.StoredHash)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -109,7 +109,7 @@ func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]APIKe
 	rows, err := r.pool.Query(
 		ctx, `
 		SELECT id, key_prefix, label, is_active, created_at, last_used_at, revoked_at
-		  FROM external_api_keys
+		 FROM external_api_keys
 		 WHERE tenant_id = $1
 		 ORDER BY created_at DESC`,
 		tenantID,
@@ -143,8 +143,8 @@ func (r *APIKeyRepo) Revoke(ctx context.Context, tenantID string, id uuid.UUID) 
 	tag, err := r.pool.Exec(
 		ctx, `
 		UPDATE external_api_keys
-		   SET revoked_at = COALESCE(revoked_at, NOW()),
-		       is_active  = FALSE
+		 SET revoked_at = COALESCE(revoked_at, NOW()),
+		 is_active = FALSE
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
 	)

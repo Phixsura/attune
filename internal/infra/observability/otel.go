@@ -1,12 +1,12 @@
 // Package observability initializes OpenTelemetry tracing for the backend.
 //
 // Design (see docs/observability-trace-design.md):
-//   - OTel is infrastructure — decoupled from the notion of a business user.
-//   - Resource holds service-level constants only (service.name /
-//     service.version / deployment.environment); never user.id / tenant.id.
-//   - The auth middleware attaches user identity per span via
-//     SetAttributes, not via the resource.
-//   - InitTracer runs once at startup; it is unrelated to login state.
+// - OTel is infrastructure — decoupled from the notion of a business user.
+// - Resource holds service-level constants only (service.name /
+// service.version / deployment.environment); never user.id / tenant.id.
+// - The auth middleware attaches user identity per span via
+// SetAttributes, not via the resource.
+// - InitTracer runs once at startup; it is unrelated to login state.
 //
 // An empty OTLP endpoint is supported: the tracer reduces to a no-op
 // and the service still runs. Local dev gets trace_ids in logs (slog

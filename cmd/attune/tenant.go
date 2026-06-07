@@ -12,8 +12,8 @@ import (
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
-// runTenant dispatches `attune tenant <verb>` subcommands. Wave 1.2
-// only exposes `create`; Wave 2 control plane will add `list / activate /
+// runTenant dispatches `attune tenant <verb>` subcommands.
+// only exposes `create`; a follow-up control plane will add `list / activate /
 // deactivate / set-lark-key` once the OAuth flow lands.
 func runTenant(args []string) error {
 	if len(args) == 0 {
@@ -64,12 +64,12 @@ func runTenantCreate(args []string) error {
 	}
 	fmt.Printf(`Tenant created:
 
-  slug: %s
-  name: %s
-  id:   %s
+ slug: %s
+ name: %s
+ id: %s
 
 Next:
-  attune keys issue --tenant %s [--label <label>]
+ attune keys issue --tenant %s [--label <label>]
 `, *slug, *name, id, *slug)
 	return nil
 }

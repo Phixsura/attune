@@ -92,13 +92,13 @@ func (r *FeedbackRepo) ListForConsole(
 	}
 	sql := `
 		SELECT id, content, source, type, user_id, page_url,
-		       COALESCE(enriched_title, ''),
-		       COALESCE(enriched_attrs, '{}'::jsonb),
-		       is_urgent,
-		       enrichment_status,
-		       created_at
-		  FROM user_feedback
-		  ` + where + `
+		 COALESCE(enriched_title, ''),
+		 COALESCE(enriched_attrs, '{}'::jsonb),
+		 is_urgent,
+		 enrichment_status,
+		 created_at
+		 FROM user_feedback
+		 ` + where + `
 		 ORDER BY id DESC
 		 LIMIT ` + addArg(opts.Limit)
 	rows, err := r.pool.Query(ctx, sql, args...)
@@ -159,15 +159,15 @@ func (r *FeedbackRepo) GetForConsole(
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT id, content, source, type, user_id, page_url,
-		       COALESCE(enriched_title, ''),
-		       COALESCE(enriched_attrs, '{}'::jsonb),
-		       is_urgent,
-		       enrichment_status, created_at,
-		       source_meta, attachments,
-		       COALESCE(enrichment_error, ''),
-		       enriched_at,
-		       COALESCE(enriched_rationale, '')
-		  FROM user_feedback
+		 COALESCE(enriched_title, ''),
+		 COALESCE(enriched_attrs, '{}'::jsonb),
+		 is_urgent,
+		 enrichment_status, created_at,
+		 source_meta, attachments,
+		 COALESCE(enrichment_error, ''),
+		 enriched_at,
+		 COALESCE(enriched_rationale, '')
+		 FROM user_feedback
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
 	).Scan(

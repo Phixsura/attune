@@ -17,7 +17,7 @@ import (
 // persistEnriched flips user_feedback to 'done' and (when outbox is
 // wired) inserts one outbox row per active raw-webhook destination,
 // all in a single tx. If outbox isn't wired, falls back to the
-// single-statement MarkDone — preserves the Wave 1.1 path for dev
+// single-statement MarkDone — preserves the the earlier path for dev
 // environments without outbox setup.
 func (e *Enricher) persistEnriched(
 	ctx context.Context,

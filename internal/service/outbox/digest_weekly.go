@@ -1,4 +1,4 @@
-// Package service · weekly digest sender (Phase 5 M6).
+// Package service · weekly digest sender (weekly digest).
 //
 // Composes a 7-day summary per tenant and pushes it to the tenant's
 // active lark-bot via the same notify.SendAlert envelope used for
@@ -6,14 +6,14 @@
 // or pod move doesn't re-send.
 //
 // Design choices (YAGNI):
-//   - Scheduler tick = 30 min. Within each tick: scan tenants whose
-//     last_digest_sent_at < now-6d, send to their first active lark-bot.
-//     "At least once a week" with up to ~30 min jitter — acceptable.
-//   - No per-tenant opt-out flag. Delete or disable the lark-bot to
-//     mute. Wave 3 can add a column when a customer asks.
-//   - UTC week boundary, ignores tenants.timezone. Acceptable until
-//     billing-grade accuracy.
-//   - Empty week → skip send (silent week is less noise than a "0 rows" digest).
+// - Scheduler tick = 30 min. Within each tick: scan tenants whose
+// last_digest_sent_at < now-6d, send to their first active lark-bot.
+// "At least once a week" with up to ~30 min jitter — acceptable.
+// - No per-tenant opt-out flag. Delete or disable the lark-bot to
+// mute. A follow-up can add a column when a customer asks.
+// - UTC week boundary, ignores tenants.timezone. Acceptable until
+// billing-grade accuracy.
+// - Empty week → skip send (silent week is less noise than a "0 rows" digest).
 package outbox
 
 import (
@@ -85,8 +85,8 @@ func (s *DigestService) runOnce(ctx context.Context) {
 
 // SendForTenant composes and sends one digest. Public so the CLI can
 // call it for smoke-testing or manual catch-up. Skips silently when:
-//   - tenant has no active lark-bot (nothing to send TO)
-//   - last 7 days had zero feedback (empty digest = noise)
+// - tenant has no active lark-bot (nothing to send TO)
+// - last 7 days had zero feedback (empty digest = noise)
 //
 // Updates last_digest_sent_at on success only. Failure leaves the
 // timestamp untouched so the next scheduler tick will retry.
@@ -191,7 +191,7 @@ func composeDigest(
 		fmt.Fprintf(&b, "\nTop %s:\n", label)
 		// dimTops is already DESC by count from the repo.
 		for _, vc := range tops {
-			fmt.Fprintf(&b, "  - %s: %d\n", displayForValue(d, vc.Value), vc.Count)
+			fmt.Fprintf(&b, " - %s: %d\n", displayForValue(d, vc.Value), vc.Count)
 		}
 	}
 	b.WriteString("\n→ Open the Attune console for details.")

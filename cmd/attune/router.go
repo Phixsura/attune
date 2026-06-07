@@ -1,6 +1,6 @@
 // router.go builds the HTTP router for `attune server`: the OTel root span +
 // X-Trace-Id middleware, the standard chi middleware chain, health/metrics, the
-// /v1 API surface, and the optional Stage B console mount. Split out of
+// /v1 API surface, and the optional Console mount. Split out of
 // server.go to keep each file under the 300-line cap (CLAUDE.md §1).
 package main
 
@@ -28,7 +28,7 @@ import (
 // buildRouter wires the chi router: OTel root span + X-Trace-Id, the standard
 // middleware chain, /healthz, /metrics, the /v1 API (lark webhook + api-key /
 // rate-limited feedback ingest), and — when CONSOLE_SESSION_KEY is set — the
-// Stage B console under /fb/v1/console.
+// Console under /fb/v1/console.
 func buildRouter(
 	ctx context.Context,
 	cfg *config.Config,
@@ -68,7 +68,7 @@ func buildRouter(
 		})
 	})
 
-	// Stage B console UI. Mounted under /fb/v1/console; the reverse
+	// Console UI. Mounted under /fb/v1/console; the reverse
 	// proxy forwards external traffic here. Disabled gracefully
 	// when ConsoleSessionKey is empty (single-process dev defaults).
 	if cfg.ConsoleSessionKey != "" {

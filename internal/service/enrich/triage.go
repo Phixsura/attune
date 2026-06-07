@@ -6,14 +6,14 @@ package enrich
 // regardless of whether the row was real signal or noise. This split
 // puts a cheap rule-based gate in front of the LLM so:
 //
-//   1. ignore-able rows (spam, emoji-only, very short noise of fewer
-//      than 5 characters) cost 0 LLM tokens and don't pollute the
-//      enriched view;
-//   2. a future fast-path can plug per-tenant keyword rules that map
-//      directly to a fixed enrichment, skipping the LLM for
-//      high-frequency known patterns;
-//   3. the full LLM path stays unchanged so existing behavior is the
-//      "default unless triage matched a shortcut".
+// 1. ignore-able rows (spam, emoji-only, very short noise of fewer
+// than 5 characters) cost 0 LLM tokens and don't pollute the
+// enriched view;
+// 2. a future fast-path can plug per-tenant keyword rules that map
+// directly to a fixed enrichment, skipping the LLM for
+// high-frequency known patterns;
+// 3. the full LLM path stays unchanged so existing behavior is the
+// "default unless triage matched a shortcut".
 //
 // v0 ships ONLY the ignore branch + the always-pass-through-to-LLM
 // default. fast-path is the scaffold; Sprint 2.x adds tenant rules.

@@ -197,16 +197,16 @@ func ComputeIsUrgent(attrs map[string]any, dims DimensionSet) bool {
 
 // FilterAttrs trims an LLM-produced attrs payload to the allowed
 // shape under the tenant's DimensionSet:
-//   - drops dims absent from the set
-//   - for each dim, drops values absent from its taxonomy (unless
-//     the taxonomy is empty, i.e. freeform multi-kind)
-//   - emits per-dim diagnostics via the dropped/suggested return
-//     channels for the caller to record as metrics
+// - drops dims absent from the set
+// - for each dim, drops values absent from its taxonomy (unless
+// the taxonomy is empty, i.e. freeform multi-kind)
+// - emits per-dim diagnostics via the dropped/suggested return
+// channels for the caller to record as metrics
 //
 // Returns (kept, dropped, suggestedDims) where:
-//   - kept       is the canonical attrs map to persist
-//   - dropped    counts the total off-list values dropped, keyed by dim
-//   - suggested  lists the dims that produced at least one off-list value
+// - kept is the canonical attrs map to persist
+// - dropped counts the total off-list values dropped, keyed by dim
+// - suggested lists the dims that produced at least one off-list value
 func FilterAttrs(produced map[string]any, dims DimensionSet) (
 	kept map[string]any, dropped map[string]int, suggested []string,
 ) {

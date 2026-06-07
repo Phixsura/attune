@@ -1,22 +1,22 @@
 // attrs.go — shared constants for log field names.
 //
 // Rules:
-//  1. HTTP and gRPC carry semantically different fields; don't force
-//     them onto a single name just because they look similar.
-//  2. Names follow OTel Semantic Conventions
-//     (https://opentelemetry.io/docs/specs/semconv/). OTel uses dot
-//     notation like `http.method`; some log backends flatten `.`,
-//     so we substitute `_` to avoid downstream ambiguity.
-//  3. Use these constants instead of string literals — any drift in
-//     field naming is then caught at compile time.
+// 1. HTTP and gRPC carry semantically different fields; don't force
+// them onto a single name just because they look similar.
+// 2. Names follow OTel Semantic Conventions
+// (https://opentelemetry.io/docs/specs/semconv/). OTel uses dot
+// notation like `http.method`; some log backends flatten `.`,
+// so we substitute `_` to avoid downstream ambiguity.
+// 3. Use these constants instead of string literals — any drift in
+// field naming is then caught at compile time.
 //
 // Usage from business code:
 //
 //	slog.InfoContext(ctx, "request",
-//	    observability.AttrHTTPMethod, r.Method,
-//	    observability.AttrHTTPRoute,  r.URL.Path,
-//	    observability.AttrHTTPStatus, sw.status,
-//	    observability.AttrDurationMs, dur,
+//	 observability.AttrHTTPMethod, r.Method,
+//	 observability.AttrHTTPRoute, r.URL.Path,
+//	 observability.AttrHTTPStatus, sw.status,
+//	 observability.AttrDurationMs, dur,
 //	)
 package observability
 

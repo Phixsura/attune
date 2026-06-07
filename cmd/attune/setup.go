@@ -32,11 +32,11 @@ import (
 // buildLLMClient picks an LLM backend from cfg.LLMProtocol. The four
 // supported protocols (#10):
 //
-//   - "openai-compat"     hand-rolled /v1/chat/completions client; covers
-//     OpenAI / Azure / vLLM / ollama / oneapi.
-//   - "openai-responses"  openai-go/v3 client.Responses.New.
-//   - "anthropic"         anthropic-sdk-go with forced tool_use.
-//   - "gemini"            google.golang.org/genai responseJsonSchema.
+// - "openai-compat" hand-rolled /v1/chat/completions client; covers
+// OpenAI / Azure / vLLM / ollama / oneapi.
+// - "openai-responses" openai-go/v3 client.Responses.New.
+// - "anthropic" anthropic-sdk-go with forced tool_use.
+// - "gemini" google.golang.org/genai responseJsonSchema.
 //
 // config.validate() enforces protocol legality and required URL/key for
 // each, so this function trusts cfg to be coherent.
@@ -60,7 +60,7 @@ func buildLLMClient(cfg *config.Config) (llmclient.LLMClient, error) {
 // tenant_notify_targets. Slug is resolved against the tenants table;
 // unknown slugs abort startup so misconfigurations don't ship silently.
 //
-// Wave 1.2: this is the only writer to tenant_notify_targets. Wave 2
+// : this is the only writer to tenant_notify_targets. a follow-up
 // adds a console UI but the same upsert semantics still apply.
 func syncCustomWebhooks(
 	ctx context.Context,
@@ -114,12 +114,12 @@ func syncCustomWebhooks(
 	return nil
 }
 
-// buildNotifier composes the active outbound chain. Wave 1.2 returns
+// buildNotifier composes the active outbound chain. returns
 // either a single LarkWebhook, a MultiNotifier (Lark + Raw), or nil
 // (everything disabled). enricher must tolerate nil — Lark / Raw both
 // disabled is a valid dev configuration.
 //
-// Wave 2 will load Lark per-tenant from the same notify_targets table,
+// a follow-up will load Lark per-tenant from the same notify_targets table,
 // at which point this function becomes "build MultiNotifier from
 // notify_targets".
 func buildNotifier(
@@ -181,15 +181,15 @@ func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 	metrics.OutboxLagSeconds.Set(age.Seconds())
 }
 
-// buildConsoleRouter wires the Stage B console (auth + OAuth + /me +
+// buildConsoleRouter wires the Console (auth + OAuth + /me +
 // /logout for now; resource endpoints land in subsequent commits). Keeps
 // console wiring isolated from the main ingest path so the legacy API
 // continues to boot even if console config is incomplete.
 //
 // Two HTTP-only escape hatches activate together when their config flags
 // are set, and ONLY together:
-//   - ConsoleInsecureCookies=true  → Secure cookie flag dropped
-//   - ConsoleDevLogin=true         → /install/dev-login backdoor mounted
+// - ConsoleInsecureCookies=true → Secure cookie flag dropped
+// - ConsoleDevLogin=true → /install/dev-login backdoor mounted
 //
 // They MUST be off in any real TLS-fronted deployment. The combined check
 // here makes "accidentally enable just one" impossible.

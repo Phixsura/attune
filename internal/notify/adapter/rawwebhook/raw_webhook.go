@@ -19,7 +19,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
-// EventEnriched is the only event_type Wave 1.2 emits. Wave 2 adds
+// EventEnriched is the only event_type emits. a follow-up will add
 // "feedback.updated" / "feedback.deleted" — handlers should switch on
 // this field, not rely on field shape.
 const EventEnriched = "feedback.enriched"
@@ -29,7 +29,7 @@ const EventEnriched = "feedback.enriched"
 // can have at most one (destination_type=raw-webhook, audience=<a>)
 // row per audience.
 //
-// Failure counters are kept in-memory only — Wave 2 console persists
+// Failure counters are kept in-memory only — a follow-up will persist
 // them to DB so PMs can see "this customer's webhook has been failing
 // for 3 days".
 type RawWebhookRouter struct {
@@ -48,7 +48,7 @@ type rawDestination struct {
 }
 
 // NewRawWebhookRouter builds the router from active rows in
-// tenant_notify_targets. Wave 1.2: env→DB sync at startup populates the
+// tenant_notify_targets. : env→DB sync at startup populates the
 // table; this constructor is called after that sync.
 //
 // Passing a nil httpClient gives a 10s-per-call default. retry should
@@ -163,7 +163,7 @@ func (r *RawWebhookRouter) send(
 
 // buildRawEnvelope serializes a Snapshot into the v1 envelope JSON.
 // trace_id is left empty here; the outbox worker fills it from the
-// outbox row before calling this. Wave 1.2 inline path (no outbox yet)
+// outbox row before calling this. the inline path (no outbox yet)
 // leaves it empty until §3.6 lands.
 func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 	env := rawEnvelope{

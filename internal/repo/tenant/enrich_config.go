@@ -17,7 +17,7 @@ import (
 // docs/proposals/2026/06/2026-06-07-flat-labels.md).
 //
 //	PromptTemplate == nil → use the built-in default prompt
-//	Dimensions == nil      → no enrichment axes wired (LLM only emits title + rationale)
+//	Dimensions == nil → no enrichment axes wired (LLM only emits title + rationale)
 //
 // In practice the tenants table is seeded by migration 014 with three
 // default dimensions (type / severity / labels) so a fresh deploy is
@@ -41,8 +41,8 @@ func (r *TenantRepo) GetEnrichConfig(ctx context.Context, tenantID string) (Enri
 	err := r.pool.QueryRow(
 		ctx,
 		`SELECT enrich_prompt_template, enrich_dimensions
-		   FROM tenants
-		  WHERE id = $1`, tenantID,
+		 FROM tenants
+		 WHERE id = $1`, tenantID,
 	).Scan(&cfg.PromptTemplate, &dimsRaw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return EnrichConfig{}, ErrTenantNotFound
@@ -82,9 +82,9 @@ func (r *TenantRepo) UpdateEnrichConfig(
 	tag, err := r.pool.Exec(
 		ctx, `
 		UPDATE tenants
-		   SET enrich_prompt_template = $2,
-		       enrich_dimensions      = $3,
-		       updated_at             = NOW()
+		 SET enrich_prompt_template = $2,
+		 enrich_dimensions = $3,
+		 updated_at = NOW()
 		 WHERE id = $1`,
 		tenantID, cfg.PromptTemplate, dimsJSON,
 	)

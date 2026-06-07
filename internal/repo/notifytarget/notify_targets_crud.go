@@ -2,7 +2,7 @@
 // Split from notify_targets.go to honor the no-grab-bag-files guidance
 // . The list/scan/insert path + type + constants stay in
 // notify_targets.go; these are the tenant-scoped single-row operations
-// the Wave 2 console drives (read one, delete one, update one).
+// the a follow-up console drives (read one, delete one, update one).
 package notifytarget
 
 import (
@@ -25,8 +25,8 @@ func (r *NotifyTargetRepo) GetByID(
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       created_at, last_failure_at, last_error
-		  FROM tenant_notify_targets
+		 created_at, last_failure_at, last_error
+		 FROM tenant_notify_targets
 		 WHERE id = $1 AND tenant_id = $2`, id, tenantID,
 	).Scan(
 		&t.ID, &t.TenantID, &t.DestinationType, &t.Audience,
@@ -76,9 +76,9 @@ func (r *NotifyTargetRepo) UpdateByID(
 	tag, err := r.pool.Exec(
 		ctx, `
 		UPDATE tenant_notify_targets
-		   SET audience = $3, url = $4, secret = $5,
-		       timeout_seconds = $6, disabled = $7,
-		       updated_at = NOW()
+		 SET audience = $3, url = $4, secret = $5,
+		 timeout_seconds = $6, disabled = $7,
+		 updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID, t.Audience, t.URL, t.Secret,
 		t.TimeoutSeconds, t.Disabled,
@@ -97,7 +97,7 @@ func (r *NotifyTargetRepo) UpdateByID(
 
 // GetByTenantAudience returns the single row matching (tenant_id,
 // destination_type, audience). Returns ErrNotifyTargetNotFound when no row
-// exists. Used mostly by tests + Wave 2 console for editing one row.
+// exists. Used mostly by tests + a follow-up console for editing one row.
 func (r *NotifyTargetRepo) GetByTenantAudience(
 	ctx context.Context, tenantID, destType, audience string,
 ) (*NotifyTarget, error) {
@@ -105,11 +105,11 @@ func (r *NotifyTargetRepo) GetByTenantAudience(
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       created_at, last_failure_at, last_error
-		  FROM tenant_notify_targets
+		 created_at, last_failure_at, last_error
+		 FROM tenant_notify_targets
 		 WHERE tenant_id = $1
-		   AND destination_type = $2
-		   AND audience = $3`,
+		 AND destination_type = $2
+		 AND audience = $3`,
 		tenantID, destType, audience,
 	).Scan(
 		&t.ID, &t.TenantID, &t.DestinationType, &t.Audience,

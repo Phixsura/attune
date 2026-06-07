@@ -3,7 +3,7 @@
 // configures). One of three notify adapter implementations alongside
 // rawwebhook and githubissue.
 //
-// Per-tenant routing arrives in Wave 2; today two Lark destinations
+// Per-tenant routing arrives in a follow-up; today two Lark destinations
 // (pool + radar) are configured statically via env and the tenantID
 // threads through every Push call for future per-tenant lookup.
 package larkwebhook
@@ -44,7 +44,7 @@ type LarkWebhook struct {
 // enabled in the chat settings.
 //
 // Retry policy is NoRetry: Lark group bots are at-most-once by
-// convention (duplicate cards would spam the chat). Wave 1.2's raw
+// convention (duplicate cards would spam the chat). 's raw
 // webhook flips on DefaultRetry.
 func NewLarkWebhook(poolURL, poolSecret, radarURL, radarSecret string) *LarkWebhook {
 	return &LarkWebhook{

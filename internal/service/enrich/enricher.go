@@ -41,9 +41,9 @@ const (
 // Enricher classifies user_feedback rows via the LLM gateway. It owns
 // the claim-then-update loop but holds no SQL itself — repo does.
 //
-// Wave 1.2 wiring:
-//   - Lark webhook → inline call via notifier (best-effort, no retry)
-//   - raw-webhook → outbox row in same tx as MarkDone (at-least-once)
+// wiring:
+// - Lark webhook → inline call via notifier (best-effort, no retry)
+// - raw-webhook → outbox row in same tx as MarkDone (at-least-once)
 //
 // SetNotifier and SetOutbox are independent; either / both / neither
 // may be wired without code changes elsewhere.
@@ -52,7 +52,7 @@ type Enricher struct {
 	llm   llmclient.LLMClient
 	model string // resolved from config; "" → enricher rejects with 400-like error
 	// notifier is read from fanOut goroutines, written by SetNotifier
-	// (typically once at startup, but Wave 2 plans dynamic per-tenant
+	// (typically once at startup, but a follow-up plans dynamic per-tenant
 	// re-wiring). atomic.Pointer keeps the read race-free without
 	// per-call locking — fanOut takes a snapshot via .Load().
 	notifier atomic.Pointer[notify.Notifier]

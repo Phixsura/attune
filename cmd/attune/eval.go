@@ -17,9 +17,9 @@ import (
 
 // runEval dispatches the `attune eval` CLI. Three modes:
 //
-//	consistency       re-run LLM on N rows; report match rate
-//	export-for-human  write CSV for offline human labeling
-//	score-human       read filled CSV; report human-vs-AI accuracy
+//	consistency re-run LLM on N rows; report match rate
+//	export-for-human write CSV for offline human labeling
+//	score-human read filled CSV; report human-vs-AI accuracy
 //
 // --tenant <id> is REQUIRED for export-for-human and score-human (the
 // CSV header is derived from that tenant's DimensionSet). consistency
@@ -32,7 +32,7 @@ import (
 //
 //	# Export 100 rows for a human to label, scoped to one tenant.
 //	attune eval --mode export-for-human --tenant demo --sample 100 \
-//	    --since 2026-05-01 --output ./labels.csv
+//	 --since 2026-05-01 --output ./labels.csv
 //
 //	# Score the filled-in CSV against the AI's columns.
 //	attune eval --mode score-human --tenant demo --input ./labels.csv

@@ -139,11 +139,11 @@ var IngestRateLimitTotal = prometheus.NewCounterVec(
 //
 // Labels:
 //
-//	tenant   — TEXT tenant id (matches IngestTotal's labels)
+//	tenant — TEXT tenant id (matches IngestTotal's labels)
 //	decision — "ignore" | "fast" | "full"
-//	  • ignore: skipped (noise / too short / spam) — no LLM cost
-//	  • fast:   matched a per-tenant rule, no LLM call
-//	  • full:   passed to the full LLM enrich stage
+//	 • ignore: skipped (noise / too short / spam) — no LLM cost
+//	 • fast: matched a per-tenant rule, no LLM call
+//	 • full: passed to the full LLM enrich stage
 var TriageDecisionsTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "attune_triage_decisions_total",

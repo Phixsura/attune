@@ -14,8 +14,8 @@ import (
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
-// NotifyTargetRepo owns the tenant_notify_targets table. Wave 1.2 wires
-// env-defined webhook destinations into this table on startup; Wave 2
+// NotifyTargetRepo owns the tenant_notify_targets table. wires
+// env-defined webhook destinations into this table on startup; a follow-up
 // adds a console for self-serve CRUD over the same rows.
 type NotifyTargetRepo struct {
 	pool *pgxpool.Pool
@@ -83,15 +83,15 @@ func (r *NotifyTargetRepo) Upsert(ctx context.Context, t NotifyTarget) error {
 	_, err := r.pool.Exec(
 		ctx, `
 		INSERT INTO tenant_notify_targets
-		  (tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled, updated_at)
+		 (tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
 		ON CONFLICT (tenant_id, destination_type, audience)
 		DO UPDATE SET
-		  url = EXCLUDED.url,
-		  secret = EXCLUDED.secret,
-		  timeout_seconds = EXCLUDED.timeout_seconds,
-		  disabled = EXCLUDED.disabled,
-		  updated_at = NOW()`,
+		 url = EXCLUDED.url,
+		 secret = EXCLUDED.secret,
+		 timeout_seconds = EXCLUDED.timeout_seconds,
+		 disabled = EXCLUDED.disabled,
+		 updated_at = NOW()`,
 		t.TenantID, t.DestinationType, t.Audience,
 		t.URL, t.Secret, t.TimeoutSeconds, t.Disabled,
 	)
@@ -102,14 +102,14 @@ func (r *NotifyTargetRepo) Upsert(ctx context.Context, t NotifyTarget) error {
 }
 
 // ListAllActive returns every active row across all tenants. Used by
-// startup wiring to build the in-memory routing table for Wave 1.2.
-// Wave 2 may add a "refresh on tenant_notify_targets change" mechanism;
+// startup wiring to build the in-memory routing table for .
+// a follow-up may add a "refresh on tenant_notify_targets change" mechanism;
 // for now, attune restart picks up any DB-side change.
 func (r *NotifyTargetRepo) ListAllActive(ctx context.Context) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       created_at, last_failure_at, last_error
-		  FROM tenant_notify_targets
+		 created_at, last_failure_at, last_error
+		 FROM tenant_notify_targets
 		 WHERE disabled = FALSE`)
 	if err != nil {
 		return nil, fmt.Errorf("list all active notify targets: %w", err)
@@ -123,10 +123,10 @@ func (r *NotifyTargetRepo) ListAllActive(ctx context.Context) ([]NotifyTarget, e
 func (r *NotifyTargetRepo) ListActiveByTenant(ctx context.Context, tenantID string) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       created_at, last_failure_at, last_error
-		  FROM tenant_notify_targets
+		 created_at, last_failure_at, last_error
+		 FROM tenant_notify_targets
 		 WHERE tenant_id = $1
-		   AND disabled = FALSE`, tenantID)
+		 AND disabled = FALSE`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list notify targets: %w", err)
 	}
@@ -157,8 +157,8 @@ func scanNotifyTargets(rows pgx.Rows) ([]NotifyTarget, error) {
 func (r *NotifyTargetRepo) ListByTenant(ctx context.Context, tenantID string) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		       created_at, last_failure_at, last_error
-		  FROM tenant_notify_targets
+		 created_at, last_failure_at, last_error
+		 FROM tenant_notify_targets
 		 WHERE tenant_id = $1
 		 ORDER BY destination_type, audience`, tenantID)
 	if err != nil {
@@ -181,7 +181,7 @@ func (r *NotifyTargetRepo) Insert(ctx context.Context, t NotifyTarget) (uuid.UUI
 	err := r.pool.QueryRow(
 		ctx, `
 		INSERT INTO tenant_notify_targets
-		  (tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled)
+		 (tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at`,
 		t.TenantID, t.DestinationType, t.Audience,

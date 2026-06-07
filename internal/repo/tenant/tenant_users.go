@@ -11,7 +11,7 @@ import (
 )
 
 // TenantUser is a row in the tenant_users table — one Lark user inside
-// one tenant. Session lookups read from here; Wave 3 RBAC reads the Role
+// one tenant. Session lookups read from here; Future RBAC reads the Role
 // column.
 type TenantUser struct {
 	ID         string
@@ -52,10 +52,10 @@ func (r *TenantUserRepo) Upsert(
 		INSERT INTO tenant_users (tenant_id, open_id, name, avatar_url, role, last_seen_at)
 		VALUES ($1, $2, $3, $4, $5, NOW())
 		ON CONFLICT (tenant_id, open_id) DO UPDATE
-		   SET name = EXCLUDED.name,
-		       avatar_url = EXCLUDED.avatar_url,
-		       last_seen_at = NOW(),
-		       is_active = TRUE
+		 SET name = EXCLUDED.name,
+		 avatar_url = EXCLUDED.avatar_url,
+		 last_seen_at = NOW(),
+		 is_active = TRUE
 		RETURNING id`,
 		tenantID, openID, name, avatarURL, role,
 	).Scan(&id)
@@ -73,10 +73,10 @@ func (r *TenantUserRepo) GetByID(ctx context.Context, id string) (*TenantUser, e
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT id, tenant_id, open_id, name, avatar_url, role, is_active,
-		       created_at, last_seen_at
-		  FROM tenant_users
+		 created_at, last_seen_at
+		 FROM tenant_users
 		 WHERE id = $1
-		   AND is_active = TRUE`, id,
+		 AND is_active = TRUE`, id,
 	).Scan(&u.ID, &u.TenantID, &u.OpenID, &u.Name, &u.AvatarURL, &u.Role,
 		&u.IsActive, &u.CreatedAt, &u.LastSeenAt)
 	if errors.Is(err, pgx.ErrNoRows) {

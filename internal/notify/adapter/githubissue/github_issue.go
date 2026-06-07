@@ -8,10 +8,10 @@ package githubissue
 // HTTP receiver and translate it themselves. With this in place, a
 // customer just registers a tenant_notify_target row with:
 //
-//   destination_type = "github-issue"
-//   url              = https://github.com/{owner}/{repo}
-//   secret           = ghp_xxx | github_pat_xxx (needs `issues:write`)
-//   audience         = pool | radar | all
+// destination_type = "github-issue"
+// url = https://github.com/{owner}/{repo}
+// secret = ghp_xxx | github_pat_xxx (needs `issues:write`)
+// audience = pool | radar | all
 //
 // and attune converts every enriched Snapshot into a "Create Issue"
 // against that repo via the outbox + Transport pipeline (same retry
@@ -61,10 +61,10 @@ const githubAPIVersion = "2022-11-28"
 // (verbatim JSON bytes from the outbox row).
 //
 // Returns:
-//   - nil on 201 Created
-//   - ErrTerminal-wrapped error on 4xx (except 408/429), bad payload,
-//     malformed repo URL — outbox will mark dead immediately
-//   - plain error on 5xx / 408 / 429 / network failures — outbox retries
+// - nil on 201 Created
+// - ErrTerminal-wrapped error on 4xx (except 408/429), bad payload,
+// malformed repo URL — outbox will mark dead immediately
+// - plain error on 5xx / 408 / 429 / network failures — outbox retries
 func SendGitHubIssue(
 	ctx context.Context, transport *notify.Transport,
 	repoURL, token string, payload []byte,

@@ -4,15 +4,15 @@ package enrich
 // generation, and per-dim whitelist gate for the metadata-driven
 // Dimensions model (#10 → E3 proposal). The three gates of the design:
 //
-//   (1) prompt names each dim and its allowed values plus i18n hints
-//       ("you MUST only pick from..."); wired in renderPrompt /
-//       renderDimensionsClause.
-//   (2) post-parse whitelist filter — the always-on guarantee, the
-//       only gate that is provider-independent; wired via
-//       domain.FilterAttrs.
-//   (3) source-level structured output (response_format /
-//       responseSchema / forced tool_use); wired in buildEnrichSchema
-//       and passed to the backend via CompletionRequest.Schema.
+// (1) prompt names each dim and its allowed values plus i18n hints
+// ("you MUST only pick from..."); wired in renderPrompt /
+// renderDimensionsClause.
+// (2) post-parse whitelist filter — the always-on guarantee, the
+// only gate that is provider-independent; wired via
+// domain.FilterAttrs.
+// (3) source-level structured output (response_format /
+// responseSchema / forced tool_use); wired in buildEnrichSchema
+// and passed to the backend via CompletionRequest.Schema.
 //
 // Gates (1) and (3) are "best effort" — they help the model behave;
 // gate (2) is what makes "attrs ⊆ configured taxonomy per dim" a
@@ -34,9 +34,9 @@ import (
 const defaultPromptTmpl = `You are a product-feedback classifier. Given one raw user-feedback string, emit ONE single-line JSON object (no markdown fences, no commentary, no leading or trailing blank lines). The schema is:
 
 {
-  "title": "a 10-30 character one-sentence summary, no trailing punctuation",
+ "title": "a 10-30 character one-sentence summary, no trailing punctuation",
 {{dimensions}}
-  "rationale": "<=30 characters: why these values"
+ "rationale": "<=30 characters: why these values"
 }
 
 Raw user feedback:
@@ -111,12 +111,12 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 	}
 	var b strings.Builder
 	for _, d := range dims {
-		fmt.Fprintf(&b, "  // %s (%s)\n", d.Name, d.Kind)
+		fmt.Fprintf(&b, " // %s (%s)\n", d.Name, d.Kind)
 		if len(d.Taxonomy) == 0 {
 			if d.Kind == domain.DimMulti {
-				fmt.Fprintf(&b, "  \"%s\": [/* freeform: any short string labels */],\n", d.Name)
+				fmt.Fprintf(&b, " \"%s\": [/* freeform: any short string labels */],\n", d.Name)
 			} else {
-				fmt.Fprintf(&b, "  \"%s\": \"...\",\n", d.Name)
+				fmt.Fprintf(&b, " \"%s\": \"...\",\n", d.Name)
 			}
 			continue
 		}
@@ -135,11 +135,11 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 			}
 		}
 		if d.Kind == domain.DimSingle {
-			fmt.Fprintf(&b, "  // pick one: %s\n", strings.Join(opts, " | "))
-			fmt.Fprintf(&b, "  \"%s\": \"<one value>\",\n", d.Name)
+			fmt.Fprintf(&b, " // pick one: %s\n", strings.Join(opts, " | "))
+			fmt.Fprintf(&b, " \"%s\": \"<one value>\",\n", d.Name)
 		} else {
-			fmt.Fprintf(&b, "  // pick zero or more: %s\n", strings.Join(opts, " | "))
-			fmt.Fprintf(&b, "  \"%s\": [/* values */],\n", d.Name)
+			fmt.Fprintf(&b, " // pick zero or more: %s\n", strings.Join(opts, " | "))
+			fmt.Fprintf(&b, " \"%s\": [/* values */],\n", d.Name)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
@@ -148,14 +148,14 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 // buildEnrichSchema constructs the JSON Schema sent to the LLM for
 // structured output (gate 3). Each dim contributes one property:
 //
-//   - single-kind  → {"type": "string"} + optional "enum"
-//   - multi-kind   → {"type": "array", "items": {"type": "string"} + optional "enum"}
-//   - All properties land in the schema's "required" list because
-//     OpenAI's strict structured-output mode rejects schemas where
-//     `additionalProperties: false` coexists with any non-required
-//     property. Non-required dims (Required=false) express
-//     "may be omitted" by accepting null as the value type — the gate
-//     (2) post-parse filter drops null entries before persistence.
+// - single-kind → {"type": "string"} + optional "enum"
+// - multi-kind → {"type": "array", "items": {"type": "string"} + optional "enum"}
+// - All properties land in the schema's "required" list because
+// OpenAI's strict structured-output mode rejects schemas where
+// `additionalProperties: false` coexists with any non-required
+// property. Non-required dims (Required=false) express
+// "may be omitted" by accepting null as the value type — the gate
+// (2) post-parse filter drops null entries before persistence.
 //
 // When the backend honours this, the model cannot emit off-list values
 // at all — but gate (2) still runs because some gateways silently

@@ -21,14 +21,14 @@ import (
 )
 
 // OAuthHandler wires /install/start + /install/callback. It owns:
-//   - building the Lark authorize URL with state for CSRF protection
-//   - exchanging callback codes for user + tenant identity
-//   - upserting tenants / tenant_users / tenant_lark_install in one
-//     callback transaction-equivalent (each call is its own short tx)
-//   - signing the session cookie + redirecting back to /console/
+// - building the Lark authorize URL with state for CSRF protection
+// - exchanging callback codes for user + tenant identity
+// - upserting tenants / tenant_users / tenant_lark_install in one
+// callback transaction-equivalent (each call is its own short tx)
+// - signing the session cookie + redirecting back to /console/
 //
-// Keep this struct concrete — Wave 3 RBAC may swap a different identity
-// provider, but Stage B is Lark-only and YAGNI applies.
+// Keep this struct concrete — Future RBAC may swap a different identity
+// provider, but the console is Lark-only today and YAGNI applies.
 type OAuthHandler struct {
 	signer       *session.Signer
 	lark         *lark.Client

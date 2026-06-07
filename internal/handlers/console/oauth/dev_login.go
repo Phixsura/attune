@@ -52,9 +52,9 @@ func NewDevLoginHandler(
 //
 // Query params:
 //
-//	tenant  — tenant slug (required; must already exist)
-//	name    — display name for the synthetic user (default "dev-tester")
-//	role    — admin|member (default admin)
+//	tenant — tenant slug (required; must already exist)
+//	name — display name for the synthetic user (default "dev-tester")
+//	role — admin|member (default admin)
 //
 // Effect: upserts tenant_users with open_id=`dev:<sha256(tenant+name)[:16]>`,
 // signs a session cookie, 302s to /console/.

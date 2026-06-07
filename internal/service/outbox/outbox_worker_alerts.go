@@ -17,10 +17,10 @@ import (
 
 // selfReportDead pushes a one-shot text card to the tenant's lark-bot
 // describing the dead delivery. Skipped silently if:
-//   - the dead target was itself a lark-bot (sending to a sibling lark-
-//     bot would be confusing; alert-of-alert is mostly noise);
-//   - the tenant has no active lark-bot configured;
-//   - the lark-bot send itself errors (we log + carry on, no recursion).
+// - the dead target was itself a lark-bot (sending to a sibling lark-
+// bot would be confusing; alert-of-alert is mostly noise);
+// - the tenant has no active lark-bot configured;
+// - the lark-bot send itself errors (we log + carry on, no recursion).
 func (w *OutboxWorker) selfReportDead(ctx context.Context, row outboxrepo.OutboxRow, reason string) {
 	const where = "service.OutboxWorker.selfReportDead"
 	if row.DestinationType == notifytarget.DestLarkBot {

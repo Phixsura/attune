@@ -1,15 +1,15 @@
 // Package lark is a thin client over the Lark Open API endpoints attune
 // actually needs. It is intentionally small — no global SDK
-// abstractions, just typed wrappers around the 3 calls Stage B uses:
+// abstractions, just typed wrappers around the 3 calls the console uses:
 //
-//   - GetAppAccessToken — `auth/v3/app_access_token/internal`. Cached
-//     in-memory with expiry; refresh on demand.
-//   - ExchangeUserCode — `authen/v1/oidc/access_token`. Turns an OAuth
-//     `code` into a user_access_token + open_id + tenant_key.
-//   - GetUserInfo — `authen/v1/user_info` (using user_access_token).
-//     Returns name + avatar for /me rendering.
+// - GetAppAccessToken — `auth/v3/app_access_token/internal`. Cached
+// in-memory with expiry; refresh on demand.
+// - ExchangeUserCode — `authen/v1/oidc/access_token`. Turns an OAuth
+// `code` into a user_access_token + open_id + tenant_key.
+// - GetUserInfo — `authen/v1/user_info` (using user_access_token).
+// Returns name + avatar for /me rendering.
 //
-// Wave 3 will add /chats, /im/v1/messages, etc. — each gets its own
+// A follow-up will add /chats, /im/v1/messages, etc. — each gets its own
 // method here, never an inline call in handlers.
 package lark
 

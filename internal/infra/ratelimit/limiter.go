@@ -1,19 +1,19 @@
 // Package ratelimit is the per-tenant token bucket guarding the ingest
 // API. Phase 3.3 ships a single global default; per-SKU + per-tenant
-// overrides come at Wave 3 billing.
+// overrides come at billing.
 //
 // Design：
-//   - Token bucket via golang.org/x/time/rate (battle-tested algorithm
-//     used by net/http2, grpc, kubernetes).
-//   - One bucket per tenant_id, keyed in a sync.Map. Buckets never
-//     evict: Y1 < 400 tenants ≈ < 50KB memory, GC isn't worth the code.
-//   - State is in-memory only. A attune restart drops all bucket
-//     state — short-lived bursts immediately after deploy can exceed
-//     the limit. Acceptable trade-off: zero new infra (no Redis), zero
-//     DB writes per request.
-//   - Rate is "requests per minute"; burst is the bucket capacity.
-//     A sustained 60/min limit with 300 burst means: clients can fire
-//     300 in a single instant, then must average 1/sec thereafter.
+// - Token bucket via golang.org/x/time/rate (battle-tested algorithm
+// used by net/http2, grpc, kubernetes).
+// - One bucket per tenant_id, keyed in a sync.Map. Buckets never
+// evict: Y1 < 400 tenants ≈ < 50KB memory, GC isn't worth the code.
+// - State is in-memory only. A attune restart drops all bucket
+// state — short-lived bursts immediately after deploy can exceed
+// the limit. Acceptable trade-off: zero new infra (no Redis), zero
+// DB writes per request.
+// - Rate is "requests per minute"; burst is the bucket capacity.
+// A sustained 60/min limit with 300 burst means: clients can fire
+// 300 in a single instant, then must average 1/sec thereafter.
 package ratelimit
 
 import (

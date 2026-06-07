@@ -7,10 +7,10 @@
 //
 // The trace_id flows in three directions:
 //
-//  1. inbound HTTP request → chi RequestID → ctx
-//  2. ctx → slog fields (every log line gets "trace_id=...")
-//  3. ctx → outbox row.TraceID → envelope.trace_id + X-Trace-ID header
-//     → customer's downstream system
+// 1. inbound HTTP request → chi RequestID → ctx
+// 2. ctx → slog fields (every log line gets "trace_id=...")
+// 3. ctx → outbox row.TraceID → envelope.trace_id + X-Trace-ID header
+// → customer's downstream system
 //
 // On a background poll (no incoming request), trace_id is generated
 // fresh per row so observability stays unbroken.

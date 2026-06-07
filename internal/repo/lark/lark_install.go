@@ -53,14 +53,14 @@ func (r *LarkInstallRepo) Upsert(ctx context.Context, install *LarkInstall) erro
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
 		ON CONFLICT (tenant_id) DO UPDATE
-		   SET lark_tenant_key = EXCLUDED.lark_tenant_key,
-		       app_id = EXCLUDED.app_id,
-		       access_token = EXCLUDED.access_token,
-		       access_token_expires_at = EXCLUDED.access_token_expires_at,
-		       refresh_token = EXCLUDED.refresh_token,
-		       refresh_token_expires_at = EXCLUDED.refresh_token_expires_at,
-		       scopes = EXCLUDED.scopes,
-		       updated_at = NOW()`,
+		 SET lark_tenant_key = EXCLUDED.lark_tenant_key,
+		 app_id = EXCLUDED.app_id,
+		 access_token = EXCLUDED.access_token,
+		 access_token_expires_at = EXCLUDED.access_token_expires_at,
+		 refresh_token = EXCLUDED.refresh_token,
+		 refresh_token_expires_at = EXCLUDED.refresh_token_expires_at,
+		 scopes = EXCLUDED.scopes,
+		 updated_at = NOW()`,
 		install.TenantID, install.LarkTenantKey, install.AppID,
 		install.AccessToken, install.AccessTokenExpiresAt,
 		install.RefreshToken, install.RefreshTokenExpiresAt,
@@ -81,10 +81,10 @@ func (r *LarkInstallRepo) Get(ctx context.Context, tenantID string) (*LarkInstal
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT tenant_id, lark_tenant_key, app_id,
-		       access_token, access_token_expires_at,
-		       refresh_token, refresh_token_expires_at,
-		       scopes, installed_at, updated_at
-		  FROM tenant_lark_install
+		 access_token, access_token_expires_at,
+		 refresh_token, refresh_token_expires_at,
+		 scopes, installed_at, updated_at
+		 FROM tenant_lark_install
 		 WHERE tenant_id = $1`, tenantID,
 	).Scan(&i.TenantID, &i.LarkTenantKey, &i.AppID,
 		&i.AccessToken, &i.AccessTokenExpiresAt,
@@ -109,10 +109,10 @@ func (r *LarkInstallRepo) GetByLarkTenantKey(
 	err := r.pool.QueryRow(
 		ctx, `
 		SELECT tenant_id, lark_tenant_key, app_id,
-		       access_token, access_token_expires_at,
-		       refresh_token, refresh_token_expires_at,
-		       scopes, installed_at, updated_at
-		  FROM tenant_lark_install
+		 access_token, access_token_expires_at,
+		 refresh_token, refresh_token_expires_at,
+		 scopes, installed_at, updated_at
+		 FROM tenant_lark_install
 		 WHERE lark_tenant_key = $1`, larkTenantKey,
 	).Scan(&i.TenantID, &i.LarkTenantKey, &i.AppID,
 		&i.AccessToken, &i.AccessTokenExpiresAt,

@@ -48,9 +48,9 @@ func (r *FeedbackRepo) Insert(ctx context.Context, tenantID, userID string, in d
 	err := r.pool.QueryRow(
 		ctx, `
 		INSERT INTO user_feedback
-		  (user_id, tenant_id, type, content, page_url, attachments, source, source_meta)
+		 (user_id, tenant_id, type, content, page_url, attachments, source, source_meta)
 		VALUES
-		  ($1, $2, 'other', $3, $4, '[]'::jsonb, $5, $6)
+		 ($1, $2, 'other', $3, $4, '[]'::jsonb, $5, $6)
 		RETURNING id`,
 		userID, tenantID, in.Content, in.PageURL, in.Source, sourceMetaJSON,
 	).Scan(&id)
@@ -69,12 +69,12 @@ func (r *FeedbackRepo) TryClaim(ctx context.Context, id int64) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE user_feedback
 		SET enrichment_status = 'enriching',
-		    enrichment_claimed_at = NOW(),
-		    enrichment_error = NULL
+		 enrichment_claimed_at = NOW(),
+		 enrichment_error = NULL
 		WHERE id = $1
-		  AND (enrichment_status IN ('pending','failed')
-		       OR (enrichment_status = 'enriching'
-		           AND enrichment_claimed_at < NOW() - INTERVAL '5 minutes'))`, id)
+		 AND (enrichment_status IN ('pending','failed')
+		 OR (enrichment_status = 'enriching'
+		 AND enrichment_claimed_at < NOW() - INTERVAL '5 minutes'))`, id)
 	if err != nil {
 		return false, fmt.Errorf("claim feedback %d: %w", id, err)
 	}
@@ -116,10 +116,10 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 	err := r.pool.QueryRow(
 		ctx,
 		`SELECT uf.content, uf.source, uf.user_id, uf.tenant_id, uf.created_at,
-		        t.enrich_prompt_template, t.enrich_dimensions
-		   FROM user_feedback uf
-		   LEFT JOIN tenants t ON t.id = uf.tenant_id
-		  WHERE uf.id = $1`, id,
+		 t.enrich_prompt_template, t.enrich_dimensions
+		 FROM user_feedback uf
+		 LEFT JOIN tenants t ON t.id = uf.tenant_id
+		 WHERE uf.id = $1`, id,
 	).Scan(&in.Content, &in.Source, &in.UserID, &in.TenantID, &in.CreatedAt,
 		&in.PromptTemplate, &dimsRaw)
 	if err != nil {
@@ -138,12 +138,12 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 const markDoneSQL = `
 	UPDATE user_feedback
 	SET enriched_title = $1,
-	    enriched_attrs = $2::jsonb,
-	    is_urgent = $3,
-	    enriched_rationale = $4,
-	    enrichment_status = 'done',
-	    enrichment_error = NULL,
-	    enriched_at = NOW()
+	 enriched_attrs = $2::jsonb,
+	 is_urgent = $3,
+	 enriched_rationale = $4,
+	 enrichment_status = 'done',
+	 enrichment_error = NULL,
+	 enriched_at = NOW()
 	WHERE id = $5`
 
 // MarkDone persists the LLM classification and flips the row to 'done'.
@@ -237,8 +237,8 @@ func (r *FeedbackRepo) ListPending(ctx context.Context, n int) ([]int64, error) 
 	rows, err := r.pool.Query(ctx, `
 		SELECT id FROM user_feedback
 		WHERE enrichment_status IN ('pending','failed')
-		   OR (enrichment_status = 'enriching'
-		       AND enrichment_claimed_at < NOW() - INTERVAL '5 minutes')
+		 OR (enrichment_status = 'enriching'
+		 AND enrichment_claimed_at < NOW() - INTERVAL '5 minutes')
 		ORDER BY created_at ASC
 		LIMIT $1`, n)
 	if err != nil {
@@ -273,11 +273,11 @@ type SampleRow struct {
 func (r *FeedbackRepo) SampleEnriched(ctx context.Context, since time.Time, n int) ([]SampleRow, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, content,
-		       COALESCE(enriched_attrs, '{}'::jsonb),
-		       is_urgent
-		  FROM user_feedback
+		 COALESCE(enriched_attrs, '{}'::jsonb),
+		 is_urgent
+		 FROM user_feedback
 		 WHERE enrichment_status = 'done'
-		   AND enriched_at >= $1
+		 AND enriched_at >= $1
 		 ORDER BY RANDOM()
 		 LIMIT $2`, since, n)
 	if err != nil {

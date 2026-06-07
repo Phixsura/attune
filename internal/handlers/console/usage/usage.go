@@ -12,7 +12,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
-// UsageHandler serves GET /fb/v1/console/usage. Phase 1 ships only the
+// UsageHandler serves GET /fb/v1/console/usage. Today's handler ships only the
 // current calendar month — no granularity/range params. The proto-defined
 // `granularity` + `range` fields are silently ignored until billing surfaces
 // real choices.
