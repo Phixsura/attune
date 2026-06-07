@@ -11,7 +11,6 @@ import { Label } from '@/components/ui/label'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
-import { ModuleMode } from '@/proto/attune/v1/enrich_config'
 
 export const Route = createFileRoute('/_authed/settings')({
   component: SettingsPage,
@@ -86,10 +85,15 @@ function SettingsPage() {
     )
   }
 
+  // Derive the mode label from the modules list rather than the
+  // moduleMode enum: protojson serialises proto enums as their string
+  // names ("MODULE_MODE_CONSTRAINED"), but ts-proto generates a numeric
+  // TS enum, so the obvious `=== ModuleMode.MODULE_MODE_CONSTRAINED`
+  // comparison is always false. The modules-length view is also the
+  // server-side derivation (service.enrich.moduleMode), so the two
+  // stay in lockstep regardless of how protojson serialises the field.
   const modeLabel =
-    cfg.data?.moduleMode === ModuleMode.MODULE_MODE_CONSTRAINED
-      ? t('settings.mode_constrained')
-      : t('settings.mode_freeform')
+    modules.length > 0 ? t('settings.mode_constrained') : t('settings.mode_freeform')
 
   return (
     <div className="space-y-6">
