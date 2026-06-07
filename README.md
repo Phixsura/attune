@@ -147,7 +147,7 @@ Every issue carries a `pillar/*` label. Pick one if you want to contribute:
 | `lizard . -l go -C 15 -T nloc=100` | CCN ≤ 15, NLOC ≤ 100 per function |
 | `npx -y jscpd . --pattern '**/*.go' --threshold 5` | duplication < 2 % |
 
-Full engineering contract: [CLAUDE.md](CLAUDE.md). Every code-changing PR must add a `[Unreleased]` entry in [CHANGELOG.md](CHANGELOG.md).
+Full engineering contract: [CLAUDE.md](CLAUDE.md). Every code-changing PR must add a `[Unreleased]` entry in [CHANGELOG.md](CHANGELOG.md). Testing tiers (unit / live LLM): [docs/testing.md](docs/testing.md).
 
 ## Local development
 

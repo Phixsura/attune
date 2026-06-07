@@ -90,6 +90,19 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **Live LLM tests segregated under `test/live/llmclient/` with a
+  `//go:build live` tag** (#10) — the four-backend e2e suite previously
+  lived in `internal/infra/llmclient/e2e_test.go` next to the mock
+  unit tests, gated only by `t.Skipf` on missing env vars. It now sits
+  in its own package + directory + build tag (three layers of
+  isolation, matching `sashabaranov/go-openai` and AWS SDK Go v2),
+  so `go test ./...` cannot accidentally enter it. New `make` targets:
+  `make test` (unit, default) and `make test-live` (opt-in). Operational
+  surface (env-var matrix, recipes, cost guardrails) documented in
+  `docs/testing.md`. Tests renamed `TestE2E_*` → `TestLive_*` so
+  `make test-live` can filter `-run '^TestLive_'`. No CI workflow yet
+  — adding `workflow_dispatch`-triggered `live-tests.yml` waits for a
+  sandbox key.
 - **Backend reorganized into hybrid layer-outside / feature-inside packages**
   (#19) — `internal/{service,repo,notify}` no longer flat. Each layer keeps
   its name + the four CLAUDE.md §5 rules (re-verified clean by grep after
