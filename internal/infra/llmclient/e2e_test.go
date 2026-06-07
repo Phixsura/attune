@@ -7,23 +7,55 @@ import (
 	"time"
 )
 
-// Live E2E tests against a real LLM endpoint.
-// Skipped unless E2E_LLM_BASE_URL is set.
+// Live E2E tests against real LLM endpoints. Each backend has its own
+// env-var trio so a single test invocation can target a mix of vendor
+// endpoints and private fleets. A test is skipped (not failed) when its
+// KEY env var is unset.
 //
-// Usage:
+//	┌──────────────────┬─────────────────────────────┬────────────────────┬───────────────────────────┐
+//	│ backend          │ KEY (required)              │ BASE (optional)    │ MODEL (optional)          │
+//	├──────────────────┼─────────────────────────────┼────────────────────┼───────────────────────────┤
+//	│ openai-compat    │ E2E_OPENAI_COMPAT_KEY       │ E2E_OPENAI_COMPAT_BASE † │ E2E_OPENAI_COMPAT_MODEL    (gpt-4o-mini)        │
+//	│ openai-responses │ E2E_OPENAI_RESPONSES_KEY    │ E2E_OPENAI_RESPONSES_BASE │ E2E_OPENAI_RESPONSES_MODEL (gpt-4o-mini)        │
+//	│ anthropic        │ E2E_ANTHROPIC_KEY           │ E2E_ANTHROPIC_BASE        │ E2E_ANTHROPIC_MODEL        (claude-sonnet-4-5)  │
+//	│ gemini           │ E2E_GEMINI_KEY              │ E2E_GEMINI_BASE           │ E2E_GEMINI_MODEL           (gemini-2.0-flash)    │
+//	└──────────────────┴─────────────────────────────┴────────────────────┴───────────────────────────┘
 //
-//	E2E_LLM_BASE_URL=<your-llm-endpoint> \
-//	E2E_OPENAI_COMPAT_KEY=<your-api-key> \
-//	go test -v -run TestE2E -timeout 300s ./internal/infra/llmclient/
+// † openai-compat has no vendor default — BASE must be set (e.g.
+//
+//	https://api.openai.com or your vLLM / ollama / oneapi host).
+//
+// The three SDK-backed backends inherit the vendor's default host when
+// BASE is empty (api.openai.com / api.anthropic.com /
+// generativelanguage.googleapis.com).
+//
+// Example — Anthropic only against the vendor default:
+//
+//	E2E_ANTHROPIC_KEY=sk-ant-... \
+//	  go test -v -run TestE2E_Anthropic ./internal/infra/llmclient/
+//
+// Example — all four against a LiteLLM Proxy that translates:
+//
+//	E2E_OPENAI_COMPAT_BASE=http://localhost:4000 E2E_OPENAI_COMPAT_KEY=sk-litellm-... \
+//	E2E_ANTHROPIC_BASE=http://localhost:4000     E2E_ANTHROPIC_KEY=sk-litellm-... \
+//	... \
+//	  go test -v -run TestE2E ./internal/infra/llmclient/
 const e2eContent = "购物车页面添加超过10件商品后会崩溃，结账按钮也没有反应"
 
-func e2eBase(t *testing.T) string {
+// e2eEndpoint resolves a backend's (base, key) from env vars.
+// keyEnv is mandatory — empty key skips the test (e2e is opt-in, never
+// fail-by-default). baseEnv is optional: the three SDK-backed backends
+// fall back to the vendor's default host when empty; the hand-rolled
+// OpenAICompat backend rejects empty base in its constructor, so users
+// targeting it must set E2E_OPENAI_COMPAT_BASE explicitly.
+func e2eEndpoint(t *testing.T, keyEnv, baseEnv string) (baseURL, apiKey string) {
 	t.Helper()
-	base := os.Getenv("E2E_LLM_BASE_URL")
-	if base == "" {
-		t.Skip("E2E_LLM_BASE_URL not set")
+	apiKey = os.Getenv(keyEnv)
+	if apiKey == "" {
+		t.Skipf("%s not set", keyEnv)
 	}
-	return base
+	baseURL = os.Getenv(baseEnv)
+	return
 }
 
 func e2eSchema() *OutputSchema {
@@ -61,11 +93,7 @@ func e2eModel(t *testing.T, envVar, fallback string) string {
 // ── OpenAI Compatible ─────────────────────────────────────────────────
 
 func TestE2E_OpenAICompat_FreeForm(t *testing.T) {
-	base := e2eBase(t)
-	key := os.Getenv("E2E_OPENAI_COMPAT_KEY")
-	if key == "" {
-		t.Skip("E2E_OPENAI_COMPAT_KEY not set")
-	}
+	base, key := e2eEndpoint(t, "E2E_OPENAI_COMPAT_KEY", "E2E_OPENAI_COMPAT_BASE")
 	model := e2eModel(t, "E2E_OPENAI_COMPAT_MODEL", "gpt-4o-mini")
 	backend, err := NewOpenAICompat(base, key)
 	if err != nil {
@@ -90,11 +118,7 @@ func TestE2E_OpenAICompat_FreeForm(t *testing.T) {
 }
 
 func TestE2E_OpenAICompat_Structured(t *testing.T) {
-	base := e2eBase(t)
-	key := os.Getenv("E2E_OPENAI_COMPAT_KEY")
-	if key == "" {
-		t.Skip("E2E_OPENAI_COMPAT_KEY not set")
-	}
+	base, key := e2eEndpoint(t, "E2E_OPENAI_COMPAT_KEY", "E2E_OPENAI_COMPAT_BASE")
 	model := e2eModel(t, "E2E_OPENAI_COMPAT_MODEL", "gpt-4o-mini")
 	backend, err := NewOpenAICompat(base, key)
 	if err != nil {
@@ -122,11 +146,7 @@ func TestE2E_OpenAICompat_Structured(t *testing.T) {
 // ── OpenAI Responses ──────────────────────────────────────────────────
 
 func TestE2E_OpenAIResponses_FreeForm(t *testing.T) {
-	base := e2eBase(t)
-	key := os.Getenv("E2E_OPENAI_RESPONSES_KEY")
-	if key == "" {
-		t.Skip("E2E_OPENAI_RESPONSES_KEY not set")
-	}
+	base, key := e2eEndpoint(t, "E2E_OPENAI_RESPONSES_KEY", "E2E_OPENAI_RESPONSES_BASE")
 	model := e2eModel(t, "E2E_OPENAI_RESPONSES_MODEL", "gpt-4o-mini")
 	backend, err := NewOpenAIResponses(base, key)
 	if err != nil {
@@ -152,11 +172,7 @@ func TestE2E_OpenAIResponses_FreeForm(t *testing.T) {
 }
 
 func TestE2E_OpenAIResponses_Structured(t *testing.T) {
-	base := e2eBase(t)
-	key := os.Getenv("E2E_OPENAI_RESPONSES_KEY")
-	if key == "" {
-		t.Skip("E2E_OPENAI_RESPONSES_KEY not set")
-	}
+	base, key := e2eEndpoint(t, "E2E_OPENAI_RESPONSES_KEY", "E2E_OPENAI_RESPONSES_BASE")
 	model := e2eModel(t, "E2E_OPENAI_RESPONSES_MODEL", "gpt-4o-mini")
 	backend, err := NewOpenAIResponses(base, key)
 	if err != nil {
@@ -185,11 +201,7 @@ func TestE2E_OpenAIResponses_Structured(t *testing.T) {
 // ── Anthropic ─────────────────────────────────────────────────────────
 
 func TestE2E_Anthropic_FreeForm(t *testing.T) {
-	base := e2eBase(t)
-	key := os.Getenv("E2E_ANTHROPIC_KEY")
-	if key == "" {
-		t.Skip("E2E_ANTHROPIC_KEY not set")
-	}
+	base, key := e2eEndpoint(t, "E2E_ANTHROPIC_KEY", "E2E_ANTHROPIC_BASE")
 	model := e2eModel(t, "E2E_ANTHROPIC_MODEL", "claude-sonnet-4-5")
 	backend, err := NewAnthropic(base, key)
 	if err != nil {
@@ -215,11 +227,7 @@ func TestE2E_Anthropic_FreeForm(t *testing.T) {
 }
 
 func TestE2E_Anthropic_Structured(t *testing.T) {
-	base := e2eBase(t)
-	key := os.Getenv("E2E_ANTHROPIC_KEY")
-	if key == "" {
-		t.Skip("E2E_ANTHROPIC_KEY not set")
-	}
+	base, key := e2eEndpoint(t, "E2E_ANTHROPIC_KEY", "E2E_ANTHROPIC_BASE")
 	model := e2eModel(t, "E2E_ANTHROPIC_MODEL", "claude-sonnet-4-5")
 	backend, err := NewAnthropic(base, key)
 	if err != nil {
@@ -248,11 +256,7 @@ func TestE2E_Anthropic_Structured(t *testing.T) {
 // ── Gemini ────────────────────────────────────────────────────────────
 
 func TestE2E_Gemini_FreeForm(t *testing.T) {
-	base := e2eBase(t)
-	key := os.Getenv("E2E_GEMINI_KEY")
-	if key == "" {
-		t.Skip("E2E_GEMINI_KEY not set")
-	}
+	base, key := e2eEndpoint(t, "E2E_GEMINI_KEY", "E2E_GEMINI_BASE")
 	model := e2eModel(t, "E2E_GEMINI_MODEL", "gemini-2.0-flash")
 	backend, err := NewGemini(base, key)
 	if err != nil {
@@ -278,11 +282,7 @@ func TestE2E_Gemini_FreeForm(t *testing.T) {
 }
 
 func TestE2E_Gemini_Structured(t *testing.T) {
-	base := e2eBase(t)
-	key := os.Getenv("E2E_GEMINI_KEY")
-	if key == "" {
-		t.Skip("E2E_GEMINI_KEY not set")
-	}
+	base, key := e2eEndpoint(t, "E2E_GEMINI_KEY", "E2E_GEMINI_BASE")
 	model := e2eModel(t, "E2E_GEMINI_MODEL", "gemini-2.0-flash")
 	backend, err := NewGemini(base, key)
 	if err != nil {
