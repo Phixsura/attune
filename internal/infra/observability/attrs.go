@@ -74,15 +74,3 @@ const AttrUserID = "user_id"
 
 // AttrTenantID — application tenant id.
 const AttrTenantID = "tenant_id"
-
-// AttrShotID — storyboard shot id (carried over from upstream services).
-const AttrShotID = "shot_id"
-
-// AttrEpisodeID — storyboard episode id (carried over from upstream services).
-const AttrEpisodeID = "episode_id"
-
-// AttrTaskID gateway task ID。
-const AttrTaskID = "task_id"
-
-// AttrModelID LLM model identifier。
-const AttrModelID = "model_id"
