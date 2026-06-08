@@ -37,6 +37,7 @@ func buildRouter(
 	apiKeys *apikeysvc.APIKeys,
 	pool *pgxpool.Pool,
 ) (chi.Router, error) {
+	const where = "main.buildRouter"
 	r := chi.NewRouter()
 	// otelchi opens the root span — continued from a client-supplied
 	// traceparent when present, generated from our readable trace_id
@@ -79,9 +80,9 @@ func buildRouter(
 		r.Route("/fb/v1/console", func(r chi.Router) {
 			r.Mount("/", consoleRouter)
 		})
-		logext.Infof(ctx, "[main.buildRouter] console enabled,base_url:%s", cfg.ConsoleBaseURL)
+		logext.Infof(ctx, "[%s] console enabled,base_url:%s", where, cfg.ConsoleBaseURL)
 	} else {
-		logext.Infof(ctx, "[main.buildRouter] console disabled (no CONSOLE_SESSION_KEY)")
+		logext.Infof(ctx, "[%s] console disabled (no CONSOLE_SESSION_KEY)", where)
 	}
 	return r, nil
 }

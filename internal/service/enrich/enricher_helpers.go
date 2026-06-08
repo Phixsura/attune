@@ -22,6 +22,7 @@ import (
 // is the right outcome for noise. Observability still records the row
 // (via the triage_decisions counter) so PMs can audit the ignore rate.
 func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.EnrichInput, reason string) error {
+	const where = "service.Enricher.persistIgnored"
 	enriched := domain.Enriched{
 		Title:     "[triage-ignored]",
 		Attrs:     map[string]any{},
@@ -32,8 +33,8 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.E
 		return fmt.Errorf("mark ignored row done: %w", err)
 	}
 	logext.Infof(ctx,
-		"[service.Enricher.persistIgnored] feedback ignored by triage,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,reason:%s",
-		trace.FromContext(ctx), row.TenantID, id, reason)
+		"[%s] feedback ignored by triage,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,reason:%s",
+		where, trace.FromContext(ctx), row.TenantID, id, reason)
 	return nil
 }
 
@@ -42,13 +43,14 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.E
 // LLM. Same downstream behavior as runFullEnrich (persist + fan out),
 // just without the LLM call.
 func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedback.EnrichInput, enriched domain.Enriched) error {
+	const where = "service.Enricher.persistFromTriage"
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
 	if err := e.persistEnriched(ctx, snapshot, enriched); err != nil {
 		return err
 	}
 	logext.Infof(ctx,
-		"[service.Enricher.persistFromTriage] feedback enriched via fast-path,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,is_urgent:%t,attrs:%s",
-		trace.FromContext(ctx), row.TenantID, id, enriched.IsUrgent,
+		"[%s] feedback enriched via fast-path,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,is_urgent:%t,attrs:%s",
+		where, trace.FromContext(ctx), row.TenantID, id, enriched.IsUrgent,
 		logext.AsLogParam(enriched.Attrs))
 	if n := e.notifier.Load(); n != nil {
 		go e.fanOut(snapshot, ptrext.Indirect(n))

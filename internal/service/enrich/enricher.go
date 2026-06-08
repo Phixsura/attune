@@ -144,6 +144,7 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 // snapshot, persist, fan out. Extracted so the triage switch in
 // EnrichOne stays one expression per branch.
 func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.EnrichInput) error {
+	const where = "service.Enricher.runFullEnrich"
 	start := time.Now()
 	cfg := classifyConfigFromRow(row)
 	mode := dimsMode(cfg)
@@ -171,8 +172,8 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 	metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "ok").
 		Observe(time.Since(start).Seconds())
 	logext.Infof(ctx,
-		"[service.Enricher.runFullEnrich] feedback enriched,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,is_urgent:%t,title:%s,attrs:%s",
-		trace.FromContext(ctx), row.TenantID, id, enriched.IsUrgent, enriched.Title,
+		"[%s] feedback enriched,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,is_urgent:%t,title:%s,attrs:%s",
+		where, trace.FromContext(ctx), row.TenantID, id, enriched.IsUrgent, enriched.Title,
 		logext.AsLogParam(enriched.Attrs))
 	if n := e.notifier.Load(); n != nil {
 		go e.fanOut(snapshot, ptrext.Indirect(n))
@@ -245,6 +246,7 @@ func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {
 // applyAttrsGate runs gate (2) per dim and records observability for
 // off-list values. Returns the canonical kept attrs.
 func applyAttrsGate(ctx context.Context, tenantID string, produced map[string]any, dims domain.DimensionSet) map[string]any {
+	const where = "service.Enricher.applyAttrsGate"
 	kept, dropped, suggested := domain.FilterAttrs(produced, dims)
 	if len(dropped) == 0 {
 		return kept
@@ -262,8 +264,8 @@ func applyAttrsGate(ctx context.Context, tenantID string, produced map[string]an
 		seen[dim] = true
 		metrics.EnrichSuggestedAttrsTotal.WithLabelValues(tenantID, dim).Inc()
 	}
-	logext.Infof(ctx, "[service.Enricher.applyAttrsGate] suggested,tenant_id:%s,dropped:%v",
-		tenantID, dropped)
+	logext.Infof(ctx, "[%s] suggested,tenant_id:%s,dropped:%v",
+		where, tenantID, dropped)
 	return kept
 }
 

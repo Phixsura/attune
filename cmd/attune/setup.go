@@ -172,9 +172,10 @@ func runOutboxLagRefresher(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 }
 
 func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
+	const where = "main.refreshOutboxLag"
 	age, err := outbox.OldestPendingAge(ctx)
 	if err != nil {
-		logext.Warnf(ctx, "[main.refreshOutboxLag] failed,err:%+v", err.Error())
+		logext.Warnf(ctx, "[%s] failed,err:%+v", where, err.Error())
 		return
 	}
 	metrics.OutboxLagSeconds.Set(age.Seconds())
@@ -193,6 +194,7 @@ func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 // They MUST be off in any real TLS-fronted deployment. The combined check
 // here makes "accidentally enable just one" impossible.
 func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, error) {
+	const where = "main.buildConsoleRouter"
 	ctx := context.Background()
 	if cfg.LarkAppID == "" || cfg.LarkAppSecret == "" {
 		return nil, fmt.Errorf("console requires lark_app_id + lark_app_secret")
@@ -210,7 +212,7 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 		return nil, err
 	}
 	if cfg.ConsoleInsecureCookies {
-		logext.Warnf(ctx, "[main.buildConsoleRouter] INSECURE cookies enabled — for HTTP testing only")
+		logext.Warnf(ctx, "[%s] INSECURE cookies enabled — for HTTP testing only", where)
 	}
 
 	larkClient := larkclient.New(cfg.LarkAppID, cfg.LarkAppSecret)
@@ -232,7 +234,7 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 
 	var devLogin http.Handler
 	if cfg.ConsoleDevLogin {
-		logext.Warnf(ctx, "[main.buildConsoleRouter] dev-login BACKDOOR enabled at /fb/v1/console/install/dev-login")
+		logext.Warnf(ctx, "[%s] dev-login BACKDOOR enabled at /fb/v1/console/install/dev-login", where)
 		devLogin = console.NewDevLoginHandler(signer, tenantRepo, userRepo, cfg.ConsoleBaseURL)
 	}
 	return console.NewRouter(

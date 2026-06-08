@@ -85,6 +85,7 @@ func composeUserID(keyID uuid.UUID, sourceUser string) string {
 // Errors are only logged — the row stays 'pending' and the background
 // poller will pick it up on the next tick.
 func (i *Ingestor) fireEnrich(inboundCtx context.Context, id int64, traceID string) {
+	const where = "service.Ingestor.fireEnrich"
 	// Detach the OTel SpanContext onto a fresh bounded ctx:
 	// - the new ctx survives the inbound HTTP request closing (60s timeout);
 	// - the OTel SpanContext rides along, keeping trace_id stitched;
@@ -98,7 +99,7 @@ func (i *Ingestor) fireEnrich(inboundCtx context.Context, id int64, traceID stri
 	ctx = trace.WithID(ctx, traceID)
 	if err := i.enricher.EnrichOne(ctx, id); err != nil {
 		logext.Warnf(ctx,
-			"[service.Ingestor.fireEnrich] inline enrich failed,id:%d,inbound_trace_id:%s,err:%+v",
-			id, traceID, err.Error())
+			"[%s] inline enrich failed,id:%d,inbound_trace_id:%s,err:%+v",
+			where, id, traceID, err.Error())
 	}
 }

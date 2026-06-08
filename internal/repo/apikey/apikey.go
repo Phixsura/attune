@@ -81,14 +81,14 @@ func (r *APIKeyRepo) LookupByHash(ctx context.Context, hash []byte) (*APIKeyRow,
 // TouchLastUsed bumps last_used_at to NOW. Fire-and-forget from
 // service.Lookup's success path — failure here is logged, not returned.
 func (r *APIKeyRepo) TouchLastUsed(id uuid.UUID) {
+	const where = "repo.APIKeyRepo.TouchLastUsed"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := r.pool.Exec(
 		ctx,
 		`UPDATE external_api_keys SET last_used_at = NOW() WHERE id = $1`, id,
 	); err != nil {
-		logext.Warnf(ctx, "[repo.APIKeyRepo.TouchLastUsed] failed,id:%s,err:%+v",
-			id, err.Error())
+		logext.Warnf(ctx, "[%s] failed,id:%s,err:%+v", where, id, err.Error())
 	}
 }
 

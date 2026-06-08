@@ -98,12 +98,13 @@ func (t *Transport) Send(
 	build RequestBuilder,
 	check ResponseChecker,
 ) error {
+	const where = "notify.Transport.Send"
 	var lastErr error
 	for attempt := 1; attempt <= t.retry.MaxAttempts; attempt++ {
 		if attempt > 1 {
 			delay := t.retry.backoff(attempt - 1)
-			logext.Infof(ctx, "[notify.Transport.Send] retry,dest:%s,attempt:%d,delay:%s,prev_err:%+v",
-				label, attempt, delay, lastErr)
+			logext.Infof(ctx, "[%s] retry,dest:%s,attempt:%d,delay:%s,prev_err:%+v",
+				where, label, attempt, delay, lastErr)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

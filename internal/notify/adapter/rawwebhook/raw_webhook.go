@@ -54,6 +54,7 @@ type rawDestination struct {
 // Passing a nil httpClient gives a 10s-per-call default. retry should
 // usually be DefaultRetry() for raw webhook (5 attempts with backoff).
 func NewRawWebhookRouter(transport *notify.Transport, targets []notifytarget.NotifyTarget) *RawWebhookRouter {
+	const where = "notify.NewRawWebhookRouter"
 	dests := make(map[string]map[string]*rawDestination)
 	for _, t := range targets {
 		if t.DestinationType != notifytarget.DestRawWebhook {
@@ -61,8 +62,8 @@ func NewRawWebhookRouter(transport *notify.Transport, targets []notifytarget.Not
 		}
 		if t.URL == "" || t.Secret == "" {
 			logext.Warnf(context.Background(),
-				"[notify.NewRawWebhookRouter] target missing url/secret, skipping,tenant_id:%s,audience:%s",
-				t.TenantID, t.Audience)
+				"[%s] target missing url/secret, skipping,tenant_id:%s,audience:%s",
+				where, t.TenantID, t.Audience)
 			continue
 		}
 		if _, ok := dests[t.TenantID]; !ok {

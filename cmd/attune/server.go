@@ -188,6 +188,7 @@ func shutdownTracing(shutdown func(context.Context) error) {
 // setupDatabase opens the pgx pool, verifies connectivity, and applies
 // migrations. The caller owns the returned pool (defer pool.Close()).
 func setupDatabase(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
+	const where = "main.setupDatabase"
 	pool, err := database.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("pgxpool: %w", err)
@@ -196,7 +197,7 @@ func setupDatabase(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, erro
 		pool.Close()
 		return nil, fmt.Errorf("pg ping: %w", err)
 	}
-	logext.Infof(ctx, "[main.setupDatabase] postgres connected")
+	logext.Infof(ctx, "[%s] postgres connected", where)
 	if err := database.RunMigrations(ctx, pool); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("migrations: %w", err)
