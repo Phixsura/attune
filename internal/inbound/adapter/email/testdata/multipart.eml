@@ -1,0 +1,19 @@
+From: carol@example.com
+To: feedback@team.com
+Subject: Multipart feedback
+Message-ID: <ghi789@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary42"
+Date: Sun, 8 Jun 2026 12:10:00 +0000
+
+--boundary42
+Content-Type: text/plain; charset=utf-8
+
+Plain version: please add dark mode.
+
+--boundary42
+Content-Type: text/html; charset=utf-8
+
+<p>HTML version: please add <b>dark mode</b>.</p>
+
+--boundary42--
