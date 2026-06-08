@@ -1,0 +1,183 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+// InboundSourceService manages a tenant's inbound source rows (#66
+// channel-agnostic inbound framework). Sources back the webhook and
+// email IMAP adapters; future channels (RSS, scrape, MQ, …) hang off
+// the same shape.
+service InboundSourceService {
+  // GET /fb/v1/console/inbound/sources
+  rpc ListInboundSources(ListInboundSourcesRequest) returns (ListInboundSourcesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/inbound/sources"};
+  }
+  // GET /fb/v1/console/inbound/sources/{id}
+  rpc GetInboundSource(GetInboundSourceRequest) returns (InboundSource) {
+    option (google.api.http) = {get: "/fb/v1/console/inbound/sources/{id}"};
+  }
+  // POST /fb/v1/console/inbound/sources — create webhook or email source.
+  // Webhook responses include a one-time secret reveal (url + secret +
+  // example); the raw secret is never returned again.
+  rpc CreateInboundSource(CreateInboundSourceRequest) returns (CreateInboundSourceResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/inbound/sources"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/inbound/sources/{id}/rotate-secret — webhook only.
+  // Returns 409 with rotation_in_grace_window error if a prior rotation
+  // is still inside its 24h grace.
+  rpc RotateInboundSourceSecret(RotateInboundSourceSecretRequest) returns (RotateInboundSourceSecretResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/inbound/sources/{id}/rotate-secret"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/inbound/sources/{id}/pause — disables the source.
+  rpc PauseInboundSource(PauseInboundSourceRequest) returns (InboundSource) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/inbound/sources/{id}/pause"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/inbound/sources/{id}/resume — re-enables.
+  rpc ResumeInboundSource(ResumeInboundSourceRequest) returns (InboundSource) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/inbound/sources/{id}/resume"
+      body: "*"
+    };
+  }
+  // DELETE /fb/v1/console/inbound/sources/{id}
+  rpc DeleteInboundSource(DeleteInboundSourceRequest) returns (DeleteInboundSourceResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/inbound/sources/{id}"};
+  }
+  // POST /fb/v1/console/inbound/sources/test-connection — IMAP-only,
+  // no state changes. Validates host/port/login/SELECT round-trip.
+  rpc TestInboundConnection(TestInboundConnectionRequest) returns (TestInboundConnectionResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/inbound/sources/test-connection"
+      body: "*"
+    };
+  }
+}
+
+// InboundSource never carries the secret — it is write-only once stored.
+message InboundSource {
+  string id = 1;
+  string tenant_id = 2;
+  string channel = 3;  // "webhook" | "email" | future channels
+  string name = 4;
+  string slug = 5;
+  bool enabled = 6;
+  optional string last_event_at = 7;  // RFC3339, null if never received
+  int64 last_uid = 8;                 // poll-mode cursor; 0 for push channels
+  string last_error = 9;              // empty if healthy
+  string created_at = 10;             // RFC3339
+  string updated_at = 11;             // RFC3339
+}
+
+message ListInboundSourcesRequest {}
+
+message ListInboundSourcesResponse {
+  repeated InboundSource items = 1;
+}
+
+message GetInboundSourceRequest {
+  string id = 1;  // path param (UUID)
+}
+
+// CreateInboundSourceRequest — one of webhook_config / email_config is
+// required based on channel. The framework selects the relevant payload;
+// the other is ignored.
+message CreateInboundSourceRequest {
+  string channel = 1 [(google.api.field_behavior) = REQUIRED];
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  optional WebhookCreateConfig webhook_config = 3;
+  optional EmailCreateConfig email_config = 4;
+}
+
+// CreateInboundSourceResponse always carries the persisted InboundSource.
+// For webhook channels, webhook_secret_reveal is also populated — this is
+// the only place the raw secret is ever transmitted; clients must store
+// it immediately because rotate is the only path to a new value.
+message CreateInboundSourceResponse {
+  InboundSource source = 1;
+  optional WebhookSecretReveal webhook_secret_reveal = 2;
+}
+
+// WebhookCreateConfig has no body today — the secret is generated
+// server-side. The empty message is a placeholder so future webhook
+// options (e.g., HMAC algorithm override) can be added without breaking
+// CreateInboundSourceRequest's shape.
+message WebhookCreateConfig {}
+
+message EmailCreateConfig {
+  string host = 1 [(google.api.field_behavior) = REQUIRED];
+  int32 port = 2 [(google.api.field_behavior) = REQUIRED];
+  bool tls = 3;
+  string username = 4 [(google.api.field_behavior) = REQUIRED];
+  string password = 5 [(google.api.field_behavior) = REQUIRED];
+  string folder = 6;                  // defaults to "INBOX"
+  int32 poll_interval_seconds = 7;    // defaults to 60
+  string start_from = 8;              // "now" | "all_unseen" (default "now")
+  string after_ingest = 9;            // "mark_seen" | "keep_unseen" | "move_to:<folder>" (default "mark_seen")
+}
+
+// WebhookSecretReveal — one-time payload returned at Create + Rotate so
+// admins can publish the URL + secret to their automation. The secret
+// is base64-encoded; signature is HMAC-SHA256(secret_raw_bytes,
+// "<X-Attune-Timestamp>.<body>") (spec §Webhook adapter).
+message WebhookSecretReveal {
+  string url = 1;
+  string secret_base64 = 2;
+  string curl_example = 3;
+}
+
+message RotateInboundSourceSecretRequest {
+  string id = 1;  // path param (UUID)
+}
+
+message RotateInboundSourceSecretResponse {
+  string secret_base64 = 1;
+  string next_eligible_at = 2;  // RFC3339, end of 24h grace
+}
+
+message PauseInboundSourceRequest {
+  string id = 1;
+}
+
+message ResumeInboundSourceRequest {
+  string id = 1;
+}
+
+message DeleteInboundSourceRequest {
+  string id = 1;
+}
+
+message DeleteInboundSourceResponse {}
+
+// TestInboundConnectionRequest validates an IMAP config without
+// persisting it. Returns ok=false + error message rather than 5xx when
+// the IMAP server rejects credentials.
+message TestInboundConnectionRequest {
+  string channel = 1 [(google.api.field_behavior) = REQUIRED];  // currently "email" only
+  optional EmailConnConfig email_config = 2;
+}
+
+message TestInboundConnectionResponse {
+  bool ok = 1;
+  optional string error = 2;
+  optional int64 latency_ms = 3;
+}
+
+message EmailConnConfig {
+  string host = 1;
+  int32 port = 2;
+  bool tls = 3;
+  string username = 4;
+  string password = 5;
+  string folder = 6;
+}

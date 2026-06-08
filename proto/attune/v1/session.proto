@@ -3,9 +3,19 @@ syntax = "proto3";
 package attune.v1;
 
 import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
 
-// SessionService backs the console session (current tenant + user, logout).
+// SessionService backs the console session (login, current tenant + user, logout).
 service SessionService {
+  // POST /fb/v1/console/install/login — local admin password login (#66 Plan T11).
+  // Replaces the deleted Lark OAuth flow. The server sets the session cookie
+  // and returns the safe-validated redirect path the SPA should navigate to.
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/install/login"
+      body: "*"
+    };
+  }
   // GET /fb/v1/console/me
   rpc GetMe(GetMeRequest) returns (GetMeResponse) {
     option (google.api.http) = {get: "/fb/v1/console/me"};
@@ -17,6 +27,16 @@ service SessionService {
       body: "*"
     };
   }
+}
+
+message LoginRequest {
+  string email = 1 [(google.api.field_behavior) = REQUIRED];
+  string password = 2 [(google.api.field_behavior) = REQUIRED];
+  string redirect_uri = 3;  // safe-path-validated server-side; defaults to /console/
+}
+
+message LoginResponse {
+  string redirect = 1;
 }
 
 message GetMeRequest {}

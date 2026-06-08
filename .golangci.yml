@@ -62,12 +62,17 @@ linters:
         #    infra / notify / domain — nor the framework root itself —
         #    may import internal/inbound/adapter/*. Adapters self-register
         #    via init(); cmd/attune is the only legal blank-import site.
+        # Exception: internal/handlers/console/inbound/ is the operator
+        # surface that drives webhook secret rotation (it calls
+        # webhook.RotateSecret directly). This file is the wiring point
+        # for that operation, analogous to cmd/attune for adapter Start.
         # See: docs/proposals/2026/06/2026-06-08-channel-agnostic-inbound.md
         inbound-boundary:
           list-mode: lax
           files:
             - "**/internal/service/**"
             - "**/internal/handlers/**"
+            - "!**/internal/handlers/console/inbound/**"
             - "**/internal/repo/**"
             - "**/internal/infra/**"
             - "**/internal/notify/**"

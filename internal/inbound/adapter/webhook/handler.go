@@ -3,7 +3,6 @@
 package webhook
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -17,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/respond"
 )
 
 const (
@@ -52,7 +52,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err != nil {
 		a.deps.Metrics.Total(channelName, tenantSlug, sourceSlug, "validate_err")
-		writeJSONErr(w, http.StatusBadRequest, "bad_request", "body too large or unreadable")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "body too large or unreadable")
 		return
 	}
 
@@ -62,7 +62,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 		// response time + status match a real auth failure.
 		_ = verifyHMACAgainstStub(a.stubSecret, ts, body, sig)
 		a.deps.Metrics.Total(channelName, tenantSlug, sourceSlug, "auth_err")
-		writeJSONErr(w, http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid")
+		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid")
 		return
 	}
 
@@ -70,7 +70,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.deps.Logger.Errorf(ctx, "[%s] parseConfig failed,err:%+v", where, err.Error())
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
-		writeJSONErr(w, http.StatusInternalServerError, "internal", "internal error")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 
@@ -81,7 +81,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.deps.Logger.Errorf(ctx, "[%s] decrypt current failed,err:%+v", where, err.Error())
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
-		writeJSONErr(w, http.StatusInternalServerError, "internal", "internal error")
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 
@@ -94,14 +94,14 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "auth_err")
-		writeJSONErr(w, http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid")
+		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid")
 		return
 	}
 
 	var req attunev1.IngestRequest
 	if err := ingestUnmarshal.Unmarshal(body, &req); err != nil {
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
-		writeJSONErr(w, http.StatusBadRequest, "bad_request", "invalid json body")
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "invalid json body")
 		return
 	}
 
@@ -136,7 +136,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 			status, msg, result = http.StatusInternalServerError, "internal error", "internal_err"
 		}
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, result)
-		writeJSONErr(w, status, "ingest", msg)
+		respond.Error(ctx, w, status, "ingest", msg)
 		return
 	}
 
@@ -150,18 +150,10 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,source_id:%s,feedback_id:%d",
 		where, src.TenantID, src.ID, id)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"id":                id,
-		"enrichment_status": "pending",
-	})
-}
-
-func writeJSONErr(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"code": code, "message": message})
+	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.IngestResponse{
+		Id:               id,
+		EnrichmentStatus: "pending",
+	}))
 }
 
 // errInternal — sentinel for distinguishing 500 vs 400 if upstream

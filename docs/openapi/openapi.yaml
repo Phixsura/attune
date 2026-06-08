@@ -224,6 +224,252 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/inbound/sources:
+        get:
+            tags:
+                - InboundSourceService
+            description: GET /fb/v1/console/inbound/sources
+            operationId: InboundSourceService_ListInboundSources
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListInboundSourcesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - InboundSourceService
+            description: |-
+                POST /fb/v1/console/inbound/sources — create webhook or email source.
+                 Webhook responses include a one-time secret reveal (url + secret +
+                 example); the raw secret is never returned again.
+            operationId: InboundSourceService_CreateInboundSource
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateInboundSourceRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateInboundSourceResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/inbound/sources/test-connection:
+        post:
+            tags:
+                - InboundSourceService
+            description: |-
+                POST /fb/v1/console/inbound/sources/test-connection — IMAP-only,
+                 no state changes. Validates host/port/login/SELECT round-trip.
+            operationId: InboundSourceService_TestInboundConnection
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TestInboundConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TestInboundConnectionResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/inbound/sources/{id}:
+        get:
+            tags:
+                - InboundSourceService
+            description: GET /fb/v1/console/inbound/sources/{id}
+            operationId: InboundSourceService_GetInboundSource
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/InboundSource'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        delete:
+            tags:
+                - InboundSourceService
+            description: DELETE /fb/v1/console/inbound/sources/{id}
+            operationId: InboundSourceService_DeleteInboundSource
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteInboundSourceResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/inbound/sources/{id}/pause:
+        post:
+            tags:
+                - InboundSourceService
+            description: POST /fb/v1/console/inbound/sources/{id}/pause — disables the source.
+            operationId: InboundSourceService_PauseInboundSource
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PauseInboundSourceRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/InboundSource'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/inbound/sources/{id}/resume:
+        post:
+            tags:
+                - InboundSourceService
+            description: POST /fb/v1/console/inbound/sources/{id}/resume — re-enables.
+            operationId: InboundSourceService_ResumeInboundSource
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ResumeInboundSourceRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/InboundSource'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/inbound/sources/{id}/rotate-secret:
+        post:
+            tags:
+                - InboundSourceService
+            description: |-
+                POST /fb/v1/console/inbound/sources/{id}/rotate-secret — webhook only.
+                 Returns 409 with rotation_in_grace_window error if a prior rotation
+                 is still inside its 24h grace.
+            operationId: InboundSourceService_RotateInboundSourceSecret
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RotateInboundSourceSecretRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RotateInboundSourceSecretResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/install/login:
+        post:
+            tags:
+                - SessionService
+            description: |-
+                POST /fb/v1/console/install/login — local admin password login (#66 Plan T11).
+                 Replaces the deleted Lark OAuth flow. The server sets the session cookie
+                 and returns the safe-validated redirect path the SPA should navigate to.
+            operationId: SessionService_Login
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LoginRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LoginResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/logout:
         post:
             tags:
@@ -493,6 +739,36 @@ components:
                 secret:
                     type: string
                     description: The raw secret — returned only here, once, at creation.
+        CreateInboundSourceRequest:
+            required:
+                - channel
+                - name
+            type: object
+            properties:
+                channel:
+                    type: string
+                name:
+                    type: string
+                webhookConfig:
+                    $ref: '#/components/schemas/WebhookCreateConfig'
+                emailConfig:
+                    $ref: '#/components/schemas/EmailCreateConfig'
+            description: |-
+                CreateInboundSourceRequest — one of webhook_config / email_config is
+                 required based on channel. The framework selects the relevant payload;
+                 the other is ignored.
+        CreateInboundSourceResponse:
+            type: object
+            properties:
+                source:
+                    $ref: '#/components/schemas/InboundSource'
+                webhookSecretReveal:
+                    $ref: '#/components/schemas/WebhookSecretReveal'
+            description: |-
+                CreateInboundSourceResponse always carries the persisted InboundSource.
+                 For webhook channels, webhook_secret_reveal is also populated — this is
+                 the only place the raw secret is ever transmitted; clients must store
+                 it immediately because rotate is the only path to a new value.
         CreateNotifyTargetRequest:
             required:
                 - destinationType
@@ -513,6 +789,9 @@ components:
                 disabled:
                     type: boolean
         DeleteApiKeyResponse:
+            type: object
+            properties: {}
+        DeleteInboundSourceResponse:
             type: object
             properties: {}
         DeleteNotifyTargetResponse:
@@ -562,6 +841,50 @@ components:
                 Dimension is one enrichment axis the LLM populates for each row.
                  Per-tenant DimensionSet is open in count and closed in shape —
                  adding any new dim is a Settings edit, not a code change.
+        EmailConnConfig:
+            type: object
+            properties:
+                host:
+                    type: string
+                port:
+                    type: integer
+                    format: int32
+                tls:
+                    type: boolean
+                username:
+                    type: string
+                password:
+                    type: string
+                folder:
+                    type: string
+        EmailCreateConfig:
+            required:
+                - host
+                - port
+                - username
+                - password
+            type: object
+            properties:
+                host:
+                    type: string
+                port:
+                    type: integer
+                    format: int32
+                tls:
+                    type: boolean
+                username:
+                    type: string
+                password:
+                    type: string
+                folder:
+                    type: string
+                pollIntervalSeconds:
+                    type: integer
+                    format: int32
+                startFrom:
+                    type: string
+                afterIngest:
+                    type: string
         EnrichConfig:
             type: object
             properties:
@@ -728,6 +1051,32 @@ components:
                  (handled in the console SPA): preferred locale list → "default" →
                  any non-empty entry. The backend never resolves — it returns the
                  full map so the same payload serves every caller.
+        InboundSource:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                channel:
+                    type: string
+                name:
+                    type: string
+                slug:
+                    type: string
+                enabled:
+                    type: boolean
+                lastEventAt:
+                    type: string
+                lastUid:
+                    type: string
+                lastError:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+            description: InboundSource never carries the secret — it is write-only once stored.
         IngestRequest:
             required:
                 - content
@@ -785,6 +1134,13 @@ components:
                         $ref: '#/components/schemas/Feedback'
                 nextCursor:
                     type: string
+        ListInboundSourcesResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/InboundSource'
         ListNotifyTargetsResponse:
             type: object
             properties:
@@ -792,6 +1148,23 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/NotifyTarget'
+        LoginRequest:
+            required:
+                - email
+                - password
+            type: object
+            properties:
+                email:
+                    type: string
+                password:
+                    type: string
+                redirectUri:
+                    type: string
+        LoginResponse:
+            type: object
+            properties:
+                redirect:
+                    type: string
         LogoutRequest:
             type: object
             properties: {}
@@ -821,6 +1194,11 @@ components:
                 lastError:
                     type: string
             description: NotifyTarget never carries the secret — it is write-only once stored.
+        PauseInboundSourceRequest:
+            type: object
+            properties:
+                id:
+                    type: string
         PreviewEnrichPromptRequest:
             required:
                 - sampleContent
@@ -832,6 +1210,23 @@ components:
             type: object
             properties:
                 renderedPrompt:
+                    type: string
+        ResumeInboundSourceRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        RotateInboundSourceSecretRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        RotateInboundSourceSecretResponse:
+            type: object
+            properties:
+                secretBase64:
+                    type: string
+                nextEligibleAt:
                     type: string
         SessionUser:
             type: object
@@ -890,6 +1285,28 @@ components:
                 timezone:
                     type: string
             description: Tenant is the console-facing tenant record.
+        TestInboundConnectionRequest:
+            required:
+                - channel
+            type: object
+            properties:
+                channel:
+                    type: string
+                emailConfig:
+                    $ref: '#/components/schemas/EmailConnConfig'
+            description: |-
+                TestInboundConnectionRequest validates an IMAP config without
+                 persisting it. Returns ok=false + error message rather than 5xx when
+                 the IMAP server rejects credentials.
+        TestInboundConnectionResponse:
+            type: object
+            properties:
+                ok:
+                    type: boolean
+                error:
+                    type: string
+                latencyMs:
+                    type: string
         TestNotifyTargetRequest:
             type: object
             properties:
@@ -954,6 +1371,28 @@ components:
                 count:
                     type: string
             description: ValueCount is one bucket of a per-dim distribution.
+        WebhookCreateConfig:
+            type: object
+            properties: {}
+            description: |-
+                WebhookCreateConfig has no body today — the secret is generated
+                 server-side. The empty message is a placeholder so future webhook
+                 options (e.g., HMAC algorithm override) can be added without breaking
+                 CreateInboundSourceRequest's shape.
+        WebhookSecretReveal:
+            type: object
+            properties:
+                url:
+                    type: string
+                secretBase64:
+                    type: string
+                curlExample:
+                    type: string
+            description: |-
+                WebhookSecretReveal — one-time payload returned at Create + Rotate so
+                 admins can publish the URL + secret to their automation. The secret
+                 is base64-encoded; signature is HMAC-SHA256(secret_raw_bytes,
+                 "<X-Attune-Timestamp>.<body>") (spec §Webhook adapter).
 tags:
     - name: ApiKeyService
       description: ApiKeyService manages a tenant's external ingest API keys (console).
@@ -971,9 +1410,15 @@ tags:
          We do NOT generate server stubs — chi routing stays. The google.api.http
          annotation exists only so protoc-gen-openapi emits the REST path + operation
          into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
+    - name: InboundSourceService
+      description: |-
+        InboundSourceService manages a tenant's inbound source rows (#66
+         channel-agnostic inbound framework). Sources back the webhook and
+         email IMAP adapters; future channels (RSS, scrape, MQ, …) hang off
+         the same shape.
     - name: NotifyTargetService
       description: NotifyTargetService manages a tenant's outbound notification destinations.
     - name: SessionService
-      description: SessionService backs the console session (current tenant + user, logout).
+      description: SessionService backs the console session (login, current tenant + user, logout).
     - name: UsageService
       description: UsageService serves the console usage dashboard.

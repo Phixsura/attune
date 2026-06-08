@@ -8,6 +8,17 @@
 
 export const protobufPackage = "attune.v1";
 
+export interface LoginRequest {
+  email: string;
+  password: string;
+  /** safe-path-validated server-side; defaults to /console/ */
+  redirectUri: string;
+}
+
+export interface LoginResponse {
+  redirect: string;
+}
+
 export interface GetMeRequest {
 }
 
@@ -48,8 +59,14 @@ export interface LogoutRequest {
 export interface LogoutResponse {
 }
 
-/** SessionService backs the console session (current tenant + user, logout). */
+/** SessionService backs the console session (login, current tenant + user, logout). */
 export interface SessionService {
+  /**
+   * POST /fb/v1/console/install/login — local admin password login (#66 Plan T11).
+   * Replaces the deleted Lark OAuth flow. The server sets the session cookie
+   * and returns the safe-validated redirect path the SPA should navigate to.
+   */
+  Login(request: LoginRequest): Promise<LoginResponse>;
   /** GET /fb/v1/console/me */
   GetMe(request: GetMeRequest): Promise<GetMeResponse>;
   /** POST /fb/v1/console/logout — clears the session cookie (204). */
