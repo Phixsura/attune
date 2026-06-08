@@ -80,29 +80,7 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		return
 	}
 
-	// First-poll cursor seed honours spec §Email IMAP adapter's
-	// `start_from` policy. `now` (default) skips existing backlog by
-	// stamping LastUID to the mailbox's UIDNext-1; `all_unseen` starts
-	// from 0 so the loop fetches every existing message. Subsequent
-	// polls already have a non-zero LastUID and skip this branch (G1
-	// fix, #66).
-	if src.State.LastUID == 0 && strings.ToLower(cfg.StartFrom) != "all_unseen" {
-		var seedUID int64
-		if selectData != nil && selectData.UIDNext > 0 {
-			seedUID = int64(selectData.UIDNext) - 1
-		}
-		if seedUID < 0 {
-			seedUID = 0
-		}
-		if err := a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
-			LastEventAt: src.State.LastEventAt,
-			LastUID:     seedUID,
-		}); err != nil {
-			a.deps.Logger.Warnf(ctx, "[%s] seed LastUID failed,source_id:%s,err:%+v",
-				where, src.ID, err.Error())
-		}
-		src.State.LastUID = seedUID
-	}
+	src = a.seedFirstPollCursor(ctx, src, cfg.StartFrom, selectData)
 
 	criteria := newSearchCriteria(src.State.LastUID)
 	searchData, err := cli.UIDSearch(criteria, ptrext.Of(imap.SearchOptions{})).Wait()
@@ -116,11 +94,53 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 	}
 
 	policy := parseAfterIngest(cfg.AfterIngest)
+	lastUID := a.ingestUIDs(ctx, cli, src, cfg, policy, uids)
 
+	a.persistPollResult(ctx, src, lastUID)
+	a.markPollSuccess(src.Slug, nowFn())
+	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, 0)
+	a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", true)
+}
+
+// seedFirstPollCursor honours spec §Email IMAP adapter's `start_from`
+// policy on the first poll for a source (LastUID == 0). `now` (default)
+// skips existing backlog by stamping LastUID to UIDNext-1; `all_unseen`
+// starts from 0 and fetches every existing message. Subsequent polls
+// already have a non-zero LastUID and pass through unchanged (G1 fix,
+// #66).
+func (a *adapter) seedFirstPollCursor(ctx context.Context, src inbound.Source, startFrom string, selectData *imap.SelectData) inbound.Source {
+	if src.State.LastUID != 0 || strings.EqualFold(startFrom, "all_unseen") {
+		return src
+	}
+	const where = "inbound.email.seedFirstPollCursor"
+	var seedUID int64
+	if selectData != nil && selectData.UIDNext > 0 {
+		seedUID = int64(selectData.UIDNext) - 1
+	}
+	if seedUID < 0 {
+		seedUID = 0
+	}
+	if err := a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
+		LastEventAt: src.State.LastEventAt,
+		LastUID:     seedUID,
+	}); err != nil {
+		a.deps.Logger.Warnf(ctx, "[%s] seed LastUID failed,source_id:%s,err:%+v",
+			where, src.ID, err.Error())
+	}
+	src.State.LastUID = seedUID
+	return src
+}
+
+// ingestUIDs walks the UID batch, fetches + parses + ingests each
+// message, and returns the last UID we either ingested or chose to
+// skip past. Per-UID failures bump metrics + advance the cursor (no
+// wedging on a single bad message); ctx-cancel exits early.
+func (a *adapter) ingestUIDs(ctx context.Context, cli *imapclient.Client, src inbound.Source, cfg emailConfig, policy afterIngestPolicy, uids []imap.UID) int64 {
+	const where = "inbound.email.ingestUIDs"
 	lastUID := src.State.LastUID
 	for _, uid := range uids {
 		if ctx.Err() != nil {
-			return
+			return lastUID
 		}
 		raw, ferr := fetchOne(cli, uid)
 		if ferr != nil {
@@ -129,7 +149,6 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "transient_err")
 			continue
 		}
-
 		parsed, perr := parseRFC822(raw)
 		if perr != nil {
 			// Bad MIME — count as validate_err and advance the cursor
@@ -142,7 +161,6 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 			lastUID = int64(uid)
 			continue
 		}
-
 		in := domain.IngestInput{
 			Source:     channelName,
 			Content:    parsed.Subject + "\n\n" + parsed.TextBody,
@@ -157,43 +175,36 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 				"imap_uid":            uid,
 			},
 		}
-
 		if _, err := a.deps.Ingest.Ingest(ctx, src.TenantID, uuid.Nil, in); err != nil {
 			a.deps.Logger.Warnf(ctx, "[%s] ingest failed,source_id:%s,uid:%d,err:%+v",
 				where, src.ID, uid, err.Error())
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
 			continue
 		}
-
 		applyAfterIngest(ctx, clientOps{cli}, uid, policy, a.deps.Logger)
 		lastUID = int64(uid)
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
 	}
+	return lastUID
+}
 
-	// UpdateState fires when:
-	//   - new UIDs landed (advance LastUID + LastEventAt), OR
-	//   - the previous state had a `last_error` left over (recovery
-	//     should clear it so the Console UI doesn't stay red — G2 fix,
-	//     #66). Without this branch a transiently-broken source that
-	//     recovered to a quiet mailbox would stay error-flagged forever.
-	if lastUID != src.State.LastUID {
+// persistPollResult writes back the per-poll state row. Two cases:
+//   - new UIDs landed → advance LastUID + LastEventAt;
+//   - LastUID unchanged but the row carried a stale last_error → clear it
+//     so the Console UI doesn't stay red (G2 fix, #66).
+func (a *adapter) persistPollResult(ctx context.Context, src inbound.Source, lastUID int64) {
+	switch {
+	case lastUID != src.State.LastUID:
 		_ = a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
 			LastEventAt: ptrext.Of(nowFn()),
 			LastUID:     lastUID,
 		})
-	} else if src.State.LastError != "" {
+	case src.State.LastError != "":
 		_ = a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
 			LastEventAt: src.State.LastEventAt,
 			LastUID:     lastUID,
 		})
 	}
-	// Stamp this poll as a success even when no new UIDs landed — the
-	// adapter successfully connected, authenticated, and searched. That
-	// is what `poll_lag` measures (operator wants alerts on "I cannot
-	// reach the mailbox", not "nobody wrote me email today").
-	a.markPollSuccess(src.Slug, nowFn())
-	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, 0)
-	a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", true)
 }
 
 // pollLagSeconds returns seconds since the last successful poll for the
