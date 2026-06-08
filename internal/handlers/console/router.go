@@ -15,8 +15,6 @@
 package console
 
 import (
-	"net/http"
-
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
@@ -27,7 +25,6 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
-	"github.com/Phixsura/attune/internal/handlers/console/oauth"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
@@ -43,8 +40,6 @@ type (
 // handlers via `console.NewXHandler(...)` after the split.
 var (
 	NewSigner               = session.NewSigner
-	NewOAuthHandler         = oauth.NewOAuthHandler
-	NewDevLoginHandler      = oauth.NewDevLoginHandler
 	NewAuthHandler          = auth.NewHandler
 	NewMeHandler            = me.NewMeHandler
 	NewAPIKeysHandler       = apikey.NewAPIKeysHandler
@@ -61,9 +56,8 @@ var (
 // Endpoint inventory:
 //
 //	public (no session required):
-//	 GET /install/start → oauth.Handler.Start
-//	 GET /install/callback → oauth.Handler.Callback
-//	 GET /install/dev-login → DevLogin (optional, gated)
+//	 POST /install/login → auth.Handler.Login (#66 Plan T11)
+//	 POST /install/logout → auth.Handler.Logout
 //
 //	session-required (RequireSession middleware):
 //	 GET /me → me.Handler.Me
@@ -93,7 +87,6 @@ var (
 //	 POST /inbound/sources/test-connection → inbound.Handler.TestConnection
 type Router struct {
 	signer        *session.Signer
-	oauth         *oauth.OAuthHandler
 	auth          *auth.Handler
 	me            *me.MeHandler
 	apiKeys       *apikey.APIKeysHandler
@@ -102,12 +95,10 @@ type Router struct {
 	usage         *usage.UsageHandler
 	enrichConfig  *enrichconfig.Handler
 	inbound       *consoleinbound.Handler
-	devLogin      http.Handler // nil when ConsoleDevLogin is off
 }
 
 func NewRouter(
 	signer *session.Signer,
-	oauth *oauth.OAuthHandler,
 	authH *auth.Handler,
 	me *me.MeHandler,
 	apiKeys *apikey.APIKeysHandler,
@@ -116,11 +107,9 @@ func NewRouter(
 	usage *usage.UsageHandler,
 	enrichConfig *enrichconfig.Handler,
 	inbound *consoleinbound.Handler,
-	devLogin http.Handler,
 ) *Router {
 	return ptrext.Of(Router{
 		signer:        signer,
-		oauth:         oauth,
 		auth:          authH,
 		me:            me,
 		apiKeys:       apiKeys,
@@ -129,7 +118,6 @@ func NewRouter(
 		usage:         usage,
 		enrichConfig:  enrichConfig,
 		inbound:       inbound,
-		devLogin:      devLogin,
 	})
 }
 
@@ -137,20 +125,10 @@ func (r *Router) Mount() chi.Router {
 	mux := chi.NewRouter()
 
 	mux.Route("/install", func(m chi.Router) {
-		// Lark OAuth (legacy; removed in #66 Plan T17).
-		m.Get("/start", r.oauth.Start)
-		m.Get("/callback", r.oauth.Callback)
-		// Local-admin password login (#66 Plan T11). Wired alongside the
-		// Lark OAuth routes so the SPA can use either flow during the
-		// transition. Once T17 lands, OAuth goes away and only these
-		// remain.
-		if r.auth != nil {
-			m.Post("/login", r.auth.Login)
-			m.Post("/logout", r.auth.Logout)
-		}
-		if r.devLogin != nil {
-			m.Method(http.MethodGet, "/dev-login", r.devLogin)
-		}
+		// Local-admin password login (#66 Plan T11) — replaces the
+		// deleted Lark OAuth flow (#66 Plan T17).
+		m.Post("/login", r.auth.Login)
+		m.Post("/logout", r.auth.Logout)
 	})
 
 	mux.Group(func(m chi.Router) {

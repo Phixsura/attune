@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,17 +12,14 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
-	larkclient "github.com/Phixsura/attune/internal/infra/lark"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/notify"
-	"github.com/Phixsura/attune/internal/notify/adapter/larkwebhook"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
-	"github.com/Phixsura/attune/internal/repo/lark"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -115,42 +111,22 @@ func syncCustomWebhooks(
 	return nil
 }
 
-// buildNotifier composes the active outbound chain. returns
-// either a single LarkWebhook, a MultiNotifier (Lark + Raw), or nil
-// (everything disabled). enricher must tolerate nil — Lark / Raw both
-// disabled is a valid dev configuration.
+// buildNotifier composes the active outbound chain.
 //
-// a follow-up will load Lark per-tenant from the same notify_targets table,
-// at which point this function becomes "build MultiNotifier from
-// notify_targets".
+// Post-#66 Plan T17 (Lark removal): the inline notifier path is gone —
+// raw-webhook destinations were the only other channel and they deliver
+// through the outbox worker reading tenant_notify_targets directly.
+// Kept as a function (instead of inlining the nil) so a future outbound
+// adapter SDK (#34) can re-introduce inline channels without touching
+// every call site.
 func buildNotifier(
 	ctx context.Context,
-	cfg *config.Config,
+	_ *config.Config,
 	_ *notifytarget.NotifyTargetRepo,
 ) (notify.Notifier, error) {
-	// Design contract (v0.4 §3.6): raw-webhook delivers via outbox ONLY
-	// (at-least-once via DB queue + worker). Lark group bot delivers
-	// inline through this Notifier (best-effort, NoRetry — duplicate
-	// cards spam chats). If we put RawWebhookRouter here too we'd
-	// double-push: once inline + once from outbox worker.
-	//
-	// Outcome: only Lark goes through the inline notifier. raw-webhook
-	// destinations are picked up by the outbox worker reading
-	// tenant_notify_targets directly.
 	const where = "main.buildNotifier"
-	if !cfg.NotifyEnabled() {
-		logext.Infof(ctx, "[%s] no inline notifiers wired (lark webhook URLs empty)", where)
-		return nil, nil
-	}
-	// Local name avoids shadowing the imported `lark` package
-	// (internal/repo/lark — see callers of lark.NewLarkInstallRepo).
-	larkBot := larkwebhook.NewLarkWebhook(
-		cfg.FeedbackPoolWebhookURL, cfg.FeedbackPoolWebhookSecret,
-		cfg.DevRadarWebhookURL, cfg.DevRadarWebhookSecret,
-	)
-	logext.Infof(ctx, "[%s] lark webhook wired,pool:%t,radar:%t",
-		where, larkBot.PoolEnabled(), larkBot.RadarEnabled())
-	return larkBot, nil
+	logext.Infof(ctx, "[%s] no inline notifiers wired (raw-webhook delivers via outbox; #34 will re-add)", where)
+	return nil, nil
 }
 
 // runOutboxLagRefresher ticks every 30s and updates the
@@ -184,18 +160,13 @@ func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 	metrics.OutboxLagSeconds.Set(age.Seconds())
 }
 
-// buildConsoleRouter wires the Console (auth + OAuth + /me +
-// /logout for now; resource endpoints land in subsequent commits). Keeps
-// console wiring isolated from the main ingest path so the legacy API
-// continues to boot even if console config is incomplete.
+// buildConsoleRouter wires the Console (auth + /me + /logout + resource
+// endpoints + #66 inbound source management). Pre-#66 the console relied
+// on Lark OAuth + dev-login backdoor; both are gone, replaced by the
+// local-admin password flow (auth.Handler + admin.Repo + bootstrap env).
 //
-// Two HTTP-only escape hatches activate together when their config flags
-// are set, and ONLY together:
-// - ConsoleInsecureCookies=true → Secure cookie flag dropped
-// - ConsoleDevLogin=true → /install/dev-login backdoor mounted
-//
-// They MUST be off in any real TLS-fronted deployment. The combined check
-// here makes "accidentally enable just one" impossible.
+// Console boots when ConsoleSessionKey is set and ConsoleBaseURL is
+// non-empty. No more dev-login / insecure-cookies escape hatches.
 func buildConsoleRouter(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
@@ -203,37 +174,20 @@ func buildConsoleRouter(
 	sourceRepo *inboundsourcerepo.Repo,
 	adminRepo *admin.Repo,
 ) (chi.Router, error) {
-	const where = "main.buildConsoleRouter"
-	ctx := context.Background()
-	if cfg.LarkAppID == "" || cfg.LarkAppSecret == "" {
-		return nil, fmt.Errorf("console requires lark_app_id + lark_app_secret")
-	}
 	if cfg.ConsoleBaseURL == "" {
 		return nil, fmt.Errorf("console requires console_base_url")
 	}
-	if cfg.ConsoleDevLogin && !cfg.ConsoleInsecureCookies {
-		return nil, fmt.Errorf(
-			"console: dev_login requires insecure_cookies (TLS would lose the test session cookie)",
-		)
-	}
-	signer, err := console.NewSigner(cfg.ConsoleSessionKey, cfg.ConsoleInsecureCookies)
+	signer, err := console.NewSigner(cfg.ConsoleSessionKey, false)
 	if err != nil {
 		return nil, err
 	}
-	if cfg.ConsoleInsecureCookies {
-		logext.Warnf(ctx, "[%s] INSECURE cookies enabled — for HTTP testing only", where)
-	}
 
-	larkClient := larkclient.New(cfg.LarkAppID, cfg.LarkAppSecret)
 	tenantRepo := tenant.NewTenant(pool)
 	userRepo := tenant.NewTenantUserRepo(pool)
-	installRepo := lark.NewLarkInstallRepo(pool)
 	apiKeySvc := apikey.NewAPIKeys(apikeyrepo.NewAPIKey(pool))
 	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
 	feedbackRepo := feedback.NewFeedback(pool)
 
-	oauth := console.NewOAuthHandler(signer, larkClient, tenantRepo, userRepo, installRepo,
-		cfg.LarkAppID, cfg.ConsoleBaseURL)
 	authHandler := console.NewAuthHandler(signer, adminRepo, cfg.ConsoleBaseURL)
 	me := console.NewMeHandler(signer, tenantRepo, userRepo)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
@@ -243,13 +197,8 @@ func buildConsoleRouter(
 	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
 	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
 
-	var devLogin http.Handler
-	if cfg.ConsoleDevLogin {
-		logext.Warnf(ctx, "[%s] dev-login BACKDOOR enabled at /fb/v1/console/install/dev-login", where)
-		devLogin = console.NewDevLoginHandler(signer, tenantRepo, userRepo, cfg.ConsoleBaseURL)
-	}
 	return console.NewRouter(
-		signer, oauth, authHandler, me, apiKeys, notifyTargets, feedback, usage,
-		enrichConfig, inboundHandler, devLogin,
+		signer, authHandler, me, apiKeys, notifyTargets, feedback, usage,
+		enrichConfig, inboundHandler,
 	).Mount(), nil
 }

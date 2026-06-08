@@ -29,13 +29,12 @@ import (
 )
 
 // buildRouter wires the chi router: OTel root span + X-Trace-Id, the standard
-// middleware chain, /healthz, /metrics, the /v1 API (lark webhook + api-key /
+// middleware chain, /healthz, /metrics, the /v1 API (api-key /
 // rate-limited feedback ingest + inbound adapter mux), and — when
 // CONSOLE_SESSION_KEY is set — the Console under /fb/v1/console.
 func buildRouter(
 	ctx context.Context,
 	cfg *config.Config,
-	larkHandler *handlers.LarkHandler,
 	ingestHandler *handlers.IngestHandler,
 	apiKeys *apikeysvc.APIKeys,
 	pool *pgxpool.Pool,
@@ -68,7 +67,6 @@ func buildRouter(
 	rateLimiter := buildRateLimiter(cfg)
 
 	r.Route("/v1", func(r chi.Router) {
-		r.Mount("/lark", larkHandler.Routes())
 		// Inbound adapter mux. Adapters have already registered their
 		// routes onto inboundMux during Manager.StartAll(ctx). Mounting
 		// it here exposes them under /v1/inbound/<channel>/...

@@ -3,7 +3,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -111,14 +110,6 @@ func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 // errInternal is a sentinel for IngestRow internal failures we want to map to 500.
 // (Currently not produced; reserved for future per-error mapping.)
 var errInternal = errors.New("internal")
-
-// writeJSON encodes an arbitrary body as JSON. Still used by the Lark adapter
-// handler (lark.go), which is intentionally NOT on the proto contract (#66).
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
 
 // writeJSONProto encodes a proto message as protoJSON — the wire contract for
 // the migrated endpoints (#19).

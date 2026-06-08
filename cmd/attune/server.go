@@ -122,16 +122,6 @@ func runServer() error {
 	// active lark-bot; composes 7-day summary + sends via SendAlert.
 	go outbox.NewDigestService(tenantRepo, feedbackRepo, notifyTargetRepo).Run(ctx)
 
-	larkHandler, err := handlers.NewLarkHandler(ctx, tenantRepo, ingestor,
-		cfg.LarkSigningSecret, cfg.LarkVerificationToken, cfg.LarkDefaultTenantSlug)
-	if err != nil {
-		return err
-	}
-	if cfg.LarkEnabled() {
-		logext.Infof(ctx, "[%s] lark webhook enabled,tenant_slug:%s", where, cfg.LarkDefaultTenantSlug)
-	} else {
-		logext.Infof(ctx, "[%s] lark webhook disabled (no signing secret)", where)
-	}
 	ingestHandler := handlers.NewIngestHandler(ingestor)
 
 	// #66 inbound framework wiring. Validate the master key FIRST so a
@@ -180,7 +170,7 @@ func runServer() error {
 	logext.Infof(ctx, "[%s] inbound framework ready,adapters:%d", where, len(inbound.Factories()))
 
 	r, err := buildRouter(
-		ctx, cfg, larkHandler, ingestHandler, apiKeys, pool,
+		ctx, cfg, ingestHandler, apiKeys, pool,
 		inboundSubRouter, inboundSecrets, inboundSources, adminRepo,
 	)
 	if err != nil {
