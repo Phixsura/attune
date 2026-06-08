@@ -51,6 +51,7 @@ func (h *IngestHandler) Routes() chi.Router {
 var ingestUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
 
 func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
+	const where = "handlers.IngestHandler.Ingest"
 	ctx := r.Context()
 	tenantID, ok := apikey.TenantIDFromContext(ctx)
 	if !ok {
@@ -99,8 +100,8 @@ func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metrics.IngestTotal.WithLabelValues(tenantID, in.Source, "ok").Inc()
-	logext.Infof(ctx, "ingest accepted,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,source:%s",
-		trace.FromContext(ctx), tenantID, id, in.Source)
+	logext.Infof(ctx, "[%s] ingest accepted,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,source:%s",
+		where, trace.FromContext(ctx), tenantID, id, in.Source)
 	writeJSONProto(w, http.StatusOK, ptrext.Of(attunev1.IngestResponse{
 		Id:               id,
 		EnrichmentStatus: "pending",

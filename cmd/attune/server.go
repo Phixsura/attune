@@ -178,10 +178,11 @@ func setupTracing(ctx context.Context) (func(context.Context) error, error) {
 
 // shutdownTracing flushes the tracer on exit with a bounded timeout.
 func shutdownTracing(shutdown func(context.Context) error) {
+	const where = "main.shutdownTracing"
 	shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
 	defer c()
 	if err := shutdown(shutdownCtx); err != nil {
-		logext.Warnf(shutdownCtx, "[main.shutdownTracing] otel shutdown failed,err:%+v", err.Error())
+		logext.Warnf(shutdownCtx, "[%s] otel shutdown failed,err:%+v", where, err.Error())
 	}
 }
 

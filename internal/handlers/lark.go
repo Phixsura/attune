@@ -68,6 +68,7 @@ func (h *LarkHandler) Routes() chi.Router {
 }
 
 func (h *LarkHandler) Event(w http.ResponseWriter, r *http.Request) {
+	const where = "handlers.LarkHandler.Event"
 	ctx := r.Context()
 	if !h.enabled {
 		http.Error(w, "lark integration disabled", http.StatusNotFound)
@@ -85,8 +86,8 @@ func (h *LarkHandler) Event(w http.ResponseWriter, r *http.Request) {
 		r.Header.Get("X-Lark-Signature"),
 		body,
 	); err != nil {
-		logext.Warnf(ctx, "lark signature check failed,event_id:%s,err:%+v",
-			r.Header.Get("X-Lark-Request-Id"), err.Error())
+		logext.Warnf(ctx, "[%s] signature check failed,event_id:%s,err:%+v",
+			where, r.Header.Get("X-Lark-Request-Id"), err.Error())
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
@@ -106,17 +107,19 @@ func (h *LarkHandler) Event(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *LarkHandler) handleURLVerification(w http.ResponseWriter, ev lark.Event) {
+	const where = "handlers.LarkHandler.handleURLVerification"
 	ctx := context.Background()
 	if h.verificationToken != "" && ev.Token != h.verificationToken {
-		logext.Warnf(ctx, "lark url_verification token mismatch")
+		logext.Warnf(ctx, "[%s] token mismatch", where)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "verification token mismatch"})
 		return
 	}
-	logext.Infof(ctx, "lark url_verification ok")
+	logext.Infof(ctx, "[%s] OK", where)
 	writeJSON(w, http.StatusOK, map[string]string{"challenge": ev.Challenge})
 }
 
 func (h *LarkHandler) handleMessage(ctx context.Context, w http.ResponseWriter, ev lark.Event) {
+	const where = "handlers.LarkHandler.handleMessage"
 	if ev.Text == "" {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ignored-empty"})
 		return
@@ -135,7 +138,7 @@ func (h *LarkHandler) handleMessage(ctx context.Context, w http.ResponseWriter, 
 	// keyID is uuid.Nil for Lark-sourced rows; user_id becomes
 	// "ext_<nil-uuid>:<open_id>".
 	if _, err := h.ingestor.IngestRow(ctx, h.defaultTenant, uuid.Nil, in); err != nil {
-		logext.Warnf(ctx, "lark ingest failed,err:%+v", err.Error())
+		logext.Warnf(ctx, "[%s] ingest failed,err:%+v", where, err.Error())
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
