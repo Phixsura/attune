@@ -21,12 +21,24 @@ import (
 //  3. ctx cancellation propagates: Shutdown returns within 5s, no goroutine leak.
 //  4. Idempotent shutdown: calling Shutdown twice does not panic.
 //  5. Duplicate Register on the same channel panics.
+//  6. Adapter actually drives its IngestPort end-to-end — Trigger (when
+//     supplied) MUST cause at least one FakeIngest.Calls entry. This
+//     criterion is the one promised by spec §Conformance test suite #5;
+//     adapters that don't naturally know how to fire an Ingest from the
+//     conformance suite alone (no live HTTP server / no IMAP fixture)
+//     pass nil and the sub-test is skipped — they're expected to cover
+//     this in their own adapter-level tests.
 //
 // The adapter under test passes a factory (typically the same constructor
 // the adapter's own init() registers).
-func TestAdapterContract(t *testing.T, factory inbound.Factory) {
+func TestAdapterContract(t *testing.T, factory inbound.Factory, opts ...ContractOption) {
 	t.Helper()
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	cfg := contractConfig{} // mutated below via the closures in opts.
+	for _, o := range opts {
+		o(&cfg) // ptrext:allow out-param config builder
+	}
 
 	t.Run("ChannelNonEmpty", func(t *testing.T) {
 		a := factory()
@@ -95,4 +107,48 @@ func TestAdapterContract(t *testing.T, factory inbound.Factory) {
 		}()
 		inbound.Register(ch, factory)
 	})
+
+	t.Run("IngestPortReceivesInput", func(t *testing.T) {
+		if cfg.trigger == nil {
+			t.Skip("no Trigger provided — adapter covers IngestPort end-to-end in its own test")
+		}
+		a := factory()
+		ingest := &FakeIngest{} // ptrext:allow mutex-identity
+		sources := NewFakeSources()
+		mux := &FakeMux{} // ptrext:allow mutex-identity
+		deps := DepsFor(ingest, sources, mux)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		if err := a.Start(ctx, deps); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		defer func() { _ = a.Shutdown(context.Background()) }()
+
+		if err := cfg.trigger(t, a, deps, sources, mux); err != nil {
+			t.Fatalf("Trigger failed: %v", err)
+		}
+		if len(ingest.Calls) == 0 {
+			t.Errorf("Trigger did not cause FakeIngest.Calls to grow; got 0 entries")
+		}
+	})
+}
+
+// ContractOption customises TestAdapterContract.
+type ContractOption func(*contractConfig)
+
+type contractConfig struct {
+	trigger TriggerFunc
+}
+
+// TriggerFunc drives one end-to-end ingest through the adapter under
+// test (e.g. send an HTTP request through the FakeMux's mounted route,
+// or call adapter-specific seam to fire a poll round). Returning a
+// non-nil error fails the sub-test.
+type TriggerFunc func(t *testing.T, a inbound.Adapter, deps inbound.Deps, sources *FakeSources, mux *FakeMux) error
+
+// WithTrigger supplies a TriggerFunc for the IngestPortReceivesInput
+// sub-test. When omitted, the sub-test is skipped (the adapter is
+// expected to cover this in its own adapter-level tests).
+func WithTrigger(f TriggerFunc) ContractOption {
+	return func(c *contractConfig) { c.trigger = f }
 }

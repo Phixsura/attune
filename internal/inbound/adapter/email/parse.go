@@ -62,7 +62,7 @@ func parseRFC822(raw []byte) (parsedMail, error) {
 				if err != nil {
 					return p, err
 				}
-				p.TextBody = string(body)
+				p.TextBody = strings.TrimSpace(string(body))
 				return p, nil
 			}
 		}
@@ -75,6 +75,6 @@ func parseRFC822(raw []byte) (parsedMail, error) {
 	if err != nil {
 		return p, err
 	}
-	p.TextBody = string(body)
+	p.TextBody = strings.TrimSpace(string(body))
 	return p, nil
 }

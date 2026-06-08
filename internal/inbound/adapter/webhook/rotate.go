@@ -113,7 +113,7 @@ func loadRotateConfig(
 	if err := json.Unmarshal(decoded, &cfg); err != nil {
 		return webhookConfig{}, fmt.Errorf("rotate: unmarshal config: %w", err)
 	}
-	if cfg.PreviousExpiresAt != nil && cfg.PreviousExpiresAt.After(time.Now()) {
+	if cfg.PreviousExpiresAt != nil && cfg.PreviousExpiresAt.After(nowFn()) {
 		return cfg, ErrRotationInGraceWindow
 	}
 	return cfg, nil
@@ -133,7 +133,7 @@ func buildRotatedConfig(
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("rotate: encrypt new: %w", err)
 	}
-	expires = time.Now().Add(GraceWindow)
+	expires = nowFn().Add(GraceWindow)
 	cfg.SecretPreviousEncrypted = cfg.SecretCurrentEncrypted
 	cfg.SecretCurrentEncrypted = newEncrypted
 	cfg.PreviousExpiresAt = ptrext.Of(expires)

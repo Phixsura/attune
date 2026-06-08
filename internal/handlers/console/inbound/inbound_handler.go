@@ -22,7 +22,7 @@ package inbound
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -397,7 +397,7 @@ func (h *Handler) createWebhook(ctx context.Context, w http.ResponseWriter, auth
 		tenantSlug = ""
 	}
 	reveal := ptrext.Of(attunev1.WebhookSecretReveal{
-		SecretBase64: base64.StdEncoding.EncodeToString(rawSecret),
+		SecretHex: hex.EncodeToString(rawSecret),
 	})
 	if tenantSlug != "" && h.baseURL != "" {
 		reveal.Url = fmt.Sprintf("%s/v1/inbound/webhook/%s/%s", h.baseURL, tenantSlug, slug)
@@ -568,7 +568,7 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.RotateInboundSourceSecretResponse{
-		SecretBase64:   base64.StdEncoding.EncodeToString(newSecret),
+		SecretHex:      hex.EncodeToString(newSecret),
 		NextEligibleAt: time.Now().Add(webhook.GraceWindow).UTC().Format(time.RFC3339),
 	}))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s", where, auth.TenantID, id)

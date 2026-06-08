@@ -7,6 +7,7 @@ package webhook
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -23,6 +24,14 @@ var nowFn = time.Now
 type adapter struct {
 	deps       inbound.Deps
 	stubSecret []byte
+	// stubConfigEnvelope and stubSecretEnvelope are pre-encrypted
+	// payloads decrypted on the unauth path so its workload (two AES-GCM
+	// Open + one JSON unmarshal) matches the authenticated path's. This
+	// closes the timing side channel that would otherwise let an
+	// attacker distinguish "unknown slug" from "known slug, bad sig"
+	// (review M4, #66).
+	stubConfigEnvelope []byte
+	stubSecretEnvelope []byte
 }
 
 // NewAdapter — exposed constructor. Production registration runs via
@@ -42,9 +51,35 @@ func (a *adapter) ShutdownTimeout() time.Duration { return 0 }
 // adapter only registers its route. The stub secret is initialised here
 // (lazy in ProcessStubSecret) so it exists by the time the first
 // request lands.
+//
+// We also pre-encrypt a stub webhookConfig + stub secret with the real
+// SecretStore so the enumeration-resistance path can decrypt them on
+// every unauth response — making the wall-clock cost of "unknown
+// source" match "known source, bad signature" (review M4).
 func (a *adapter) Start(_ context.Context, deps inbound.Deps) error {
 	a.deps = deps
 	a.stubSecret = ProcessStubSecret()
+
+	// Build a representative webhookConfig and encrypt it so the unauth
+	// path can spend the same Decrypt+Unmarshal+Decrypt cost as the
+	// authenticated path. If any of these fail, fall back to no stub
+	// envelopes — adapter still works, only the timing side-channel
+	// hardening degrades.
+	stubInner := webhookConfig{
+		Version:                 1,
+		HMACAlgo:                "sha256",
+		SecretCurrentEncrypted:  a.stubSecret,
+		SecretPreviousEncrypted: nil,
+	}
+	if rawInner, err := json.Marshal(stubInner); err == nil {
+		if envInner, err := deps.Secrets.Encrypt(rawInner); err == nil {
+			a.stubConfigEnvelope = envInner
+		}
+	}
+	if envSec, err := deps.Secrets.Encrypt(a.stubSecret); err == nil {
+		a.stubSecretEnvelope = envSec
+	}
+
 	deps.Mux.Method(
 		http.MethodPost,
 		"/webhook/{tenant-slug}/{source-slug}",

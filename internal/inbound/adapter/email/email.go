@@ -29,13 +29,20 @@ type adapter struct {
 	// the pollLoop goroutine only, but the mu guard keeps it safe
 	// against Shutdown winding the goroutine down concurrently.
 	lastSuccessAt map[string]time.Time
+	// pollIntervals — slug-keyed configured per-source poll interval in
+	// seconds. Populated by pollSource on first successful decrypt;
+	// consumed by nextInterval() between rounds. Same mu guard.
+	pollIntervals map[string]int
 }
 
 // NewAdapter — exposed constructor. Production registration runs via
 // init(); external callers (tests, one-off wiring) use NewAdapter
 // directly.
 func NewAdapter() inbound.Adapter {
-	return &adapter{lastSuccessAt: map[string]time.Time{}} // ptrext:allow inbound-adapter-mutex-identity
+	return &adapter{ // ptrext:allow inbound-adapter-mutex-identity
+		lastSuccessAt: map[string]time.Time{},
+		pollIntervals: map[string]int{},
+	}
 }
 
 // Channel reports the registered channel name.

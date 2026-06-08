@@ -4,6 +4,7 @@ package webhook
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -30,6 +31,12 @@ const (
 
 	hdrTimestamp = "X-Attune-Timestamp"
 	hdrSignature = "X-Attune-Signature"
+
+	// unknownLabel is the fixed Prometheus label value used on every
+	// unauthenticated metric emission so an attacker spamming random
+	// URL slugs cannot pump cardinality. Real tenant / source slugs
+	// only enter label vectors after the source row is loaded.
+	unknownLabel = "unknown"
 )
 
 // ingestUnmarshal — protojson decoder configured to tolerate unknown
@@ -52,19 +59,27 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	// Read body BEFORE branching on the source lookup so timing does
 	// not leak source existence. MaxBytesReader caps unauthenticated
 	// work at maxBodyBytes.
+	//
+	// Metric labels for unauthenticated paths use the fixed "unknown"
+	// sentinels — accepting the URL-supplied slugs into Prometheus
+	// label vectors lets any client pump label cardinality to OOM
+	// (review B4, #66). Authenticated paths (post GetBySlugs success
+	// + src.Enabled) use the real tenant_id / slug below.
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err != nil {
-		a.deps.Metrics.Total(channelName, tenantSlug, sourceSlug, "validate_err")
+		a.deps.Metrics.Total(channelName, unknownLabel, unknownLabel, "validate_err")
 		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "body too large or unreadable")
 		return
 	}
 
 	src, srcErr := a.deps.Sources.GetBySlugs(ctx, tenantSlug, channelName, sourceSlug)
 	if srcErr != nil || !src.Enabled {
-		// Enumeration resistance: verify against stub secret so the
-		// response time + status match a real auth failure.
-		_ = verifyHMACAgainstStub(a.stubSecret, ts, body, sig)
-		a.deps.Metrics.Total(channelName, tenantSlug, sourceSlug, "auth_err")
+		// Enumeration resistance: do everything the authenticated path
+		// would do — two AES-GCM Open rounds + one JSON unmarshal +
+		// HMAC verify — so response wall-clock matches and "unknown
+		// slug" can't be distinguished from "known slug, bad sig".
+		a.runStubAuthRound(ts, body, sig)
+		a.deps.Metrics.Total(channelName, unknownLabel, unknownLabel, "auth_err")
 		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid")
 		return
 	}
@@ -141,6 +156,25 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 // IngestPort wraps an internal error. We never construct this here; we
 // just compare via errors.Is so the framework's caller can opt in.
 var errInternal = errors.New("inbound.webhook: internal")
+
+// runStubAuthRound performs the same shape of crypto work the
+// authenticated path would: Decrypt(config envelope) + Unmarshal +
+// Decrypt(secret envelope) + HMAC verify against the per-process stub
+// secret. All results are intentionally discarded. The stub envelopes
+// are pre-encrypted at Start, so this function only spends the
+// per-request CPU cost (no key derivation, no allocation churn).
+func (a *adapter) runStubAuthRound(ts string, body []byte, sig string) {
+	if len(a.stubConfigEnvelope) > 0 {
+		if inner, err := a.deps.Secrets.Decrypt(a.stubConfigEnvelope); err == nil {
+			var stub webhookConfig
+			_ = json.Unmarshal(inner, &stub)
+		}
+	}
+	if len(a.stubSecretEnvelope) > 0 {
+		_, _ = a.deps.Secrets.Decrypt(a.stubSecretEnvelope)
+	}
+	_ = verifyHMACAgainstStub(a.stubSecret, ts, body, sig)
+}
 
 // authenticate decodes the source's secret envelope and verifies the
 // HMAC against current — falling back to the previous secret while it

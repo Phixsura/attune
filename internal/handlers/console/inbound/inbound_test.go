@@ -4,7 +4,7 @@ package inbound
 
 import (
 	"context"
-	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -390,11 +390,11 @@ func TestRotate_HappyPath(t *testing.T) {
 	if err := protojson.Unmarshal(w.Body.Bytes(), &out); err != nil {
 		t.Fatalf("proto decode: %v\nbody: %s", err, w.Body.String())
 	}
-	if out.GetSecretBase64() == "" {
+	if out.GetSecretHex() == "" {
 		t.Fatal("missing secret in response")
 	}
-	if _, err := base64.StdEncoding.DecodeString(out.GetSecretBase64()); err != nil {
-		t.Fatalf("secret not base64: %v", err)
+	if _, err := hex.DecodeString(out.GetSecretHex()); err != nil {
+		t.Fatalf("secret not hex: %v", err)
 	}
 	if out.GetNextEligibleAt() == "" {
 		t.Fatal("missing next_eligible_at")

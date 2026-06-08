@@ -64,28 +64,23 @@ type Config struct {
 	RateLimitPerMinute int  `yaml:"rate_limit_per_minute"`
 	RateLimitBurst     int  `yaml:"rate_limit_burst"`
 	RateLimitDisabled  bool `yaml:"rate_limit_disabled"`
-
-	// ConsoleInsecureCookies drops the `Secure` cookie flag — required
-	// only when serving console over plain HTTP. Never enable under TLS.
-	ConsoleInsecureCookies bool `yaml:"console_insecure_cookies"`
 }
 
 type yamlConfig struct {
-	Port                   int                 `yaml:"port"`
-	DatabaseURL            string              `yaml:"database_url"`
-	LLMProtocol            string              `yaml:"llm_protocol"`
-	LLMOpenAIBaseURL       string              `yaml:"llm_openai_base_url"`
-	LLMOpenAIAPIKey        string              `yaml:"llm_openai_api_key"`
-	LLMModel               string              `yaml:"llm_model"`
-	EnricherInterval       string              `yaml:"enricher_interval"`
-	EnricherBatch          int                 `yaml:"enricher_batch"`
-	CustomWebhooks         []CustomWebhookDest `yaml:"custom_webhooks"`
-	ConsoleSessionKey      string              `yaml:"console_session_key"`
-	ConsoleBaseURL         string              `yaml:"console_base_url"`
-	ConsoleInsecureCookies bool                `yaml:"console_insecure_cookies"`
-	RateLimitPerMinute     int                 `yaml:"rate_limit_per_minute"`
-	RateLimitBurst         int                 `yaml:"rate_limit_burst"`
-	RateLimitDisabled      bool                `yaml:"rate_limit_disabled"`
+	Port               int                 `yaml:"port"`
+	DatabaseURL        string              `yaml:"database_url"`
+	LLMProtocol        string              `yaml:"llm_protocol"`
+	LLMOpenAIBaseURL   string              `yaml:"llm_openai_base_url"`
+	LLMOpenAIAPIKey    string              `yaml:"llm_openai_api_key"`
+	LLMModel           string              `yaml:"llm_model"`
+	EnricherInterval   string              `yaml:"enricher_interval"`
+	EnricherBatch      int                 `yaml:"enricher_batch"`
+	CustomWebhooks     []CustomWebhookDest `yaml:"custom_webhooks"`
+	ConsoleSessionKey  string              `yaml:"console_session_key"`
+	ConsoleBaseURL     string              `yaml:"console_base_url"`
+	RateLimitPerMinute int                 `yaml:"rate_limit_per_minute"`
+	RateLimitBurst     int                 `yaml:"rate_limit_burst"`
+	RateLimitDisabled  bool                `yaml:"rate_limit_disabled"`
 }
 
 // Load reads the YAML config from FEEDBACK_API_CONFIG (or ./config.yaml)
@@ -116,20 +111,19 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	c := ptrext.Of(Config{
-		Port:                   yc.Port,
-		DatabaseURL:            yc.DatabaseURL,
-		LLMProtocol:            LLMProtocol(yc.LLMProtocol),
-		LLMOpenAIBaseURL:       yc.LLMOpenAIBaseURL,
-		LLMOpenAIAPIKey:        yc.LLMOpenAIAPIKey,
-		LLMModel:               yc.LLMModel,
-		EnricherBatch:          yc.EnricherBatch,
-		CustomWebhooks:         yc.CustomWebhooks,
-		ConsoleSessionKey:      yc.ConsoleSessionKey,
-		ConsoleBaseURL:         yc.ConsoleBaseURL,
-		ConsoleInsecureCookies: yc.ConsoleInsecureCookies,
-		RateLimitPerMinute:     yc.RateLimitPerMinute,
-		RateLimitBurst:         yc.RateLimitBurst,
-		RateLimitDisabled:      yc.RateLimitDisabled,
+		Port:               yc.Port,
+		DatabaseURL:        yc.DatabaseURL,
+		LLMProtocol:        LLMProtocol(yc.LLMProtocol),
+		LLMOpenAIBaseURL:   yc.LLMOpenAIBaseURL,
+		LLMOpenAIAPIKey:    yc.LLMOpenAIAPIKey,
+		LLMModel:           yc.LLMModel,
+		EnricherBatch:      yc.EnricherBatch,
+		CustomWebhooks:     yc.CustomWebhooks,
+		ConsoleSessionKey:  yc.ConsoleSessionKey,
+		ConsoleBaseURL:     yc.ConsoleBaseURL,
+		RateLimitPerMinute: yc.RateLimitPerMinute,
+		RateLimitBurst:     yc.RateLimitBurst,
+		RateLimitDisabled:  yc.RateLimitDisabled,
 	})
 	// defaults — extracted to keep Load's CCN ≤ 15 (§1).
 	c.applyDefaults()

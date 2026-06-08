@@ -29,6 +29,7 @@
     "locked_out": "因连续登录失败，账户已锁定 15 分钟。",
     "login_failed": "登录失败，请稍后重试",
     "login_hint_admin": "用部署时通过 ATTUNE_BOOTSTRAP_ADMIN_* 创建的管理员账号登录。",
+    "cross_site_rejected": "跨站请求被拒绝。请检查反向代理是否保留了 Origin / Referer 头。",
     "role": {
       "admin": "管理员",
       "member": "成员"

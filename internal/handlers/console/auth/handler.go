@@ -53,6 +53,20 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	const where = "console.auth.Handler.Login"
 	ctx := r.Context()
 
+	// Login-CSRF defence (review H6, #66). Login is the one console
+	// endpoint that runs without a prior session cookie + CSRF token,
+	// so we need an out-of-band origin check. SameSite=Lax stops
+	// the browser from *sending* a cookie cross-site but does NOT stop
+	// a malicious origin from forcing a victim's browser to set a
+	// fresh session cookie ("login fixation"), which then attributes
+	// later actions to the attacker's account.
+	if !originAllowed(r, h.baseURL) {
+		logext.Warnf(ctx, "[%s] reject: bad origin,origin:%s",
+			where, r.Header.Get("Origin"))
+		respond.Error(ctx, w, http.StatusForbidden, "forbidden", "cross-site login not allowed")
+		return
+	}
+
 	var req attunev1.LoginRequest
 	if err := respond.Decode(r.Body, &req); err != nil {
 		if errors.Is(err, respond.ErrBodyTooLarge) {
@@ -81,6 +95,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if a.LockedUntil != nil && a.LockedUntil.After(time.Now()) {
+		// Run a dummy bcrypt even when locked so an attacker probing the
+		// locked-account oracle can't distinguish "exists + locked" from
+		// "wrong password" by response time (review M1, #66).
+		_ = VerifyOrDummy("", req.GetPassword())
 		respond.Error(ctx, w, http.StatusLocked, "locked", "account locked due to too many failed attempts")
 		return
 	}
@@ -119,19 +137,63 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	const where = "console.auth.Handler.Logout"
 	ctx := r.Context()
 
-	// Match IssueSessionCookie's Secure flag (Insecure mode allows
-	// plain-HTTP dev deploys).
-	secure := !h.signer.Insecure()
-	http.SetCookie(w, ptrext.Of(http.Cookie{
-		Name:     session.SessionCookieName,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
-	}))
+	// Delegate to the shared ClearSessionCookie helper so cookie
+	// attributes stay consistent with IssueSessionCookie (review-only
+	// nit: Logout used to roll its own).
+	h.signer.ClearSessionCookie(w)
 	logext.Infof(ctx, "[%s] OK", where)
 	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.LogoutResponse{}))
+}
+
+// originAllowed returns true when the request's Origin (or Referer
+// fallback) matches the configured baseURL's origin, or when neither
+// header is set (curl / native-app POSTs — these cannot be driven from
+// a malicious page). Sec-Fetch-Site=same-origin is treated as a
+// definitive same-site signal.
+//
+// baseURL is the canonical console origin from config
+// (ConsoleBaseURL); both http:// and https:// schemes are matched
+// because dev / loopback deploys may run plain HTTP behind a TLS
+// reverse proxy.
+func originAllowed(r *http.Request, baseURL string) bool {
+	// Modern browsers send Sec-Fetch-Site since 2020; trust the
+	// explicit "same-origin" / "same-site" / "none" labels.
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "same-origin", "same-site":
+		return true
+	case "cross-site":
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		origin = r.Header.Get("Referer")
+	}
+	if origin == "" {
+		// curl, server-to-server, native apps — these cannot be driven
+		// by a malicious page DOM, so an empty Origin is acceptable.
+		return true
+	}
+	if baseURL == "" {
+		return true
+	}
+	return sameOrigin(origin, baseURL)
+}
+
+// sameOrigin compares the scheme + host portion of two URLs. A trailing
+// path is allowed (Referer typically includes one); the comparison
+// ignores everything past the host.
+func sameOrigin(got, want string) bool {
+	return originHost(got) == originHost(want)
+}
+
+func originHost(u string) string {
+	// strip scheme
+	if i := strings.Index(u, "://"); i >= 0 {
+		u = u[i+3:]
+	}
+	// strip path / query / fragment
+	if i := strings.IndexAny(u, "/?#"); i >= 0 {
+		u = u[:i]
+	}
+	return strings.ToLower(u)
 }

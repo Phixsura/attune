@@ -60,24 +60,21 @@ type ctxKey struct{}
 // Signer signs and verifies session + CSRF tokens with one HMAC key.
 // It is safe for concurrent use.
 //
-// Insecure=true drops the `Secure` cookie flag — required for plain-HTTP
-// dev/preview deployments (e.g. IP-only setup before TLS lands).
-// MUST be false in any real TLS-fronted production.
+// Session cookies are always `Secure` (review H1 / spec §Security).
+// Plain-HTTP deployments must front attune with a reverse-proxy
+// terminating TLS; the previous `Insecure` escape hatch was a real
+// risk of being left on in production and is removed.
 type Signer struct {
-	key      []byte
-	insecure bool
+	key []byte
 }
 
-func NewSigner(key string, insecure bool) (*Signer, error) {
+// NewSigner builds a Signer from a >=32-byte secret.
+func NewSigner(key string) (*Signer, error) {
 	if len(key) < 32 {
 		return nil, fmt.Errorf("console_session_key must be at least 32 bytes (got %d)", len(key))
 	}
-	return ptrext.Of(Signer{key: []byte(key), insecure: insecure}), nil
+	return ptrext.Of(Signer{key: []byte(key)}), nil
 }
-
-// Insecure reports whether this Signer was created with the
-// HTTP-only escape hatch (drops Secure cookie flag).
-func (s *Signer) Insecure() bool { return s.insecure }
 
 // SignSession returns the cookie value: base64(payload).base64(hmac).
 func (s *Signer) SignSession(p Payload) (string, error) {
@@ -148,7 +145,7 @@ func (s *Signer) IssueSessionCookie(w http.ResponseWriter, tenantID, userID stri
 		Value:    val,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   !s.insecure,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(SessionTTL),
 	}))
@@ -156,15 +153,13 @@ func (s *Signer) IssueSessionCookie(w http.ResponseWriter, tenantID, userID stri
 }
 
 // ClearSessionCookie expires the session cookie. Used by POST /logout.
-// Mirrors IssueSessionCookie's Secure setting so the browser matches the
-// cookie identity (path/secure must match for SetCookie to overwrite).
 func (s *Signer) ClearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, ptrext.Of(http.Cookie{
 		Name:     SessionCookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   !s.insecure,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	}))

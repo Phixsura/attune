@@ -31,6 +31,20 @@ func ConfirmLarkDelete(ctx context.Context, pool *pgxpool.Pool) error {
 	if os.Getenv("ATTUNE_CONFIRM_LARK_DELETE") == "yes" {
 		return nil
 	}
+	// Fresh install: user_feedback table does not yet exist (migration
+	// 001_init.sql creates it). No lark-* rows possible → no guard
+	// trigger. Without this short-circuit a brand-new deploy would
+	// fail boot on `relation "user_feedback" does not exist` (review
+	// B3, #66).
+	var tableExists bool
+	if err := pool.QueryRow(ctx,
+		`SELECT to_regclass('public.user_feedback') IS NOT NULL`,
+	).Scan(&tableExists); err != nil {
+		return fmt.Errorf("ConfirmLarkDelete check table: %w", err)
+	}
+	if !tableExists {
+		return nil
+	}
 	var n int
 	if err := pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM user_feedback WHERE source LIKE 'lark-%'`,

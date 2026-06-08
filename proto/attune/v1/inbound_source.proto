@@ -128,11 +128,12 @@ message EmailCreateConfig {
 
 // WebhookSecretReveal — one-time payload returned at Create + Rotate so
 // admins can publish the URL + secret to their automation. The secret
-// is base64-encoded; signature is HMAC-SHA256(secret_raw_bytes,
-// "<X-Attune-Timestamp>.<body>") (spec §Webhook adapter).
+// is lowercase-hex-encoded; signature is HMAC-SHA256(secret_raw_bytes,
+// "<X-Attune-Timestamp>.<body>") (spec §Webhook adapter). The
+// signature header is hex-encoded (e.g. "sha256=ab12…").
 message WebhookSecretReveal {
   string url = 1;
-  string secret_base64 = 2;
+  string secret_hex = 2;
   string curl_example = 3;
 }
 
@@ -141,7 +142,7 @@ message RotateInboundSourceSecretRequest {
 }
 
 message RotateInboundSourceSecretResponse {
-  string secret_base64 = 1;
+  string secret_hex = 1;
   string next_eligible_at = 2;  // RFC3339, end of 24h grace
 }
 

@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   with a unified port (`internal/inbound.Adapter`) shared across push, poll,
   schedule, and stream modes. Two production adapters ship alongside the
   framework:
-  - `internal/inbound/adapter/webhook` — Stripe-style `Attune-Timestamp` /
-    `Attune-Signature` HMAC-SHA256 over `"<ts>.<body>"` with a ±300 s replay
+  - `internal/inbound/adapter/webhook` — Stripe-style `X-Attune-Timestamp` /
+    `X-Attune-Signature` HMAC-SHA256 over `"<ts>.<body>"` with a ±300 s replay
     window, dual-secret rotation (24 h grace, then `409
     rotation_in_grace_window`), and per-source 401 enumeration resistance
     (same status + path + stub-HMAC timing for unknown slugs).
@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     (`InboundSourceService` × 8 RPCs).
 - **Console authentication: email + bcrypt password** (#66). The
   Lark-OAuth login is removed; the console now signs in via
-  `POST /fb/v1/auth/login` against bcrypt-hashed credentials in a new
+  `POST /fb/v1/console/install/login` against bcrypt-hashed credentials in a new
   `admins` table (migration `016_create_admins.sql`). bcrypt cost 12 +
   timing-equalized dummy-hash on unknown emails keeps the login path
   constant-time. A safe-redirect helper rejects open redirects on the

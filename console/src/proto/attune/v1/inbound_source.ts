@@ -94,12 +94,13 @@ export interface EmailCreateConfig {
 /**
  * WebhookSecretReveal — one-time payload returned at Create + Rotate so
  * admins can publish the URL + secret to their automation. The secret
- * is base64-encoded; signature is HMAC-SHA256(secret_raw_bytes,
- * "<X-Attune-Timestamp>.<body>") (spec §Webhook adapter).
+ * is lowercase-hex-encoded; signature is HMAC-SHA256(secret_raw_bytes,
+ * "<X-Attune-Timestamp>.<body>") (spec §Webhook adapter). The
+ * signature header is hex-encoded (e.g. "sha256=ab12…").
  */
 export interface WebhookSecretReveal {
   url: string;
-  secretBase64: string;
+  secretHex: string;
   curlExample: string;
 }
 
@@ -109,7 +110,7 @@ export interface RotateInboundSourceSecretRequest {
 }
 
 export interface RotateInboundSourceSecretResponse {
-  secretBase64: string;
+  secretHex: string;
   /** RFC3339, end of 24h grace */
   nextEligibleAt: string;
 }

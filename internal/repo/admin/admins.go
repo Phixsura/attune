@@ -92,6 +92,24 @@ func (r *Repo) GetByEmail(ctx context.Context, email string) (Admin, error) {
 	return a, nil
 }
 
+// GetByID looks up an admin by primary-key id. Used by /me to resolve
+// the admin row referenced by a logged-in session cookie.
+func (r *Repo) GetByID(ctx context.Context, id string) (Admin, error) {
+	var a Admin
+	err := r.pool.QueryRow(ctx,
+		`SELECT id, email, password_hash, display_name, role, failed_attempts, locked_until
+		 FROM admins WHERE id = $1`,
+		id,
+	).Scan(&a.ID, &a.Email, &a.PasswordHash, &a.DisplayName, &a.Role, &a.FailedAttempts, &a.LockedUntil)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Admin{}, ErrNotFound
+	}
+	if err != nil {
+		return Admin{}, fmt.Errorf("admin.GetByID: %w", err)
+	}
+	return a, nil
+}
+
 // IncrementFailedAttempts bumps the counter and applies a 15-minute
 // lockout once it reaches maxFailedAttempts.
 func (r *Repo) IncrementFailedAttempts(ctx context.Context, id string) error {

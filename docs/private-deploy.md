@@ -396,23 +396,25 @@ preferred backup tool.
 
 ### Inbound webhook returns 401
 
-**Symptoms:** Customer POST to `/v1/inbound/webhook/<slug>` receives
+**Symptoms:** Customer POST to
+`/v1/inbound/webhook/<tenant-slug>/<source-slug>` receives
 `401 invalid signature`; logs show `signature_mismatch` or
 `unknown_source`.
 
 **Fix:**
 - Confirm the source still exists and is **enabled** in the console
   (`Settings → Inbound Sources`). attune answers `401` on the same URL
-  for any unknown slug (enumeration resistance), so a typo in the slug
-  looks identical to a bad signature.
+  for any unknown slug (enumeration resistance), so a typo in the
+  tenant slug or source slug looks identical to a bad signature.
 - The webhook adapter expects Stripe-style headers:
-  `Attune-Timestamp: <unix-seconds>` and
-  `Attune-Signature: <hex-hmac-sha256("<ts>.<body>")>`.
+  `X-Attune-Timestamp: <unix-seconds>` and
+  `X-Attune-Signature: sha256=<hex-hmac-sha256("<ts>.<body>")>`.
   Replay window is ±300 s; sync the sender's clock to NTP.
 - If you just rotated the secret (`POST .../rotate`), the **old**
-  secret is accepted for the 24 h grace window and then hard-rejected
-  with `409 rotation_in_grace_window` until grace expires (or you call
-  rotate again, which advances `rotated_at`).
+  secret is accepted for the 24 h grace window. A **second** rotate
+  inside the grace window is refused with
+  `409 rotation_in_grace_window` — wait for the grace to expire (the
+  response's `next_eligible_at` tells you when) and try again.
 
 ### Inbound master key was lost
 

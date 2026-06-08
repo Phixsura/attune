@@ -59,7 +59,6 @@ func applyEnvOverrides(yc *yamlConfig) error {
 		env string
 		dst *bool
 	}{
-		{"FEEDBACK_API_CONSOLE_INSECURE_COOKIES", &yc.ConsoleInsecureCookies},
 		{"FEEDBACK_API_RATE_LIMIT_DISABLED", &yc.RateLimitDisabled},
 	} {
 		if v := os.Getenv(b.env); v != "" {

@@ -177,7 +177,7 @@ func buildConsoleRouter(
 	if cfg.ConsoleBaseURL == "" {
 		return nil, fmt.Errorf("console requires console_base_url")
 	}
-	signer, err := console.NewSigner(cfg.ConsoleSessionKey, false)
+	signer, err := console.NewSigner(cfg.ConsoleSessionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func buildConsoleRouter(
 	feedbackRepo := feedback.NewFeedback(pool)
 
 	authHandler := console.NewAuthHandler(signer, adminRepo, cfg.ConsoleBaseURL)
-	me := console.NewMeHandler(signer, tenantRepo, userRepo)
+	me := console.NewMeHandler(signer, tenantRepo, userRepo, adminRepo)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
 	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -29,6 +30,12 @@ func BootstrapAdmin(ctx context.Context, repo *admin.Repo) error {
 	}
 	if n > 0 {
 		logext.Infof(ctx, "[%s] %d admin(s) exist, skipping bootstrap", where, n)
+		// Defence-in-depth: nudge the operator to unset the bootstrap
+		// envs after first start (review M6, #66). The plaintext
+		// password in /proc/<pid>/environ on Linux is exposed to any
+		// sidecar or debugger running as the same uid; once the admin
+		// row exists it must not linger.
+		warnBootstrapEnvStillSet(ctx, where)
 		return nil
 	}
 	email := config.GetOrFile("ATTUNE_BOOTSTRAP_ADMIN_EMAIL")
@@ -54,4 +61,28 @@ func BootstrapAdmin(ctx context.Context, repo *admin.Repo) error {
 	}
 	logext.Warnf(ctx, "[%s] created first admin %s — change password and unset ATTUNE_BOOTSTRAP_ADMIN_* env immediately", where, email)
 	return nil
+}
+
+// warnBootstrapEnvStillSet emits a Warn log on every subsequent start
+// when the bootstrap env vars are still populated. We don't fail the
+// boot — the deployment may have stalled mid-upgrade — but we want a
+// loud-and-loop signal so log dashboards catch it.
+func warnBootstrapEnvStillSet(ctx context.Context, where string) {
+	stale := []string{}
+	for _, name := range []string{
+		"ATTUNE_BOOTSTRAP_ADMIN_EMAIL",
+		"ATTUNE_BOOTSTRAP_ADMIN_EMAIL_FILE",
+		"ATTUNE_BOOTSTRAP_ADMIN_PASSWORD",
+		"ATTUNE_BOOTSTRAP_ADMIN_PASSWORD_FILE",
+	} {
+		if os.Getenv(name) != "" {
+			stale = append(stale, name)
+		}
+	}
+	if len(stale) > 0 {
+		logext.Warnf(ctx,
+			"[%s] ATTUNE_BOOTSTRAP_ADMIN_* still set after first start; "+
+				"unset these to keep credentials off /proc/<pid>/environ: %v",
+			where, stale)
+	}
 }

@@ -15,7 +15,6 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/inbound"
-	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -45,16 +44,19 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		_ = a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
 			LastEventAt: src.State.LastEventAt,
 			LastUID:     src.State.LastUID,
-			LastError:   "decrypt config: " + err.Error(),
+			LastError:   "decrypt config",
 		})
 		return
 	}
+	// Remember the source's poll interval so pollLoop's between-rounds
+	// sleep honours it (review M3, #66).
+	a.recordPollInterval(src.Slug, cfg.PollIntervalSeconds)
 
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
 	options := ptrext.Of(imapclient.Options{})
 	cli, err := dialIMAP(ctx, addr, cfg.TLS, options)
 	if err != nil {
-		a.transientError(ctx, src, "dial: "+err.Error())
+		a.transientError(ctx, src, "dial: imap server unreachable")
 		return
 	}
 	defer func() { _ = cli.Logout() }()
@@ -62,8 +64,13 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 	if err := cli.Login(cfg.Username, password).Wait(); err != nil {
 		// AUTHENTICATIONFAILED is operator-facing — disable the source
 		// so the next 60s tick does not retry; admin must reconnect.
-		logext.Warnf(ctx, "[%s] login failed,source_id:%s,err:%+v", where, src.ID, err.Error())
-		_ = a.deps.Sources.SetEnabled(ctx, src.ID, false, "auth: "+err.Error())
+		// We deliberately log + persist a sanitised constant message —
+		// servers occasionally echo the LOGIN command back in BAD/NO
+		// responses, which could leak the password fragment to
+		// console + log readers (review M2, #66). Operators see the
+		// real error in the IMAP server's own logs.
+		a.deps.Logger.Warnf(ctx, "[%s] login failed,source_id:%s", where, src.ID)
+		_ = a.deps.Sources.SetEnabled(ctx, src.ID, false, "imap authentication failed")
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "auth_err")
 		a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", false)
 		return
@@ -102,9 +109,15 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 
 		parsed, perr := parseRFC822(raw)
 		if perr != nil {
-			// Bad MIME — count as validate_err but advance the cursor
-			// so the loop doesn't wedge on this UID forever.
+			// Bad MIME — count as validate_err and advance the cursor
+			// so the loop doesn't wedge on this UID forever. We do
+			// NOT call Ingest on a half-parsed message; that would
+			// write an empty user_feedback row (review H4, #66).
+			a.deps.Logger.Warnf(ctx, "[%s] parse failed,source_id:%s,uid:%d,err:%+v",
+				where, src.ID, uid, perr.Error())
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
+			lastUID = int64(uid)
+			continue
 		}
 
 		in := domain.IngestInput{
@@ -172,13 +185,12 @@ func (a *adapter) markPollSuccess(slug string, t time.Time) {
 	a.mu.Unlock()
 }
 
-// dialIMAP — separated for test seams. Production uses TLS unless the
-// source explicitly opted out (cfg.TLS == false).
-var dialIMAP = func(_ context.Context, addr string, useTLS bool, opt *imapclient.Options) (*imapclient.Client, error) {
-	if useTLS {
-		return imapclient.DialTLS(addr, opt)
-	}
-	return imapclient.DialInsecure(addr, opt)
+// dialIMAP — separated for test seams. Production dials TLS only —
+// the cfg.TLS=false escape hatch is gone (review H2, #66). A loopback
+// reverse proxy that terminates TLS can front a plain-IMAP server if
+// the operator truly needs one.
+var dialIMAP = func(_ context.Context, addr string, _ bool, opt *imapclient.Options) (*imapclient.Client, error) {
+	return imapclient.DialTLS(addr, opt)
 }
 
 func newSearchCriteria(lastUID int64) *imap.SearchCriteria {
