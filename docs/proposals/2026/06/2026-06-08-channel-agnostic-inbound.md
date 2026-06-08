@@ -116,7 +116,7 @@ Push                              Poll                              Schedule    
                        │   blank-import inbound/adapter/{webhook,email} │
                        │   m := inbound.NewManager(deps); m.StartAll(ctx) │
                        └────────────────────┬────────────────────────┘
-                                            │ Deps{ Mux, Ingest, Secrets, Sources, Metrics, Logger }
+                                            │ Deps{ Mux, Ingest, Secrets, Sources, Metrics }
             ┌───────────────────────────────┴───────────────────────────────┐
             ▼                                                                ▼
   ┌─────────────────────┐                                       ┌──────────────────────┐
@@ -215,13 +215,19 @@ type Mux interface {
 // Deps — handed to every adapter at Start.
 // Add fields here only when a dependency becomes universal across adapters;
 // adapter-specific config comes from inbound_sources.config (encrypted JSON).
+//
+// Logging is intentionally NOT in Deps — adapters import
+// `internal/pkg/logext` directly, matching every other internal package
+// (service / repo / notify / handlers). Wrapping logext behind an
+// interface here would be YAGNI: `internal/` packages aren't externally
+// importable, so the framework can't be embedded with an alternative
+// logger anyway.
 type Deps struct {
     Mux     Mux              // adapter mounts HTTP routes (push adapters only)
     Ingest  IngestPort       // canonical normalize → persist
     Sources SourceStore      // load + update inbound_sources rows
     Secrets SecretStore      // envelope encrypt/decrypt per-source credentials
     Metrics InboundMetrics
-    Logger  Logger
 }
 
 // ShutdownTimeouter — optional role (Caddy-style). If an Adapter implements it,
@@ -414,13 +420,12 @@ type InboundMetrics interface {
     SetPollLag(channel, tenant, sourceSlug string, seconds float64)    // attune_inbound_poll_lag_seconds
 }
 
-// Logger — logext facade subset, ctx-first. Adapters call this so they never
-// import log/slog directly (CLAUDE.md §7).
-type Logger interface {
-    Infof(ctx context.Context, format string, args ...any)
-    Warnf(ctx context.Context, format string, args ...any)
-    Errorf(ctx context.Context, format string, args ...any)
-}
+// Logging — adapters import `internal/pkg/logext` directly (same as
+// every other internal package: service, repo, notify, handlers).
+// CLAUDE.md §7 forbids direct log/slog; logext is the standard facade.
+// We do NOT wrap logext behind an interface here: internal/ packages
+// aren't externally importable, so the framework can never be embedded
+// by code that brings its own logger — the interface would be YAGNI.
 ```
 
 ### Conformance test suite — `internal/inbound/inboundtest/`
@@ -964,7 +969,6 @@ internal/inbound/
     secrets.go              ← SecretStore + AES-GCM impl
     sources.go              ← SourceStore + Source + SourceState
     metrics.go              ← InboundMetrics + Prometheus impl
-    logger.go               ← Logger interface (logext-backed)
     mux.go                  ← chi sub-router helper
     inbound_test.go         ← unit: registry duplicate-panic, manager start/stop order
 internal/inbound/inboundtest/

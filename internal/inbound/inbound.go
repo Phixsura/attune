@@ -88,11 +88,17 @@ func (f IngestFunc) Ingest(ctx context.Context, tenantID string, keyID uuid.UUID
 // Add fields here only when a dependency becomes universal across
 // adapters; adapter-specific config comes from inbound_sources.config
 // (encrypted JSON).
+//
+// Logging is intentionally NOT in Deps — adapters import the
+// `internal/pkg/logext` facade directly, matching every other internal
+// package in attune (service / repo / notify / handlers all do the
+// same). Wrapping logext behind an interface here would be YAGNI:
+// `internal/` packages aren't externally importable, so the framework
+// can't be embedded with an alternative logger anyway.
 type Deps struct {
 	Mux     Mux
 	Ingest  IngestPort
 	Sources SourceStore
 	Secrets SecretStore
 	Metrics InboundMetrics
-	Logger  Logger
 }

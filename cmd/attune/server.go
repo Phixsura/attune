@@ -240,23 +240,6 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
-// inboundLogger adapts the package-level logext.* helpers to the
-// inbound.Logger interface (CLAUDE.md §7 — adapters must never import
-// log/slog directly).
-type inboundLogger struct{}
-
-func (inboundLogger) Infof(ctx context.Context, format string, args ...any) {
-	logext.Infof(ctx, format, args...)
-}
-
-func (inboundLogger) Warnf(ctx context.Context, format string, args ...any) {
-	logext.Warnf(ctx, format, args...)
-}
-
-func (inboundLogger) Errorf(ctx context.Context, format string, args ...any) {
-	logext.Errorf(ctx, format, args...)
-}
-
 // inboundWiring bundles the inbound-framework deps runServer needs to
 // thread into buildRouter + into its shutdown defer. Extracted from
 // runServer in #66 Plan T24 so the boot function stays under the §1
@@ -315,7 +298,6 @@ func setupInbound(ctx context.Context, pool *pgxpool.Pool, ingestor *ingest.Inge
 		Sources: sources,
 		Secrets: secrets,
 		Metrics: inbound.NewPrometheusMetrics(metrics.Registry),
-		Logger:  inboundLogger{},
 	}
 	manager := inbound.NewManager(deps)
 	if err := manager.StartAll(ctx); err != nil {

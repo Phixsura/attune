@@ -141,7 +141,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 		LastEventAt: ptrext.Of(nowFn()),
 		LastUID:     src.State.LastUID,
 	}); err != nil {
-		a.deps.Logger.Warnf(ctx, "[%s] UpdateState failed,err:%+v", where, err.Error())
+		logext.Warnf(ctx, "[%s] UpdateState failed,err:%+v", where, err.Error())
 	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,source_id:%s,feedback_id:%d",
@@ -170,7 +170,7 @@ func (a *adapter) authenticate(
 	const where = "inbound.webhook.authenticate"
 	current, previous, prevExpired, err := parseConfig(src.Config, a.deps.Secrets)
 	if err != nil {
-		a.deps.Logger.Errorf(ctx, "[%s] parseConfig failed,err:%+v", where, err.Error())
+		logext.Errorf(ctx, "[%s] parseConfig failed,err:%+v", where, err.Error())
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
 		return http.StatusInternalServerError, "internal", "internal error", false
 	}
@@ -180,7 +180,7 @@ func (a *adapter) authenticate(
 	// stays a single decrypt round.
 	curSecret, err := a.deps.Secrets.Decrypt(current)
 	if err != nil {
-		a.deps.Logger.Errorf(ctx, "[%s] decrypt current failed,err:%+v", where, err.Error())
+		logext.Errorf(ctx, "[%s] decrypt current failed,err:%+v", where, err.Error())
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
 		return http.StatusInternalServerError, "internal", "internal error", false
 	}

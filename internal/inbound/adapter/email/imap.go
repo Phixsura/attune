@@ -16,6 +16,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/inbound"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -41,7 +42,7 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 
 	cfg, password, err := parseEmailConfig(src.Config, a.deps.Secrets)
 	if err != nil {
-		a.deps.Logger.Warnf(ctx, "[%s] decrypt config failed,source_id:%s,err:%+v", where, src.ID, err.Error())
+		logext.Warnf(ctx, "[%s] decrypt config failed,source_id:%s,err:%+v", where, src.ID, err.Error())
 		_ = a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
 			LastEventAt: src.State.LastEventAt,
 			LastUID:     src.State.LastUID,
@@ -67,7 +68,7 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		// responses, which could leak the password fragment to
 		// console + log readers (review M2, #66). Operators see the
 		// real error in the IMAP server's own logs.
-		a.deps.Logger.Warnf(ctx, "[%s] login failed,source_id:%s", where, src.ID)
+		logext.Warnf(ctx, "[%s] login failed,source_id:%s", where, src.ID)
 		_ = a.deps.Sources.SetEnabled(ctx, src.ID, false, "imap authentication failed")
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "auth_err")
 		a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", false)
@@ -124,7 +125,7 @@ func (a *adapter) seedFirstPollCursor(ctx context.Context, src inbound.Source, s
 		LastEventAt: src.State.LastEventAt,
 		LastUID:     seedUID,
 	}); err != nil {
-		a.deps.Logger.Warnf(ctx, "[%s] seed LastUID failed,source_id:%s,err:%+v",
+		logext.Warnf(ctx, "[%s] seed LastUID failed,source_id:%s,err:%+v",
 			where, src.ID, err.Error())
 	}
 	src.State.LastUID = seedUID
@@ -144,7 +145,7 @@ func (a *adapter) ingestUIDs(ctx context.Context, cli *imapclient.Client, src in
 		}
 		raw, ferr := fetchOne(cli, uid)
 		if ferr != nil {
-			a.deps.Logger.Warnf(ctx, "[%s] fetch failed,source_id:%s,uid:%d,err:%+v",
+			logext.Warnf(ctx, "[%s] fetch failed,source_id:%s,uid:%d,err:%+v",
 				where, src.ID, uid, ferr.Error())
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "transient_err")
 			continue
@@ -155,7 +156,7 @@ func (a *adapter) ingestUIDs(ctx context.Context, cli *imapclient.Client, src in
 			// so the loop doesn't wedge on this UID forever. We do
 			// NOT call Ingest on a half-parsed message; that would
 			// write an empty user_feedback row (review H4, #66).
-			a.deps.Logger.Warnf(ctx, "[%s] parse failed,source_id:%s,uid:%d,err:%+v",
+			logext.Warnf(ctx, "[%s] parse failed,source_id:%s,uid:%d,err:%+v",
 				where, src.ID, uid, perr.Error())
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
 			lastUID = int64(uid)
@@ -176,12 +177,12 @@ func (a *adapter) ingestUIDs(ctx context.Context, cli *imapclient.Client, src in
 			},
 		}
 		if _, err := a.deps.Ingest.Ingest(ctx, src.TenantID, uuid.Nil, in); err != nil {
-			a.deps.Logger.Warnf(ctx, "[%s] ingest failed,source_id:%s,uid:%d,err:%+v",
+			logext.Warnf(ctx, "[%s] ingest failed,source_id:%s,uid:%d,err:%+v",
 				where, src.ID, uid, err.Error())
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
 			continue
 		}
-		applyAfterIngest(ctx, clientOps{cli}, uid, policy, a.deps.Logger)
+		applyAfterIngest(ctx, clientOps{cli}, uid, policy)
 		lastUID = int64(uid)
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
 	}
@@ -335,7 +336,7 @@ func (o clientOps) MoveTo(uid imap.UID, mailbox string) error {
 // the IMAP server would trip a BAD response on every poll. mark_seen is
 // the spec-documented safe default; this matches the unknown-policy
 // fallback in parseAfterIngest.
-func applyAfterIngest(ctx context.Context, ops imapOps, uid imap.UID, policy afterIngestPolicy, log inbound.Logger) {
+func applyAfterIngest(ctx context.Context, ops imapOps, uid imap.UID, policy afterIngestPolicy) {
 	const where = "inbound.email.applyAfterIngest"
 	switch policy.Kind {
 	case "keep_unseen":
@@ -345,9 +346,9 @@ func applyAfterIngest(ctx context.Context, ops imapOps, uid imap.UID, policy aft
 		return
 	case "move_to":
 		if policy.Folder == "" {
-			log.Warnf(ctx, "[%s] move_to with empty folder, falling back to mark_seen,uid:%d", where, uid)
+			logext.Warnf(ctx, "[%s] move_to with empty folder, falling back to mark_seen,uid:%d", where, uid)
 			if err := ops.MarkSeen(uid); err != nil {
-				log.Warnf(ctx, "[%s] store \\Seen failed,uid:%d,err:%+v", where, uid, err.Error())
+				logext.Warnf(ctx, "[%s] store \\Seen failed,uid:%d,err:%+v", where, uid, err.Error())
 			}
 			return
 		}
@@ -355,14 +356,14 @@ func applyAfterIngest(ctx context.Context, ops imapOps, uid imap.UID, policy aft
 			// Most likely cause: the destination folder does not exist
 			// (operator typo, or they archived it). Log + continue —
 			// the cursor has already advanced so we won't re-ingest.
-			log.Warnf(ctx, "[%s] move failed,uid:%d,folder:%s,err:%+v",
+			logext.Warnf(ctx, "[%s] move failed,uid:%d,folder:%s,err:%+v",
 				where, uid, policy.Folder, err.Error())
 		}
 	default: // "mark_seen" + unknown fall-through (parseAfterIngest pins unknown → mark_seen)
 		if err := ops.MarkSeen(uid); err != nil {
 			// Already \Seen, server-side permission glitch, etc. — log,
 			// don't retry. The cursor guards against re-ingest regardless.
-			log.Warnf(ctx, "[%s] store \\Seen failed,uid:%d,err:%+v", where, uid, err.Error())
+			logext.Warnf(ctx, "[%s] store \\Seen failed,uid:%d,err:%+v", where, uid, err.Error())
 		}
 	}
 }

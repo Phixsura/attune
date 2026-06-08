@@ -70,7 +70,6 @@ func TestWebhookHandle_EmitsLatencyAndSourceStateOnSuccess(t *testing.T) {
 			Sources: sources,
 			Secrets: secrets,
 			Metrics: metrics,
-			Logger:  inboundtest.FakeLogger{},
 		},
 		stubSecret: ProcessStubSecret(),
 	}

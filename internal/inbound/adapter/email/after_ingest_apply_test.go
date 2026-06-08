@@ -9,7 +9,6 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 
-	"github.com/Phixsura/attune/internal/inbound/inboundtest"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -91,7 +90,7 @@ func TestApplyAfterIngest_PolicyDispatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ops := ptrext.Of(fakeOps{})
-			applyAfterIngest(context.Background(), ops, targetUID, tt.policy, inboundtest.FakeLogger{})
+			applyAfterIngest(context.Background(), ops, targetUID, tt.policy)
 
 			if got := ops.markSeenUIDs; !equalUIDs(got, tt.want.seenUIDs) {
 				t.Errorf("MarkSeen UIDs = %v, want %v", got, tt.want.seenUIDs)
@@ -137,7 +136,7 @@ func TestApplyAfterIngest_ErrorsAreSwallowed(t *testing.T) {
 					t.Fatalf("applyAfterIngest panicked on err path: %v", r)
 				}
 			}()
-			applyAfterIngest(context.Background(), tc.ops, 100, tc.policy, inboundtest.FakeLogger{})
+			applyAfterIngest(context.Background(), tc.ops, 100, tc.policy)
 		})
 	}
 }

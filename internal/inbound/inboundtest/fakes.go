@@ -192,18 +192,6 @@ func (f *FakeMetrics) SetPollLag(channel, tenant, sourceSlug string, _ float64) 
 	f.PollLags = append(f.PollLags, channel+"|"+tenant+"|"+sourceSlug)
 }
 
-// FakeLogger — discards.
-type FakeLogger struct{}
-
-// Infof discards.
-func (FakeLogger) Infof(context.Context, string, ...any) {}
-
-// Warnf discards.
-func (FakeLogger) Warnf(context.Context, string, ...any) {}
-
-// Errorf discards.
-func (FakeLogger) Errorf(context.Context, string, ...any) {}
-
 // FakeMux — collects mounted routes for assertions.
 type FakeMux struct {
 	Routes []FakeRoute
@@ -239,7 +227,6 @@ func DepsFor(ingest *FakeIngest, sources *FakeSources, mux *FakeMux) inbound.Dep
 		Sources: sources,
 		Secrets: FakeSecrets{},
 		Metrics: ptrext.Of(FakeMetrics{}),
-		Logger:  FakeLogger{},
 	}
 }
 
@@ -258,6 +245,5 @@ var (
 	_ inbound.SourceStore    = (*FakeSources)(nil)
 	_ inbound.SecretStore    = FakeSecrets{}
 	_ inbound.InboundMetrics = (*FakeMetrics)(nil)
-	_ inbound.Logger         = FakeLogger{}
 	_ inbound.Mux            = (*FakeMux)(nil)
 )

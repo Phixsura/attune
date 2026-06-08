@@ -5,6 +5,8 @@ package email
 import (
 	"context"
 	"time"
+
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // loopInterval is the fixed between-rounds wait per spec §Email IMAP
@@ -24,7 +26,7 @@ func (a *adapter) pollLoop(ctx context.Context) {
 	for {
 		sources, err := a.deps.Sources.List(ctx, channelName)
 		if err != nil {
-			a.deps.Logger.Warnf(ctx, "[inbound.email.pollLoop] list sources failed,err:%+v", err.Error())
+			logext.Warnf(ctx, "[inbound.email.pollLoop] list sources failed,err:%+v", err.Error())
 		}
 		for _, src := range sources {
 			if ctx.Err() != nil {
