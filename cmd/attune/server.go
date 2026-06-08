@@ -17,17 +17,25 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers"
+	"github.com/Phixsura/attune/internal/handlers/console"
+	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -126,7 +134,55 @@ func runServer() error {
 	}
 	ingestHandler := handlers.NewIngestHandler(ingestor)
 
-	r, err := buildRouter(ctx, cfg, larkHandler, ingestHandler, apiKeys, pool)
+	// #66 inbound framework wiring. Validate the master key FIRST so a
+	// misconfigured deploy fails the boot loudly; the rest of the inbound
+	// surface depends on the SecretStore the key seeds.
+	inboundKey, err := inbound.BootstrapValidate()
+	if err != nil {
+		return fmt.Errorf("inbound boot: %w", err)
+	}
+	inboundSecrets, err := inbound.NewAESGCMSecretStore(inboundKey)
+	if err != nil {
+		return fmt.Errorf("inbound secrets: %w", err)
+	}
+	inboundSources := inboundsourcerepo.NewRepo(pool)
+	adminRepo := admin.NewRepo(pool)
+	if err := console.BootstrapAdmin(ctx, adminRepo); err != nil {
+		return fmt.Errorf("bootstrap admin: %w", err)
+	}
+
+	// Inbound sub-router. Adapters mount their channel-relative routes
+	// (e.g. "/webhook/{tenant-slug}/{source-slug}") onto this mux during
+	// Manager.StartAll; buildRouter then mounts the populated mux under
+	// /v1/inbound.
+	inboundSubRouter := chi.NewRouter()
+	inboundDeps := inbound.Deps{
+		Mux: inbound.NewChiMux(inboundSubRouter),
+		Ingest: inbound.IngestFunc(func(ctx context.Context, tenantID string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
+			return ingestor.IngestRow(ctx, tenantID, keyID, in)
+		}),
+		Sources: inboundSources,
+		Secrets: inboundSecrets,
+		Metrics: inbound.NewPrometheusMetrics(prometheus.DefaultRegisterer),
+		Logger:  inboundLogger{},
+	}
+	manager := inbound.NewManager(inboundDeps)
+	if err := manager.StartAll(ctx); err != nil {
+		return fmt.Errorf("inbound manager: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := manager.ShutdownAll(shutdownCtx); err != nil {
+			logext.Warnf(shutdownCtx, "[%s] inbound shutdown failed,err:%+v", where, err.Error())
+		}
+	}()
+	logext.Infof(ctx, "[%s] inbound framework ready,adapters:%d", where, len(inbound.Factories()))
+
+	r, err := buildRouter(
+		ctx, cfg, larkHandler, ingestHandler, apiKeys, pool,
+		inboundSubRouter, inboundSecrets, inboundSources, adminRepo,
+	)
 	if err != nil {
 		return err
 	}
@@ -231,6 +287,23 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// inboundLogger adapts the package-level logext.* helpers to the
+// inbound.Logger interface (CLAUDE.md §7 — adapters must never import
+// log/slog directly).
+type inboundLogger struct{}
+
+func (inboundLogger) Infof(ctx context.Context, format string, args ...any) {
+	logext.Infof(ctx, format, args...)
+}
+
+func (inboundLogger) Warnf(ctx context.Context, format string, args ...any) {
+	logext.Warnf(ctx, format, args...)
+}
+
+func (inboundLogger) Errorf(ctx context.Context, format string, args ...any) {
+	logext.Errorf(ctx, format, args...)
 }
 
 func parseOTelHeaders(raw string) map[string]string {

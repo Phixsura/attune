@@ -20,8 +20,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
+	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
+	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
@@ -43,12 +45,15 @@ var (
 	NewSigner               = session.NewSigner
 	NewOAuthHandler         = oauth.NewOAuthHandler
 	NewDevLoginHandler      = oauth.NewDevLoginHandler
+	NewAuthHandler          = auth.NewHandler
 	NewMeHandler            = me.NewMeHandler
 	NewAPIKeysHandler       = apikey.NewAPIKeysHandler
 	NewNotifyTargetsHandler = notifytarget.NewNotifyTargetsHandler
 	NewFeedbackHandler      = feedback.NewFeedbackHandler
 	NewUsageHandler         = usage.NewUsageHandler
 	NewEnrichConfigHandler  = enrichconfig.NewHandler
+	NewInboundHandler       = consoleinbound.NewHandler
+	BootstrapAdmin          = auth.BootstrapAdmin
 )
 
 // Router wires every console endpoint into a single chi.Router.
@@ -78,38 +83,52 @@ var (
 //	 GET /enrich-config → enrichconfig.Handler.Get
 //	 PUT /enrich-config → enrichconfig.Handler.Update
 //	 POST /enrich-config/preview → enrichconfig.Handler.Preview
+//	 GET /inbound/sources → inbound.Handler.List
+//	 POST /inbound/sources → inbound.Handler.Create
+//	 GET /inbound/sources/{id} → inbound.Handler.Get
+//	 POST /inbound/sources/{id}/rotate-secret → inbound.Handler.Rotate
+//	 POST /inbound/sources/{id}/pause → inbound.Handler.Pause
+//	 POST /inbound/sources/{id}/resume → inbound.Handler.Resume
+//	 DELETE /inbound/sources/{id} → inbound.Handler.Delete
+//	 POST /inbound/sources/test-connection → inbound.Handler.TestConnection
 type Router struct {
 	signer        *session.Signer
 	oauth         *oauth.OAuthHandler
+	auth          *auth.Handler
 	me            *me.MeHandler
 	apiKeys       *apikey.APIKeysHandler
 	notifyTargets *notifytarget.NotifyTargetsHandler
 	feedback      *feedback.FeedbackHandler
 	usage         *usage.UsageHandler
 	enrichConfig  *enrichconfig.Handler
+	inbound       *consoleinbound.Handler
 	devLogin      http.Handler // nil when ConsoleDevLogin is off
 }
 
 func NewRouter(
 	signer *session.Signer,
 	oauth *oauth.OAuthHandler,
+	authH *auth.Handler,
 	me *me.MeHandler,
 	apiKeys *apikey.APIKeysHandler,
 	notifyTargets *notifytarget.NotifyTargetsHandler,
 	feedback *feedback.FeedbackHandler,
 	usage *usage.UsageHandler,
 	enrichConfig *enrichconfig.Handler,
+	inbound *consoleinbound.Handler,
 	devLogin http.Handler,
 ) *Router {
 	return ptrext.Of(Router{
 		signer:        signer,
 		oauth:         oauth,
+		auth:          authH,
 		me:            me,
 		apiKeys:       apiKeys,
 		notifyTargets: notifyTargets,
 		feedback:      feedback,
 		usage:         usage,
 		enrichConfig:  enrichConfig,
+		inbound:       inbound,
 		devLogin:      devLogin,
 	})
 }
@@ -118,8 +137,17 @@ func (r *Router) Mount() chi.Router {
 	mux := chi.NewRouter()
 
 	mux.Route("/install", func(m chi.Router) {
+		// Lark OAuth (legacy; removed in #66 Plan T17).
 		m.Get("/start", r.oauth.Start)
 		m.Get("/callback", r.oauth.Callback)
+		// Local-admin password login (#66 Plan T11). Wired alongside the
+		// Lark OAuth routes so the SPA can use either flow during the
+		// transition. Once T17 lands, OAuth goes away and only these
+		// remain.
+		if r.auth != nil {
+			m.Post("/login", r.auth.Login)
+			m.Post("/logout", r.auth.Logout)
+		}
 		if r.devLogin != nil {
 			m.Method(http.MethodGet, "/dev-login", r.devLogin)
 		}
@@ -159,6 +187,19 @@ func (r *Router) Mount() chi.Router {
 			e.Put("/", r.enrichConfig.Update)
 			e.Post("/preview", r.enrichConfig.Preview)
 		})
+
+		if r.inbound != nil {
+			m.Route("/inbound/sources", func(s chi.Router) {
+				s.Get("/", r.inbound.List)
+				s.Post("/", r.inbound.Create)
+				s.Post("/test-connection", r.inbound.TestConnection)
+				s.Get("/{id}", r.inbound.Get)
+				s.Delete("/{id}", r.inbound.Delete)
+				s.Post("/{id}/rotate-secret", r.inbound.Rotate)
+				s.Post("/{id}/pause", r.inbound.Pause)
+				s.Post("/{id}/resume", r.inbound.Resume)
+			})
+		}
 	})
 
 	return mux

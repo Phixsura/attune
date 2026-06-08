@@ -25,6 +25,13 @@ import (
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
+
+	// #66 inbound adapters self-register via init(). Blank-import is the
+	// only legal site per the inbound-boundary depguard rule; cmd/attune
+	// owns this entrypoint so the framework registry is populated before
+	// inbound.Manager.StartAll runs in server.go.
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/email"
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/webhook"
 )
 
 // subcommands routes each CLI verb to its handler. `server` ignores its args

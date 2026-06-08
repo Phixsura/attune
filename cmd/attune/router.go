@@ -18,17 +18,20 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Phixsura/attune/internal/handlers"
+	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/repo/admin"
+	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 )
 
 // buildRouter wires the chi router: OTel root span + X-Trace-Id, the standard
 // middleware chain, /healthz, /metrics, the /v1 API (lark webhook + api-key /
-// rate-limited feedback ingest), and — when CONSOLE_SESSION_KEY is set — the
-// Console under /fb/v1/console.
+// rate-limited feedback ingest + inbound adapter mux), and — when
+// CONSOLE_SESSION_KEY is set — the Console under /fb/v1/console.
 func buildRouter(
 	ctx context.Context,
 	cfg *config.Config,
@@ -36,6 +39,10 @@ func buildRouter(
 	ingestHandler *handlers.IngestHandler,
 	apiKeys *apikeysvc.APIKeys,
 	pool *pgxpool.Pool,
+	inboundMux chi.Router,
+	inboundSecrets inbound.SecretStore,
+	inboundSources *inboundsourcerepo.Repo,
+	adminRepo *admin.Repo,
 ) (chi.Router, error) {
 	const where = "main.buildRouter"
 	r := chi.NewRouter()
@@ -62,6 +69,12 @@ func buildRouter(
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Mount("/lark", larkHandler.Routes())
+		// Inbound adapter mux. Adapters have already registered their
+		// routes onto inboundMux during Manager.StartAll(ctx). Mounting
+		// it here exposes them under /v1/inbound/<channel>/...
+		if inboundMux != nil {
+			r.Mount("/inbound", inboundMux)
+		}
 		r.Group(func(r chi.Router) {
 			r.Use(apikey.Middleware(apiKeys))
 			r.Use(rateLimiter.Middleware)
@@ -73,7 +86,7 @@ func buildRouter(
 	// proxy forwards external traffic here. Disabled gracefully
 	// when ConsoleSessionKey is empty (single-process dev defaults).
 	if cfg.ConsoleSessionKey != "" {
-		consoleRouter, err := buildConsoleRouter(cfg, pool)
+		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, adminRepo)
 		if err != nil {
 			return nil, fmt.Errorf("build console: %w", err)
 		}

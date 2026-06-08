@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/handlers/console"
+	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	larkclient "github.com/Phixsura/attune/internal/infra/lark"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -18,8 +19,10 @@ import (
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/notify/adapter/larkwebhook"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	"github.com/Phixsura/attune/internal/repo/lark"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
@@ -193,7 +196,13 @@ func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 //
 // They MUST be off in any real TLS-fronted deployment. The combined check
 // here makes "accidentally enable just one" impossible.
-func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, error) {
+func buildConsoleRouter(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+	secrets inbound.SecretStore,
+	sourceRepo *inboundsourcerepo.Repo,
+	adminRepo *admin.Repo,
+) (chi.Router, error) {
 	const where = "main.buildConsoleRouter"
 	ctx := context.Background()
 	if cfg.LarkAppID == "" || cfg.LarkAppSecret == "" {
@@ -225,12 +234,14 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 
 	oauth := console.NewOAuthHandler(signer, larkClient, tenantRepo, userRepo, installRepo,
 		cfg.LarkAppID, cfg.ConsoleBaseURL)
+	authHandler := console.NewAuthHandler(signer, adminRepo, cfg.ConsoleBaseURL)
 	me := console.NewMeHandler(signer, tenantRepo, userRepo)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
 	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
 	usage := console.NewUsageHandler(feedbackRepo)
 	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
+	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
 
 	var devLogin http.Handler
 	if cfg.ConsoleDevLogin {
@@ -238,6 +249,7 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 		devLogin = console.NewDevLoginHandler(signer, tenantRepo, userRepo, cfg.ConsoleBaseURL)
 	}
 	return console.NewRouter(
-		signer, oauth, me, apiKeys, notifyTargets, feedback, usage, enrichConfig, devLogin,
+		signer, oauth, authHandler, me, apiKeys, notifyTargets, feedback, usage,
+		enrichConfig, inboundHandler, devLogin,
 	).Mount(), nil
 }
