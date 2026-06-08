@@ -199,6 +199,13 @@ func setupDatabase(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, erro
 		return nil, fmt.Errorf("pg ping: %w", err)
 	}
 	logext.Infof(ctx, "[%s] postgres connected", where)
+	// Destructive-data guard before applying 015_drop_lark.sql — see
+	// docs/proposals/2026/06/2026-06-08-channel-agnostic-inbound.md
+	// §Data migrations.
+	if err := database.ConfirmLarkDelete(ctx, pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("migrations preflight: %w", err)
+	}
 	if err := database.RunMigrations(ctx, pool); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("migrations: %w", err)
