@@ -29,16 +29,11 @@ const MaxContentLen = 5000
 // per-tenant Dimension taxonomy, so the axes no longer have a global
 // vocabulary to validate against.)
 var ValidSources = map[string]bool{
-	"api":           true, // generic API client (default for /v1/feedback/ingest)
-	"lark-group":    true, // Lark group chat webhook (handled by /v1/lark/event)
-	"lark-bitable":  true, // Lark Bitable record (automation → POST ingest)
-	"lark-approval": true, // Lark Approval instance (automation → POST ingest)
-	"lark-helpdesk": true, // Lark Helpdesk ticket (event subscription → POST ingest)
-	"lark-form":     true, // Lark Form / Doc comment (automation → POST ingest)
-	"webhook":       true, // generic inbound HTTP webhook (#66 Phase 1)
-	"email":         true, // mailbox poller / inbound IMAP (#66 Phase 1)
-	"web":           true, // in-app JS feedback widget
-	"other":         true, // catch-all for misc integrations
+	"api":     true, // generic API client (default for /v1/feedback/ingest)
+	"webhook": true, // generic inbound HTTP webhook (#66 Phase 1)
+	"email":   true, // mailbox poller / inbound IMAP (#66 Phase 1)
+	"web":     true, // in-app JS feedback widget
+	"other":   true, // catch-all for misc integrations
 }
 
 // SourceDisplayName returns the human-facing label for a source enum.
@@ -54,16 +49,6 @@ func SourceDisplayName(source string) string {
 	switch source {
 	case "api":
 		return "API client"
-	case "lark-group":
-		return "Lark Group Chat"
-	case "lark-bitable":
-		return "Lark Bitable"
-	case "lark-approval":
-		return "Lark Approval"
-	case "lark-helpdesk":
-		return "Lark Helpdesk"
-	case "lark-form":
-		return "Lark Form / Doc Comment"
 	case "webhook":
 		return "Webhook"
 	case "email":

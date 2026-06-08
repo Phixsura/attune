@@ -7,7 +7,7 @@ import "testing"
 // validate_err path (proposal #6).
 func TestBoundedSource(t *testing.T) {
 	// Known-valid sources pass through unchanged.
-	for _, valid := range []string{"api", "lark-group", "other"} {
+	for _, valid := range []string{"api", "webhook", "email", "other"} {
 		if got := boundedSource(valid); got != valid {
 			t.Errorf("boundedSource(%q) = %q, want %q", valid, got, valid)
 		}
