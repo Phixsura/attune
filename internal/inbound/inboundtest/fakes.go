@@ -133,8 +133,14 @@ func (f *FakeSources) SetEnabled(_ context.Context, id string, enabled bool, _ s
 // fixtures can be reasoned about.
 type FakeSecrets struct{}
 
-// Encrypt prepends version + key_id (0x01 0x00) to plaintext.
+// Encrypt prepends version + key_id (0x01 0x00) to plaintext. Caps
+// input at 1 MiB so the `2+len(b)` capacity computation cannot overflow
+// int on 32-bit builds (CodeQL #30) — fixtures never approach this.
 func (FakeSecrets) Encrypt(b []byte) ([]byte, error) {
+	const maxLen = 1 << 20
+	if len(b) > maxLen {
+		return nil, errCrypto
+	}
 	out := make([]byte, 0, 2+len(b))
 	out = append(out, 0x01, 0x00)
 	out = append(out, b...)

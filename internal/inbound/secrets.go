@@ -54,8 +54,19 @@ func NewAESGCMSecretStore(key []byte) (SecretStore, error) {
 	return ptrext.Of(aesGCMStore{aead: aead}), nil
 }
 
+// maxPlaintextLen caps the per-call Encrypt input. Inbound secrets are
+// HMAC keys / IMAP credentials / small JSON config envelopes — none of
+// these ever approach 1 MiB. Cap explicitly so the `headerLen+nonceLen+
+// len(plaintext)+overhead` allocation cannot overflow int on 32-bit
+// builds (CodeQL #29).
+const maxPlaintextLen = 1 << 20
+
 // Encrypt — writes version + key_id + nonce + ciphertext + tag.
 func (s *aesGCMStore) Encrypt(plaintext []byte) ([]byte, error) {
+	if len(plaintext) > maxPlaintextLen {
+		return nil, fmt.Errorf("inbound: plaintext too large (%d > %d)",
+			len(plaintext), maxPlaintextLen)
+	}
 	nonce := make([]byte, nonceLen)
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, fmt.Errorf("inbound: nonce read: %w", err)
