@@ -1787,7 +1787,7 @@ Expected: PASS (if testdb harness exists). If integration tests skip due to miss
 - [ ] **Step 8: Commit**
 
 ```bash
-git add internal/infra/database/migrations/202606081201_*.sql internal/repo/admin/ internal/infra/config/bootstrap_env*
+git add internal/infra/database/migrations/016_create_admins.sql internal/repo/admin/ internal/infra/config/bootstrap_env*
 git commit -m "feat(repo/admin): admins table + bootstrap-safe repo + GetOrFile env helper (#66 step 7/24)
 
 Per spec §Console: local admin password — admins schema with bcrypt hash
@@ -1982,7 +1982,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/infra/database/migrations/202606081202_*.sql internal/repo/inboundsource/
+git add internal/infra/database/migrations/017_create_inbound_sources.sql internal/repo/inboundsource/
 git commit -m "feat(repo/inboundsource): inbound_sources table + DB-backed SourceStore (#66 step 8/24)
 
 Per spec §Data migrations + §Supporting types. Implements inbound.SourceStore
@@ -2091,7 +2091,7 @@ func ConfirmLarkDelete(ctx context.Context, pool *pgxpool.Pool) error {
 Locate the existing migration-runner call (likely `migrate.Up(...)`). Insert before it:
 
 ```go
-// Destructive-data guard before applying 202606081200_drop_lark — see
+// Destructive-data guard before applying 015_drop_lark.sql — see
 // docs/proposals/2026/06/2026-06-08-channel-agnostic-inbound.md §Data migrations.
 if err := database.ConfirmLarkDelete(ctx, pool); err != nil {
     return fmt.Errorf("attune: %w", err)
@@ -2101,7 +2101,7 @@ if err := database.ConfirmLarkDelete(ctx, pool); err != nil {
 - [ ] **Step 4: Run tests**
 
 ```bash
-go test ./internal/infra/migrate -v
+go test ./internal/infra/database -run TestConfirmLarkDelete -v
 ```
 Expected: PASS all three.
 
@@ -3636,7 +3636,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/domain/feedback.go internal/infra/database/migrations/202606081200_*.sql
+git add internal/domain/feedback.go internal/infra/database/migrations/015_drop_lark.sql
 git commit -m "feat(domain,migrate): drop lark-* source enums + migration to delete lark rows (#66 step 18/24)
 
 Per spec §Implementation plan step 9 — final ValidSources cleanup (after
