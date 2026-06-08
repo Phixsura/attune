@@ -41,7 +41,7 @@ service NotifyTargetService {
 // NotifyTarget never carries the secret — it is write-only once stored.
 message NotifyTarget {
   string id = 1;
-  string destination_type = 2;  // lark-bot | raw-webhook | slack-bot | email
+  string destination_type = 2;  // raw-webhook | slack-bot | email (#34 outbound adapter SDK extends this)
   string audience = 3;          // pool | radar | all
   string url = 4;
   int32 timeout_seconds = 5;

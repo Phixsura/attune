@@ -9,6 +9,80 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Console UI: inbound sources page + admin change-password (#66 B2 / H10).**
+  Fills the SPA gap left by the backend-first #66 landing — operators now
+  manage webhook + email inbound sources directly from the console
+  instead of via curl. New `/inbound-sources` route covers list, create
+  (two-channel wizard: webhook = name only, email = full IMAP fields +
+  inline test-connection probe), one-shot webhook secret reveal on
+  create + rotate, pause / resume toggle, and delete. The reveal dialog
+  surfaces secret_hex + the public webhook URL + a curl example with a
+  copy-button affordance per field. A new `/change-password` route lets
+  console admins rotate their bootstrap password (current ≥ 12-char new,
+  confirm match, server-side bcrypt cost 12 with timing-equalised wrong
+  current-password rejection). The user menu in the TopBar gets a
+  "Change password" item for admins; tenant-user sessions are filtered
+  client- and server-side. Backend wires
+  `POST /fb/v1/console/me/change-password` as a new RPC in
+  `proto/attune/v1/session.proto`, an admin-only
+  `auth.ChangePasswordHandler`, and `admin.Repo.UpdatePasswordHash` —
+  all under the existing `RequireSession` + CSRF guard.
+- **Channel-agnostic inbound framework + channel-native console auth (#66).**
+  attune now serves as a self-hosted, multi-source feedback ingestion plane
+  with a unified port (`internal/inbound.Adapter`) shared across push, poll,
+  schedule, and stream modes. Two production adapters ship alongside the
+  framework:
+  - `internal/inbound/adapter/webhook` — Stripe-style `X-Attune-Timestamp` /
+    `X-Attune-Signature` HMAC-SHA256 over `"<ts>.<body>"` with a ±300 s replay
+    window, dual-secret rotation (24 h grace, then `409
+    rotation_in_grace_window`), and per-source 401 enumeration resistance
+    (same status + path + stub-HMAC timing for unknown slugs).
+  - `internal/inbound/adapter/email` — IMAP poller (TLS-only) using
+    `emersion/go-imap/v2` + `go-message`; multipart/alternative prefers
+    `text/plain`; `lastUID` cursor advances per poll; `after_ingest:
+    mark_seen` (default), `keep_unseen`, and `move_to:<folder>` all drive
+    the IMAP STORE / MOVE wire commands (the v0.3 review-H3 follow-up
+    replaced the documented v2-beta no-op with `clientOps.MarkSeen` /
+    `clientOps.MoveTo` against a narrow `imapOps` interface).
+  - **Encryption at rest**: every inbound secret (webhook HMAC,
+    IMAP username / password) is sealed AES-GCM-256 with envelope
+    `version(1) + key_id(1) + nonce(12) + ct + tag(16)`. The
+    `ATTUNE_INBOUND_MASTER_KEY` env var (32 bytes hex/base64) seeds the
+    store and is validated at boot via
+    `internal/inbound.BootstrapValidate`; reserved bytes leave room for
+    master-key rotation (#94).
+  - **Boundary enforcement**: two depguard rules ship in `.golangci.yml` —
+    `inbound-boundary` (framework core `internal/inbound/*` may NOT import
+    adapters under `.../adapter/*`) and `inbound-framework-isolation`
+    (framework may NOT import service / repo / handlers / notify). Adapters
+    self-register via `init() + inbound.Register`, blank-imported from
+    `cmd/attune/main.go` (Caddy/Bento pattern) — adding a new channel is one
+    package with no edits to `cmd/`.
+  - **Conformance**: `internal/inbound/inboundtest` ships fakes
+    (FakeIngest / FakeSources / FakeSecrets / FakeMetrics / FakeMux)
+    and a `TestAdapterContract` with five gates every adapter must
+    pass (ChannelNonEmpty / StartShutdownOK / CtxCancelGraceful /
+    IdempotentShutdown / DuplicateRegisterPanics).
+  - **Console**: a first-class **inbound sources** page at
+    `/console/inbound-sources` — CRUD + rotate + pause/resume + test
+    connection, served by `internal/handlers/console/inbound` against the
+    proto contract in `proto/attune/v1/inbound_source.proto`
+    (`InboundSourceService` × 8 RPCs).
+- **Console authentication: email + bcrypt password** (#66). The
+  Lark-OAuth login is removed; the console now signs in via
+  `POST /fb/v1/console/install/login` against bcrypt-hashed credentials in a new
+  `admins` table (migration `016_create_admins.sql`). bcrypt cost 12 +
+  timing-equalized dummy-hash on unknown emails keeps the login path
+  constant-time. A safe-redirect helper rejects open redirects on the
+  `next=` query. Session cookies retain `HttpOnly + Secure +
+  SameSite=Lax + Path=/`.
+- **Bootstrap admin** (#66). On first start, attune reads
+  `ATTUNE_BOOTSTRAP_ADMIN_EMAIL` + `ATTUNE_BOOTSTRAP_ADMIN_PASSWORD`
+  (or `_FILE` variants — secret-file pattern documented in
+  `internal/infra/config.GetOrFile`) and creates the first console
+  admin. TOCTOU-safe via `pg_advisory_xact_lock` + `ON CONFLICT (email)
+  DO NOTHING`; subsequent starts read `admins` and skip the env vars
+  entirely, so the credentials don't linger.
 - **Console SPA test suite (#13).** Vitest (jsdom) + MSW + Testing
   Library + v8 coverage. ~80 cases cover the api-client (CSRF
   injection, error envelope, signal), the i18n resolver, the
@@ -20,8 +94,160 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   identity tracking). Per-file coverage thresholds on 17 surfaces
   gate CI against regressions.
 
-### Removed
+### Changed
 
+- **#66 review pass: 13 audit findings inline-fixed** — C1-C5 / H1-H6 /
+  M2 / M4-M8.
+  - `respond.Error` / `respond.Proto` unified the ingest + console
+    response paths; deleted local `writeJSONProto` / `writeError` /
+    `errInternal` shims (C1, M1).
+  - Removed dead `auth.Handler.Routes` + `Logout` (covered by `me.Logout`
+    via the documented session route — C2), `session.OAuthStateCookie /
+    OAuthStateTTL` constants leftover from T17 OAuth removal (C3).
+  - `InboundSource` proto gained `created_at` / `updated_at` so the
+    contract matches the SQL row (C4); both Repo selects and the
+    console `listAllForTenant` SQL scan the new columns.
+  - `login.tsx` now uses the proto-generated `LoginRequest` /
+    `LoginResponse` types and canonical `redirectUri` camelCase key
+    (C5).
+  - `webhook.Config` + `email.Config` exported from the adapter
+    packages and reused by the console handler — deleted the duplicated
+    `webhookConfigEnvelope` / `emailConfigEnvelope` (H1).
+  - `EmailCreateConfig.poll_interval_seconds` retired (field reserved
+    in proto) — the batch-loop topology has only ever honoured a fixed
+    60s `loopInterval`, the per-source knob was unconsumed (H2).
+  - `dialIMAP` shrunk to `(ctx, addr, *imapclient.Options)` after the
+    `cfg.TLS` bool was deleted in the TLS-only refactor (H3).
+  - `inbound.BootstrapValidate` now calls
+    `internal/infra/config.GetOrFile(MasterKeyEnv)` instead of a
+    local `readKeyEnv` reimplementation — one `*_FILE` semantic for the
+    whole codebase (H4).
+  - `me.MeHandler.Logout` returns `200 + LogoutResponse{}` instead of
+    `204 No Content` so the OpenAPI shape stays consistent with every
+    other proto RPC (H5).
+  - Docs corrected: `Settings → Inbound Sources` → "the Inbound Sources
+    page, route `/console/inbound-sources`" in `docs/private-deploy.md`
+    + this changelog (H6).
+  - `email.nowFn` rewritten as the idiomatic
+    `var nowFn = time.Now` (M2).
+  - `console/src/components/loading.tsx` consolidates the three
+    identical `Loading` spinners on inbound-sources / feedback /
+    notify-targets routes (M4).
+  - Deleted `EmptyInboundSourcesIcon` re-export — routes import
+    `lucide-react` directly per the rest of the SPA (M5).
+  - Channel literal sources collapsed to `webhook.Channel` /
+    `email.Channel`; the console handler aliases via
+    `channelWebhook = webhook.Channel` etc., so changing the channel
+    name requires exactly one edit (M7).
+  - Lizard-verified the `Login` / `decodeLoginRequest` /
+    `authenticate` / `resolveAdminScope` split: inlining would push the
+    merged `Login` to CCN ~24 against the `≤15` gate — split is
+    justified, comment locked in (M8).
+- **Email adapter `after_ingest` policy (`mark_seen` / `keep_unseen` /
+  `move_to:<folder>`) now actually fires the IMAP STORE / MOVE — previously
+  a documented no-op in v0.3 (review H3, #66).** The original
+  `applyAfterIngest` shipped as a comment-heavy no-op citing the
+  `go-imap/v2` beta API; revisiting the cached source showed `Move` exposes
+  `Wait() (*MoveData, error)` and `Store` returns a `*FetchCommand` whose
+  `Close()` cleanly drains the wire. The implementation now narrows the
+  client surface to an `imapOps { MarkSeen(uid); MoveTo(uid, mailbox) }`
+  interface — production wraps a live `*imapclient.Client`, tests drop in
+  a recording stub. STORE/MOVE failures are logged via
+  `logext.Warnf` and swallowed: the `lastUID` cursor in
+  `pollSource` is the correctness primitive and has already advanced, so
+  a one-shot wire failure is recoverable on the next round without
+  duplicate ingest. `move_to:` with an empty folder degrades to
+  `mark_seen` rather than passing an empty mailbox to IMAP.
+
+### Fixed
+
+- **CodeQL `go/allocation-size-overflow` on AES-GCM encrypt paths**
+  (#66 / commit `e6142cc`). The `internal/inbound/secrets.go` and
+  `internal/inbound/inboundtest/fakes.go` Encrypt functions now bound
+  the plaintext at 1 MiB before constructing the output slice, which
+  prevents an attacker-controlled length from causing an integer
+  overflow in slice capacity arithmetic. CI's CodeQL "Go" job was
+  failing on the first scan; the cap matches the inbound-source
+  config / webhook secret use case (both under 1 KiB in practice).
+
+### Security
+
+- **#66 hardening pass (1 BLOCKER + 6 HIGH + 8 MEDIUM after Phase-4
+  Chrome E2E)**.
+  - Email adapter Shutdown now honours the per-adapter timeout —
+    `wg.Wait()` is multiplexed against `ctx.Done()` so a wedged IMAP
+    `Login/Select/UIDSearch/fetchOne` blocking read can no longer pin
+    the whole process at shutdown (B1).
+  - IMAP LOGIN failures only auto-disable the source on
+    AUTHENTICATIONFAILED — transient network errors stay transient,
+    preventing a single bad TCP round-trip from flipping a healthy
+    source off (H-1).
+  - Per-message size cap (`maxMessageBytes = 8 MiB`) on email fetch +
+    parse paths. Over-size messages mark `validate_err` and advance
+    the cursor; bounds peak per-tick RSS at ~800 MiB against a
+    malformed / hostile server (H-2).
+  - `Rotate` handler now uses the `next_eligible_at` value the
+    rotator computed (and persisted into the DB envelope) — the
+    response field and the actual grace boundary agree to the
+    nanosecond. Prior recompute drifted by microseconds (H-3).
+  - Webhook `adapter.stubSecret` cached field deleted; `handle` calls
+    the `ProcessStubSecret` package-level sync.Once singleton
+    directly. Two layers of caching collapsed to one (H-4).
+  - SSRF guard at both runtime poll and console TestConnection:
+    `email.ValidateOutboundHost` rejects link-local (covers AWS / GCP
+    IMDS 169.254.169.254), unspecified, and IPv4 multicast. Loopback
+    + RFC1918 stay allowed on purpose for on-prem deployments (M-3).
+  - Decrypted IMAP password returned as `[]byte` instead of `string`
+    and explicitly zeroed after LOGIN — Go strings are immutable, so
+    the prior `string` return pinned plaintext until GC. (M-4)
+  - Bcrypt lockout: `IncrementFailedAttempts` only sets
+    `locked_until` on the exact `failed_attempts + 1 = $threshold`
+    transition (was `>=`), AND the auth handler resets
+    `failed_attempts` after a prior lockout expires — together they
+    close the indefinite-DoS-of-legitimate-admin loophole (M-1).
+  - `BootstrapAdmin` now enforces the same 12-character password
+    floor as `ChangePassword` — the operator can no longer ship a
+    weak first-admin password by env-var (M-2).
+- **#66 cleanup pass** (M-5 / M-6): collapsed the consumer-side
+  `sourceRepo` interface in the console handler to the framework's
+  own `inbound.SourceStore`; deleted `internal/inbound/chi_mux.go`
+  (a `chi.Router` directly satisfies the `inbound.Mux` single-method
+  interface).
+
+- **BREAKING — integral Lark removal** (#66). The Lark Open Platform
+  integration ships its **destructive** retirement in v0.3 — there is no
+  feature flag, no compat shim, no preserve-the-data path. The deploy
+  flow is documented end-to-end in
+  [`docs/private-deploy.md`](docs/private-deploy.md) "Upgrading to v0.3".
+  - **Code**: `internal/infra/lark/`, `internal/notify/adapter/larkwebhook/`,
+    `internal/repo/lark/`, `internal/handlers/console/oauth/`, and every
+    `lark*` ingest path under `internal/handlers/` are deleted. The
+    `internal/domain.ValidSources` enum drops the four `lark-*` Sprint-1.2
+    sources; the canonical set is now `{api, webhook, email, web, other}`.
+  - **Database** (migration `015_drop_lark.sql`):
+    `DELETE FROM user_feedback WHERE source LIKE 'lark-%'`,
+    `DELETE FROM outbox WHERE channel ILIKE 'lark%'`,
+    `DELETE FROM tenant_notify_targets WHERE destination_type ILIKE '%lark%'`,
+    `DELETE FROM tenant_users WHERE user_id LIKE 'ext_<nil-uuid>:%'`,
+    plus `DROP COLUMN tenant_users.lark_open_id / tenants.lark_install /
+    tenants.lark_tenant_key`, `DROP TABLE tenant_lark_install / lark_install`.
+    The deploy startup path runs `internal/infra/database.ConfirmLarkDelete`
+    **before** the migration: if any lark-typed row exists AND
+    `ATTUNE_CONFIRM_LARK_DELETE=yes` is not set, startup hard-fails with a
+    pointer to `docs/private-deploy.md` — silent loss is impossible.
+  - **Proto**: `proto/attune/v1/session.proto` adds `Login` /
+    `LoginRequest` / `LoginResponse`; the `Tenant` message uses
+    `reserved 4; reserved "lark_tenant_key";` so the field number can't
+    be silently reused. All Lark-prefixed RPCs / fields are gone from the
+    generated Go / TS / OpenAPI.
+  - **Console SPA**: every Lark string in `console/src/i18n/zh-CN.json`
+    is removed; the login route is `console/src/routes/login.tsx`
+    (TanStack file-based router, email + password form). The Lark
+    OAuth-callback route is gone.
+  - **Outbound notify**: the inline Lark group-bot path is removed —
+    notify-target alerts (raw-webhook failure surfacing, etc.) await the
+    #34 outbound-adapter SDK for a channel-agnostic alert channel; they
+    log-only in v0.3.
 - Unused `react-hook-form`, `zod`, `@hookform/resolvers` from
   `console/dependencies` (no references in `console/src/**`).
 - Dead `pnpm gen:api` / `src/api/types.ts` references in
@@ -393,6 +619,29 @@ authored — wire-stable, never auto-renamed.
 
 ### Security
 
+- **Encryption at rest for inbound secrets** (#66). All customer
+  webhook HMAC secrets and IMAP credentials are sealed with AES-GCM-256
+  via `internal/inbound.NewAESGCMSecretStore`. The wire envelope
+  reserves `version + key_id` bytes so #94 (master-key rotation) is a
+  read-decrypt-with-old → write-encrypt-with-new sweep with no schema
+  churn. Plaintext never enters the database, the OpenAPI surface, or
+  the console UI; on reveal the secret is shown **once**, post-creation
+  RPCs return only an opaque last-4 hint.
+- **Webhook replay + enumeration resistance** (#66). The webhook
+  adapter rejects requests outside a ±300 s timestamp window
+  (Stripe-style) and computes a stub HMAC on unknown source slugs so
+  that the 401-handling path is the same wall-clock for known vs.
+  unknown sources — operators can't enumerate slugs by timing.
+- **Console auth: bcrypt cost 12 + dummy-bcrypt equalization** (#66).
+  `VerifyOrDummy` runs a constant-time bcrypt against a
+  package-private stub hash when the email is unknown, so the 401
+  path is observationally identical to the wrong-password path. Cookie
+  attributes (`HttpOnly + Secure + SameSite=Lax + Path=/`) match the
+  guidance in CLAUDE.md §8.
+- **Bootstrap admin TOCTOU guard** (#66). `BootstrapAdmin` runs inside
+  `pg_advisory_xact_lock` + `ON CONFLICT (email) DO NOTHING`; two
+  attune replicas racing on the same first start cannot create two
+  rows.
 - Bounded the `source` label on `attune_ingest_total`: a rejected (invalid)
   client-supplied `source` is now recorded as `invalid` instead of the raw value,
   closing an unbounded metric-cardinality vector on the ingest validation-error

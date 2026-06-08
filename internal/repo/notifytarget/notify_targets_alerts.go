@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package repo — alert-state tracking for tenant_notify_targets.
-// Split from notify_targets.go to honor the no-grab-bag-files guidance
-// . These methods support Phase 3.2 webhook failure
-// visibility — outbox worker calls TouchFailure on markDead and
-// ClearFailure on first successful re-delivery.
+// Split from notify_targets.go to honor the no-grab-bag-files guidance.
+// These methods support webhook failure visibility — outbox worker calls
+// TouchFailure on markDead and ClearFailure on first successful re-delivery.
 package notifytarget
 
 import (
@@ -59,24 +60,4 @@ func (r *NotifyTargetRepo) ClearFailure(
 		return fmt.Errorf("clear notify target failure: %w", err)
 	}
 	return nil
-}
-
-// ListLarkBots returns active lark-bot rows for the given tenant. Outbox
-// worker uses this to find where to push meta-failure alerts (when a
-// raw-webhook dies, the tenant's chat is the right surface to tell humans).
-func (r *NotifyTargetRepo) ListLarkBots(
-	ctx context.Context, tenantID string,
-) ([]NotifyTarget, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		 last_failure_at, last_error
-		 FROM tenant_notify_targets
-		 WHERE tenant_id = $1
-		 AND destination_type = $2
-		 AND disabled = FALSE`, tenantID, DestLarkBot)
-	if err != nil {
-		return nil, fmt.Errorf("list lark bots: %w", err)
-	}
-	defer rows.Close()
-	return scanNotifyTargets(rows)
 }

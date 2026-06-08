@@ -12,17 +12,12 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import type { NotifyTargetCreate } from '@/features/notify-targets/api/create-notify-target'
 import type { NotifyTarget } from '@/features/notify-targets/api/list-notify-targets'
 
-type DestType = 'lark-bot' | 'raw-webhook'
+// raw-webhook is the only outbound destination shipped in v0.3. #34
+// will reintroduce a typed select when the outbound-adapter SDK lands.
+const FIXED_DEST_TYPE = 'raw-webhook' as const
 
 export function CreateNotifyDialog({
   open,
@@ -36,13 +31,11 @@ export function CreateNotifyDialog({
   pending: boolean
 }) {
   const { t } = useTranslation()
-  const [type, setType] = useState<DestType>('lark-bot')
   const [url, setUrl] = useState('')
   const [secret, setSecret] = useState('')
   const [timeout, setTimeoutSec] = useState(10)
 
   const reset = () => {
-    setType('lark-bot')
     setUrl('')
     setSecret('')
     setTimeoutSec(10)
@@ -64,7 +57,7 @@ export function CreateNotifyDialog({
             // Pass server-side defaults explicitly so the wire body is
             // self-describing — the API also fills these if omitted.
             const body: NotifyTargetCreate = {
-              destinationType: type,
+              destinationType: FIXED_DEST_TYPE,
               url: url.trim(),
               audience: 'all',
               timeoutSeconds: timeout,
@@ -80,23 +73,6 @@ export function CreateNotifyDialog({
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="nt-type">{t('notify_targets.create_dialog.type_field')}</Label>
-              <Select value={type} onValueChange={(v) => setType(v as DestType)} disabled={pending}>
-                <SelectTrigger id="nt-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="lark-bot">
-                    {t('notify_targets.create_dialog.type_lark')}
-                  </SelectItem>
-                  <SelectItem value="raw-webhook">
-                    {t('notify_targets.create_dialog.type_raw')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
               <Label htmlFor="nt-url">{t('notify_targets.create_dialog.url_field')}</Label>
               <Input
                 id="nt-url"
@@ -107,9 +83,7 @@ export function CreateNotifyDialog({
                 required
               />
               <p className="text-xs text-muted-foreground">
-                {type === 'lark-bot'
-                  ? t('notify_targets.create_dialog.url_help_lark')
-                  : t('notify_targets.create_dialog.url_help_raw')}
+                {t('notify_targets.create_dialog.url_help_raw')}
               </p>
             </div>
 
@@ -123,9 +97,7 @@ export function CreateNotifyDialog({
                 disabled={pending}
               />
               <p className="text-xs text-muted-foreground">
-                {type === 'lark-bot'
-                  ? t('notify_targets.create_dialog.secret_help_lark')
-                  : t('notify_targets.create_dialog.secret_help_raw')}
+                {t('notify_targets.create_dialog.secret_help_raw')}
               </p>
             </div>
 

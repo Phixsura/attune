@@ -15,17 +15,16 @@
 package console
 
 import (
-	"net/http"
-
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
+	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
+	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
-	"github.com/Phixsura/attune/internal/handlers/console/oauth"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
@@ -40,15 +39,17 @@ type (
 // Constructor re-exports so cmd/attune/setup.go can keep building
 // handlers via `console.NewXHandler(...)` after the split.
 var (
-	NewSigner               = session.NewSigner
-	NewOAuthHandler         = oauth.NewOAuthHandler
-	NewDevLoginHandler      = oauth.NewDevLoginHandler
-	NewMeHandler            = me.NewMeHandler
-	NewAPIKeysHandler       = apikey.NewAPIKeysHandler
-	NewNotifyTargetsHandler = notifytarget.NewNotifyTargetsHandler
-	NewFeedbackHandler      = feedback.NewFeedbackHandler
-	NewUsageHandler         = usage.NewUsageHandler
-	NewEnrichConfigHandler  = enrichconfig.NewHandler
+	NewSigner                = session.NewSigner
+	NewAuthHandler           = auth.NewHandler
+	NewChangePasswordHandler = auth.NewChangePasswordHandler
+	NewMeHandler             = me.NewMeHandler
+	NewAPIKeysHandler        = apikey.NewAPIKeysHandler
+	NewNotifyTargetsHandler  = notifytarget.NewNotifyTargetsHandler
+	NewFeedbackHandler       = feedback.NewFeedbackHandler
+	NewUsageHandler          = usage.NewUsageHandler
+	NewEnrichConfigHandler   = enrichconfig.NewHandler
+	NewInboundHandler        = consoleinbound.NewHandler
+	BootstrapAdmin           = auth.BootstrapAdmin
 )
 
 // Router wires every console endpoint into a single chi.Router.
@@ -56,13 +57,12 @@ var (
 // Endpoint inventory:
 //
 //	public (no session required):
-//	 GET /install/start → oauth.Handler.Start
-//	 GET /install/callback → oauth.Handler.Callback
-//	 GET /install/dev-login → DevLogin (optional, gated)
+//	 POST /install/login → auth.Handler.Login (#66 Plan T11)
 //
 //	session-required (RequireSession middleware):
 //	 GET /me → me.Handler.Me
 //	 POST /logout → me.Handler.Logout
+//	 POST /me/change-password → auth.ChangePasswordHandler.ChangePassword
 //	 GET /api-keys → apikey.Handler.List
 //	 POST /api-keys → apikey.Handler.Create
 //	 DELETE /api-keys/{id} → apikey.Handler.Revoke
@@ -78,57 +78,69 @@ var (
 //	 GET /enrich-config → enrichconfig.Handler.Get
 //	 PUT /enrich-config → enrichconfig.Handler.Update
 //	 POST /enrich-config/preview → enrichconfig.Handler.Preview
+//	 GET /inbound/sources → inbound.Handler.List
+//	 POST /inbound/sources → inbound.Handler.Create
+//	 GET /inbound/sources/{id} → inbound.Handler.Get
+//	 POST /inbound/sources/{id}/rotate-secret → inbound.Handler.Rotate
+//	 POST /inbound/sources/{id}/pause → inbound.Handler.Pause
+//	 POST /inbound/sources/{id}/resume → inbound.Handler.Resume
+//	 DELETE /inbound/sources/{id} → inbound.Handler.Delete
+//	 POST /inbound/sources/test-connection → inbound.Handler.TestConnection
 type Router struct {
-	signer        *session.Signer
-	oauth         *oauth.OAuthHandler
-	me            *me.MeHandler
-	apiKeys       *apikey.APIKeysHandler
-	notifyTargets *notifytarget.NotifyTargetsHandler
-	feedback      *feedback.FeedbackHandler
-	usage         *usage.UsageHandler
-	enrichConfig  *enrichconfig.Handler
-	devLogin      http.Handler // nil when ConsoleDevLogin is off
+	signer         *session.Signer
+	auth           *auth.Handler
+	changePassword *auth.ChangePasswordHandler
+	me             *me.MeHandler
+	apiKeys        *apikey.APIKeysHandler
+	notifyTargets  *notifytarget.NotifyTargetsHandler
+	feedback       *feedback.FeedbackHandler
+	usage          *usage.UsageHandler
+	enrichConfig   *enrichconfig.Handler
+	inbound        *consoleinbound.Handler
 }
 
 func NewRouter(
 	signer *session.Signer,
-	oauth *oauth.OAuthHandler,
+	authH *auth.Handler,
+	changePassword *auth.ChangePasswordHandler,
 	me *me.MeHandler,
 	apiKeys *apikey.APIKeysHandler,
 	notifyTargets *notifytarget.NotifyTargetsHandler,
 	feedback *feedback.FeedbackHandler,
 	usage *usage.UsageHandler,
 	enrichConfig *enrichconfig.Handler,
-	devLogin http.Handler,
+	inbound *consoleinbound.Handler,
 ) *Router {
 	return ptrext.Of(Router{
-		signer:        signer,
-		oauth:         oauth,
-		me:            me,
-		apiKeys:       apiKeys,
-		notifyTargets: notifyTargets,
-		feedback:      feedback,
-		usage:         usage,
-		enrichConfig:  enrichConfig,
-		devLogin:      devLogin,
+		signer:         signer,
+		auth:           authH,
+		changePassword: changePassword,
+		me:             me,
+		apiKeys:        apiKeys,
+		notifyTargets:  notifyTargets,
+		feedback:       feedback,
+		usage:          usage,
+		enrichConfig:   enrichConfig,
+		inbound:        inbound,
 	})
 }
 
 func (r *Router) Mount() chi.Router {
 	mux := chi.NewRouter()
 
-	mux.Route("/install", func(m chi.Router) {
-		m.Get("/start", r.oauth.Start)
-		m.Get("/callback", r.oauth.Callback)
-		if r.devLogin != nil {
-			m.Method(http.MethodGet, "/dev-login", r.devLogin)
-		}
-	})
+	// Local-admin password login (#66 Plan T11) — replaces the deleted
+	// external-OAuth flow (#66 Plan T17). Logout is served at
+	// /fb/v1/console/logout below (behind RequireSession), not under
+	// /install — the SPA only knows the post-login path.
+	mux.Post("/install/login", r.auth.Login)
 
 	mux.Group(func(m chi.Router) {
 		m.Use(r.signer.RequireSession)
 		m.Get("/me", r.me.Me)
 		m.Post("/logout", r.me.Logout)
+		if r.changePassword != nil {
+			m.Post("/me/change-password", r.changePassword.ChangePassword)
+		}
 
 		m.Route("/api-keys", func(k chi.Router) {
 			k.Get("/", r.apiKeys.List)
@@ -159,6 +171,19 @@ func (r *Router) Mount() chi.Router {
 			e.Put("/", r.enrichConfig.Update)
 			e.Post("/preview", r.enrichConfig.Preview)
 		})
+
+		if r.inbound != nil {
+			m.Route("/inbound/sources", func(s chi.Router) {
+				s.Get("/", r.inbound.List)
+				s.Post("/", r.inbound.Create)
+				s.Post("/test-connection", r.inbound.TestConnection)
+				s.Get("/{id}", r.inbound.Get)
+				s.Delete("/{id}", r.inbound.Delete)
+				s.Post("/{id}/rotate-secret", r.inbound.Rotate)
+				s.Post("/{id}/pause", r.inbound.Pause)
+				s.Post("/{id}/resume", r.inbound.Resume)
+			})
+		}
 	})
 
 	return mux

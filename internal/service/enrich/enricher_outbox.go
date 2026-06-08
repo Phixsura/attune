@@ -87,9 +87,10 @@ func (e *Enricher) persistEnriched(
 }
 
 // outboxDestTypes lists destination_type values that go through the
-// outbox + Transport pipeline (rather than inline fan-out like lark-bot).
-// New outbox-routed dispatchers add themselves here and grow a sender in
-// service/outbox/outbox_worker.go's sendByDestType. Sprint 1 adds github-issue.
+// outbox + Transport pipeline (rather than the inline-fanout slot kept
+// for the #34 outbound adapter SDK). New outbox-routed dispatchers add
+// themselves here and grow a sender in
+// service/outbox/outbox_worker.go's sendByDestType.
 var outboxDestTypes = map[string]bool{
 	notifytarget.DestRawWebhook:  true,
 	notifytarget.DestGitHubIssue: true,

@@ -1,0 +1,8 @@
+From: alice@example.com
+To: feedback@team.com
+Subject: Buggy login flow
+Message-ID: <abc123@example.com>
+Date: Sun, 8 Jun 2026 12:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+The login page errors out when I use Safari.

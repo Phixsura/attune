@@ -42,7 +42,7 @@ const (
 // the claim-then-update loop but holds no SQL itself — repo does.
 //
 // wiring:
-// - Lark webhook → inline call via notifier (best-effort, no retry)
+// - inline notifier (slot reserved for the #34 outbound adapter SDK) → fire-and-forget
 // - raw-webhook → outbox row in same tx as MarkDone (at-least-once)
 //
 // SetNotifier and SetOutbox are independent; either / both / neither
@@ -68,7 +68,7 @@ func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient, model string
 	return ptrext.Of(Enricher{repo: r, llm: llm, model: model})
 }
 
-// SetNotifier wires the inline webhook fan-out (Lark). nil = no
+// SetNotifier wires the inline webhook fan-out. nil = no
 // notifications; rows still land in Postgres normally. Safe for concurrent
 // reads (fanOut goroutines).
 func (e *Enricher) SetNotifier(n notify.Notifier) {

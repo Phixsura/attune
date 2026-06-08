@@ -9,20 +9,13 @@ import (
 const testKey = "test-signer-key-32-bytes-padding!" // unit-test only, never used in prod
 
 func TestNewSigner_RejectsShortKey(t *testing.T) {
-	if _, err := NewSigner("too-short", false); err == nil {
+	if _, err := NewSigner("too-short"); err == nil {
 		t.Fatal("expected error for key < 32 bytes")
 	}
 }
 
-func TestSigner_InsecureFlag(t *testing.T) {
-	s, _ := NewSigner(testKey, true)
-	if !s.Insecure() {
-		t.Fatal("expected Insecure()=true when constructed with insecure=true")
-	}
-}
-
 func TestSession_RoundTrip(t *testing.T) {
-	s, err := NewSigner(testKey, false)
+	s, err := NewSigner(testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +34,7 @@ func TestSession_RoundTrip(t *testing.T) {
 }
 
 func TestSession_RejectsExpired(t *testing.T) {
-	s, _ := NewSigner(testKey, false)
+	s, _ := NewSigner(testKey)
 	p := Payload{TenantID: "t", UserID: "u", ExpiresAt: time.Now().Add(-time.Second).Unix()}
 	tok, _ := s.SignSession(p)
 	if _, err := s.VerifySession(tok); err == nil {
@@ -50,7 +43,7 @@ func TestSession_RejectsExpired(t *testing.T) {
 }
 
 func TestSession_RejectsTampered(t *testing.T) {
-	s, _ := NewSigner(testKey, false)
+	s, _ := NewSigner(testKey)
 	p := Payload{TenantID: "t", UserID: "u", ExpiresAt: time.Now().Add(time.Hour).Unix()}
 	tok, _ := s.SignSession(p)
 	// Flip a payload byte.
@@ -66,7 +59,7 @@ func TestSession_RejectsTampered(t *testing.T) {
 }
 
 func TestCSRF_RoundTrip(t *testing.T) {
-	s, _ := NewSigner(testKey, false)
+	s, _ := NewSigner(testKey)
 	tok := s.CSRFToken("user-1")
 	if !s.VerifyCSRF("user-1", tok) {
 		t.Fatal("CSRF round-trip failed")

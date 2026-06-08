@@ -85,7 +85,8 @@ var outParamMethods = map[string]struct{}{
 
 	// attune internal decoders that fan into json.Unmarshal — same contract
 	// as the stdlib ones, just wrapped behind a helper.
-	"postJSON": {}, // internal/infra/lark/client.go
+	"postJSON":   {}, // internal/infra/lark/client.go
+	"decodeJSON": {}, // internal/handlers/console/inbound/inbound_handler.go
 }
 
 var (

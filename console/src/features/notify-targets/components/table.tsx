@@ -40,7 +40,6 @@ export function TargetTable({
 }) {
   const { t } = useTranslation()
   const typeLabel: Record<string, string> = {
-    'lark-bot': t('notify_targets.type_label.lark-bot'),
     'raw-webhook': t('notify_targets.type_label.raw-webhook'),
   }
   return (

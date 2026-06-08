@@ -111,13 +111,14 @@ layout, gitea pattern — see `docs/proposals/2026/06/2026-06-06-feature-organiz
 
 ```
 service/  enrich/  ingest/  outbox/  apikey/  eval/
-repo/     feedback/  apikey/  outbox/  notifytarget/  tenant/  lark/
-notify/   adapter/{rawwebhook,larkwebhook,githubissue}/   (transport stays at root)
+repo/     feedback/  apikey/  outbox/  notifytarget/  tenant/  admin/  inboundsource/
+notify/   adapter/{rawwebhook,githubissue}/   (transport stays at root)
+inbound/  (framework root)  adapter/{webhook,email}/  inboundtest/
 ```
 
 `internal/service/apikey` and `internal/repo/apikey` collide on package name;
-importers needing both alias the repo side as `apikeyrepo` (same for `outboxrepo`
-and `larkrepo` where it collides with `internal/infra/lark`).
+importers needing both alias the repo side as `apikeyrepo` (same for
+`outboxrepo` and `inboundsourcerepo` where they collide).
 
 Cross-layer rules — a violation is a rejection-grade lint:
 
@@ -125,6 +126,32 @@ Cross-layer rules — a violation is a rejection-grade lint:
 - `service` never writes HTTP.
 - `notify` never imports `service`.
 - `infra` never imports `service` or `repo`.
+
+### Inbound framework (#66) — extra rules
+
+`internal/inbound/` is the channel-agnostic ingest framework. Adapters
+self-register via `init()` and are blank-imported by `cmd/attune` only.
+The CI depguard rules (`.golangci.yml` → `inbound-boundary` +
+`inbound-framework-isolation`) enforce:
+
+- `inbound` (framework root) doesn't import `service` / `repo` /
+  `handlers` / `notify`. `IngestPort` / `SourceStore` / `SecretStore` are
+  declared as interfaces in `inbound`; `cmd/attune` injects the
+  implementations.
+- `inbound/adapter/<channel>` may import `inbound` (the framework root)
+  but NEVER any sibling adapter package, never `service` / `repo` /
+  `handlers` / `notify` / `infra` / `domain` (except `domain.IngestInput`
+  used in the port signature).
+- The only legal blank-import site for any `internal/inbound/adapter/*`
+  package is `cmd/attune`. `handlers/console/inbound/` is the documented
+  exception — it calls `webhook.RotateSecret` as the operator-side
+  rotation primitive, analogous to how `cmd/attune` calls
+  `Manager.StartAll`.
+- The framework absorbs four execution modes — push (webhook), poll
+  (email IMAP / RSS), schedule (cron crawler), stream (MQ / WebSocket /
+  firehose) — behind the same `Adapter { Channel, Start, Shutdown }`
+  port. Adding a channel = adding a package + one blank-import line +
+  one `domain.ValidSources` entry (#95 will fold the third away).
 
 For the full layout, see [`README.md`](README.md).
 

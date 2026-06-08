@@ -1,5 +1,5 @@
-import { Link } from '@tanstack/react-router'
-import { LogOut, User } from 'lucide-react'
+import { Link, useNavigate } from '@tanstack/react-router'
+import { KeyRound, LogOut, User } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Logo } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
@@ -22,7 +22,9 @@ interface TopBarProps {
 // long feedback lists.
 export function TopBar({ me }: TopBarProps) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const logout = useLogout()
+  const isAdmin = me.user?.role === 'admin'
 
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
@@ -34,6 +36,7 @@ export function TopBar({ me }: TopBarProps) {
         <nav className="ml-6 flex items-center gap-4 text-sm">
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
           <NavLink to="/notify-targets">{t('nav.notify_targets')}</NavLink>
+          <NavLink to="/inbound-sources">{t('nav.inbound_sources')}</NavLink>
           <NavLink to="/api-keys">{t('nav.api_keys')}</NavLink>
           <NavLink to="/settings">{t('nav.settings')}</NavLink>
           <NavLink to="/usage">{t('nav.usage')}</NavLink>
@@ -48,9 +51,19 @@ export function TopBar({ me }: TopBarProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                {t(me.user?.role === 'admin' ? 'auth.role.admin' : 'auth.role.member')}
+                {t(isAdmin ? 'auth.role.admin' : 'auth.role.member')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              {isAdmin && (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    void navigate({ to: '/change-password' })
+                  }}
+                >
+                  <KeyRound className="size-4" />
+                  {t('auth.change_password.menu')}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onSelect={() => {
                   logout.mutate(undefined, {

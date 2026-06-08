@@ -15,8 +15,8 @@ import (
 )
 
 // Transport is the common outbound POST mechanism shared by every
-// notify destination (Lark group webhook today; raw HTTPS webhook in
-// ; future Slack / Discord / Linear adapters).
+// notify destination (raw HTTPS webhook today; future Slack / Discord /
+// Linear adapters under the #34 outbound adapter SDK).
 //
 // Each destination provides two callbacks to Send:
 //
@@ -29,10 +29,9 @@ import (
 // retry-worthy error (transport will back off and retry), or
 // ErrTerminal (transport stops immediately).
 //
-// This split keeps protocol details (Lark's body-embedded signature,
-// raw webhook's header signature, payload validation, in-band error
-// codes) inside each adapter, while the retry / timing / logging loop
-// is written once here.
+// This split keeps protocol details (header signature, payload
+// validation, in-band error codes) inside each adapter, while the
+// retry / timing / logging loop is written once here.
 type Transport struct {
 	httpClient *http.Client
 	retry      RetryPolicy
@@ -40,7 +39,7 @@ type Transport struct {
 
 // RetryPolicy describes the back-off schedule. Default: 5 attempts
 // with delays 1s / 2s / 4s / 8s, capped at MaxDelay. Set MaxAttempts=1
-// for fire-and-forget destinations (current Lark group webhook).
+// for fire-and-forget destinations.
 type RetryPolicy struct {
 	MaxAttempts int
 	BaseDelay   time.Duration
@@ -48,8 +47,8 @@ type RetryPolicy struct {
 }
 
 // NoRetry is the policy for destinations where retrying does more harm
-// than good (e.g. Lark group bot at-most-once semantics — duplicate
-// cards spam the chat).
+// than good — e.g. chat-style integrations where duplicate messages
+// spam the channel.
 func NoRetry() RetryPolicy {
 	return RetryPolicy{MaxAttempts: 1}
 }

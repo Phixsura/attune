@@ -3,9 +3,19 @@ syntax = "proto3";
 package attune.v1;
 
 import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
 
-// SessionService backs the console session (current tenant + user, logout).
+// SessionService backs the console session (login, current tenant + user, logout).
 service SessionService {
+  // POST /fb/v1/console/install/login — local admin password login (#66 Plan T11).
+  // The server sets the session cookie and returns the safe-validated
+  // redirect path the SPA should navigate to.
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/install/login"
+      body: "*"
+    };
+  }
   // GET /fb/v1/console/me
   rpc GetMe(GetMeRequest) returns (GetMeResponse) {
     option (google.api.http) = {get: "/fb/v1/console/me"};
@@ -17,6 +27,29 @@ service SessionService {
       body: "*"
     };
   }
+  // POST /fb/v1/console/me/change-password — admin self-service password
+  // change. Verifies current_password (timing-equalised with login), then
+  // re-hashes new_password at bcrypt cost 12. Tenant-user sessions are
+  // rejected with 403 — only admin sessions (TenantID == "") may rotate
+  // their own credential here. On 401 wrong current_password the SPA
+  // surfaces a generic error to avoid distinguishing "wrong password"
+  // from "session is now stale".
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/me/change-password"
+      body: "*"
+    };
+  }
+}
+
+message LoginRequest {
+  string email = 1 [(google.api.field_behavior) = REQUIRED];
+  string password = 2 [(google.api.field_behavior) = REQUIRED];
+  string redirect_uri = 3;  // safe-path-validated server-side; defaults to /console/
+}
+
+message LoginResponse {
+  string redirect = 1;
 }
 
 message GetMeRequest {}
@@ -32,12 +65,15 @@ message Tenant {
   string id = 1;
   string slug = 2;
   string name = 3;
-  optional string lark_tenant_key = 4;
+  reserved 4;
+  reserved "lark_tenant_key";  // removed by #66 Plan T18
   string locale = 5;    // BCP 47
   string timezone = 6;  // IANA tz
 }
 
 // SessionUser is the logged-in console user.
+// open_id is an opaque per-user identifier — historically carried an
+// upstream IM open_id but is now an attune-internal user id.
 message SessionUser {
   string open_id = 1;
   string name = 2;
@@ -48,3 +84,15 @@ message SessionUser {
 message LogoutRequest {}
 
 message LogoutResponse {}
+
+// ChangePasswordRequest carries the caller's current password (verified
+// before the rotation) and the desired new password. Both fields are
+// REQUIRED; the handler enforces new_password length >= 12.
+message ChangePasswordRequest {
+  string current_password = 1 [(google.api.field_behavior) = REQUIRED];
+  string new_password = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// ChangePasswordResponse is empty on success (200). Errors travel through
+// the standard {code, message, requestId} envelope.
+message ChangePasswordResponse {}

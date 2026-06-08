@@ -8,6 +8,17 @@
 
 export const protobufPackage = "attune.v1";
 
+export interface LoginRequest {
+  email: string;
+  password: string;
+  /** safe-path-validated server-side; defaults to /console/ */
+  redirectUri: string;
+}
+
+export interface LoginResponse {
+  redirect: string;
+}
+
 export interface GetMeRequest {
 }
 
@@ -22,16 +33,17 @@ export interface Tenant {
   id: string;
   slug: string;
   name: string;
-  larkTenantKey?:
-    | string
-    | undefined;
   /** BCP 47 */
   locale: string;
   /** IANA tz */
   timezone: string;
 }
 
-/** SessionUser is the logged-in console user. */
+/**
+ * SessionUser is the logged-in console user.
+ * open_id is an opaque per-user identifier — historically carried an
+ * upstream IM open_id but is now an attune-internal user id.
+ */
 export interface SessionUser {
   openId: string;
   name: string;
@@ -48,10 +60,43 @@ export interface LogoutRequest {
 export interface LogoutResponse {
 }
 
-/** SessionService backs the console session (current tenant + user, logout). */
+/**
+ * ChangePasswordRequest carries the caller's current password (verified
+ * before the rotation) and the desired new password. Both fields are
+ * REQUIRED; the handler enforces new_password length >= 12.
+ */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+/**
+ * ChangePasswordResponse is empty on success (200). Errors travel through
+ * the standard {code, message, requestId} envelope.
+ */
+export interface ChangePasswordResponse {
+}
+
+/** SessionService backs the console session (login, current tenant + user, logout). */
 export interface SessionService {
+  /**
+   * POST /fb/v1/console/install/login — local admin password login (#66 Plan T11).
+   * The server sets the session cookie and returns the safe-validated
+   * redirect path the SPA should navigate to.
+   */
+  Login(request: LoginRequest): Promise<LoginResponse>;
   /** GET /fb/v1/console/me */
   GetMe(request: GetMeRequest): Promise<GetMeResponse>;
   /** POST /fb/v1/console/logout — clears the session cookie (204). */
   Logout(request: LogoutRequest): Promise<LogoutResponse>;
+  /**
+   * POST /fb/v1/console/me/change-password — admin self-service password
+   * change. Verifies current_password (timing-equalised with login), then
+   * re-hashes new_password at bcrypt cost 12. Tenant-user sessions are
+   * rejected with 403 — only admin sessions (TenantID == "") may rotate
+   * their own credential here. On 401 wrong current_password the SPA
+   * surfaces a generic error to avoid distinguishing "wrong password"
+   * from "session is now stale".
+   */
+  ChangePassword(request: ChangePasswordRequest): Promise<ChangePasswordResponse>;
 }

@@ -17,22 +17,50 @@
     "copy": "复制",
     "copied": "已复制",
     "close": "关闭",
-    "never": "从未"
+    "never": "从未",
+    "error": "出错了"
   },
   "auth": {
-    "login_with_lark": "用飞书登录",
+    "email_label": "邮箱",
+    "password_label": "密码",
+    "login_submit": "登录",
     "logging_in": "登录中…",
     "logout": "退出登录",
-    "login_hint_tenant": "{{action}}前请确认你的飞书账号已加入对应租户。",
-    "login_hint_first_user": "首次接入会自动建立租户与用户记录，可以在控制台邀请其他成员。",
+    "invalid_credentials": "邮箱或密码错误",
+    "locked_out": "因连续登录失败，账户已锁定 15 分钟。",
+    "login_failed": "登录失败，请稍后重试",
+    "login_hint_admin": "用部署时通过 ATTUNE_BOOTSTRAP_ADMIN_* 创建的管理员账号登录。",
+    "cross_site_rejected": "跨站请求被拒绝。请检查反向代理是否保留了 Origin / Referer 头。",
     "role": {
       "admin": "管理员",
       "member": "成员"
+    },
+    "change_password": {
+      "menu": "修改密码",
+      "title": "修改密码",
+      "subtitle": "更新你登录控制台用的密码。新密码至少 12 个字符。",
+      "form_title": "管理员密码",
+      "form_help": "需要先输入当前密码以确认身份。",
+      "current_label": "当前密码",
+      "new_label": "新密码",
+      "new_help": "至少 {{min}} 个字符。",
+      "confirm_label": "确认新密码",
+      "submit": "更新密码",
+      "success": "密码已更新",
+      "error": {
+        "too_short": "新密码至少需要 {{min}} 个字符",
+        "mismatch": "两次输入的新密码不一致",
+        "same": "新密码不能与当前密码相同",
+        "wrong_current": "当前密码错误",
+        "forbidden": "仅管理员可在此修改密码",
+        "generic": "修改密码失败，请稍后重试"
+      }
     }
   },
   "nav": {
     "feedback": "反馈",
     "notify_targets": "通知目标",
+    "inbound_sources": "入站源",
     "api_keys": "API key",
     "settings": "分类设置",
     "usage": "用量"
@@ -119,7 +147,7 @@
     "empty_body": "签一把就能把 ingest API 接到你的产品里。明文 key 仅签发时返回一次。"
   },
   "notify_targets": {
-    "subtitle": "告诉Attune把反馈推到哪里——飞书群机器人 webhook、或你自己的 HTTPS 接收端。",
+    "subtitle": "告诉 Attune 把反馈推到哪里——你自己的 HTTPS 接收端。",
     "create_button": "+ 添加目标",
     "test_button": "测试",
     "delete_button": "删除",
@@ -132,19 +160,13 @@
       "status": "状态"
     },
     "type_label": {
-      "lark-bot": "飞书群机器人",
       "raw-webhook": "自定义 webhook"
     },
     "create_dialog": {
       "title": "添加通知目标",
-      "type_field": "类型",
-      "type_lark": "飞书群机器人（粘贴群机器人 webhook URL）",
-      "type_raw": "自定义 webhook（你自己的 HTTPS 接收端）",
       "url_field": "Webhook URL",
-      "url_help_lark": "在飞书群里：设置 → 群机器人 → 自定义机器人 → 复制 webhook 地址",
       "url_help_raw": "你的 HTTPS 端点。HMAC 签名将通过 X-Attune-Signature header 发送。",
       "secret_field": "签名 secret",
-      "secret_help_lark": "可选——如果你在飞书机器人启用了「签名校验」，把那个字符串粘过来",
       "secret_help_raw": "建议至少 32 字节随机串。空 = 不签名。",
       "timeout_field": "超时（秒）",
       "audience_field": "受众范围"
@@ -167,9 +189,84 @@
       "disabled_field": "暂停（disabled）— 关闭后停止接收推送"
     },
     "empty_title": "还没有通知目标",
-    "empty_body": "加一个飞书群机器人或自定义 webhook，反馈来了就推送过去。",
-    "lark_chip_active": "✓ 飞书已接入",
-    "lark_chip_disabled": "飞书已配置但已暂停"
+    "empty_body": "加一个自定义 webhook，反馈来了就推送过去。"
+  },
+  "inbound_sources": {
+    "subtitle": "管理用户反馈的入口。webhook 接收应用内推送，email 通过 IMAP 拉取邮件反馈。",
+    "create_button": "+ 添加入站源",
+    "empty_title": "还没有入站源",
+    "empty_body": "添加 webhook 让你的应用直接推送反馈，或者接一个邮箱定期收取用户邮件。",
+    "channel": {
+      "webhook": "Webhook",
+      "email": "邮箱"
+    },
+    "table": {
+      "name": "名称",
+      "channel": "通道",
+      "slug": "Slug",
+      "state": "状态",
+      "last_event": "最近事件",
+      "actions": "操作"
+    },
+    "state": {
+      "healthy": "正常",
+      "error": "异常",
+      "paused": "已暂停",
+      "paused_tooltip": "已暂停，新事件不会被接收"
+    },
+    "actions": {
+      "rotate": "轮换 secret",
+      "pause": "暂停",
+      "resume": "恢复",
+      "delete": "删除"
+    },
+    "create": {
+      "title": "添加入站源",
+      "channel_label": "通道",
+      "webhook_help": "适合应用内反馈、机器人推送。",
+      "email_help": "通过 IMAP 拉取用户邮件反馈。",
+      "name_field": "名称",
+      "name_placeholder": "如：App 反馈、Support 邮箱",
+      "name_help": "名称会被规范化成 URL-safe slug，后续不可改。",
+      "email": {
+        "host": "IMAP 主机",
+        "port": "端口",
+        "tls": "使用 TLS（强烈建议）",
+        "username": "用户名",
+        "password": "密码或 App Password",
+        "password_help": "保存时使用 AES-GCM 加密，仅在 IMAP 登录时解出。",
+        "folder": "文件夹",
+        "test_button": "测试连接",
+        "test_ok": "连接成功 · {{ms}} ms"
+      }
+    },
+    "reveal": {
+      "title": "请妥善保存这个 secret",
+      "body": "下方的值只会显示这一次。关闭对话框后，丢失只能通过轮换重铸。",
+      "url_label": "Webhook URL",
+      "secret_label": "Secret（hex 编码）",
+      "curl_label": "示例 curl 调用",
+      "warning": "请立刻把它复制到你的密码管理器或部署管线，再关闭本窗口。",
+      "acknowledge": "我已妥善保存"
+    },
+    "rotate": {
+      "title": "轮换 webhook secret？",
+      "body": "旧的 secret 在 24 小时内仍可用，便于你逐步切换下游配置。轮换会得到一个全新的 secret，仅显示一次。",
+      "confirm": "轮换"
+    },
+    "delete": {
+      "title": "删除这个入站源？",
+      "body": "删除后 webhook URL 立刻失效，已入库的反馈不受影响。该操作不可恢复。",
+      "confirm": "确认删除"
+    },
+    "toast": {
+      "created": "已创建",
+      "rotated": "已轮换",
+      "rotation_in_grace": "上次轮换还在 24 小时宽限期内，请稍后再试",
+      "paused": "已暂停",
+      "resumed": "已恢复",
+      "deleted": "已删除"
+    }
   },
   "feedback": {
     "subtitle": "你产品里来自用户的所有反馈。AI 自动分类。维度由你在「分类设置」自定义。",
@@ -202,7 +299,7 @@
       "enrichedAt": "富化于"
     },
     "empty_title": "还没有反馈",
-    "empty_body": "把 API key 接到你的产品里。新反馈到了 1 分钟内会出现在这里，飞书群也会同步。",
+    "empty_body": "把 API key 接到你的产品里。新反馈到了 1 分钟内会出现在这里，配置好的 webhook 目标也会同步。",
     "stats": {
       "title": "本月分布",
       "summary": "汇总",

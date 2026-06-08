@@ -146,8 +146,10 @@ func TestSelectOutboxTargets_AudienceAllRoutesBothPaths(t *testing.T) {
 
 func TestSelectOutboxTargets_DropsNonOutboxDests(t *testing.T) {
 	targets := []notifytarget.NotifyTarget{
-		// lark-bot uses the inline notifier path, not outbox.
-		{TenantID: "t", DestinationType: "lark-bot", Audience: notifytarget.AudiencePool, URL: "https://x"},
+		// Unknown dest types must be filtered — selectOutboxTargets
+		// guards against schema drift where the migration table accepts
+		// a value the worker doesn't know how to send.
+		{TenantID: "t", DestinationType: "slack-bot", Audience: notifytarget.AudiencePool, URL: "https://x"},
 	}
 	if got := selectOutboxTargets(targets, sampleSnapshot(true)); len(got) != 0 {
 		t.Errorf("non-outbox dest should be filtered, got %d", len(got))

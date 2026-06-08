@@ -45,29 +45,15 @@ type Config struct {
 	// pointing at a gateway that aliases (or hosts) a non-default model.
 	LLMModel string `yaml:"llm_model"`
 
-	LarkSigningSecret     string `yaml:"lark_signing_secret"`
-	LarkVerificationToken string `yaml:"lark_verification_token"`
-	LarkDefaultTenantSlug string `yaml:"lark_default_tenant_slug"`
-
-	// Lark group bot outbound. Empty URLs disable the destination —
-	// rows still land in Postgres normally. SINGLE-TENANT (dogfood);
-	// per-tenant Lark wiring waits for OAuth flow.
-	FeedbackPoolWebhookURL    string `yaml:"feedback_pool_webhook_url"`
-	FeedbackPoolWebhookSecret string `yaml:"feedback_pool_webhook_secret"`
-	DevRadarWebhookURL        string `yaml:"dev_radar_webhook_url"`
-	DevRadarWebhookSecret     string `yaml:"dev_radar_webhook_secret"`
-
 	// Per-tenant custom HTTPS webhooks. Sync'd into tenant_notify_targets
 	// at startup; the console takes over CRUD afterwards. The tenant slug
 	// must already exist in the tenants table.
 	CustomWebhooks []CustomWebhookDest `yaml:"custom_webhooks"`
 
-	// Console config. LarkAppID/Secret are used for OAuth +
-	// app_access_token calls. ConsoleSessionKey must be ≥ 32 random bytes
-	// (HMACs the session / CSRF tokens). ConsoleBaseURL is the Lark OAuth
-	// callback redirect_uri origin (e.g. https://attune.example.com).
-	LarkAppID         string `yaml:"lark_app_id"`
-	LarkAppSecret     string `yaml:"lark_app_secret"`
+	// Console config. ConsoleSessionKey must be ≥ 32 random bytes
+	// (HMACs the session / CSRF tokens). ConsoleBaseURL is the
+	// origin used for safe-redirect rendering (e.g.
+	// https://attune.example.com).
 	ConsoleSessionKey string `yaml:"console_session_key"`
 	ConsoleBaseURL    string `yaml:"console_base_url"`
 
@@ -78,43 +64,23 @@ type Config struct {
 	RateLimitPerMinute int  `yaml:"rate_limit_per_minute"`
 	RateLimitBurst     int  `yaml:"rate_limit_burst"`
 	RateLimitDisabled  bool `yaml:"rate_limit_disabled"`
-
-	// ConsoleInsecureCookies drops the `Secure` cookie flag — required
-	// only when serving console over plain HTTP. Never enable under TLS.
-	ConsoleInsecureCookies bool `yaml:"console_insecure_cookies"`
-
-	// ConsoleDevLogin enables GET /fb/v1/console/install/dev-login —
-	// a backdoor that mints a session without Lark OAuth. Test loops
-	// only. Logs WARN on every use. Never on in production.
-	ConsoleDevLogin bool `yaml:"console_dev_login"`
 }
 
 type yamlConfig struct {
-	Port                      int                 `yaml:"port"`
-	DatabaseURL               string              `yaml:"database_url"`
-	LLMProtocol               string              `yaml:"llm_protocol"`
-	LLMOpenAIBaseURL          string              `yaml:"llm_openai_base_url"`
-	LLMOpenAIAPIKey           string              `yaml:"llm_openai_api_key"`
-	LLMModel                  string              `yaml:"llm_model"`
-	EnricherInterval          string              `yaml:"enricher_interval"`
-	EnricherBatch             int                 `yaml:"enricher_batch"`
-	LarkSigningSecret         string              `yaml:"lark_signing_secret"`
-	LarkVerificationToken     string              `yaml:"lark_verification_token"`
-	LarkDefaultTenantSlug     string              `yaml:"lark_default_tenant_slug"`
-	FeedbackPoolWebhookURL    string              `yaml:"feedback_pool_webhook_url"`
-	FeedbackPoolWebhookSecret string              `yaml:"feedback_pool_webhook_secret"`
-	DevRadarWebhookURL        string              `yaml:"dev_radar_webhook_url"`
-	DevRadarWebhookSecret     string              `yaml:"dev_radar_webhook_secret"`
-	CustomWebhooks            []CustomWebhookDest `yaml:"custom_webhooks"`
-	LarkAppID                 string              `yaml:"lark_app_id"`
-	LarkAppSecret             string              `yaml:"lark_app_secret"`
-	ConsoleSessionKey         string              `yaml:"console_session_key"`
-	ConsoleBaseURL            string              `yaml:"console_base_url"`
-	ConsoleInsecureCookies    bool                `yaml:"console_insecure_cookies"`
-	ConsoleDevLogin           bool                `yaml:"console_dev_login"`
-	RateLimitPerMinute        int                 `yaml:"rate_limit_per_minute"`
-	RateLimitBurst            int                 `yaml:"rate_limit_burst"`
-	RateLimitDisabled         bool                `yaml:"rate_limit_disabled"`
+	Port               int                 `yaml:"port"`
+	DatabaseURL        string              `yaml:"database_url"`
+	LLMProtocol        string              `yaml:"llm_protocol"`
+	LLMOpenAIBaseURL   string              `yaml:"llm_openai_base_url"`
+	LLMOpenAIAPIKey    string              `yaml:"llm_openai_api_key"`
+	LLMModel           string              `yaml:"llm_model"`
+	EnricherInterval   string              `yaml:"enricher_interval"`
+	EnricherBatch      int                 `yaml:"enricher_batch"`
+	CustomWebhooks     []CustomWebhookDest `yaml:"custom_webhooks"`
+	ConsoleSessionKey  string              `yaml:"console_session_key"`
+	ConsoleBaseURL     string              `yaml:"console_base_url"`
+	RateLimitPerMinute int                 `yaml:"rate_limit_per_minute"`
+	RateLimitBurst     int                 `yaml:"rate_limit_burst"`
+	RateLimitDisabled  bool                `yaml:"rate_limit_disabled"`
 }
 
 // Load reads the YAML config from FEEDBACK_API_CONFIG (or ./config.yaml)
@@ -145,30 +111,19 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	c := ptrext.Of(Config{
-		Port:                      yc.Port,
-		DatabaseURL:               yc.DatabaseURL,
-		LLMProtocol:               LLMProtocol(yc.LLMProtocol),
-		LLMOpenAIBaseURL:          yc.LLMOpenAIBaseURL,
-		LLMOpenAIAPIKey:           yc.LLMOpenAIAPIKey,
-		LLMModel:                  yc.LLMModel,
-		EnricherBatch:             yc.EnricherBatch,
-		LarkSigningSecret:         yc.LarkSigningSecret,
-		LarkVerificationToken:     yc.LarkVerificationToken,
-		LarkDefaultTenantSlug:     yc.LarkDefaultTenantSlug,
-		FeedbackPoolWebhookURL:    yc.FeedbackPoolWebhookURL,
-		FeedbackPoolWebhookSecret: yc.FeedbackPoolWebhookSecret,
-		DevRadarWebhookURL:        yc.DevRadarWebhookURL,
-		DevRadarWebhookSecret:     yc.DevRadarWebhookSecret,
-		CustomWebhooks:            yc.CustomWebhooks,
-		LarkAppID:                 yc.LarkAppID,
-		LarkAppSecret:             yc.LarkAppSecret,
-		ConsoleSessionKey:         yc.ConsoleSessionKey,
-		ConsoleBaseURL:            yc.ConsoleBaseURL,
-		ConsoleInsecureCookies:    yc.ConsoleInsecureCookies,
-		ConsoleDevLogin:           yc.ConsoleDevLogin,
-		RateLimitPerMinute:        yc.RateLimitPerMinute,
-		RateLimitBurst:            yc.RateLimitBurst,
-		RateLimitDisabled:         yc.RateLimitDisabled,
+		Port:               yc.Port,
+		DatabaseURL:        yc.DatabaseURL,
+		LLMProtocol:        LLMProtocol(yc.LLMProtocol),
+		LLMOpenAIBaseURL:   yc.LLMOpenAIBaseURL,
+		LLMOpenAIAPIKey:    yc.LLMOpenAIAPIKey,
+		LLMModel:           yc.LLMModel,
+		EnricherBatch:      yc.EnricherBatch,
+		CustomWebhooks:     yc.CustomWebhooks,
+		ConsoleSessionKey:  yc.ConsoleSessionKey,
+		ConsoleBaseURL:     yc.ConsoleBaseURL,
+		RateLimitPerMinute: yc.RateLimitPerMinute,
+		RateLimitBurst:     yc.RateLimitBurst,
+		RateLimitDisabled:  yc.RateLimitDisabled,
 	})
 	// defaults — extracted to keep Load's CCN ≤ 15 (§1).
 	c.applyDefaults()
@@ -186,8 +141,8 @@ func Load() (*Config, error) {
 		logext.Errorf(ctx, "[%s] validate failed,err:%+v", where, err.Error())
 		return nil, err
 	}
-	logext.Infof(ctx, "[%s] OK,port:%d,console_enabled:%t,lark_enabled:%t",
-		where, c.Port, c.ConsoleSessionKey != "", c.LarkEnabled())
+	logext.Infof(ctx, "[%s] OK,port:%d,console_enabled:%t",
+		where, c.Port, c.ConsoleSessionKey != "")
 	return c, nil
 }
 
@@ -249,16 +204,5 @@ func (c *Config) validate() error {
 		return fmt.Errorf("config: llm_openai_api_key is required when llm_protocol=%s",
 			c.LLMProtocol)
 	}
-	if c.LarkSigningSecret != "" && c.LarkDefaultTenantSlug == "" {
-		return fmt.Errorf("config: lark_default_tenant_slug is required when lark_signing_secret is set")
-	}
 	return c.validateCustomWebhooks()
-}
-
-// LarkEnabled reports whether the Lark webhook handler should accept events.
-func (c *Config) LarkEnabled() bool { return c.LarkSigningSecret != "" }
-
-// NotifyEnabled reports whether at least one outbound webhook is wired.
-func (c *Config) NotifyEnabled() bool {
-	return c.FeedbackPoolWebhookURL != "" || c.DevRadarWebhookURL != ""
 }

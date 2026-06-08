@@ -1,9 +1,10 @@
 // server.go holds the `attune server` bootstrap: it loads config, wires up
-// OpenTelemetry, the pgx pool, the LLM client, repos/services, the outbox +
-// digest background workers, the chi router (lark + ingest + console mounts)
-// and runs the HTTP server until SIGINT/SIGTERM. The small OTel header helpers
-// and the signal-driven context live here too since they are only used by the
-// server path. Subcommand dispatch and CLI plumbing stay in main.go.
+// OpenTelemetry, the pgx pool, the LLM client, repos/services, the outbox
+// background worker, the chi router (ingest + inbound framework + console
+// mounts) and runs the HTTP server until SIGINT/SIGTERM. The small OTel
+// header helpers and the signal-driven context live here too since they are
+// only used by the server path. Subcommand dispatch and CLI plumbing stay in
+// main.go.
 package main
 
 import (
@@ -17,17 +18,25 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers"
+	"github.com/Phixsura/attune/internal/handlers/console"
+	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -109,24 +118,22 @@ func runServer() error {
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
 
-	// weekly digest weekly digest scheduler. Ticks every 30 min; scans
-	// tenants whose last_digest_sent_at < now-6d AND has at least one
-	// active lark-bot; composes 7-day summary + sends via SendAlert.
-	go outbox.NewDigestService(tenantRepo, feedbackRepo, notifyTargetRepo).Run(ctx)
+	// (Weekly digest scheduler removed with #66 Plan T17 — its only
+	// channel was an IM group bot. A channel-agnostic digest sender
+	// lands on the #34 outbound adapter SDK.)
 
-	larkHandler, err := handlers.NewLarkHandler(ctx, tenantRepo, ingestor,
-		cfg.LarkSigningSecret, cfg.LarkVerificationToken, cfg.LarkDefaultTenantSlug)
+	ingestHandler := handlers.NewIngestHandler(ingestor)
+
+	inb, err := setupInbound(ctx, pool, ingestor)
 	if err != nil {
 		return err
 	}
-	if cfg.LarkEnabled() {
-		logext.Infof(ctx, "[%s] lark webhook enabled,tenant_slug:%s", where, cfg.LarkDefaultTenantSlug)
-	} else {
-		logext.Infof(ctx, "[%s] lark webhook disabled (no signing secret)", where)
-	}
-	ingestHandler := handlers.NewIngestHandler(ingestor)
+	defer inb.shutdown()
 
-	r, err := buildRouter(ctx, cfg, larkHandler, ingestHandler, apiKeys, pool)
+	r, err := buildRouter(
+		ctx, cfg, ingestHandler, apiKeys, pool,
+		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo,
+	)
 	if err != nil {
 		return err
 	}
@@ -199,6 +206,13 @@ func setupDatabase(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, erro
 		return nil, fmt.Errorf("pg ping: %w", err)
 	}
 	logext.Infof(ctx, "[%s] postgres connected", where)
+	// Destructive-data guard before applying 015_drop_lark.sql — see
+	// docs/proposals/2026/06/2026-06-08-channel-agnostic-inbound.md
+	// §Data migrations.
+	if err := database.ConfirmLarkDelete(ctx, pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("migrations preflight: %w", err)
+	}
 	if err := database.RunMigrations(ctx, pool); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("migrations: %w", err)
@@ -224,6 +238,82 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// inboundWiring bundles the inbound-framework deps runServer needs to
+// thread into buildRouter + into its shutdown defer. Extracted from
+// runServer in #66 Plan T24 so the boot function stays under the §1
+// CCN/NLOC threshold.
+type inboundWiring struct {
+	subRouter *chi.Mux
+	secrets   inbound.SecretStore
+	sources   *inboundsourcerepo.Repo
+	adminRepo *admin.Repo
+	manager   *inbound.Manager
+}
+
+// shutdown drains in-flight inbound work with a bounded timeout. Called
+// from runServer's defer; we keep a separate method so the close
+// timeout + log call stay encapsulated.
+func (w inboundWiring) shutdown() {
+	const where = "main.inboundWiring.shutdown"
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := w.manager.ShutdownAll(shutdownCtx); err != nil {
+		logext.Warnf(shutdownCtx, "[%s] inbound shutdown failed,err:%+v", where, err.Error())
+	}
+}
+
+// setupInbound wires the #66 channel-agnostic inbound framework:
+// validates the master key, builds the AES-GCM secret store, opens the
+// inbound_sources repo, runs first-start admin bootstrap, and starts
+// every registered adapter on a fresh chi sub-router. The caller mounts
+// the returned sub-router at /v1/inbound and calls w.shutdown() in a
+// defer.
+func setupInbound(ctx context.Context, pool *pgxpool.Pool, ingestor *ingest.Ingestor) (inboundWiring, error) {
+	const where = "main.setupInbound"
+	inboundKey, err := inbound.BootstrapValidate()
+	if err != nil {
+		return inboundWiring{}, fmt.Errorf("inbound boot: %w", err)
+	}
+	secrets, err := inbound.NewAESGCMSecretStore(inboundKey)
+	if err != nil {
+		return inboundWiring{}, fmt.Errorf("inbound secrets: %w", err)
+	}
+	sources := inboundsourcerepo.NewRepo(pool)
+	adminRepo := admin.NewRepo(pool)
+	if err := console.BootstrapAdmin(ctx, adminRepo); err != nil {
+		return inboundWiring{}, fmt.Errorf("bootstrap admin: %w", err)
+	}
+
+	// Adapters mount their channel-relative routes onto subRouter during
+	// Manager.StartAll; buildRouter then mounts the populated mux under
+	// /v1/inbound.
+	subRouter := chi.NewRouter()
+	deps := inbound.Deps{
+		// `chi.Router` already satisfies `inbound.Mux` (single Method
+		// method) — no wrapper needed (#66 review M-6). The old ChiMux
+		// adapter struct was deleted.
+		Mux: subRouter,
+		Ingest: inbound.IngestFunc(func(ctx context.Context, tenantID string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
+			return ingestor.IngestRow(ctx, tenantID, keyID, in)
+		}),
+		Sources: sources,
+		Secrets: secrets,
+		Metrics: inbound.NewPrometheusMetrics(metrics.Registry),
+	}
+	manager := inbound.NewManager(deps)
+	if err := manager.StartAll(ctx); err != nil {
+		return inboundWiring{}, fmt.Errorf("inbound manager: %w", err)
+	}
+	logext.Infof(ctx, "[%s] inbound framework ready,adapters:%d", where, len(inbound.Factories()))
+	return inboundWiring{
+		subRouter: subRouter,
+		secrets:   secrets,
+		sources:   sources,
+		adminRepo: adminRepo,
+		manager:   manager,
+	}, nil
 }
 
 func parseOTelHeaders(raw string) map[string]string {

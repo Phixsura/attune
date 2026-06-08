@@ -13,6 +13,7 @@ package respond
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -67,4 +68,34 @@ func Error(ctx context.Context, w http.ResponseWriter, status int, code, message
 		Message:   message,
 		RequestId: middleware.GetReqID(ctx),
 	}))
+}
+
+// ErrorWithExtra writes the unified ErrorResponse plus a small map of
+// extra top-level fields. Used by endpoints whose spec explicitly
+// requires a structured detail beside {code, message, requestId} —
+// e.g. webhook rotate's `next_eligible_at` (spec
+// §Webhook adapter / Rotate behavior). Keys are emitted as JSON
+// lowerCamelCase verbatim; values are marshaled by encoding/json.
+//
+// Prefer Error() — only reach for this helper when a spec field shape
+// truly forces a top-level detail.
+func ErrorWithExtra(ctx context.Context, w http.ResponseWriter, status int, code, message string, extra map[string]any) {
+	body := map[string]any{
+		"code":      code,
+		"message":   message,
+		"requestId": middleware.GetReqID(ctx),
+	}
+	for k, v := range extra {
+		body[k] = v
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		// Fall back to the standard envelope; the loss of the extra
+		// fields is preferable to a 500 cascade.
+		Error(ctx, w, status, code, message)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(raw)
 }

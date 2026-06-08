@@ -7,6 +7,7 @@ import { useDeferredValue, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
 import { EmptyState } from '@/components/empty-state'
+import { Loading } from '@/components/loading'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -128,16 +129,6 @@ function FeedbackPage() {
         dims={dims}
         onOpenChange={(v) => !v && setDetailId(null)}
       />
-    </div>
-  )
-}
-
-function Loading() {
-  const { t } = useTranslation()
-  return (
-    <div className="flex items-center justify-center py-8 text-muted-foreground">
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      {t('app.loading')}
     </div>
   )
 }

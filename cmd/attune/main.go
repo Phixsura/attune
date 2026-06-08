@@ -6,7 +6,7 @@
 //
 // main.go is the CLI entrypoint: it installs the slog handler and dispatches
 // subcommands. The `server` bootstrap lives in server.go; tenant/eval/outbox/
-// digest live in their own sibling files (all package main).
+// live in their own sibling files (all package main).
 package main
 
 import (
@@ -25,6 +25,13 @@ import (
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
+
+	// #66 inbound adapters self-register via init(). Blank-import is the
+	// only legal site per the inbound-boundary depguard rule; cmd/attune
+	// owns this entrypoint so the framework registry is populated before
+	// inbound.Manager.StartAll runs in server.go.
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/email"
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/webhook"
 )
 
 // subcommands routes each CLI verb to its handler. `server` ignores its args
@@ -36,7 +43,6 @@ var subcommands = map[string]func([]string) error{
 	"tenant": runTenant,
 	"eval":   runEval,
 	"outbox": runOutbox,
-	"digest": runDigest,
 }
 
 func main() {
@@ -77,7 +83,6 @@ Usage:
  attune keys issue --tenant <slug> [--label <s>] Mint an API key
  attune eval --mode <m> [--tenant <slug>] ... AI accuracy report (--tenant required for export-for-human / score-human)
  attune outbox prune --older-than <dur> Mark stale pending rows dead
- attune digest run --tenant <slug> Send weekly digest now (smoke)
 `)
 }
 

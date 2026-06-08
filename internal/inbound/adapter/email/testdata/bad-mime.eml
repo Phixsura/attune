@@ -1,0 +1,9 @@
+From: weird@example.com
+To: feedback@team.com
+Subject: Missing body
+Message-ID: <broken@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="
+Date: Sun, 8 Jun 2026 12:15:00 +0000
+
+(deliberately broken MIME — unterminated boundary string above)

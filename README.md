@@ -16,7 +16,7 @@ Listening is passive. Attunement is active alignment.
 [user signals]
      │
      ▼
-HTTP / Lark / email   ·   API-key auth · rate-limited · deduped
+HTTP webhook · email IMAP · API client   ·   HMAC / cookie auth · rate-limited · deduped
      │
      ▼
 ┌──────────────────────────────────────────────────────┐
@@ -33,9 +33,8 @@ PostgreSQL   ·   single source of truth · your data, your control
      ▼
 ┌──────────────────────────────────────────────────────┐
 │ fan-out                                              │
-│   · inline:   Lark group bot                         │
 │   · outbox:   customer HTTPS webhooks (at-least-once)│
-│   · daily:    LLM-summarized theme digest            │
+│   · digest:   LLM-summarized theme digest (#34)      │
 └──────────────────────────────────────────────────────┘
      │
      ▼
@@ -70,6 +69,15 @@ Every field in [`config.example.yaml`](config.example.yaml) has an env-var overr
 | `llm_protocol` | `FEEDBACK_API_LLM_PROTOCOL` | `openai-compat` (default), `openai-responses`, `anthropic`, or `gemini` |
 | `llm_openai_base_url` | `FEEDBACK_API_LLM_OPENAI_BASE_URL` | Any OpenAI-compatible endpoint (only for `openai-compat`) |
 | `llm_openai_api_key` | `FEEDBACK_API_LLM_OPENAI_API_KEY` | Bearer token / API key (required for all protocols) |
+| `inbound_master_key` | `ATTUNE_INBOUND_MASTER_KEY` | 32 bytes (hex or base64) — AES-GCM key for encrypted inbound source secrets / IMAP credentials (#66). Required on first start of every deploy; back up alongside DB credentials. |
+| `bootstrap_admin_email` | `ATTUNE_BOOTSTRAP_ADMIN_EMAIL` (+ `_FILE` variant) | First console admin's email (#66). Read only when `admins` is empty; unset after first start. |
+| `bootstrap_admin_password` | `ATTUNE_BOOTSTRAP_ADMIN_PASSWORD` (+ `_FILE` variant) | First console admin's password (#66). Use `_FILE` variant on Linux to avoid `/proc/<pid>/environ` exposure. |
+
+> ⚠️ **Upgrading from a v0.2 install with Lark data?** v0.3 hard-deletes
+> `user_feedback` rows where `source LIKE 'lark-%'`. Set
+> `ATTUNE_CONFIRM_LARK_DELETE=yes` to opt in, or `pg_dump` and export
+> those rows first. See [`docs/private-deploy.md`](docs/private-deploy.md)
+> for the full preflight runbook.
 
 ## Architecture
 
@@ -78,7 +86,7 @@ Every field in [`config.example.yaml`](config.example.yaml) has an env-var overr
 | HTTP server | Go 1.25, chi router, structured slog | Single static binary |
 | Storage | PostgreSQL 14+ | pgvector for clustering (v0.5+) |
 | LLM enrichment | OpenAI Chat / OpenAI Responses / Anthropic / Gemini | Multi-protocol with structured output |
-| Outbound | Lark group bot · customer HTTPS webhooks | Slack / Discord / email in v0.6 |
+| Outbound | customer HTTPS webhooks · GitHub Issues | Slack / Discord / email in v0.6 (#34) |
 | Console | React + Vite + biome (`console/`) | Triage UI, served as static files |
 | Observability | OpenTelemetry + Prometheus `/metrics` | Grafana dashboards in `observability/dashboards/` |
 
@@ -89,20 +97,23 @@ cmd/attune/                  Bootstrap: DI + signals + CLI subcommands
 internal/
   domain/                    Pure types: IngestInput / Snapshot / Enriched
   repo/                      Data access — all SQL lives here
-    feedback/  apikey/  outbox/  notifytarget/  tenant/  lark/
+    feedback/  apikey/  outbox/  notifytarget/  tenant/  admin/  inboundsource/
   service/                   Business logic + orchestration
     enrich/  ingest/  outbox/  apikey/  eval/
   handlers/                  HTTP routes + parameter parsing
-    console/                 Stage B console API
+    console/                 Console API (auth, feedback, settings, inbound source mgmt)
+  inbound/                   #66 channel-agnostic ingest framework
+    adapter/                 Per-channel inbound adapters
+      webhook/  email/
+    inboundtest/             Conformance suite + shared fakes
   notify/                    Outbound webhooks + Transport framework
     adapter/                 Per-destination senders
-      rawwebhook/  larkwebhook/  githubissue/
+      rawwebhook/  githubissue/
   infra/
     apikey/                  HTTP middleware + context keys
     config/                  YAML + env override
     database/                Schema migrations
     llmclient/               Multi-protocol LLM client (OpenAI / Anthropic / Gemini)
-    lark/                    Inbound Lark protocol
     observability/           Vendored OTel + slog helpers
 console/                     React triage UI (feature-based: src/features/*)
 ```

@@ -16,9 +16,11 @@ import (
 
 // OutboxWorker drains the notify_outbox queue. Today's scope: only
 // raw-webhook destinations go through outbox (external customers need
-// at-least-once). Lark stays inline because its failure mode = a
+// at-least-once). Inline notifier paths (#34 outbound adapter SDK) are
+// outside this worker; the worker only drains raw-webhook rows.
+// Historical note: pre-#66 the inline path was the IM group bot — a
 // missed card to an internal PM, not a missed delivery to a paying
-// customer. a follow-up may unify if Lark per-tenant routing arrives.
+// customer. a follow-up may unify if inline routing returns via #34.
 type OutboxWorker struct {
 	outbox    *outboxrepo.OutboxRepo
 	targets   *notifytarget.NotifyTargetRepo
@@ -200,11 +202,11 @@ func (w *OutboxWorker) failOrDead(ctx context.Context, row outboxrepo.OutboxRow,
 // Phase 3.2 side effects on the dead path:
 // - mark the originating notify_target row as currently-failing so the
 // console UI surfaces "your webhook has been failing for X" badge;
-// - push a self-report card to the tenant's lark-bot (if any) so a
+// - (Self-report card to an inline-notifier surface used to live here. Removed in #66 Plan T17;
 // human sees "your raw-webhook stopped" without staring at console.
 //
 // Self-report failures are logged but never propagated — we don't want
-// alert-of-alert recursion when a tenant's lark-bot is also broken.
+// the future #34 outbound adapter SDK will re-add a channel-agnostic alert path.)
 func (w *OutboxWorker) markDead(ctx context.Context, row outboxrepo.OutboxRow, reason string) {
 	const where = "service.OutboxWorker.markDead"
 	if err := w.outbox.MarkDead(ctx, row.ID, reason); err != nil {
@@ -224,8 +226,8 @@ func (w *OutboxWorker) markDead(ctx context.Context, row outboxrepo.OutboxRow, r
 		logext.Warnf(ctx, "[%s] touch target failure errored,id:%d,tenant:%s,err:%+v",
 			where, row.ID, row.TenantID, err.Error())
 	}
-
-	w.selfReportDead(ctx, row, reason)
+	// (Self-report-dead alerting went away with #66 Plan T17. A future
+	// generic-alerts feature will live under the #34 outbound adapter SDK.)
 }
 
 func outboxBackoff(attempt int) time.Duration {

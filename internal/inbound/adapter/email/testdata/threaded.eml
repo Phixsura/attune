@@ -1,0 +1,10 @@
+From: bob@example.com
+To: feedback@team.com
+Subject: Re: Buggy login flow
+Message-ID: <def456@example.com>
+In-Reply-To: <abc123@example.com>
+References: <abc123@example.com>
+Date: Sun, 8 Jun 2026 12:05:00 +0000
+Content-Type: text/plain; charset=utf-8
+
++1, same issue on Firefox.

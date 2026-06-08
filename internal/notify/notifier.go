@@ -9,7 +9,7 @@ import (
 // Notifier is the side-channel the enricher hands a freshly classified
 // row to. Lives in the notify root because that's the convergence point
 // for outbound delivery — both consumer (service/enrich) and providers
-// (service/outbox MultiNotifier, notify/adapter/lark+raw+github) refer
+// (service/outbox MultiNotifier, notify/adapter/{rawwebhook,githubissue}) refer
 // to the same canonical name. Push* methods MUST NOT block — they are
 // invoked from a goroutine but should still respect the supplied
 // context for timeouts.

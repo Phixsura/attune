@@ -91,7 +91,7 @@ var EnrichAttrsRejectedTotal = prometheus.NewCounterVec(
 )
 
 // NotifyFailuresTotal increments on every notifier push that didn't
-// return nil. destination_type ∈ {lark-pool, lark-radar, raw-webhook};
+// return nil. destination_type ∈ {raw-webhook, github-issue};
 // reason is the error class (transport | terminal).
 var NotifyFailuresTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{

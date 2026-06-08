@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Bell, CheckCircle2, Loader2 } from 'lucide-react'
+import { Bell } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
+import { Loading } from '@/components/loading'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -112,7 +113,6 @@ function NotifyTargetsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {list.data && <LarkChip targets={list.data} />}
           <Button onClick={() => setCreateOpen(true)}>{t('notify_targets.create_button')}</Button>
         </div>
       </div>
@@ -167,41 +167,5 @@ function NotifyTargetsPage() {
         pending={handleDelete.isPending}
       />
     </div>
-  )
-}
-
-function Loading() {
-  const { t } = useTranslation()
-  return (
-    <div className="flex items-center justify-center py-8 text-muted-foreground">
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      {t('app.loading')}
-    </div>
-  )
-}
-
-// LarkChip shows a green "Lark connected" pill near the header when
-// the tenant has at least one active, healthy lark-bot target.
-// Disabled or failing lark-bot targets fall back to a softer
-// "configured but paused" hint. No chip when no lark-bot exists —
-// silence is the right cue that the operator should create one (the
-// create button leads them there).
-function LarkChip({ targets }: { targets: NotifyTarget[] }) {
-  const { t } = useTranslation()
-  const larkBots = targets.filter((x) => x.destinationType === 'lark-bot')
-  if (larkBots.length === 0) return null
-  const healthy = larkBots.find((x) => !x.disabled && !x.lastFailureAt)
-  if (healthy) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-        <CheckCircle2 className="h-3.5 w-3.5" />
-        {t('notify_targets.lark_chip_active')}
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-muted bg-muted/30 px-2.5 py-1 text-xs text-muted-foreground">
-      {t('notify_targets.lark_chip_disabled')}
-    </span>
   )
 }
