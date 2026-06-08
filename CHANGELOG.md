@@ -40,9 +40,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - `internal/inbound/adapter/email` — IMAP poller (TLS-only) using
     `emersion/go-imap/v2` + `go-message`; multipart/alternative prefers
     `text/plain`; `lastUID` cursor advances per poll; `after_ingest:
-    mark_seen` (default) and `mark_read` documented (`move` deferred — see
-    `internal/inbound/adapter/email/after_ingest.go` for the upstream
-    `go-imap/v2` beta-API caveat).
+    mark_seen` (default), `keep_unseen`, and `move_to:<folder>` all drive
+    the IMAP STORE / MOVE wire commands (the v0.3 review-H3 follow-up
+    replaced the documented v2-beta no-op with `clientOps.MarkSeen` /
+    `clientOps.MoveTo` against a narrow `imapOps` interface).
   - **Encryption at rest**: every inbound secret (webhook HMAC,
     IMAP username / password) is sealed AES-GCM-256 with envelope
     `version(1) + key_id(1) + nonce(12) + ct + tag(16)`. The
@@ -91,6 +92,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   components (`i18n-input` and `dimensions-editor`'s WeakMap-based
   identity tracking). Per-file coverage thresholds on 17 surfaces
   gate CI against regressions.
+
+### Changed
+
+- **Email adapter `after_ingest` policy (`mark_seen` / `keep_unseen` /
+  `move_to:<folder>`) now actually fires the IMAP STORE / MOVE — previously
+  a documented no-op in v0.3 (review H3, #66).** The original
+  `applyAfterIngest` shipped as a comment-heavy no-op citing the
+  `go-imap/v2` beta API; revisiting the cached source showed `Move` exposes
+  `Wait() (*MoveData, error)` and `Store` returns a `*FetchCommand` whose
+  `Close()` cleanly drains the wire. The implementation now narrows the
+  client surface to an `imapOps { MarkSeen(uid); MoveTo(uid, mailbox) }`
+  interface — production wraps a live `*imapclient.Client`, tests drop in
+  a recording stub. STORE/MOVE failures are logged via
+  `inbound.Logger.Warnf` and swallowed: the `lastUID` cursor in
+  `pollSource` is the correctness primitive and has already advanced, so
+  a one-shot wire failure is recoverable on the next round without
+  duplicate ingest. `move_to:` with an empty folder degrades to
+  `mark_seen` rather than passing an empty mailbox to IMAP.
 
 ### Removed
 

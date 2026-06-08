@@ -142,7 +142,7 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 			continue
 		}
 
-		applyAfterIngest(cli, uid, policy)
+		applyAfterIngest(ctx, clientOps{cli}, uid, policy, a.deps.Logger)
 		lastUID = int64(uid)
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
 	}
@@ -232,22 +232,94 @@ func fetchOne(cli *imapclient.Client, uid imap.UID) ([]byte, error) {
 	return nil, errors.New("fetchOne: empty result")
 }
 
+// imapOps is the narrow surface applyAfterIngest needs from the IMAP
+// client — one method per logical operation, returning a plain error.
+// Production wraps a live *imapclient.Client in clientOps below; tests
+// supply a recording stub. We deliberately hide the underlying
+// *imapclient.FetchCommand / *imapclient.MoveCommand return types: those
+// carry unexported fields and would otherwise be unconstructible in
+// tests (the original v2-beta caveat that pushed this function to a
+// no-op for v0.3 — review H3, #66).
+type imapOps interface {
+	// MarkSeen adds \Seen to a single UID. Silent=true on the wire so
+	// the server skips the untagged FETCH echo we'd otherwise ignore.
+	MarkSeen(uid imap.UID) error
+	// MoveTo moves a single UID to the named mailbox. Caller validates
+	// mailbox != "" — passing "" would be a server BAD response.
+	MoveTo(uid imap.UID, mailbox string) error
+}
+
+// clientOps adapts a live *imapclient.Client to imapOps.
+//
+// Store returns *FetchCommand because IMAP STORE replies are FETCH-shaped
+// (the server echoes the post-store flag vector). With Silent=true the
+// echo is suppressed, but we still call Close() to drain the wire and
+// let the next command go out.
+//
+// Move returns *MoveCommand with an exported Wait(); we discard the
+// returned *MoveData (the destination UIDs are not interesting to attune).
+type clientOps struct{ c *imapclient.Client }
+
+func (o clientOps) MarkSeen(uid imap.UID) error {
+	flags := ptrext.Of(imap.StoreFlags{
+		Op:     imap.StoreFlagsAdd,
+		Silent: true,
+		Flags:  []imap.Flag{imap.FlagSeen},
+	})
+	return o.c.Store(imap.UIDSetNum(uid), flags, nil).Close()
+}
+
+func (o clientOps) MoveTo(uid imap.UID, mailbox string) error {
+	_, err := o.c.Move(imap.UIDSetNum(uid), mailbox).Wait()
+	return err
+}
+
 // applyAfterIngest applies the configured after-ingest policy.
 //
 // The correctness primitive of the email adapter is the lastUID cursor:
 // each successful Ingest advances it, so the same message is never
 // re-ingested. The IMAP \Seen flag or move-to-folder is a UX nicety on
-// top of that cursor.
+// top of that cursor — a single STORE/MOVE failure here is logged and
+// swallowed, on the assumption that the operator will reconcile manually
+// (e.g. they deleted the move-target folder) and the next poll round
+// won't re-ingest because the cursor already advanced.
 //
-// In go-imap/v2 (currently beta), the Store and Move commands return
-// imapclient.FetchCommand-shaped values whose Wait() is unexported.
-// Rather than chase the v2 beta API surface in this PR we leave the
-// flag manipulation as best-effort no-ops; the cursor still prevents
-// duplicate processing, and Plan T24 manual smoke (gate 19 — "rotate
-// 24h overlap" and related) verifies end-to-end. Re-enable when
-// emersion/go-imap v2 ships a stable Store/Move API.
-func applyAfterIngest(_ *imapclient.Client, _ imap.UID, _ afterIngestPolicy) {
-	// intentionally a no-op for v2 beta — see comment above
+// move_to with an empty folder degrades to mark_seen — parseAfterIngest
+// accepts the malformed "move_to:" string (its own test calls this out
+// as "a config bug but parsed"), and forwarding the empty mailbox to
+// the IMAP server would trip a BAD response on every poll. mark_seen is
+// the spec-documented safe default; this matches the unknown-policy
+// fallback in parseAfterIngest.
+func applyAfterIngest(ctx context.Context, ops imapOps, uid imap.UID, policy afterIngestPolicy, log inbound.Logger) {
+	const where = "inbound.email.applyAfterIngest"
+	switch policy.Kind {
+	case "keep_unseen":
+		// Intentional no-op — operator wants to preserve the IMAP
+		// new-message indicator (helpdesk lite). Cursor still guards
+		// against re-ingest.
+		return
+	case "move_to":
+		if policy.Folder == "" {
+			log.Warnf(ctx, "[%s] move_to with empty folder, falling back to mark_seen,uid:%d", where, uid)
+			if err := ops.MarkSeen(uid); err != nil {
+				log.Warnf(ctx, "[%s] store \\Seen failed,uid:%d,err:%+v", where, uid, err.Error())
+			}
+			return
+		}
+		if err := ops.MoveTo(uid, policy.Folder); err != nil {
+			// Most likely cause: the destination folder does not exist
+			// (operator typo, or they archived it). Log + continue —
+			// the cursor has already advanced so we won't re-ingest.
+			log.Warnf(ctx, "[%s] move failed,uid:%d,folder:%s,err:%+v",
+				where, uid, policy.Folder, err.Error())
+		}
+	default: // "mark_seen" + unknown fall-through (parseAfterIngest pins unknown → mark_seen)
+		if err := ops.MarkSeen(uid); err != nil {
+			// Already \Seen, server-side permission glitch, etc. — log,
+			// don't retry. The cursor guards against re-ingest regardless.
+			log.Warnf(ctx, "[%s] store \\Seen failed,uid:%d,err:%+v", where, uid, err.Error())
+		}
+	}
 }
 
 func (a *adapter) transientError(ctx context.Context, src inbound.Source, reason string) {
