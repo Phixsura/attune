@@ -441,15 +441,18 @@ import (
 )
 
 // TestAdapterContract — every adapter calls this from its own _test.
-// Minimum bar:
+// Minimum bar (5 lifecycle gates):
 //   1. Channel() returns a non-empty string with no whitespace or '/'.
 //   2. Start(ctx, mockDeps) followed by immediate Shutdown does not panic.
 //   3. ctx cancellation propagates: Shutdown returns within 5s, no goroutine leak.
 //   4. Idempotent shutdown: calling Shutdown twice does not panic.
-//   5. Mock IngestPort receives at least one IngestInput via the adapter's
-//      fixture-driven path.
-//   6. Duplicate Register on the same channel panics (verified at framework
-//      level, not per-adapter).
+//   5. Duplicate Register on the same channel panics.
+//
+// IngestPort end-to-end coverage is delegated to each adapter's own
+// adapter-level test where the fixture (httptest for webhook, fake
+// imapclient for email) is naturally available; the conformance suite
+// stays focused on lifecycle so it can run without channel-specific
+// scaffolding.
 func TestAdapterContract(t *testing.T, factory inbound.Factory) { … }
 ```
 

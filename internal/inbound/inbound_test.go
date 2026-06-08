@@ -4,7 +4,6 @@ package inbound_test
 
 import (
 	"context"
-	"net/http"
 	"testing"
 	"time"
 
@@ -38,8 +37,4 @@ func TestIngestPortInterface_Compiles(t *testing.T) {
 	var _ inbound.IngestPort = inbound.IngestFunc(func(_ context.Context, _ string, _ uuid.UUID, _ domain.IngestInput) (int64, error) {
 		return 0, nil
 	})
-}
-
-func TestMuxInterface_Compiles(t *testing.T) {
-	var _ inbound.Mux = inbound.MuxFunc(func(_, _ string, _ http.Handler) {})
 }

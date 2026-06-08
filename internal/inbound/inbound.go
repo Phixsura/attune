@@ -55,17 +55,9 @@ type ShutdownTimeouter interface {
 // Mux — narrow router-agnostic surface the framework hands to push
 // adapters. Deliberately not chi.Router so the framework boundary stays
 // decoupled from chi. cmd/attune passes a chiMux that satisfies this;
-// in tests inboundtest supplies a stdlib http.ServeMux wrapper.
+// in tests inboundtest supplies a FakeMux struct.
 type Mux interface {
 	Method(method, pattern string, h http.Handler)
-}
-
-// MuxFunc — adapter pattern for ad-hoc test muxes.
-type MuxFunc func(method, pattern string, h http.Handler)
-
-// Method satisfies Mux.
-func (f MuxFunc) Method(method, pattern string, h http.Handler) {
-	f(method, pattern, h)
 }
 
 // IngestPort — adapters call this to reach the core. Signature mirrors

@@ -9,7 +9,6 @@ import (
 	"context"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -256,5 +255,3 @@ var (
 	_ inbound.Logger         = FakeLogger{}
 	_ inbound.Mux            = (*FakeMux)(nil)
 )
-
-var _ = time.Second // retain time import for future expansion

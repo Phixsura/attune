@@ -4,7 +4,6 @@ package webhook
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -74,11 +73,12 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 
 	src, srcErr := a.deps.Sources.GetBySlugs(ctx, tenantSlug, channelName, sourceSlug)
 	if srcErr != nil || !src.Enabled {
-		// Enumeration resistance: do everything the authenticated path
-		// would do — two AES-GCM Open rounds + one JSON unmarshal +
-		// HMAC verify — so response wall-clock matches and "unknown
-		// slug" can't be distinguished from "known slug, bad sig".
-		a.runStubAuthRound(ts, body, sig)
+		// Enumeration resistance per spec §Webhook adapter: verify
+		// against the per-process stub secret so the response shape +
+		// status match a real auth failure. (The spec asks for one
+		// HMAC verify, not full-shape equivalence to the authenticated
+		// path — we stay literal to keep the surface small.)
+		_ = verifyHMACAgainstStub(a.stubSecret, ts, body, sig)
 		a.deps.Metrics.Total(channelName, unknownLabel, unknownLabel, "auth_err")
 		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid")
 		return
@@ -156,25 +156,6 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 // IngestPort wraps an internal error. We never construct this here; we
 // just compare via errors.Is so the framework's caller can opt in.
 var errInternal = errors.New("inbound.webhook: internal")
-
-// runStubAuthRound performs the same shape of crypto work the
-// authenticated path would: Decrypt(config envelope) + Unmarshal +
-// Decrypt(secret envelope) + HMAC verify against the per-process stub
-// secret. All results are intentionally discarded. The stub envelopes
-// are pre-encrypted at Start, so this function only spends the
-// per-request CPU cost (no key derivation, no allocation churn).
-func (a *adapter) runStubAuthRound(ts string, body []byte, sig string) {
-	if len(a.stubConfigEnvelope) > 0 {
-		if inner, err := a.deps.Secrets.Decrypt(a.stubConfigEnvelope); err == nil {
-			var stub webhookConfig
-			_ = json.Unmarshal(inner, &stub)
-		}
-	}
-	if len(a.stubSecretEnvelope) > 0 {
-		_, _ = a.deps.Secrets.Decrypt(a.stubSecretEnvelope)
-	}
-	_ = verifyHMACAgainstStub(a.stubSecret, ts, body, sig)
-}
 
 // authenticate decodes the source's secret envelope and verifies the
 // HMAC against current — falling back to the previous secret while it

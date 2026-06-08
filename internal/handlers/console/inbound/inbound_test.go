@@ -128,23 +128,6 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-func TestStatusOf(t *testing.T) {
-	cases := []struct {
-		name string
-		src  inbound.Source
-		want string
-	}{
-		{"paused trumps error", inbound.Source{Enabled: false, State: inbound.SourceState{LastError: "boom"}}, "paused"},
-		{"error when enabled", inbound.Source{Enabled: true, State: inbound.SourceState{LastError: "boom"}}, "error"},
-		{"clean enabled", inbound.Source{Enabled: true}, "enabled"},
-	}
-	for _, c := range cases {
-		if got := statusOf(c.src); got != c.want {
-			t.Errorf("%s: got %q want %q", c.name, got, c.want)
-		}
-	}
-}
-
 func TestValidateEmailCreateConfig_HappyPath(t *testing.T) {
 	cfg := ptrext.Of(attunev1.EmailCreateConfig{
 		Host:     "imap.example.com",

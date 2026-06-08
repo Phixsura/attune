@@ -5,7 +5,6 @@ package inbound
 import (
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -65,9 +64,3 @@ func readKeyEnv() string {
 	}
 	return os.Getenv(MasterKeyEnv)
 }
-
-// ErrMasterKeyMissing — sentinel so cmd/attune can distinguish "operator
-// has not opted-in to the inbound framework yet" from "the env value is
-// malformed". Currently both still fail boot — kept here as a forward
-// hook for a future graceful-skip mode.
-var ErrMasterKeyMissing = errors.New("inbound: master key not configured")

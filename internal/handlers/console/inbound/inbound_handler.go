@@ -168,21 +168,6 @@ func NewHandler(sources *inboundsource.Repo, p *pgxpool.Pool, secrets inbound.Se
 	})
 }
 
-// statusOf derives the gauge-aligned UI status from raw row state —
-// matches the labels on attune_inbound_source_state. Currently encoded
-// in the response by surfacing enabled + last_error and letting the SPA
-// pick a chip; kept as a helper for future server-side filtering.
-func statusOf(s inbound.Source) string {
-	switch {
-	case !s.Enabled:
-		return "paused"
-	case s.State.LastError != "":
-		return "error"
-	default:
-		return "enabled"
-	}
-}
-
 // rowToProto projects an inbound.Source into the wire-shape
 // attunev1.InboundSource (CLAUDE.md §11).
 func rowToProto(s inbound.Source) *attunev1.InboundSource {
@@ -919,7 +904,3 @@ func tenantSlugFromPool(p *pgxpool.Pool) tenantLookup {
 		return slug, err
 	}
 }
-
-// statusOf is currently unused but kept for future server-side state
-// filtering against attune_inbound_source_state gauge labels.
-var _ = statusOf
