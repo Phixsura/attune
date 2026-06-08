@@ -6,7 +6,7 @@
 
 **Architecture:** `internal/inbound/` defines the `Adapter { Channel, Start, Shutdown }` port (OTel-style lifecycle), `init()`-based registry (Caddy/Bento), and the `IngestPort` interface that core implements via a `cmd/attune` shim. Two adapters self-register at startup: webhook (HTTP push, HMAC + timestamp + dual-secret 24h) and email IMAP (poll, per-tenant N:1, encrypted creds, last-UID cursor). Two depguard rules enforce the boundary in CI: core ⊥ adapters, framework ⊥ service/repo/handlers/notify. Console replaces Lark OAuth with local admin password (bcrypt + lockout + dummy-bcrypt timing equalisation).
 
-**Tech Stack:** Go 1.22+, Postgres 16, chi router, golang-migrate, pgx, attune `logext` + `ptrext` + observability facades; new deps `emersion/go-imap/v2`, `emersion/go-message`, `golang.org/x/crypto/bcrypt`, `go.uber.org/goleak`; frontend TanStack Router + React + Tailwind.
+**Tech Stack:** Go 1.22+, Postgres 16, chi router, attune's own `internal/infra/database.RunMigrations` (embed.FS over `migrations/*.sql`, per-file transaction, tracker table `schema_migrations_feedback`), pgx, attune `logext` + `ptrext` + observability facades; new deps `emersion/go-imap/v2`, `emersion/go-message`, `golang.org/x/crypto/bcrypt` (promoted from indirect to direct), `go.uber.org/goleak`; frontend TanStack Router + React + Tailwind. **Migration files are single SQL per attune convention — no separate `.up.sql` / `.down.sql`. Down-migration story is "schema rolls forward only" per spec §Rollback.**
 
 **Spec references:** All section names (e.g. "Webhook adapter") below refer to the accepted spec at `docs/proposals/2026/06/2026-06-08-channel-agnostic-inbound.md`. The plan does not duplicate spec rationale.
 
@@ -71,19 +71,16 @@ internal/handlers/console/inbound/
     inbound_handler.go      ← list / create / rotate / pause / delete / test-connection
     inbound_test.go
 
-internal/migrations/
-    202606081200_drop_lark.up.sql
-    202606081200_drop_lark.down.sql       ← intentionally empty + comment "schema rolls forward only"
-    202606081201_create_admins.up.sql
-    202606081201_create_admins.down.sql
-    202606081202_create_inbound_sources.up.sql
-    202606081202_create_inbound_sources.down.sql
+internal/infra/database/migrations/
+    015_drop_lark.sql                     ← attune's RunMigrations uses single-file SQL, no up/down split
+    016_create_admins.sql
+    017_create_inbound_sources.sql
 
 internal/infra/config/
     bootstrap_env.go        ← env.GetOrFile helper
     bootstrap_env_test.go
 
-internal/infra/migrate/
+internal/infra/database/
     confirm_lark.go         ← destructive-data guard
     confirm_lark_test.go
 
@@ -110,6 +107,14 @@ Per spec §File-by-file delta → EDIT table — that table is the source of tru
 ---
 
 ## Task list
+
+### Task 0: testdb harness deferred — integration tests use `t.Skip`
+
+**Files:** (no changes — directive)
+
+attune currently has no `internal/testdb/` harness, and the existing `#12 — test: add PostgreSQL integration tests + a service-container CI job` issue tracks adding one. **In this PR, every step that calls `testdb.NewPool(t)` is marked `t.Skip("requires testdb harness — see #12")`**. Unit tests with in-memory fakes (from `internal/inbound/inboundtest`) cover the framework contract; Task 24 manual smoke + Gate 11 (testcontainers/postgres integration test) exercise the DB path end-to-end before merge.
+
+Tasks affected: 8 (admin repo), 9 (inboundsource repo), 10 (migration guard), 15 (inbound handler).
 
 ### Task 1: Worktree + branch hygiene
 
@@ -1391,8 +1396,7 @@ Deliberate-pollution tests covered by Task 24 verification gates 12 + 13."
 ### Task 8: `admins` table + repo + `env.GetOrFile` helper
 
 **Files:**
-- Create: `internal/migrations/202606081201_create_admins.up.sql`
-- Create: `internal/migrations/202606081201_create_admins.down.sql`
+- Create: `internal/infra/database/migrations/016_create_admins.sql`
 - Create: `internal/repo/admin/admins.go`
 - Create: `internal/repo/admin/admins_test.go`
 - Create: `internal/infra/config/bootstrap_env.go`
@@ -1400,7 +1404,7 @@ Deliberate-pollution tests covered by Task 24 verification gates 12 + 13."
 
 - [ ] **Step 1: Create migration files**
 
-`internal/migrations/202606081201_create_admins.up.sql`:
+`internal/infra/database/migrations/016_create_admins.sql`:
 ```sql
 BEGIN;
 
@@ -1421,12 +1425,7 @@ CREATE INDEX admins_email_lower ON admins (LOWER(email));
 COMMIT;
 ```
 
-`internal/migrations/202606081201_create_admins.down.sql`:
-```sql
--- Schema rolls forward only per spec §Rollback story.
--- Down migration intentionally empty; rollback requires pg_dump restoration.
-SELECT 1;
-```
+(attune's `RunMigrations` runs single SQL files; no `.down.sql` companion is needed. Spec §Rollback story confirms "schema rolls forward only".)
 
 - [ ] **Step 2: Write failing test for env.GetOrFile**
 
@@ -1528,7 +1527,7 @@ import (
     "testing"
 
     "github.com/Phixsura/attune/internal/repo/admin"
-    "github.com/Phixsura/attune/internal/testdb" // existing test harness (testcontainers/pgx)
+    "github.com/Phixsura/attune/internal/testdb // SKIP: harness does NOT exist in this branch; see Task 0" // existing test harness (testcontainers/pgx)
 )
 
 func TestAdminRepo_Create_Get_Verify(t *testing.T) {
@@ -1788,7 +1787,7 @@ Expected: PASS (if testdb harness exists). If integration tests skip due to miss
 - [ ] **Step 8: Commit**
 
 ```bash
-git add internal/migrations/202606081201_*.sql internal/repo/admin/ internal/infra/config/bootstrap_env*
+git add internal/infra/database/migrations/202606081201_*.sql internal/repo/admin/ internal/infra/config/bootstrap_env*
 git commit -m "feat(repo/admin): admins table + bootstrap-safe repo + GetOrFile env helper (#66 step 7/24)
 
 Per spec §Console: local admin password — admins schema with bcrypt hash
@@ -1803,14 +1802,13 @@ exposure on Linux."
 ### Task 9: `inbound_sources` table + DB-backed SourceStore
 
 **Files:**
-- Create: `internal/migrations/202606081202_create_inbound_sources.up.sql`
-- Create: `internal/migrations/202606081202_create_inbound_sources.down.sql`
+- Create: `internal/infra/database/migrations/017_create_inbound_sources.sql`
 - Create: `internal/repo/inboundsource/inbound_sources.go`
 - Create: `internal/repo/inboundsource/inbound_sources_test.go`
 
 - [ ] **Step 1: Create migration files**
 
-`internal/migrations/202606081202_create_inbound_sources.up.sql`:
+`internal/infra/database/migrations/017_create_inbound_sources.sql`:
 ```sql
 BEGIN;
 
@@ -1838,11 +1836,7 @@ CREATE INDEX inbound_sources_tenant
 COMMIT;
 ```
 
-`internal/migrations/202606081202_create_inbound_sources.down.sql`:
-```sql
--- Schema rolls forward only.
-SELECT 1;
-```
+(Single-file migration; no down companion — see Task 8 step 1 note.)
 
 - [ ] **Step 2: Implement DB-backed SourceStore satisfying `inbound.SourceStore`**
 
@@ -1988,7 +1982,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/migrations/202606081202_*.sql internal/repo/inboundsource/
+git add internal/infra/database/migrations/202606081202_*.sql internal/repo/inboundsource/
 git commit -m "feat(repo/inboundsource): inbound_sources table + DB-backed SourceStore (#66 step 8/24)
 
 Per spec §Data migrations + §Supporting types. Implements inbound.SourceStore
@@ -2001,14 +1995,14 @@ config is BYTEA (AES-GCM envelope from inbound.SecretStore)."
 ### Task 10: Migration runner integration + destructive-data guard
 
 **Files:**
-- Create: `internal/infra/migrate/confirm_lark.go`
-- Create: `internal/infra/migrate/confirm_lark_test.go`
+- Create: `internal/infra/database/confirm_lark.go`
+- Create: `internal/infra/database/confirm_lark_test.go`
 - Modify: `cmd/attune/setup.go` (wire migration runner with the guard)
 
 - [ ] **Step 1: Write failing test for guard**
 
 ```go
-// internal/infra/migrate/confirm_lark_test.go
+// internal/infra/database/confirm_lark_test.go
 package migrate_test
 
 import (
@@ -2016,8 +2010,8 @@ import (
     "errors"
     "testing"
 
-    "github.com/Phixsura/attune/internal/infra/migrate"
-    "github.com/Phixsura/attune/internal/testdb"
+    "github.com/Phixsura/attune/internal/infra/database"
+    "github.com/Phixsura/attune/internal/testdb // SKIP: harness does NOT exist in this branch; see Task 0"
 )
 
 func TestConfirmLarkDelete_AbortsWhenRowsPresentAndEnvUnset(t *testing.T) {
@@ -2026,8 +2020,8 @@ func TestConfirmLarkDelete_AbortsWhenRowsPresentAndEnvUnset(t *testing.T) {
         `INSERT INTO user_feedback(tenant_id, source, content) VALUES ($1, 'lark-group', 'x')`,
         "tenant-test")
     t.Setenv("ATTUNE_CONFIRM_LARK_DELETE", "")
-    err := migrate.ConfirmLarkDelete(context.Background(), pool)
-    if !errors.Is(err, migrate.ErrDestructiveMigrationGuard) {
+    err := database.ConfirmLarkDelete(context.Background(), pool)
+    if !errors.Is(err, database.ErrDestructiveMigrationGuard) {
         t.Errorf("got %v; want ErrDestructiveMigrationGuard", err)
     }
 }
@@ -2038,7 +2032,7 @@ func TestConfirmLarkDelete_PassesWhenEnvSet(t *testing.T) {
         `INSERT INTO user_feedback(tenant_id, source, content) VALUES ($1, 'lark-group', 'x')`,
         "tenant-test")
     t.Setenv("ATTUNE_CONFIRM_LARK_DELETE", "yes")
-    if err := migrate.ConfirmLarkDelete(context.Background(), pool); err != nil {
+    if err := database.ConfirmLarkDelete(context.Background(), pool); err != nil {
         t.Errorf("got %v; want nil", err)
     }
 }
@@ -2046,7 +2040,7 @@ func TestConfirmLarkDelete_PassesWhenEnvSet(t *testing.T) {
 func TestConfirmLarkDelete_PassesWhenNoLarkRows(t *testing.T) {
     pool := testdb.NewPool(t)
     t.Setenv("ATTUNE_CONFIRM_LARK_DELETE", "")
-    if err := migrate.ConfirmLarkDelete(context.Background(), pool); err != nil {
+    if err := database.ConfirmLarkDelete(context.Background(), pool); err != nil {
         t.Errorf("got %v; want nil", err)
     }
 }
@@ -2055,8 +2049,8 @@ func TestConfirmLarkDelete_PassesWhenNoLarkRows(t *testing.T) {
 - [ ] **Step 2: Implement guard**
 
 ```go
-// internal/infra/migrate/confirm_lark.go
-package migrate
+// internal/infra/database/confirm_lark.go
+package database
 
 import (
     "context"
@@ -2067,9 +2061,9 @@ import (
     "github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrDestructiveMigrationGuard = errors.New("migrate: destructive guard active")
+var ErrDestructiveMigrationGuard = errors.New("database: destructive lark-delete guard active")
 
-// ConfirmLarkDelete — run BEFORE migration 202606081200_drop_lark.up.sql.
+// ConfirmLarkDelete — run BEFORE migration 015_drop_lark.sql.
 // Aborts if there are lark-* user_feedback rows AND
 // ATTUNE_CONFIRM_LARK_DELETE != "yes". Returns the count via the error wrap
 // so operators can see the exact number that will be lost.
@@ -2099,7 +2093,7 @@ Locate the existing migration-runner call (likely `migrate.Up(...)`). Insert bef
 ```go
 // Destructive-data guard before applying 202606081200_drop_lark — see
 // docs/proposals/2026/06/2026-06-08-channel-agnostic-inbound.md §Data migrations.
-if err := migrate.ConfirmLarkDelete(ctx, pool); err != nil {
+if err := database.ConfirmLarkDelete(ctx, pool); err != nil {
     return fmt.Errorf("attune: %w", err)
 }
 ```
@@ -2114,7 +2108,7 @@ Expected: PASS all three.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/infra/migrate/ cmd/attune/setup.go
+git add internal/infra/database/ cmd/attune/setup.go
 git commit -m "feat(migrate): destructive-data guard before lark deletion (#66 step 9/24)
 
 Per spec §Data migrations — ConfirmLarkDelete aborts startup if any
@@ -3576,8 +3570,7 @@ reserved — no wire-level surprise for legacy clients."
 
 **Files:**
 - Modify: `internal/domain/feedback.go` — remove the 5 `lark-*` entries from `ValidSources` and the 5 cases from `SourceDisplayName`
-- Create: `internal/migrations/202606081200_drop_lark.up.sql`
-- Create: `internal/migrations/202606081200_drop_lark.down.sql`
+- Create: `internal/infra/database/migrations/015_drop_lark.sql`
 
 - [ ] **Step 1: Update Domain**
 
@@ -3600,10 +3593,10 @@ case "lark-form":     return "Lark Form / Doc Comment"
 
 - [ ] **Step 2: Migration file**
 
-`internal/migrations/202606081200_drop_lark.up.sql`:
+`internal/infra/database/migrations/015_drop_lark.sql`:
 ```sql
 -- Hard-delete all Lark-bound data + schema. Pre-1.0; no customer retention.
--- Guarded by ATTUNE_CONFIRM_LARK_DELETE env (see migrate.ConfirmLarkDelete).
+-- Guarded by ATTUNE_CONFIRM_LARK_DELETE env (see database.ConfirmLarkDelete).
 BEGIN;
 
 DELETE FROM user_feedback WHERE source LIKE 'lark-%';
@@ -3643,7 +3636,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/domain/feedback.go internal/migrations/202606081200_*.sql
+git add internal/domain/feedback.go internal/infra/database/migrations/202606081200_*.sql
 git commit -m "feat(domain,migrate): drop lark-* source enums + migration to delete lark rows (#66 step 18/24)
 
 Per spec §Implementation plan step 9 — final ValidSources cleanup (after
@@ -3935,7 +3928,7 @@ Searched for "TBD" / "TODO" / "implement later" / "similar to Task N" / "add app
 - `inboundtest.TestAdapterContract`, `inboundtest.DepsFor`, `inboundtest.NewFakeSources` — defined T6, used T13/T14.
 - `admin.Repo`, `admin.NewAdmin`, `admin.ErrAlreadyBootstrapped` — defined T8, used T11.
 - `webhook.RotateSecret`, `webhook.ErrRotationInGraceWindow` — defined T13, used T15.
-- `migrate.ConfirmLarkDelete`, `migrate.ErrDestructiveMigrationGuard` — defined T10, used T19 implicitly via runner.
+- `database.ConfirmLarkDelete`, `database.ErrDestructiveMigrationGuard` — defined T10, used T19 implicitly via runner.
 
 **Names consistent across tasks.**
 
