@@ -37,7 +37,6 @@ func NewNotifyTarget(pool *pgxpool.Pool) *NotifyTargetRepo {
 // selectOutboxTargets if the audience semantics apply.
 const (
 	DestRawWebhook  = "raw-webhook"
-	DestLarkBot     = "lark-bot"
 	DestSlackBot    = "slack-bot"
 	DestEmail       = "email"
 	DestGitHubIssue = "github-issue" // Sprint 1 (2026-05-17): native GitHub Issue dispatch

@@ -118,60 +118,21 @@ func runServer() error {
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
 
-	// (Weekly digest scheduler removed with #66 Plan T17 — it sent only
-	// to lark-bots. A future generic digest sender lands on the #34
-	// outbound adapter SDK.)
+	// (Weekly digest scheduler removed with #66 Plan T17 — its only
+	// channel was an IM group bot. A channel-agnostic digest sender
+	// lands on the #34 outbound adapter SDK.)
 
 	ingestHandler := handlers.NewIngestHandler(ingestor)
 
-	// #66 inbound framework wiring. Validate the master key FIRST so a
-	// misconfigured deploy fails the boot loudly; the rest of the inbound
-	// surface depends on the SecretStore the key seeds.
-	inboundKey, err := inbound.BootstrapValidate()
+	inb, err := setupInbound(ctx, pool, ingestor)
 	if err != nil {
-		return fmt.Errorf("inbound boot: %w", err)
+		return err
 	}
-	inboundSecrets, err := inbound.NewAESGCMSecretStore(inboundKey)
-	if err != nil {
-		return fmt.Errorf("inbound secrets: %w", err)
-	}
-	inboundSources := inboundsourcerepo.NewRepo(pool)
-	adminRepo := admin.NewRepo(pool)
-	if err := console.BootstrapAdmin(ctx, adminRepo); err != nil {
-		return fmt.Errorf("bootstrap admin: %w", err)
-	}
-
-	// Inbound sub-router. Adapters mount their channel-relative routes
-	// (e.g. "/webhook/{tenant-slug}/{source-slug}") onto this mux during
-	// Manager.StartAll; buildRouter then mounts the populated mux under
-	// /v1/inbound.
-	inboundSubRouter := chi.NewRouter()
-	inboundDeps := inbound.Deps{
-		Mux: inbound.NewChiMux(inboundSubRouter),
-		Ingest: inbound.IngestFunc(func(ctx context.Context, tenantID string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
-			return ingestor.IngestRow(ctx, tenantID, keyID, in)
-		}),
-		Sources: inboundSources,
-		Secrets: inboundSecrets,
-		Metrics: inbound.NewPrometheusMetrics(prometheus.DefaultRegisterer),
-		Logger:  inboundLogger{},
-	}
-	manager := inbound.NewManager(inboundDeps)
-	if err := manager.StartAll(ctx); err != nil {
-		return fmt.Errorf("inbound manager: %w", err)
-	}
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		if err := manager.ShutdownAll(shutdownCtx); err != nil {
-			logext.Warnf(shutdownCtx, "[%s] inbound shutdown failed,err:%+v", where, err.Error())
-		}
-	}()
-	logext.Infof(ctx, "[%s] inbound framework ready,adapters:%d", where, len(inbound.Factories()))
+	defer inb.shutdown()
 
 	r, err := buildRouter(
 		ctx, cfg, ingestHandler, apiKeys, pool,
-		inboundSubRouter, inboundSecrets, inboundSources, adminRepo,
+		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo,
 	)
 	if err != nil {
 		return err
@@ -294,6 +255,80 @@ func (inboundLogger) Warnf(ctx context.Context, format string, args ...any) {
 
 func (inboundLogger) Errorf(ctx context.Context, format string, args ...any) {
 	logext.Errorf(ctx, format, args...)
+}
+
+// inboundWiring bundles the inbound-framework deps runServer needs to
+// thread into buildRouter + into its shutdown defer. Extracted from
+// runServer in #66 Plan T24 so the boot function stays under the §1
+// CCN/NLOC threshold.
+type inboundWiring struct {
+	subRouter *chi.Mux
+	secrets   inbound.SecretStore
+	sources   *inboundsourcerepo.Repo
+	adminRepo *admin.Repo
+	manager   *inbound.Manager
+}
+
+// shutdown drains in-flight inbound work with a bounded timeout. Called
+// from runServer's defer; we keep a separate method so the close
+// timeout + log call stay encapsulated.
+func (w inboundWiring) shutdown() {
+	const where = "main.inboundWiring.shutdown"
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := w.manager.ShutdownAll(shutdownCtx); err != nil {
+		logext.Warnf(shutdownCtx, "[%s] inbound shutdown failed,err:%+v", where, err.Error())
+	}
+}
+
+// setupInbound wires the #66 channel-agnostic inbound framework:
+// validates the master key, builds the AES-GCM secret store, opens the
+// inbound_sources repo, runs first-start admin bootstrap, and starts
+// every registered adapter on a fresh chi sub-router. The caller mounts
+// the returned sub-router at /v1/inbound and calls w.shutdown() in a
+// defer.
+func setupInbound(ctx context.Context, pool *pgxpool.Pool, ingestor *ingest.Ingestor) (inboundWiring, error) {
+	const where = "main.setupInbound"
+	inboundKey, err := inbound.BootstrapValidate()
+	if err != nil {
+		return inboundWiring{}, fmt.Errorf("inbound boot: %w", err)
+	}
+	secrets, err := inbound.NewAESGCMSecretStore(inboundKey)
+	if err != nil {
+		return inboundWiring{}, fmt.Errorf("inbound secrets: %w", err)
+	}
+	sources := inboundsourcerepo.NewRepo(pool)
+	adminRepo := admin.NewRepo(pool)
+	if err := console.BootstrapAdmin(ctx, adminRepo); err != nil {
+		return inboundWiring{}, fmt.Errorf("bootstrap admin: %w", err)
+	}
+
+	// Adapters mount their channel-relative routes onto subRouter during
+	// Manager.StartAll; buildRouter then mounts the populated mux under
+	// /v1/inbound.
+	subRouter := chi.NewRouter()
+	deps := inbound.Deps{
+		Mux: inbound.NewChiMux(subRouter),
+		Ingest: inbound.IngestFunc(func(ctx context.Context, tenantID string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
+			return ingestor.IngestRow(ctx, tenantID, keyID, in)
+		}),
+		Sources: sources,
+		Secrets: secrets,
+		Metrics: inbound.NewPrometheusMetrics(prometheus.DefaultRegisterer),
+		Logger:  inboundLogger{},
+	}
+	manager := inbound.NewManager(deps)
+	if err := manager.StartAll(ctx); err != nil {
+		return inboundWiring{}, fmt.Errorf("inbound manager: %w", err)
+	}
+	logext.Infof(ctx, "[%s] inbound framework ready,adapters:%d", where, len(inbound.Factories()))
+	return inboundWiring{
+		subRouter: subRouter,
+		secrets:   secrets,
+		sources:   sources,
+		adminRepo: adminRepo,
+		manager:   manager,
+	}, nil
 }
 
 func parseOTelHeaders(raw string) map[string]string {

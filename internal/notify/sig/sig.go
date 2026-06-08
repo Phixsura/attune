@@ -1,9 +1,8 @@
 // Package sig holds the wire-canonical HMAC signing helpers + the v1
 // envelope-version constant. Centralized here so notify/test_send.go,
-// notify/adapter/{rawwebhook,larkwebhook}, and service/outbox can all
-// reference the same byte-exact implementations. The previous arrangement
-// — three copies of SignRaw plus comments saying "must stay in sync" —
-// was a real drift hazard.
+// notify/adapter/rawwebhook, and service/outbox can all reference the
+// same byte-exact implementation of SignRaw — no "must stay in sync"
+// comments, no drift.
 //
 // The package depends only on stdlib crypto; no other internal/notify
 // types — so it can be imported from anywhere in the outbound subsystem
@@ -13,7 +12,6 @@ package sig
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 )
 
@@ -29,16 +27,4 @@ func SignRaw(body []byte, secret string) string {
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write(body)
 	return "sha256=" + hex.EncodeToString(h.Sum(nil))
-}
-
-// SignLarkBot computes the Lark/Feishu custom-bot v2 signature.
-// The key is `timestamp + "\n" + secret` and the message is empty — see
-// open.feishu.cn/document/.../bot-v2 for the protocol. Returns base64.
-func SignLarkBot(timestamp, secret string) (string, error) {
-	stringToSign := timestamp + "\n" + secret
-	h := hmac.New(sha256.New, []byte(stringToSign))
-	if _, err := h.Write([]byte{}); err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
 }

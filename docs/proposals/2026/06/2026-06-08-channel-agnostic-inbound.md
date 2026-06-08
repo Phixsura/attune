@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #66 |
-| **Status** | Accepted |
+| **Status** | Implemented |
 | **Started** | 2026-06-08 |
 | **Related** | #19 (canonical proto contract, CLOSED — provides `pb.IngestRequest`), #34 (outbound notify adapter SDK — symmetric counterpart), #35 (email-to-feedback gateway — folded in here), #40 (console SSO/OIDC — post-this), #7 (private-deploy docs — needs follow-up), #63 (Grafana panels — consumes new metrics), #48 (logext facade — applies to new code) |
 

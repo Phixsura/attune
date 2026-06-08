@@ -3,6 +3,7 @@
 package webhook
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -68,35 +69,8 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	current, previous, prevExpired, err := parseConfig(src.Config, a.deps.Secrets)
-	if err != nil {
-		a.deps.Logger.Errorf(ctx, "[%s] parseConfig failed,err:%+v", where, err.Error())
-		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
-		return
-	}
-
-	// Decrypt current secret only — decrypt previous lazily on
-	// fallback so the common path (valid signature against current)
-	// stays a single decrypt round.
-	curSecret, err := a.deps.Secrets.Decrypt(current)
-	if err != nil {
-		a.deps.Logger.Errorf(ctx, "[%s] decrypt current failed,err:%+v", where, err.Error())
-		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
-		return
-	}
-
-	ok := verifyHMAC(curSecret, ts, body, sig)
-	if !ok && len(previous) > 0 && !prevExpired {
-		prevSecret, decErr := a.deps.Secrets.Decrypt(previous)
-		if decErr == nil {
-			ok = verifyHMAC(prevSecret, ts, body, sig)
-		}
-	}
-	if !ok {
-		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "auth_err")
-		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid")
+	if status, code, msg, ok := a.authenticate(ctx, src, ts, body, sig); !ok {
+		respond.Error(ctx, w, status, code, msg)
 		return
 	}
 
@@ -167,3 +141,44 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 // IngestPort wraps an internal error. We never construct this here; we
 // just compare via errors.Is so the framework's caller can opt in.
 var errInternal = errors.New("inbound.webhook: internal")
+
+// authenticate decodes the source's secret envelope and verifies the
+// HMAC against current — falling back to the previous secret while it
+// remains inside its rotation grace window. Returns (status, code,
+// msg, ok); on ok=true the caller proceeds to ingest. Pulled out of
+// handle() so the request flow stays inside the §1 CCN threshold.
+func (a *adapter) authenticate(
+	ctx context.Context,
+	src inbound.Source,
+	ts string, body []byte, sig string,
+) (status int, code, msg string, ok bool) {
+	const where = "inbound.webhook.authenticate"
+	current, previous, prevExpired, err := parseConfig(src.Config, a.deps.Secrets)
+	if err != nil {
+		a.deps.Logger.Errorf(ctx, "[%s] parseConfig failed,err:%+v", where, err.Error())
+		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
+		return http.StatusInternalServerError, "internal", "internal error", false
+	}
+
+	// Decrypt current secret only — decrypt previous lazily on
+	// fallback so the common path (valid signature against current)
+	// stays a single decrypt round.
+	curSecret, err := a.deps.Secrets.Decrypt(current)
+	if err != nil {
+		a.deps.Logger.Errorf(ctx, "[%s] decrypt current failed,err:%+v", where, err.Error())
+		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
+		return http.StatusInternalServerError, "internal", "internal error", false
+	}
+
+	valid := verifyHMAC(curSecret, ts, body, sig)
+	if !valid && len(previous) > 0 && !prevExpired {
+		if prevSecret, decErr := a.deps.Secrets.Decrypt(previous); decErr == nil {
+			valid = verifyHMAC(prevSecret, ts, body, sig)
+		}
+	}
+	if !valid {
+		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "auth_err")
+		return http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid", false
+	}
+	return 0, "", "", true
+}

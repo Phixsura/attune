@@ -113,12 +113,12 @@ func syncCustomWebhooks(
 
 // buildNotifier composes the active outbound chain.
 //
-// Post-#66 Plan T17 (Lark removal): the inline notifier path is gone —
-// raw-webhook destinations were the only other channel and they deliver
-// through the outbox worker reading tenant_notify_targets directly.
-// Kept as a function (instead of inlining the nil) so a future outbound
-// adapter SDK (#34) can re-introduce inline channels without touching
-// every call site.
+// Post-#66 Plan T17: the inline notifier path is gone — raw-webhook
+// destinations were the only other channel and they deliver through
+// the outbox worker reading tenant_notify_targets directly. Kept as a
+// function (instead of inlining the nil) so a future outbound adapter
+// SDK (#34) can re-introduce inline channels without touching every
+// call site.
 func buildNotifier(
 	ctx context.Context,
 	_ *config.Config,
@@ -162,8 +162,8 @@ func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 
 // buildConsoleRouter wires the Console (auth + /me + /logout + resource
 // endpoints + #66 inbound source management). Pre-#66 the console relied
-// on Lark OAuth + dev-login backdoor; both are gone, replaced by the
-// local-admin password flow (auth.Handler + admin.Repo + bootstrap env).
+// on an external OAuth + dev-login backdoor; both are gone, replaced by
+// the local-admin password flow (auth.Handler + admin.Repo + bootstrap env).
 //
 // Console boots when ConsoleSessionKey is set and ConsoleBaseURL is
 // non-empty. No more dev-login / insecure-cookies escape hatches.

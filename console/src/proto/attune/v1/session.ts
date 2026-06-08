@@ -41,8 +41,8 @@ export interface Tenant {
 
 /**
  * SessionUser is the logged-in console user.
- * open_id is an opaque per-user identifier; pre-#66 it carried the Lark
- * open_id but post-removal it is now an attune-internal user id.
+ * open_id is an opaque per-user identifier — historically carried an
+ * upstream IM open_id but is now an attune-internal user id.
  */
 export interface SessionUser {
   openId: string;

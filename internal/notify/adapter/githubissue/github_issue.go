@@ -2,11 +2,9 @@ package githubissue
 
 // github_issue.go — native GitHub Issue dispatch.
 //
-// Sprint 1 (2026-05-17): the first real Dispatch Plugin beyond
-// lark-bot. Until this lands the only way to push feedback to GitHub was
-// the generic raw-webhook framework — i.e. the customer had to host an
-// HTTP receiver and translate it themselves. With this in place, a
-// customer just registers a tenant_notify_target row with:
+// Sprint 1 (2026-05-17): the first dispatch plugin to land on top of
+// the generic raw-webhook framework. A customer registers a
+// tenant_notify_target row with:
 //
 // destination_type = "github-issue"
 // url = https://github.com/{owner}/{repo}
@@ -17,8 +15,8 @@ package githubissue
 // against that repo via the outbox + Transport pipeline (same retry
 // semantics as raw-webhook: 5 attempts, 30s/2m/10m/1h backoff).
 //
-// Why outbox (not inline like Lark): GitHub returns 5xx during incidents
-// and enforces secondary rate limits; at-least-once with backoff matches
+// Why outbox (not inline): GitHub returns 5xx during incidents and
+// enforces secondary rate limits; at-least-once with backoff matches
 // reality better than fire-and-forget.
 
 import (
@@ -256,7 +254,7 @@ func formatAttrRows(attrs map[string]any) string {
 	return b.String()
 }
 
-// formatAttrValue mirrors the Lark card's per-value formatter:
+// formatAttrValue mirrors the raw-webhook envelope's per-value formatter:
 // strings pass through, slices become slash-joined, everything else
 // falls back to %v.
 func formatAttrValue(v any) string {

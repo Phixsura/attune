@@ -117,7 +117,7 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusBadRequest, "validation", err.Error())
 		return
 	}
-	// Today only ships lark-bot + raw-webhook adapters.
+	// Today only ships raw-webhook + github-issue adapters.
 	if nreq.DestinationType == notifytarget.DestSlackBot || nreq.DestinationType == notifytarget.DestEmail {
 		logext.Warnf(ctx, "[%s] reject: not implemented,tenant_id:%s,dest:%s",
 			where, auth.TenantID, nreq.DestinationType)
@@ -166,7 +166,7 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 		return errors.New("destination_type must not be empty")
 	}
 	switch req.DestinationType {
-	case notifytarget.DestLarkBot, notifytarget.DestRawWebhook, notifytarget.DestSlackBot, notifytarget.DestEmail:
+	case notifytarget.DestRawWebhook, notifytarget.DestSlackBot, notifytarget.DestEmail:
 	default:
 		return errors.New("destination_type value is not allowed")
 	}

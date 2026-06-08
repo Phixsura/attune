@@ -126,7 +126,7 @@ func (r *Router) Mount() chi.Router {
 
 	mux.Route("/install", func(m chi.Router) {
 		// Local-admin password login (#66 Plan T11) — replaces the
-		// deleted Lark OAuth flow (#66 Plan T17).
+		// deleted external-OAuth flow (#66 Plan T17).
 		m.Post("/login", r.auth.Login)
 		m.Post("/logout", r.auth.Logout)
 	})

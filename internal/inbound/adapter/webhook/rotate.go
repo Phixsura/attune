@@ -56,58 +56,18 @@ func RotateSecret(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var rawConfig []byte
-	err = tx.QueryRow(
-		ctx,
-		`SELECT config FROM inbound_sources WHERE id = $1 FOR UPDATE`,
-		sourceID,
-	).Scan(&rawConfig)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, time.Time{}, fmt.Errorf("rotate: source not found")
-	}
+	cfg, err := loadRotateConfig(ctx, tx, secrets, sourceID)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("rotate: select: %w", err)
+		// Surface the grace-window block with the previous-expiry timestamp.
+		if errors.Is(err, ErrRotationInGraceWindow) {
+			return nil, ptrext.Indirect(cfg.PreviousExpiresAt), err
+		}
+		return nil, time.Time{}, err
 	}
 
-	decoded, err := secrets.Decrypt(rawConfig)
+	newSecret, updatedEnvelope, expires, err := buildRotatedConfig(secrets, cfg)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("rotate: decrypt config: %w", err)
-	}
-	var cfg webhookConfig
-	if err := json.Unmarshal(decoded, &cfg); err != nil {
-		return nil, time.Time{}, fmt.Errorf("rotate: unmarshal config: %w", err)
-	}
-	if cfg.PreviousExpiresAt != nil && cfg.PreviousExpiresAt.After(time.Now()) {
-		return nil, ptrext.Indirect(cfg.PreviousExpiresAt), ErrRotationInGraceWindow
-	}
-
-	newSecret = make([]byte, SecretLen)
-	if _, err := rand.Read(newSecret); err != nil {
-		return nil, time.Time{}, fmt.Errorf("rotate: rand: %w", err)
-	}
-	newEncrypted, err := secrets.Encrypt(newSecret)
-	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("rotate: encrypt new: %w", err)
-	}
-
-	expires := time.Now().Add(GraceWindow)
-	cfg.SecretPreviousEncrypted = cfg.SecretCurrentEncrypted
-	cfg.SecretCurrentEncrypted = newEncrypted
-	cfg.PreviousExpiresAt = ptrext.Of(expires)
-	if cfg.Version == 0 {
-		cfg.Version = 1
-	}
-	if cfg.HMACAlgo == "" {
-		cfg.HMACAlgo = "sha256"
-	}
-
-	updated, err := json.Marshal(cfg)
-	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("rotate: marshal config: %w", err)
-	}
-	updatedEnvelope, err := secrets.Encrypt(updated)
-	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("rotate: encrypt config: %w", err)
+		return nil, time.Time{}, err
 	}
 
 	if _, err := tx.Exec(
@@ -122,4 +82,74 @@ func RotateSecret(
 		return nil, time.Time{}, fmt.Errorf("rotate: commit: %w", err)
 	}
 	return newSecret, expires, nil
+}
+
+// loadRotateConfig fetches and decodes the current webhookConfig under
+// SELECT FOR UPDATE, refusing the rotation when the previous secret is
+// still inside its grace window.
+func loadRotateConfig(
+	ctx context.Context,
+	tx pgx.Tx,
+	secrets inbound.SecretStore,
+	sourceID string,
+) (webhookConfig, error) {
+	var rawConfig []byte
+	err := tx.QueryRow(
+		ctx,
+		`SELECT config FROM inbound_sources WHERE id = $1 FOR UPDATE`,
+		sourceID,
+	).Scan(&rawConfig)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return webhookConfig{}, fmt.Errorf("rotate: source not found")
+	}
+	if err != nil {
+		return webhookConfig{}, fmt.Errorf("rotate: select: %w", err)
+	}
+	decoded, err := secrets.Decrypt(rawConfig)
+	if err != nil {
+		return webhookConfig{}, fmt.Errorf("rotate: decrypt config: %w", err)
+	}
+	var cfg webhookConfig
+	if err := json.Unmarshal(decoded, &cfg); err != nil {
+		return webhookConfig{}, fmt.Errorf("rotate: unmarshal config: %w", err)
+	}
+	if cfg.PreviousExpiresAt != nil && cfg.PreviousExpiresAt.After(time.Now()) {
+		return cfg, ErrRotationInGraceWindow
+	}
+	return cfg, nil
+}
+
+// buildRotatedConfig generates a new secret, promotes current →
+// previous, and re-encrypts the envelope for storage.
+func buildRotatedConfig(
+	secrets inbound.SecretStore,
+	cfg webhookConfig,
+) (newSecret, updatedEnvelope []byte, expires time.Time, err error) {
+	newSecret = make([]byte, SecretLen)
+	if _, err = rand.Read(newSecret); err != nil {
+		return nil, nil, time.Time{}, fmt.Errorf("rotate: rand: %w", err)
+	}
+	newEncrypted, err := secrets.Encrypt(newSecret)
+	if err != nil {
+		return nil, nil, time.Time{}, fmt.Errorf("rotate: encrypt new: %w", err)
+	}
+	expires = time.Now().Add(GraceWindow)
+	cfg.SecretPreviousEncrypted = cfg.SecretCurrentEncrypted
+	cfg.SecretCurrentEncrypted = newEncrypted
+	cfg.PreviousExpiresAt = ptrext.Of(expires)
+	if cfg.Version == 0 {
+		cfg.Version = 1
+	}
+	if cfg.HMACAlgo == "" {
+		cfg.HMACAlgo = "sha256"
+	}
+	updated, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, nil, time.Time{}, fmt.Errorf("rotate: marshal config: %w", err)
+	}
+	updatedEnvelope, err = secrets.Encrypt(updated)
+	if err != nil {
+		return nil, nil, time.Time{}, fmt.Errorf("rotate: encrypt config: %w", err)
+	}
+	return newSecret, updatedEnvelope, expires, nil
 }

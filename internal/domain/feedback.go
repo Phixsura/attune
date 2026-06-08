@@ -18,11 +18,11 @@ const MaxContentLen = 5000
 // Source enums — kept as plain strings so they round-trip cleanly
 // through JSON and SQL without enum machinery.
 //
-// Sprint 1.2 (2026-05-17) added four Lark-native source enums so
-// customers can pipe Lark Approval / Bitable / Helpdesk / Form items
-// directly into attune via a no-code automation → POST /v1/feedback/ingest
-// (no extra attune-side endpoint needed). See README.md for the
-// per-source configuration snippets.
+// Sprint 1.2 added four IM-native source enums for piping no-code
+// automations into attune; those were removed with #66 Plan T19 in
+// favour of the channel-agnostic inbound framework. The set is now
+// {api, webhook, email, web, other} — see
+// docs/proposals/2026/06/2026-06-08-channel-agnostic-inbound.md.
 //
 // (Pre-flat-labels: ValidKinds and ValidSeverities lived here too. The
 // proposal 2026-06-07-flat-labels.md, #10 moved classification to a
@@ -37,10 +37,10 @@ var ValidSources = map[string]bool{
 }
 
 // SourceDisplayName returns the human-facing label for a source enum.
-// Used by dispatch envelopes (github-issue body, lark-card, raw-webhook
-// envelope) so downstream readers see "Lark Bitable #recXXX" instead
-// of the bare "lark-bitable" technical key. Falls back to the raw key
-// when unknown — never returns empty, never panics on unseen sources.
+// Used by dispatch envelopes (github-issue body, raw-webhook envelope)
+// so downstream readers see "Email" instead of the bare "email"
+// technical key. Falls back to the raw key when unknown — never returns
+// empty, never panics on unseen sources.
 //
 // The display strings are English-canonical by design; localizing
 // them per-tenant requires threading locale into the notify path and is

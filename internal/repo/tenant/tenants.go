@@ -28,8 +28,8 @@ func NewTenant(pool *pgxpool.Pool) *TenantRepo {
 var ErrTenantNotFound = errors.New("tenant not found")
 
 // ResolveSlug returns the TEXT tenant id for an active slug.
-// Used at startup to map config like lark_default_tenant_slug to the
-// actual id stored on user_feedback rows.
+// Used at startup to map an operator-supplied tenant slug to the actual
+// id stored on user_feedback rows.
 func (r *TenantRepo) ResolveSlug(ctx context.Context, slug string) (string, error) {
 	var id string
 	err := r.pool.QueryRow(

@@ -18,7 +18,7 @@ import (
 // raw-webhook destinations go through outbox (external customers need
 // at-least-once). Inline notifier paths (#34 outbound adapter SDK) are
 // outside this worker; the worker only drains raw-webhook rows.
-// Historical note: pre-#66 the inline path was the Lark group bot — a
+// Historical note: pre-#66 the inline path was the IM group bot — a
 // missed card to an internal PM, not a missed delivery to a paying
 // customer. a follow-up may unify if inline routing returns via #34.
 type OutboxWorker struct {

@@ -300,8 +300,8 @@ func (x *Tenant) GetTimezone() string {
 }
 
 // SessionUser is the logged-in console user.
-// open_id is an opaque per-user identifier; pre-#66 it carried the Lark
-// open_id but post-removal it is now an attune-internal user id.
+// open_id is an opaque per-user identifier — historically carried an
+// upstream IM open_id but is now an attune-internal user id.
 type SessionUser struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OpenId        string                 `protobuf:"bytes,1,opt,name=open_id,json=openId,proto3" json:"open_id,omitempty"`

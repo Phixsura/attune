@@ -123,7 +123,7 @@
     "empty_body": "签一把就能把 ingest API 接到你的产品里。明文 key 仅签发时返回一次。"
   },
   "notify_targets": {
-    "subtitle": "告诉Attune把反馈推到哪里——飞书群机器人 webhook、或你自己的 HTTPS 接收端。",
+    "subtitle": "告诉 Attune 把反馈推到哪里——你自己的 HTTPS 接收端。",
     "create_button": "+ 添加目标",
     "test_button": "测试",
     "delete_button": "删除",
@@ -136,19 +136,13 @@
       "status": "状态"
     },
     "type_label": {
-      "lark-bot": "飞书群机器人",
       "raw-webhook": "自定义 webhook"
     },
     "create_dialog": {
       "title": "添加通知目标",
-      "type_field": "类型",
-      "type_lark": "飞书群机器人（粘贴群机器人 webhook URL）",
-      "type_raw": "自定义 webhook（你自己的 HTTPS 接收端）",
       "url_field": "Webhook URL",
-      "url_help_lark": "在飞书群里：设置 → 群机器人 → 自定义机器人 → 复制 webhook 地址",
       "url_help_raw": "你的 HTTPS 端点。HMAC 签名将通过 X-Attune-Signature header 发送。",
       "secret_field": "签名 secret",
-      "secret_help_lark": "可选——如果你在飞书机器人启用了「签名校验」，把那个字符串粘过来",
       "secret_help_raw": "建议至少 32 字节随机串。空 = 不签名。",
       "timeout_field": "超时（秒）",
       "audience_field": "受众范围"
@@ -171,9 +165,7 @@
       "disabled_field": "暂停（disabled）— 关闭后停止接收推送"
     },
     "empty_title": "还没有通知目标",
-    "empty_body": "加一个飞书群机器人或自定义 webhook，反馈来了就推送过去。",
-    "lark_chip_active": "✓ 飞书已接入",
-    "lark_chip_disabled": "飞书已配置但已暂停"
+    "empty_body": "加一个自定义 webhook，反馈来了就推送过去。"
   },
   "feedback": {
     "subtitle": "你产品里来自用户的所有反馈。AI 自动分类。维度由你在「分类设置」自定义。",
@@ -206,7 +198,7 @@
       "enrichedAt": "富化于"
     },
     "empty_title": "还没有反馈",
-    "empty_body": "把 API key 接到你的产品里。新反馈到了 1 分钟内会出现在这里，飞书群也会同步。",
+    "empty_body": "把 API key 接到你的产品里。新反馈到了 1 分钟内会出现在这里，配置好的 webhook 目标也会同步。",
     "stats": {
       "title": "本月分布",
       "summary": "汇总",

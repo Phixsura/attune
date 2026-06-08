@@ -32,7 +32,7 @@ func NewIngestor(r *feedback.FeedbackRepo, e *enrich.Enricher) *Ingestor {
 // IngestRow validates input, persists it, and fires off best-effort
 // enrichment. Returns the new row id. tenantID is the TEXT tenants.id;
 // keyID is the UUID of the api key used to authenticate (uuid.Nil for
-// non-API-key sources like the Lark webhook).
+// non-API-key sources like the #66 inbound webhook / email adapters).
 func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
 	const where = "service.Ingestor.IngestRow"
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,key_id:%s,source:%s,content_len:%d",
@@ -51,11 +51,11 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d", where, tenantID, id)
 	if i.enricher != nil {
-		// Capture the inbound trace_id (Lark / customer webhook) and
-		// the OTel SpanContext (attune's own trace) so the async
-		// enrich goroutine inherits both. Downstream the enricher
-		// propagates traceparent on its LLM call, which lets the
-		// trace backend join attune's spans with the gateway's.
+		// Capture the inbound trace_id (customer webhook / email
+		// adapter) and the OTel SpanContext (attune's own trace) so
+		// the async enrich goroutine inherits both. Downstream the
+		// enricher propagates traceparent on its LLM call, which lets
+		// the trace backend join attune's spans with the gateway's.
 		go i.fireEnrich(ctx, id, trace.FromContext(ctx))
 	}
 	return id, nil
@@ -63,7 +63,8 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 
 // composeUserID prefixes every external-source row with the api key
 // uuid so we can trace which key submitted what, while preserving any
-// upstream user id (e.g. Lark open_id) for later support lookups.
+// upstream user id (e.g. email From: / webhook source_user) for later
+// support lookups.
 func composeUserID(keyID uuid.UUID, sourceUser string) string {
 	uid := "ext_" + keyID.String()
 	if sourceUser != "" {
@@ -89,7 +90,7 @@ func (i *Ingestor) fireEnrich(inboundCtx context.Context, id int64, traceID stri
 	// Detach the OTel SpanContext onto a fresh bounded ctx:
 	// - the new ctx survives the inbound HTTP request closing (60s timeout);
 	// - the OTel SpanContext rides along, keeping trace_id stitched;
-	// - the inbound business trace_id (Lark / customer) is propagated via trace.WithID.
+	// - the inbound business trace_id (customer / inbound adapter) is propagated via trace.WithID.
 	span := oteltrace.SpanFromContext(inboundCtx)
 	ctx, cancel := context.WithTimeout(
 		oteltrace.ContextWithSpanContext(context.Background(), span.SpanContext()),

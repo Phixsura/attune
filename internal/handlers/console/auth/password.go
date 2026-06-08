@@ -5,10 +5,10 @@
 // equalising-dummy verify, the login + logout HTTP endpoints, and the
 // startup BootstrapAdmin helper.
 //
-// This package replaces internal/handlers/console/oauth — the Lark OAuth
-// flow is removed in Plan T17, the dev_login backdoor with it. The
-// post-login redirect helper redirectIsSafe is rescued verbatim from
-// oauth.go into redirect.go (same logic, new home).
+// This package replaces internal/handlers/console/oauth — the
+// external-OAuth flow is removed in Plan T17, the dev_login backdoor
+// with it. The post-login redirect helper redirectIsSafe is rescued
+// verbatim from oauth.go into redirect.go (same logic, new home).
 package auth
 
 import (

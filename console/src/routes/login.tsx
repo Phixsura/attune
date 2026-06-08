@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-// Login is local-admin email + password (#66 replaces the Lark OAuth
-// button). The form POSTs JSON to /fb/v1/console/install/login; on
+// Login is local-admin email + password (#66 replaces the external
+// OAuth button). The form POSTs JSON to /fb/v1/console/install/login; on
 // success the server returns { redirect: "/console/..." } which we
 // honour (or fall back to /console/).
 //

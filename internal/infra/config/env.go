@@ -36,15 +36,6 @@ func applyEnvOverrides(yc *yamlConfig) error {
 		{"FEEDBACK_API_LLM_OPENAI_BASE_URL", &yc.LLMOpenAIBaseURL},
 		{"FEEDBACK_API_LLM_OPENAI_API_KEY", &yc.LLMOpenAIAPIKey},
 		{"FEEDBACK_API_LLM_MODEL", &yc.LLMModel},
-		{"FEEDBACK_API_LARK_SIGNING_SECRET", &yc.LarkSigningSecret},
-		{"FEEDBACK_API_LARK_VERIFICATION_TOKEN", &yc.LarkVerificationToken},
-		{"FEEDBACK_API_LARK_DEFAULT_TENANT_SLUG", &yc.LarkDefaultTenantSlug},
-		{"FEEDBACK_API_FEEDBACK_POOL_WEBHOOK_URL", &yc.FeedbackPoolWebhookURL},
-		{"FEEDBACK_API_FEEDBACK_POOL_WEBHOOK_SECRET", &yc.FeedbackPoolWebhookSecret},
-		{"FEEDBACK_API_DEV_RADAR_WEBHOOK_URL", &yc.DevRadarWebhookURL},
-		{"FEEDBACK_API_DEV_RADAR_WEBHOOK_SECRET", &yc.DevRadarWebhookSecret},
-		{"FEEDBACK_API_LARK_APP_ID", &yc.LarkAppID},
-		{"FEEDBACK_API_LARK_APP_SECRET", &yc.LarkAppSecret},
 		{"FEEDBACK_API_CONSOLE_SESSION_KEY", &yc.ConsoleSessionKey},
 		{"FEEDBACK_API_CONSOLE_BASE_URL", &yc.ConsoleBaseURL},
 	} {
@@ -69,7 +60,6 @@ func applyEnvOverrides(yc *yamlConfig) error {
 		dst *bool
 	}{
 		{"FEEDBACK_API_CONSOLE_INSECURE_COOKIES", &yc.ConsoleInsecureCookies},
-		{"FEEDBACK_API_CONSOLE_DEV_LOGIN", &yc.ConsoleDevLogin},
 		{"FEEDBACK_API_RATE_LIMIT_DISABLED", &yc.RateLimitDisabled},
 	} {
 		if v := os.Getenv(b.env); v != "" {

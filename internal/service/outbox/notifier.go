@@ -20,8 +20,9 @@ import (
 // member errors are collected via errors.Join but a single failure
 // never blocks the others — webhook outages must not cascade.
 //
-// Today production wiring builds a single LarkWebhook (raw-webhook delivers via outbox, not inline) — MultiNotifier is reserved for future multi-channel fanout. A follow-up adds
-// Slack / Discord adapters using the same Notifier shape.
+// Today production wiring has no inline notifier (raw-webhook delivers
+// via outbox; the inline-fanout slot is reserved for the #34 outbound
+// adapter SDK).
 type MultiNotifier struct {
 	members []notify.Notifier
 }

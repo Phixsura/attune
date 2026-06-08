@@ -19,7 +19,7 @@ import (
 )
 
 // Handler owns the local-admin login + logout endpoints (#66 Plan T11)
-// that replace the deleted Lark OAuth flow.
+// that replace the deleted external-OAuth flow.
 type Handler struct {
 	signer  *session.Signer
 	admins  *admin.Repo

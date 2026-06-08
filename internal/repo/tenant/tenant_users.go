@@ -12,8 +12,8 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
-// TenantUser is a row in the tenant_users table — one Lark user inside
-// one tenant. Session lookups read from here; Future RBAC reads the Role
+// TenantUser is a row in the tenant_users table — one user inside one
+// tenant. Session lookups read from here; future RBAC reads the Role
 // column.
 type TenantUser struct {
 	ID         string
@@ -40,8 +40,8 @@ func NewTenantUserRepo(pool *pgxpool.Pool) *TenantUserRepo {
 
 // Upsert idempotently inserts a tenant_user. If the (tenant_id, open_id)
 // pair already exists, name + avatar + last_seen_at are refreshed (the
-// user may have changed their display info in Lark). Role is NOT updated
-// here — that's an admin action.
+// user may have updated their display info upstream). Role is NOT
+// updated here — that's an admin action.
 //
 // Returns the row ID (UUID).
 func (r *TenantUserRepo) Upsert(
@@ -70,8 +70,8 @@ func (r *TenantUserRepo) Upsert(
 }
 
 // GetByID returns the row by surrogate UUID. Session reads use this
-// because the cookie carries the row id (not the open_id, which is a
-// Lark identity we don't want leaking into our session payload).
+// because the cookie carries the row id (not the open_id, which is an
+// upstream identity we don't want leaking into our session payload).
 func (r *TenantUserRepo) GetByID(ctx context.Context, id string) (*TenantUser, error) {
 	var u TenantUser
 	err := r.pool.QueryRow(

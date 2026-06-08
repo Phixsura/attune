@@ -14,8 +14,9 @@ import (
 )
 
 // runTenant dispatches `attune tenant <verb>` subcommands.
-// only exposes `create`; a follow-up control plane will add `list / activate /
-// deactivate / set-lark-key` once the OAuth flow lands.
+// only exposes `create`; a follow-up control plane will add `list /
+// activate / deactivate` once the admin UI grows beyond the inbound
+// source CRUD surface.
 func runTenant(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: attune tenant create --slug <s> [--name <n>]")

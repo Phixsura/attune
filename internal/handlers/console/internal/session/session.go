@@ -38,7 +38,7 @@ const (
 )
 
 // Payload is what gets HMAC-signed into the cookie. UserID is the
-// surrogate uuid from tenant_users (NOT the Lark open_id, kept server-
+// surrogate uuid from tenant_users (NOT any upstream open_id, kept server-
 // side). ExpiresAt is unix seconds — keep this struct small, it's
 // base64-roundtripped on every request.
 type Payload struct {
