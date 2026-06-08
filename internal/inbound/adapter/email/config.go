@@ -34,25 +34,29 @@ const defaultFolder = "INBOX"
 
 // parseEmailConfig — decrypts the inbound_sources.config envelope and
 // returns the typed view + the resolved IMAP password (also decrypted).
-// Caller is responsible for clearing the password from memory ASAP.
-func parseEmailConfig(raw []byte, secrets inbound.SecretStore) (Config, string, error) {
+// Password is returned as `[]byte` so the caller can wipe it after
+// LOGIN (Go strings are immutable + GC-only, so a `string` return
+// would pin the plaintext until garbage collection). The caller MUST
+// zero the slice ASAP after handing it to the IMAP client (#66 review
+// M-4).
+func parseEmailConfig(raw []byte, secrets inbound.SecretStore) (Config, []byte, error) {
 	decoded, err := secrets.Decrypt(raw)
 	if err != nil {
-		return Config{}, "", err
+		return Config{}, nil, err
 	}
 	var cfg Config
 	if e := json.Unmarshal(decoded, &cfg); e != nil {
-		return Config{}, "", e
+		return Config{}, nil, e
 	}
 	if cfg.Version != ConfigVersion {
-		return Config{}, "", errors.New("email: unsupported config version")
+		return Config{}, nil, errors.New("email: unsupported config version")
 	}
 	if cfg.Folder == "" {
 		cfg.Folder = defaultFolder
 	}
 	pw, err := secrets.Decrypt(cfg.PasswordEncrypted)
 	if err != nil {
-		return Config{}, "", err
+		return Config{}, nil, err
 	}
-	return cfg, string(pw), nil
+	return cfg, pw, nil
 }

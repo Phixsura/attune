@@ -49,6 +49,17 @@ func (f *fakeSourceRepo) SetEnabled(_ context.Context, id string, enabled bool, 
 	return f.setEnabledErr
 }
 
+// GetBySlugs + UpdateState fill out the inbound.SourceStore surface —
+// the handler doesn't exercise these paths in unit tests but the
+// interface is the framework's, so we satisfy it for the type-check.
+func (f *fakeSourceRepo) GetBySlugs(_ context.Context, _, _, _ string) (inbound.Source, error) {
+	return f.getSrc, f.getErr
+}
+
+func (f *fakeSourceRepo) UpdateState(_ context.Context, _ string, _ inbound.SourceState) error {
+	return nil
+}
+
 // newTestHandler — wires a Handler against fakes. Delete uses h.pool
 // directly (real pgx); tests that exercise Delete pass nil pool +
 // expect 500 "pool not configured" or are deferred to the integration

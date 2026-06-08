@@ -24,6 +24,29 @@ import (
 // so a backlogged mailbox does not stall the loop for tens of minutes.
 const maxBatchUIDs = 100
 
+// maxMessageBytes caps a single RFC822 message fetch. With
+// maxBatchUIDs (100) this bounds peak per-tick memory at ~800 MiB even
+// against a hostile / malformed IMAP server returning enormous bodies
+// (#66 review H-2). Over-size messages are dropped with `validate_err`
+// — the UID cursor still advances so a single bad message doesn't
+// wedge the source.
+const maxMessageBytes = 8 * 1024 * 1024
+
+// errMessageTooLarge — sentinel returned by fetchOne when a message
+// exceeds maxMessageBytes. Maps to validate_err at the caller.
+var errMessageTooLarge = errors.New("email: message exceeds size cap")
+
+// wipe overwrites b with zeros. Used to scrub the decrypted IMAP
+// password from the heap after LOGIN (#66 review M-4). Best-effort —
+// the conversion `string(b)` at the imapclient call site materialises
+// a copy that we can't reach, but zeroing our own slice shortens dwell
+// time and the compiler must respect the loop body.
+func wipe(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
 // pollSource — connects to the source's IMAP server, searches for new
 // UIDs, fetches and ingests each, applies the after_ingest policy.
 // Authentication-failure marks the source disabled so subsequent
@@ -50,7 +73,16 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		})
 		return
 	}
+	defer wipe(password)
 
+	if err := ValidateOutboundHost(cfg.Host); err != nil {
+		logext.Warnf(ctx, "[%s] blocked host,source_id:%s,host:%s,err:%s",
+			where, src.ID, cfg.Host, err.Error())
+		_ = a.deps.Sources.SetEnabled(ctx, src.ID, false, "imap host blocked")
+		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
+		a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", false)
+		return
+	}
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
 	options := ptrext.Of(imapclient.Options{})
 	cli, err := dialIMAP(ctx, addr, options)
@@ -60,18 +92,30 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 	}
 	defer func() { _ = cli.Logout() }()
 
-	if err := cli.Login(cfg.Username, password).Wait(); err != nil {
-		// AUTHENTICATIONFAILED is operator-facing — disable the source
-		// so the next 60s tick does not retry; admin must reconnect.
-		// We deliberately log + persist a sanitised constant message —
-		// servers occasionally echo the LOGIN command back in BAD/NO
-		// responses, which could leak the password fragment to
-		// console + log readers (review M2, #66). Operators see the
-		// real error in the IMAP server's own logs.
-		logext.Warnf(ctx, "[%s] login failed,source_id:%s", where, src.ID)
-		_ = a.deps.Sources.SetEnabled(ctx, src.ID, false, "imap authentication failed")
-		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "auth_err")
-		a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", false)
+	if err := cli.Login(cfg.Username, string(password)).Wait(); err != nil {
+		// Only **AUTHENTICATIONFAILED** disables the source — that's the
+		// operator-actionable case (wrong creds, account locked out,
+		// app-password revoked). Network timeouts / TLS resets /
+		// server-side BAD or NO responses without a specific code are
+		// transient and should NOT auto-disable: a single bad TCP
+		// round-trip would otherwise flip a healthy source off and
+		// require manual operator re-enable (#66 review H-1).
+		//
+		// We log a sanitised constant message because servers
+		// occasionally echo the LOGIN command back in BAD/NO responses,
+		// which could leak the password fragment to console + log
+		// readers (review M2, #66). Operators see the real error in
+		// the IMAP server's own logs.
+		var imapErr *imap.Error
+		if errors.As(err, &imapErr) && imapErr.Code == imap.ResponseCodeAuthenticationFailed {
+			logext.Warnf(ctx, "[%s] login auth failed (disabling),source_id:%s", where, src.ID)
+			_ = a.deps.Sources.SetEnabled(ctx, src.ID, false, "imap authentication failed")
+			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "auth_err")
+			a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", false)
+			return
+		}
+		logext.Warnf(ctx, "[%s] login transient err,source_id:%s", where, src.ID)
+		a.transientError(ctx, src, "login: transient")
 		return
 	}
 
@@ -145,6 +189,16 @@ func (a *adapter) ingestUIDs(ctx context.Context, cli *imapclient.Client, src in
 		}
 		raw, ferr := fetchOne(cli, uid)
 		if ferr != nil {
+			// errMessageTooLarge is a validate_err (the message is
+			// permanently un-ingestable; advancing the cursor prevents
+			// an infinite retry loop). Anything else is transient_err.
+			if errors.Is(ferr, errMessageTooLarge) {
+				logext.Warnf(ctx, "[%s] msg too large,source_id:%s,uid:%d,cap:%d",
+					where, src.ID, uid, maxMessageBytes)
+				a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
+				lastUID = int64(uid)
+				continue
+			}
 			logext.Warnf(ctx, "[%s] fetch failed,source_id:%s,uid:%d,err:%+v",
 				where, src.ID, uid, ferr.Error())
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "transient_err")
@@ -264,9 +318,15 @@ func fetchOne(cli *imapclient.Client, uid imap.UID) ([]byte, error) {
 				break
 			}
 			if body, ok := item.(imapclient.FetchItemDataBodySection); ok {
-				b, err := io.ReadAll(body.Literal)
+				// LimitReader to maxMessageBytes+1: if we get the +1
+				// byte, the server tried to hand us something too big
+				// for downstream parsing.
+				b, err := io.ReadAll(io.LimitReader(body.Literal, maxMessageBytes+1))
 				if err != nil {
 					return nil, err
+				}
+				if len(b) > maxMessageBytes {
+					return nil, errMessageTooLarge
 				}
 				return b, nil
 			}

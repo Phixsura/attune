@@ -53,9 +53,12 @@ type ShutdownTimeouter interface {
 }
 
 // Mux — narrow router-agnostic surface the framework hands to push
-// adapters. Deliberately not chi.Router so the framework boundary stays
-// decoupled from chi. cmd/attune passes a chiMux that satisfies this;
-// in tests inboundtest supplies a FakeMux struct.
+// adapters. `chi.Router` already satisfies this interface in production
+// (cmd/attune passes the sub-router directly), and `inboundtest.FakeMux`
+// records calls in tests. We keep the interface — instead of typing
+// Deps.Mux as `chi.Router` outright — so tests don't have to implement
+// chi's full surface (#66 review M-6; the ChiMux wrapper struct was
+// deleted as a no-op indirection).
 type Mux interface {
 	Method(method, pattern string, h http.Handler)
 }

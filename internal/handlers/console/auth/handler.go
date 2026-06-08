@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -135,6 +136,17 @@ func (h *Handler) authenticate(ctx context.Context, w http.ResponseWriter, req *
 		return admin.Admin{}, false
 	}
 
+	// Lock expired but counter still hot — fresh attempt window starts
+	// now. Without this reset the attacker would re-lock the admin on
+	// the very next failed try (failed_attempts already == threshold),
+	// turning the 15-min lockout into an indefinite DoS (#66 review
+	// M-1, paired with the `=` threshold tweak in the repo).
+	if a.LockedUntil != nil && a.FailedAttempts > 0 {
+		if err := h.admins.ResetFailedAttempts(ctx, a.ID); err != nil {
+			logext.Warnf(ctx, "[%s] reset expired lock counter failed,err:%+v", where, err.Error())
+		}
+	}
+
 	if !VerifyOrDummy(a.PasswordHash, req.GetPassword()) {
 		if err := h.admins.IncrementFailedAttempts(ctx, a.ID); err != nil {
 			logext.Warnf(ctx, "[%s] IncrementFailedAttempts failed,err:%+v", where, err.Error())
@@ -200,21 +212,34 @@ func originAllowed(r *http.Request, baseURL string) bool {
 	return sameOrigin(origin, baseURL)
 }
 
-// sameOrigin compares the scheme + host portion of two URLs. A trailing
-// path is allowed (Referer typically includes one); the comparison
-// ignores everything past the host.
+// sameOrigin compares the scheme + host:port portion of two URLs.
+// Trailing path is allowed (Referer typically includes one); we
+// normalise default ports (`:443` for https, `:80` for http) so an
+// explicit `https://x:443` matches an implicit `https://x` (#66
+// review NIT). Scheme is part of the comparison — an http origin
+// cannot impersonate https.
 func sameOrigin(got, want string) bool {
-	return originHost(got) == originHost(want)
+	a, ok1 := originKey(got)
+	b, ok2 := originKey(want)
+	return ok1 && ok2 && a == b
 }
 
-func originHost(u string) string {
-	// strip scheme
-	if i := strings.Index(u, "://"); i >= 0 {
-		u = u[i+3:]
+// originKey returns "<scheme>://<host>:<port>" with default ports
+// stripped, suitable for direct string equality. Returns (_, false)
+// on parse failure.
+func originKey(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", false
 	}
-	// strip path / query / fragment
-	if i := strings.IndexAny(u, "/?#"); i >= 0 {
-		u = u[:i]
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
 	}
-	return strings.ToLower(u)
+	if port != "" {
+		return scheme + "://" + host + ":" + port, true
+	}
+	return scheme + "://" + host, true
 }

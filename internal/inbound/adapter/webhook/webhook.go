@@ -21,8 +21,7 @@ func init() {
 var nowFn = time.Now
 
 type adapter struct {
-	deps       inbound.Deps
-	stubSecret []byte
+	deps inbound.Deps
 }
 
 // NewAdapter — exposed constructor. Production registration runs via
@@ -39,13 +38,14 @@ func (a *adapter) ShutdownTimeout() time.Duration { return 0 }
 
 // Start mounts POST /v1/inbound/webhook/{tenant-slug}/{source-slug} on
 // the framework Mux. The HTTP server is owned by cmd/attune; this
-// adapter only registers its route. The stub secret is initialised here
-// (lazy in ProcessStubSecret) so it exists by the time the first
-// request lands; the unauth path runs one HMAC verify against it for
-// enumeration resistance (spec §Webhook adapter).
+// adapter only registers its route. The process-stub secret is
+// lazy-initialised the first time `handle` reaches the unauth path —
+// no need to materialise it at Start time (#66 review H-4 dropped the
+// adapter-level cached field; ProcessStubSecret is itself a
+// sync.Once-guarded singleton, the second indirection was pure
+// duplication).
 func (a *adapter) Start(_ context.Context, deps inbound.Deps) error {
 	a.deps = deps
-	a.stubSecret = ProcessStubSecret()
 	deps.Mux.Method(
 		http.MethodPost,
 		"/webhook/{tenant-slug}/{source-slug}",

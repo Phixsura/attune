@@ -112,6 +112,14 @@ func (r *Repo) GetByID(ctx context.Context, id string) (Admin, error) {
 
 // IncrementFailedAttempts bumps the counter and applies a 15-minute
 // lockout once it reaches maxFailedAttempts.
+//
+// `=` (not `>=`) on the threshold check: locks fire **only** on the
+// exact transition, never on subsequent attempts. The Login handler
+// must clear the counter once a prior lock has expired (see
+// `auth.Handler.authenticate`), otherwise an attacker continuing to
+// hammer the admin past the first lockout would re-extend the lock
+// every attempt — indefinitely DoSing a legitimate admin (#66 review
+// M-1).
 func (r *Repo) IncrementFailedAttempts(ctx context.Context, id string) error {
 	// Bug found during Phase-4 validation: the prior form passed
 	// `lockoutDuration.Seconds()` as an int into `$3 || ' seconds'`,
@@ -124,7 +132,7 @@ func (r *Repo) IncrementFailedAttempts(ctx context.Context, id string) error {
 		`UPDATE admins
 		    SET failed_attempts = failed_attempts + 1,
 		        locked_until = CASE
-		            WHEN failed_attempts + 1 >= $2 THEN now() + $3::interval
+		            WHEN failed_attempts + 1 = $2 THEN now() + $3::interval
 		            ELSE locked_until
 		        END,
 		        updated_at = now()

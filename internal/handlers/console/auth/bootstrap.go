@@ -47,6 +47,15 @@ func BootstrapAdmin(ctx context.Context, repo *admin.Repo) error {
 			where,
 		)
 	}
+	// Same length floor as the self-service change-password endpoint
+	// (#66 review M-2). Fail boot loudly rather than persisting a weak
+	// hash that the admin can't strengthen later without re-bootstrapping.
+	if len(pass) < minNewPasswordLen {
+		return fmt.Errorf(
+			"[%s] ATTUNE_BOOTSTRAP_ADMIN_PASSWORD must be at least %d characters (got %d)",
+			where, minNewPasswordLen, len(pass),
+		)
+	}
 	hash, err := HashPassword(pass)
 	if err != nil {
 		return fmt.Errorf("[%s] hash password: %w", where, err)

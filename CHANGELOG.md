@@ -59,9 +59,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     `cmd/attune/main.go` (Caddy/Bento pattern) — adding a new channel is one
     package with no edits to `cmd/`.
   - **Conformance**: `internal/inbound/inboundtest` ships fakes
-    (FakeIngest / FakeSources / FakeSecrets / FakeMetrics / FakeLogger /
-    FakeMux) and a `TestAdapterContract` with six gates every adapter
-    must pass.
+    (FakeIngest / FakeSources / FakeSecrets / FakeMetrics / FakeMux)
+    and a `TestAdapterContract` with five gates every adapter must
+    pass (ChannelNonEmpty / StartShutdownOK / CtxCancelGraceful /
+    IdempotentShutdown / DuplicateRegisterPanics).
   - **Console**: a first-class **inbound sources** page at
     `/console/inbound-sources` — CRUD + rotate + pause/resume + test
     connection, served by `internal/handlers/console/inbound` against the
@@ -152,13 +153,66 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   client surface to an `imapOps { MarkSeen(uid); MoveTo(uid, mailbox) }`
   interface — production wraps a live `*imapclient.Client`, tests drop in
   a recording stub. STORE/MOVE failures are logged via
-  `inbound.Logger.Warnf` and swallowed: the `lastUID` cursor in
+  `logext.Warnf` and swallowed: the `lastUID` cursor in
   `pollSource` is the correctness primitive and has already advanced, so
   a one-shot wire failure is recoverable on the next round without
   duplicate ingest. `move_to:` with an empty folder degrades to
   `mark_seen` rather than passing an empty mailbox to IMAP.
 
-### Removed
+### Fixed
+
+- **CodeQL `go/allocation-size-overflow` on AES-GCM encrypt paths**
+  (#66 / commit `e6142cc`). The `internal/inbound/secrets.go` and
+  `internal/inbound/inboundtest/fakes.go` Encrypt functions now bound
+  the plaintext at 1 MiB before constructing the output slice, which
+  prevents an attacker-controlled length from causing an integer
+  overflow in slice capacity arithmetic. CI's CodeQL "Go" job was
+  failing on the first scan; the cap matches the inbound-source
+  config / webhook secret use case (both under 1 KiB in practice).
+
+### Security
+
+- **#66 hardening pass (1 BLOCKER + 6 HIGH + 8 MEDIUM after Phase-4
+  Chrome E2E)**.
+  - Email adapter Shutdown now honours the per-adapter timeout —
+    `wg.Wait()` is multiplexed against `ctx.Done()` so a wedged IMAP
+    `Login/Select/UIDSearch/fetchOne` blocking read can no longer pin
+    the whole process at shutdown (B1).
+  - IMAP LOGIN failures only auto-disable the source on
+    AUTHENTICATIONFAILED — transient network errors stay transient,
+    preventing a single bad TCP round-trip from flipping a healthy
+    source off (H-1).
+  - Per-message size cap (`maxMessageBytes = 8 MiB`) on email fetch +
+    parse paths. Over-size messages mark `validate_err` and advance
+    the cursor; bounds peak per-tick RSS at ~800 MiB against a
+    malformed / hostile server (H-2).
+  - `Rotate` handler now uses the `next_eligible_at` value the
+    rotator computed (and persisted into the DB envelope) — the
+    response field and the actual grace boundary agree to the
+    nanosecond. Prior recompute drifted by microseconds (H-3).
+  - Webhook `adapter.stubSecret` cached field deleted; `handle` calls
+    the `ProcessStubSecret` package-level sync.Once singleton
+    directly. Two layers of caching collapsed to one (H-4).
+  - SSRF guard at both runtime poll and console TestConnection:
+    `email.ValidateOutboundHost` rejects link-local (covers AWS / GCP
+    IMDS 169.254.169.254), unspecified, and IPv4 multicast. Loopback
+    + RFC1918 stay allowed on purpose for on-prem deployments (M-3).
+  - Decrypted IMAP password returned as `[]byte` instead of `string`
+    and explicitly zeroed after LOGIN — Go strings are immutable, so
+    the prior `string` return pinned plaintext until GC. (M-4)
+  - Bcrypt lockout: `IncrementFailedAttempts` only sets
+    `locked_until` on the exact `failed_attempts + 1 = $threshold`
+    transition (was `>=`), AND the auth handler resets
+    `failed_attempts` after a prior lockout expires — together they
+    close the indefinite-DoS-of-legitimate-admin loophole (M-1).
+  - `BootstrapAdmin` now enforces the same 12-character password
+    floor as `ChangePassword` — the operator can no longer ship a
+    weak first-admin password by env-var (M-2).
+- **#66 cleanup pass** (M-5 / M-6): collapsed the consumer-side
+  `sourceRepo` interface in the console handler to the framework's
+  own `inbound.SourceStore`; deleted `internal/inbound/chi_mux.go`
+  (a `chi.Router` directly satisfies the `inbound.Mux` single-method
+  interface).
 
 - **BREAKING — integral Lark removal** (#66). The Lark Open Platform
   integration ships its **destructive** retirement in v0.3 — there is no

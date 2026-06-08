@@ -82,22 +82,17 @@ type rotator func(ctx context.Context, pool *pgxpool.Pool, secrets inbound.Secre
 // nil/err without opening a TCP socket.
 type testConnFn func(ctx context.Context, cfg testConnInputs) error
 
-// sourceRepo is the read surface of inboundsource.Repo the handler uses.
-// Defined here (consumer-side) so the test file can supply a fake.
-type sourceRepo interface {
-	List(ctx context.Context, channel string) ([]inbound.Source, error)
-	Get(ctx context.Context, id string) (inbound.Source, error)
-	SetEnabled(ctx context.Context, id string, enabled bool, reason string) error
-}
-
 // tenantLookup resolves a tenant's slug from its id — needed to build
 // the public webhook URL the create response surfaces. Production uses
 // the tenants table; tests stub.
 type tenantLookup func(ctx context.Context, tenantID string) (string, error)
 
 // Handler implements the /fb/v1/console/inbound/sources surface.
+// `sources` types as the framework's own `inbound.SourceStore` so the
+// handler and the adapter framework share one interface (#66 review
+// M-5; the prior 3-method `sourceRepo` was a strict subset).
 type Handler struct {
-	sources    sourceRepo
+	sources    inbound.SourceStore
 	pool       *pgxpool.Pool
 	secrets    inbound.SecretStore
 	baseURL    string
@@ -514,9 +509,14 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to rotate secret")
 		return
 	}
+	// Reuse the `nextEligible` that the rotator already computed (and
+	// persisted into the on-disk envelope). Recomputing `time.Now() +
+	// GraceWindow` here drifted by microseconds vs the DB value (#66
+	// review H-3); the response field and the actual grace boundary
+	// now agree to the nanosecond.
 	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.RotateInboundSourceSecretResponse{
 		SecretHex:      hex.EncodeToString(newSecret),
-		NextEligibleAt: time.Now().Add(webhook.GraceWindow).UTC().Format(time.RFC3339),
+		NextEligibleAt: nextEligible.UTC().Format(time.RFC3339),
 	}))
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s", where, auth.TenantID, id)
 }
@@ -706,6 +706,12 @@ type testConnInputs struct {
 // needs one. After dial, runs LOGIN / SELECT / LOGOUT. Returns any
 // error verbatim — the handler wraps it into the proto response.
 func imapDialAndProbe(_ context.Context, cfg testConnInputs) error {
+	if err := email.ValidateOutboundHost(cfg.Host); err != nil {
+		// SSRF guard (#66 review M-3) — surfaces the validate-shape
+		// error verbatim. The handler wraps it into the proto response;
+		// operators see the blocked-host detail.
+		return err
+	}
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
 	opt := ptrext.Of(imapclient.Options{})
 	cli, err := imapclient.DialTLS(addr, opt)

@@ -71,7 +71,6 @@ func TestWebhookHandle_EmitsLatencyAndSourceStateOnSuccess(t *testing.T) {
 			Secrets: secrets,
 			Metrics: metrics,
 		},
-		stubSecret: ProcessStubSecret(),
 	}
 
 	// Sign a valid request.

@@ -71,8 +71,13 @@ func (a *adapter) Start(_ context.Context, deps inbound.Deps) error {
 	return nil
 }
 
-// Shutdown cancels the pollLoop and waits for it to drain. Idempotent.
-func (a *adapter) Shutdown(_ context.Context) error {
+// Shutdown cancels the pollLoop and waits for it to drain, but honours
+// the ctx deadline so a wedged IMAP blocking-read can't pin the whole
+// process from exiting. Manager calls us with `ShutdownTimeout()`
+// (10 s); after that we return — leaked goroutines will die on their
+// own when the process exits, the cancel() already told them to. (#66
+// review B1.) Idempotent.
+func (a *adapter) Shutdown(ctx context.Context) error {
 	a.mu.Lock()
 	cancel := a.cancel
 	a.cancel = nil
@@ -80,6 +85,15 @@ func (a *adapter) Shutdown(_ context.Context) error {
 	if cancel != nil {
 		cancel()
 	}
-	a.wg.Wait()
-	return nil
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

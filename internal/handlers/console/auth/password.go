@@ -12,8 +12,6 @@
 package auth
 
 import (
-	"errors"
-
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -34,7 +32,7 @@ func VerifyOrDummy(realHash, password string) bool {
 		_ = bcrypt.CompareHashAndPassword([]byte(stubHash), []byte(password))
 		return false
 	}
-	return errors.Is(bcrypt.CompareHashAndPassword([]byte(realHash), []byte(password)), nil)
+	return bcrypt.CompareHashAndPassword([]byte(realHash), []byte(password)) == nil
 }
 
 // HashPassword wraps bcrypt.GenerateFromPassword at cost 12 (the 2024

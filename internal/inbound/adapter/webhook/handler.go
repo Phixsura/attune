@@ -82,7 +82,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 		// status match a real auth failure. (The spec asks for one
 		// HMAC verify, not full-shape equivalence to the authenticated
 		// path — we stay literal to keep the surface small.)
-		_ = verifyHMACAgainstStub(a.stubSecret, ts, body, sig)
+		_ = verifyHMACAgainstStub(ProcessStubSecret(), ts, body, sig)
 		a.deps.Metrics.Total(channelName, unknownLabel, unknownLabel, "auth_err")
 		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid")
 		return

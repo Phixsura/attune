@@ -623,7 +623,6 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
   "username": "feedback@team.com",
   "password_encrypted": "<base64 envelope ciphertext>",
   "folder": "INBOX",
-  "poll_interval_seconds": 60,
   "start_from": "now",
   "after_ingest": "mark_seen"
 }
@@ -631,6 +630,14 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 
 `start_from` ∈ `{"now", "all_unseen"}` (default `now` — skip backlog).
 `after_ingest` ∈ `{"mark_seen", "keep_unseen", "move_to:<folder>"}` (default `mark_seen` — matches helpdesk convention; `keep_unseen` available for users who want their mailbox UI to keep new-message indicators).
+
+> **#66 review H-2 (post-implementation):** `poll_interval_seconds` was
+> originally part of this envelope but never consumed — the batch-loop
+> `pollLoop` uses a fixed 60 s `loopInterval` for all sources. The
+> field was retired before release (proto: `reserved 7`; Go / TS / SPA
+> wizard: deleted). A per-source goroutine refactor that honours an
+> operator-specified interval is a future follow-up; when it lands it
+> will reintroduce the field at a new tag.
 
 **Library choices**
 
@@ -782,7 +789,7 @@ column reflects the **last successful** file and an operator can re-invoke
 the runner to resume from the next file — there is no "poisoned half-applied"
 state because each file is atomic.
 
-**Destructive-data guard.** Migration `202606081200_drop_lark.sql` deletes
+**Destructive-data guard.** Migration `015_drop_lark.sql` deletes
 arbitrary numbers of `user_feedback` rows. Before applying it, the runner
 checks:
 
@@ -803,7 +810,7 @@ normally.
 
 Three migrations, applied in order:
 
-#### `202606081200_drop_lark.sql`
+#### `015_drop_lark.sql`
 
 ```sql
 -- Hard-delete all Lark-bound data + schema. Pre-1.0; no customer retention.
@@ -833,11 +840,11 @@ COMMIT;
 
 (Column / table names verified against the live schema during PR implementation; `IF EXISTS` clauses keep the migration safe across minor schema drift.)
 
-#### `202606081201_create_admins.sql`
+#### `016_create_admins.sql`
 
 (See `admins` DDL above.)
 
-#### `202606081202_create_inbound_sources.sql`
+#### `017_create_inbound_sources.sql`
 
 ```sql
 BEGIN;
@@ -1001,9 +1008,9 @@ internal/handlers/console/auth/
 internal/repo/admin/
     admins.go
 internal/migrations/
-    202606081200_drop_lark.sql
-    202606081201_create_admins.sql
-    202606081202_create_inbound_sources.sql
+    015_drop_lark.sql
+    016_create_admins.sql
+    017_create_inbound_sources.sql
 console/src/pages/Login.tsx
 console/src/pages/InboundSources.tsx
 console/src/pages/InboundSourceNew.tsx
@@ -1099,7 +1106,7 @@ docs/proposals/2026/06/2026-06-06-inbound-adapter-framework.md   (superseded)
 6. Webhook adapter: full implementation + tests + conformance.
 7. Email adapter: full implementation + tests + conformance.
 8. Console inbound UI: `InboundSources.tsx` + `InboundSourceNew.tsx`.
-9. **Lark removal**: file deletes + all EDIT entries; migration `202606081200_drop_lark.sql` runs (with the destructive guard); remove the `lark-*` entries from `ValidSources` left behind in step 1.
+9. **Lark removal**: file deletes + all EDIT entries; migration `015_drop_lark.sql` runs (with the destructive guard); remove the `lark-*` entries from `ValidSources` left behind in step 1.
 10. Proto re-gen (`make proto`); CHANGELOG; README updates.
 11. CLAUDE.md §5 layering increment.
 

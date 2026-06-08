@@ -291,7 +291,10 @@ func setupInbound(ctx context.Context, pool *pgxpool.Pool, ingestor *ingest.Inge
 	// /v1/inbound.
 	subRouter := chi.NewRouter()
 	deps := inbound.Deps{
-		Mux: &inbound.ChiMux{Router: subRouter}, // ptrext:allow chi-router-not-copy-eligible
+		// `chi.Router` already satisfies `inbound.Mux` (single Method
+		// method) — no wrapper needed (#66 review M-6). The old ChiMux
+		// adapter struct was deleted.
+		Mux: subRouter,
 		Ingest: inbound.IngestFunc(func(ctx context.Context, tenantID string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
 			return ingestor.IngestRow(ctx, tenantID, keyID, in)
 		}),
