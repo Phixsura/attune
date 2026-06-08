@@ -188,7 +188,7 @@ func buildConsoleRouter(
 	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
 	feedbackRepo := feedback.NewFeedback(pool)
 
-	authHandler := console.NewAuthHandler(signer, adminRepo, cfg.ConsoleBaseURL)
+	authHandler := console.NewAuthHandler(signer, adminRepo, tenantRepo, cfg.ConsoleBaseURL)
 	changePasswordHandler := console.NewChangePasswordHandler(adminRepo, signer)
 	me := console.NewMeHandler(signer, tenantRepo, userRepo, adminRepo)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)

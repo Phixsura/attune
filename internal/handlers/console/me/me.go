@@ -50,44 +50,63 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 	auth := session.FromContext(ctx)
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,user_id:%s", where, auth.TenantID, auth.UserID)
 
+	// Admin sessions are identified by UserID hitting the admins table.
+	// They may carry a non-empty TenantID (resolved at login by
+	// auth.Handler so tenant-scoped handlers can operate), but /me itself
+	// always renders the admin synthetic profile + a tenant block for
+	// whichever tenant the session is scoped to.
+	if h.admins != nil {
+		if a, err := h.admins.GetByID(ctx, auth.UserID); err == nil {
+			h.meAdmin(ctx, w, a, auth.TenantID)
+			return
+		} else if !errors.Is(err, admin.ErrNotFound) {
+			logext.Errorf(ctx, "[%s] admins.GetByID failed,user_id:%s,err:%+v",
+				where, auth.UserID, err.Error())
+			respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to look up admin")
+			return
+		}
+	}
 	if auth.TenantID == "" {
-		h.meAdmin(ctx, w, auth.UserID)
+		// No admin match AND no tenant — session points nowhere.
+		h.signer.ClearSessionCookie(w)
+		respond.Error(ctx, w, http.StatusUnauthorized, "user_gone", "session subject not found")
 		return
 	}
 	h.meTenantUser(ctx, w, auth.TenantID, auth.UserID)
 }
 
 // adminTenantSlug is the synthetic Tenant.Slug returned in admin-session
-// /me responses. SPA gates on it to suppress tenant-scoped CRUD if the
-// caller is the global admin.
+// /me responses when no real tenant has been resolved at login. The SPA
+// can gate tenant-scoped CRUD on slug == "_admin" if needed.
 const adminTenantSlug = "_admin"
 
-// meAdmin serves the admin-session /me branch.
-func (h *MeHandler) meAdmin(ctx context.Context, w http.ResponseWriter, adminID string) {
+// meAdmin serves the admin-session /me branch. tenantID may be empty
+// (no active tenant yet) or a real tenant id (single-tenant dogfood;
+// auth.Handler stamps the lex-first active tenant on the cookie).
+func (h *MeHandler) meAdmin(ctx context.Context, w http.ResponseWriter, a admin.Admin, tenantID string) {
 	const where = "console.MeHandler.meAdmin"
-	a, err := h.admins.GetByID(ctx, adminID)
-	if err != nil {
-		if errors.Is(err, admin.ErrNotFound) {
-			logext.Warnf(ctx, "[%s] admin row gone,admin_id:%s", where, adminID)
-			h.signer.ClearSessionCookie(w)
-			respond.Error(ctx, w, http.StatusUnauthorized, "user_gone", "admin row is gone")
-			return
+	tenantPB := ptrext.Of(attunev1.Tenant{
+		Id:       adminTenantSlug,
+		Slug:     adminTenantSlug,
+		Name:     "System Admin",
+		Locale:   "",
+		Timezone: "",
+	})
+	if tenantID != "" && h.tenants != nil {
+		if row, err := h.tenants.GetByID(ctx, tenantID); err == nil {
+			tenantPB = ptrext.Of(attunev1.Tenant{
+				Id:       row.ID,
+				Slug:     row.Slug,
+				Name:     row.Name,
+				Locale:   row.Locale,
+				Timezone: row.Timezone,
+			})
+		} else {
+			logext.Warnf(ctx, "[%s] tenant load failed,tenant_id:%s,err:%+v", where, tenantID, err.Error())
 		}
-		logext.Errorf(ctx, "[%s] admins.GetByID failed,admin_id:%s,err:%+v", where, adminID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load admin")
-		return
 	}
-	// The synthetic tenant lets the SPA render its layout shell
-	// (TopBar, etc.) without crashing on a missing Tenant.Slug. The
-	// SPA distinguishes admin from tenant-scoped users via Role.
 	me := ptrext.Of(attunev1.GetMeResponse{
-		Tenant: ptrext.Of(attunev1.Tenant{
-			Id:       adminTenantSlug,
-			Slug:     adminTenantSlug,
-			Name:     "System Admin",
-			Locale:   "",
-			Timezone: "",
-		}),
+		Tenant: tenantPB,
 		User: ptrext.Of(attunev1.SessionUser{
 			OpenId: a.ID,
 			Name:   adminDisplay(a),
@@ -96,7 +115,7 @@ func (h *MeHandler) meAdmin(ctx context.Context, w http.ResponseWriter, adminID 
 		CsrfToken: h.signer.CSRFToken(a.ID),
 	})
 	respond.Proto(w, http.StatusOK, me)
-	logext.Infof(ctx, "[%s] OK,admin_id:%s", where, a.ID)
+	logext.Infof(ctx, "[%s] OK,admin_id:%s,tenant_id:%s", where, a.ID, tenantID)
 }
 
 // adminDisplay falls back to email when display_name is empty so the

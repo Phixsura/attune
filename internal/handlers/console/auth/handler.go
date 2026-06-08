@@ -16,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
 // Handler owns the local-admin login + logout endpoints (#66 Plan T11)
@@ -23,14 +24,16 @@ import (
 type Handler struct {
 	signer  *session.Signer
 	admins  *admin.Repo
+	tenants *tenant.TenantRepo
 	baseURL string
 }
 
 // NewHandler wires the dependencies.
-func NewHandler(signer *session.Signer, admins *admin.Repo, baseURL string) *Handler {
+func NewHandler(signer *session.Signer, admins *admin.Repo, tenants *tenant.TenantRepo, baseURL string) *Handler {
 	return ptrext.Of(Handler{
 		signer:  signer,
 		admins:  admins,
+		tenants: tenants,
 		baseURL: strings.TrimRight(baseURL, "/"),
 	})
 }
@@ -115,9 +118,19 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		logext.Warnf(ctx, "[%s] ResetFailedAttempts failed,err:%+v", where, err.Error())
 	}
 
-	// Admins are global, not tenant-scoped (RBAC for tenants comes in
-	// #38). TenantID stays empty; UserID is the admin row id.
-	if err := h.signer.IssueSessionCookie(w, "", a.ID); err != nil {
+	// Single-tenant dogfood scope: admins act inside the lexicographically
+	// first active tenant if any exists. #38 will add a tenant switcher;
+	// when no tenant exists yet, TenantID stays empty and tenant-scoped
+	// handlers gracefully degrade.
+	scopeTenantID := ""
+	if h.tenants != nil {
+		if id, terr := h.tenants.FirstActiveID(ctx); terr == nil {
+			scopeTenantID = id
+		} else if !errors.Is(terr, tenant.ErrTenantNotFound) {
+			logext.Warnf(ctx, "[%s] FirstActiveID failed,err:%+v", where, terr.Error())
+		}
+	}
+	if err := h.signer.IssueSessionCookie(w, scopeTenantID, a.ID); err != nil {
 		logext.Errorf(ctx, "[%s] IssueSessionCookie failed,err:%+v", where, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
 		return

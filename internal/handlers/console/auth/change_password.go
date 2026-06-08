@@ -41,31 +41,18 @@ func NewChangePasswordHandler(admins *admin.Repo, signer *session.Signer) *Chang
 // ChangePassword handles POST /fb/v1/console/me/change-password.
 //
 // Flow:
-//  1. Resolve auth.UserID; reject tenant-user sessions (TenantID != "").
-//  2. Load admin row; if it vanished, clear cookie + 401 (matches /me).
+//  1. Decode + validate the request body (length, current != new).
+//  2. Load admin row by UserID; if not found OR not an admin, reject
+//     403 (tenant-user sessions can't change passwords here).
 //  3. Verify current_password via VerifyOrDummy (timing-equalised). On
 //     mismatch, return 401 with a generic message — the SPA shows
 //     "current password is wrong" without leaking enumerate-ability.
-//  4. Validate new_password length >= 12 and new != current (a true
-//     rotation, not a re-hash of the same secret).
-//  5. Hash new_password (bcrypt cost 12) and persist.
-//  6. Return 200 ChangePasswordResponse{}.
+//  4. Hash new_password (bcrypt cost 12) and persist.
+//  5. Return 200 ChangePasswordResponse{}.
 func (h *ChangePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	const where = "console.auth.ChangePasswordHandler.ChangePassword"
 	ctx := r.Context()
 	auth := session.FromContext(ctx)
-
-	if auth.TenantID != "" {
-		// Tenant-user password rotation is out of scope — those users
-		// authenticate via the upstream IdP (or, in v0.3, no longer
-		// have a console password at all). 403 distinguishes from 401
-		// so the SPA does not bounce to /login.
-		logext.Warnf(ctx, "[%s] reject: tenant user,tenant_id:%s,user_id:%s",
-			where, auth.TenantID, auth.UserID)
-		respond.Error(ctx, w, http.StatusForbidden, "forbidden",
-			"only console admins can change their password here")
-		return
-	}
 
 	var req attunev1.ChangePasswordRequest
 	if err := respond.Decode(r.Body, &req); err != nil {
@@ -96,10 +83,12 @@ func (h *ChangePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.Re
 	a, err := h.admins.GetByID(ctx, auth.UserID)
 	switch {
 	case errors.Is(err, admin.ErrNotFound):
-		// Session points at a deleted admin row — log out.
-		logext.Warnf(ctx, "[%s] admin row gone,user_id:%s", where, auth.UserID)
-		h.signer.ClearSessionCookie(w)
-		respond.Error(ctx, w, http.StatusUnauthorized, "user_gone", "admin row is gone")
+		// Session UserID isn't an admin (tenant-user, or admin row
+		// deleted). 403 keeps the SPA from bouncing to /login.
+		logext.Warnf(ctx, "[%s] not an admin,user_id:%s,tenant_id:%s",
+			where, auth.UserID, auth.TenantID)
+		respond.Error(ctx, w, http.StatusForbidden, "forbidden",
+			"only console admins can change their password here")
 		return
 	case err != nil:
 		logext.Errorf(ctx, "[%s] GetByID failed,user_id:%s,err:%+v",

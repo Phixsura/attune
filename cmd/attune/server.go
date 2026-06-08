@@ -21,7 +21,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers"
@@ -29,6 +28,7 @@ import (
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -314,7 +314,7 @@ func setupInbound(ctx context.Context, pool *pgxpool.Pool, ingestor *ingest.Inge
 		}),
 		Sources: sources,
 		Secrets: secrets,
-		Metrics: inbound.NewPrometheusMetrics(prometheus.DefaultRegisterer),
+		Metrics: inbound.NewPrometheusMetrics(metrics.Registry),
 		Logger:  inboundLogger{},
 	}
 	manager := inbound.NewManager(deps)

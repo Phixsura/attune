@@ -27,6 +27,26 @@ func NewTenant(pool *pgxpool.Pool) *TenantRepo {
 // ErrTenantNotFound signals the slug doesn't exist or is inactive.
 var ErrTenantNotFound = errors.New("tenant not found")
 
+// FirstActiveID returns the id of the lexicographically smallest active
+// tenant, or ErrTenantNotFound if none exist. Admin sessions use this
+// as the implicit tenant scope for single-tenant dogfood deploys (the
+// console only exposes one tenant today; #38 will grow the tenant
+// switcher).
+func (r *TenantRepo) FirstActiveID(ctx context.Context) (string, error) {
+	var id string
+	err := r.pool.QueryRow(
+		ctx,
+		`SELECT id FROM tenants WHERE is_active = TRUE ORDER BY slug LIMIT 1`,
+	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrTenantNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("first active tenant: %w", err)
+	}
+	return id, nil
+}
+
 // ResolveSlug returns the TEXT tenant id for an active slug.
 // Used at startup to map an operator-supplied tenant slug to the actual
 // id stored on user_feedback rows.
