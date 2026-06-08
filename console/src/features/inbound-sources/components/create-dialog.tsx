@@ -27,7 +27,6 @@ interface EmailFields {
   username: string
   password: string
   folder: string
-  pollIntervalSeconds: number
 }
 
 const defaultEmail: EmailFields = {
@@ -37,7 +36,6 @@ const defaultEmail: EmailFields = {
   username: '',
   password: '',
   folder: 'INBOX',
-  pollIntervalSeconds: 60,
 }
 
 // CreateInboundSourceDialog — two-channel wizard. The user picks
@@ -87,7 +85,6 @@ export function CreateInboundSourceDialog({
         username: email.username.trim(),
         password: email.password,
         folder: email.folder.trim() || 'INBOX',
-        pollIntervalSeconds: email.pollIntervalSeconds,
         startFrom: 'now',
         afterIngest: 'mark_seen',
       },
@@ -341,18 +338,6 @@ function EmailFieldset({
             onChange={(e) => set('folder', e.target.value)}
             disabled={pending}
             placeholder="INBOX"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="is-poll">{t('inbound_sources.create.email.poll_interval')}</Label>
-          <Input
-            id="is-poll"
-            type="number"
-            min={10}
-            max={3600}
-            value={values.pollIntervalSeconds}
-            onChange={(e) => set('pollIntervalSeconds', Number(e.target.value) || 60)}
-            disabled={pending}
           />
         </div>
       </div>

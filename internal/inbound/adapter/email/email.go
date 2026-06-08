@@ -13,7 +13,12 @@ import (
 	"github.com/Phixsura/attune/internal/inbound"
 )
 
-const channelName = "email"
+// Channel is the registered channel name for this adapter. Exported so
+// the console handler (and other layers that need to refer to the
+// channel by string) reuse a single definition (#66 review M7).
+const Channel = "email"
+
+const channelName = Channel
 
 func init() {
 	inbound.Register(channelName, NewAdapter)

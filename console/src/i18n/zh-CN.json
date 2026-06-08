@@ -236,7 +236,6 @@
         "password": "密码或 App Password",
         "password_help": "保存时使用 AES-GCM 加密，仅在 IMAP 登录时解出。",
         "folder": "文件夹",
-        "poll_interval": "轮询间隔（秒）",
         "test_button": "测试连接",
         "test_ok": "连接成功 · {{ms}} ms"
       }

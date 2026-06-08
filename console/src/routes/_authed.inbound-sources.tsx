@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Loader2 } from 'lucide-react'
+import { InboxIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
+import { Loading } from '@/components/loading'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -23,10 +24,7 @@ import { CreateInboundSourceDialog } from '@/features/inbound-sources/components
 import { DeleteInboundSourceDialog } from '@/features/inbound-sources/components/delete-dialog'
 import { RotateConfirmDialog } from '@/features/inbound-sources/components/rotate-dialog'
 import { SecretRevealDialog } from '@/features/inbound-sources/components/secret-reveal-dialog'
-import {
-  EmptyInboundSourcesIcon,
-  SourcesTable,
-} from '@/features/inbound-sources/components/sources-table'
+import { SourcesTable } from '@/features/inbound-sources/components/sources-table'
 
 export const Route = createFileRoute('/_authed/inbound-sources')({
   component: InboundSourcesPage,
@@ -151,7 +149,7 @@ function InboundSourcesPage() {
             />
           ) : (
             <EmptyState
-              icon={EmptyInboundSourcesIcon}
+              icon={InboxIcon}
               title={t('inbound_sources.empty_title')}
               description={t('inbound_sources.empty_body')}
               action={{
@@ -188,16 +186,6 @@ function InboundSourcesPage() {
         secretHex={reveal?.secretHex ?? ''}
         curlExample={reveal?.curlExample}
       />
-    </div>
-  )
-}
-
-function Loading() {
-  const { t } = useTranslation()
-  return (
-    <div className="flex items-center justify-center py-8 text-muted-foreground">
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      {t('app.loading')}
     </div>
   )
 }

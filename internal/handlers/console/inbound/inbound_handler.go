@@ -42,6 +42,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/inbound"
+	"github.com/Phixsura/attune/internal/inbound/adapter/email"
 	"github.com/Phixsura/attune/internal/inbound/adapter/webhook"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -49,17 +50,12 @@ import (
 	"github.com/Phixsura/attune/internal/repo/inboundsource"
 )
 
-// Channel names accepted by the console (mirrors the registered adapter
-// channels). Kept here so a typo in this package fails compilation
-// rather than only at request time.
+// Channel names — aliased from the adapter packages so a typo in this
+// file fails compilation, AND the literal lives in exactly one place
+// per channel (#66 review M7).
 const (
-	channelWebhook = "webhook"
-	channelEmail   = "email"
-
-	// webhookConfigVersion / emailConfigVersion mirror the per-channel
-	// config shape versions used by the adapters.
-	webhookConfigVersion = 1
-	emailConfigVersion   = 1
+	channelWebhook = webhook.Channel
+	channelEmail   = email.Channel
 
 	// secretLen is 32 bytes (256 bits) of randomness per webhook
 	// source — same length the adapter uses on rotate.
@@ -138,6 +134,8 @@ func rowToProto(s inbound.Source) *attunev1.InboundSource {
 		Enabled:   s.Enabled,
 		LastUid:   s.State.LastUID,
 		LastError: s.State.LastError,
+		CreatedAt: s.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt: s.UpdatedAt.UTC().Format(time.RFC3339),
 	})
 	if s.State.LastEventAt != nil {
 		out.LastEventAt = ptrext.Of(s.State.LastEventAt.UTC().Format(time.RFC3339))
@@ -182,7 +180,7 @@ func (h *Handler) listAllForTenant(ctx context.Context, tenantID string) ([]inbo
 	rows, err := h.pool.Query(
 		ctx,
 		`SELECT id, tenant_id, channel, name, slug, enabled,
-		        last_event_at, last_uid, last_error
+		        last_event_at, last_uid, last_error, created_at, updated_at
 		   FROM inbound_sources
 		  WHERE tenant_id = $1
 		  ORDER BY channel ASC, name ASC`,
@@ -198,7 +196,8 @@ func (h *Handler) listAllForTenant(ctx context.Context, tenantID string) ([]inbo
 		var lastEventAt *time.Time
 		var lastError *string
 		if err := rows.Scan(&s.ID, &s.TenantID, &s.Channel, &s.Name, &s.Slug,
-			&s.Enabled, &lastEventAt, &s.State.LastUID, &lastError); err != nil {
+			&s.Enabled, &lastEventAt, &s.State.LastUID, &lastError,
+			&s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("inbound: scan: %w", err)
 		}
 		s.State.LastEventAt = lastEventAt
@@ -299,8 +298,8 @@ func (h *Handler) createWebhook(ctx context.Context, w http.ResponseWriter, auth
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to encrypt secret")
 		return
 	}
-	cfg := webhookConfigEnvelope{
-		Version:                webhookConfigVersion,
+	cfg := webhook.Config{
+		Version:                webhook.ConfigVersion,
 		SecretCurrentEncrypted: encSecret,
 		HMACAlgo:               "sha256",
 	}
@@ -411,17 +410,16 @@ func (h *Handler) encryptEmailConfig(cfg *attunev1.EmailCreateConfig) ([]byte, e
 	if afterIngest == "" {
 		afterIngest = "mark_seen"
 	}
-	inner := emailConfigEnvelope{
-		Version:             emailConfigVersion,
-		Host:                cfg.GetHost(),
-		Port:                int(cfg.GetPort()),
-		TLS:                 cfg.GetTls(),
-		Username:            cfg.GetUsername(),
-		PasswordEncrypted:   encPW,
-		Folder:              folder,
-		PollIntervalSeconds: int(cfg.GetPollIntervalSeconds()),
-		StartFrom:           startFrom,
-		AfterIngest:         afterIngest,
+	inner := email.Config{
+		Version:           email.ConfigVersion,
+		Host:              cfg.GetHost(),
+		Port:              int(cfg.GetPort()),
+		TLS:               cfg.GetTls(),
+		Username:          cfg.GetUsername(),
+		PasswordEncrypted: encPW,
+		Folder:            folder,
+		StartFrom:         startFrom,
+		AfterIngest:       afterIngest,
 	}
 	raw, err := json.Marshal(inner)
 	if err != nil {
@@ -730,31 +728,6 @@ func imapDialAndProbe(_ context.Context, cfg testConnInputs) error {
 
 // --- internal helpers below this line --------------------------------
 
-// webhookConfigEnvelope mirrors internal/inbound/adapter/webhook
-// webhookConfig (unexported there). Duplicated here intentionally:
-// the alternative is exporting the type, which would couple the handler
-// to the adapter's internal layout beyond the single RotateSecret call.
-type webhookConfigEnvelope struct {
-	Version                int    `json:"version"`
-	SecretCurrentEncrypted []byte `json:"secret_current_encrypted"`
-	HMACAlgo               string `json:"hmac_algo"`
-}
-
-// emailConfigEnvelope mirrors internal/inbound/adapter/email
-// emailConfig. Same duplication rationale as webhookConfigEnvelope.
-type emailConfigEnvelope struct {
-	Version             int    `json:"version"`
-	Host                string `json:"host"`
-	Port                int    `json:"port"`
-	TLS                 bool   `json:"tls"`
-	Username            string `json:"username"`
-	PasswordEncrypted   []byte `json:"password_encrypted"`
-	Folder              string `json:"folder"`
-	PollIntervalSeconds int    `json:"poll_interval_seconds"`
-	StartFrom           string `json:"start_from"`
-	AfterIngest         string `json:"after_ingest"`
-}
-
 // validateEmailCreateConfig — strict validation of the proto-decoded
 // EmailCreateConfig before it touches encryption / insertion. Defaults
 // for folder/start_from/after_ingest are applied in encryptEmailConfig
@@ -785,9 +758,6 @@ func validateEmailCreateConfig(cfg *attunev1.EmailCreateConfig) error {
 		// ok
 	default:
 		return errors.New("email_config.start_from must be 'now' or 'all_unseen'")
-	}
-	if cfg.GetPollIntervalSeconds() < 0 {
-		return errors.New("email_config.poll_interval_seconds must be non-negative")
 	}
 	return nil
 }

@@ -53,7 +53,7 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
 	options := ptrext.Of(imapclient.Options{})
-	cli, err := dialIMAP(ctx, addr, cfg.TLS, options)
+	cli, err := dialIMAP(ctx, addr, options)
 	if err != nil {
 		a.transientError(ctx, src, "dial: imap server unreachable")
 		return
@@ -136,7 +136,7 @@ func (a *adapter) seedFirstPollCursor(ctx context.Context, src inbound.Source, s
 // message, and returns the last UID we either ingested or chose to
 // skip past. Per-UID failures bump metrics + advance the cursor (no
 // wedging on a single bad message); ctx-cancel exits early.
-func (a *adapter) ingestUIDs(ctx context.Context, cli *imapclient.Client, src inbound.Source, cfg emailConfig, policy afterIngestPolicy, uids []imap.UID) int64 {
+func (a *adapter) ingestUIDs(ctx context.Context, cli *imapclient.Client, src inbound.Source, cfg Config, policy afterIngestPolicy, uids []imap.UID) int64 {
 	const where = "inbound.email.ingestUIDs"
 	lastUID := src.State.LastUID
 	for _, uid := range uids {
@@ -232,10 +232,10 @@ func (a *adapter) markPollSuccess(slug string, t time.Time) {
 }
 
 // dialIMAP — separated for test seams. Production dials TLS only —
-// the cfg.TLS=false escape hatch is gone (review H2, #66). A loopback
-// reverse proxy that terminates TLS can front a plain-IMAP server if
-// the operator truly needs one.
-var dialIMAP = func(_ context.Context, addr string, _ bool, opt *imapclient.Options) (*imapclient.Client, error) {
+// the previous bool-toggle TLS escape hatch is gone (#66 review H2 / H3).
+// A loopback reverse proxy that terminates TLS can front a plain-IMAP
+// server if the operator truly needs one.
+var dialIMAP = func(_ context.Context, addr string, opt *imapclient.Options) (*imapclient.Client, error) {
 	return imapclient.DialTLS(addr, opt)
 }
 
@@ -378,7 +378,4 @@ func (a *adapter) transientError(ctx context.Context, src inbound.Source, reason
 }
 
 // nowFn — overrideable in tests; production uses time.Now.
-var nowFn = func() (t time.Time) {
-	t = time.Now()
-	return
-}
+var nowFn = time.Now

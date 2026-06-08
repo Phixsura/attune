@@ -30,11 +30,9 @@ import (
 // in the /me response body and is mirrored by SPA into X-CSRF-Token.
 const (
 	SessionCookieName = "attune_session"
-	OAuthStateCookie  = "attune_oauth_state"
 	CSRFHeader        = "X-CSRF-Token"
 
-	SessionTTL    = 7 * 24 * time.Hour
-	OAuthStateTTL = 10 * time.Minute
+	SessionTTL = 7 * 24 * time.Hour
 )
 
 // Payload is what gets HMAC-signed into the cookie. UserID is the

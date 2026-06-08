@@ -930,9 +930,6 @@ components:
                     type: string
                 folder:
                     type: string
-                pollIntervalSeconds:
-                    type: integer
-                    format: int32
                 startFrom:
                     type: string
                 afterIngest:

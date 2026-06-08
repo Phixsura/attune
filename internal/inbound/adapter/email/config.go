@@ -5,55 +5,54 @@ package email
 import (
 	"encoding/json"
 	"errors"
-	"time"
 
 	"github.com/Phixsura/attune/internal/inbound"
 )
 
-// emailConfig is the decrypted shape of inbound_sources.config for an
+// Config is the decrypted shape of inbound_sources.config for an
 // "email" channel row.
-type emailConfig struct {
-	Version             int    `json:"version"`
-	Host                string `json:"host"`
-	Port                int    `json:"port"`
-	TLS                 bool   `json:"tls"`
-	Username            string `json:"username"`
-	PasswordEncrypted   []byte `json:"password_encrypted"`
-	Folder              string `json:"folder"`
-	PollIntervalSeconds int    `json:"poll_interval_seconds"`
-	StartFrom           string `json:"start_from"`   // "now" | "all_unseen"
-	AfterIngest         string `json:"after_ingest"` // "mark_seen" | "keep_unseen" | "move_to:<folder>"
+//
+// Exported so internal/handlers/console/inbound can build the envelope
+// at create time without duplicating the field list (H1, #66 review).
+// ConfigVersion is the only supported value of Version.
+type Config struct {
+	Version           int    `json:"version"`
+	Host              string `json:"host"`
+	Port              int    `json:"port"`
+	TLS               bool   `json:"tls"`
+	Username          string `json:"username"`
+	PasswordEncrypted []byte `json:"password_encrypted"`
+	Folder            string `json:"folder"`
+	StartFrom         string `json:"start_from"`   // "now" | "all_unseen"
+	AfterIngest       string `json:"after_ingest"` // "mark_seen" | "keep_unseen" | "move_to:<folder>"
 }
 
-const (
-	defaultPollInterval = 60 * time.Second
-	defaultFolder       = "INBOX"
-)
+// ConfigVersion is the on-disk schema version stored in Config.Version.
+const ConfigVersion = 1
+
+const defaultFolder = "INBOX"
 
 // parseEmailConfig — decrypts the inbound_sources.config envelope and
 // returns the typed view + the resolved IMAP password (also decrypted).
 // Caller is responsible for clearing the password from memory ASAP.
-func parseEmailConfig(raw []byte, secrets inbound.SecretStore) (emailConfig, string, error) {
+func parseEmailConfig(raw []byte, secrets inbound.SecretStore) (Config, string, error) {
 	decoded, err := secrets.Decrypt(raw)
 	if err != nil {
-		return emailConfig{}, "", err
+		return Config{}, "", err
 	}
-	var cfg emailConfig
+	var cfg Config
 	if e := json.Unmarshal(decoded, &cfg); e != nil {
-		return emailConfig{}, "", e
+		return Config{}, "", e
 	}
-	if cfg.Version != 1 {
-		return emailConfig{}, "", errors.New("email: unsupported config version")
+	if cfg.Version != ConfigVersion {
+		return Config{}, "", errors.New("email: unsupported config version")
 	}
 	if cfg.Folder == "" {
 		cfg.Folder = defaultFolder
 	}
-	if cfg.PollIntervalSeconds <= 0 {
-		cfg.PollIntervalSeconds = int(defaultPollInterval / time.Second)
-	}
 	pw, err := secrets.Decrypt(cfg.PasswordEncrypted)
 	if err != nil {
-		return emailConfig{}, "", err
+		return Config{}, "", err
 	}
 	return cfg, string(pw), nil
 }

@@ -350,9 +350,9 @@ columns are hard-deleted. Pre-1.0 carries no retention guarantee.
    credentials, change the password, then **unset** the bootstrap env vars
    and `ATTUNE_CONFIRM_LARK_DELETE` so they don't linger in the next start.
 8. **Re-onboard** any feedback that used to flow via Lark — the console's
-   `Settings → Inbound Sources` page is where you create webhook + email
-   sources. The webhook adapter speaks Stripe-style HMAC; the email adapter
-   polls IMAP.
+   `Inbound Sources` page (route `/console/inbound-sources`) is where you
+   create webhook + email sources. The webhook adapter speaks Stripe-style
+   HMAC; the email adapter polls IMAP.
 
 If a step fails, the migration is wrapped in a single transaction — Postgres
 rolls back and the image keeps the old schema. Diagnose, fix, retry.
@@ -403,9 +403,10 @@ preferred backup tool.
 
 **Fix:**
 - Confirm the source still exists and is **enabled** in the console
-  (`Settings → Inbound Sources`). attune answers `401` on the same URL
-  for any unknown slug (enumeration resistance), so a typo in the
-  tenant slug or source slug looks identical to a bad signature.
+  (Inbound Sources page, route `/console/inbound-sources`). attune
+  answers `401` on the same URL for any unknown slug (enumeration
+  resistance), so a typo in the tenant slug or source slug looks
+  identical to a bad signature.
 - The webhook adapter expects Stripe-style headers:
   `X-Attune-Timestamp: <unix-seconds>` and
   `X-Attune-Signature: sha256=<hex-hmac-sha256("<ts>.<body>")>`.

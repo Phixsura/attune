@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Bell, Loader2 } from 'lucide-react'
+import { Bell } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
+import { Loading } from '@/components/loading'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -165,16 +166,6 @@ function NotifyTargetsPage() {
         onConfirm={() => deleteTarget && handleDelete.mutate(deleteTarget.id)}
         pending={handleDelete.isPending}
       />
-    </div>
-  )
-}
-
-function Loading() {
-  const { t } = useTranslation()
-  return (
-    <div className="flex items-center justify-center py-8 text-muted-foreground">
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      {t('app.loading')}
     </div>
   )
 }

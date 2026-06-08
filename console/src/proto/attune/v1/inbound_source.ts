@@ -83,8 +83,6 @@ export interface EmailCreateConfig {
   password: string;
   /** defaults to "INBOX" */
   folder: string;
-  /** defaults to 60 */
-  pollIntervalSeconds: number;
   /** "now" | "all_unseen" (default "now") */
   startFrom: string;
   /** "mark_seen" | "keep_unseen" | "move_to:<folder>" (default "mark_seen") */

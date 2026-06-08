@@ -4,7 +4,6 @@ package webhook
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -21,8 +20,13 @@ import (
 	"github.com/Phixsura/attune/internal/respond"
 )
 
+// Channel is the registered channel name for this adapter. Exported so
+// the console handler (and other layers that need to refer to the
+// channel by string) reuse a single definition (#66 review M7).
+const Channel = "webhook"
+
 const (
-	channelName = "webhook"
+	channelName = Channel
 
 	// maxBodyBytes — same 64 KiB cap as /v1/feedback/ingest. We bound
 	// unauthenticated work cheaply (the cap runs before HMAC verify).
@@ -118,16 +122,10 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 
 	id, err := a.deps.Ingest.Ingest(ctx, src.TenantID, uuid.Nil, in)
 	if err != nil {
-		// We do not surface internal-vs-validation distinctions to the
-		// caller here; the inbound code paths simply log + map onto
-		// validate_err / internal_err.
-		status, msg := http.StatusBadRequest, err.Error()
-		result := "validate_err"
-		if errors.Is(err, errInternal) {
-			status, msg, result = http.StatusInternalServerError, "internal error", "internal_err"
-		}
-		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, result)
-		respond.Error(ctx, w, status, "ingest", msg)
+		// service.Ingestor.IngestRow only returns Validate()-style
+		// errors; map to 400 + validate_err uniformly.
+		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
+		respond.Error(ctx, w, http.StatusBadRequest, "ingest", err.Error())
 		return
 	}
 
@@ -151,11 +149,6 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 		EnrichmentStatus: "pending",
 	}))
 }
-
-// errInternal — sentinel for distinguishing 500 vs 400 if upstream
-// IngestPort wraps an internal error. We never construct this here; we
-// just compare via errors.Is so the framework's caller can opt in.
-var errInternal = errors.New("inbound.webhook: internal")
 
 // authenticate decodes the source's secret envelope and verifies the
 // HMAC against current — falling back to the previous secret while it

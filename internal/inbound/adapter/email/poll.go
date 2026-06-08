@@ -10,10 +10,10 @@ import (
 )
 
 // loopInterval is the fixed between-rounds wait per spec §Email IMAP
-// adapter pollLoop pseudocode. Per-source `poll_interval_seconds` is
-// preserved in the config envelope but is not honoured by this
-// batch-loop topology (one tick polls every enabled source serially);
-// a per-source-goroutine refactor that respects the knob is a future
+// adapter pollLoop pseudocode. The batch-loop topology (one tick polls
+// every enabled source serially) does not honour a per-source interval;
+// the proto field that previously declared this knob was removed before
+// release (#66 review H2). A per-source-goroutine refactor is a future
 // follow-up.
 const loopInterval = 60 * time.Second
 

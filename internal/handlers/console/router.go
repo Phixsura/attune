@@ -58,7 +58,6 @@ var (
 //
 //	public (no session required):
 //	 POST /install/login → auth.Handler.Login (#66 Plan T11)
-//	 POST /install/logout → auth.Handler.Logout
 //
 //	session-required (RequireSession middleware):
 //	 GET /me → me.Handler.Me
@@ -129,12 +128,11 @@ func NewRouter(
 func (r *Router) Mount() chi.Router {
 	mux := chi.NewRouter()
 
-	mux.Route("/install", func(m chi.Router) {
-		// Local-admin password login (#66 Plan T11) — replaces the
-		// deleted external-OAuth flow (#66 Plan T17).
-		m.Post("/login", r.auth.Login)
-		m.Post("/logout", r.auth.Logout)
-	})
+	// Local-admin password login (#66 Plan T11) — replaces the deleted
+	// external-OAuth flow (#66 Plan T17). Logout is served at
+	// /fb/v1/console/logout below (behind RequireSession), not under
+	// /install — the SPA only knows the post-login path.
+	mux.Post("/install/login", r.auth.Login)
 
 	mux.Group(func(m chi.Router) {
 		m.Use(r.signer.RequireSession)

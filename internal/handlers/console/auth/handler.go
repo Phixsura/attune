@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -37,14 +35,6 @@ func NewHandler(signer *session.Signer, admins *admin.Repo, tenants *tenant.Tena
 		tenants: tenants,
 		baseURL: strings.TrimRight(baseURL, "/"),
 	})
-}
-
-// Routes mounts /install/login + /install/logout.
-func (h *Handler) Routes() chi.Router {
-	r := chi.NewRouter()
-	r.Post("/login", h.Login)
-	r.Post("/logout", h.Logout)
-	return r
 }
 
 // Login handles POST /install/login. The request/response shapes are
@@ -174,19 +164,6 @@ func (h *Handler) resolveAdminScope(ctx context.Context, where string) string {
 		logext.Warnf(ctx, "[%s] FirstActiveID failed,err:%+v", where, err.Error())
 	}
 	return ""
-}
-
-// Logout handles POST /install/logout. Clears the session cookie. Idempotent.
-func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	const where = "console.auth.Handler.Logout"
-	ctx := r.Context()
-
-	// Delegate to the shared ClearSessionCookie helper so cookie
-	// attributes stay consistent with IssueSessionCookie (review-only
-	// nit: Logout used to roll its own).
-	h.signer.ClearSessionCookie(w)
-	logext.Infof(ctx, "[%s] OK", where)
-	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.LogoutResponse{}))
 }
 
 // originAllowed returns true when the request's Origin (or Referer

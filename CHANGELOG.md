@@ -62,8 +62,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     (FakeIngest / FakeSources / FakeSecrets / FakeMetrics / FakeLogger /
     FakeMux) and a `TestAdapterContract` with six gates every adapter
     must pass.
-  - **Console**: a first-class **inbound sources** page under
-    `Settings → Inbound Sources` — CRUD + rotate + pause/resume + test
+  - **Console**: a first-class **inbound sources** page at
+    `/console/inbound-sources` — CRUD + rotate + pause/resume + test
     connection, served by `internal/handlers/console/inbound` against the
     proto contract in `proto/attune/v1/inbound_source.proto`
     (`InboundSourceService` × 8 RPCs).
@@ -95,6 +95,53 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **#66 review pass: 13 audit findings inline-fixed** — C1-C5 / H1-H6 /
+  M2 / M4-M8.
+  - `respond.Error` / `respond.Proto` unified the ingest + console
+    response paths; deleted local `writeJSONProto` / `writeError` /
+    `errInternal` shims (C1, M1).
+  - Removed dead `auth.Handler.Routes` + `Logout` (covered by `me.Logout`
+    via the documented session route — C2), `session.OAuthStateCookie /
+    OAuthStateTTL` constants leftover from T17 OAuth removal (C3).
+  - `InboundSource` proto gained `created_at` / `updated_at` so the
+    contract matches the SQL row (C4); both Repo selects and the
+    console `listAllForTenant` SQL scan the new columns.
+  - `login.tsx` now uses the proto-generated `LoginRequest` /
+    `LoginResponse` types and canonical `redirectUri` camelCase key
+    (C5).
+  - `webhook.Config` + `email.Config` exported from the adapter
+    packages and reused by the console handler — deleted the duplicated
+    `webhookConfigEnvelope` / `emailConfigEnvelope` (H1).
+  - `EmailCreateConfig.poll_interval_seconds` retired (field reserved
+    in proto) — the batch-loop topology has only ever honoured a fixed
+    60s `loopInterval`, the per-source knob was unconsumed (H2).
+  - `dialIMAP` shrunk to `(ctx, addr, *imapclient.Options)` after the
+    `cfg.TLS` bool was deleted in the TLS-only refactor (H3).
+  - `inbound.BootstrapValidate` now calls
+    `internal/infra/config.GetOrFile(MasterKeyEnv)` instead of a
+    local `readKeyEnv` reimplementation — one `*_FILE` semantic for the
+    whole codebase (H4).
+  - `me.MeHandler.Logout` returns `200 + LogoutResponse{}` instead of
+    `204 No Content` so the OpenAPI shape stays consistent with every
+    other proto RPC (H5).
+  - Docs corrected: `Settings → Inbound Sources` → "the Inbound Sources
+    page, route `/console/inbound-sources`" in `docs/private-deploy.md`
+    + this changelog (H6).
+  - `email.nowFn` rewritten as the idiomatic
+    `var nowFn = time.Now` (M2).
+  - `console/src/components/loading.tsx` consolidates the three
+    identical `Loading` spinners on inbound-sources / feedback /
+    notify-targets routes (M4).
+  - Deleted `EmptyInboundSourcesIcon` re-export — routes import
+    `lucide-react` directly per the rest of the SPA (M5).
+  - Channel literal sources collapsed to `webhook.Channel` /
+    `email.Channel`; the console handler aliases via
+    `channelWebhook = webhook.Channel` etc., so changing the channel
+    name requires exactly one edit (M7).
+  - Lizard-verified the `Login` / `decodeLoginRequest` /
+    `authenticate` / `resolveAdminScope` split: inlining would push the
+    merged `Login` to CCN ~24 against the `≤15` gate — split is
+    justified, comment locked in (M8).
 - **Email adapter `after_ingest` policy (`mark_seen` / `keep_unseen` /
   `move_to:<folder>`) now actually fires the IMAP STORE / MOVE — previously
   a documented no-op in v0.3 (review H3, #66).** The original

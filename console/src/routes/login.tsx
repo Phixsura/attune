@@ -5,12 +5,16 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { type ApiError, api } from '@/lib/api-client'
+import type { LoginRequest, LoginResponse } from '@/proto/attune/v1/session'
 
 // Login is local-admin email + password (#66 replaces the external
 // OAuth button). The form POSTs JSON to /fb/v1/console/install/login; on
 // success the server returns { redirect: "/console/..." } which we
 // honour (or fall back to /console/).
 //
+// Body + response shapes come from the generated proto types
+// (proto/attune/v1/session.proto → console/src/proto/attune/v1/session.ts):
+// canonical protoJSON uses camelCase keys (redirectUri, not redirect_uri).
 // The first admin is bootstrapped by the backend at startup from
 // ATTUNE_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD}[_FILE] env vars when the
 // admins table is empty — there is no first-time signup UI here.
@@ -19,10 +23,6 @@ import { type ApiError, api } from '@/lib/api-client'
 // errors surface the same {code, message, requestId} envelope as every
 // other mutation — and the SPA can show `requestId` in tooltips so
 // support can find the matching server log line.
-
-interface LoginResponse {
-  redirect?: string
-}
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
@@ -48,15 +48,16 @@ function LoginPage() {
     setRequestId(undefined)
     setSubmitting(true)
     try {
+      const body: LoginRequest = {
+        email,
+        password,
+        redirectUri: redirect ?? '/console/',
+      }
       const data = await api<LoginResponse>('/fb/v1/console/install/login', {
         method: 'POST',
-        body: {
-          email,
-          password,
-          redirect_uri: redirect ?? '/console/',
-        },
+        body,
       })
-      await navigate({ to: data.redirect ?? '/console/' })
+      await navigate({ to: data.redirect || '/console/' })
     } catch (err) {
       const apiErr = err as ApiError
       setRequestId(apiErr.requestId)

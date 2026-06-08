@@ -11,19 +11,26 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
-// webhookConfig — the decrypted shape of inbound_sources.config for a
+// Config — the decrypted shape of inbound_sources.config for a
 // "webhook" channel row. The two ciphertexts are envelope-encrypted via
 // inbound.SecretStore (AES-GCM-256, version + key_id bytes — see
-// internal/inbound/secrets.go for the layout). previous_expires_at is
-// populated by rotate.RotateSecret; when nil OR in the past the
-// previous secret is considered expired.
-type webhookConfig struct {
+// internal/inbound/secrets.go for the layout). PreviousExpiresAt is
+// populated by RotateSecret; when nil OR in the past the previous
+// secret is considered expired.
+//
+// Exported so internal/handlers/console/inbound can build the envelope
+// at create time without duplicating the field list (H1, #66 review).
+// ConfigVersion is the only supported value of Version.
+type Config struct {
 	Version                 int        `json:"version"`
 	SecretCurrentEncrypted  []byte     `json:"secret_current_encrypted"`
 	SecretPreviousEncrypted []byte     `json:"secret_previous_encrypted,omitempty"`
 	PreviousExpiresAt       *time.Time `json:"previous_expires_at,omitempty"`
 	HMACAlgo                string     `json:"hmac_algo"`
 }
+
+// ConfigVersion is the on-disk schema version stored in Config.Version.
+const ConfigVersion = 1
 
 // parseConfig returns the current secret, the previous secret (or
 // nil/empty), and whether the previous secret has expired. raw is the
@@ -34,11 +41,11 @@ func parseConfig(raw []byte, secrets inbound.SecretStore) (current, previous []b
 	if err != nil {
 		return nil, nil, true, err
 	}
-	var cfg webhookConfig
+	var cfg Config
 	if e := json.Unmarshal(decoded, &cfg); e != nil {
 		return nil, nil, true, e
 	}
-	if cfg.Version != 1 {
+	if cfg.Version != ConfigVersion {
 		return nil, nil, true, errors.New("webhook: unsupported config version")
 	}
 	if cfg.HMACAlgo != "" && cfg.HMACAlgo != "sha256" {

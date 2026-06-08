@@ -121,7 +121,12 @@ message EmailCreateConfig {
   string username = 4 [(google.api.field_behavior) = REQUIRED];
   string password = 5 [(google.api.field_behavior) = REQUIRED];
   string folder = 6;                  // defaults to "INBOX"
-  int32 poll_interval_seconds = 7;    // defaults to 60
+  // Field 7 reserved — poll_interval_seconds was removed before release
+  // (#66 review H2): the current pollLoop topology uses a fixed
+  // loopInterval = 60s for all sources; per-source intervals require a
+  // per-source-goroutine refactor and weren't shipping in v1.
+  reserved 7;
+  reserved "poll_interval_seconds";
   string start_from = 8;              // "now" | "all_unseen" (default "now")
   string after_ingest = 9;            // "mark_seen" | "keep_unseen" | "move_to:<folder>" (default "mark_seen")
 }

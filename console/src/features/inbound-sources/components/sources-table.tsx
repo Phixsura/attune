@@ -2,7 +2,6 @@ import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import {
   AlertTriangle,
-  Inbox as InboxIcon,
   Key,
   Loader2,
   Mail,
@@ -176,7 +175,3 @@ function StateBadge({ source }: { source: InboundSource }) {
     </span>
   )
 }
-
-// EmptyInboundSourcesIcon — re-exported so the route file can pass it
-// to EmptyState without re-importing from lucide-react itself.
-export const EmptyInboundSourcesIcon = InboxIcon

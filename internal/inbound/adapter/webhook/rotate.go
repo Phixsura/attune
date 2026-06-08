@@ -84,7 +84,7 @@ func RotateSecret(
 	return newSecret, expires, nil
 }
 
-// loadRotateConfig fetches and decodes the current webhookConfig under
+// loadRotateConfig fetches and decodes the current Config (the JSON shape under
 // SELECT FOR UPDATE, refusing the rotation when the previous secret is
 // still inside its grace window.
 func loadRotateConfig(
@@ -92,7 +92,7 @@ func loadRotateConfig(
 	tx pgx.Tx,
 	secrets inbound.SecretStore,
 	sourceID string,
-) (webhookConfig, error) {
+) (Config, error) {
 	var rawConfig []byte
 	err := tx.QueryRow(
 		ctx,
@@ -100,18 +100,18 @@ func loadRotateConfig(
 		sourceID,
 	).Scan(&rawConfig)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return webhookConfig{}, fmt.Errorf("rotate: source not found")
+		return Config{}, fmt.Errorf("rotate: source not found")
 	}
 	if err != nil {
-		return webhookConfig{}, fmt.Errorf("rotate: select: %w", err)
+		return Config{}, fmt.Errorf("rotate: select: %w", err)
 	}
 	decoded, err := secrets.Decrypt(rawConfig)
 	if err != nil {
-		return webhookConfig{}, fmt.Errorf("rotate: decrypt config: %w", err)
+		return Config{}, fmt.Errorf("rotate: decrypt config: %w", err)
 	}
-	var cfg webhookConfig
+	var cfg Config
 	if err := json.Unmarshal(decoded, &cfg); err != nil {
-		return webhookConfig{}, fmt.Errorf("rotate: unmarshal config: %w", err)
+		return Config{}, fmt.Errorf("rotate: unmarshal config: %w", err)
 	}
 	if cfg.PreviousExpiresAt != nil && cfg.PreviousExpiresAt.After(nowFn()) {
 		return cfg, ErrRotationInGraceWindow
@@ -123,7 +123,7 @@ func loadRotateConfig(
 // previous, and re-encrypts the envelope for storage.
 func buildRotatedConfig(
 	secrets inbound.SecretStore,
-	cfg webhookConfig,
+	cfg Config,
 ) (newSecret, updatedEnvelope []byte, expires time.Time, err error) {
 	newSecret = make([]byte, SecretLen)
 	if _, err = rand.Read(newSecret); err != nil {
@@ -138,7 +138,7 @@ func buildRotatedConfig(
 	cfg.SecretCurrentEncrypted = newEncrypted
 	cfg.PreviousExpiresAt = ptrext.Of(expires)
 	if cfg.Version == 0 {
-		cfg.Version = 1
+		cfg.Version = ConfigVersion
 	}
 	if cfg.HMACAlgo == "" {
 		cfg.HMACAlgo = "sha256"

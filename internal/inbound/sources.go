@@ -22,14 +22,16 @@ type SourceStore interface {
 // adapter to consume. Config is still ciphertext; adapters call
 // Secrets.Decrypt on demand to keep plaintext window minimal.
 type Source struct {
-	ID       string
-	TenantID string
-	Channel  string
-	Name     string
-	Slug     string
-	Config   []byte
-	Enabled  bool
-	State    SourceState
+	ID        string
+	TenantID  string
+	Channel   string
+	Name      string
+	Slug      string
+	Config    []byte
+	Enabled   bool
+	State     SourceState
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // SourceState — denormalised columns the adapter writes back as it makes

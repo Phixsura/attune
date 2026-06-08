@@ -183,10 +183,13 @@ func (h *MeHandler) meTenantUser(ctx context.Context, w http.ResponseWriter, ten
 		where, tenantID, userID, user.Role)
 }
 
-// Logout handles POST /fb/v1/console/logout. Returns 204.
+// Logout handles POST /fb/v1/console/logout. Returns the proto
+// LogoutResponse envelope so the wire shape matches OpenAPI (200, not
+// 204) and stays consistent with the rest of the console RPCs.
 func (h *MeHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	const where = "console.MeHandler.Logout"
+	ctx := r.Context()
 	h.signer.ClearSessionCookie(w)
-	w.WriteHeader(http.StatusNoContent)
-	logext.Infof(r.Context(), "[%s] OK", where)
+	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.LogoutResponse{}))
+	logext.Infof(ctx, "[%s] OK", where)
 }
