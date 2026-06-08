@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -40,6 +41,7 @@ var ingestUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
 func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	const where = "inbound.webhook.handle"
 	ctx := r.Context()
+	start := nowFn()
 
 	tenantSlug := chi.URLParam(r, "tenant-slug")
 	sourceSlug := chi.URLParam(r, "source-slug")
@@ -141,6 +143,11 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
+	a.deps.Metrics.Latency(channelName, src.TenantID, src.Slug, time.Since(start).Seconds())
+	// Touch the per-source state gauge so an ops dashboard filtering by
+	// {state="enabled"} reflects active sources — webhook is push-mode,
+	// so we mark the source as enabled on every successful delivery.
+	a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", true)
 	if err := a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
 		LastEventAt: ptrext.Of(nowFn()),
 		LastUID:     src.State.LastUID,

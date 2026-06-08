@@ -30,6 +30,14 @@ const maxBatchUIDs = 100
 // disabling.
 func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 	const where = "inbound.email.pollSource"
+	start := nowFn()
+	// Emit the running poll-lag (seconds since last successful poll for
+	// this source) at the top of every attempt so a wedged source shows
+	// growing lag even when it never completes successfully.
+	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, a.pollLagSeconds(src.Slug, start))
+	defer func() {
+		a.deps.Metrics.Latency(channelName, src.TenantID, src.Slug, time.Since(start).Seconds())
+	}()
 
 	cfg, password, err := parseEmailConfig(src.Config, a.deps.Secrets)
 	if err != nil {
@@ -57,6 +65,7 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		logext.Warnf(ctx, "[%s] login failed,source_id:%s,err:%+v", where, src.ID, err.Error())
 		_ = a.deps.Sources.SetEnabled(ctx, src.ID, false, "auth: "+err.Error())
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "auth_err")
+		a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", false)
 		return
 	}
 
@@ -131,6 +140,36 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 			LastUID:     lastUID,
 		})
 	}
+	// Stamp this poll as a success even when no new UIDs landed — the
+	// adapter successfully connected, authenticated, and searched. That
+	// is what `poll_lag` measures (operator wants alerts on "I cannot
+	// reach the mailbox", not "nobody wrote me email today").
+	a.markPollSuccess(src.Slug, nowFn())
+	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, 0)
+	a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", true)
+}
+
+// pollLagSeconds returns seconds since the last successful poll for the
+// supplied source slug. Returns 0 for sources we have never observed
+// succeed — that lines up with the "first scrape after boot" Prometheus
+// convention.
+func (a *adapter) pollLagSeconds(slug string, now time.Time) float64 {
+	a.mu.Lock()
+	last, ok := a.lastSuccessAt[slug]
+	a.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	return now.Sub(last).Seconds()
+}
+
+func (a *adapter) markPollSuccess(slug string, t time.Time) {
+	a.mu.Lock()
+	if a.lastSuccessAt == nil {
+		a.lastSuccessAt = map[string]time.Time{}
+	}
+	a.lastSuccessAt[slug] = t
+	a.mu.Unlock()
 }
 
 // dialIMAP — separated for test seams. Production uses TLS unless the

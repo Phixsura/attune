@@ -24,13 +24,18 @@ type adapter struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	deps   inbound.Deps
+	// lastSuccessAt — slug-keyed last successful pollSource finish, used
+	// to emit attune_inbound_poll_lag_seconds. Reads/writes happen on
+	// the pollLoop goroutine only, but the mu guard keeps it safe
+	// against Shutdown winding the goroutine down concurrently.
+	lastSuccessAt map[string]time.Time
 }
 
 // NewAdapter — exposed constructor. Production registration runs via
 // init(); external callers (tests, one-off wiring) use NewAdapter
 // directly.
 func NewAdapter() inbound.Adapter {
-	return &adapter{} // ptrext:allow inbound-adapter-mutex-identity
+	return &adapter{lastSuccessAt: map[string]time.Time{}} // ptrext:allow inbound-adapter-mutex-identity
 }
 
 // Channel reports the registered channel name.
