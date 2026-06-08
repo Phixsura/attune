@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Channel-agnostic inbound framework + channel-native console auth (#66).**
+  attune now serves as a self-hosted, multi-source feedback ingestion plane
+  with a unified port (`internal/inbound.Adapter`) shared across push, poll,
+  schedule, and stream modes. Two production adapters ship alongside the
+  framework:
+  - `internal/inbound/adapter/webhook` — Stripe-style `Attune-Timestamp` /
+    `Attune-Signature` HMAC-SHA256 over `"<ts>.<body>"` with a ±300 s replay
+    window, dual-secret rotation (24 h grace, then `409
+    rotation_in_grace_window`), and per-source 401 enumeration resistance
+    (same status + path + stub-HMAC timing for unknown slugs).
+  - `internal/inbound/adapter/email` — IMAP poller (TLS-only) using
+    `emersion/go-imap/v2` + `go-message`; multipart/alternative prefers
+    `text/plain`; `lastUID` cursor advances per poll; `after_ingest:
+    mark_seen` (default) and `mark_read` documented (`move` deferred — see
+    `internal/inbound/adapter/email/after_ingest.go` for the upstream
+    `go-imap/v2` beta-API caveat).
+  - **Encryption at rest**: every inbound secret (webhook HMAC,
+    IMAP username / password) is sealed AES-GCM-256 with envelope
+    `version(1) + key_id(1) + nonce(12) + ct + tag(16)`. The
+    `ATTUNE_INBOUND_MASTER_KEY` env var (32 bytes hex/base64) seeds the
+    store and is validated at boot via
+    `internal/inbound.BootstrapValidate`; reserved bytes leave room for
+    master-key rotation (#94).
+  - **Boundary enforcement**: two depguard rules ship in `.golangci.yml` —
+    `inbound-boundary` (framework core `internal/inbound/*` may NOT import
+    adapters under `.../adapter/*`) and `inbound-framework-isolation`
+    (framework may NOT import service / repo / handlers / notify). Adapters
+    self-register via `init() + inbound.Register`, blank-imported from
+    `cmd/attune/main.go` (Caddy/Bento pattern) — adding a new channel is one
+    package with no edits to `cmd/`.
+  - **Conformance**: `internal/inbound/inboundtest` ships fakes
+    (FakeIngest / FakeSources / FakeSecrets / FakeMetrics / FakeLogger /
+    FakeMux) and a `TestAdapterContract` with six gates every adapter
+    must pass.
+  - **Console**: a first-class **inbound sources** page under
+    `Settings → Inbound Sources` — CRUD + rotate + pause/resume + test
+    connection, served by `internal/handlers/console/inbound` against the
+    proto contract in `proto/attune/v1/inbound_source.proto`
+    (`InboundSourceService` × 8 RPCs).
+- **Console authentication: email + bcrypt password** (#66). The
+  Lark-OAuth login is removed; the console now signs in via
+  `POST /fb/v1/auth/login` against bcrypt-hashed credentials in a new
+  `admins` table (migration `016_create_admins.sql`). bcrypt cost 12 +
+  timing-equalized dummy-hash on unknown emails keeps the login path
+  constant-time. A safe-redirect helper rejects open redirects on the
+  `next=` query. Session cookies retain `HttpOnly + Secure +
+  SameSite=Lax + Path=/`.
+- **Bootstrap admin** (#66). On first start, attune reads
+  `ATTUNE_BOOTSTRAP_ADMIN_EMAIL` + `ATTUNE_BOOTSTRAP_ADMIN_PASSWORD`
+  (or `_FILE` variants — secret-file pattern documented in
+  `internal/infra/config.GetOrFile`) and creates the first console
+  admin. TOCTOU-safe via `pg_advisory_xact_lock` + `ON CONFLICT (email)
+  DO NOTHING`; subsequent starts read `admins` and skip the env vars
+  entirely, so the credentials don't linger.
 - **Console SPA test suite (#13).** Vitest (jsdom) + MSW + Testing
   Library + v8 coverage. ~80 cases cover the api-client (CSRF
   injection, error envelope, signal), the i18n resolver, the
@@ -22,6 +76,40 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Removed
 
+- **BREAKING — integral Lark removal** (#66). The Lark Open Platform
+  integration ships its **destructive** retirement in v0.3 — there is no
+  feature flag, no compat shim, no preserve-the-data path. The deploy
+  flow is documented end-to-end in
+  [`docs/private-deploy.md`](docs/private-deploy.md) "Upgrading to v0.3".
+  - **Code**: `internal/infra/lark/`, `internal/notify/adapter/larkwebhook/`,
+    `internal/repo/lark/`, `internal/handlers/console/oauth/`, and every
+    `lark*` ingest path under `internal/handlers/` are deleted. The
+    `internal/domain.ValidSources` enum drops the four `lark-*` Sprint-1.2
+    sources; the canonical set is now `{api, webhook, email, web, other}`.
+  - **Database** (migration `015_drop_lark.sql`):
+    `DELETE FROM user_feedback WHERE source LIKE 'lark-%'`,
+    `DELETE FROM outbox WHERE channel ILIKE 'lark%'`,
+    `DELETE FROM tenant_notify_targets WHERE destination_type ILIKE '%lark%'`,
+    `DELETE FROM tenant_users WHERE user_id LIKE 'ext_<nil-uuid>:%'`,
+    plus `DROP COLUMN tenant_users.lark_open_id / tenants.lark_install /
+    tenants.lark_tenant_key`, `DROP TABLE tenant_lark_install / lark_install`.
+    The deploy startup path runs `internal/infra/database.ConfirmLarkDelete`
+    **before** the migration: if any lark-typed row exists AND
+    `ATTUNE_CONFIRM_LARK_DELETE=yes` is not set, startup hard-fails with a
+    pointer to `docs/private-deploy.md` — silent loss is impossible.
+  - **Proto**: `proto/attune/v1/session.proto` adds `Login` /
+    `LoginRequest` / `LoginResponse`; the `Tenant` message uses
+    `reserved 4; reserved "lark_tenant_key";` so the field number can't
+    be silently reused. All Lark-prefixed RPCs / fields are gone from the
+    generated Go / TS / OpenAPI.
+  - **Console SPA**: every Lark string in `console/src/i18n/zh-CN.json`
+    is removed; the login route is `console/src/routes/login.tsx`
+    (TanStack file-based router, email + password form). The Lark
+    OAuth-callback route is gone.
+  - **Outbound notify**: the inline Lark group-bot path is removed —
+    notify-target alerts (raw-webhook failure surfacing, etc.) await the
+    #34 outbound-adapter SDK for a channel-agnostic alert channel; they
+    log-only in v0.3.
 - Unused `react-hook-form`, `zod`, `@hookform/resolvers` from
   `console/dependencies` (no references in `console/src/**`).
 - Dead `pnpm gen:api` / `src/api/types.ts` references in
@@ -393,6 +481,29 @@ authored — wire-stable, never auto-renamed.
 
 ### Security
 
+- **Encryption at rest for inbound secrets** (#66). All customer
+  webhook HMAC secrets and IMAP credentials are sealed with AES-GCM-256
+  via `internal/inbound.NewAESGCMSecretStore`. The wire envelope
+  reserves `version + key_id` bytes so #94 (master-key rotation) is a
+  read-decrypt-with-old → write-encrypt-with-new sweep with no schema
+  churn. Plaintext never enters the database, the OpenAPI surface, or
+  the console UI; on reveal the secret is shown **once**, post-creation
+  RPCs return only an opaque last-4 hint.
+- **Webhook replay + enumeration resistance** (#66). The webhook
+  adapter rejects requests outside a ±300 s timestamp window
+  (Stripe-style) and computes a stub HMAC on unknown source slugs so
+  that the 401-handling path is the same wall-clock for known vs.
+  unknown sources — operators can't enumerate slugs by timing.
+- **Console auth: bcrypt cost 12 + dummy-bcrypt equalization** (#66).
+  `VerifyOrDummy` runs a constant-time bcrypt against a
+  package-private stub hash when the email is unknown, so the 401
+  path is observationally identical to the wrong-password path. Cookie
+  attributes (`HttpOnly + Secure + SameSite=Lax + Path=/`) match the
+  guidance in CLAUDE.md §8.
+- **Bootstrap admin TOCTOU guard** (#66). `BootstrapAdmin` runs inside
+  `pg_advisory_xact_lock` + `ON CONFLICT (email) DO NOTHING`; two
+  attune replicas racing on the same first start cannot create two
+  rows.
 - Bounded the `source` label on `attune_ingest_total`: a rejected (invalid)
   client-supplied `source` is now recorded as `invalid` instead of the raw value,
   closing an unbounded metric-cardinality vector on the ingest validation-error
