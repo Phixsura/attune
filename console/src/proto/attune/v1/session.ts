@@ -33,16 +33,17 @@ export interface Tenant {
   id: string;
   slug: string;
   name: string;
-  larkTenantKey?:
-    | string
-    | undefined;
   /** BCP 47 */
   locale: string;
   /** IANA tz */
   timezone: string;
 }
 
-/** SessionUser is the logged-in console user. */
+/**
+ * SessionUser is the logged-in console user.
+ * open_id is an opaque per-user identifier; pre-#66 it carried the Lark
+ * open_id but post-removal it is now an attune-internal user id.
+ */
 export interface SessionUser {
   openId: string;
   name: string;
@@ -63,8 +64,8 @@ export interface LogoutResponse {
 export interface SessionService {
   /**
    * POST /fb/v1/console/install/login — local admin password login (#66 Plan T11).
-   * Replaces the deleted Lark OAuth flow. The server sets the session cookie
-   * and returns the safe-validated redirect path the SPA should navigate to.
+   * The server sets the session cookie and returns the safe-validated
+   * redirect path the SPA should navigate to.
    */
   Login(request: LoginRequest): Promise<LoginResponse>;
   /** GET /fb/v1/console/me */

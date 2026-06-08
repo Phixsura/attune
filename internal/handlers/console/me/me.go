@@ -66,12 +66,11 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 
 	me := ptrext.Of(attunev1.GetMeResponse{
 		Tenant: ptrext.Of(attunev1.Tenant{
-			Id:            tenantRow.ID,
-			Slug:          tenantRow.Slug,
-			Name:          tenantRow.Name,
-			LarkTenantKey: tenantRow.LarkTenantKey,
-			Locale:        tenantRow.Locale,
-			Timezone:      tenantRow.Timezone,
+			Id:       tenantRow.ID,
+			Slug:     tenantRow.Slug,
+			Name:     tenantRow.Name,
+			Locale:   tenantRow.Locale,
+			Timezone: tenantRow.Timezone,
 		}),
 		User: ptrext.Of(attunev1.SessionUser{
 			OpenId: user.OpenID,

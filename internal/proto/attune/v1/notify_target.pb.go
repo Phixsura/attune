@@ -26,7 +26,7 @@ const (
 type NotifyTarget struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	DestinationType string                 `protobuf:"bytes,2,opt,name=destination_type,json=destinationType,proto3" json:"destination_type,omitempty"` // lark-bot | raw-webhook | slack-bot | email
+	DestinationType string                 `protobuf:"bytes,2,opt,name=destination_type,json=destinationType,proto3" json:"destination_type,omitempty"` // raw-webhook | slack-bot | email (#34 outbound adapter SDK extends this)
 	Audience        string                 `protobuf:"bytes,3,opt,name=audience,proto3" json:"audience,omitempty"`                                      // pool | radar | all
 	Url             string                 `protobuf:"bytes,4,opt,name=url,proto3" json:"url,omitempty"`
 	TimeoutSeconds  int32                  `protobuf:"varint,5,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`

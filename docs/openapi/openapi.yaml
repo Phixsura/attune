@@ -448,8 +448,8 @@ paths:
                 - SessionService
             description: |-
                 POST /fb/v1/console/install/login — local admin password login (#66 Plan T11).
-                 Replaces the deleted Lark OAuth flow. The server sets the session cookie
-                 and returns the safe-validated redirect path the SPA should navigate to.
+                 The server sets the session cookie and returns the safe-validated
+                 redirect path the SPA should navigate to.
             operationId: SessionService_Login
             requestBody:
                 content:
@@ -1239,7 +1239,10 @@ components:
                     type: string
                 role:
                     type: string
-            description: SessionUser is the logged-in console user.
+            description: |-
+                SessionUser is the logged-in console user.
+                 open_id is an opaque per-user identifier; pre-#66 it carried the Lark
+                 open_id but post-removal it is now an attune-internal user id.
         Status:
             type: object
             properties:
@@ -1277,8 +1280,6 @@ components:
                 slug:
                     type: string
                 name:
-                    type: string
-                larkTenantKey:
                     type: string
                 locale:
                     type: string

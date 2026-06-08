@@ -8,8 +8,8 @@ import "google/api/field_behavior.proto";
 // SessionService backs the console session (login, current tenant + user, logout).
 service SessionService {
   // POST /fb/v1/console/install/login — local admin password login (#66 Plan T11).
-  // Replaces the deleted Lark OAuth flow. The server sets the session cookie
-  // and returns the safe-validated redirect path the SPA should navigate to.
+  // The server sets the session cookie and returns the safe-validated
+  // redirect path the SPA should navigate to.
   rpc Login(LoginRequest) returns (LoginResponse) {
     option (google.api.http) = {
       post: "/fb/v1/console/install/login"
@@ -52,12 +52,15 @@ message Tenant {
   string id = 1;
   string slug = 2;
   string name = 3;
-  optional string lark_tenant_key = 4;
+  reserved 4;
+  reserved "lark_tenant_key";  // removed by #66 Plan T18
   string locale = 5;    // BCP 47
   string timezone = 6;  // IANA tz
 }
 
 // SessionUser is the logged-in console user.
+// open_id is an opaque per-user identifier; pre-#66 it carried the Lark
+// open_id but post-removal it is now an attune-internal user id.
 message SessionUser {
   string open_id = 1;
   string name = 2;
