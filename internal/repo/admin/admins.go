@@ -127,6 +127,30 @@ func (r *Repo) IncrementFailedAttempts(ctx context.Context, id string) error {
 	return err
 }
 
+// UpdatePasswordHash replaces the stored bcrypt hash for an admin.
+// Called from the console change-password endpoint after the current
+// password has been verified. failed_attempts / locked_until are NOT
+// reset here — the rotate doesn't unlock a locked account, that
+// distinction belongs to a future "force unlock" admin action.
+//
+// Returns ErrNotFound when no row matches the id (caller wraps as 401
+// so a session referencing a deleted admin row maps to "log out").
+func (r *Repo) UpdatePasswordHash(ctx context.Context, id, newHash string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE admins
+		    SET password_hash = $2, updated_at = now()
+		  WHERE id = $1`,
+		id, newHash,
+	)
+	if err != nil {
+		return fmt.Errorf("admin.UpdatePasswordHash: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ResetFailedAttempts clears the counter (called on successful login).
 func (r *Repo) ResetFailedAttempts(ctx context.Context, id string) error {
 	_, err := r.pool.Exec(ctx,

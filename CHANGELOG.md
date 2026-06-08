@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Console UI: inbound sources page + admin change-password (#66 B2 / H10).**
+  Fills the SPA gap left by the backend-first #66 landing — operators now
+  manage webhook + email inbound sources directly from the console
+  instead of via curl. New `/inbound-sources` route covers list, create
+  (two-channel wizard: webhook = name only, email = full IMAP fields +
+  inline test-connection probe), one-shot webhook secret reveal on
+  create + rotate, pause / resume toggle, and delete. The reveal dialog
+  surfaces secret_hex + the public webhook URL + a curl example with a
+  copy-button affordance per field. A new `/change-password` route lets
+  console admins rotate their bootstrap password (current ≥ 12-char new,
+  confirm match, server-side bcrypt cost 12 with timing-equalised wrong
+  current-password rejection). The user menu in the TopBar gets a
+  "Change password" item for admins; tenant-user sessions are filtered
+  client- and server-side. Backend wires
+  `POST /fb/v1/console/me/change-password` as a new RPC in
+  `proto/attune/v1/session.proto`, an admin-only
+  `auth.ChangePasswordHandler`, and `admin.Repo.UpdatePasswordHash` —
+  all under the existing `RequireSession` + CSRF guard.
 - **Channel-agnostic inbound framework + channel-native console auth (#66).**
   attune now serves as a self-hosted, multi-source feedback ingestion plane
   with a unified port (`internal/inbound.Adapter`) shared across push, poll,

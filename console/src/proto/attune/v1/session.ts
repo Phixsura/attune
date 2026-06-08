@@ -60,6 +60,23 @@ export interface LogoutRequest {
 export interface LogoutResponse {
 }
 
+/**
+ * ChangePasswordRequest carries the caller's current password (verified
+ * before the rotation) and the desired new password. Both fields are
+ * REQUIRED; the handler enforces new_password length >= 12.
+ */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+/**
+ * ChangePasswordResponse is empty on success (200). Errors travel through
+ * the standard {code, message, requestId} envelope.
+ */
+export interface ChangePasswordResponse {
+}
+
 /** SessionService backs the console session (login, current tenant + user, logout). */
 export interface SessionService {
   /**
@@ -72,4 +89,14 @@ export interface SessionService {
   GetMe(request: GetMeRequest): Promise<GetMeResponse>;
   /** POST /fb/v1/console/logout — clears the session cookie (204). */
   Logout(request: LogoutRequest): Promise<LogoutResponse>;
+  /**
+   * POST /fb/v1/console/me/change-password — admin self-service password
+   * change. Verifies current_password (timing-equalised with login), then
+   * re-hashes new_password at bcrypt cost 12. Tenant-user sessions are
+   * rejected with 403 — only admin sessions (TenantID == "") may rotate
+   * their own credential here. On 401 wrong current_password the SPA
+   * surfaces a generic error to avoid distinguishing "wrong password"
+   * from "session is now stale".
+   */
+  ChangePassword(request: ChangePasswordRequest): Promise<ChangePasswordResponse>;
 }

@@ -189,6 +189,7 @@ func buildConsoleRouter(
 	feedbackRepo := feedback.NewFeedback(pool)
 
 	authHandler := console.NewAuthHandler(signer, adminRepo, cfg.ConsoleBaseURL)
+	changePasswordHandler := console.NewChangePasswordHandler(adminRepo, signer)
 	me := console.NewMeHandler(signer, tenantRepo, userRepo, adminRepo)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
@@ -198,7 +199,7 @@ func buildConsoleRouter(
 	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
 
 	return console.NewRouter(
-		signer, authHandler, me, apiKeys, notifyTargets, feedback, usage,
+		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback, usage,
 		enrichConfig, inboundHandler,
 	).Mount(), nil
 }

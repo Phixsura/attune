@@ -39,16 +39,17 @@ type (
 // Constructor re-exports so cmd/attune/setup.go can keep building
 // handlers via `console.NewXHandler(...)` after the split.
 var (
-	NewSigner               = session.NewSigner
-	NewAuthHandler          = auth.NewHandler
-	NewMeHandler            = me.NewMeHandler
-	NewAPIKeysHandler       = apikey.NewAPIKeysHandler
-	NewNotifyTargetsHandler = notifytarget.NewNotifyTargetsHandler
-	NewFeedbackHandler      = feedback.NewFeedbackHandler
-	NewUsageHandler         = usage.NewUsageHandler
-	NewEnrichConfigHandler  = enrichconfig.NewHandler
-	NewInboundHandler       = consoleinbound.NewHandler
-	BootstrapAdmin          = auth.BootstrapAdmin
+	NewSigner                = session.NewSigner
+	NewAuthHandler           = auth.NewHandler
+	NewChangePasswordHandler = auth.NewChangePasswordHandler
+	NewMeHandler             = me.NewMeHandler
+	NewAPIKeysHandler        = apikey.NewAPIKeysHandler
+	NewNotifyTargetsHandler  = notifytarget.NewNotifyTargetsHandler
+	NewFeedbackHandler       = feedback.NewFeedbackHandler
+	NewUsageHandler          = usage.NewUsageHandler
+	NewEnrichConfigHandler   = enrichconfig.NewHandler
+	NewInboundHandler        = consoleinbound.NewHandler
+	BootstrapAdmin           = auth.BootstrapAdmin
 )
 
 // Router wires every console endpoint into a single chi.Router.
@@ -62,6 +63,7 @@ var (
 //	session-required (RequireSession middleware):
 //	 GET /me → me.Handler.Me
 //	 POST /logout → me.Handler.Logout
+//	 POST /me/change-password → auth.ChangePasswordHandler.ChangePassword
 //	 GET /api-keys → apikey.Handler.List
 //	 POST /api-keys → apikey.Handler.Create
 //	 DELETE /api-keys/{id} → apikey.Handler.Revoke
@@ -86,20 +88,22 @@ var (
 //	 DELETE /inbound/sources/{id} → inbound.Handler.Delete
 //	 POST /inbound/sources/test-connection → inbound.Handler.TestConnection
 type Router struct {
-	signer        *session.Signer
-	auth          *auth.Handler
-	me            *me.MeHandler
-	apiKeys       *apikey.APIKeysHandler
-	notifyTargets *notifytarget.NotifyTargetsHandler
-	feedback      *feedback.FeedbackHandler
-	usage         *usage.UsageHandler
-	enrichConfig  *enrichconfig.Handler
-	inbound       *consoleinbound.Handler
+	signer         *session.Signer
+	auth           *auth.Handler
+	changePassword *auth.ChangePasswordHandler
+	me             *me.MeHandler
+	apiKeys        *apikey.APIKeysHandler
+	notifyTargets  *notifytarget.NotifyTargetsHandler
+	feedback       *feedback.FeedbackHandler
+	usage          *usage.UsageHandler
+	enrichConfig   *enrichconfig.Handler
+	inbound        *consoleinbound.Handler
 }
 
 func NewRouter(
 	signer *session.Signer,
 	authH *auth.Handler,
+	changePassword *auth.ChangePasswordHandler,
 	me *me.MeHandler,
 	apiKeys *apikey.APIKeysHandler,
 	notifyTargets *notifytarget.NotifyTargetsHandler,
@@ -109,15 +113,16 @@ func NewRouter(
 	inbound *consoleinbound.Handler,
 ) *Router {
 	return ptrext.Of(Router{
-		signer:        signer,
-		auth:          authH,
-		me:            me,
-		apiKeys:       apiKeys,
-		notifyTargets: notifyTargets,
-		feedback:      feedback,
-		usage:         usage,
-		enrichConfig:  enrichConfig,
-		inbound:       inbound,
+		signer:         signer,
+		auth:           authH,
+		changePassword: changePassword,
+		me:             me,
+		apiKeys:        apiKeys,
+		notifyTargets:  notifyTargets,
+		feedback:       feedback,
+		usage:          usage,
+		enrichConfig:   enrichConfig,
+		inbound:        inbound,
 	})
 }
 
@@ -135,6 +140,9 @@ func (r *Router) Mount() chi.Router {
 		m.Use(r.signer.RequireSession)
 		m.Get("/me", r.me.Me)
 		m.Post("/logout", r.me.Logout)
+		if r.changePassword != nil {
+			m.Post("/me/change-password", r.changePassword.ChangePassword)
+		}
 
 		m.Route("/api-keys", func(k chi.Router) {
 			k.Get("/", r.apiKeys.List)

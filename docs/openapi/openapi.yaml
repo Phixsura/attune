@@ -514,6 +514,38 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/me/change-password:
+        post:
+            tags:
+                - SessionService
+            description: |-
+                POST /fb/v1/console/me/change-password — admin self-service password
+                 change. Verifies current_password (timing-equalised with login), then
+                 re-hashes new_password at bcrypt cost 12. Tenant-user sessions are
+                 rejected with 403 — only admin sessions (TenantID == "") may rotate
+                 their own credential here. On 401 wrong current_password the SPA
+                 surfaces a generic error to avoid distinguishing "wrong password"
+                 from "session is now stale".
+            operationId: SessionService_ChangePassword
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ChangePasswordRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ChangePasswordResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/notify-targets:
         get:
             tags:
@@ -724,6 +756,26 @@ components:
                     type: string
                 size:
                     type: string
+        ChangePasswordRequest:
+            required:
+                - currentPassword
+                - newPassword
+            type: object
+            properties:
+                currentPassword:
+                    type: string
+                newPassword:
+                    type: string
+            description: |-
+                ChangePasswordRequest carries the caller's current password (verified
+                 before the rotation) and the desired new password. Both fields are
+                 REQUIRED; the handler enforces new_password length >= 12.
+        ChangePasswordResponse:
+            type: object
+            properties: {}
+            description: |-
+                ChangePasswordResponse is empty on success (200). Errors travel through
+                 the standard {code, message, requestId} envelope.
         CreateApiKeyRequest:
             required:
                 - label
