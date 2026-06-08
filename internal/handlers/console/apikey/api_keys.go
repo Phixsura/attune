@@ -2,7 +2,6 @@ package apikey
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -55,7 +54,6 @@ func (h *APIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
 	logext.Infof(ctx, "[%s] start,tenant_id:%s", where, auth.TenantID)
 	rows, err := h.svc.List(ctx, auth.TenantID)
 	if err != nil {
-		slog.ErrorContext(ctx, "api-keys list", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] svc.List failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to list API keys")
@@ -99,7 +97,6 @@ func (h *APIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	raw, id, err := h.svc.Issue(ctx, auth.TenantID, label)
 	if err != nil {
-		slog.ErrorContext(ctx, "api-keys issue", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] svc.Issue failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to issue API key")
@@ -109,7 +106,6 @@ func (h *APIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Re-read the row so we return canonical timestamps. Cheap: N is tiny.
 	rows, err := h.svc.List(ctx, auth.TenantID)
 	if err != nil {
-		slog.WarnContext(ctx, "api-keys post-issue list", "err", err)
 		logext.Warnf(ctx, "[%s] post-issue list failed,tenant_id:%s,err:%s",
 			where, auth.TenantID, err.Error())
 	}
@@ -150,7 +146,6 @@ func (h *APIKeysHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 			respond.Error(ctx, w, http.StatusNotFound, "not_found", "API key not found or not owned by tenant")
 			return
 		}
-		slog.ErrorContext(ctx, "api-keys revoke", "err", err, "id", id, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] svc.Revoke failed,tenant_id:%s,key_id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "revoke failed")

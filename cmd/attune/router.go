@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 )
 
@@ -79,9 +79,9 @@ func buildRouter(
 		r.Route("/fb/v1/console", func(r chi.Router) {
 			r.Mount("/", consoleRouter)
 		})
-		slog.InfoContext(ctx, "console enabled", "base_url", cfg.ConsoleBaseURL)
+		logext.Infof(ctx, "[main.buildRouter] console enabled,base_url:%s", cfg.ConsoleBaseURL)
 	} else {
-		slog.InfoContext(ctx, "console disabled (no CONSOLE_SESSION_KEY)")
+		logext.Infof(ctx, "[main.buildRouter] console disabled (no CONSOLE_SESSION_KEY)")
 	}
 	return r, nil
 }

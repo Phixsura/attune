@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/lark"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/ingest"
@@ -85,8 +85,8 @@ func (h *LarkHandler) Event(w http.ResponseWriter, r *http.Request) {
 		r.Header.Get("X-Lark-Signature"),
 		body,
 	); err != nil {
-		slog.WarnContext(ctx, "lark signature check failed",
-			"err", err, "event_id", r.Header.Get("X-Lark-Request-Id"))
+		logext.Warnf(ctx, "lark signature check failed,event_id:%s,err:%+v",
+			r.Header.Get("X-Lark-Request-Id"), err.Error())
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
@@ -108,11 +108,11 @@ func (h *LarkHandler) Event(w http.ResponseWriter, r *http.Request) {
 func (h *LarkHandler) handleURLVerification(w http.ResponseWriter, ev lark.Event) {
 	ctx := context.Background()
 	if h.verificationToken != "" && ev.Token != h.verificationToken {
-		slog.WarnContext(ctx, "lark url_verification token mismatch")
+		logext.Warnf(ctx, "lark url_verification token mismatch")
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "verification token mismatch"})
 		return
 	}
-	slog.InfoContext(ctx, "lark url_verification ok")
+	logext.Infof(ctx, "lark url_verification ok")
 	writeJSON(w, http.StatusOK, map[string]string{"challenge": ev.Challenge})
 }
 
@@ -135,7 +135,7 @@ func (h *LarkHandler) handleMessage(ctx context.Context, w http.ResponseWriter, 
 	// keyID is uuid.Nil for Lark-sourced rows; user_id becomes
 	// "ext_<nil-uuid>:<open_id>".
 	if _, err := h.ingestor.IngestRow(ctx, h.defaultTenant, uuid.Nil, in); err != nil {
-		slog.WarnContext(ctx, "lark ingest failed", "err", err)
+		logext.Warnf(ctx, "lark ingest failed,err:%+v", err.Error())
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -70,7 +69,6 @@ func syncCustomWebhooks(
 ) error {
 	const where = "main.syncCustomWebhooks"
 	if len(dests) == 0 {
-		slog.InfoContext(ctx, "no custom webhooks configured")
 		logext.Infof(ctx, "[%s] OK,no custom webhooks", where)
 		return nil
 	}
@@ -108,8 +106,8 @@ func syncCustomWebhooks(
 		}); err != nil {
 			return fmt.Errorf("custom_webhooks[%d]: upsert: %w", i, err)
 		}
-		slog.InfoContext(ctx, "custom webhook synced",
-			"tenant_slug", d.TenantSlug, "audience", audience, "disabled", d.Disabled)
+		logext.Infof(ctx, "[%s] custom webhook synced,tenant_slug:%s,audience:%s,disabled:%t",
+			where, d.TenantSlug, audience, d.Disabled)
 	}
 	return nil
 }
@@ -136,8 +134,9 @@ func buildNotifier(
 	// Outcome: only Lark goes through the inline notifier. raw-webhook
 	// destinations are picked up by the outbox worker reading
 	// tenant_notify_targets directly.
+	const where = "main.buildNotifier"
 	if !cfg.NotifyEnabled() {
-		slog.InfoContext(ctx, "no inline notifiers wired (lark webhook URLs empty)")
+		logext.Infof(ctx, "[%s] no inline notifiers wired (lark webhook URLs empty)", where)
 		return nil, nil
 	}
 	// Local name avoids shadowing the imported `lark` package
@@ -146,8 +145,8 @@ func buildNotifier(
 		cfg.FeedbackPoolWebhookURL, cfg.FeedbackPoolWebhookSecret,
 		cfg.DevRadarWebhookURL, cfg.DevRadarWebhookSecret,
 	)
-	slog.InfoContext(ctx, "lark webhook wired",
-		"pool", larkBot.PoolEnabled(), "radar", larkBot.RadarEnabled())
+	logext.Infof(ctx, "[%s] lark webhook wired,pool:%t,radar:%t",
+		where, larkBot.PoolEnabled(), larkBot.RadarEnabled())
 	return larkBot, nil
 }
 
@@ -175,7 +174,7 @@ func runOutboxLagRefresher(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 	age, err := outbox.OldestPendingAge(ctx)
 	if err != nil {
-		slog.WarnContext(ctx, "outbox lag refresh failed", "err", err)
+		logext.Warnf(ctx, "[main.refreshOutboxLag] failed,err:%+v", err.Error())
 		return
 	}
 	metrics.OutboxLagSeconds.Set(age.Seconds())
@@ -211,7 +210,7 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 		return nil, err
 	}
 	if cfg.ConsoleInsecureCookies {
-		slog.WarnContext(ctx, "console: INSECURE cookies enabled — for HTTP testing only")
+		logext.Warnf(ctx, "[main.buildConsoleRouter] INSECURE cookies enabled — for HTTP testing only")
 	}
 
 	larkClient := larkclient.New(cfg.LarkAppID, cfg.LarkAppSecret)
@@ -233,7 +232,7 @@ func buildConsoleRouter(cfg *config.Config, pool *pgxpool.Pool) (chi.Router, err
 
 	var devLogin http.Handler
 	if cfg.ConsoleDevLogin {
-		slog.WarnContext(ctx, "console: dev-login BACKDOOR enabled at /fb/v1/console/install/dev-login")
+		logext.Warnf(ctx, "[main.buildConsoleRouter] dev-login BACKDOOR enabled at /fb/v1/console/install/dev-login")
 		devLogin = console.NewDevLoginHandler(signer, tenantRepo, userRepo, cfg.ConsoleBaseURL)
 	}
 	return console.NewRouter(

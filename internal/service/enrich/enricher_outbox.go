@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
@@ -80,11 +79,9 @@ func (e *Enricher) persistEnriched(
 		return fmt.Errorf("commit enrich tx: %w", err)
 	}
 	if len(selected) > 0 {
-		slog.InfoContext(ctx, "outbox rows queued",
-			"inbound_trace_id", traceID,
-			"tenant_id", s.TenantID,
-			"feedback_id", s.ID,
-			"count", len(selected))
+		logext.Infof(ctx,
+			"[%s] outbox rows queued,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,count:%d",
+			where, traceID, s.TenantID, s.ID, len(selected))
 	}
 	return nil
 }

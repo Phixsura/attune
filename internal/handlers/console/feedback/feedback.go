@@ -3,7 +3,6 @@ package feedback
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -122,7 +121,6 @@ func (h *FeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.repo.ListForConsole(ctx, auth.TenantID, opts)
 	if err != nil {
-		slog.ErrorContext(ctx, "feedback list", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] feedback.ListForConsole failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to list feedback")
@@ -195,7 +193,6 @@ func (h *FeedbackHandler) Get(w http.ResponseWriter, r *http.Request) {
 			respond.Error(ctx, w, http.StatusNotFound, "not_found", "feedback not found or not owned by tenant")
 			return
 		}
-		slog.ErrorContext(ctx, "feedback detail", "err", err, "id", id)
 		logext.Errorf(ctx, "[%s] feedback.GetForConsole failed,tenant_id:%s,id:%d,err:%+v",
 			where, auth.TenantID, id, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load feedback detail")

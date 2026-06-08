@@ -4,7 +4,6 @@ package notifytarget
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -38,7 +37,6 @@ func (h *NotifyTargetsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			respond.Error(ctx, w, http.StatusNotFound, "not_found", "notify target not found or not owned by tenant")
 			return
 		}
-		slog.ErrorContext(ctx, "notify-targets delete", "err", err)
 		logext.Errorf(ctx, "[%s] repo.Delete failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "delete failed")
@@ -69,7 +67,6 @@ func (h *NotifyTargetsHandler) Test(w http.ResponseWriter, r *http.Request) {
 			respond.Error(ctx, w, http.StatusNotFound, "not_found", "notify target not found or not owned by tenant")
 			return
 		}
-		slog.ErrorContext(ctx, "notify-targets test load", "err", err)
 		logext.Errorf(ctx, "[%s] repo.GetByID failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load target")

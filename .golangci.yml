@@ -44,6 +44,19 @@ linters:
           deny:
             - pkg: github.com/Phixsura/attune/internal/service
               desc: "notify must not import service (CLAUDE.md §5)"
+        # CLAUDE.md §7 / #48: only the logging facade may import log/slog.
+        # Business code logs through internal/pkg/logext; the facade
+        # (logext itself + observability's TraceIDHandler) is the only
+        # place that touches slog directly.
+        slog-facade:
+          list-mode: lax
+          files:
+            - "**/*.go"
+            - "!**/internal/pkg/logext/**"
+            - "!**/internal/infra/observability/**"
+          deny:
+            - pkg: log/slog
+              desc: "log via internal/pkg/logext, not log/slog directly (CLAUDE.md §7, #48)"
     revive:
       rules:
         - name: blank-imports

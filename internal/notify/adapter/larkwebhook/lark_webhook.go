@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -162,8 +161,8 @@ func checkLarkResponse(dest string, s domain.Snapshot) notify.ResponseChecker {
 			return fmt.Errorf("%w: http=%d code=%d msg=%s body=%s",
 				notify.ErrTerminal, status, out.Code, out.Msg, truncate(string(body), 200))
 		}
-		slog.InfoContext(ctx, "lark webhook pushed",
-			"dest", dest, "feedback_id", s.ID, "urgent", s.IsUrgent)
+		logext.Infof(ctx, "[%s] pushed,dest:%s,feedback_id:%d,urgent:%t",
+			where, dest, s.ID, s.IsUrgent)
 		return nil
 	}
 }

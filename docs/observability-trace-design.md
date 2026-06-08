@@ -8,13 +8,13 @@
 ## Where it's wired
 
 ```
-cmd/attune/main.go:50   slog.SetDefault(slog.New(observability.NewTraceIDHandler(inner)))
+cmd/attune/main.go      observability.InstallDefaultLogger()       // slog default: JSON/text + TraceIDHandler
 cmd/attune/server.go    observability.InitTracer(ctx, Options{…})  // OTLP exporter (or noop)
 internal/infra/observability/
   otel.go     InitTracer — global TracerProvider + W3C propagator + OTLP/noop exporter
   idgen.go    ReadableIDGenerator — timestamp-prefixed, human-readable trace_id
   slog.go     TraceIDHandler — injects trace_id/span_id into every ctx-carrying log line
-  attrs.go    reserved + business field-name constants (underscore form for SLS)
+              BuildDefaultHandler / InstallDefaultLogger — startup wiring
 ```
 
 ## Principles
@@ -39,13 +39,13 @@ internal/infra/observability/
    ```
 
    Consequences:
-   - A log call must carry `ctx` (`slog.InfoContext` / `logext.*f(ctx, …)`) for
-     correlation — a non-context call silently loses it. (Enforced: lint-slog
-     rule-1.)
-   - These keys are a **reserved field-name contract** (`attrs.go`:
-     `AttrTraceID` / `AttrSpanID`), shared across the BE / Gateway / attune fleet.
-     Business code must **not** re-emit them by hand — that would duplicate the
-     handler's field. (Enforced: lint-slog rule-2.)
+   - A log call must carry `ctx` — business code calls `logext.*f(ctx, …)`
+     (the only logging entry point; depguard's `slog-facade` rule blocks
+     direct `log/slog` imports outside the facade — #48).
+   - `trace_id` / `span_id` are a **reserved field-name contract**, shared
+     across the BE / Gateway / attune fleet. Business code must **not**
+     re-emit them by hand — that would duplicate the handler's field.
+     (Enforced: lint-slog rule-2.)
 
 3. **Trace IDs are always present, even without a collector.** `InitTracer` with
    an empty `Endpoint` still installs a real `TracerProvider` (AlwaysSample +
@@ -84,31 +84,50 @@ the time straight off the ID:
 
 ## Logging facade & field names
 
-- Default handler emits **JSON** (prod; SLS field indexing). `ENV=dev` switches to
-  text for readable `docker logs`.
-- Structured field names live as constants in `attrs.go`, using the `_` form
-  (`http_method`, `duration_ms`, …) chosen to **not** collide with the OTel
-  auto-injected dotted keys. Some constants are shared fleet-wide and may be
-  vestigial for attune specifically — treat `attrs.go` as the registry, not a
-  per-service spec.
-- Facade direction (single `logext` entry point, banning direct `slog.*` in
-  business code) is tracked separately in issue #48.
+- Default handler emits **JSON** (prod; aggregator field indexing). `ENV=dev`
+  switches to text for readable `docker logs`. Installed by
+  `observability.InstallDefaultLogger()` at startup.
+- Single entry point: business code calls `logext.{Info,Warn,Error}f(ctx, …)`
+  (printf-style). Three levels only — #48 dropped Debug from the facade on
+  the rule "if a record is worth shipping, it's an Info; otherwise it doesn't
+  belong in the code." Fields are formatted into the message string — attune
+  does not back log-field aggregation today (dashboards/alerts are
+  Prometheus-backed), so flattening is the right trade. If structured kv is
+  ever needed, the facade can add `logext.Infow(ctx, msg, kv…)` without
+  touching call sites elsewhere.
+- Direct `log/slog` imports outside the facade are blocked by golangci-lint's
+  depguard `slog-facade` rule (#48). The facade itself —
+  `internal/pkg/logext/` plus `internal/infra/observability/` — is the only
+  legitimate `log/slog` consumer.
 
-## Lint enforcement (`scripts/lint-slog.sh`)
+## Lint enforcement
+
+**Authoritative (golangci-lint, AST-accurate).**
+
+| linter / rule | Catches |
+|---|---|
+| depguard `slog-facade` | any `import "log/slog"` outside the facade — #48 |
+| depguard `infra-isolation` / `notify-isolation` | §5 layering — #19 |
+
+**Pattern checks (`scripts/lint-slog.sh`, grep/awk fallback for what depguard
+can't see):**
 
 | Rule | Catches | Fix |
 |---|---|---|
-| rule-1 | non-context `slog.*` (loses correlation) | use `*Context` / `logext.*f(ctx, …)` |
 | rule-2 | business code re-emitting a reserved key (`trace_id`, …) | drop it — the handler injects it |
 | rule-3 | `&http.Client{}` without `otelhttp.NewTransport` | wrap the transport (outbound spans) |
 
-**Facade exemption.** `internal/infra/observability/` and `internal/pkg/logext/` are exempt
-from the business-field rules (1, 2): they *define and inject* the reserved keys
-rather than misuse them. `TraceIDHandler` setting `trace_id` is the canonical
-source, not a rule-2 violation. The linter runs `--strict` in pre-commit and CI.
+(Rule-1 — non-context `slog.*` — was retired by #48: depguard now denies
+`log/slog` outright in business code, which subsumes the call-site check.)
+
+**Facade exemption.** `internal/infra/observability/` and `internal/pkg/logext/`
+are exempt from rule-2: they *define and inject* the reserved keys rather than
+misuse them. The linter runs `--strict` in pre-commit and CI;
+`golangci-lint run` runs in both as well (#48).
 
 ## References
 
-- Code: `internal/infra/observability/{otel,idgen,slog,attrs}.go`, `cmd/attune/main.go`.
-- Issues: #9 (cleared the warnings + `--strict` + this doc), #48 (logext facade),
-  #4 (lint-slog), #1 (CI gate).
+- Code: `internal/infra/observability/{otel,idgen,slog}.go`, `internal/pkg/logext/logext.go`,
+  `cmd/attune/main.go`.
+- Issues: #9 (cleared the warnings + `--strict` + this doc), #48 (logext facade
+  + depguard slog-ban), #4 (lint-slog), #1 (CI gate).

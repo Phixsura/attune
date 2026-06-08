@@ -18,7 +18,6 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"log/slog"
 	"sort"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -103,7 +102,6 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 				where, version, err.Error())
 			return fmt.Errorf("commit %d: %w", version, err)
 		}
-		slog.InfoContext(ctx, "feedback-api migration applied", "version", version, "file", name)
 		logext.Infof(ctx, "[%s] applied,version:%d,file:%s", where, version, name)
 	}
 	logext.Infof(ctx, "[%s] OK", where)

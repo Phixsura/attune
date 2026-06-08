@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -88,7 +87,8 @@ func (r *APIKeyRepo) TouchLastUsed(id uuid.UUID) {
 		ctx,
 		`UPDATE external_api_keys SET last_used_at = NOW() WHERE id = $1`, id,
 	); err != nil {
-		slog.WarnContext(ctx, "apikey: touch last_used_at failed", "id", id, "err", err)
+		logext.Warnf(ctx, "[repo.APIKeyRepo.TouchLastUsed] failed,id:%s,err:%+v",
+			id, err.Error())
 	}
 }
 

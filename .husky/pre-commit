@@ -26,8 +26,13 @@
 #      is ~130 B → passes automatically), or a one-off bypass. We do NOT cap source
 #      LINES: Go/Google style cap functions not files (CI's lizard already does).
 #   ② go vet — packages touched by staged .go (blocks)
-#   ③ scripts/lint-slog.sh — slog/OTel lint (--strict; blocks on any finding)
-#   ④ biome — staged console/src files (blocks, only if console deps present)
+#   ③ scripts/lint-slog.sh — rule-2/rule-3 pattern checks (--strict; blocks)
+#   ④ scripts/lint-rawptr.sh — bans bare *p / &x (blocks)
+#   ⑤ golangci-lint run — incremental on changed files (blocks). Caches under
+#      ~/.cache/golangci-lint so cached re-runs are sub-second on small diffs;
+#      this is the local source of truth for the depguard slog-facade rule
+#      (#48) and the §5 layering rules.
+#   ⑥ biome — staged console/src files (blocks, only if console deps present)
 
 set -uo pipefail  # NOT -e: we accumulate failures and decide the exit ourselves.
 
@@ -78,7 +83,15 @@ if [ -f scripts/lint-rawptr.sh ]; then
   bash scripts/lint-rawptr.sh || fail=1
 fi
 
-# ── ⑤ console biome — staged console/src only, guarded on installed deps ──────
+# ── ⑤ golangci-lint — depguard §5 layering + slog-facade ban (#48) ────────────
+# Cached on disk so re-runs on small diffs are sub-second; skipped quietly when
+# the toolchain is absent (CI runs the full lint authoritatively either way).
+if [ -n "$go_files" ] && command -v golangci-lint >/dev/null 2>&1; then
+  say "golangci-lint"
+  golangci-lint run || fail=1
+fi
+
+# ── ⑥ console biome — staged console/src only, guarded on installed deps ──────
 con=$(git diff --cached --name-only --diff-filter=ACM -- 'console/src/**' \
       | grep -E '\.(ts|tsx|js|jsx|json)$' || true)
 if [ -n "$con" ]; then

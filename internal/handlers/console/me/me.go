@@ -2,7 +2,6 @@ package me
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
@@ -44,7 +43,6 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 			respond.Error(ctx, w, http.StatusUnauthorized, "user_gone", "user is disabled or deleted")
 			return
 		}
-		slog.ErrorContext(ctx, "/me: load user", "err", err, "user_id", auth.UserID)
 		logext.Errorf(ctx, "[%s] users.GetByID failed,user_id:%s,err:%+v",
 			where, auth.UserID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load user")
@@ -54,16 +52,16 @@ func (h *MeHandler) Me(w http.ResponseWriter, r *http.Request) {
 	// below this point can still reference tenant.ErrX / tenant.Y.
 	tenantRow, err := h.tenants.GetByID(ctx, auth.TenantID)
 	if err != nil {
-		slog.ErrorContext(ctx, "/me: load tenant", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] tenants.GetByID failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load tenant")
 		return
 	}
 
-	// Fire-and-forget: bump last_seen_at. Failure is just a metric loss.
+	// Fire-and-forget: bump last_seen_at. Failure is just a metric loss,
+	// but a sustained warn stream means the DB is unhappy — log it.
 	if err := h.users.TouchLastSeen(ctx, user.ID); err != nil {
-		slog.DebugContext(ctx, "/me: touch last_seen", "err", err)
+		logext.Warnf(ctx, "[%s] touch last_seen failed,err:%+v", where, err.Error())
 	}
 
 	me := ptrext.Of(attunev1.GetMeResponse{

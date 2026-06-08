@@ -3,7 +3,6 @@ package ingest
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -98,7 +97,8 @@ func (i *Ingestor) fireEnrich(inboundCtx context.Context, id int64, traceID stri
 	defer cancel()
 	ctx = trace.WithID(ctx, traceID)
 	if err := i.enricher.EnrichOne(ctx, id); err != nil {
-		slog.WarnContext(ctx, "inline enrich failed",
-			"id", id, "inbound_trace_id", traceID, "err", err)
+		logext.Warnf(ctx,
+			"[service.Ingestor.fireEnrich] inline enrich failed,id:%d,inbound_trace_id:%s,err:%+v",
+			id, traceID, err.Error())
 	}
 }

@@ -19,7 +19,6 @@ package outbox
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -54,7 +53,9 @@ func NewDigestService(
 // Run blocks until ctx is cancelled, dispatching digests on each tick.
 // Safe to call once at startup; not safe to run two instances.
 func (s *DigestService) Run(ctx context.Context) {
-	slog.InfoContext(ctx, "digest scheduler started", "cadence", digestCadence, "tick", digestTick)
+	const where = "service.DigestService.Run"
+	logext.Infof(ctx, "[%s] digest scheduler started,cadence:%s,tick:%s",
+		where, digestCadence, digestTick)
 	t := time.NewTicker(digestTick)
 	defer t.Stop()
 	// Fire once immediately on startup so a long-stopped service catches
@@ -71,15 +72,17 @@ func (s *DigestService) Run(ctx context.Context) {
 }
 
 func (s *DigestService) runOnce(ctx context.Context) {
+	const where = "service.DigestService.runOnce"
 	cutoff := time.Now().Add(-digestCadence)
 	candidates, err := s.tenants.TenantsNeedingDigest(ctx, cutoff)
 	if err != nil {
-		slog.WarnContext(ctx, "digest: scan tenants", "err", err)
+		logext.Warnf(ctx, "[%s] scan tenants failed,err:%+v", where, err.Error())
 		return
 	}
 	for _, c := range candidates {
 		if err := s.SendForTenant(ctx, c.ID, c.Slug, c.Name); err != nil {
-			slog.WarnContext(ctx, "digest: tenant send failed", "tenant", c.Slug, "err", err)
+			logext.Warnf(ctx, "[%s] tenant send failed,tenant:%s,err:%+v",
+				where, c.Slug, err.Error())
 		}
 	}
 }
@@ -103,7 +106,7 @@ func (s *DigestService) SendForTenant(
 		return fmt.Errorf("list lark-bots: %w", err)
 	}
 	if len(bots) == 0 {
-		slog.DebugContext(ctx, "digest: no lark-bot, skipping", "tenant", slug)
+		logext.Infof(ctx, "[%s] no lark-bot, skipping,tenant:%s", where, slug)
 		return nil
 	}
 
@@ -128,7 +131,8 @@ func (s *DigestService) SendForTenant(
 		total += b.Value
 	}
 	if total == 0 {
-		slog.DebugContext(ctx, "digest: zero feedback this week, skipping", "tenant", slug)
+		logext.Infof(ctx, "[%s] zero feedback this week, skipping,tenant:%s",
+			where, slug)
 		return nil
 	}
 	urgent, _ := s.feedback.UrgentCount(ctx, tenantID, from, now)
@@ -138,8 +142,8 @@ func (s *DigestService) SendForTenant(
 		tops, err := s.feedback.TopValuesByDim(ctx, tenantID, d.Name,
 			d.Kind == domain.DimMulti, from, now, 5)
 		if err != nil {
-			slog.WarnContext(ctx, "digest: top values per dim",
-				"dim", d.Name, "err", err)
+			logext.Warnf(ctx, "[%s] top values per dim failed,dim:%s,err:%+v",
+				where, d.Name, err.Error())
 			continue
 		}
 		dimTops[d.Name] = tops
@@ -149,16 +153,17 @@ func (s *DigestService) SendForTenant(
 	res := notify.SendAlert(ctx, bots[0], text)
 	if !res.OK {
 		logext.Errorf(ctx, "[%s] SendAlert failed,tenant:%s,latency_ms:%d,err:%+v",
-			where, slug, res.LatencyMs, res.Err.Error())
+			where, slug, res.LatencyMs, res.Err)
 		return fmt.Errorf("send alert: %w", res.Err)
 	}
 	logext.Infof(ctx, "[%s] OK,tenant:%s,total:%d,latency_ms:%d",
 		where, slug, total, res.LatencyMs)
 	if err := s.tenants.TouchDigestSent(ctx, tenantID); err != nil {
-		slog.WarnContext(ctx, "digest: touch sent failed", "tenant", slug, "err", err)
+		logext.Warnf(ctx, "[%s] touch sent failed,tenant:%s,err:%+v",
+			where, slug, err.Error())
 	}
-	slog.InfoContext(ctx, "digest: sent",
-		"tenant", slug, "total", total, "latency_ms", res.LatencyMs)
+	logext.Infof(ctx, "[%s] sent,tenant:%s,total:%d,latency_ms:%d",
+		where, slug, total, res.LatencyMs)
 	return nil
 }
 

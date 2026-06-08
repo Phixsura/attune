@@ -1,7 +1,6 @@
 package usage
 
 import (
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -37,7 +36,6 @@ func (h *UsageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	buckets, err := h.repo.UsageByDay(ctx, auth.TenantID, periodStart, periodEnd)
 	if err != nil {
-		slog.ErrorContext(ctx, "usage", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] feedback.UsageByDay failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to read usage")

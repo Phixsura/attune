@@ -8,11 +8,11 @@ package enrich
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 )
@@ -31,11 +31,9 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.E
 	if err := e.repo.MarkDone(ctx, id, enriched); err != nil {
 		return fmt.Errorf("mark ignored row done: %w", err)
 	}
-	slog.InfoContext(ctx, "feedback ignored by triage",
-		"inbound_trace_id", trace.FromContext(ctx),
-		"tenant_id", row.TenantID,
-		"feedback_id", id,
-		"reason", reason)
+	logext.Infof(ctx,
+		"[service.Enricher.persistIgnored] feedback ignored by triage,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,reason:%s",
+		trace.FromContext(ctx), row.TenantID, id, reason)
 	return nil
 }
 
@@ -48,12 +46,10 @@ func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedbac
 	if err := e.persistEnriched(ctx, snapshot, enriched); err != nil {
 		return err
 	}
-	slog.InfoContext(ctx, "feedback enriched via fast-path",
-		"inbound_trace_id", trace.FromContext(ctx),
-		"tenant_id", row.TenantID,
-		"feedback_id", id,
-		"attrs", enriched.Attrs,
-		"is_urgent", enriched.IsUrgent)
+	logext.Infof(ctx,
+		"[service.Enricher.persistFromTriage] feedback enriched via fast-path,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,is_urgent:%t,attrs:%s",
+		trace.FromContext(ctx), row.TenantID, id, enriched.IsUrgent,
+		logext.AsLogParam(enriched.Attrs))
 	if n := e.notifier.Load(); n != nil {
 		go e.fanOut(snapshot, ptrext.Indirect(n))
 	}

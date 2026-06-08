@@ -3,7 +3,6 @@ package notifytarget
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,7 +63,6 @@ func (h *NotifyTargetsHandler) List(w http.ResponseWriter, r *http.Request) {
 	logext.Infof(ctx, "[%s] start,tenant_id:%s", where, auth.TenantID)
 	rows, err := h.repo.ListByTenant(ctx, auth.TenantID)
 	if err != nil {
-		slog.ErrorContext(ctx, "notify-targets list", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] notifytarget.ListByTenant failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to list notify targets")
@@ -148,7 +146,6 @@ func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 				"a target already exists for this (destination_type, audience) combination — delete the old one first")
 			return
 		}
-		slog.ErrorContext(ctx, "notify-targets insert", "err", err, "tenant_id", auth.TenantID)
 		logext.Errorf(ctx, "[%s] repo.Insert failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to create notify target")

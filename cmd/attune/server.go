@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -77,7 +76,7 @@ func runServer() error {
 		return err
 	}
 	defer llm.Close()
-	slog.InfoContext(ctx, "llm backend ready", "endpoint", cfg.LLMOpenAIBaseURL)
+	logext.Infof(ctx, "[%s] llm backend ready,endpoint:%s", where, cfg.LLMOpenAIBaseURL)
 
 	feedbackRepo := feedback.NewFeedback(pool)
 	apikeyRepo := apikeyrepo.NewAPIKey(pool)
@@ -121,9 +120,9 @@ func runServer() error {
 		return err
 	}
 	if cfg.LarkEnabled() {
-		slog.InfoContext(ctx, "lark webhook enabled", "tenant_slug", cfg.LarkDefaultTenantSlug)
+		logext.Infof(ctx, "[%s] lark webhook enabled,tenant_slug:%s", where, cfg.LarkDefaultTenantSlug)
 	} else {
-		slog.InfoContext(ctx, "lark webhook disabled (no signing secret)")
+		logext.Infof(ctx, "[%s] lark webhook disabled (no signing secret)", where)
 	}
 	ingestHandler := handlers.NewIngestHandler(ingestor)
 
@@ -139,7 +138,7 @@ func runServer() error {
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 	})
-	slog.InfoContext(ctx, "attune server listening", "addr", srv.Addr)
+	logext.Infof(ctx, "[%s] attune server listening,addr:%s", where, srv.Addr)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -149,7 +148,7 @@ func runServer() error {
 	}()
 	select {
 	case <-ctx.Done():
-		slog.InfoContext(ctx, "shutting down")
+		logext.Infof(ctx, "[%s] shutting down", where)
 		shutdownCtx, c := context.WithTimeout(context.Background(), 10*time.Second)
 		defer c()
 		return srv.Shutdown(shutdownCtx)
@@ -182,7 +181,7 @@ func shutdownTracing(shutdown func(context.Context) error) {
 	shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
 	defer c()
 	if err := shutdown(shutdownCtx); err != nil {
-		slog.WarnContext(shutdownCtx, "otel shutdown failed", "err", err)
+		logext.Warnf(shutdownCtx, "[main.shutdownTracing] otel shutdown failed,err:%+v", err.Error())
 	}
 }
 
@@ -197,7 +196,7 @@ func setupDatabase(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, erro
 		pool.Close()
 		return nil, fmt.Errorf("pg ping: %w", err)
 	}
-	slog.InfoContext(ctx, "postgres connected")
+	logext.Infof(ctx, "[main.setupDatabase] postgres connected")
 	if err := database.RunMigrations(ctx, pool); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("migrations: %w", err)
