@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 )
 
@@ -37,6 +37,7 @@ func buildRouter(
 	apiKeys *apikeysvc.APIKeys,
 	pool *pgxpool.Pool,
 ) (chi.Router, error) {
+	const where = "main.buildRouter"
 	r := chi.NewRouter()
 	// otelchi opens the root span — continued from a client-supplied
 	// traceparent when present, generated from our readable trace_id
@@ -79,9 +80,9 @@ func buildRouter(
 		r.Route("/fb/v1/console", func(r chi.Router) {
 			r.Mount("/", consoleRouter)
 		})
-		slog.InfoContext(ctx, "console enabled", "base_url", cfg.ConsoleBaseURL)
+		logext.Infof(ctx, "[%s] console enabled,base_url:%s", where, cfg.ConsoleBaseURL)
 	} else {
-		slog.InfoContext(ctx, "console disabled (no CONSOLE_SESSION_KEY)")
+		logext.Infof(ctx, "[%s] console disabled (no CONSOLE_SESSION_KEY)", where)
 	}
 	return r, nil
 }

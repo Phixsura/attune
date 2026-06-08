@@ -26,7 +26,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -36,7 +35,6 @@ import (
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
-	// OTel-aware logging convention — see docs/observability-sop.md.
 )
 
 // githubAPIBaseForTest is github.com's REST API root. var (not const) so
@@ -335,13 +333,9 @@ func checkGitHubResponse(label string, env attuneEnvelope) notify.ResponseChecke
 		switch {
 		case status == http.StatusCreated:
 			number, htmlURL := extractIssueLink(body)
-			// ResponseChecker doesn't receive ctx; Background here is
-			// safe because env already carries the inbound trace
-			// correlation in fields (bin/lint-slog.sh §1).
-			slog.InfoContext(ctx, "github issue created",
-				"dest", label, "feedback_id", env.Feedback.ID,
-				"issue_number", number, "url", htmlURL,
-				"inbound_trace_id", env.TraceID)
+			logext.Infof(ctx,
+				"[%s] issue created,dest:%s,feedback_id:%d,issue_number:%d,url:%s,inbound_trace_id:%s",
+				where, label, env.Feedback.ID, number, htmlURL, env.TraceID)
 			return nil
 		case status == http.StatusRequestTimeout || status == http.StatusTooManyRequests:
 			return fmt.Errorf("github-issue %s retryable status=%d body=%s",

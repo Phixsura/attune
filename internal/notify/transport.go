@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -98,12 +98,13 @@ func (t *Transport) Send(
 	build RequestBuilder,
 	check ResponseChecker,
 ) error {
+	const where = "notify.Transport.Send"
 	var lastErr error
 	for attempt := 1; attempt <= t.retry.MaxAttempts; attempt++ {
 		if attempt > 1 {
 			delay := t.retry.backoff(attempt - 1)
-			slog.InfoContext(ctx, "transport retry",
-				"dest", label, "attempt", attempt, "delay", delay, "prev_err", lastErr)
+			logext.Infof(ctx, "[%s] retry,dest:%s,attempt:%d,delay:%s,prev_err:%+v",
+				where, label, attempt, delay, lastErr)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

@@ -22,7 +22,7 @@ AI assistants (Claude Code, Cursor, etc.) working on this repository.
 | Code duplication | < 4% | `npx -y jscpd . --pattern '**/*.go' --threshold 5` |
 | Internal info | 0 leaks (IPs, /opt paths, brand names) | grep |
 | Outbound HTTP clients | must wrap with `otelhttp.NewTransport` | `scripts/lint-slog.sh` Rule 3 |
-| Logging | `logext.*` + `ctx` first | `scripts/lint-slog.sh` Rule 1 |
+| Logging | `logext.*` + `ctx` first; no direct `log/slog` in business code | `golangci-lint` depguard `slog-facade` |
 | Raw pointer ops | 0 bare `*p` deref / `&x` address-of (use `internal/pkg/ptrext`) | `scripts/lint-rawptr.sh` |
 | **Console (TS / React)** | | |
 | `pnpm tsc -b --noEmit` | 0 errors | CI |
@@ -145,8 +145,17 @@ For the full layout, see [`README.md`](README.md).
 
 ## 7 · Observability conventions
 
-- All logs use `logext.Infof` / `logext.Warnf` / `logext.Errorf` with `ctx`
-  as the first argument.
+- All logs go through `logext.Infof` / `logext.Warnf` / `logext.Errorf`
+  with `ctx` as the first argument. Three levels only (no Debug — #48):
+  if a "Debug" record is worth shipping to ops, it's an `Info`; if it's
+  not, it shouldn't be in the code. Business code never imports `log/slog`
+  directly — golangci-lint's depguard `slog-facade` rule (`.golangci.yml`)
+  enforces this; only `internal/pkg/logext` + `internal/infra/observability`
+  (the facade internals that own the `trace_id`/`span_id` injection
+  contract) may touch `log/slog`.
+- The slog default is installed by `observability.InstallDefaultLogger()`
+  at startup; it wraps a JSON/text handler in `TraceIDHandler` so every
+  record carries `trace_id`/`span_id` from the active OTel span on ctx.
 - HTTP clients hitting external services must wrap their transport with
   `otelhttp.NewTransport(http.DefaultTransport)`.
 - New metrics live in `internal/infra/metrics` and follow the existing

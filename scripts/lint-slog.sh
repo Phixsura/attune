@@ -1,28 +1,27 @@
 #!/usr/bin/env bash
 # attune — slog / OTel / http.Client static linter.
 #
-# A fast (≤ 1s) grep+awk pass that catches the three observability mistakes
-# most likely to silently break tracing. Ported from the parent monorepo's
-# bin/lint-slog.sh, trimmed to attune scope. Invoked by the pre-commit hook
-# (.husky/pre-commit, issue #3) and — with the known warnings cleared
-# (issue #9) — by CI in --strict mode (issue #1). See CLAUDE.md §1 / §7.
+# A fast (≤ 1s) grep+awk pass that catches the two observability mistakes
+# golangci-lint does not cover. Invoked by the pre-commit hook
+# (.husky/pre-commit, issue #3) and by CI in --strict mode (issue #1).
+# See CLAUDE.md §1 / §7.
+#
+# Rule-1 (non-context slog call) was retired by #48: golangci-lint's
+# depguard now denies `log/slog` outright in business code via the
+# `slog-facade` rule in .golangci.yml — caught at import, not call site,
+# more precisely. This script keeps the two pattern checks (literal
+# reserved-key collisions, http.Client transport hygiene) that depguard
+# can't see.
 #
 # ── Rules ───────────────────────────────────────────────────────────────────
-#
-#   rule-1  Non-context slog call.
-#           `slog.Info(…)` / `slog.Warn(…)` / `slog.Error(…)` / `slog.Debug(…)`
-#           lose trace_id/span_id correlation because they carry no ctx.
-#           FIX: use the *Context variants — `slog.InfoContext(ctx, …)` — or the
-#           `logext.Infof(ctx, …)` wrappers (ctx-first by signature).
 #
 #   rule-2  Business field collides with an OTel auto-injected key.
 #           Keys like "trace_id" / "span_id" are injected by TraceIDHandler
 #           (internal/infra/observability/slog.go); "service.name" / "http.method" …
 #           are injected by the OTel SDK. Re-setting them from business code
 #           produces duplicate/ambiguous fields in the log backend.
-#           FIX: don't set auto-injected keys by hand. For deliberate business
-#           fields use the underscore constants in infra/observability/attrs.go
-#           (AttrHTTPMethod = "http_method", …), which are chosen to NOT collide.
+#           FIX: don't set auto-injected keys by hand — drop the manual
+#           field and rely on handler injection.
 #
 #   rule-3  &http.Client{…} without an otelhttp Transport.
 #           A client built without `Transport: otelhttp.NewTransport(…)` emits
@@ -35,13 +34,13 @@
 #
 #       slog.String("trace_id", id)   // lint-slog:allow rule-2
 #
-#   The marker is per-rule (`rule-1` / `rule-2` / `rule-3`) and per-line; it
-#   suppresses only that rule on that line. Use sparingly and only where the
-#   collision/omission is intentional (e.g. the canonical injector itself).
+#   The marker is per-rule (`rule-2` / `rule-3`) and per-line; it suppresses
+#   only that rule on that line. Use sparingly and only where the collision/
+#   omission is intentional (e.g. the canonical injector itself).
 #
 #   Facade internals — internal/infra/observability/ and internal/pkg/logext/ — are
-#   auto-exempt from the business-field rules (rule-1, rule-2): they define and
-#   inject the reserved keys rather than misuse them. No per-line marker needed.
+#   auto-exempt from rule-2: they define and inject the reserved keys rather
+#   than misuse them. No per-line marker needed.
 #
 # ── Limitations (this is grep/awk, not a Go parser) ─────────────────────────
 #
@@ -72,7 +71,7 @@ cd "$(dirname "$0")/.." || { echo "lint-slog: cannot cd to repo root" >&2; exit 
 strict=0
 usage() {
   cat <<'EOF'
-lint-slog — static slog / OTel / http.Client linter (rules 1-3; see file header).
+lint-slog — static slog / OTel / http.Client linter (rule-2 + rule-3; see file header).
 
 usage: scripts/lint-slog.sh [--strict]
 
@@ -109,8 +108,7 @@ if [[ "${#files[@]}" -eq 0 ]]; then
 fi
 
 # facade internals (the slog facade + the OTel handler that *injects* the
-# reserved keys) are exempt from the business-field rules (rule-1, rule-2) —
-# they own those keys, not misuse them. #48 reuses this when it tightens rule-1.
+# reserved keys) are exempt from rule-2 — they own those keys, not misuse them.
 is_facade_internal() {
   case "$1" in
     internal/infra/observability/*|internal/pkg/logext/*) return 0 ;;
@@ -128,7 +126,7 @@ check_grep() {
     [[ -z "$line" ]] && continue
     [[ "$line" == *"lint-slog:allow ${id}"* ]] && continue   # per-line exemption
     file="${line%%:*}"; tmp="${line#*:}"; ln="${tmp%%:*}"; code="${tmp#*:}"
-    is_facade_internal "$file" && continue                   # facade owns the reserved keys (#9; #48 reuses)
+    is_facade_internal "$file" && continue                   # facade owns the reserved keys
     [[ "$code" =~ ^[[:space:]]*// ]] && continue             # pure // comment line (URL-safe: anchored at line start)
     printf '    %s%s:%s%s\n' "$yellow" "$file" "$ln" "$reset"
     found=$((found + 1)); warn=$((warn + 1))
@@ -140,14 +138,9 @@ check_grep() {
   fi
 }
 
-check_grep "rule-1" \
-  "non-context slog call (loses trace correlation)" \
-  "use slog.InfoContext(ctx, …) or logext.Infof(ctx, …)" \
-  'slog\.(Debug|Info|Warn|Error)\('
-
 check_grep "rule-2" \
   "business field collides with an OTel auto-injected key" \
-  "drop the manual key, or use the non-colliding observability/attrs.go constants" \
+  "drop the manual key — TraceIDHandler / the OTel SDK already inject it" \
   '"(trace_id|span_id|service\.name|http\.method|http\.route|http\.status_code)"[[:space:]]*,'
 
 # rule-3: brace-aware scan of each &http.Client{…} literal (handles multi-line).

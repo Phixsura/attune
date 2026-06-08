@@ -7,7 +7,6 @@ package outbox
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -28,7 +27,6 @@ func (w *OutboxWorker) selfReportDead(ctx context.Context, row outboxrepo.Outbox
 	}
 	bots, err := w.targets.ListLarkBots(ctx, row.TenantID)
 	if err != nil {
-		slog.WarnContext(ctx, "outbox: list lark bots for alert", "tenant", row.TenantID, "err", err)
 		logext.Errorf(ctx, "[%s] list lark bots failed,tenant:%s,err:%+v",
 			where, row.TenantID, err.Error())
 		return
@@ -45,14 +43,12 @@ func (w *OutboxWorker) selfReportDead(ctx context.Context, row outboxrepo.Outbox
 	// when a tenant has multiple chats wired up.
 	res := notify.SendAlert(ctx, bots[0], text)
 	if !res.OK {
-		slog.WarnContext(ctx, "outbox: self-report alert failed",
-			"tenant", row.TenantID, "bot_id", bots[0].ID,
-			"latency_ms", res.LatencyMs, "err", res.Err)
+		logext.Warnf(ctx, "[%s] self-report alert failed,tenant:%s,bot_id:%s,latency_ms:%d,err:%+v",
+			where, row.TenantID, bots[0].ID, res.LatencyMs, res.Err)
 		return
 	}
-	slog.InfoContext(ctx, "outbox: self-report alert sent",
-		"tenant", row.TenantID, "dead_outbox_id", row.ID,
-		"latency_ms", res.LatencyMs)
+	logext.Infof(ctx, "[%s] self-report alert sent,tenant:%s,dead_outbox_id:%d,latency_ms:%d",
+		where, row.TenantID, row.ID, res.LatencyMs)
 }
 
 // outboxBackoff is the retry schedule from design doc §3.6:

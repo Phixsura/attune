@@ -8,11 +8,11 @@ package enrich
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 )
@@ -22,6 +22,7 @@ import (
 // is the right outcome for noise. Observability still records the row
 // (via the triage_decisions counter) so PMs can audit the ignore rate.
 func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.EnrichInput, reason string) error {
+	const where = "service.Enricher.persistIgnored"
 	enriched := domain.Enriched{
 		Title:     "[triage-ignored]",
 		Attrs:     map[string]any{},
@@ -31,11 +32,9 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.E
 	if err := e.repo.MarkDone(ctx, id, enriched); err != nil {
 		return fmt.Errorf("mark ignored row done: %w", err)
 	}
-	slog.InfoContext(ctx, "feedback ignored by triage",
-		"inbound_trace_id", trace.FromContext(ctx),
-		"tenant_id", row.TenantID,
-		"feedback_id", id,
-		"reason", reason)
+	logext.Infof(ctx,
+		"[%s] feedback ignored by triage,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,reason:%s",
+		where, trace.FromContext(ctx), row.TenantID, id, reason)
 	return nil
 }
 
@@ -44,16 +43,15 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.E
 // LLM. Same downstream behavior as runFullEnrich (persist + fan out),
 // just without the LLM call.
 func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedback.EnrichInput, enriched domain.Enriched) error {
+	const where = "service.Enricher.persistFromTriage"
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
 	if err := e.persistEnriched(ctx, snapshot, enriched); err != nil {
 		return err
 	}
-	slog.InfoContext(ctx, "feedback enriched via fast-path",
-		"inbound_trace_id", trace.FromContext(ctx),
-		"tenant_id", row.TenantID,
-		"feedback_id", id,
-		"attrs", enriched.Attrs,
-		"is_urgent", enriched.IsUrgent)
+	logext.Infof(ctx,
+		"[%s] feedback enriched via fast-path,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,is_urgent:%t,attrs:%s",
+		where, trace.FromContext(ctx), row.TenantID, id, enriched.IsUrgent,
+		logext.AsLogParam(enriched.Attrs))
 	if n := e.notifier.Load(); n != nil {
 		go e.fanOut(snapshot, ptrext.Indirect(n))
 	}

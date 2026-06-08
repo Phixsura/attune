@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 
 	"github.com/Phixsura/attune/internal/notify"
@@ -92,11 +91,8 @@ func checkOutboxResponse(label string, row outboxrepo.OutboxRow) notify.Response
 		switch {
 		case status >= 200 && status < 300:
 			// OTel: inbound_trace_id (not trace_id) — see docs/observability-sop.md.
-			// Ctx isn't threaded into ResponseChecker so use Background; the
-			// row already carries the inbound trace correlation in fields.
-			slog.InfoContext(ctx, "outbox row delivered",
-				"id", row.ID, "tenant", row.TenantID,
-				"inbound_trace_id", row.TraceID, "status", status)
+			logext.Infof(ctx, "[%s] row delivered,id:%d,tenant:%s,inbound_trace_id:%s,status:%d",
+				where, row.ID, row.TenantID, row.TraceID, status)
 			return nil
 		case status == 408 || status == 429:
 			return fmt.Errorf("outbox %s retryable status=%d body=%s",

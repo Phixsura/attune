@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -135,20 +134,17 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	// 1-5. Exchange code, upsert tenant/user/install.
 	tenantID, userID, created, err := h.resolveAndUpsert(ctx, code)
 	if err != nil {
-		slog.ErrorContext(ctx, "oauth: exchange/upsert failed", "err", err)
+		logext.Errorf(ctx, "[%s] resolveAndUpsert failed,err:%+v", where, err.Error())
 		respond.Error(ctx, w, http.StatusBadGateway, err.Error(), "Lark token exchange or upsert failed")
 		return
 	}
 	// 6. Sign session, redirect.
 	if err := h.signer.IssueSessionCookie(w, tenantID, userID); err != nil {
-		slog.ErrorContext(ctx, "oauth: sign session", "err", err)
 		logext.Errorf(ctx, "[%s] signer.IssueSessionCookie failed,user_id:%s,err:%+v",
 			where, userID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "session_sign_failed", "failed to sign session")
 		return
 	}
-	slog.InfoContext(ctx, "console: oauth login",
-		"tenant_id", tenantID, "user_id", userID, "first_install", created)
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,user_id:%s,first_install:%t",
 		where, tenantID, userID, created)
 	// postLogin is extracted from the OAuth state nonce we ourselves

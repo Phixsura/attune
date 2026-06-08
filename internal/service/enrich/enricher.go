@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -145,6 +144,7 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 // snapshot, persist, fan out. Extracted so the triage switch in
 // EnrichOne stays one expression per branch.
 func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.EnrichInput) error {
+	const where = "service.Enricher.runFullEnrich"
 	start := time.Now()
 	cfg := classifyConfigFromRow(row)
 	mode := dimsMode(cfg)
@@ -171,13 +171,10 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 	}
 	metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "ok").
 		Observe(time.Since(start).Seconds())
-	slog.InfoContext(ctx, "feedback enriched",
-		"inbound_trace_id", trace.FromContext(ctx),
-		"tenant_id", row.TenantID,
-		"feedback_id", id,
-		"attrs", enriched.Attrs,
-		"is_urgent", enriched.IsUrgent,
-		"title", enriched.Title)
+	logext.Infof(ctx,
+		"[%s] feedback enriched,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,is_urgent:%t,title:%s,attrs:%s",
+		where, trace.FromContext(ctx), row.TenantID, id, enriched.IsUrgent, enriched.Title,
+		logext.AsLogParam(enriched.Attrs))
 	if n := e.notifier.Load(); n != nil {
 		go e.fanOut(snapshot, ptrext.Indirect(n))
 	}
@@ -249,6 +246,7 @@ func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {
 // applyAttrsGate runs gate (2) per dim and records observability for
 // off-list values. Returns the canonical kept attrs.
 func applyAttrsGate(ctx context.Context, tenantID string, produced map[string]any, dims domain.DimensionSet) map[string]any {
+	const where = "service.Enricher.applyAttrsGate"
 	kept, dropped, suggested := domain.FilterAttrs(produced, dims)
 	if len(dropped) == 0 {
 		return kept
@@ -266,8 +264,8 @@ func applyAttrsGate(ctx context.Context, tenantID string, produced map[string]an
 		seen[dim] = true
 		metrics.EnrichSuggestedAttrsTotal.WithLabelValues(tenantID, dim).Inc()
 	}
-	logext.Infof(ctx, "[service.Enricher.applyAttrsGate] suggested,tenant_id:%s,dropped:%v",
-		tenantID, dropped)
+	logext.Infof(ctx, "[%s] suggested,tenant_id:%s,dropped:%v",
+		where, tenantID, dropped)
 	return kept
 }
 
@@ -277,28 +275,30 @@ func applyAttrsGate(ctx context.Context, tenantID string, produced map[string]an
 // `n` is captured at goroutine launch so a concurrent SetNotifier(nil)
 // or replacement can't trip a nil deref mid-call.
 func (e *Enricher) fanOut(s domain.Snapshot, n notify.Notifier) {
+	const where = "service.Enricher.fanOut"
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if err := n.PushPool(ctx, s); err != nil {
-		slog.WarnContext(ctx, "notify pool failed", "id", s.ID, "err", err)
+		logext.Warnf(ctx, "[%s] pool failed,id:%d,err:%+v", where, s.ID, err.Error())
 	}
 	if s.IsUrgent {
 		if err := n.PushRadar(ctx, s); err != nil {
-			slog.WarnContext(ctx, "notify radar failed", "id", s.ID, "err", err)
+			logext.Warnf(ctx, "[%s] radar failed,id:%d,err:%+v", where, s.ID, err.Error())
 		}
 	}
 }
 
 // EnrichPending sweeps up to n rows that need classification.
 func (e *Enricher) EnrichPending(ctx context.Context, n int) {
+	const where = "service.Enricher.EnrichPending"
 	ids, err := e.repo.ListPending(ctx, n)
 	if err != nil {
-		slog.ErrorContext(ctx, "enrich list pending failed", "err", err)
+		logext.Errorf(ctx, "[%s] list pending failed,err:%+v", where, err.Error())
 		return
 	}
 	for _, id := range ids {
 		if err := e.EnrichOne(ctx, id); err != nil {
-			slog.WarnContext(ctx, "feedback enrich failed", "id", id, "err", err)
+			logext.Warnf(ctx, "[%s] enrich failed,id:%d,err:%+v", where, id, err.Error())
 		}
 	}
 }
@@ -306,11 +306,12 @@ func (e *Enricher) EnrichPending(ctx context.Context, n int) {
 // RunBackground polls pending rows on `interval`. A nil-llm enricher
 // logs once and returns so it doesn't busy-spin in misconfigured envs.
 func (e *Enricher) RunBackground(ctx context.Context, interval time.Duration, batch int) {
+	const where = "service.Enricher.RunBackground"
 	if e.llm == nil {
-		slog.WarnContext(ctx, "feedback enricher disabled: no llm client")
+		logext.Warnf(ctx, "[%s] disabled: no llm client", where)
 		return
 	}
-	slog.InfoContext(ctx, "feedback enricher started", "interval", interval, "batch", batch)
+	logext.Infof(ctx, "[%s] started,interval:%s,batch:%d", where, interval, batch)
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {

@@ -14,13 +14,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"time"
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/observability"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -40,17 +40,11 @@ var subcommands = map[string]func([]string) error{
 }
 
 func main() {
-	// slog handler: JSON by default (production-safe, structured for log
-	// aggregators that key on field names). Local dev opts into the text
-	// handler via ENV=dev for human-readable `docker logs` output.
-	// Full rationale: docs/observability-trace-design.md.
-	var inner slog.Handler
-	if os.Getenv("ENV") == "dev" {
-		inner = slog.NewTextHandler(os.Stdout, ptrext.Of(slog.HandlerOptions{Level: slog.LevelInfo}))
-	} else {
-		inner = slog.NewJSONHandler(os.Stdout, ptrext.Of(slog.HandlerOptions{Level: slog.LevelInfo}))
-	}
-	slog.SetDefault(slog.New(observability.NewTraceIDHandler(inner)))
+	// Install the slog default (JSON in prod, Text under ENV=dev) wrapped in
+	// TraceIDHandler so every log record carries trace_id/span_id. CLAUDE.md
+	// §7 routes all log calls through internal/pkg/logext on top of this.
+	// Rationale: docs/observability-trace-design.md.
+	observability.InstallDefaultLogger()
 
 	ctx := context.Background()
 	args := os.Args[1:]
@@ -69,7 +63,7 @@ func main() {
 		os.Exit(2)
 	}
 	if err := handler(args[1:]); err != nil {
-		slog.ErrorContext(ctx, args[0]+" subcommand failed", "err", err)
+		logext.Errorf(ctx, "%s subcommand failed,err:%+v", args[0], err)
 		os.Exit(1)
 	}
 }

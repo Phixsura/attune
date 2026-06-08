@@ -29,11 +29,6 @@ import (
 	"log/slog"
 )
 
-// Debugf is a printf-style slog.DebugContext wrapper.
-func Debugf(ctx context.Context, format string, args ...any) {
-	slog.DebugContext(ctx, fmt.Sprintf(format, args...))
-}
-
 // Infof is a printf-style slog.InfoContext wrapper.
 func Infof(ctx context.Context, format string, args ...any) {
 	slog.InfoContext(ctx, fmt.Sprintf(format, args...))

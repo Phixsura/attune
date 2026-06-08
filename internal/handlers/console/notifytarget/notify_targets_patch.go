@@ -6,7 +6,6 @@ package notifytarget
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -51,7 +50,6 @@ func (h *NotifyTargetsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 				"notify target not found or not owned by tenant")
 			return
 		}
-		slog.ErrorContext(ctx, "notify-targets patch get", "err", err)
 		logext.Errorf(ctx, "[%s] repo.GetByID failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to read notify target")
@@ -105,7 +103,6 @@ func (h *NotifyTargetsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			respond.Error(ctx, w, http.StatusNotFound, "not_found", "notify target was deleted before the update could apply")
 			return
 		}
-		slog.ErrorContext(ctx, "notify-targets patch update", "err", err)
 		logext.Errorf(ctx, "[%s] repo.UpdateByID failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to update notify target")

@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -87,7 +86,6 @@ func (h *DevLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"tenant '"+slug+"' does not exist; create it first via `attune tenant create`")
 			return
 		}
-		slog.ErrorContext(ctx, "dev-login: resolve tenant", "err", err)
 		logext.Errorf(ctx, "[%s] tenants.ResolveSlug failed,slug:%s,err:%+v",
 			where, slug, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to resolve tenant")
@@ -101,7 +99,6 @@ func (h *DevLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	userID, err := h.users.Upsert(ctx, tenantID, openID, name, "", role)
 	if err != nil {
-		slog.ErrorContext(ctx, "dev-login: upsert user", "err", err)
 		logext.Errorf(ctx, "[%s] users.Upsert failed,tenant_id:%s,open_id:%s,err:%+v",
 			where, tenantID, openID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to upsert user")
@@ -109,17 +106,12 @@ func (h *DevLoginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.signer.IssueSessionCookie(w, tenantID, userID); err != nil {
-		slog.ErrorContext(ctx, "dev-login: sign session", "err", err)
 		logext.Errorf(ctx, "[%s] signer.IssueSessionCookie failed,user_id:%s,err:%+v",
 			where, userID, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to sign session")
 		return
 	}
 
-	slog.WarnContext(ctx, "dev-login: backdoor session minted",
-		"tenant_slug", slug, "tenant_id", tenantID,
-		"user_id", userID, "open_id", openID, "role", role,
-		"remote_ip", r.RemoteAddr)
 	logext.Warnf(ctx, "[%s] backdoor session minted,slug:%s,tenant_id:%s,user_id:%s,open_id:%s,role:%s,remote_ip:%s",
 		where, slug, tenantID, userID, openID, role, r.RemoteAddr)
 

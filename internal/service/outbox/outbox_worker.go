@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/Phixsura/attune/internal/infra/metrics"
@@ -65,20 +64,21 @@ func (w *OutboxWorker) Configure(pollInterval time.Duration, batchSize, maxAttem
 // claims (from prior crashes), then ticks every pollInterval to claim
 // + send a batch.
 func (w *OutboxWorker) Run(ctx context.Context) {
+	const where = "service.OutboxWorker.Run"
 	if reset, err := w.outbox.ResetStaleClaims(ctx); err != nil {
-		slog.WarnContext(ctx, "outbox: reset stale claims failed", "err", err)
+		logext.Warnf(ctx, "[%s] reset stale claims failed,err:%+v", where, err.Error())
 	} else if reset > 0 {
-		slog.InfoContext(ctx, "outbox: reset stale claims", "count", reset)
+		logext.Infof(ctx, "[%s] reset stale claims,count:%d", where, reset)
 	}
-	slog.InfoContext(ctx, "outbox worker started",
-		"poll_interval", w.pollInterval, "batch", w.batchSize, "max_attempts", w.maxAttempts)
+	logext.Infof(ctx, "[%s] outbox worker started,poll_interval:%s,batch:%d,max_attempts:%d",
+		where, w.pollInterval, w.batchSize, w.maxAttempts)
 
 	tick := time.NewTicker(w.pollInterval)
 	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			slog.InfoContext(ctx, "outbox worker stopping")
+			logext.Infof(ctx, "[%s] outbox worker stopping", where)
 			return
 		case <-tick.C:
 			w.processBatch(ctx)
@@ -89,9 +89,10 @@ func (w *OutboxWorker) Run(ctx context.Context) {
 // processBatch claims and sends one batch. Per-row failures don't
 // short-circuit the batch.
 func (w *OutboxWorker) processBatch(ctx context.Context) {
+	const where = "service.OutboxWorker.processBatch"
 	rows, err := w.outbox.ClaimBatch(ctx, w.batchSize)
 	if err != nil {
-		slog.ErrorContext(ctx, "outbox: claim batch failed", "err", err)
+		logext.Errorf(ctx, "[%s] claim batch failed,err:%+v", where, err.Error())
 		return
 	}
 	for _, row := range rows {
@@ -158,8 +159,8 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 	logext.Infof(ctx, "[%s] OK,id:%d,tenant:%s,dest_type:%s",
 		where, row.ID, row.TenantID, row.DestinationType)
 	if err := w.outbox.MarkDelivered(ctx, row.ID); err != nil {
-		slog.WarnContext(ctx, "outbox: mark delivered failed",
-			"id", row.ID, "inbound_trace_id", row.TraceID, "err", err)
+		logext.Warnf(ctx, "[%s] mark delivered failed,id:%d,inbound_trace_id:%s,err:%+v",
+			where, row.ID, row.TraceID, err.Error())
 	}
 	// Phase 3.2 · clear the alert state on first success after a
 	// failing streak. ClearFailure is no-op when last_failure_at IS NULL,
@@ -168,7 +169,8 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 		ctx,
 		row.TenantID, row.DestinationType, row.DestinationTarget, row.Audience,
 	); err != nil {
-		slog.DebugContext(ctx, "outbox: clear target failure errored", "id", row.ID, "err", err)
+		logext.Warnf(ctx, "[%s] clear target failure errored,id:%d,err:%+v",
+			where, row.ID, err.Error())
 	}
 }
 
@@ -179,6 +181,7 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 // failOrDead promotes a row to dead once attempts exceeds max.
 // Otherwise schedules the next retry per the backoff table.
 func (w *OutboxWorker) failOrDead(ctx context.Context, row outboxrepo.OutboxRow, msg string) {
+	const where = "service.OutboxWorker.failOrDead"
 	next := row.Attempts + 1
 	if next >= w.maxAttempts {
 		w.markDead(ctx, row, fmt.Sprintf("exceeded %d attempts: %s", w.maxAttempts, msg))
@@ -186,8 +189,8 @@ func (w *OutboxWorker) failOrDead(ctx context.Context, row outboxrepo.OutboxRow,
 	}
 	delay := outboxBackoff(next)
 	if err := w.outbox.MarkFailed(ctx, row.ID, msg, delay); err != nil {
-		slog.WarnContext(ctx, "outbox: mark failed errored",
-			"id", row.ID, "inbound_trace_id", row.TraceID, "err", err)
+		logext.Warnf(ctx, "[%s] mark failed errored,id:%d,inbound_trace_id:%s,err:%+v",
+			where, row.ID, row.TraceID, err.Error())
 	}
 }
 
@@ -203,13 +206,14 @@ func (w *OutboxWorker) failOrDead(ctx context.Context, row outboxrepo.OutboxRow,
 // Self-report failures are logged but never propagated — we don't want
 // alert-of-alert recursion when a tenant's lark-bot is also broken.
 func (w *OutboxWorker) markDead(ctx context.Context, row outboxrepo.OutboxRow, reason string) {
+	const where = "service.OutboxWorker.markDead"
 	if err := w.outbox.MarkDead(ctx, row.ID, reason); err != nil {
-		slog.WarnContext(ctx, "outbox: mark dead errored",
-			"id", row.ID, "inbound_trace_id", row.TraceID, "err", err)
+		logext.Warnf(ctx, "[%s] mark dead errored,id:%d,inbound_trace_id:%s,err:%+v",
+			where, row.ID, row.TraceID, err.Error())
 		return
 	}
-	slog.WarnContext(ctx, "outbox: row marked dead",
-		"id", row.ID, "tenant", row.TenantID, "inbound_trace_id", row.TraceID, "reason", reason)
+	logext.Warnf(ctx, "[%s] row marked dead,id:%d,tenant:%s,inbound_trace_id:%s,reason:%s",
+		where, row.ID, row.TenantID, row.TraceID, reason)
 
 	// Touch the target's alert state. Best-effort — if the customer
 	// already deleted the target, this UPDATE matches 0 rows.
@@ -217,8 +221,8 @@ func (w *OutboxWorker) markDead(ctx context.Context, row outboxrepo.OutboxRow, r
 		ctx,
 		row.TenantID, row.DestinationType, row.DestinationTarget, row.Audience, reason,
 	); err != nil {
-		slog.WarnContext(ctx, "outbox: touch target failure errored",
-			"id", row.ID, "tenant", row.TenantID, "err", err)
+		logext.Warnf(ctx, "[%s] touch target failure errored,id:%d,tenant:%s,err:%+v",
+			where, row.ID, row.TenantID, err.Error())
 	}
 
 	w.selfReportDead(ctx, row, reason)

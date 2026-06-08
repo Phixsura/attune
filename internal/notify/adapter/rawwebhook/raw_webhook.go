@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -55,14 +54,16 @@ type rawDestination struct {
 // Passing a nil httpClient gives a 10s-per-call default. retry should
 // usually be DefaultRetry() for raw webhook (5 attempts with backoff).
 func NewRawWebhookRouter(transport *notify.Transport, targets []notifytarget.NotifyTarget) *RawWebhookRouter {
+	const where = "notify.NewRawWebhookRouter"
 	dests := make(map[string]map[string]*rawDestination)
 	for _, t := range targets {
 		if t.DestinationType != notifytarget.DestRawWebhook {
 			continue
 		}
 		if t.URL == "" || t.Secret == "" {
-			slog.WarnContext(context.Background(), "raw webhook target missing url/secret, skipping",
-				"tenant_id", t.TenantID, "audience", t.Audience)
+			logext.Warnf(context.Background(),
+				"[%s] target missing url/secret, skipping,tenant_id:%s,audience:%s",
+				where, t.TenantID, t.Audience)
 			continue
 		}
 		if _, ok := dests[t.TenantID]; !ok {
@@ -206,8 +207,8 @@ func checkRawResponse(label string, s domain.Snapshot) notify.ResponseChecker {
 			where, label, s.ID, status, truncate(string(body), 1024))
 		switch {
 		case status >= 200 && status < 300:
-			slog.InfoContext(ctx, "raw webhook delivered",
-				"dest", label, "feedback_id", s.ID, "status", status)
+			logext.Infof(ctx, "[%s] delivered,dest:%s,feedback_id:%d,status:%d",
+				where, label, s.ID, status)
 			return nil
 		case status == 408 || status == 429:
 			return fmt.Errorf("raw webhook %s retryable status=%d body=%s",

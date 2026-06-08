@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +18,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/trace"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
@@ -51,6 +51,7 @@ func (h *IngestHandler) Routes() chi.Router {
 var ingestUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
 
 func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
+	const where = "handlers.IngestHandler.Ingest"
 	ctx := r.Context()
 	tenantID, ok := apikey.TenantIDFromContext(ctx)
 	if !ok {
@@ -99,11 +100,8 @@ func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metrics.IngestTotal.WithLabelValues(tenantID, in.Source, "ok").Inc()
-	slog.InfoContext(ctx, "ingest accepted",
-		"inbound_trace_id", trace.FromContext(ctx),
-		"tenant_id", tenantID,
-		"feedback_id", id,
-		"source", in.Source)
+	logext.Infof(ctx, "[%s] ingest accepted,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,source:%s",
+		where, trace.FromContext(ctx), tenantID, id, in.Source)
 	writeJSONProto(w, http.StatusOK, ptrext.Of(attunev1.IngestResponse{
 		Id:               id,
 		EnrichmentStatus: "pending",
