@@ -96,7 +96,7 @@ Push                              Poll                              Schedule    
 | Social / X / Reddit / HN / Product Hunt / App Store reviews | poll or stream mode |
 | MQ subscription (MQTT / Kafka / AMQP / NATS / Redis Streams) | stream mode |
 | Chinese IM outbound (Feishu / DingTalk / WeWork / Bark) | outbound notify adapter SDK (#34) + a channel pack |
-| MCP server exposing attune history | separate server; not in the inbound framework |
+| MCP server exposing attune as an agent-accessible tool surface (search / triage / classify / record signals as a first-class principal, with per-agent attribution and auditable actions) | separate server / package; not in the inbound framework; warrants its own design proposal + tracking issue |
 | Console OIDC / SSO | reserved for #40 |
 | Outbound notify adapter SDK itself | #34 |
 | Webhook transform DSL (JS sandbox / JSONPath mapping) | clients adapt their own payload; later, a webhook-adapter sub-config |
