@@ -57,6 +57,42 @@ linters:
           deny:
             - pkg: log/slog
               desc: "log via internal/pkg/logext, not log/slog directly (CLAUDE.md §7, #48)"
+        # #66 channel-agnostic inbound boundary. Two rules:
+        # 1. inbound-boundary: nothing under service / handlers / repo /
+        #    infra / notify / domain — nor the framework root itself —
+        #    may import internal/inbound/adapter/*. Adapters self-register
+        #    via init(); cmd/attune is the only legal blank-import site.
+        # See: docs/proposals/2026/06/2026-06-08-channel-agnostic-inbound.md
+        inbound-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/service/**"
+            - "**/internal/handlers/**"
+            - "**/internal/repo/**"
+            - "**/internal/infra/**"
+            - "**/internal/notify/**"
+            - "**/internal/domain/**"
+            - "**/internal/inbound/*.go"
+          deny:
+            - pkg: github.com/Phixsura/attune/internal/inbound/adapter
+              desc: "core/framework must not import inbound adapters; cmd/attune blank-imports only (#66)"
+        # 2. inbound-framework-isolation: the framework root defines
+        #    IngestPort + SourceStore + SecretStore as interfaces; the
+        #    implementations are wired by cmd/attune. The framework
+        #    itself must not shortcut and import them.
+        inbound-framework-isolation:
+          list-mode: lax
+          files:
+            - "**/internal/inbound/*.go"
+          deny:
+            - pkg: github.com/Phixsura/attune/internal/service
+              desc: "inbound framework defines IngestPort; impl is wired by cmd/attune"
+            - pkg: github.com/Phixsura/attune/internal/repo
+              desc: "inbound framework defines SourceStore; impl wired by cmd/attune"
+            - pkg: github.com/Phixsura/attune/internal/handlers
+              desc: "framework is below handlers"
+            - pkg: github.com/Phixsura/attune/internal/notify
+              desc: "inbound and notify are sibling subsystems"
     revive:
       rules:
         - name: blank-imports
