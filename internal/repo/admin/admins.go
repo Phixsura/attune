@@ -113,16 +113,23 @@ func (r *Repo) GetByID(ctx context.Context, id string) (Admin, error) {
 // IncrementFailedAttempts bumps the counter and applies a 15-minute
 // lockout once it reaches maxFailedAttempts.
 func (r *Repo) IncrementFailedAttempts(ctx context.Context, id string) error {
+	// Bug found during Phase-4 validation: the prior form passed
+	// `lockoutDuration.Seconds()` as an int into `$3 || ' seconds'`,
+	// which pgx's TEXT-style protocol refuses to encode into a `text`
+	// parameter slot ("unable to encode 900 into text format for
+	// text (OID 25): cannot find encode plan"). The whole UPDATE
+	// errored and the lockout never triggered. The fix: build the
+	// interval literal Go-side and pass it as a single TEXT arg.
 	_, err := r.pool.Exec(ctx,
 		`UPDATE admins
 		    SET failed_attempts = failed_attempts + 1,
 		        locked_until = CASE
-		            WHEN failed_attempts + 1 >= $2 THEN now() + ($3 || ' seconds')::interval
+		            WHEN failed_attempts + 1 >= $2 THEN now() + $3::interval
 		            ELSE locked_until
 		        END,
 		        updated_at = now()
 		  WHERE id = $1`,
-		id, maxFailedAttempts, int(lockoutDuration.Seconds()),
+		id, maxFailedAttempts, fmt.Sprintf("%d seconds", int(lockoutDuration.Seconds())),
 	)
 	return err
 }

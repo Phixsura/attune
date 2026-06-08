@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -61,8 +62,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	// so we need an out-of-band origin check. SameSite=Lax stops
 	// the browser from *sending* a cookie cross-site but does NOT stop
 	// a malicious origin from forcing a victim's browser to set a
-	// fresh session cookie ("login fixation"), which then attributes
-	// later actions to the attacker's account.
+	// fresh session cookie ("login fixation").
 	if !originAllowed(r, h.baseURL) {
 		logext.Warnf(ctx, "[%s] reject: bad origin,origin:%s",
 			where, r.Header.Get("Origin"))
@@ -70,66 +70,17 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req attunev1.LoginRequest
-	if err := respond.Decode(r.Body, &req); err != nil {
-		if errors.Is(err, respond.ErrBodyTooLarge) {
-			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds 1 MiB")
-			return
-		}
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "invalid json body")
-		return
-	}
-	if req.GetEmail() == "" || req.GetPassword() == "" {
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "email and password required")
+	req, ok := decodeLoginRequest(ctx, w, r)
+	if !ok {
 		return
 	}
 
-	a, err := h.admins.GetByEmail(ctx, req.GetEmail())
-	switch {
-	case errors.Is(err, admin.ErrNotFound):
-		// Equalise timing with a dummy bcrypt run; result discarded.
-		_ = VerifyOrDummy("", req.GetPassword())
-		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "invalid credentials")
-		return
-	case err != nil:
-		logext.Errorf(ctx, "[%s] GetByEmail failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
+	a, ok := h.authenticate(ctx, w, req) // *LoginRequest — proto messages carry sync.Mutex
+	if !ok {
 		return
 	}
 
-	if a.LockedUntil != nil && a.LockedUntil.After(time.Now()) {
-		// Run a dummy bcrypt even when locked so an attacker probing the
-		// locked-account oracle can't distinguish "exists + locked" from
-		// "wrong password" by response time (review M1, #66).
-		_ = VerifyOrDummy("", req.GetPassword())
-		respond.Error(ctx, w, http.StatusLocked, "locked", "account locked due to too many failed attempts")
-		return
-	}
-
-	if !VerifyOrDummy(a.PasswordHash, req.GetPassword()) {
-		if err := h.admins.IncrementFailedAttempts(ctx, a.ID); err != nil {
-			logext.Warnf(ctx, "[%s] IncrementFailedAttempts failed,err:%+v", where, err.Error())
-		}
-		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "invalid credentials")
-		return
-	}
-
-	if err := h.admins.ResetFailedAttempts(ctx, a.ID); err != nil {
-		logext.Warnf(ctx, "[%s] ResetFailedAttempts failed,err:%+v", where, err.Error())
-	}
-
-	// Single-tenant dogfood scope: admins act inside the lexicographically
-	// first active tenant if any exists. #38 will add a tenant switcher;
-	// when no tenant exists yet, TenantID stays empty and tenant-scoped
-	// handlers gracefully degrade.
-	scopeTenantID := ""
-	if h.tenants != nil {
-		if id, terr := h.tenants.FirstActiveID(ctx); terr == nil {
-			scopeTenantID = id
-		} else if !errors.Is(terr, tenant.ErrTenantNotFound) {
-			logext.Warnf(ctx, "[%s] FirstActiveID failed,err:%+v", where, terr.Error())
-		}
-	}
+	scopeTenantID := h.resolveAdminScope(ctx, where)
 	if err := h.signer.IssueSessionCookie(w, scopeTenantID, a.ID); err != nil {
 		logext.Errorf(ctx, "[%s] IssueSessionCookie failed,err:%+v", where, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
@@ -143,6 +94,86 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	logext.Infof(ctx, "[%s] OK,admin_id:%s,redirect:%s", where, a.ID, redirect)
 	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.LoginResponse{Redirect: redirect}))
+}
+
+// decodeLoginRequest reads + validates the proto body shape. Returns
+// (req, true) on success; on failure writes a 400/413 and returns ok=false.
+// Returns a pointer because proto messages carry a sync.Mutex; copying
+// by value trips `vet copylocks`.
+func decodeLoginRequest(ctx context.Context, w http.ResponseWriter, r *http.Request) (*attunev1.LoginRequest, bool) {
+	req := ptrext.Of(attunev1.LoginRequest{})
+	if err := respond.Decode(r.Body, req); err != nil {
+		if errors.Is(err, respond.ErrBodyTooLarge) {
+			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds 1 MiB")
+			return nil, false
+		}
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "invalid json body")
+		return nil, false
+	}
+	if req.GetEmail() == "" || req.GetPassword() == "" {
+		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "email and password required")
+		return nil, false
+	}
+	return req, true
+}
+
+// authenticate resolves the admin row by email and verifies the password.
+// On success returns (admin, true). On any failure writes the response
+// and returns ok=false. Timing is equalised across "unknown email",
+// "locked", and "wrong password" by always running a bcrypt op.
+func (h *Handler) authenticate(ctx context.Context, w http.ResponseWriter, req *attunev1.LoginRequest) (admin.Admin, bool) {
+	const where = "console.auth.Handler.authenticate"
+	a, err := h.admins.GetByEmail(ctx, req.GetEmail())
+	switch {
+	case errors.Is(err, admin.ErrNotFound):
+		// Equalise timing with a dummy bcrypt run; result discarded.
+		_ = VerifyOrDummy("", req.GetPassword())
+		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "invalid credentials")
+		return admin.Admin{}, false
+	case err != nil:
+		logext.Errorf(ctx, "[%s] GetByEmail failed,err:%+v", where, err.Error())
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
+		return admin.Admin{}, false
+	}
+
+	if a.LockedUntil != nil && a.LockedUntil.After(time.Now()) {
+		// Run a dummy bcrypt even when locked so an attacker probing the
+		// locked-account oracle can't distinguish "exists + locked" from
+		// "wrong password" by response time (review M1, #66).
+		_ = VerifyOrDummy("", req.GetPassword())
+		respond.Error(ctx, w, http.StatusLocked, "locked", "account locked due to too many failed attempts")
+		return admin.Admin{}, false
+	}
+
+	if !VerifyOrDummy(a.PasswordHash, req.GetPassword()) {
+		if err := h.admins.IncrementFailedAttempts(ctx, a.ID); err != nil {
+			logext.Warnf(ctx, "[%s] IncrementFailedAttempts failed,err:%+v", where, err.Error())
+		}
+		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "invalid credentials")
+		return admin.Admin{}, false
+	}
+
+	if err := h.admins.ResetFailedAttempts(ctx, a.ID); err != nil {
+		logext.Warnf(ctx, "[%s] ResetFailedAttempts failed,err:%+v", where, err.Error())
+	}
+	return a, true
+}
+
+// resolveAdminScope returns the TEXT id of the lex-first active tenant
+// (single-tenant dogfood; #38 brings a tenant switcher) or "" when no
+// tenant exists. Tenant-scoped handlers degrade gracefully on "".
+func (h *Handler) resolveAdminScope(ctx context.Context, where string) string {
+	if h.tenants == nil {
+		return ""
+	}
+	id, err := h.tenants.FirstActiveID(ctx)
+	if err == nil {
+		return id
+	}
+	if !errors.Is(err, tenant.ErrTenantNotFound) {
+		logext.Warnf(ctx, "[%s] FirstActiveID failed,err:%+v", where, err.Error())
+	}
+	return ""
 }
 
 // Logout handles POST /install/logout. Clears the session cookie. Idempotent.

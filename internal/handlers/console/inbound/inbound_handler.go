@@ -748,20 +748,16 @@ type testConnInputs struct {
 	Folder   string
 }
 
-// imapDialAndProbe — production IMAP probe. Connects with TLS unless
-// the caller explicitly opted out (test-only / loopback), then LOGIN /
-// SELECT / LOGOUT. Returns any error verbatim — the handler wraps it
-// into the proto response.
+// imapDialAndProbe — production IMAP probe. TLS-only (review H2, #66):
+// the cfg.TLS=false escape hatch is gone here just as it is in the
+// inbound/adapter/email runtime — loopback reverse proxies that
+// terminate TLS can front a plain-IMAP server if the operator truly
+// needs one. After dial, runs LOGIN / SELECT / LOGOUT. Returns any
+// error verbatim — the handler wraps it into the proto response.
 func imapDialAndProbe(_ context.Context, cfg testConnInputs) error {
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
 	opt := ptrext.Of(imapclient.Options{})
-	var cli *imapclient.Client
-	var err error
-	if cfg.TLS {
-		cli, err = imapclient.DialTLS(addr, opt)
-	} else {
-		cli, err = imapclient.DialInsecure(addr, opt)
-	}
+	cli, err := imapclient.DialTLS(addr, opt)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
@@ -817,6 +813,14 @@ func validateEmailCreateConfig(cfg *attunev1.EmailCreateConfig) error {
 	if cfg.GetPort() < 1 || cfg.GetPort() > 65535 {
 		return errors.New("email_config.port must be 1..65535")
 	}
+	if !cfg.GetTls() {
+		// TLS-only (review H2, #66 — confirmed during Phase-4 audit).
+		// Plain IMAP would expose the LOGIN literal (username +
+		// password) over the wire; the runtime dialIMAP already
+		// enforces TLS unconditionally, but rejecting at create time
+		// stops a stale `tls:false` row from sitting in the table.
+		return errors.New("email_config.tls must be true (plain IMAP is disallowed)")
+	}
 	if strings.TrimSpace(cfg.GetUsername()) == "" {
 		return errors.New("email_config.username must not be empty")
 	}
@@ -836,12 +840,16 @@ func validateEmailCreateConfig(cfg *attunev1.EmailCreateConfig) error {
 }
 
 // validateEmailConnConfig — narrower variant for the test-connection
-// probe. Returns a normalised testConnInputs on success.
+// probe. Returns a normalised testConnInputs on success. Like the
+// create-source path it requires tls=true (review H2, #66).
 func validateEmailConnConfig(cfg *attunev1.EmailConnConfig) (testConnInputs, error) {
+	if !cfg.GetTls() {
+		return testConnInputs{}, errors.New("tls must be true (plain IMAP is disallowed)")
+	}
 	out := testConnInputs{
 		Host:     strings.TrimSpace(cfg.GetHost()),
 		Port:     int(cfg.GetPort()),
-		TLS:      cfg.GetTls(),
+		TLS:      true,
 		Username: strings.TrimSpace(cfg.GetUsername()),
 		Password: cfg.GetPassword(),
 		Folder:   strings.TrimSpace(cfg.GetFolder()),

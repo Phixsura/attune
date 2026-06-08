@@ -167,33 +167,38 @@ func TestValidateEmailCreateConfig_Validation(t *testing.T) {
 	}{
 		{
 			"empty host",
-			ptrext.Of(attunev1.EmailCreateConfig{Port: 993, Username: "u", Password: "p"}),
+			ptrext.Of(attunev1.EmailCreateConfig{Port: 993, Tls: true, Username: "u", Password: "p"}),
 			"host",
 		},
 		{
 			"port 0",
-			ptrext.Of(attunev1.EmailCreateConfig{Host: "h", Port: 0, Username: "u", Password: "p"}),
+			ptrext.Of(attunev1.EmailCreateConfig{Host: "h", Port: 0, Tls: true, Username: "u", Password: "p"}),
 			"port",
 		},
 		{
 			"port too big",
-			ptrext.Of(attunev1.EmailCreateConfig{Host: "h", Port: 70000, Username: "u", Password: "p"}),
+			ptrext.Of(attunev1.EmailCreateConfig{Host: "h", Port: 70000, Tls: true, Username: "u", Password: "p"}),
 			"port",
 		},
 		{
+			"tls false rejected (review H2, #66)",
+			ptrext.Of(attunev1.EmailCreateConfig{Host: "h", Port: 993, Tls: false, Username: "u", Password: "p"}),
+			"tls",
+		},
+		{
 			"no username",
-			ptrext.Of(attunev1.EmailCreateConfig{Host: "h", Port: 993, Password: "p"}),
+			ptrext.Of(attunev1.EmailCreateConfig{Host: "h", Port: 993, Tls: true, Password: "p"}),
 			"username",
 		},
 		{
 			"no password",
-			ptrext.Of(attunev1.EmailCreateConfig{Host: "h", Port: 993, Username: "u"}),
+			ptrext.Of(attunev1.EmailCreateConfig{Host: "h", Port: 993, Tls: true, Username: "u"}),
 			"password",
 		},
 		{
 			"bad start_from",
 			ptrext.Of(attunev1.EmailCreateConfig{
-				Host: "h", Port: 993, Username: "u", Password: "p", StartFrom: "junk",
+				Host: "h", Port: 993, Tls: true, Username: "u", Password: "p", StartFrom: "junk",
 			}),
 			"start_from",
 		},
@@ -404,7 +409,8 @@ func TestRotate_HappyPath(t *testing.T) {
 func TestTestConnection_EmailHappyPath(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
 	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
-	body := `{"channel":"email","emailConfig":{"host":"h","port":143,"username":"u","password":"p"}}`
+	// tls:true is mandatory post-H2 (review fix #66); plain IMAP is disallowed.
+	body := `{"channel":"email","emailConfig":{"host":"h","port":993,"tls":true,"username":"u","password":"p"}}`
 	w := httptest.NewRecorder()
 	h.TestConnection(w, authedRequest(http.MethodPost, "/x", body, ""))
 	if w.Code != http.StatusOK {
@@ -423,7 +429,8 @@ func TestTestConnection_DialFailure_Surfaces(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
 	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
 	h.testConn = stubProbe(errors.New("connection refused"))
-	body := `{"channel":"email","emailConfig":{"host":"h","port":143,"username":"u","password":"p"}}`
+	// tls:true is mandatory post-H2 (review fix #66); plain IMAP is disallowed.
+	body := `{"channel":"email","emailConfig":{"host":"h","port":993,"tls":true,"username":"u","password":"p"}}`
 	w := httptest.NewRecorder()
 	h.TestConnection(w, authedRequest(http.MethodPost, "/x", body, ""))
 	if w.Code != http.StatusOK {
