@@ -224,8 +224,9 @@ func (w *OutboxWorker) markDead(ctx context.Context, row outboxrepo.OutboxRow, r
 		logext.Warnf(ctx, "[%s] touch target failure errored,id:%d,tenant:%s,err:%+v",
 			where, row.ID, row.TenantID, err.Error())
 	}
-
-	w.selfReportDead(ctx, row, reason)
+	// (Self-report-dead alerting went away with #66 Plan T17 — it pushed
+	// a card to the tenant's lark-bot. A future generic-alerts feature
+	// will live under the #34 outbound adapter SDK.)
 }
 
 func outboxBackoff(attempt int) time.Duration {

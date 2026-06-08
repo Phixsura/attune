@@ -1,9 +1,10 @@
 // server.go holds the `attune server` bootstrap: it loads config, wires up
-// OpenTelemetry, the pgx pool, the LLM client, repos/services, the outbox +
-// digest background workers, the chi router (lark + ingest + console mounts)
-// and runs the HTTP server until SIGINT/SIGTERM. The small OTel header helpers
-// and the signal-driven context live here too since they are only used by the
-// server path. Subcommand dispatch and CLI plumbing stay in main.go.
+// OpenTelemetry, the pgx pool, the LLM client, repos/services, the outbox
+// background worker, the chi router (ingest + inbound framework + console
+// mounts) and runs the HTTP server until SIGINT/SIGTERM. The small OTel
+// header helpers and the signal-driven context live here too since they are
+// only used by the server path. Subcommand dispatch and CLI plumbing stay in
+// main.go.
 package main
 
 import (
@@ -117,10 +118,9 @@ func runServer() error {
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
 
-	// weekly digest weekly digest scheduler. Ticks every 30 min; scans
-	// tenants whose last_digest_sent_at < now-6d AND has at least one
-	// active lark-bot; composes 7-day summary + sends via SendAlert.
-	go outbox.NewDigestService(tenantRepo, feedbackRepo, notifyTargetRepo).Run(ctx)
+	// (Weekly digest scheduler removed with #66 Plan T17 — it sent only
+	// to lark-bots. A future generic digest sender lands on the #34
+	// outbound adapter SDK.)
 
 	ingestHandler := handlers.NewIngestHandler(ingestor)
 
