@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -48,9 +49,6 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		})
 		return
 	}
-	// Remember the source's poll interval so pollLoop's between-rounds
-	// sleep honours it (review M3, #66).
-	a.recordPollInterval(src.Slug, cfg.PollIntervalSeconds)
 
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
 	options := ptrext.Of(imapclient.Options{})
@@ -76,9 +74,34 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		return
 	}
 
-	if _, err := cli.Select(cfg.Folder, ptrext.Of(imap.SelectOptions{})).Wait(); err != nil {
+	selectData, err := cli.Select(cfg.Folder, ptrext.Of(imap.SelectOptions{})).Wait()
+	if err != nil {
 		a.transientError(ctx, src, "select: "+err.Error())
 		return
+	}
+
+	// First-poll cursor seed honours spec §Email IMAP adapter's
+	// `start_from` policy. `now` (default) skips existing backlog by
+	// stamping LastUID to the mailbox's UIDNext-1; `all_unseen` starts
+	// from 0 so the loop fetches every existing message. Subsequent
+	// polls already have a non-zero LastUID and skip this branch (G1
+	// fix, #66).
+	if src.State.LastUID == 0 && strings.ToLower(cfg.StartFrom) != "all_unseen" {
+		var seedUID int64
+		if selectData != nil && selectData.UIDNext > 0 {
+			seedUID = int64(selectData.UIDNext) - 1
+		}
+		if seedUID < 0 {
+			seedUID = 0
+		}
+		if err := a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
+			LastEventAt: src.State.LastEventAt,
+			LastUID:     seedUID,
+		}); err != nil {
+			a.deps.Logger.Warnf(ctx, "[%s] seed LastUID failed,source_id:%s,err:%+v",
+				where, src.ID, err.Error())
+		}
+		src.State.LastUID = seedUID
 	}
 
 	criteria := newSearchCriteria(src.State.LastUID)
@@ -147,9 +170,20 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
 	}
 
+	// UpdateState fires when:
+	//   - new UIDs landed (advance LastUID + LastEventAt), OR
+	//   - the previous state had a `last_error` left over (recovery
+	//     should clear it so the Console UI doesn't stay red — G2 fix,
+	//     #66). Without this branch a transiently-broken source that
+	//     recovered to a quiet mailbox would stay error-flagged forever.
 	if lastUID != src.State.LastUID {
 		_ = a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
 			LastEventAt: ptrext.Of(nowFn()),
+			LastUID:     lastUID,
+		})
+	} else if src.State.LastError != "" {
+		_ = a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
+			LastEventAt: src.State.LastEventAt,
 			LastUID:     lastUID,
 		})
 	}

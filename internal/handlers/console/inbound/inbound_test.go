@@ -49,26 +49,11 @@ func (f *fakeSourceRepo) SetEnabled(_ context.Context, id string, enabled bool, 
 	return f.setEnabledErr
 }
 
-// fakeExec — records last DELETE invocation; returns a stubbable
-// RowsAffected for the race-vs-not-found branch.
-type fakeExec struct {
-	lastSQL  string
-	lastArgs []any
-	rows     int64
-	err      error
-}
-
-func (f *fakeExec) Exec(_ context.Context, sql string, args ...any) (pgconnResult, error) {
-	f.lastSQL = sql
-	f.lastArgs = args
-	if f.err != nil {
-		return nil, f.err
-	}
-	return commandTag{tag: f.rows}, nil
-}
-
-// newTestHandler — wires a Handler against fakes.
-func newTestHandler(repo *fakeSourceRepo, exec *fakeExec) *Handler {
+// newTestHandler — wires a Handler against fakes. Delete uses h.pool
+// directly (real pgx); tests that exercise Delete pass nil pool +
+// expect 500 "pool not configured" or are deferred to the integration
+// suite (review O10, #66).
+func newTestHandler(repo *fakeSourceRepo, _ *struct{}) *Handler {
 	return ptrext.Of(Handler{
 		sources:    repo,
 		secrets:    inboundtest.FakeSecrets{},
@@ -76,7 +61,6 @@ func newTestHandler(repo *fakeSourceRepo, exec *fakeExec) *Handler {
 		rotate:     stubRotate(nil, time.Time{}),
 		testConn:   stubProbe(nil),
 		tenantSlug: func(context.Context, string) (string, error) { return "tenant-x", nil },
-		exec:       exec,
 	})
 }
 
@@ -202,7 +186,7 @@ func TestValidateEmailCreateConfig_Validation(t *testing.T) {
 
 func TestGet_404(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{getErr: inboundsource.ErrNotFound})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Get(w, authedRequest(http.MethodGet, "/x", "", uuid.NewString()))
 	if w.Code != http.StatusNotFound {
@@ -215,7 +199,7 @@ func TestGet_CrossTenant(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{getSrc: inbound.Source{
 		ID: id, TenantID: "tenant-OTHER", Channel: "webhook", Name: "n", Slug: "n", Enabled: true,
 	}})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Get(w, authedRequest(http.MethodGet, "/x", "", id))
 	if w.Code != http.StatusNotFound {
@@ -235,7 +219,7 @@ func TestGet_HappyPath(t *testing.T) {
 		Enabled:  true,
 		State:    inbound.SourceState{LastEventAt: ptrext.Of(ts)},
 	}})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Get(w, authedRequest(http.MethodGet, "/x", "", id))
 	if w.Code != http.StatusOK {
@@ -258,7 +242,7 @@ func TestPause_FlipsEnabled(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{getSrc: inbound.Source{
 		ID: id, TenantID: "tenant-1", Channel: "webhook", Enabled: true,
 	}})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Pause(w, authedRequest(http.MethodPost, "/x", "", id))
 	if w.Code != http.StatusOK {
@@ -275,7 +259,7 @@ func TestResume_FlipsEnabled(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{getSrc: inbound.Source{
 		ID: id, TenantID: "tenant-1", Channel: "webhook", Enabled: false,
 	}})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Resume(w, authedRequest(http.MethodPost, "/x", "", id))
 	if w.Code != http.StatusOK {
@@ -288,7 +272,7 @@ func TestResume_FlipsEnabled(t *testing.T) {
 
 func TestDelete_404OnMissing(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{getErr: inboundsource.ErrNotFound})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Delete(w, authedRequest(http.MethodDelete, "/x", "", uuid.NewString()))
 	if w.Code != http.StatusNotFound {
@@ -296,34 +280,21 @@ func TestDelete_404OnMissing(t *testing.T) {
 	}
 }
 
-func TestDelete_HappyPath(t *testing.T) {
-	id := uuid.NewString()
-	repo := ptrext.Of(fakeSourceRepo{getSrc: inbound.Source{
-		ID: id, TenantID: "tenant-1", Channel: "webhook", Enabled: true,
-	}})
-	exec := ptrext.Of(fakeExec{rows: 1})
-	h := newTestHandler(repo, exec)
-	w := httptest.NewRecorder()
-	h.Delete(w, authedRequest(http.MethodDelete, "/x", "", id))
-	if w.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", w.Code)
-	}
-	if !strings.Contains(exec.lastSQL, "DELETE FROM inbound_sources") {
-		t.Fatalf("expected DELETE SQL; got %q", exec.lastSQL)
-	}
-}
+// TestDelete_HappyPath and TestDelete_RaceLost moved to the testdb
+// integration suite — Delete now drives pgxpool.Pool directly (no exec
+// seam, review O10 #66) so the happy / race branches are exercised
+// against a real Postgres instead of a fake.
 
-func TestDelete_RaceLost(t *testing.T) {
+func TestDelete_NoPoolReturns500(t *testing.T) {
 	id := uuid.NewString()
 	repo := ptrext.Of(fakeSourceRepo{getSrc: inbound.Source{
 		ID: id, TenantID: "tenant-1", Channel: "webhook", Enabled: true,
 	}})
-	exec := ptrext.Of(fakeExec{rows: 0})
-	h := newTestHandler(repo, exec)
+	h := newTestHandler(repo, nil) // pool stays nil
 	w := httptest.NewRecorder()
 	h.Delete(w, authedRequest(http.MethodDelete, "/x", "", id))
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("race-lost should map to 404, got %d", w.Code)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("nil-pool Delete must 500; got %d", w.Code)
 	}
 }
 
@@ -332,7 +303,7 @@ func TestRotate_RejectsEmailChannel(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{getSrc: inbound.Source{
 		ID: id, TenantID: "tenant-1", Channel: "email",
 	}})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Rotate(w, authedRequest(http.MethodPost, "/x", "", id))
 	if w.Code != http.StatusBadRequest {
@@ -346,7 +317,7 @@ func TestRotate_GraceWindow_Returns409(t *testing.T) {
 		ID: id, TenantID: "tenant-1", Channel: "webhook",
 	}})
 	next := time.Now().Add(2 * time.Hour)
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	h.rotate = stubRotate(webhook.ErrRotationInGraceWindow, next)
 	w := httptest.NewRecorder()
 	h.Rotate(w, authedRequest(http.MethodPost, "/x", "", id))
@@ -368,7 +339,7 @@ func TestRotate_HappyPath(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{getSrc: inbound.Source{
 		ID: id, TenantID: "tenant-1", Channel: "webhook",
 	}})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Rotate(w, authedRequest(http.MethodPost, "/x", "", id))
 	if w.Code != http.StatusOK {
@@ -391,7 +362,7 @@ func TestRotate_HappyPath(t *testing.T) {
 
 func TestTestConnection_EmailHappyPath(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	// tls:true is mandatory post-H2 (review fix #66); plain IMAP is disallowed.
 	body := `{"channel":"email","emailConfig":{"host":"h","port":993,"tls":true,"username":"u","password":"p"}}`
 	w := httptest.NewRecorder()
@@ -410,7 +381,7 @@ func TestTestConnection_EmailHappyPath(t *testing.T) {
 
 func TestTestConnection_DialFailure_Surfaces(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	h.testConn = stubProbe(errors.New("connection refused"))
 	// tls:true is mandatory post-H2 (review fix #66); plain IMAP is disallowed.
 	body := `{"channel":"email","emailConfig":{"host":"h","port":993,"tls":true,"username":"u","password":"p"}}`
@@ -433,7 +404,7 @@ func TestTestConnection_DialFailure_Surfaces(t *testing.T) {
 
 func TestTestConnection_RejectsWebhookChannel(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	body := `{"channel":"webhook"}`
 	w := httptest.NewRecorder()
 	h.TestConnection(w, authedRequest(http.MethodPost, "/x", body, ""))
@@ -451,7 +422,7 @@ func TestTestConnection_RejectsWebhookChannel(t *testing.T) {
 
 func TestCreate_RejectsUnknownChannel(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Create(w, authedRequest(http.MethodPost, "/x", `{"channel":"bogus","name":"X"}`, ""))
 	if w.Code != http.StatusBadRequest {
@@ -461,7 +432,7 @@ func TestCreate_RejectsUnknownChannel(t *testing.T) {
 
 func TestCreate_RejectsBadJSON(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Create(w, authedRequest(http.MethodPost, "/x", `{not-json`, ""))
 	if w.Code != http.StatusBadRequest {
@@ -471,7 +442,7 @@ func TestCreate_RejectsBadJSON(t *testing.T) {
 
 func TestCreate_RejectsEmptyName(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Create(w, authedRequest(http.MethodPost, "/x", `{"channel":"webhook","name":"   "}`, ""))
 	if w.Code != http.StatusBadRequest {
@@ -481,7 +452,7 @@ func TestCreate_RejectsEmptyName(t *testing.T) {
 
 func TestCreate_RejectsNonAlphanumericName(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
-	h := newTestHandler(repo, ptrext.Of(fakeExec{}))
+	h := newTestHandler(repo, nil)
 	w := httptest.NewRecorder()
 	h.Create(w, authedRequest(http.MethodPost, "/x", `{"channel":"webhook","name":"!!!"}`, ""))
 	if w.Code != http.StatusBadRequest {

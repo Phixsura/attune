@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -47,8 +48,19 @@ func Register(channel string, factory Factory) {
 
 // ResetForTest — clears the registry. Test fixtures use it to deduplicate
 // across tests that import multiple adapter packages transitively.
-// Documented test-only — production binaries should not call this.
+//
+// Runtime-gated via `testing.Testing()` (Go 1.21+) so a production
+// binary that accidentally reaches this function panics rather than
+// silently nuking its adapter registry. Spec §Registry asks for
+// "build-tag-gated"; we use Go's built-in test detector instead
+// because (a) shipping a build tag would require every test caller
+// to opt in via `-tags`, breaking conformance suites that depend on
+// cross-package imports, and (b) testing.Testing() achieves the same
+// "prod can't call this" guarantee at zero cost (G4 fix, #66).
 func ResetForTest() {
+	if !testing.Testing() {
+		panic("inbound.ResetForTest must only be called from tests")
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	factories = map[string]Factory{}

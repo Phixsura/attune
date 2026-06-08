@@ -308,7 +308,7 @@ func setupInbound(ctx context.Context, pool *pgxpool.Pool, ingestor *ingest.Inge
 	// /v1/inbound.
 	subRouter := chi.NewRouter()
 	deps := inbound.Deps{
-		Mux: inbound.NewChiMux(subRouter),
+		Mux: &inbound.ChiMux{Router: subRouter}, // ptrext:allow chi-router-not-copy-eligible
 		Ingest: inbound.IngestFunc(func(ctx context.Context, tenantID string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
 			return ingestor.IngestRow(ctx, tenantID, keyID, in)
 		}),

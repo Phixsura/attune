@@ -6,8 +6,6 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-
-	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // ChiMux adapts a chi.Router to the inbound.Mux interface. cmd/attune
@@ -20,11 +18,6 @@ import (
 // gorilla/mux or stdlib http.ServeMux only touches this file.
 type ChiMux struct {
 	Router chi.Router
-}
-
-// NewChiMux — convenience constructor wrapping the supplied router.
-func NewChiMux(r chi.Router) *ChiMux {
-	return ptrext.Of(ChiMux{Router: r})
 }
 
 // Method satisfies inbound.Mux.

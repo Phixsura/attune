@@ -25,8 +25,9 @@ import (
 // (e.g. apikey middleware) — so every customer-facing error in attune
 // emits the {code, message, requestId} envelope.
 var (
-	Proto = respond.Proto
-	Error = respond.Error
+	Proto          = respond.Proto
+	Error          = respond.Error
+	ErrorWithExtra = respond.ErrorWithExtra
 )
 
 var unmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}

@@ -77,46 +77,6 @@ const (
 // the public webhook URL so it's lower-case ASCII only.
 var slugSanitize = regexp.MustCompile(`[^a-z0-9]+`)
 
-// pool is the narrow read+write surface this handler needs from pgxpool.
-// Exposed as an interface so unit tests can pass a fake (we test
-// validation / error mapping; the DB ops are integration-tested by
-// repo/inboundsource).
-type pool interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconnResult, error)
-}
-
-// pgconnResult is the subset of pgconn.CommandTag the handler reads —
-// only RowsAffected on Delete. Letting tests fake it without pulling
-// pgconn directly into the test file.
-type pgconnResult interface {
-	RowsAffected() int64
-}
-
-// realPool wraps *pgxpool.Pool to satisfy the local pool interface; it
-// is the production binding installed by NewHandler. The wrapper is
-// nil-safe at handler construction time but Exec returns an error if no
-// pool was supplied — calling rotate/delete without a pool is a wiring
-// bug.
-type realPool struct{ p *pgxpool.Pool }
-
-// Exec satisfies pool.Exec.
-func (r realPool) Exec(ctx context.Context, sql string, args ...any) (pgconnResult, error) {
-	if r.p == nil {
-		return nil, errors.New("inbound: pool not configured")
-	}
-	tag, err := r.p.Exec(ctx, sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	return commandTag{tag: tag.RowsAffected()}, nil
-}
-
-// commandTag adapts a numeric row count to the pgconnResult interface.
-type commandTag struct{ tag int64 }
-
-// RowsAffected satisfies pgconnResult.
-func (c commandTag) RowsAffected() int64 { return c.tag }
-
 // rotator is the subset of webhook.RotateSecret the handler depends on,
 // kept as an interface so tests can stub it without standing up Postgres.
 type rotator func(ctx context.Context, pool *pgxpool.Pool, secrets inbound.SecretStore, sourceID string) ([]byte, time.Time, error)
@@ -148,7 +108,6 @@ type Handler struct {
 	rotate     rotator
 	testConn   testConnFn
 	tenantSlug tenantLookup
-	exec       pool
 }
 
 // NewHandler wires production dependencies — pool for direct DELETE,
@@ -164,7 +123,6 @@ func NewHandler(sources *inboundsource.Repo, p *pgxpool.Pool, secrets inbound.Se
 		rotate:     webhook.RotateSecret,
 		testConn:   imapDialAndProbe,
 		tenantSlug: tenantSlugFromPool(p),
-		exec:       realPool{p: p},
 	})
 }
 
@@ -541,10 +499,16 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 	newSecret, nextEligible, err := h.rotate(ctx, h.pool, h.secrets, id)
 	if err != nil {
 		if errors.Is(err, webhook.ErrRotationInGraceWindow) {
-			respond.Error(ctx, w, http.StatusConflict, "rotation_in_grace_window",
-				fmt.Sprintf("next eligible at %s", nextEligible.UTC().Format(time.RFC3339)))
+			// Spec §Webhook adapter / Rotate behavior requires
+			// `next_eligible_at` as a top-level field next to the
+			// usual envelope (G5 fix, #66).
+			nextStr := nextEligible.UTC().Format(time.RFC3339)
+			respond.ErrorWithExtra(ctx, w, http.StatusConflict,
+				"rotation_in_grace_window",
+				"rotation refused while previous secret is still inside its 24h grace window",
+				map[string]any{"nextEligibleAt": nextStr})
 			logext.Warnf(ctx, "[%s] reject: grace window,tenant_id:%s,id:%s,next:%s",
-				where, auth.TenantID, id, nextEligible.UTC().Format(time.RFC3339))
+				where, auth.TenantID, id, nextStr)
 			return
 		}
 		logext.Errorf(ctx, "[%s] rotate failed,tenant_id:%s,id:%s,err:%+v",
@@ -641,14 +605,18 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.exec.Exec(ctx, `DELETE FROM inbound_sources WHERE id = $1`, id)
+	if h.pool == nil {
+		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "inbound: pool not configured")
+		return
+	}
+	tag, err := h.pool.Exec(ctx, `DELETE FROM inbound_sources WHERE id = $1`, id)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] delete failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
 		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to delete inbound source")
 		return
 	}
-	if res.RowsAffected() == 0 {
+	if tag.RowsAffected() == 0 {
 		// Race: deleted between Get and Exec. Treat as 404 — the
 		// admin's intent is reached either way.
 		respond.Error(ctx, w, http.StatusNotFound, "not_found", "inbound source not found")

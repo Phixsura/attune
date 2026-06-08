@@ -7,17 +7,13 @@ import (
 	"time"
 )
 
-const (
-	// defaultLoopInterval is the fallback when no source row is enabled
-	// or no source has reported a poll interval yet. We don't tight-loop
-	// on an empty registry.
-	defaultLoopInterval = 60 * time.Second
-
-	// minLoopInterval is the floor — a misconfigured source asking to
-	// poll every second cannot drag attune into a hot loop against the
-	// IMAP server (the per-source 30s budget also bounds this).
-	minLoopInterval = 10 * time.Second
-)
+// loopInterval is the fixed between-rounds wait per spec §Email IMAP
+// adapter pollLoop pseudocode. Per-source `poll_interval_seconds` is
+// preserved in the config envelope but is not honoured by this
+// batch-loop topology (one tick polls every enabled source serially);
+// a per-source-goroutine refactor that respects the knob is a future
+// follow-up.
+const loopInterval = 60 * time.Second
 
 // pollLoop iterates enabled email sources, polling each within its own
 // 30-second budget. The list-then-poll pattern means newly-enabled
@@ -45,53 +41,10 @@ func (a *adapter) pollLoop(ctx context.Context) {
 			cancel()
 		}
 
-		interval := a.nextInterval()
 		select {
-		case <-time.After(interval):
+		case <-time.After(loopInterval):
 		case <-ctx.Done():
 			return
 		}
 	}
-}
-
-// nextInterval picks the smallest per-source poll interval (clamped to
-// minLoopInterval) and falls back to defaultLoopInterval when no source
-// has reported one yet. Each pollSource records its source's interval
-// into pollIntervals on its first successful decrypt; later rounds use
-// the cached value.
-//
-// Spec §Email IMAP adapter promised the per-source
-// `poll_interval_seconds` knob would take effect; the original loop
-// hard-coded 60s, ignoring every source's setting (review M3, #66).
-func (a *adapter) nextInterval() time.Duration {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	best := defaultLoopInterval
-	seen := false
-	for _, secs := range a.pollIntervals {
-		if secs <= 0 {
-			continue
-		}
-		d := time.Duration(secs) * time.Second
-		if d < minLoopInterval {
-			d = minLoopInterval
-		}
-		if !seen || d < best {
-			best = d
-			seen = true
-		}
-	}
-	return best
-}
-
-// recordPollInterval stamps the configured interval seconds for a given
-// source slug under the adapter mutex. Called from pollSource right
-// after a successful config decrypt.
-func (a *adapter) recordPollInterval(slug string, secs int) {
-	a.mu.Lock()
-	if a.pollIntervals == nil {
-		a.pollIntervals = map[string]int{}
-	}
-	a.pollIntervals[slug] = secs
-	a.mu.Unlock()
 }
