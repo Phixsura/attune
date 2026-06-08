@@ -35,7 +35,8 @@ var ValidSources = map[string]bool{
 	"lark-approval": true, // Lark Approval instance (automation → POST ingest)
 	"lark-helpdesk": true, // Lark Helpdesk ticket (event subscription → POST ingest)
 	"lark-form":     true, // Lark Form / Doc comment (automation → POST ingest)
-	"email":         true, // mailbox poller (Sprint 1.3+)
+	"webhook":       true, // generic inbound HTTP webhook (#66 Phase 1)
+	"email":         true, // mailbox poller / inbound IMAP (#66 Phase 1)
 	"web":           true, // in-app JS feedback widget
 	"other":         true, // catch-all for misc integrations
 }
@@ -63,6 +64,8 @@ func SourceDisplayName(source string) string {
 		return "Lark Helpdesk"
 	case "lark-form":
 		return "Lark Form / Doc Comment"
+	case "webhook":
+		return "Webhook"
 	case "email":
 		return "Email"
 	case "web":
