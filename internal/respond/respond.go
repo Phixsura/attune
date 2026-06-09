@@ -59,12 +59,14 @@ func Proto(w http.ResponseWriter, status int, m proto.Message) {
 // requestId is pulled from the chi RequestID middleware so support
 // engineers can grep one id across logs / customer reports / traces.
 //
-// Every customer-facing HTTP error in attune flows through this single
-// function — the previous {"error":"..."} shape from apikey middleware
-// and similar ad-hoc handlers is the bug class this exists to prevent.
-func Error(ctx context.Context, w http.ResponseWriter, status int, code, message string) {
+// `code` is the proto-defined ErrorCode enum (see proto/attune/v1/common.proto);
+// its enum name is emitted as the stable wire string. Every customer-facing
+// HTTP error in attune flows through this single function — the previous
+// {"error":"..."} shape from apikey middleware and similar ad-hoc handlers is
+// the bug class this exists to prevent.
+func Error(ctx context.Context, w http.ResponseWriter, status int, code attunev1.ErrorCode, message string) {
 	Proto(w, status, ptrext.Of(attunev1.ErrorResponse{
-		Code:      code,
+		Code:      code.String(),
 		Message:   message,
 		RequestId: middleware.GetReqID(ctx),
 	}))
@@ -79,9 +81,9 @@ func Error(ctx context.Context, w http.ResponseWriter, status int, code, message
 //
 // Prefer Error() — only reach for this helper when a spec field shape
 // truly forces a top-level detail.
-func ErrorWithExtra(ctx context.Context, w http.ResponseWriter, status int, code, message string, extra map[string]any) {
+func ErrorWithExtra(ctx context.Context, w http.ResponseWriter, status int, code attunev1.ErrorCode, message string, extra map[string]any) {
 	body := map[string]any{
-		"code":      code,
+		"code":      code.String(),
 		"message":   message,
 		"requestId": middleware.GetReqID(ctx),
 	}

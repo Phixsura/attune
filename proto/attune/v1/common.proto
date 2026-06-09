@@ -2,16 +2,83 @@ syntax = "proto3";
 
 package attune.v1;
 
+// ErrorCode is the closed set of machine-readable error codes attune emits
+// in every 4xx/5xx response. Clients (the console SPA, future SDKs) MUST
+// switch on this enum and never on the `message` field. New codes are added
+// via `buf breaking`-compatible append; existing names/numbers MUST NOT
+// change once published.
+//
+// Wire encoding: ErrorResponse.code is kept as a string for protobuf
+// compatibility, but its value is the enum value name verbatim, e.g.
+// `{"code":"CONFLICT"}`. The console SPA can import ErrorCode from the
+// generated TS module and compare with the enum constant directly.
+//
+// `ERROR_CODE_UNSPECIFIED` carries the proto3 zero-value suffix (required
+// by buf's `ENUM_ZERO_VALUE_SUFFIX` lint). All other values are bare —
+// `ENUM_VALUE_PREFIX` is excluded in buf.yaml because protojson serializes
+// the verbatim value name and `ERROR_CODE_CONFLICT` would bloat every
+// error response unnecessarily.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;  // proto3 default — never wire
+
+  // Generic HTTP-status-like codes
+  BAD_REQUEST          = 1;
+  UNAUTHORIZED         = 2;
+  NOT_FOUND            = 3;
+  CONFLICT             = 4;
+  VALIDATION           = 5;
+  BODY_TOO_LARGE       = 6;
+  INTERNAL             = 7;
+  NOT_IMPLEMENTED      = 8;
+  BAD_GATEWAY          = 9;
+  CLIENT_CANCELED      = 10;
+  DEADLINE_EXCEEDED    = 11;
+  FORBIDDEN            = 34;
+  LOCKED               = 35;
+
+  // attune business-specific (extend as new sentinels are surfaced)
+  BAD_ID               = 12;
+  TENANT_NOT_FOUND     = 13;
+  USER_GONE            = 14;
+  CSRF_INVALID         = 15;
+  SESSION_SIGN_FAILED  = 16;
+  MISSING_TENANT       = 17;
+  MISSING_LABEL        = 18;
+  MISSING_SAMPLE       = 19;
+  LABEL_TOO_LONG       = 20;
+  DELIVERY_FAILED      = 21;
+  REDIRECT_FAILED      = 22;
+  WEAK_PASSWORD        = 36;
+  SAME_PASSWORD        = 37;
+  UNSUPPORTED          = 38;
+  ROTATION_IN_GRACE_WINDOW = 39;
+
+  // enrich-config validation (service/enrich)
+  MISSING_CONTENT_TOKEN  = 23;
+  TEMPLATE_TOO_LONG      = 24;
+  DIM_NAME_FORMAT        = 25;
+  DIM_NAME_RESERVED      = 26;
+  DIM_NAME_DUP           = 27;
+  DIM_KIND_INVALID       = 28;
+  DIM_DISPLAY_EMPTY      = 29;
+  TAXONOMY_VALUE_EMPTY   = 30;
+  TAXONOMY_VALUE_DUP     = 31;
+  TAXONOMY_DISPLAY_EMPTY = 32;
+  URGENT_NOT_IN_TAXONOMY = 33;
+}
+
 // ErrorResponse is the JSON body returned on any 4xx/5xx across attune's HTTP
 // APIs — a stable machine-readable `code`, a human-facing `message`, and the
 // request id for support/tracing:
 //
-//   {"code":"validation","message":"content is required","requestId":"abc123"}
+//   {"code":"VALIDATION","message":"content is required","requestId":"abc123"}
 //
 // One envelope for the public ingest API and the console alike.
 message ErrorResponse {
-  // Stable error code, e.g. unauthorized / bad_request / validation /
-  // not_found / conflict / internal. Safe for clients to switch on.
+  // Stable machine-readable error code. Values are the ErrorCode enum names
+  // (for example "VALIDATION"). Kept as string to avoid a protobuf field-type
+  // break for existing clients that already consume ErrorResponse.
+  // Clients switch on this; never on `message`.
   string code = 1;
 
   // Human-facing message. Not stable; do not switch on it.

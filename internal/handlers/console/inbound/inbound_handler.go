@@ -154,7 +154,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logext.Errorf(ctx, "[%s] list failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to list inbound sources")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to list inbound sources")
 		return
 	}
 	items := make([]*attunev1.InboundSource, 0, len(rows))
@@ -210,23 +210,23 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !isUUID(id) {
 		logext.Warnf(ctx, "[%s] reject: bad id,tenant_id:%s", where, auth.TenantID)
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id is not a UUID")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "id is not a UUID")
 		return
 	}
 	src, err := h.sources.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, inboundsource.ErrNotFound) {
-			respond.Error(ctx, w, http.StatusNotFound, "not_found", "inbound source not found")
+			respond.Error(ctx, w, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "inbound source not found")
 			return
 		}
 		logext.Errorf(ctx, "[%s] sources.Get failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load inbound source")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load inbound source")
 		return
 	}
 	if src.TenantID != auth.TenantID {
 		// Same response shape as not-found to avoid leaking other tenants' IDs.
-		respond.Error(ctx, w, http.StatusNotFound, "not_found", "inbound source not found")
+		respond.Error(ctx, w, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "inbound source not found")
 		return
 	}
 	respond.Proto(w, http.StatusOK, rowToProto(src))
@@ -241,25 +241,25 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req attunev1.CreateInboundSourceRequest
 	if err := respond.Decode(r.Body, &req); err != nil {
 		if errors.Is(err, respond.ErrBodyTooLarge) {
-			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds 1 MiB")
+			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, attunev1.ErrorCode_BODY_TOO_LARGE, "request body exceeds 1 MiB")
 			return
 		}
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "request body is not valid JSON")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "request body is not valid JSON")
 		return
 	}
 	channel := strings.TrimSpace(strings.ToLower(req.GetChannel()))
 	name := strings.TrimSpace(req.GetName())
 	if channel != channelWebhook && channel != channelEmail {
-		respond.Error(ctx, w, http.StatusBadRequest, "validation", "channel must be webhook or email")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "channel must be webhook or email")
 		return
 	}
 	if name == "" || len(name) > 200 {
-		respond.Error(ctx, w, http.StatusBadRequest, "validation", "name must be non-empty and ≤ 200 characters")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "name must be non-empty and ≤ 200 characters")
 		return
 	}
 	slug := slugify(name)
 	if slug == "" {
-		respond.Error(ctx, w, http.StatusBadRequest, "validation", "name must contain at least one alphanumeric character")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "name must contain at least one alphanumeric character")
 		return
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,channel:%s,name:%s,slug:%s",
@@ -284,13 +284,13 @@ func (h *Handler) createWebhook(ctx context.Context, w http.ResponseWriter, auth
 	rawSecret := make([]byte, secretLen)
 	if _, err := rand.Read(rawSecret); err != nil {
 		logext.Errorf(ctx, "[%s] rand failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to generate secret")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to generate secret")
 		return
 	}
 	encSecret, err := h.secrets.Encrypt(rawSecret)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] encrypt secret failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to encrypt secret")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to encrypt secret")
 		return
 	}
 	cfg := webhook.Config{
@@ -301,13 +301,13 @@ func (h *Handler) createWebhook(ctx context.Context, w http.ResponseWriter, auth
 	cfgBytes, err := json.Marshal(cfg)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] marshal cfg failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to encode config")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to encode config")
 		return
 	}
 	envelope, err := h.secrets.Encrypt(cfgBytes)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] encrypt cfg failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to encrypt config")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to encrypt config")
 		return
 	}
 	if err := h.insertRow(ctx, id, auth.TenantID, channelWebhook, name, slug, envelope); err != nil {
@@ -319,7 +319,7 @@ func (h *Handler) createWebhook(ctx context.Context, w http.ResponseWriter, auth
 	if err != nil {
 		logext.Errorf(ctx, "[%s] post-insert reload failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "row created but reload failed")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "row created but reload failed")
 		return
 	}
 	resp := ptrext.Of(attunev1.CreateInboundSourceResponse{Source: rowToProto(stored)})
@@ -353,17 +353,17 @@ func (h *Handler) createEmail(ctx context.Context, w http.ResponseWriter, auth *
 	const where = "console.inbound.createEmail"
 	cfg := req.GetEmailConfig()
 	if cfg == nil {
-		respond.Error(ctx, w, http.StatusBadRequest, "validation", "email_config is required for channel=email")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "email_config is required for channel=email")
 		return
 	}
 	if err := validateEmailCreateConfig(cfg); err != nil {
-		respond.Error(ctx, w, http.StatusBadRequest, "validation", err.Error())
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 		return
 	}
 	envelope, err := h.encryptEmailConfig(cfg)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] encrypt failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to encrypt config")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to encrypt config")
 		return
 	}
 	id := uuid.NewString()
@@ -375,7 +375,7 @@ func (h *Handler) createEmail(ctx context.Context, w http.ResponseWriter, auth *
 	if err != nil {
 		logext.Errorf(ctx, "[%s] post-insert reload failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "row created but reload failed")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "row created but reload failed")
 		return
 	}
 	respond.Proto(w, http.StatusCreated, ptrext.Of(attunev1.CreateInboundSourceResponse{
@@ -446,12 +446,12 @@ func (h *Handler) insertRow(ctx context.Context, id, tenantID, channel, name, sl
 func (h *Handler) handleInsertErr(ctx context.Context, w http.ResponseWriter, where, tenantID string, err error) {
 	if isUniqueViolation(err) {
 		logext.Warnf(ctx, "[%s] reject: slug conflict,tenant_id:%s", where, tenantID)
-		respond.Error(ctx, w, http.StatusConflict, "conflict",
+		respond.Error(ctx, w, http.StatusConflict, attunev1.ErrorCode_CONFLICT,
 			"another inbound source with the same name already exists; pick a different name")
 		return
 	}
 	logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,err:%+v", where, tenantID, err.Error())
-	respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to create inbound source")
+	respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to create inbound source")
 }
 
 // Rotate handles POST /fb/v1/console/inbound/sources/{id}/rotate-secret.
@@ -464,26 +464,26 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 	auth := session.FromContext(ctx)
 	id := chi.URLParam(r, "id")
 	if !isUUID(id) {
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id is not a UUID")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "id is not a UUID")
 		return
 	}
 	src, err := h.sources.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, inboundsource.ErrNotFound) {
-			respond.Error(ctx, w, http.StatusNotFound, "not_found", "inbound source not found")
+			respond.Error(ctx, w, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "inbound source not found")
 			return
 		}
 		logext.Errorf(ctx, "[%s] sources.Get failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load inbound source")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load inbound source")
 		return
 	}
 	if src.TenantID != auth.TenantID {
-		respond.Error(ctx, w, http.StatusNotFound, "not_found", "inbound source not found")
+		respond.Error(ctx, w, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "inbound source not found")
 		return
 	}
 	if src.Channel != channelWebhook {
-		respond.Error(ctx, w, http.StatusBadRequest, "unsupported",
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_UNSUPPORTED,
 			"rotate-secret only applies to webhook sources")
 		return
 	}
@@ -497,7 +497,7 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 			// usual envelope (G5 fix, #66).
 			nextStr := nextEligible.UTC().Format(time.RFC3339)
 			respond.ErrorWithExtra(ctx, w, http.StatusConflict,
-				"rotation_in_grace_window",
+				attunev1.ErrorCode_ROTATION_IN_GRACE_WINDOW,
 				"rotation refused while previous secret is still inside its 24h grace window",
 				map[string]any{"nextEligibleAt": nextStr})
 			logext.Warnf(ctx, "[%s] reject: grace window,tenant_id:%s,id:%s,next:%s",
@@ -506,7 +506,7 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 		}
 		logext.Errorf(ctx, "[%s] rotate failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to rotate secret")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to rotate secret")
 		return
 	}
 	// Reuse the `nextEligible` that the rotator already computed (and
@@ -532,22 +532,22 @@ func (h *Handler) setEnabled(w http.ResponseWriter, r *http.Request, enabled boo
 	auth := session.FromContext(ctx)
 	id := chi.URLParam(r, "id")
 	if !isUUID(id) {
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id is not a UUID")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "id is not a UUID")
 		return
 	}
 	src, err := h.sources.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, inboundsource.ErrNotFound) {
-			respond.Error(ctx, w, http.StatusNotFound, "not_found", "inbound source not found")
+			respond.Error(ctx, w, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "inbound source not found")
 			return
 		}
 		logext.Errorf(ctx, "[%s] sources.Get failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load inbound source")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load inbound source")
 		return
 	}
 	if src.TenantID != auth.TenantID {
-		respond.Error(ctx, w, http.StatusNotFound, "not_found", "inbound source not found")
+		respond.Error(ctx, w, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "inbound source not found")
 		return
 	}
 	reason := ""
@@ -557,7 +557,7 @@ func (h *Handler) setEnabled(w http.ResponseWriter, r *http.Request, enabled boo
 	if err := h.sources.SetEnabled(ctx, id, enabled, reason); err != nil {
 		logext.Errorf(ctx, "[%s] SetEnabled failed,tenant_id:%s,id:%s,enabled:%v,err:%+v",
 			where, auth.TenantID, id, enabled, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to update enabled flag")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to update enabled flag")
 		return
 	}
 	// Reload so the response carries the freshly-mutated state.
@@ -565,7 +565,7 @@ func (h *Handler) setEnabled(w http.ResponseWriter, r *http.Request, enabled boo
 	if err != nil {
 		logext.Errorf(ctx, "[%s] post-toggle reload failed,id:%s,err:%+v",
 			where, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "toggle ok but reload failed")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "toggle ok but reload failed")
 		return
 	}
 	respond.Proto(w, http.StatusOK, rowToProto(updated))
@@ -582,7 +582,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	auth := session.FromContext(ctx)
 	id := chi.URLParam(r, "id")
 	if !isUUID(id) {
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_id", "id is not a UUID")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "id is not a UUID")
 		return
 	}
 	// Look up first to enforce tenant ownership in a single round-trip
@@ -590,34 +590,34 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	src, err := h.sources.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, inboundsource.ErrNotFound) {
-			respond.Error(ctx, w, http.StatusNotFound, "not_found", "inbound source not found")
+			respond.Error(ctx, w, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "inbound source not found")
 			return
 		}
 		logext.Errorf(ctx, "[%s] sources.Get failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to load inbound source")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load inbound source")
 		return
 	}
 	if src.TenantID != auth.TenantID {
-		respond.Error(ctx, w, http.StatusNotFound, "not_found", "inbound source not found")
+		respond.Error(ctx, w, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "inbound source not found")
 		return
 	}
 
 	if h.pool == nil {
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "inbound: pool not configured")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "inbound: pool not configured")
 		return
 	}
 	tag, err := h.pool.Exec(ctx, `DELETE FROM inbound_sources WHERE id = $1`, id)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] delete failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to delete inbound source")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to delete inbound source")
 		return
 	}
 	if tag.RowsAffected() == 0 {
 		// Race: deleted between Get and Exec. Treat as 404 — the
 		// admin's intent is reached either way.
-		respond.Error(ctx, w, http.StatusNotFound, "not_found", "inbound source not found")
+		respond.Error(ctx, w, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "inbound source not found")
 		return
 	}
 	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.DeleteInboundSourceResponse{}))

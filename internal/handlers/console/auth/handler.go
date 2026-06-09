@@ -57,7 +57,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if !originAllowed(r, h.baseURL) {
 		logext.Warnf(ctx, "[%s] reject: bad origin,origin:%s",
 			where, r.Header.Get("Origin"))
-		respond.Error(ctx, w, http.StatusForbidden, "forbidden", "cross-site login not allowed")
+		respond.Error(ctx, w, http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "cross-site login not allowed")
 		return
 	}
 
@@ -74,7 +74,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	scopeTenantID := h.resolveAdminScope(ctx, where)
 	if err := h.signer.IssueSessionCookie(w, scopeTenantID, a.ID); err != nil {
 		logext.Errorf(ctx, "[%s] IssueSessionCookie failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "internal error")
 		return
 	}
 
@@ -95,14 +95,14 @@ func decodeLoginRequest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	req := ptrext.Of(attunev1.LoginRequest{})
 	if err := respond.Decode(r.Body, req); err != nil {
 		if errors.Is(err, respond.ErrBodyTooLarge) {
-			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds 1 MiB")
+			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, attunev1.ErrorCode_BODY_TOO_LARGE, "request body exceeds 1 MiB")
 			return nil, false
 		}
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "invalid json body")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
 		return nil, false
 	}
 	if req.GetEmail() == "" || req.GetPassword() == "" {
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "email and password required")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "email and password required")
 		return nil, false
 	}
 	return req, true
@@ -119,11 +119,11 @@ func (h *Handler) authenticate(ctx context.Context, w http.ResponseWriter, req *
 	case errors.Is(err, admin.ErrNotFound):
 		// Equalise timing with a dummy bcrypt run; result discarded.
 		_ = VerifyOrDummy("", req.GetPassword())
-		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "invalid credentials")
+		respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "invalid credentials")
 		return admin.Admin{}, false
 	case err != nil:
 		logext.Errorf(ctx, "[%s] GetByEmail failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "internal error")
 		return admin.Admin{}, false
 	}
 
@@ -132,7 +132,7 @@ func (h *Handler) authenticate(ctx context.Context, w http.ResponseWriter, req *
 		// locked-account oracle can't distinguish "exists + locked" from
 		// "wrong password" by response time (review M1, #66).
 		_ = VerifyOrDummy("", req.GetPassword())
-		respond.Error(ctx, w, http.StatusLocked, "locked", "account locked due to too many failed attempts")
+		respond.Error(ctx, w, http.StatusLocked, attunev1.ErrorCode_LOCKED, "account locked due to too many failed attempts")
 		return admin.Admin{}, false
 	}
 
@@ -151,7 +151,7 @@ func (h *Handler) authenticate(ctx context.Context, w http.ResponseWriter, req *
 		if err := h.admins.IncrementFailedAttempts(ctx, a.ID); err != nil {
 			logext.Warnf(ctx, "[%s] IncrementFailedAttempts failed,err:%+v", where, err.Error())
 		}
-		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "invalid credentials")
+		respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "invalid credentials")
 		return admin.Admin{}, false
 	}
 

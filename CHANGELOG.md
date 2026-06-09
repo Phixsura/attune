@@ -83,6 +83,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   admin. TOCTOU-safe via `pg_advisory_xact_lock` + `ON CONFLICT (email)
   DO NOTHING`; subsequent starts read `admins` and skip the env vars
   entirely, so the credentials don't linger.
+
+- **`internal/dispatcher` typed HTTP helper and product API migration.** Adds a generic bind/result layer with `Empty` / `JSON` / `Path` / `Query` / `Param` / `ParamInt64` / `Combine` / `Custom` input helpers, moves all 18 in-scope product endpoints onto it, and adds typed session/API-key auth contexts for dispatcher handlers.
+
+- **`cmd/lint-errorcode` / `scripts/lint-errorcode.sh` — bans hand-written `ErrorResponse.Code` string literals.** The lint keeps the compatibility string field routed through `attune.v1.ErrorCode` by failing on `attunev1.ErrorResponse{Code: "..."}` drift.
+
 - **Console SPA test suite (#13).** Vitest (jsdom) + MSW + Testing
   Library + v8 coverage. ~80 cases cover the api-client (CSRF
   injection, error envelope, signal), the i18n resolver, the
@@ -92,9 +97,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `useUpdateEnrichConfig` cache-write side effect), and the `dim`
   components (`i18n-input` and `dimensions-editor`'s WeakMap-based
   identity tracking). Per-file coverage thresholds on 17 surfaces
-  gate CI against regressions.
+ gate CI against regressions.
 
 ### Changed
+
+- **Error response codes are now proto-owned UPPER_SNAKE names.** `ErrorResponse.code` remains a string field for protobuf compatibility, but values are normalized from previous lower_snake strings such as `validation` / `bad_request` to `VALIDATION` / `BAD_REQUEST` via `attune.v1.ErrorCode`. Pre-1.0 breaking change for clients that switch on the `code` string.
+
+- **CI now verifies downloaded `buf` binaries by SHA-256 and ignores generated protobuf Go in the duplication gate.** The `jscpd` gate scans hand-written Go with `**/*.pb.go` excluded, keeping generated code noise out of the duplication signal.
+
+- **`lint-rawptr` now recognizes exported generic selector type arguments.** This prevents false positives for helper values such as `dispatcher.JSONBody[*Req]` while still reporting real value-position pointer dereferences.
 
 - **#66 review pass: 13 audit findings inline-fixed** — C1-C5 / H1-H6 /
   M2 / M4-M8.

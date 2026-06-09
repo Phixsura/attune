@@ -24,6 +24,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
 // Cookie + header names. attune_session is HttpOnly; csrf token lives
@@ -173,14 +174,14 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 		ck, err := r.Cookie(SessionCookieName)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] reject: missing cookie,path:%s", where, r.URL.Path)
-			respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "not logged in or session expired")
+			respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "not logged in or session expired")
 			return
 		}
 		p, err := s.VerifySession(ck.Value)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] reject: verify session failed,path:%s,err:%s",
 				where, r.URL.Path, err.Error())
-			respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "session verification failed")
+			respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "session verification failed")
 			return
 		}
 		// CSRF check for state-changing methods. GET/HEAD bypass.
@@ -188,7 +189,7 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 			if !s.VerifyCSRF(p.UserID, r.Header.Get(CSRFHeader)) {
 				logext.Warnf(ctx, "[%s] reject: csrf invalid,path:%s,user_id:%s",
 					where, r.URL.Path, p.UserID)
-				respond.Error(ctx, w, http.StatusForbidden, "csrf_invalid", "invalid CSRF token")
+				respond.Error(ctx, w, http.StatusForbidden, attunev1.ErrorCode_CSRF_INVALID, "invalid CSRF token")
 				return
 			}
 		}

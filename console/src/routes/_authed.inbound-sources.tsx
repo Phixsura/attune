@@ -25,6 +25,7 @@ import { DeleteInboundSourceDialog } from '@/features/inbound-sources/components
 import { RotateConfirmDialog } from '@/features/inbound-sources/components/rotate-dialog'
 import { SecretRevealDialog } from '@/features/inbound-sources/components/secret-reveal-dialog'
 import { SourcesTable } from '@/features/inbound-sources/components/sources-table'
+import { ErrorCode } from '@/proto/attune/v1/common'
 
 export const Route = createFileRoute('/_authed/inbound-sources')({
   component: InboundSourcesPage,
@@ -81,7 +82,7 @@ function InboundSourcesPage() {
     },
     onError: (err) => {
       const apiErr = err as { status?: number; code?: string; message?: string }
-      if (apiErr.code === 'rotation_in_grace_window') {
+      if (apiErr.code === ErrorCode.ROTATION_IN_GRACE_WINDOW) {
         toast.error(t('inbound_sources.toast.rotation_in_grace'))
       } else {
         toast.error(apiErr.message || 'failed')

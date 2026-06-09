@@ -26,13 +26,13 @@ describe('feedbackDetailQuery', () => {
   it('404 surfaces the error envelope', async () => {
     server.use(
       http.get('/fb/v1/console/feedback/:id', () =>
-        HttpResponse.json({ code: 'not_found', message: 'no such feedback' }, { status: 404 }),
+        HttpResponse.json({ code: 'NOT_FOUND', message: 'no such feedback' }, { status: 404 }),
       ),
     )
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     await expect(qc.fetchQuery(feedbackDetailQuery('missing'))).rejects.toMatchObject({
       status: 404,
-      code: 'not_found',
+      code: 'NOT_FOUND',
     })
   })
 })

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/metrics"
@@ -17,7 +18,6 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/respond"
 )
 
 // ingestRower is the business-layer dependency the handler needs: validate +
@@ -38,7 +38,12 @@ func NewIngestHandler(ingestor ingestRower) *IngestHandler {
 
 func (h *IngestHandler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.Post("/ingest", h.Ingest)
+	r.Post("/ingest", dispatcher.Bind(
+		"handlers.IngestHandler.Ingest",
+		apikey.FromContext,
+		dispatcher.Custom(func() *attunev1.IngestRequest { return ptrext.Of(attunev1.IngestRequest{}) }, BindIngestRequest),
+		h.Ingest,
+	))
 	return r
 }
 
@@ -47,29 +52,27 @@ func (h *IngestHandler) Routes() chi.Router {
 // fields working (proposal 2026-06-06-protobuf-idl-contract, Decision 6).
 var ingestUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
 
-func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
-	const where = "handlers.IngestHandler.Ingest"
-	ctx := r.Context()
-	tenantID, ok := apikey.TenantIDFromContext(ctx)
+func BindIngestRequest(r *http.Request, req *attunev1.IngestRequest) error {
+	tenantID, ok := apikey.TenantIDFromContext(r.Context())
 	if !ok {
-		metrics.IngestTotal.WithLabelValues("unknown", "unknown", "auth_err").Inc()
-		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "no tenant in context")
-		return
+		tenantID = "unknown"
 	}
-	keyID, _ := apikey.KeyIDFromContext(ctx)
+	body, err := io.ReadAll(io.LimitReader(r.Body, (64*1024)+1))
+	if err != nil || len(body) > 64*1024 {
+		metrics.IngestTotal.WithLabelValues(tenantID, "unknown", "validate_err").Inc()
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
+	}
+	if err := ingestUnmarshal.Unmarshal(body, req); err != nil {
+		metrics.IngestTotal.WithLabelValues(tenantID, "unknown", "validate_err").Inc()
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
+	}
+	return nil
+}
 
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64*1024))
-	if err != nil {
-		metrics.IngestTotal.WithLabelValues(tenantID, "unknown", "validate_err").Inc()
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "invalid json body")
-		return
-	}
-	var req attunev1.IngestRequest
-	if err := ingestUnmarshal.Unmarshal(body, &req); err != nil {
-		metrics.IngestTotal.WithLabelValues(tenantID, "unknown", "validate_err").Inc()
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "invalid json body")
-		return
-	}
+func (h *IngestHandler) Ingest(ctx *dispatcher.RequestContext[*apikey.AuthCtx], req *attunev1.IngestRequest) (dispatcher.Result[*attunev1.IngestResponse], error) {
+	const where = "handlers.IngestHandler.Ingest"
+	tenantID := ctx.Auth.TenantID
+	keyID := ctx.Auth.KeyID
 
 	in := domain.IngestInput{
 		Content:    req.GetContent(),
@@ -86,21 +89,17 @@ func (h *IngestHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 
 	id, err := h.ingestor.IngestRow(ctx, tenantID, keyID, in)
 	if err != nil {
-		// IngestRow currently only returns Validate()-style errors; map
-		// uniformly to 400 + validate_err. If a future internal-error
-		// path needs distinguishing, wire it through a typed error then.
 		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(in.Source), "validate_err").Inc()
-		respond.Error(ctx, w, http.StatusBadRequest, "validation", err.Error())
-		return
+		return dispatcher.Result[*attunev1.IngestResponse]{}, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	}
 
 	metrics.IngestTotal.WithLabelValues(tenantID, in.Source, "ok").Inc()
 	logext.Infof(ctx, "[%s] ingest accepted,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,source:%s",
 		where, trace.FromContext(ctx), tenantID, id, in.Source)
-	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.IngestResponse{
+	return dispatcher.OK(http.StatusOK, ptrext.Of(attunev1.IngestResponse{
 		Id:               id,
 		EnrichmentStatus: "pending",
-	}))
+	})), nil
 }
 
 // boundedSource keeps attune_ingest_total's `source` label bounded to known

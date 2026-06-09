@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { meQuery } from '@/features/session/api/get-me'
 import { type ApiError, api } from '@/lib/api-client'
+import { ErrorCode } from '@/proto/attune/v1/common'
 import type { ChangePasswordResponse } from '@/proto/attune/v1/session'
 
 // Minimum new-password length matches the server-side
@@ -68,9 +69,9 @@ function ChangePasswordPage() {
       setRequestId(apiErr.requestId)
       if (apiErr.status === 401) {
         setError(t('auth.change_password.error.wrong_current'))
-      } else if (apiErr.code === 'weak_password') {
+      } else if (apiErr.code === ErrorCode.WEAK_PASSWORD) {
         setError(t('auth.change_password.error.too_short', { min: NEW_PASSWORD_MIN_LEN }))
-      } else if (apiErr.code === 'same_password') {
+      } else if (apiErr.code === ErrorCode.SAME_PASSWORD) {
         setError(t('auth.change_password.error.same'))
       } else if (apiErr.status === 403) {
         setError(t('auth.change_password.error.forbidden'))

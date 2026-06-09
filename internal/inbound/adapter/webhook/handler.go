@@ -71,7 +71,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err != nil {
 		a.deps.Metrics.Total(channelName, unknownLabel, unknownLabel, "validate_err")
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "body too large or unreadable")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "body too large or unreadable")
 		return
 	}
 
@@ -84,7 +84,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 		// path — we stay literal to keep the surface small.)
 		_ = verifyHMACAgainstStub(ProcessStubSecret(), ts, body, sig)
 		a.deps.Metrics.Total(channelName, unknownLabel, unknownLabel, "auth_err")
-		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid")
+		respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "signature or timestamp invalid")
 		return
 	}
 
@@ -96,7 +96,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	var req attunev1.IngestRequest
 	if err := ingestUnmarshal.Unmarshal(body, &req); err != nil {
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "invalid json body")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
 		return
 	}
 
@@ -125,7 +125,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 		// service.Ingestor.IngestRow only returns Validate()-style
 		// errors; map to 400 + validate_err uniformly.
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
-		respond.Error(ctx, w, http.StatusBadRequest, "ingest", err.Error())
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 		return
 	}
 
@@ -159,13 +159,13 @@ func (a *adapter) authenticate(
 	ctx context.Context,
 	src inbound.Source,
 	ts string, body []byte, sig string,
-) (status int, code, msg string, ok bool) {
+) (status int, code attunev1.ErrorCode, msg string, ok bool) {
 	const where = "inbound.webhook.authenticate"
 	current, previous, prevExpired, err := parseConfig(src.Config, a.deps.Secrets)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] parseConfig failed,err:%+v", where, err.Error())
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
-		return http.StatusInternalServerError, "internal", "internal error", false
+		return http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "internal error", false
 	}
 
 	// Decrypt current secret only — decrypt previous lazily on
@@ -175,7 +175,7 @@ func (a *adapter) authenticate(
 	if err != nil {
 		logext.Errorf(ctx, "[%s] decrypt current failed,err:%+v", where, err.Error())
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
-		return http.StatusInternalServerError, "internal", "internal error", false
+		return http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "internal error", false
 	}
 
 	valid := verifyHMAC(curSecret, ts, body, sig)
@@ -186,7 +186,7 @@ func (a *adapter) authenticate(
 	}
 	if !valid {
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "auth_err")
-		return http.StatusUnauthorized, "unauthorized", "signature or timestamp invalid", false
+		return http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "signature or timestamp invalid", false
 	}
-	return 0, "", "", true
+	return 0, attunev1.ErrorCode_ERROR_CODE_UNSPECIFIED, "", true
 }

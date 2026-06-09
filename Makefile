@@ -8,7 +8,7 @@
 # plugins, so no local protoc-gen-* installs are needed — only network access to
 # the Buf Schema Registry. To change a proto dependency, run `make proto-deps`.
 
-.PHONY: help proto proto-lint proto-deps test test-live test-live-list
+.PHONY: help proto proto-lint proto-breaking proto-deps test test-live test-live-list
 
 help: ## List targets.
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -19,6 +19,9 @@ proto: ## Regenerate Go + TS + OpenAPI from proto/, then lint.
 
 proto-lint: ## Lint the proto definitions only.
 	buf lint
+
+proto-breaking: ## Check proto compatibility against main.
+	buf breaking --against '.git#branch=main'
 
 proto-deps: ## Refresh buf.lock (after changing deps in buf.yaml).
 	buf dep update

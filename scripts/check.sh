@@ -32,6 +32,9 @@ go build ./...
 step "go vet ./..."
 go vet ./...
 
+step "lint-errorcode"
+bash scripts/lint-errorcode.sh
+
 step "go test ./..."
 go test ./...
 
@@ -46,8 +49,8 @@ lizard . -l go -C 10 -T nloc=100 -w || {
 }
 
 if [[ "$skip_jscpd" -eq 0 ]]; then
-  step "jscpd (duplication < 4%)"
-  npx -y jscpd . --pattern '**/*.go' --threshold 4 --silent
+  step "jscpd (duplication < 4%, generated proto ignored)"
+  npx -y jscpd . -f go -i '**/*.pb.go' -t 4 --silent
 fi
 
 printf '\n\033[1;32m✓ all gates green\033[0m\n'

@@ -117,8 +117,8 @@ func TestChangePassword_RejectsShortNewPassword(t *testing.T) {
 		t.Fatalf("status: got %d want 400; body=%s", w.Code, w.Body.String())
 	}
 	env := decodeEnvelope(t, w.Body.Bytes())
-	if env["code"] != "weak_password" {
-		t.Fatalf("code: got %v want weak_password", env["code"])
+	if env["code"] != "WEAK_PASSWORD" {
+		t.Fatalf("code: got %v want WEAK_PASSWORD", env["code"])
 	}
 }
 
@@ -132,8 +132,8 @@ func TestChangePassword_RejectsSamePassword(t *testing.T) {
 		t.Fatalf("status: got %d want 400; body=%s", w.Code, w.Body.String())
 	}
 	env := decodeEnvelope(t, w.Body.Bytes())
-	if env["code"] != "same_password" {
-		t.Fatalf("code: got %v want same_password", env["code"])
+	if env["code"] != "SAME_PASSWORD" {
+		t.Fatalf("code: got %v want SAME_PASSWORD", env["code"])
 	}
 }
 

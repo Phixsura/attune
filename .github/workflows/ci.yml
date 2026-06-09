@@ -176,6 +176,21 @@ jobs:
           cache: true
       - run: bash scripts/lint-rawptr.sh
 
+  # ── lint-errorcode: ErrorResponse.code must flow from ErrorCode enum ───────
+  lint-errorcode:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: bash scripts/lint-errorcode.sh
+
   # ── Lizard: complexity (CCN ≤ 15) + length (NLOC ≤ 100) ────────────────────
   lizard:
     needs: changes
@@ -190,6 +205,20 @@ jobs:
           python-version: "3.13"
       - run: pip install lizard==1.23.0
       - run: lizard . -l go -C 15 -T nloc=100 --warnings_only
+
+  # ── jscpd: code duplication gate, generated proto excluded ─────────────────
+  jscpd:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - run: npx -y jscpd . -f go -i '**/*.pb.go' -t 4 --silent
 
   # ── govulncheck (informational — never blocks; see header) ─────────────────
   govulncheck:
@@ -317,15 +346,28 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+          fetch-depth: 0 # buf breaking compares against the base branch
       - name: Install buf
         env:
-          BUF_VERSION: 1.50.0
+          BUF_VERSION: 1.70.0
+          BUF_ASSET: buf-Linux-x86_64
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -fsSL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-Linux-x86_64" -o "$HOME/.local/bin/buf"
+          curl -fsSL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/${BUF_ASSET}" -o "$HOME/.local/bin/buf"
+          curl -fsSL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/sha256.txt" -o "$RUNNER_TEMP/buf-sha256.txt"
+          expected="$(awk -v asset="${BUF_ASSET}" '$2 == asset { print $1 }' "$RUNNER_TEMP/buf-sha256.txt")"
+          actual="$(sha256sum "$HOME/.local/bin/buf" | awk '{ print $1 }')"
+          test -n "$expected"
+          test "$actual" = "$expected"
           chmod +x "$HOME/.local/bin/buf"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: buf lint
+      - name: proto-breaking (against base branch)
+        run: |
+          base="${GITHUB_BASE_REF:-main}"
+          git fetch --no-tags origin "${base}:refs/remotes/origin/${base}"
+          base_commit="$(git merge-base HEAD "origin/${base}")"
+          buf breaking --against ".git#commit=${base_commit}"
       - name: proto-sync (committed Go/TS/OpenAPI match `buf generate`)
         run: |
           buf generate
@@ -333,7 +375,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, go-integration, golangci-lint, lint-slog, lint-rawptr, lizard, govulncheck, console, changelog, docker-build, compose-config, proto]
+    needs: [changes, go-checks, go-integration, golangci-lint, lint-slog, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, changelog, docker-build, compose-config, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:

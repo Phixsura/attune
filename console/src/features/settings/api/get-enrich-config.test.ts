@@ -25,13 +25,13 @@ describe('enrichConfigQuery', () => {
   it('error envelope surfaces (e.g. 500)', async () => {
     server.use(
       http.get('/fb/v1/console/enrich-config', () =>
-        HttpResponse.json({ code: 'internal', message: 'boom' }, { status: 500 }),
+        HttpResponse.json({ code: 'INTERNAL', message: 'boom' }, { status: 500 }),
       ),
     )
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     await expect(qc.fetchQuery(enrichConfigQuery())).rejects.toMatchObject({
       status: 500,
-      code: 'internal',
+      code: 'INTERNAL',
     })
   })
 })

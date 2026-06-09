@@ -135,7 +135,7 @@ describe('_authed.feedback route — user flow smoke', () => {
         }),
       ),
       http.get('/fb/v1/console/feedback', () =>
-        HttpResponse.json({ code: 'internal', message: 'boom' }, { status: 500 }),
+        HttpResponse.json({ code: 'INTERNAL', message: 'boom' }, { status: 500 }),
       ),
       http.get('/fb/v1/console/feedback/stats', () =>
         HttpResponse.json({

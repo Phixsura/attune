@@ -3,23 +3,20 @@ package notifytarget
 import (
 	"context"
 	"errors"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
-	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
-	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
-// notifyTargetRepo is the subset of *notifytarget.NotifyTargetRepo that the console
-// handler uses. Defined here (consumer side) so unit tests can pass a fake.
+// notifyTargetRepo is the subset of *notifytarget.NotifyTargetRepo that the
+// console handler uses. Defined here (consumer side) so unit tests can pass a
+// fake.
 type notifyTargetRepo interface {
 	ListByTenant(ctx context.Context, tenantID string) ([]notifytarget.NotifyTarget, error)
 	Insert(ctx context.Context, t notifytarget.NotifyTarget) (uuid.UUID, time.Time, error)
@@ -55,27 +52,6 @@ func toNotifyProto(row notifytarget.NotifyTarget) *attunev1.NotifyTarget {
 	return t
 }
 
-// List handles GET /fb/v1/console/notify-targets.
-func (h *NotifyTargetsHandler) List(w http.ResponseWriter, r *http.Request) {
-	const where = "console.NotifyTargetsHandler.List"
-	ctx := r.Context()
-	auth := session.FromContext(ctx)
-	logext.Infof(ctx, "[%s] start,tenant_id:%s", where, auth.TenantID)
-	rows, err := h.repo.ListByTenant(ctx, auth.TenantID)
-	if err != nil {
-		logext.Errorf(ctx, "[%s] notifytarget.ListByTenant failed,tenant_id:%s,err:%+v",
-			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to list notify targets")
-		return
-	}
-	items := make([]*attunev1.NotifyTarget, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, toNotifyProto(row))
-	}
-	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.ListNotifyTargetsResponse{Items: items}))
-	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
-}
-
 // createNotifyRequest carries normalized create/patch fields through validation.
 type createNotifyRequest struct {
 	DestinationType string
@@ -84,78 +60,6 @@ type createNotifyRequest struct {
 	Secret          string
 	TimeoutSeconds  int
 	Disabled        bool
-}
-
-// Create handles POST /fb/v1/console/notify-targets.
-func (h *NotifyTargetsHandler) Create(w http.ResponseWriter, r *http.Request) {
-	const where = "console.NotifyTargetsHandler.Create"
-	ctx := r.Context()
-	auth := session.FromContext(ctx)
-	var req attunev1.CreateNotifyTargetRequest
-	if err := respond.Decode(r.Body, &req); err != nil {
-		if errors.Is(err, respond.ErrBodyTooLarge) {
-			logext.Warnf(ctx, "[%s] reject: body too large,tenant_id:%s", where, auth.TenantID)
-			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds the 1 MiB limit")
-			return
-		}
-		logext.Warnf(ctx, "[%s] reject: bad json,tenant_id:%s,err:%s",
-			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "request body is not valid JSON")
-		return
-	}
-	nreq := ptrext.Of(createNotifyRequest{
-		DestinationType: req.GetDestinationType(),
-		Audience:        req.GetAudience(),
-		URL:             req.GetUrl(),
-		Secret:          req.GetSecret(),
-		TimeoutSeconds:  int(req.GetTimeoutSeconds()),
-		Disabled:        req.GetDisabled(),
-	})
-	if err := validateNotifyCreate(nreq); err != nil {
-		logext.Warnf(ctx, "[%s] reject: validation,tenant_id:%s,err:%s",
-			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusBadRequest, "validation", err.Error())
-		return
-	}
-	// Today only ships raw-webhook + github-issue adapters.
-	if nreq.DestinationType == notifytarget.DestSlackBot || nreq.DestinationType == notifytarget.DestEmail {
-		logext.Warnf(ctx, "[%s] reject: not implemented,tenant_id:%s,dest:%s",
-			where, auth.TenantID, nreq.DestinationType)
-		respond.Error(ctx, w, http.StatusNotImplemented, "not_implemented",
-			"destination_type "+nreq.DestinationType+" is not implemented yet")
-		return
-	}
-	logext.Infof(ctx, "[%s] start,tenant_id:%s,dest:%s,audience:%s",
-		where, auth.TenantID, nreq.DestinationType, nreq.Audience)
-
-	target := notifytarget.NotifyTarget{
-		TenantID:        auth.TenantID,
-		DestinationType: nreq.DestinationType,
-		Audience:        nreq.Audience,
-		URL:             nreq.URL,
-		Secret:          nreq.Secret,
-		TimeoutSeconds:  nreq.TimeoutSeconds,
-		Disabled:        nreq.Disabled,
-	}
-	id, createdAt, err := h.repo.Insert(ctx, target)
-	if err != nil {
-		if errors.Is(err, notifytarget.ErrNotifyTargetConflict) {
-			logext.Warnf(ctx, "[%s] reject: conflict,tenant_id:%s,dest:%s,audience:%s",
-				where, auth.TenantID, nreq.DestinationType, nreq.Audience)
-			respond.Error(ctx, w, http.StatusConflict, "conflict",
-				"a target already exists for this (destination_type, audience) combination — delete the old one first")
-			return
-		}
-		logext.Errorf(ctx, "[%s] repo.Insert failed,tenant_id:%s,err:%+v",
-			where, auth.TenantID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to create notify target")
-		return
-	}
-	target.ID = id
-	target.CreatedAt = createdAt
-	respond.Proto(w, http.StatusCreated, toNotifyProto(target))
-	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s,dest:%s",
-		where, auth.TenantID, id, nreq.DestinationType)
 }
 
 // validateNotifyCreate runs the field-level rules + normalization in place.
@@ -175,11 +79,11 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 	}
 	u, err := url.Parse(req.URL)
 	if err != nil {
-		return errors.New("url must be https://… or a loopback http://127.0.0.1")
+		return errors.New("url must be https://... or a loopback http://127.0.0.1")
 	}
 	loopbackHTTP := u.Scheme == "http" && isLoopback(u.Hostname())
 	if u.Scheme != "https" && !loopbackHTTP {
-		return errors.New("url must be https://… or a loopback http://127.0.0.1")
+		return errors.New("url must be https://... or a loopback http://127.0.0.1")
 	}
 	switch req.Audience {
 	case "":

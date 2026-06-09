@@ -61,7 +61,7 @@ func TestIngestRequestDiscardUnknown(t *testing.T) {
 // The previous {"error":"..."} shape was removed when #19 unified errors;
 // the apikey middleware (the last leak, caught by E2E) now also emits this.
 func TestErrorResponseWire(t *testing.T) {
-	b, err := protojson.Marshal(ptrext.Of(attunev1.ErrorResponse{Code: "validation", Message: "content is required"}))
+	b, err := protojson.Marshal(ptrext.Of(attunev1.ErrorResponse{Code: attunev1.ErrorCode_VALIDATION.String(), Message: "content is required"}))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestErrorResponseWire(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatalf("re-decode: %v (%s)", err, b)
 	}
-	if m["code"] != "validation" || m["message"] != "content is required" {
+	if m["code"] != "VALIDATION" || m["message"] != "content is required" {
 		t.Errorf("unified error envelope wrong: %s", b)
 	}
 }

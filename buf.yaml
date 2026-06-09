@@ -11,6 +11,12 @@ lint:
     # several RPCs share a resource message), which these two rules forbid.
     - RPC_RESPONSE_STANDARD_NAME
     - RPC_REQUEST_RESPONSE_UNIQUE
+    # ErrorCode's value name IS the wire value (protojson default); a
+    # mandatory `ERROR_CODE_` prefix on every value would bloat every error
+    # response without buying any disambiguation — attune only has one
+    # error-code enum. See docs/proposals/2026/06/2026-06-09-http-dispatcher.md
+    # §A9 for full rationale.
+    - ENUM_VALUE_PREFIX
 breaking:
   use:
     - FILE

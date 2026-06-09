@@ -1,3 +1,4 @@
+// ptrext:file-allow test fixtures use handler pointers and proto request captures.
 package notifytarget
 
 import (
@@ -13,41 +14,68 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
 // fakeNotifyRepo implements notifyTargetRepo for tests. Each method
 // records the last invocation arguments + returns the configured stub.
 type fakeNotifyRepo struct {
-	getRow *notifytarget.NotifyTarget
-	getErr error
+	listRows   []notifytarget.NotifyTarget
+	listErr    error
+	listTenant string
+
+	insertID     uuid.UUID
+	insertTime   time.Time
+	insertErr    error
+	insertTarget *notifytarget.NotifyTarget
+
+	getRow    *notifytarget.NotifyTarget
+	getErr    error
+	getTenant string
+	getID     uuid.UUID
 
 	updateErr        error
 	updateCalledWith *notifytarget.NotifyTarget
+	updateTenant     string
+	updateID         uuid.UUID
+
+	deleteErr    error
+	deleteTenant string
+	deleteID     uuid.UUID
 }
 
-func (f *fakeNotifyRepo) ListByTenant(_ context.Context, _ string) ([]notifytarget.NotifyTarget, error) {
-	return nil, nil
+func (f *fakeNotifyRepo) ListByTenant(_ context.Context, tenantID string) ([]notifytarget.NotifyTarget, error) {
+	f.listTenant = tenantID
+	return f.listRows, f.listErr
 }
 
-func (f *fakeNotifyRepo) Insert(_ context.Context, _ notifytarget.NotifyTarget) (uuid.UUID, time.Time, error) {
-	return uuid.Nil, time.Time{}, nil
+func (f *fakeNotifyRepo) Insert(_ context.Context, t notifytarget.NotifyTarget) (uuid.UUID, time.Time, error) {
+	f.insertTarget = ptrext.Of(t)
+	return f.insertID, f.insertTime, f.insertErr
 }
 
-func (f *fakeNotifyRepo) GetByID(_ context.Context, _ string, _ uuid.UUID) (*notifytarget.NotifyTarget, error) {
+func (f *fakeNotifyRepo) GetByID(_ context.Context, tenantID string, id uuid.UUID) (*notifytarget.NotifyTarget, error) {
+	f.getTenant = tenantID
+	f.getID = id
 	return f.getRow, f.getErr
 }
 
-func (f *fakeNotifyRepo) UpdateByID(_ context.Context, _ string, _ uuid.UUID, t notifytarget.NotifyTarget) error {
+func (f *fakeNotifyRepo) UpdateByID(_ context.Context, tenantID string, id uuid.UUID, t notifytarget.NotifyTarget) error {
+	f.updateTenant = tenantID
+	f.updateID = id
 	f.updateCalledWith = ptrext.Of(t)
 	return f.updateErr
 }
 
-func (f *fakeNotifyRepo) Delete(_ context.Context, _ string, _ uuid.UUID) error {
-	return nil
+func (f *fakeNotifyRepo) Delete(_ context.Context, tenantID string, id uuid.UUID) error {
+	f.deleteTenant = tenantID
+	f.deleteID = id
+	return f.deleteErr
 }
 
 // authCtxRequest mints a *http.Request with the auth context injected
@@ -63,6 +91,21 @@ func authCtxRequest(method, body string, id uuid.UUID) *http.Request {
 	ctx := context.WithValue(r.Context(), chi.RouteCtxKey, rctx)
 	ctx = session.WithAuthCtx(ctx, ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}))
 	return r.WithContext(ctx)
+}
+
+func patchHandler(h *NotifyTargetsHandler) http.HandlerFunc {
+	return dispatcher.Bind(
+		"console.NotifyTargetsHandler.Patch",
+		func(ctx context.Context) *session.AuthCtx { return session.FromContext(ctx) },
+		dispatcher.Combine(
+			func() *attunev1.UpdateNotifyTargetRequest { return &attunev1.UpdateNotifyTargetRequest{} },
+			dispatcher.JSONBody[*attunev1.UpdateNotifyTargetRequest],
+			dispatcher.Param("id", func(req *attunev1.UpdateNotifyTargetRequest, id string) {
+				req.Id = id
+			}),
+		),
+		h.Patch,
+	)
 }
 
 func TestPatch_Happy(t *testing.T) {
@@ -82,7 +125,7 @@ func TestPatch_Happy(t *testing.T) {
 
 	body := `{"url":"https://example.com/new","disabled":true}`
 	w := httptest.NewRecorder()
-	h.Patch(w, authCtxRequest(http.MethodPatch, body, id))
+	patchHandler(h)(w, authCtxRequest(http.MethodPatch, body, id))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -117,7 +160,7 @@ func TestPatch_404_GetReturnsNotFound(t *testing.T) {
 	h := NewNotifyTargetsHandler(fake)
 
 	w := httptest.NewRecorder()
-	h.Patch(w, authCtxRequest(http.MethodPatch, `{"disabled":true}`, id))
+	patchHandler(h)(w, authCtxRequest(http.MethodPatch, `{"disabled":true}`, id))
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
@@ -144,7 +187,7 @@ func TestPatch_409_UpdateConflict(t *testing.T) {
 
 	// Patch changes audience to "all" — would collide with sibling row.
 	w := httptest.NewRecorder()
-	h.Patch(w, authCtxRequest(http.MethodPatch, `{"audience":"all"}`, id))
+	patchHandler(h)(w, authCtxRequest(http.MethodPatch, `{"audience":"all"}`, id))
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
@@ -160,7 +203,7 @@ func TestPatch_BadJSON(t *testing.T) {
 	h := NewNotifyTargetsHandler(fake)
 
 	w := httptest.NewRecorder()
-	h.Patch(w, authCtxRequest(http.MethodPatch, `{not-json`, id))
+	patchHandler(h)(w, authCtxRequest(http.MethodPatch, `{not-json`, id))
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
