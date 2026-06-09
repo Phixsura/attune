@@ -72,7 +72,7 @@ func Custom[Req proto.Message](newReq func() Req, bindReq Binder[Req]) Input[Req
 
 // JSONBody decodes a protoJSON request body with the shared dispatcher limit.
 func JSONBody[Req proto.Message](r *http.Request, req Req) error {
-	return DecodeJSON(r.Body, req)
+	return decodeJSON(r.Body, req)
 }
 
 func bindAll[Req proto.Message](binders ...Binder[Req]) Binder[Req] {

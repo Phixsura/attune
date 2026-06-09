@@ -2,7 +2,7 @@
 //
 // ErrorResponse.code intentionally remains a string protobuf field for
 // backwards compatibility, but writers must pass attunev1.ErrorCode and let
-// respond.Error serialize code.String(). This lint catches the easy drift
+// dispatcher/respond serialize code.String(). This lint catches the easy drift
 // vector: attunev1.ErrorResponse{Code: "..."}.
 package main
 
@@ -136,7 +136,7 @@ func analyzeFile(fset *token.FileSet, path string) ([]finding, error) {
 			out = append(out, finding{
 				Pos:  pos,
 				Rule: ruleCodeLiteral,
-				Msg:  `use attunev1.ErrorCode_*.String() or respond.Error(..., attunev1.ErrorCode_*, ...) instead of a raw code string`,
+				Msg:  `use attunev1.ErrorCode_*.String() or dispatcher.Fail/NewError/Reject with attunev1.ErrorCode_* instead of a raw code string`,
 			})
 		}
 		return true

@@ -83,7 +83,7 @@ func authedRequest(t *testing.T, signer *console.Signer, method, urlStr string) 
 	r := httptest.NewRequest(method, urlStr, nil)
 	r.Header.Set("X-CSRF-Token", signer.CSRFToken(userID))
 	w := httptest.NewRecorder()
-	if err := signer.IssueSessionCookie(w, "tenant-1", userID); err != nil {
+	if err := signer.IssueSessionCookie(cookieSinkRecorder{ResponseRecorder: w}, "tenant-1", userID); err != nil {
 		t.Fatalf("IssueSessionCookie: %v", err)
 	}
 	cookies := w.Result().Cookies()
@@ -92,6 +92,14 @@ func authedRequest(t *testing.T, signer *console.Signer, method, urlStr string) 
 	}
 	r.AddCookie(cookies[0])
 	return r
+}
+
+type cookieSinkRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+func (c cookieSinkRecorder) SetCookie(cookie *http.Cookie) {
+	http.SetCookie(c.ResponseRecorder, cookie)
 }
 
 func insertTenant(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {

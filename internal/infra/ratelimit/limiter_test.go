@@ -1,10 +1,25 @@
 package ratelimit
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/apikey"
 )
+
+type stubVerifier struct {
+	tenantID string
+}
+
+func (s stubVerifier) Lookup(context.Context, string) (string, uuid.UUID, error) {
+	return s.tenantID, uuid.New(), nil
+}
 
 func TestAllow_Burst(t *testing.T) {
 	l := New(60, 5, false, nil)
@@ -81,5 +96,41 @@ func TestMiddleware_BypassEmptyTenant(t *testing.T) {
 	}
 	if called != 1 {
 		t.Fatalf("next handler should have run once")
+	}
+}
+
+func TestMiddleware_LimitedUsesDispatcherEnvelope(t *testing.T) {
+	l := New(60, 1, false, nil)
+	tenantID := "tenant-1"
+	if !l.Allow(tenantID) {
+		t.Fatal("first request should fill bucket")
+	}
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next handler should not run for limited request")
+	})
+	r := httptest.NewRequest(http.MethodPost, "/v1/feedback/ingest", nil)
+	r.Header.Set("X-API-Key", domain.APIKeyPrefix+"test")
+	w := httptest.NewRecorder()
+
+	apikey.Middleware(stubVerifier{tenantID: tenantID})(l.Middleware(next)).ServeHTTP(w, r)
+
+	if w.Result().StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", w.Result().StatusCode, http.StatusTooManyRequests)
+	}
+	if got := w.Header().Get("Retry-After"); got != "1" {
+		t.Fatalf("Retry-After = %q, want 1", got)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v; raw=%s", err, w.Body.String())
+	}
+	if body["code"] != "RATE_LIMITED" {
+		t.Fatalf("code = %v, want RATE_LIMITED; body=%s", body["code"], w.Body.String())
+	}
+	if body["message"] != "submission too frequent, retry in 1 second" {
+		t.Fatalf("message = %v; body=%s", body["message"], w.Body.String())
+	}
+	if _, leak := body["error"]; leak {
+		t.Fatalf("legacy error field leaked: %s", w.Body.String())
 	}
 }

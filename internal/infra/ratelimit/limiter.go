@@ -17,14 +17,18 @@
 package ratelimit
 
 import (
+	"fmt"
+	"math"
 	"net/http"
 	"sync"
 
 	"golang.org/x/time/rate"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
 // Limiter is the per-tenant rate limiter. Construct once, share via
@@ -91,6 +95,30 @@ func (l *Limiter) Allow(tenantID string) bool {
 	return true
 }
 
+func (l *Limiter) retryAfterSeconds(tenantID string) int {
+	if l.disabled || l.perMinute <= 0 || tenantID == "" {
+		return 0
+	}
+	res := l.limiterFor(tenantID).Reserve()
+	if !res.OK() {
+		return 1
+	}
+	delay := res.Delay()
+	res.Cancel()
+	if delay <= 0 {
+		return 1
+	}
+	return int(math.Ceil(delay.Seconds()))
+}
+
+func retryAfterMessage(seconds int) string {
+	unit := "seconds"
+	if seconds == 1 {
+		unit = "second"
+	}
+	return fmt.Sprintf("submission too frequent, retry in %d %s", seconds, unit)
+}
+
 // Middleware returns the HTTP wrapper. Mount AFTER api-key middleware
 // so context already carries tenant_id.
 //
@@ -103,10 +131,10 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 		if !l.Allow(tenantID) {
 			logext.Warnf(ctx, "[%s] reject: rate limited,tenant_id:%s,path:%s",
 				where, tenantID, r.URL.Path)
-			w.Header().Set("Retry-After", "30")
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":"rate_limited","message":"submission too frequent, retry in 30 seconds"}`))
+			retryAfter := l.retryAfterSeconds(tenantID)
+			w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
+			dispatcher.Reject(ctx, w, http.StatusTooManyRequests,
+				attunev1.ErrorCode_RATE_LIMITED, retryAfterMessage(retryAfter))
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -38,6 +38,9 @@ bash scripts/lint-errorcode.sh
 step "lint-integration-layout"
 bash scripts/lint-integration-layout.sh
 
+step "lint-http-response-emission"
+bash scripts/lint-http-response-emission.sh
+
 step "go test ./..."
 go test ./...
 

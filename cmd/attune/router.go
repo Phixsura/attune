@@ -17,6 +17,7 @@ import (
 	"github.com/riandyrn/otelchi"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/apikey"
@@ -103,9 +104,7 @@ func buildRouter(
 // real application path. (The pre-0.2 /health route was removed; see CHANGELOG.)
 // The otelchi /health-prefix filter in buildRouter keeps /healthz out of traces.
 func mountHealth(r chi.Router) {
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("ok"))
-	})
+	r.Get("/healthz", dispatcher.HealthzHandler())
 }
 
 // traceIDResponseHeader writes the active OTel trace_id into the

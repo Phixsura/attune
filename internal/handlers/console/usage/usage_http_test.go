@@ -12,6 +12,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	feedbackrepo "github.com/Phixsura/attune/internal/repo/feedback"
 )
@@ -40,9 +41,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 	h := &UsageHandler{repo: repo}
 	handler := dispatcher.Bind(
 		"console.UsageHandler.Get",
-		dispatchtest.Auth,
 		dispatcher.Empty(func() *attunev1.GetUsageRequest { return &attunev1.GetUsageRequest{} }),
 		h.Get,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetUsageRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
 	)
 
 	w := httptest.NewRecorder()

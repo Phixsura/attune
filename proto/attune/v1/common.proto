@@ -52,6 +52,7 @@ enum ErrorCode {
   SAME_PASSWORD        = 37;
   UNSUPPORTED          = 38;
   ROTATION_IN_GRACE_WINDOW = 39;
+  RATE_LIMITED         = 40;
 
   // enrich-config validation (service/enrich)
   MISSING_CONTENT_TOKEN  = 23;

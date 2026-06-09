@@ -24,6 +24,23 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   enrich → outbox queue → outbox drain path. `OutboxWorker.ProcessOnce(ctx)`
   exposes one deterministic batch-drain cycle for tests and future
   manual drain use.
+- **Dispatcher-owned HTTP response emission across attune-owned routes (#99).**
+  Remaining console auth, change-password, inbound source management,
+  webhook inbound ingest, API-key/session/rate-limit middleware, and `/healthz`
+  now emit responses through `internal/dispatcher`. The dispatcher grew
+  middleware rejection helpers, a fixed health-check response helper, and an
+  option-driven `Bind(..., WithAuth(...))` path that covers both context-auth
+  routes and webhook pre-auth source lookup/HMAC verification. `RequestContext`
+  now exposes only cookie side effects, keeping
+  response body/status writing owned by dispatcher. `respond` is now a
+  low-level encoder used by dispatcher instead of a production handler
+  dependency. A new
+  `scripts/lint-http-response-emission.sh` gate is wired into
+  `scripts/check.sh` to block future direct `respond.*`, `WriteHeader`, or
+  `http.Error`/`http.SetCookie` response emission outside dispatcher/respond-owned
+  code. Rate limiting now returns the standard error envelope with proto code
+  `RATE_LIMITED` and a bucket-derived `Retry-After`; console test-connection
+  now surfaces dispatcher error-envelope messages on malformed requests.
 
 - **Console UI: inbound sources page + admin change-password (#66 B2 / H10).**
   Fills the SPA gap left by the backend-first #66 landing — operators now

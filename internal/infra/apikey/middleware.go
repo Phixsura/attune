@@ -14,11 +14,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/respond"
 )
 
 // Verifier is the dependency middleware needs from the service layer.
@@ -64,7 +64,7 @@ func Middleware(v Verifier) func(http.Handler) http.Handler {
 			raw := r.Header.Get("X-API-Key")
 			if raw == "" || !strings.HasPrefix(raw, domain.APIKeyPrefix) {
 				logext.Warnf(ctx, "[%s] reject: missing/malformed key,path:%s", where, r.URL.Path)
-				respond.Error(ctx, w, http.StatusUnauthorized,
+				dispatcher.Reject(ctx, w, http.StatusUnauthorized,
 					attunev1.ErrorCode_UNAUTHORIZED, "missing or malformed api key")
 				return
 			}
@@ -82,7 +82,7 @@ func Middleware(v Verifier) func(http.Handler) http.Handler {
 				} else {
 					logext.Warnf(ctx, "[%s] reject: invalid key,path:%s", where, r.URL.Path)
 				}
-				respond.Error(ctx, w, status, code, msg)
+				dispatcher.Reject(ctx, w, status, code, msg)
 				return
 			}
 			newCtx := context.WithValue(r.Context(), ctxTenantID, tid)

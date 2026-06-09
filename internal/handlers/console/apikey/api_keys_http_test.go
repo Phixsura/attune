@@ -12,6 +12,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 )
@@ -32,9 +33,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		}}
 		handler := dispatcher.Bind(
 			"console.APIKeysHandler.List",
-			dispatchtest.Auth,
 			dispatcher.Empty(func() *attunev1.ListApiKeysRequest { return &attunev1.ListApiKeysRequest{} }),
 			h.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListApiKeysRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -65,9 +68,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		}}
 		handler := dispatcher.Bind(
 			"console.APIKeysHandler.Create",
-			dispatchtest.Auth,
 			dispatcher.JSON(func() *attunev1.CreateApiKeyRequest { return &attunev1.CreateApiKeyRequest{} }),
 			h.Create,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateApiKeyRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -87,12 +92,14 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := &APIKeysHandler{svc: svc}
 		handler := dispatcher.Bind(
 			"console.APIKeysHandler.Revoke",
-			dispatchtest.Auth,
 			dispatcher.Path(
 				func() *attunev1.DeleteApiKeyRequest { return &attunev1.DeleteApiKeyRequest{} },
 				dispatcher.Param("id", func(req *attunev1.DeleteApiKeyRequest, id string) { req.Id = id }),
 			),
 			h.Revoke,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteApiKeyRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()

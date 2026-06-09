@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/inbound"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
 func init() {
@@ -49,7 +52,12 @@ func (a *adapter) Start(_ context.Context, deps inbound.Deps) error {
 	deps.Mux.Method(
 		http.MethodPost,
 		"/webhook/{tenant-slug}/{source-slug}",
-		http.HandlerFunc(a.handle),
+		dispatcher.Bind(
+			"inbound.webhook.handle",
+			dispatcher.Empty(func() *attunev1.IngestRequest { return ptrext.Of(attunev1.IngestRequest{}) }),
+			a.handle,
+			dispatcher.WithAuth(a.bindRequest),
+		),
 	)
 	return nil
 }

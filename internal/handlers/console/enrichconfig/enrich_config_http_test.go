@@ -12,6 +12,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -59,9 +60,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		}}
 		handler := dispatcher.Bind(
 			"console.EnrichConfigHandler.Get",
-			dispatchtest.Auth,
 			dispatcher.Empty(func() *attunev1.GetEnrichConfigRequest { return &attunev1.GetEnrichConfigRequest{} }),
 			h.Get,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetEnrichConfigRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -80,9 +83,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := &Handler{svc: svc}
 		handler := dispatcher.Bind(
 			"console.EnrichConfigHandler.Update",
-			dispatchtest.Auth,
 			dispatcher.JSON(func() *attunev1.UpdateEnrichConfigRequest { return &attunev1.UpdateEnrichConfigRequest{} }),
 			h.Update,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateEnrichConfigRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -106,9 +111,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := &Handler{svc: svc}
 		handler := dispatcher.Bind(
 			"console.EnrichConfigHandler.Preview",
-			dispatchtest.Auth,
 			dispatcher.JSON(func() *attunev1.PreviewEnrichPromptRequest { return &attunev1.PreviewEnrichPromptRequest{} }),
 			h.Preview,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PreviewEnrichPromptRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()

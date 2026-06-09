@@ -37,8 +37,8 @@ func decode(t *testing.T, body []byte) map[string]any {
 	return m
 }
 
-// wrap installs chi's RequestID middleware so respond.Error finds a
-// non-empty value for the requestId field — mirrors production wiring.
+// wrap installs chi's RequestID middleware so dispatcher-owned errors include
+// a non-empty requestId field — mirrors production wiring.
 func wrap(h http.Handler) http.Handler {
 	return middleware.RequestID(h)
 }
@@ -86,7 +86,7 @@ func TestMiddleware_MissingHeader_UnifiedEnvelope(t *testing.T) {
 		t.Errorf("requestId must be non-empty (chi RequestID middleware); body=%s", body)
 	}
 	// Negative: the OLD shape's "error" key must NOT appear, otherwise
-	// some caller is bypassing respond.Error again.
+	// some caller is bypassing the dispatcher envelope again.
 	if _, leak := m["error"]; leak {
 		t.Errorf("legacy {\"error\":...} envelope still present: %s", body)
 	}
@@ -99,8 +99,9 @@ func TestMiddleware_InvalidKey_UnifiedEnvelope(t *testing.T) {
 	srv := httptest.NewServer(wrap(mw(next(t))))
 	defer srv.Close()
 
+	rawKey := domain.APIKeyPrefix + "deadbeef"
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/feedback/ingest", nil)
-	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"deadbeef")
+	req.Header.Set("X-API-Key", rawKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)
@@ -114,6 +115,9 @@ func TestMiddleware_InvalidKey_UnifiedEnvelope(t *testing.T) {
 	m := decode(t, body)
 	if m["code"] != "UNAUTHORIZED" || m["message"] != "invalid api key" {
 		t.Errorf("envelope wrong: %s", body)
+	}
+	if strings.Contains(string(body), rawKey) {
+		t.Fatalf("raw api key leaked in response body: %s", body)
 	}
 }
 

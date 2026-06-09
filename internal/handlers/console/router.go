@@ -2,20 +2,16 @@
 // subpackage (auth, apikey, feedback, inbound, me, notifytarget, usage) into a
 // single chi.Router mounted by attune under /fb/v1/console.
 //
-// Shared helpers live under handlers/console/internal/:
-// - internal/respond — response/decode helpers (Proto, Error, Decode,
-// ErrBodyTooLarge)
-// - internal/session — Signer, cookies, RequireSession middleware,
-// AuthCtx + FromContext
+// Shared helpers live under handlers/console/internal/session: Signer, cookies,
+// RequireSession middleware, AuthCtx + FromContext.
 //
-// Each handler subpackage imports respond + session. This package
-// (`console`) imports the handler subpackages + session for the
-// middleware. No cycles: subpackages do not import this root, and
-// neither internal/respond nor internal/session import any handler.
+// Handler subpackages import dispatcher + session. This package (`console`)
+// imports the handler subpackages + session for the middleware. No cycles:
+// subpackages do not import this root, and session does not import any handler.
 package console
 
 import (
-	"context"
+	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
@@ -61,12 +57,12 @@ var (
 // Endpoint inventory:
 //
 //	public (no session required):
-//	 POST /install/login -> auth.Handler.Login
+//	 POST /install/login -> dispatcher.Bind(auth.Handler.Login)
 //
 //	session-required (RequireSession middleware):
 //	 GET /me -> dispatcher.Bind(me.Handler.Me)
 //	 POST /logout -> dispatcher.Bind(me.Handler.Logout)
-//	 POST /me/change-password -> auth.ChangePasswordHandler.ChangePassword
+//	 POST /me/change-password -> dispatcher.Bind(auth.ChangePasswordHandler.ChangePassword)
 //	 GET /api-keys -> dispatcher.Bind(apikey.Handler.List)
 //	 POST /api-keys -> dispatcher.Bind(apikey.Handler.Create)
 //	 DELETE /api-keys/{id} -> dispatcher.Bind(apikey.Handler.Revoke)
@@ -82,17 +78,17 @@ var (
 //	 GET /enrich-config -> dispatcher.Bind(enrichconfig.Handler.Get)
 //	 PUT /enrich-config -> dispatcher.Bind(enrichconfig.Handler.Update)
 //	 POST /enrich-config/preview -> dispatcher.Bind(enrichconfig.Handler.Preview)
-//	 GET /inbound/sources -> inbound.Handler.List
-//	 POST /inbound/sources -> inbound.Handler.Create
-//	 GET /inbound/sources/{id} -> inbound.Handler.Get
-//	 POST /inbound/sources/{id}/rotate-secret -> inbound.Handler.Rotate
-//	 POST /inbound/sources/{id}/pause -> inbound.Handler.Pause
-//	 POST /inbound/sources/{id}/resume -> inbound.Handler.Resume
-//	 DELETE /inbound/sources/{id} -> inbound.Handler.Delete
-//	 POST /inbound/sources/test-connection -> inbound.Handler.TestConnection
+//	 GET /inbound/sources -> dispatcher.Bind(inbound.Handler.List)
+//	 POST /inbound/sources -> dispatcher.Bind(inbound.Handler.Create)
+//	 GET /inbound/sources/{id} -> dispatcher.Bind(inbound.Handler.Get)
+//	 POST /inbound/sources/{id}/rotate-secret -> dispatcher.Bind(inbound.Handler.Rotate)
+//	 POST /inbound/sources/{id}/pause -> dispatcher.Bind(inbound.Handler.Pause)
+//	 POST /inbound/sources/{id}/resume -> dispatcher.Bind(inbound.Handler.Resume)
+//	 DELETE /inbound/sources/{id} -> dispatcher.Bind(inbound.Handler.Delete)
+//	 POST /inbound/sources/test-connection -> dispatcher.Bind(inbound.Handler.TestConnection)
 type Router struct {
 	signer         *session.Signer
-	auth           *auth.Handler
+	login          *auth.Handler
 	changePassword *auth.ChangePasswordHandler
 	me             *me.MeHandler
 	apiKeys        *apikey.APIKeysHandler
@@ -117,7 +113,7 @@ func NewRouter(
 ) *Router {
 	return ptrext.Of(Router{
 		signer:         signer,
-		auth:           authH,
+		login:          authH,
 		changePassword: changePassword,
 		me:             me,
 		apiKeys:        apiKeys,
@@ -129,14 +125,22 @@ func NewRouter(
 	})
 }
 
-func consoleSession(ctx context.Context) *session.AuthCtx {
-	return session.FromContext(ctx)
-}
-
 func (r *Router) Mount() chi.Router {
 	mux := chi.NewRouter()
 
-	mux.Post("/install/login", r.auth.Login)
+	mux.Post("/install/login", dispatcher.Bind(
+		"console.auth.Handler.Login",
+		dispatcher.Combine(
+			func() *attunev1.LoginRequest { return ptrext.Of(attunev1.LoginRequest{}) },
+			r.login.RequireLoginOrigin,
+			dispatcher.JSONBody[*attunev1.LoginRequest],
+			r.login.ValidateRequest,
+		),
+		r.login.Login,
+		dispatcher.WithAuth(func(_ *http.Request, _ *attunev1.LoginRequest) (struct{}, error) {
+			return struct{}{}, nil
+		}),
+	))
 
 	mux.Group(func(m chi.Router) {
 		m.Use(r.signer.RequireSession)
@@ -149,27 +153,44 @@ func (r *Router) Mount() chi.Router {
 func (r *Router) mountSession(m chi.Router) {
 	m.Get("/me", dispatcher.Bind(
 		"console.MeHandler.Me",
-		consoleSession,
 		dispatcher.Empty(func() *attunev1.GetMeRequest { return ptrext.Of(attunev1.GetMeRequest{}) }),
 		r.me.Me,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetMeRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
 	))
 	m.Post("/logout", dispatcher.Bind(
 		"console.MeHandler.Logout",
-		consoleSession,
 		dispatcher.Empty(func() *attunev1.LogoutRequest { return ptrext.Of(attunev1.LogoutRequest{}) }),
 		r.me.Logout,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.LogoutRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
 	))
 	if r.changePassword != nil {
-		m.Post("/me/change-password", r.changePassword.ChangePassword)
+		m.Post("/me/change-password", dispatcher.Bind(
+			"console.auth.ChangePasswordHandler.ChangePassword",
+			dispatcher.Combine(
+				func() *attunev1.ChangePasswordRequest { return ptrext.Of(attunev1.ChangePasswordRequest{}) },
+				dispatcher.JSONBody[*attunev1.ChangePasswordRequest],
+				r.changePassword.ValidateRequest,
+			),
+			r.changePassword.ChangePassword,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ChangePasswordRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 	}
 	r.mountAPIKeys(m)
 	r.mountNotifyTargets(m)
 	r.mountFeedback(m)
 	m.Get("/usage", dispatcher.Bind(
 		"console.UsageHandler.Get",
-		consoleSession,
 		dispatcher.Empty(func() *attunev1.GetUsageRequest { return ptrext.Of(attunev1.GetUsageRequest{}) }),
 		r.usage.Get,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetUsageRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
 	))
 	r.mountEnrichConfig(m)
 	r.mountInbound(m)
@@ -179,19 +200,22 @@ func (r *Router) mountAPIKeys(m chi.Router) {
 	m.Route("/api-keys", func(k chi.Router) {
 		k.Get("/", dispatcher.Bind(
 			"console.APIKeysHandler.List",
-			consoleSession,
 			dispatcher.Empty(func() *attunev1.ListApiKeysRequest { return ptrext.Of(attunev1.ListApiKeysRequest{}) }),
 			r.apiKeys.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListApiKeysRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 		k.Post("/", dispatcher.Bind(
 			"console.APIKeysHandler.Create",
-			consoleSession,
 			dispatcher.JSON(func() *attunev1.CreateApiKeyRequest { return ptrext.Of(attunev1.CreateApiKeyRequest{}) }),
 			r.apiKeys.Create,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateApiKeyRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 		k.Delete("/{id}", dispatcher.Bind(
 			"console.APIKeysHandler.Revoke",
-			consoleSession,
 			dispatcher.Path(
 				func() *attunev1.DeleteApiKeyRequest { return ptrext.Of(attunev1.DeleteApiKeyRequest{}) },
 				dispatcher.Param("id", func(req *attunev1.DeleteApiKeyRequest, id string) {
@@ -199,6 +223,9 @@ func (r *Router) mountAPIKeys(m chi.Router) {
 				}),
 			),
 			r.apiKeys.Revoke,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteApiKeyRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 	})
 }
@@ -207,19 +234,22 @@ func (r *Router) mountNotifyTargets(m chi.Router) {
 	m.Route("/notify-targets", func(n chi.Router) {
 		n.Get("/", dispatcher.Bind(
 			"console.NotifyTargetsHandler.List",
-			consoleSession,
 			dispatcher.Empty(func() *attunev1.ListNotifyTargetsRequest { return ptrext.Of(attunev1.ListNotifyTargetsRequest{}) }),
 			r.notifyTargets.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListNotifyTargetsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 		n.Post("/", dispatcher.Bind(
 			"console.NotifyTargetsHandler.Create",
-			consoleSession,
 			dispatcher.JSON(func() *attunev1.CreateNotifyTargetRequest { return ptrext.Of(attunev1.CreateNotifyTargetRequest{}) }),
 			r.notifyTargets.Create,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateNotifyTargetRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 		n.Patch("/{id}", dispatcher.Bind(
 			"console.NotifyTargetsHandler.Patch",
-			consoleSession,
 			dispatcher.Combine(
 				func() *attunev1.UpdateNotifyTargetRequest { return ptrext.Of(attunev1.UpdateNotifyTargetRequest{}) },
 				dispatcher.JSONBody[*attunev1.UpdateNotifyTargetRequest],
@@ -228,10 +258,12 @@ func (r *Router) mountNotifyTargets(m chi.Router) {
 				}),
 			),
 			r.notifyTargets.Patch,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateNotifyTargetRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 		n.Delete("/{id}", dispatcher.Bind(
 			"console.NotifyTargetsHandler.Delete",
-			consoleSession,
 			dispatcher.Path(
 				func() *attunev1.DeleteNotifyTargetRequest { return ptrext.Of(attunev1.DeleteNotifyTargetRequest{}) },
 				dispatcher.Param("id", func(req *attunev1.DeleteNotifyTargetRequest, id string) {
@@ -239,10 +271,12 @@ func (r *Router) mountNotifyTargets(m chi.Router) {
 				}),
 			),
 			r.notifyTargets.Delete,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteNotifyTargetRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 		n.Post("/{id}/test", dispatcher.Bind(
 			"console.NotifyTargetsHandler.Test",
-			consoleSession,
 			dispatcher.Path(
 				func() *attunev1.TestNotifyTargetRequest { return ptrext.Of(attunev1.TestNotifyTargetRequest{}) },
 				dispatcher.Param("id", func(req *attunev1.TestNotifyTargetRequest, id string) {
@@ -250,6 +284,9 @@ func (r *Router) mountNotifyTargets(m chi.Router) {
 				}),
 			),
 			r.notifyTargets.Test,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TestNotifyTargetRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 	})
 }
@@ -258,20 +295,23 @@ func (r *Router) mountFeedback(m chi.Router) {
 	m.Route("/feedback", func(f chi.Router) {
 		f.Get("/", dispatcher.Bind(
 			"console.FeedbackHandler.List",
-			consoleSession,
 			dispatcher.Query(func() *attunev1.ListFeedbackRequest { return ptrext.Of(attunev1.ListFeedbackRequest{}) }, feedback.BindListRequest),
 			r.feedback.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListFeedbackRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 		// /stats must come BEFORE /{id}; source order keeps the intent clear.
 		f.Get("/stats", dispatcher.Bind(
 			"console.FeedbackHandler.Stats",
-			consoleSession,
 			dispatcher.Empty(func() *attunev1.GetFeedbackStatsRequest { return ptrext.Of(attunev1.GetFeedbackStatsRequest{}) }),
 			r.feedback.Stats,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetFeedbackStatsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 		f.Get("/{id}", dispatcher.Bind(
 			"console.FeedbackHandler.Get",
-			consoleSession,
 			dispatcher.Path(
 				func() *attunev1.GetFeedbackRequest { return ptrext.Of(attunev1.GetFeedbackRequest{}) },
 				dispatcher.ParamInt64("id", func(req *attunev1.GetFeedbackRequest, id int64) {
@@ -279,6 +319,9 @@ func (r *Router) mountFeedback(m chi.Router) {
 				}, "id must be an integer"),
 			),
 			r.feedback.Get,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetFeedbackRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 	})
 }
@@ -287,21 +330,27 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 	m.Route("/enrich-config", func(e chi.Router) {
 		e.Get("/", dispatcher.Bind(
 			"console.EnrichConfigHandler.Get",
-			consoleSession,
 			dispatcher.Empty(func() *attunev1.GetEnrichConfigRequest { return ptrext.Of(attunev1.GetEnrichConfigRequest{}) }),
 			r.enrichConfig.Get,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetEnrichConfigRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 		e.Put("/", dispatcher.Bind(
 			"console.EnrichConfigHandler.Update",
-			consoleSession,
 			dispatcher.JSON(func() *attunev1.UpdateEnrichConfigRequest { return ptrext.Of(attunev1.UpdateEnrichConfigRequest{}) }),
 			r.enrichConfig.Update,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateEnrichConfigRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 		e.Post("/preview", dispatcher.Bind(
 			"console.EnrichConfigHandler.Preview",
-			consoleSession,
 			dispatcher.JSON(func() *attunev1.PreviewEnrichPromptRequest { return ptrext.Of(attunev1.PreviewEnrichPromptRequest{}) }),
 			r.enrichConfig.Preview,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PreviewEnrichPromptRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
 		))
 	})
 }
@@ -311,13 +360,88 @@ func (r *Router) mountInbound(m chi.Router) {
 		return
 	}
 	m.Route("/inbound/sources", func(s chi.Router) {
-		s.Get("/", r.inbound.List)
-		s.Post("/", r.inbound.Create)
-		s.Post("/test-connection", r.inbound.TestConnection)
-		s.Get("/{id}", r.inbound.Get)
-		s.Delete("/{id}", r.inbound.Delete)
-		s.Post("/{id}/rotate-secret", r.inbound.Rotate)
-		s.Post("/{id}/pause", r.inbound.Pause)
-		s.Post("/{id}/resume", r.inbound.Resume)
+		s.Get("/", dispatcher.Bind(
+			"console.inbound.List",
+			dispatcher.Empty(func() *attunev1.ListInboundSourcesRequest { return ptrext.Of(attunev1.ListInboundSourcesRequest{}) }),
+			r.inbound.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListInboundSourcesRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		s.Post("/", dispatcher.Bind(
+			"console.inbound.Create",
+			dispatcher.JSON(func() *attunev1.CreateInboundSourceRequest { return ptrext.Of(attunev1.CreateInboundSourceRequest{}) }),
+			r.inbound.Create,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateInboundSourceRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		s.Post("/test-connection", dispatcher.Bind(
+			"console.inbound.TestConnection",
+			dispatcher.JSON(func() *attunev1.TestInboundConnectionRequest {
+				return ptrext.Of(attunev1.TestInboundConnectionRequest{})
+			}),
+			r.inbound.TestConnection,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TestInboundConnectionRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		s.Get("/{id}", dispatcher.Bind(
+			"console.inbound.Get",
+			dispatcher.Path(
+				func() *attunev1.GetInboundSourceRequest { return ptrext.Of(attunev1.GetInboundSourceRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.GetInboundSourceRequest, id string) { req.Id = id }),
+			),
+			r.inbound.Get,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetInboundSourceRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		s.Delete("/{id}", dispatcher.Bind(
+			"console.inbound.Delete",
+			dispatcher.Path(
+				func() *attunev1.DeleteInboundSourceRequest { return ptrext.Of(attunev1.DeleteInboundSourceRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.DeleteInboundSourceRequest, id string) { req.Id = id }),
+			),
+			r.inbound.Delete,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteInboundSourceRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		s.Post("/{id}/rotate-secret", dispatcher.Bind(
+			"console.inbound.Rotate",
+			dispatcher.Path(
+				func() *attunev1.RotateInboundSourceSecretRequest {
+					return ptrext.Of(attunev1.RotateInboundSourceSecretRequest{})
+				},
+				dispatcher.Param("id", func(req *attunev1.RotateInboundSourceSecretRequest, id string) { req.Id = id }),
+			),
+			r.inbound.Rotate,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RotateInboundSourceSecretRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		s.Post("/{id}/pause", dispatcher.Bind(
+			"console.inbound.Pause",
+			dispatcher.Path(
+				func() *attunev1.PauseInboundSourceRequest { return ptrext.Of(attunev1.PauseInboundSourceRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.PauseInboundSourceRequest, id string) { req.Id = id }),
+			),
+			r.inbound.Pause,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PauseInboundSourceRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		s.Post("/{id}/resume", dispatcher.Bind(
+			"console.inbound.Resume",
+			dispatcher.Path(
+				func() *attunev1.ResumeInboundSourceRequest { return ptrext.Of(attunev1.ResumeInboundSourceRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.ResumeInboundSourceRequest, id string) { req.Id = id }),
+			),
+			r.inbound.Resume,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ResumeInboundSourceRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 	})
 }

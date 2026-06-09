@@ -33,7 +33,7 @@ func (h *MeHandler) Me(ctx *dispatcher.RequestContext[*session.AuthCtx], _ *attu
 		}
 	}
 	if auth.TenantID == "" {
-		h.signer.ClearSessionCookie(ctx.Response())
+		h.signer.ClearSessionCookie(ctx)
 		return dispatcher.Fail[*attunev1.GetMeResponse](
 			http.StatusUnauthorized, attunev1.ErrorCode_USER_GONE, "session subject not found")
 	}
@@ -92,7 +92,7 @@ func (h *MeHandler) meTenantUser(ctx *dispatcher.RequestContext[*session.AuthCtx
 	if err != nil {
 		if errors.Is(err, tenant.ErrTenantUserNotFound) {
 			logext.Warnf(ctx, "[%s] reject: user gone,user_id:%s", where, userID)
-			h.signer.ClearSessionCookie(ctx.Response())
+			h.signer.ClearSessionCookie(ctx)
 			return dispatcher.Fail[*attunev1.GetMeResponse](
 				http.StatusUnauthorized, attunev1.ErrorCode_USER_GONE, "user is disabled or deleted")
 		}

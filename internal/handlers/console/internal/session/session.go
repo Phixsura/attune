@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -128,9 +128,12 @@ func (s *Signer) hmac(input string) string {
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
 
-// IssueSessionCookie writes the session cookie on a response. Used by
-// the OAuth callback after a successful install/login.
-func (s *Signer) IssueSessionCookie(w http.ResponseWriter, tenantID, userID string) error {
+type cookieSink interface {
+	SetCookie(*http.Cookie)
+}
+
+// IssueSessionCookie writes the session cookie after a successful login.
+func (s *Signer) IssueSessionCookie(sink cookieSink, tenantID, userID string) error {
 	val, err := s.SignSession(Payload{
 		TenantID:  tenantID,
 		UserID:    userID,
@@ -139,7 +142,7 @@ func (s *Signer) IssueSessionCookie(w http.ResponseWriter, tenantID, userID stri
 	if err != nil {
 		return err
 	}
-	http.SetCookie(w, ptrext.Of(http.Cookie{
+	sink.SetCookie(ptrext.Of(http.Cookie{
 		Name:     SessionCookieName,
 		Value:    val,
 		Path:     "/",
@@ -152,8 +155,8 @@ func (s *Signer) IssueSessionCookie(w http.ResponseWriter, tenantID, userID stri
 }
 
 // ClearSessionCookie expires the session cookie. Used by POST /logout.
-func (s *Signer) ClearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, ptrext.Of(http.Cookie{
+func (s *Signer) ClearSessionCookie(sink cookieSink) {
+	sink.SetCookie(ptrext.Of(http.Cookie{
 		Name:     SessionCookieName,
 		Value:    "",
 		Path:     "/",
@@ -166,7 +169,7 @@ func (s *Signer) ClearSessionCookie(w http.ResponseWriter) {
 
 // RequireSession is the chi-style middleware that gates all /console
 // endpoints except /install/*. Sets AuthCtx in request context on
-// success; returns 401 (with respond.Error) on failure.
+// success; returns dispatcher-owned error envelopes on failure.
 func (s *Signer) RequireSession(next http.Handler) http.Handler {
 	const where = "session.RequireSession"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -174,14 +177,14 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 		ck, err := r.Cookie(SessionCookieName)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] reject: missing cookie,path:%s", where, r.URL.Path)
-			respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "not logged in or session expired")
+			dispatcher.Reject(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "not logged in or session expired")
 			return
 		}
 		p, err := s.VerifySession(ck.Value)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] reject: verify session failed,path:%s,err:%s",
 				where, r.URL.Path, err.Error())
-			respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "session verification failed")
+			dispatcher.Reject(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "session verification failed")
 			return
 		}
 		// CSRF check for state-changing methods. GET/HEAD bypass.
@@ -189,7 +192,7 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 			if !s.VerifyCSRF(p.UserID, r.Header.Get(CSRFHeader)) {
 				logext.Warnf(ctx, "[%s] reject: csrf invalid,path:%s,user_id:%s",
 					where, r.URL.Path, p.UserID)
-				respond.Error(ctx, w, http.StatusForbidden, attunev1.ErrorCode_CSRF_INVALID, "invalid CSRF token")
+				dispatcher.Reject(ctx, w, http.StatusForbidden, attunev1.ErrorCode_CSRF_INVALID, "invalid CSRF token")
 				return
 			}
 		}

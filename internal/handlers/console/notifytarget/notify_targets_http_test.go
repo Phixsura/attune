@@ -12,6 +12,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
@@ -34,9 +35,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		})
 		handler := dispatcher.Bind(
 			"console.NotifyTargetsHandler.List",
-			dispatchtest.Auth,
 			dispatcher.Empty(func() *attunev1.ListNotifyTargetsRequest { return &attunev1.ListNotifyTargetsRequest{} }),
 			h.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListNotifyTargetsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -57,9 +60,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := NewNotifyTargetsHandler(repo)
 		handler := dispatcher.Bind(
 			"console.NotifyTargetsHandler.Create",
-			dispatchtest.Auth,
 			dispatcher.JSON(func() *attunev1.CreateNotifyTargetRequest { return &attunev1.CreateNotifyTargetRequest{} }),
 			h.Create,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateNotifyTargetRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -94,13 +99,15 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := NewNotifyTargetsHandler(repo)
 		handler := dispatcher.Bind(
 			"console.NotifyTargetsHandler.Patch",
-			dispatchtest.Auth,
 			dispatcher.Combine(
 				func() *attunev1.UpdateNotifyTargetRequest { return &attunev1.UpdateNotifyTargetRequest{} },
 				dispatcher.JSONBody[*attunev1.UpdateNotifyTargetRequest],
 				dispatcher.Param("id", func(req *attunev1.UpdateNotifyTargetRequest, id string) { req.Id = id }),
 			),
 			h.Patch,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateNotifyTargetRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -123,12 +130,14 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := NewNotifyTargetsHandler(repo)
 		handler := dispatcher.Bind(
 			"console.NotifyTargetsHandler.Delete",
-			dispatchtest.Auth,
 			dispatcher.Path(
 				func() *attunev1.DeleteNotifyTargetRequest { return &attunev1.DeleteNotifyTargetRequest{} },
 				dispatcher.Param("id", func(req *attunev1.DeleteNotifyTargetRequest, id string) { req.Id = id }),
 			),
 			h.Delete,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteNotifyTargetRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -166,12 +175,14 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := NewNotifyTargetsHandler(repo)
 		handler := dispatcher.Bind(
 			"console.NotifyTargetsHandler.Test",
-			dispatchtest.Auth,
 			dispatcher.Path(
 				func() *attunev1.TestNotifyTargetRequest { return &attunev1.TestNotifyTargetRequest{} },
 				dispatcher.Param("id", func(req *attunev1.TestNotifyTargetRequest, id string) { req.Id = id }),
 			),
 			h.Test,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TestNotifyTargetRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
