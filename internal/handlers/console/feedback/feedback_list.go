@@ -25,7 +25,7 @@ func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
 		req.Cursor = ptrext.Of(v)
 	}
 	if v := q.Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
 			req.Limit = ptrext.Of(int32(n))
 		}
 	}
