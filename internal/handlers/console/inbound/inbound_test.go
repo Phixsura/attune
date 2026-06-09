@@ -337,8 +337,8 @@ func TestRotate_GraceWindow_Returns409(t *testing.T) {
 	}
 	// Conflict body uses the standard error envelope, not the success
 	// proto — the error code identifies the grace-window case.
-	if !strings.Contains(w.Body.String(), "rotation_in_grace_window") {
-		t.Fatalf("want rotation_in_grace_window error code; got %s", w.Body.String())
+	if !strings.Contains(w.Body.String(), "ROTATION_IN_GRACE_WINDOW") {
+		t.Fatalf("want ROTATION_IN_GRACE_WINDOW error code; got %s", w.Body.String())
 	}
 	if !strings.Contains(w.Body.String(), next.UTC().Format(time.RFC3339)[:10]) {
 		t.Fatalf("want next_eligible_at hint in body; got %s", w.Body.String())

@@ -76,8 +76,8 @@ func TestMiddleware_MissingHeader_UnifiedEnvelope(t *testing.T) {
 
 	body, _ := readAll(resp)
 	m := decode(t, body)
-	if m["code"] != "unauthenticated" {
-		t.Errorf("code = %v, want unauthenticated; body=%s", m["code"], body)
+	if m["code"] != "UNAUTHORIZED" {
+		t.Errorf("code = %v, want UNAUTHORIZED; body=%s", m["code"], body)
 	}
 	if m["message"] != "missing or malformed api key" {
 		t.Errorf("message = %v; body=%s", m["message"], body)
@@ -112,14 +112,14 @@ func TestMiddleware_InvalidKey_UnifiedEnvelope(t *testing.T) {
 	}
 	body, _ := readAll(resp)
 	m := decode(t, body)
-	if m["code"] != "unauthenticated" || m["message"] != "invalid api key" {
+	if m["code"] != "UNAUTHORIZED" || m["message"] != "invalid api key" {
 		t.Errorf("envelope wrong: %s", body)
 	}
 }
 
 // TestMiddleware_LookupFailure_500 covers the third branch: the
 // verifier returned a non-ErrInvalidAPIKey error (DB down, etc.).
-// Must return 500 + code=internal under the unified envelope.
+// Must return 500 + code=INTERNAL under the unified envelope.
 func TestMiddleware_LookupFailure_500(t *testing.T) {
 	mw := Middleware(stubVerifier{err: errors.New("db timeout")})
 	srv := httptest.NewServer(wrap(mw(next(t))))
@@ -138,7 +138,7 @@ func TestMiddleware_LookupFailure_500(t *testing.T) {
 	}
 	body, _ := readAll(resp)
 	m := decode(t, body)
-	if m["code"] != "internal" || m["message"] != "api key lookup failed" {
+	if m["code"] != "INTERNAL" || m["message"] != "api key lookup failed" {
 		t.Errorf("envelope wrong: %s", body)
 	}
 }

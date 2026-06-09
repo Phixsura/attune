@@ -11,43 +11,43 @@ export const protobufPackage = "google.protobuf";
 /** The full set of known editions. */
 export enum Edition {
   /** EDITION_UNKNOWN - A placeholder for an unknown edition value. */
-  EDITION_UNKNOWN = 0,
+  EDITION_UNKNOWN = "EDITION_UNKNOWN",
   /**
    * EDITION_LEGACY - A placeholder edition for specifying default behaviors *before* a feature
    * was first introduced.  This is effectively an "infinite past".
    */
-  EDITION_LEGACY = 900,
+  EDITION_LEGACY = "EDITION_LEGACY",
   /**
    * EDITION_PROTO2 - Legacy syntax "editions".  These pre-date editions, but behave much like
    * distinct editions.  These can't be used to specify the edition of proto
    * files, but feature definitions must supply proto2/proto3 defaults for
    * backwards compatibility.
    */
-  EDITION_PROTO2 = 998,
-  EDITION_PROTO3 = 999,
+  EDITION_PROTO2 = "EDITION_PROTO2",
+  EDITION_PROTO3 = "EDITION_PROTO3",
   /**
    * EDITION_2023 - Editions that have been released.  The specific values are arbitrary and
    * should not be depended on, but they will always be time-ordered for easy
    * comparison.
    */
-  EDITION_2023 = 1000,
-  EDITION_2024 = 1001,
+  EDITION_2023 = "EDITION_2023",
+  EDITION_2024 = "EDITION_2024",
   /**
    * EDITION_1_TEST_ONLY - Placeholder editions for testing feature resolution.  These should not be
    * used or relied on outside of tests.
    */
-  EDITION_1_TEST_ONLY = 1,
-  EDITION_2_TEST_ONLY = 2,
-  EDITION_99997_TEST_ONLY = 99997,
-  EDITION_99998_TEST_ONLY = 99998,
-  EDITION_99999_TEST_ONLY = 99999,
+  EDITION_1_TEST_ONLY = "EDITION_1_TEST_ONLY",
+  EDITION_2_TEST_ONLY = "EDITION_2_TEST_ONLY",
+  EDITION_99997_TEST_ONLY = "EDITION_99997_TEST_ONLY",
+  EDITION_99998_TEST_ONLY = "EDITION_99998_TEST_ONLY",
+  EDITION_99999_TEST_ONLY = "EDITION_99999_TEST_ONLY",
   /**
    * EDITION_MAX - Placeholder for specifying unbounded edition support.  This should only
    * ever be used by plugins that can expect to never require any changes to
    * support a new edition.
    */
-  EDITION_MAX = 2147483647,
-  UNRECOGNIZED = -1,
+  EDITION_MAX = "EDITION_MAX",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 /**
@@ -173,9 +173,9 @@ export interface ExtensionRangeOptions {
 /** The verification state of the extension range. */
 export enum ExtensionRangeOptions_VerificationState {
   /** DECLARATION - All the extensions of the range must be declared. */
-  DECLARATION = 0,
-  UNVERIFIED = 1,
-  UNRECOGNIZED = -1,
+  DECLARATION = "DECLARATION",
+  UNVERIFIED = "UNVERIFIED",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 export interface ExtensionRangeOptions_Declaration {
@@ -301,23 +301,23 @@ export enum FieldDescriptorProto_Type {
    * TYPE_DOUBLE - 0 is reserved for errors.
    * Order is weird for historical reasons.
    */
-  TYPE_DOUBLE = 1,
-  TYPE_FLOAT = 2,
+  TYPE_DOUBLE = "TYPE_DOUBLE",
+  TYPE_FLOAT = "TYPE_FLOAT",
   /**
    * TYPE_INT64 - Not ZigZag encoded.  Negative numbers take 10 bytes.  Use TYPE_SINT64 if
    * negative values are likely.
    */
-  TYPE_INT64 = 3,
-  TYPE_UINT64 = 4,
+  TYPE_INT64 = "TYPE_INT64",
+  TYPE_UINT64 = "TYPE_UINT64",
   /**
    * TYPE_INT32 - Not ZigZag encoded.  Negative numbers take 10 bytes.  Use TYPE_SINT32 if
    * negative values are likely.
    */
-  TYPE_INT32 = 5,
-  TYPE_FIXED64 = 6,
-  TYPE_FIXED32 = 7,
-  TYPE_BOOL = 8,
-  TYPE_STRING = 9,
+  TYPE_INT32 = "TYPE_INT32",
+  TYPE_FIXED64 = "TYPE_FIXED64",
+  TYPE_FIXED32 = "TYPE_FIXED32",
+  TYPE_BOOL = "TYPE_BOOL",
+  TYPE_STRING = "TYPE_STRING",
   /**
    * TYPE_GROUP - Tag-delimited aggregate.
    * Group type is deprecated and not supported after google.protobuf. However, Proto3
@@ -325,33 +325,33 @@ export enum FieldDescriptorProto_Type {
    * treat group fields as unknown fields.  In Editions, the group wire format
    * can be enabled via the `message_encoding` feature.
    */
-  TYPE_GROUP = 10,
+  TYPE_GROUP = "TYPE_GROUP",
   /** TYPE_MESSAGE - Length-delimited aggregate. */
-  TYPE_MESSAGE = 11,
+  TYPE_MESSAGE = "TYPE_MESSAGE",
   /** TYPE_BYTES - New in version 2. */
-  TYPE_BYTES = 12,
-  TYPE_UINT32 = 13,
-  TYPE_ENUM = 14,
-  TYPE_SFIXED32 = 15,
-  TYPE_SFIXED64 = 16,
+  TYPE_BYTES = "TYPE_BYTES",
+  TYPE_UINT32 = "TYPE_UINT32",
+  TYPE_ENUM = "TYPE_ENUM",
+  TYPE_SFIXED32 = "TYPE_SFIXED32",
+  TYPE_SFIXED64 = "TYPE_SFIXED64",
   /** TYPE_SINT32 - Uses ZigZag encoding. */
-  TYPE_SINT32 = 17,
+  TYPE_SINT32 = "TYPE_SINT32",
   /** TYPE_SINT64 - Uses ZigZag encoding. */
-  TYPE_SINT64 = 18,
-  UNRECOGNIZED = -1,
+  TYPE_SINT64 = "TYPE_SINT64",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 export enum FieldDescriptorProto_Label {
   /** LABEL_OPTIONAL - 0 is reserved for errors */
-  LABEL_OPTIONAL = 1,
-  LABEL_REPEATED = 3,
+  LABEL_OPTIONAL = "LABEL_OPTIONAL",
+  LABEL_REPEATED = "LABEL_REPEATED",
   /**
    * LABEL_REQUIRED - The required label is only allowed in google.protobuf.  In proto3 and Editions
    * it's explicitly prohibited.  In Editions, the `field_presence` feature
    * can be used to get this behavior.
    */
-  LABEL_REQUIRED = 2,
-  UNRECOGNIZED = -1,
+  LABEL_REQUIRED = "LABEL_REQUIRED",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 /** Describes a oneof. */
@@ -596,12 +596,12 @@ export interface FileOptions {
 /** Generated classes can be optimized for speed or code size. */
 export enum FileOptions_OptimizeMode {
   /** SPEED - Generate complete code for parsing, serialization, */
-  SPEED = 1,
+  SPEED = "SPEED",
   /** CODE_SIZE - etc. */
-  CODE_SIZE = 2,
+  CODE_SIZE = "CODE_SIZE",
   /** LITE_RUNTIME - Generate code using MessageLite and the lite runtime. */
-  LITE_RUNTIME = 3,
-  UNRECOGNIZED = -1,
+  LITE_RUNTIME = "LITE_RUNTIME",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 export interface MessageOptions {
@@ -804,7 +804,7 @@ export interface FieldOptions {
 
 export enum FieldOptions_CType {
   /** STRING - Default mode. */
-  STRING = 0,
+  STRING = "STRING",
   /**
    * CORD - The option [ctype=CORD] may be applied to a non-repeated field of type
    * "bytes". It indicates that in C++, the data should be stored in a Cord
@@ -813,27 +813,27 @@ export enum FieldOptions_CType {
    * Cord, or when parsing with aliasing enabled, as the parsed Cord may then
    * alias the original buffer.
    */
-  CORD = 1,
-  STRING_PIECE = 2,
-  UNRECOGNIZED = -1,
+  CORD = "CORD",
+  STRING_PIECE = "STRING_PIECE",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 export enum FieldOptions_JSType {
   /** JS_NORMAL - Use the default type. */
-  JS_NORMAL = 0,
+  JS_NORMAL = "JS_NORMAL",
   /** JS_STRING - Use JavaScript strings. */
-  JS_STRING = 1,
+  JS_STRING = "JS_STRING",
   /** JS_NUMBER - Use JavaScript numbers. */
-  JS_NUMBER = 2,
-  UNRECOGNIZED = -1,
+  JS_NUMBER = "JS_NUMBER",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 /** If set to RETENTION_SOURCE, the option will be omitted from the binary. */
 export enum FieldOptions_OptionRetention {
-  RETENTION_UNKNOWN = 0,
-  RETENTION_RUNTIME = 1,
-  RETENTION_SOURCE = 2,
-  UNRECOGNIZED = -1,
+  RETENTION_UNKNOWN = "RETENTION_UNKNOWN",
+  RETENTION_RUNTIME = "RETENTION_RUNTIME",
+  RETENTION_SOURCE = "RETENTION_SOURCE",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 /**
@@ -842,17 +842,17 @@ export enum FieldOptions_OptionRetention {
  * option on any kind of entity.
  */
 export enum FieldOptions_OptionTargetType {
-  TARGET_TYPE_UNKNOWN = 0,
-  TARGET_TYPE_FILE = 1,
-  TARGET_TYPE_EXTENSION_RANGE = 2,
-  TARGET_TYPE_MESSAGE = 3,
-  TARGET_TYPE_FIELD = 4,
-  TARGET_TYPE_ONEOF = 5,
-  TARGET_TYPE_ENUM = 6,
-  TARGET_TYPE_ENUM_ENTRY = 7,
-  TARGET_TYPE_SERVICE = 8,
-  TARGET_TYPE_METHOD = 9,
-  UNRECOGNIZED = -1,
+  TARGET_TYPE_UNKNOWN = "TARGET_TYPE_UNKNOWN",
+  TARGET_TYPE_FILE = "TARGET_TYPE_FILE",
+  TARGET_TYPE_EXTENSION_RANGE = "TARGET_TYPE_EXTENSION_RANGE",
+  TARGET_TYPE_MESSAGE = "TARGET_TYPE_MESSAGE",
+  TARGET_TYPE_FIELD = "TARGET_TYPE_FIELD",
+  TARGET_TYPE_ONEOF = "TARGET_TYPE_ONEOF",
+  TARGET_TYPE_ENUM = "TARGET_TYPE_ENUM",
+  TARGET_TYPE_ENUM_ENTRY = "TARGET_TYPE_ENUM_ENTRY",
+  TARGET_TYPE_SERVICE = "TARGET_TYPE_SERVICE",
+  TARGET_TYPE_METHOD = "TARGET_TYPE_METHOD",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 export interface FieldOptions_EditionDefault {
@@ -1015,12 +1015,12 @@ export interface MethodOptions {
  * methods, and PUT verb for idempotent methods instead of the default POST.
  */
 export enum MethodOptions_IdempotencyLevel {
-  IDEMPOTENCY_UNKNOWN = 0,
+  IDEMPOTENCY_UNKNOWN = "IDEMPOTENCY_UNKNOWN",
   /** NO_SIDE_EFFECTS - implies idempotent */
-  NO_SIDE_EFFECTS = 1,
+  NO_SIDE_EFFECTS = "NO_SIDE_EFFECTS",
   /** IDEMPOTENT - idempotent, but may have side effects */
-  IDEMPOTENT = 2,
-  UNRECOGNIZED = -1,
+  IDEMPOTENT = "IDEMPOTENT",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 /**
@@ -1075,46 +1075,46 @@ export interface FeatureSet {
 }
 
 export enum FeatureSet_FieldPresence {
-  FIELD_PRESENCE_UNKNOWN = 0,
-  EXPLICIT = 1,
-  IMPLICIT = 2,
-  LEGACY_REQUIRED = 3,
-  UNRECOGNIZED = -1,
+  FIELD_PRESENCE_UNKNOWN = "FIELD_PRESENCE_UNKNOWN",
+  EXPLICIT = "EXPLICIT",
+  IMPLICIT = "IMPLICIT",
+  LEGACY_REQUIRED = "LEGACY_REQUIRED",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 export enum FeatureSet_EnumType {
-  ENUM_TYPE_UNKNOWN = 0,
-  OPEN = 1,
-  CLOSED = 2,
-  UNRECOGNIZED = -1,
+  ENUM_TYPE_UNKNOWN = "ENUM_TYPE_UNKNOWN",
+  OPEN = "OPEN",
+  CLOSED = "CLOSED",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 export enum FeatureSet_RepeatedFieldEncoding {
-  REPEATED_FIELD_ENCODING_UNKNOWN = 0,
-  PACKED = 1,
-  EXPANDED = 2,
-  UNRECOGNIZED = -1,
+  REPEATED_FIELD_ENCODING_UNKNOWN = "REPEATED_FIELD_ENCODING_UNKNOWN",
+  PACKED = "PACKED",
+  EXPANDED = "EXPANDED",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 export enum FeatureSet_Utf8Validation {
-  UTF8_VALIDATION_UNKNOWN = 0,
-  VERIFY = 2,
-  NONE = 3,
-  UNRECOGNIZED = -1,
+  UTF8_VALIDATION_UNKNOWN = "UTF8_VALIDATION_UNKNOWN",
+  VERIFY = "VERIFY",
+  NONE = "NONE",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 export enum FeatureSet_MessageEncoding {
-  MESSAGE_ENCODING_UNKNOWN = 0,
-  LENGTH_PREFIXED = 1,
-  DELIMITED = 2,
-  UNRECOGNIZED = -1,
+  MESSAGE_ENCODING_UNKNOWN = "MESSAGE_ENCODING_UNKNOWN",
+  LENGTH_PREFIXED = "LENGTH_PREFIXED",
+  DELIMITED = "DELIMITED",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 export enum FeatureSet_JsonFormat {
-  JSON_FORMAT_UNKNOWN = 0,
-  ALLOW = 1,
-  LEGACY_BEST_EFFORT = 2,
-  UNRECOGNIZED = -1,
+  JSON_FORMAT_UNKNOWN = "JSON_FORMAT_UNKNOWN",
+  ALLOW = "ALLOW",
+  LEGACY_BEST_EFFORT = "LEGACY_BEST_EFFORT",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 /**
@@ -1344,10 +1344,10 @@ export interface GeneratedCodeInfo_Annotation {
  */
 export enum GeneratedCodeInfo_Annotation_Semantic {
   /** NONE - There is no effect or the effect is indescribable. */
-  NONE = 0,
+  NONE = "NONE",
   /** SET - The element is set or otherwise mutated. */
-  SET = 1,
+  SET = "SET",
   /** ALIAS - An alias to the element is returned. */
-  ALIAS = 2,
-  UNRECOGNIZED = -1,
+  ALIAS = "ALIAS",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }

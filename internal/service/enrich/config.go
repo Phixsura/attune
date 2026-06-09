@@ -9,6 +9,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
@@ -109,35 +110,38 @@ func ValidatePromptTemplate(tmpl string) error {
 	return nil
 }
 
-// ErrToCode maps validation errors to stable API error codes.
-func ErrToCode(err error) string {
+// ErrToCode maps validation errors to stable API error codes from the
+// ErrorCode enum (proto/attune/v1/common.proto). Returns ERROR_CODE_UNSPECIFIED
+// for unknown errors so callers can detect "no mapping" via comparison with
+// the zero value.
+func ErrToCode(err error) attunev1.ErrorCode {
 	switch {
 	case errors.Is(err, ErrMissingContentToken):
-		return "missing_content_token"
+		return attunev1.ErrorCode_MISSING_CONTENT_TOKEN
 	case errors.Is(err, ErrTemplateTooLong):
-		return "template_too_long"
+		return attunev1.ErrorCode_TEMPLATE_TOO_LONG
 	case errors.Is(err, domain.ErrDimensionNameFormat):
-		return "dim_name_format"
+		return attunev1.ErrorCode_DIM_NAME_FORMAT
 	case errors.Is(err, domain.ErrDimensionNameReserved):
-		return "dim_name_reserved"
+		return attunev1.ErrorCode_DIM_NAME_RESERVED
 	case errors.Is(err, domain.ErrDimensionNameDup):
-		return "dim_name_dup"
+		return attunev1.ErrorCode_DIM_NAME_DUP
 	case errors.Is(err, domain.ErrDimensionKindInvalid):
-		return "dim_kind_invalid"
+		return attunev1.ErrorCode_DIM_KIND_INVALID
 	case errors.Is(err, domain.ErrDimensionDisplayEmpty):
-		return "dim_display_empty"
+		return attunev1.ErrorCode_DIM_DISPLAY_EMPTY
 	case errors.Is(err, domain.ErrTaxonomyValueEmpty):
-		return "taxonomy_value_empty"
+		return attunev1.ErrorCode_TAXONOMY_VALUE_EMPTY
 	case errors.Is(err, domain.ErrTaxonomyValueDup):
-		return "taxonomy_value_dup"
+		return attunev1.ErrorCode_TAXONOMY_VALUE_DUP
 	case errors.Is(err, domain.ErrTaxonomyDisplayEmpty):
-		return "taxonomy_display_empty"
+		return attunev1.ErrorCode_TAXONOMY_DISPLAY_EMPTY
 	case errors.Is(err, domain.ErrUrgentNotInTaxonomy):
-		return "urgent_not_in_taxonomy"
+		return attunev1.ErrorCode_URGENT_NOT_IN_TAXONOMY
 	case errors.Is(err, tenant.ErrTenantNotFound):
-		return "not_found"
+		return attunev1.ErrorCode_NOT_FOUND
 	default:
-		return ""
+		return attunev1.ErrorCode_ERROR_CODE_UNSPECIFIED
 	}
 }
 

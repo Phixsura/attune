@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Phixsura/attune/internal/domain"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
@@ -40,22 +41,22 @@ func TestValidatePromptTemplate_ExactBoundary(t *testing.T) {
 func TestErrToCode_AllBranches(t *testing.T) {
 	cases := []struct {
 		err  error
-		code string
+		code attunev1.ErrorCode
 	}{
-		{ErrMissingContentToken, "missing_content_token"},
-		{ErrTemplateTooLong, "template_too_long"},
-		{domain.ErrDimensionNameFormat, "dim_name_format"},
-		{domain.ErrDimensionNameReserved, "dim_name_reserved"},
-		{domain.ErrDimensionNameDup, "dim_name_dup"},
-		{domain.ErrDimensionKindInvalid, "dim_kind_invalid"},
-		{domain.ErrDimensionDisplayEmpty, "dim_display_empty"},
-		{domain.ErrTaxonomyValueEmpty, "taxonomy_value_empty"},
-		{domain.ErrTaxonomyValueDup, "taxonomy_value_dup"},
-		{domain.ErrTaxonomyDisplayEmpty, "taxonomy_display_empty"},
-		{domain.ErrUrgentNotInTaxonomy, "urgent_not_in_taxonomy"},
-		{tenant.ErrTenantNotFound, "not_found"},
-		{errors.New("unmapped"), ""},
-		{nil, ""},
+		{ErrMissingContentToken, attunev1.ErrorCode_MISSING_CONTENT_TOKEN},
+		{ErrTemplateTooLong, attunev1.ErrorCode_TEMPLATE_TOO_LONG},
+		{domain.ErrDimensionNameFormat, attunev1.ErrorCode_DIM_NAME_FORMAT},
+		{domain.ErrDimensionNameReserved, attunev1.ErrorCode_DIM_NAME_RESERVED},
+		{domain.ErrDimensionNameDup, attunev1.ErrorCode_DIM_NAME_DUP},
+		{domain.ErrDimensionKindInvalid, attunev1.ErrorCode_DIM_KIND_INVALID},
+		{domain.ErrDimensionDisplayEmpty, attunev1.ErrorCode_DIM_DISPLAY_EMPTY},
+		{domain.ErrTaxonomyValueEmpty, attunev1.ErrorCode_TAXONOMY_VALUE_EMPTY},
+		{domain.ErrTaxonomyValueDup, attunev1.ErrorCode_TAXONOMY_VALUE_DUP},
+		{domain.ErrTaxonomyDisplayEmpty, attunev1.ErrorCode_TAXONOMY_DISPLAY_EMPTY},
+		{domain.ErrUrgentNotInTaxonomy, attunev1.ErrorCode_URGENT_NOT_IN_TAXONOMY},
+		{tenant.ErrTenantNotFound, attunev1.ErrorCode_NOT_FOUND},
+		{errors.New("unmapped"), attunev1.ErrorCode_ERROR_CODE_UNSPECIFIED},
+		{nil, attunev1.ErrorCode_ERROR_CODE_UNSPECIFIED},
 	}
 	for i, c := range cases {
 		got := ErrToCode(c.err)

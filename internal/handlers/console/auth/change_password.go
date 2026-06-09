@@ -57,25 +57,25 @@ func (h *ChangePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.Re
 	var req attunev1.ChangePasswordRequest
 	if err := respond.Decode(r.Body, &req); err != nil {
 		if errors.Is(err, respond.ErrBodyTooLarge) {
-			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, "body_too_large",
+			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, attunev1.ErrorCode_BODY_TOO_LARGE,
 				"request body exceeds 1 MiB")
 			return
 		}
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request", "invalid json body")
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
 		return
 	}
 	if req.GetCurrentPassword() == "" || req.GetNewPassword() == "" {
-		respond.Error(ctx, w, http.StatusBadRequest, "bad_request",
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST,
 			"current_password and new_password are required")
 		return
 	}
 	if len(req.GetNewPassword()) < minNewPasswordLen {
-		respond.Error(ctx, w, http.StatusBadRequest, "weak_password",
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_WEAK_PASSWORD,
 			"new_password must be at least 12 characters")
 		return
 	}
 	if req.GetCurrentPassword() == req.GetNewPassword() {
-		respond.Error(ctx, w, http.StatusBadRequest, "same_password",
+		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_SAME_PASSWORD,
 			"new_password must differ from current_password")
 		return
 	}
@@ -87,20 +87,20 @@ func (h *ChangePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.Re
 		// deleted). 403 keeps the SPA from bouncing to /login.
 		logext.Warnf(ctx, "[%s] not an admin,user_id:%s,tenant_id:%s",
 			where, auth.UserID, auth.TenantID)
-		respond.Error(ctx, w, http.StatusForbidden, "forbidden",
+		respond.Error(ctx, w, http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN,
 			"only console admins can change their password here")
 		return
 	case err != nil:
 		logext.Errorf(ctx, "[%s] GetByID failed,user_id:%s,err:%+v",
 			where, auth.UserID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "internal error")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "internal error")
 		return
 	}
 
 	if !VerifyOrDummy(a.PasswordHash, req.GetCurrentPassword()) {
 		// Generic 401 — same response shape as login so timing /
 		// content-based enumeration is not possible.
-		respond.Error(ctx, w, http.StatusUnauthorized, "unauthorized",
+		respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED,
 			"current password is wrong")
 		return
 	}
@@ -109,7 +109,7 @@ func (h *ChangePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		logext.Errorf(ctx, "[%s] HashPassword failed,user_id:%s,err:%+v",
 			where, auth.UserID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to hash password")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to hash password")
 		return
 	}
 	if err := h.admins.UpdatePasswordHash(ctx, a.ID, newHash); err != nil {
@@ -117,12 +117,12 @@ func (h *ChangePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.Re
 			// Lost a TOCTOU race against an admin delete; behave the
 			// same as the row-gone branch above.
 			h.signer.ClearSessionCookie(w)
-			respond.Error(ctx, w, http.StatusUnauthorized, "user_gone", "admin row is gone")
+			respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_USER_GONE, "admin row is gone")
 			return
 		}
 		logext.Errorf(ctx, "[%s] UpdatePasswordHash failed,user_id:%s,err:%+v",
 			where, auth.UserID, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, "internal", "failed to update password")
+		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to update password")
 		return
 	}
 

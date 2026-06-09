@@ -16,8 +16,8 @@ export const protobufPackage = "google.protobuf";
  */
 export enum NullValue {
   /** NULL_VALUE - Null value. */
-  NULL_VALUE = 0,
-  UNRECOGNIZED = -1,
+  NULL_VALUE = "NULL_VALUE",
+  UNRECOGNIZED = "UNRECOGNIZED",
 }
 
 /**

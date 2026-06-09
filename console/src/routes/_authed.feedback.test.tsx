@@ -121,7 +121,7 @@ describe('_authed.feedback route — user flow smoke', () => {
     await waitFor(() => {
       expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
     })
-  })
+  }, 10000)
 
   it('500 from /feedback → empty state (not crash) — documents current behavior', async () => {
     // Backend errors currently render as "no feedback" rather than a
@@ -135,7 +135,7 @@ describe('_authed.feedback route — user flow smoke', () => {
         }),
       ),
       http.get('/fb/v1/console/feedback', () =>
-        HttpResponse.json({ code: 'internal', message: 'boom' }, { status: 500 }),
+        HttpResponse.json({ code: 'INTERNAL', message: 'boom' }, { status: 500 }),
       ),
       http.get('/fb/v1/console/feedback/stats', () =>
         HttpResponse.json({

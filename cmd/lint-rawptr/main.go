@@ -38,6 +38,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -166,7 +167,7 @@ func expandPaths(args []string) ([]string, error) {
 			}
 			// the linter itself — it walks the AST, so it's all type-position
 			// hits; just skip to avoid noise.
-			if strings.Contains(path, "cmd/lint-rawptr/") {
+			if strings.Contains(path, "cmd/lint-rawptr/") || strings.Contains(path, "cmd/lint-errorcode/") {
 				return nil
 			}
 			out = append(out, path)
@@ -344,7 +345,7 @@ func (c *typeClassifier) walkSpecOrLit(n ast.Node, _ bool) bool {
 			c.walk(elt, false)
 		}
 	case *ast.CallExpr:
-		c.walk(x.Fun, isTypeExpr(x.Fun))
+		c.walkCallFun(x.Fun)
 		for _, a := range x.Args {
 			c.walk(a, false)
 		}
@@ -363,17 +364,53 @@ func (c *typeClassifier) walkExprChild(n ast.Node, inType bool) bool {
 	case *ast.SelectorExpr:
 		c.walk(x.X, false)
 	case *ast.IndexExpr:
+		indexIsType := inType || isLikelySelectorInstantiation(x.X)
 		c.walk(x.X, inType)
-		c.walk(x.Index, false)
+		c.walk(x.Index, indexIsType)
 	case *ast.IndexListExpr:
+		indexIsType := inType || isLikelySelectorInstantiation(x.X)
 		c.walk(x.X, inType)
 		for _, ix := range x.Indices {
-			c.walk(ix, false)
+			c.walk(ix, indexIsType)
 		}
 	default:
 		return false
 	}
 	return true
+}
+
+func (c *typeClassifier) walkCallFun(fun ast.Expr) {
+	switch x := fun.(type) {
+	case *ast.ParenExpr:
+		c.walkCallFun(x.X)
+	case *ast.IndexExpr:
+		c.walk(x.X, false)
+		c.walk(x.Index, true)
+	case *ast.IndexListExpr:
+		c.walk(x.X, false)
+		for _, ix := range x.Indices {
+			c.walk(ix, true)
+		}
+	default:
+		c.walk(fun, isTypeExpr(fun))
+	}
+}
+
+func isLikelySelectorInstantiation(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.ParenExpr:
+		return isLikelySelectorInstantiation(x.X)
+	case *ast.SelectorExpr:
+		return startsUpper(x.Sel.Name)
+	}
+	return false
+}
+
+func startsUpper(s string) bool {
+	for _, r := range s {
+		return unicode.IsUpper(r)
+	}
+	return false
 }
 
 // walkDefault — fallthrough recursion via ast.Inspect for the structural

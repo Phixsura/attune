@@ -48,7 +48,7 @@ describe('useUpdateEnrichConfig — cache write side effect', () => {
   it('PUT failure does not write to cache', async () => {
     server.use(
       http.put('/fb/v1/console/enrich-config', () =>
-        HttpResponse.json({ code: 'bad_request', message: 'nope' }, { status: 400 }),
+        HttpResponse.json({ code: 'BAD_REQUEST', message: 'nope' }, { status: 400 }),
       ),
     )
     const { qc, wrapper } = wrap()

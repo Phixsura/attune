@@ -108,7 +108,7 @@ describe('api()', () => {
       server.use(
         http.get('/fb/v1/bad', () =>
           HttpResponse.json(
-            { code: 'invalid_label', message: 'label too short', requestId: 'req-42' },
+            { code: 'VALIDATION', message: 'label too short', requestId: 'req-42' },
             { status: 400 },
           ),
         ),
@@ -119,7 +119,7 @@ describe('api()', () => {
       } catch (err) {
         const e = err as ApiError
         expect(e.status).toBe(400)
-        expect(e.code).toBe('invalid_label')
+        expect(e.code).toBe('VALIDATION')
         expect(e.message).toBe('label too short')
         expect(e.requestId).toBe('req-42')
       }
