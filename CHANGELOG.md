@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **PostgreSQL integration tier (#12).** Adds a dual-mode
+  `internal/testdb` harness: CI runs `make test-integration` against a
+  GitHub Actions `postgres:18` service container, while local runs fall
+  back to `postgres:18` via testcontainers-go when no
+  `ATTUNE_TEST_DATABASE_URL` is set. PostgreSQL smoke suites are
+  centralized under `test/integration/postgres/<area>` and protected by
+  `scripts/lint-integration-layout.sh` so future integration tests do
+  not drift back into package-adjacent `*_io_test.go` files. The tier
+  adds real Postgres smoke coverage for migrations, the Lark-delete
+  preflight guard, feedback JSONB queries, API key issue/lookup/revoke,
+  tenant + notify-target CRUD, admin bootstrap/lockout state, inbound
+  source repo state, console inbound delete branches, and the ingest →
+  enrich → outbox queue → outbox drain path. `OutboxWorker.ProcessOnce(ctx)`
+  exposes one deterministic batch-drain cycle for tests and future
+  manual drain use.
+
 - **Console UI: inbound sources page + admin change-password (#66 B2 / H10).**
   Fills the SPA gap left by the backend-first #66 landing — operators now
   manage webhook + email inbound sources directly from the console
