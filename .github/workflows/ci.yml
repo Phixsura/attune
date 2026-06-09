@@ -13,10 +13,6 @@
 #     success, so gating on the real jobs directly would let unrelated PRs pass
 #     without ever running them. The gate fails iff a real job failed/cancelled.
 #
-# Deliberately omitted for now:
-#   * docker-build — the Dockerfile still assumes the old monorepo layout
-#     (COPY gateway/ + listen/); deferred to a follow-up that builds standalone.
-#
 # govulncheck is informational (continue-on-error): its standard-library
 # findings track the Go toolchain version against a live DB, so they change
 # over time independent of our code and must not block unrelated PRs.

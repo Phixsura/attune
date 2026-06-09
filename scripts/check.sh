@@ -38,7 +38,7 @@ bash scripts/lint-errorcode.sh
 step "go test ./..."
 go test ./...
 
-step "lizard (CCN ≤ 10, NLOC ≤ 100)"
+step "lizard (yellow >10; CI red >15; NLOC ≤ 100)"
 # 律 2 黄区警告 10-15；红区 > 15. Threshold 10 surfaces yellow so red
 # rises clearly. -w prints only warnings.
 lizard . -l go -C 10 -T nloc=100 -w || {

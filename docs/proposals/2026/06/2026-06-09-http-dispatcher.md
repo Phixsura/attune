@@ -37,17 +37,17 @@ The repeated template is **decode → 1 MiB cap → session/apikey extract → v
 
 ## Non-goals
 
-- **Connect-RPC / gRPC.** Out of scope; requires a new wire path scheme, a new console SDK, and has no escape hatch for OAuth/healthz/lark. Tracked as a possible Phase 2 if/when the dispatcher proves out (see Alternatives).
+- **Connect-RPC / gRPC.** Out of scope; requires a new wire path scheme, a new console SDK, and has no escape hatch for auth/healthz/lark/inbound native routes. Tracked as a possible Phase 2 if/when the dispatcher proves out (see Alternatives).
 - **Direct adoption of Huma.** Considered seriously and rejected (Alternative §A4) — its `application/problem+json` envelope and `struct → OpenAPI` reflection conflict with attune's existing envelope and the proto-IDL truth-source rule (CLAUDE.md §11).
 - **RFC 7807 / 9457 envelope migration.** attune's current `{code, message, requestId}` is an AIP-193 minimal form; aligning to RFC 9457 is a clean future minor bump but not coupled to dispatcher.
 - **Switching observability to a hook model.** logext is a hard convention (CLAUDE.md §7); the dispatcher hard-defaults it and exposes an opt-out, not the inverse.
 - **Service / repo refactor.** Lower layers stay byte-identical. The dispatcher is strictly a handler-layer rewrite.
 - **DSL-first codegen (Goa-style).** Proto already is attune's second IDL layer; a third (route DSL) is rejected.
-- **Lark event endpoint / OAuth callback / `/healthz` / `dev-login`.** These five endpoints are carve-outs — see Scope.
+- **Lark event endpoint / console auth flows / inbound source management / `/healthz`.** These surfaces stay native `chi` in this PR — see Scope.
 
 ## Scope — endpoints targeted
 
-The product HTTP API on `main` is **23 endpoints**; **18 migrate to the dispatcher**, **5 stay native chi as carve-outs**.
+The product HTTP API on current `main` is larger after #66. This PR migrates the **18 #71 in-scope endpoints** to the dispatcher and leaves auth/inbound/health/lark surfaces native where their ownership or control flow is outside the dispatcher proving slice.
 
 | # | Method | Path | Auth | Migrates |
 |---|---|---|---|---|
@@ -61,15 +61,15 @@ The product HTTP API on `main` is **23 endpoints**; **18 migrate to the dispatch
 | 18 | POST | `/v1/feedback/ingest` | apikey | ✅ |
 | C1 | GET | `/healthz` | none | **carve-out** — k8s probe reads HTTP status only; proto-ifying buys nothing |
 | C2 | POST | `/v1/lark/event` | lark-signature | **carve-out** — foreign event format (#66 / CLAUDE.md §11) |
-| C3 | GET | `/fb/v1/console/install/start` | none | **carve-out** — OAuth state machine, form-encoded + 302 redirect |
-| C4 | GET | `/fb/v1/console/install/callback` | none | **carve-out** — same |
-| C5 | GET | `/fb/v1/console/install/dev-login` | none | **carve-out** — HTTP-only test loop, form-encoded |
+| C3 | POST | `/fb/v1/console/install/login` | none | **native auth flow** — origin checks, timing-equalized credential handling, session cookie issue |
+| C4 | POST | `/fb/v1/console/me/change-password` | session | **native auth flow** — admin credential rotation plus session-cookie clearing on row-gone races |
+| C5–C12 | GET/POST/GET/POST/POST/POST/DELETE/POST | `/fb/v1/console/inbound/sources[...]` | session | **native #66 surface** — channel-specific secret reveal, rotate, pause/resume, delete, and test-connection workflows |
 
-The carve-outs share one property: their HTTP shape is **not `proto.Message in → proto.Message out`**. Forcing them through the dispatcher would burn 100% of the escape hatches Huma needs to support them; carving them out keeps the dispatcher's contract pure.
+The native rows are not leftover dispatcher migration work. They are either status-only / foreign-event endpoints (`/healthz`, `/v1/lark/event`) or auth/inbound workflows owned by adjacent proposals. They still use the canonical `respond.Error` / `respond.Proto` envelope and proto-owned `ErrorCode` values.
 
-Issue #71 quoted "11 endpoints"; the true count is **18 in-scope + 5 carve-out**. Both are corrected in this proposal.
+Issue #71 quoted "11 endpoints" before #66 expanded the console surface. The implemented dispatcher scope is **18 in-scope endpoints**, with the additional native routes locked by `router_inventory_test.go`.
 
-Implementation checkpoint (2026-06-09): all 18 in-scope endpoints now route through `internal/dispatcher`. The five carve-outs remain native `chi` because their HTTP shape is not `proto.Message in → proto.Message out`.
+Implementation checkpoint (2026-06-09): all 18 in-scope endpoints now route through `internal/dispatcher`. Native routes remain `chi` handlers with the same canonical envelope/type-code discipline.
 
 Handler package organization follows **one endpoint per file**. Shared package-level helpers (handler structs, narrow service/repo interfaces, DTO conversion, validation helpers) stay in the package root file; each HTTP method lives in its own file such as `api_keys_create.go` or `notify_targets_list.go`.
 
@@ -82,9 +82,9 @@ Handler package organization follows **one endpoint per file**. Shared package-l
                                 │
             ┌───────────────────┴─────────────────────┐
             │                                         │
-       dispatcher (NEW, ~280 LOC)              carve-outs (5)
+       dispatcher (NEW, ~280 LOC)              native routes
             │                                /healthz, /lark/event,
-            │                                /install/start|callback|dev-login
+            │                                auth login/change-password, inbound
     Bind(where, authFn, Input, handler)
             │
             ▼
@@ -343,7 +343,7 @@ A bare `err` returned from a handler **always** maps to 500 `code=INTERNAL` and 
 
 ### Error code IDL contract — `ErrorCode` enum with string-compatible `ErrorResponse.code`
 
-attune's `respond.Error` call-sites today produce **19 distinct stable `code` strings** (verified by grep across `internal/`): `bad_id`, `bad_request`, `body_too_large`, `conflict`, `csrf_invalid`, `delivery_failed`, `internal`, `label_too_long`, `missing_label`, `missing_sample`, `missing_tenant`, `not_found`, `not_implemented`, `redirect_failed`, `session_sign_failed`, `tenant_not_found`, `unauthorized`, `user_gone`, `validation`. They are part of the wire contract — the console SPA branches on them — yet they live as untyped strings on both sides, drifting silently. The audit step also normalizes the two current outliers: the apikey middleware's `unauthenticated` spelling and the OAuth `err.Error()`-as-code path.
+attune's `respond.Error` call-sites today produce **19 distinct stable `code` strings** (verified by grep across `internal/`): `bad_id`, `bad_request`, `body_too_large`, `conflict`, `csrf_invalid`, `delivery_failed`, `internal`, `label_too_long`, `missing_label`, `missing_sample`, `missing_tenant`, `not_found`, `not_implemented`, `redirect_failed`, `session_sign_failed`, `tenant_not_found`, `unauthorized`, `user_gone`, `validation`. They are part of the wire contract — the console SPA branches on them — yet they live as untyped strings on both sides, drifting silently. The audit step also normalizes current outliers such as the apikey middleware's `unauthenticated` spelling and any raw-code native handler paths.
 
 Per CLAUDE.md §11 (proto is the single truth source for the HTTP contract), error codes belong in the proto layer:
 
@@ -399,7 +399,7 @@ Handlers consume the enum directly:
 return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusConflict, attunev1.ErrorCode_CONFLICT, "...")
 ```
 
-`dispatcher.Fail` / `dispatcher.NewError` take `attunev1.ErrorCode`, not `string` — typos and drift are caught at compile time. Likewise, `respond.Error`'s `code` parameter upgrades to `ErrorCode`; the apikey middleware, the OAuth/dev-login carve-outs, and the ingest writeError all migrate in the same wave (Implementation plan Commit 2). The audit step resolves the current `unauthenticated`/`err.Error()` outliers before that commit lands.
+`dispatcher.Fail` / `dispatcher.NewError` take `attunev1.ErrorCode`, not `string` — typos and drift are caught at compile time. Likewise, `respond.Error`'s `code` parameter upgrades to `ErrorCode`; the apikey middleware, auth/inbound native routes, and the ingest binder errors all migrate in the same wave (Implementation plan Commit 2). The audit step resolves current `unauthenticated`/raw-code outliers before that commit lands.
 
 `buf breaking` allows enum value additions (non-breaking) but blocks enum renames/removals and any future `ErrorResponse` field-type churn. The remaining string-field emission is guarded by the typed `respond.Error` signature and endpoint smoke tests.
 
@@ -454,7 +454,7 @@ Predicted cost: reviewers need 2-3 clarification rounds on the generic-struct me
 4. **Single failure helper `Fail[Resp](status, code, msg)`.** The underlying `NewError` shape matches `respond.Error(ctx, w, status, code, msg)` (`internal/respond/respond.go:64`); migration is a near-mechanical rewrite, with no zero-result ceremony at handler call-sites. The Huma-style nine `Error4XX`-named helpers were rejected because attune's existing call-sites do not have a 1:1 status→code mapping (400 is variously `"bad_request"` / `"bad_id"` / `"validation"`; 401 is `"unauthenticated"` / `"user_gone"`; etc.) — any "default code per helper" abstraction would be wrong half the time, leaving an override path as the de-facto convention. (See Alternatives §A8.)
 5. **No global mutable state, no factory hooks.** attune's framework-y packages document the convention explicitly: `internal/infra/observability/slog.go:28-29` — "Pure — no global state. Tests construct a handler over a bytes.Buffer here without touching slog.Default." A repo-wide `grep '^var [A-Z][a-zA-Z]* = func' internal/ cmd/` returns 0 results. The dispatcher follows the same convention — no `var NewError = func(...)` swap point. Envelope evolution (future RFC 9457, etc.) is achieved by editing the dispatcher's internal `respond.Error` call site, not by exposing a mutable factory.
 6. **Observability hard-default.** Entry/exit `logext` triple is mandatory. Quieter logging can be added later as an explicit option once there is a real quiet-by-design endpoint.
-7. **5 carve-outs.** `/healthz`, `/v1/lark/event`, and the three `/install/*` OAuth-flow endpoints stay native `http.HandlerFunc`. CLAUDE.md §11 already names lark; this proposal extends the carve-out list to the other four with the same justification (HTTP shape is not `proto.Message in → proto.Message out`).
+7. **Native-route boundary.** `/healthz`, `/v1/lark/event`, console auth flows (`/install/login`, `/me/change-password`), and the #66 inbound-source management surface stay native `http.HandlerFunc` in this PR. The first two are status-only / foreign-event shapes; the latter two are adjacent auth/inbound workflows whose handlers already own cookie, credential, secret-reveal, rotation, and test-connection side effects. The dispatcher proves out on the 18 #71 product endpoints without forcing unrelated workflow rewrites.
 8. **One `Bind` plus explicit auth extractor.** A session-specific helper cannot live in `internal/dispatcher` because it would need to import `handlers/console/internal/session`, which is outside Go's `internal/` visibility boundary. Passing `authFn` at the route site keeps the package boundary honest while preserving compile-time auth typing.
 9. **Wire envelope byte-identical, with one deliberate exception.** `{code, message, requestId}` envelope shape preserved; status codes and protojson `EmitUnpopulated` behavior preserved. The deliberate exception: `ErrorResponse.code` values normalize from lower_snake strings to `ErrorCode` enum names while the protobuf field remains `string` for compatibility — see §"Error code IDL contract". Justified: error codes are wire contract that the console SPA branches on; per CLAUDE.md §11 they belong in proto, not in Go/TS hardcoded strings drifting silently. pre-1.0, no public SDK consumers; `### Changed` in CHANGELOG. E2E baseline gate enforces the rest of the wire fleet-wide; a future RFC 9457 alignment is a separate minor bump, not coupled here.
 10. **Phased endpoint migration.** Start with mechanical handlers (`usage`, API keys, notify-target List/Create), then move the richer by-id and validation-heavy handlers once the dispatcher behavior is covered. Mixed style is temporary and tracked by this proposal's implementation checklist.
@@ -524,7 +524,7 @@ The natural progression from PR #67 (also buf-family). Rejected because:
 
 - Connect mounts services at `/<package>.<Service>/<Method>`, not at attune's existing REST paths. Either rewrite all console URLs or run a URL rewrite layer permanently — both bad.
 - Connect-Web is a new TS client; replaces today's protojson + fetch console SDK. Cost: 8 call-site rewrites + a new dependency.
-- OAuth callback / lark event / healthz have no Connect-shaped form. They'd still need carve-outs **and** the dispatcher contract would lose the wider "all product API" coverage.
+- lark event / healthz / auth and inbound workflows do not all have clean Connect-shaped form. They'd still need native routes **and** the dispatcher contract would lose the wider "all product API" coverage.
 
 Tracked as a Phase 2 possibility once the dispatcher proves out, but explicitly not chosen now.
 
@@ -577,7 +577,7 @@ Phased implementation on the issue branch. Each slice should stay reviewable, ke
 
 **Commit 2 — `respond.Error` signature upgrade.**
 - `respond.Error`'s `code` parameter type `string` → `attunev1.ErrorCode`.
-- All non-dispatcher call-sites migrate in the same commit: `apikey.Middleware`, `oauth.Start/Callback`, `DevLogin`, `IngestHandler.writeError`, `lark.Handler.Event`. Roughly 30 call-sites total per the audit (§"Problem"). The raw `err.Error()` OAuth path is normalized to a stable enum before this lands.
+- All non-dispatcher call-sites migrate in the same commit: `apikey.Middleware`, console auth native handlers, console inbound native handlers, ingest binder errors, and inbound adapter/event handlers. Roughly 70 call-sites total per the final audit. Raw string-code paths are normalized to stable enum values before this lands.
 - `internal/handlers/console/internal/respond` re-export stays a thin wrapper; signature mirrors automatically.
 - Existing tests continue to pass: the wire value changes from `"conflict"` to `"CONFLICT"` per-fixture (golden files regenerated), while the protobuf field shape stays compatible.
 
@@ -591,7 +591,7 @@ Phased implementation on the issue branch. Each slice should stay reviewable, ke
 - Keep `internal/dispatcher` at handler-layer only. No service/repo/domain/infra import is introduced by the proving slice.
 - A dedicated AST linter remains a follow-up if the dispatcher expands beyond the initial endpoints.
 
-**Commit 5 — sentinel completeness audit.** Pass over `internal/domain/`, `internal/service/`, `internal/repo/`. Today's named sentinels (`ErrAPIKeyNotFound`, `ErrNotifyTargetConflict`, `ErrNotifyTargetNotFound`, `ErrTenantNotFound`, `ErrFeedbackNotFound`, `ErrDimensionKindInvalid`, …) plus any unnamed errors discovered during migration get a name. No behavior change — just exporting `var Err* = errors.New(...)`. **If the audit surfaces an error path whose handler-level `code` is not yet in `ErrorCode`**, the new enum value is appended to `proto/attune/v1/common.proto` in this same commit and `make proto` re-runs — `buf breaking` permits enum value addition, so this is non-breaking. The audit also normalizes the current `unauthenticated` and OAuth raw-code outliers before the dispatcher migration starts. The audit and the enum should converge to a single source of truth for "every distinct error a handler can return."
+**Commit 5 — sentinel completeness audit.** Pass over `internal/domain/`, `internal/service/`, `internal/repo/`. Today's named sentinels (`ErrAPIKeyNotFound`, `ErrNotifyTargetConflict`, `ErrNotifyTargetNotFound`, `ErrTenantNotFound`, `ErrFeedbackNotFound`, `ErrDimensionKindInvalid`, …) plus any unnamed errors discovered during migration get a name. No behavior change — just exporting `var Err* = errors.New(...)`. **If the audit surfaces an error path whose handler-level `code` is not yet in `ErrorCode`**, the new enum value is appended to `proto/attune/v1/common.proto` in this same commit and `make proto` re-runs — `buf breaking` permits enum value addition, so this is non-breaking. The audit also normalizes the current `unauthenticated` and raw-code outliers before the dispatcher migration starts. The audit and the enum should converge to a single source of truth for "every distinct error a handler can return."
 
 **Commit 6+ — phased endpoint migration.** Each endpoint group:
 1. Rewrites the handler to `func(rc, req) (dispatcher.Result[*resp], error)` form.
@@ -615,7 +615,7 @@ Migrated endpoint groups:
 **Follow-up — docs and changelog.**
 - CHANGELOG `### Added`: `internal/dispatcher/` package; `enum ErrorCode` in `proto/attune/v1/common.proto`.
 - CHANGELOG `### Changed`: handler layer rewritten on the typed dispatcher; `ErrorResponse.code` wire value from lower_snake to `ErrorCode` enum-name string — pre-1.0 minor bump; console SPA migrated in same release.
-- CLAUDE.md §11 carve-out list extended: `/healthz`, `/v1/lark/event`, `/fb/v1/console/install/{start,callback,dev-login}`.
+- Scope documented with the final native-route boundary: `/healthz`, `/v1/lark/event`, `/fb/v1/console/install/login`, `/fb/v1/console/me/change-password`, and `/fb/v1/console/inbound/sources[...]`.
 
 **Follow-up — consolidated wire-test battery + CI lock.** The per-endpoint wire tests added during phased migration are reviewed as a coherent set; `internal/handlers/ingest_wire_test.go` stays as the public-API anchor. Expected diff vs pre-dispatcher hand-snapshots: only the `code` value case (`"conflict"` → `"CONFLICT"`), every other byte identical.
 
@@ -632,7 +632,7 @@ Migrated endpoint groups:
 - `lizard . -l go -C 15 -T nloc=100` — no thresholds exceeded.
 - `npx -y jscpd . -f go -i '**/*.pb.go' -t 4 --silent` — 2.04% duplicated lines with generated protobuf Go excluded, under the 4% gate.
 - `buf generate` — regenerated Go / TS / OpenAPI outputs; a second `buf generate && git diff --check` was clean.
-- `buf lint` and `buf breaking --against '.git#branch=main'` — both pass with a checksum-verified official `buf` v1.70.0 binary. CI now downloads `sha256.txt` and compares the Linux `buf` asset before running proto gates.
+- `buf lint` and `buf breaking --against '.git#branch=main'` — both pass with the checksum-verified official `buf` v1.50.0 binary used by CI. CI downloads `sha256.txt` and compares the Linux `buf` asset before running proto gates.
 - `PATH=/private/tmp/attune-buf:$PATH make proto-lint` and `make proto-breaking` — both pass before the temporary `buf` binary is removed.
 - Frontend `pnpm typecheck` — pass.
 - Frontend `pnpm test` — 18 files / 82 tests pass.
