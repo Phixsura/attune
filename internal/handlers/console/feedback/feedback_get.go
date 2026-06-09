@@ -27,11 +27,11 @@ func (h *FeedbackHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 		if errors.Is(err, feedback.ErrFeedbackNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%d",
 				where, auth.TenantID, id)
-			return dispatcher.Result[*attunev1.FeedbackDetail]{}, dispatcher.NewError(http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "feedback not found or not owned by tenant")
+			return dispatcher.Fail[*attunev1.FeedbackDetail](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "feedback not found or not owned by tenant")
 		}
 		logext.Errorf(ctx, "[%s] feedback.GetForConsole failed,tenant_id:%s,id:%d,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		return dispatcher.Result[*attunev1.FeedbackDetail]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load feedback detail")
+		return dispatcher.Fail[*attunev1.FeedbackDetail](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load feedback detail")
 	}
 
 	f := toProtoFeedback(row.ConsoleListRow)
@@ -78,5 +78,5 @@ func (h *FeedbackHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 		detail.EnrichedAt = ptrext.Of(row.EnrichedAt.UTC().Format(time.RFC3339))
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%d", where, auth.TenantID, id)
-	return dispatcher.OK(http.StatusOK, detail), nil
+	return dispatcher.OK(detail)
 }

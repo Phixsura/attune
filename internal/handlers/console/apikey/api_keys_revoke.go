@@ -23,19 +23,19 @@ func (h *APIKeysHandler) Revoke(ctx *dispatcher.RequestContext[*session.AuthCtx]
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad id,tenant_id:%s,id_str:%s",
 			where, auth.TenantID, idStr)
-		return dispatcher.Result[*attunev1.DeleteApiKeyResponse]{}, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "id is not a UUID")
+		return dispatcher.Fail[*attunev1.DeleteApiKeyResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "id is not a UUID")
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,key_id:%s", where, auth.TenantID, id)
 	if err := h.svc.Revoke(ctx, auth.TenantID, id); err != nil {
 		if errors.Is(err, apikeyrepo.ErrAPIKeyNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,key_id:%s",
 				where, auth.TenantID, id)
-			return dispatcher.Result[*attunev1.DeleteApiKeyResponse]{}, dispatcher.NewError(http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "API key not found or not owned by tenant")
+			return dispatcher.Fail[*attunev1.DeleteApiKeyResponse](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "API key not found or not owned by tenant")
 		}
 		logext.Errorf(ctx, "[%s] svc.Revoke failed,tenant_id:%s,key_id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		return dispatcher.Result[*attunev1.DeleteApiKeyResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "revoke failed")
+		return dispatcher.Fail[*attunev1.DeleteApiKeyResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "revoke failed")
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,key_id:%s", where, auth.TenantID, id)
-	return dispatcher.NoContent[*attunev1.DeleteApiKeyResponse](), nil
+	return dispatcher.NoContent[*attunev1.DeleteApiKeyResponse]()
 }

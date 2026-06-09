@@ -42,14 +42,24 @@ type Result[Resp proto.Message] struct {
 	Body   Resp
 }
 
-// OK constructs a successful response.
-func OK[Resp proto.Message](status int, body Resp) Result[Resp] {
-	return Result[Resp]{Status: status, Body: body}
+// Success constructs a successful response with an explicit HTTP status.
+func Success[Resp proto.Message](status int, body Resp) (Result[Resp], error) {
+	return Result[Resp]{Status: status, Body: body}, nil
+}
+
+// OK constructs a 200 response.
+func OK[Resp proto.Message](body Resp) (Result[Resp], error) {
+	return Success(http.StatusOK, body)
+}
+
+// Created constructs a 201 response.
+func Created[Resp proto.Message](body Resp) (Result[Resp], error) {
+	return Success(http.StatusCreated, body)
 }
 
 // NoContent constructs a 204 response.
-func NoContent[Resp proto.Message]() Result[Resp] {
-	return Result[Resp]{Status: http.StatusNoContent}
+func NoContent[Resp proto.Message]() (Result[Resp], error) {
+	return Result[Resp]{Status: http.StatusNoContent}, nil
 }
 
 // Error carries the HTTP status plus the machine-readable envelope code.
@@ -67,6 +77,11 @@ func (e *Error) Error() string {
 // shared ErrorResponse envelope.
 func NewError(status int, code attunev1.ErrorCode, msg string) *Error {
 	return ptrext.Of(Error{Status: status, Code: code, Message: msg})
+}
+
+// Fail constructs a typed handler error and the zero success result.
+func Fail[Resp proto.Message](status int, code attunev1.ErrorCode, msg string) (Result[Resp], error) {
+	return Result[Resp]{}, NewError(status, code, msg)
 }
 
 // DecodeJSON reads a protoJSON request body with the shared 1 MiB limit.

@@ -12,5 +12,5 @@ func (h *MeHandler) Logout(ctx *dispatcher.RequestContext[*session.AuthCtx], _ *
 	const where = "console.MeHandler.Logout"
 	h.signer.ClearSessionCookie(ctx.Response())
 	logext.Infof(ctx, "[%s] OK", where)
-	return dispatcher.NoContent[*attunev1.LogoutResponse](), nil
+	return dispatcher.NoContent[*attunev1.LogoutResponse]()
 }

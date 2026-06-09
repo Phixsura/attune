@@ -42,7 +42,7 @@ func (h *UsageHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], _ *
 	if err != nil {
 		logext.Errorf(ctx, "[%s] feedback.UsageByDay failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		return dispatcher.Result[*attunev1.GetUsageResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read usage")
+		return dispatcher.Fail[*attunev1.GetUsageResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read usage")
 	}
 
 	series := make([]*attunev1.UsageBucket, 0, len(buckets))
@@ -55,14 +55,14 @@ func (h *UsageHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], _ *
 		total += b.Value
 	}
 
-	result := dispatcher.OK(http.StatusOK, ptrext.Of(attunev1.GetUsageResponse{
+	resp := ptrext.Of(attunev1.GetUsageResponse{
 		PeriodStart: periodStart.Format(time.RFC3339),
 		PeriodEnd:   periodEnd.Format(time.RFC3339),
 		Total:       total,
 		Series:      series,
 		Quota:       nil, // null until billing lands
-	}))
+	})
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,total:%d,buckets:%d",
 		where, auth.TenantID, total, len(series))
-	return result, nil
+	return dispatcher.OK(resp)
 }

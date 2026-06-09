@@ -63,7 +63,7 @@ func (h *FeedbackHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx],
 	if err != nil {
 		logext.Errorf(ctx, "[%s] read dim cfg failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		return dispatcher.Result[*attunev1.ListFeedbackResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read tenant config")
+		return dispatcher.Fail[*attunev1.ListFeedbackResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read tenant config")
 	}
 	opts := feedback.ConsoleListOpts{
 		Q:     req.GetQ(),
@@ -87,7 +87,7 @@ func (h *FeedbackHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx],
 	if err != nil {
 		logext.Errorf(ctx, "[%s] feedback.ListForConsole failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		return dispatcher.Result[*attunev1.ListFeedbackResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to list feedback")
+		return dispatcher.Fail[*attunev1.ListFeedbackResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to list feedback")
 	}
 	items := make([]*attunev1.Feedback, 0, len(rows))
 	for _, row := range rows {
@@ -98,5 +98,5 @@ func (h *FeedbackHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx],
 		resp.NextCursor = ptrext.Of(strconv.FormatInt(rows[len(rows)-1].ID, 10))
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
-	return dispatcher.OK(http.StatusOK, resp), nil
+	return dispatcher.OK(resp)
 }

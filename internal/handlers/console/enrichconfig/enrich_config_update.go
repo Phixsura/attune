@@ -20,7 +20,7 @@ func (h *Handler) Update(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 	auth := ctx.Auth
 	dims, err := dimsFromProto(req.GetDimensions())
 	if err != nil {
-		return dispatcher.Result[*attunev1.UpdateEnrichConfigResponse]{}, dispatcher.NewError(http.StatusBadRequest, enrich.ErrToCode(err), enrich.ErrToMessage(err))
+		return dispatcher.Fail[*attunev1.UpdateEnrichConfigResponse](http.StatusBadRequest, enrich.ErrToCode(err), enrich.ErrToMessage(err))
 	}
 	in := enrich.View{Dimensions: dims}
 	if req.PromptTemplate != nil {
@@ -43,14 +43,14 @@ func (h *Handler) Update(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 			if errors.Is(err, tenant.ErrTenantNotFound) {
 				status = http.StatusNotFound
 			}
-			return dispatcher.Result[*attunev1.UpdateEnrichConfigResponse]{}, dispatcher.NewError(status, code, msg)
+			return dispatcher.Fail[*attunev1.UpdateEnrichConfigResponse](status, code, msg)
 		}
 		logext.Errorf(ctx, "[%s] update failed,err:%+v,tenant_id:%s", where, err, auth.TenantID)
-		return dispatcher.Result[*attunev1.UpdateEnrichConfigResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to save enrich config")
+		return dispatcher.Fail[*attunev1.UpdateEnrichConfigResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to save enrich config")
 	}
 	v, err := h.svc.Get(ctx, auth.TenantID)
 	if err != nil {
-		return dispatcher.Result[*attunev1.UpdateEnrichConfigResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read enrich config")
+		return dispatcher.Fail[*attunev1.UpdateEnrichConfigResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read enrich config")
 	}
-	return dispatcher.OK(http.StatusOK, ptrext.Of(attunev1.UpdateEnrichConfigResponse{Config: toProtoConfig(v)})), nil
+	return dispatcher.OK(ptrext.Of(attunev1.UpdateEnrichConfigResponse{Config: toProtoConfig(v)}))
 }

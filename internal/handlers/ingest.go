@@ -90,16 +90,16 @@ func (h *IngestHandler) Ingest(ctx *dispatcher.RequestContext[*apikey.AuthCtx], 
 	id, err := h.ingestor.IngestRow(ctx, tenantID, keyID, in)
 	if err != nil {
 		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(in.Source), "validate_err").Inc()
-		return dispatcher.Result[*attunev1.IngestResponse]{}, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
+		return dispatcher.Fail[*attunev1.IngestResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	}
 
 	metrics.IngestTotal.WithLabelValues(tenantID, in.Source, "ok").Inc()
 	logext.Infof(ctx, "[%s] ingest accepted,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,source:%s",
 		where, trace.FromContext(ctx), tenantID, id, in.Source)
-	return dispatcher.OK(http.StatusOK, ptrext.Of(attunev1.IngestResponse{
+	return dispatcher.OK(ptrext.Of(attunev1.IngestResponse{
 		Id:               id,
 		EnrichmentStatus: "pending",
-	})), nil
+	}))
 }
 
 // boundedSource keeps attune_ingest_total's `source` label bounded to known

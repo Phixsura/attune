@@ -28,13 +28,13 @@ func (h *MeHandler) Me(ctx *dispatcher.RequestContext[*session.AuthCtx], _ *attu
 		} else if !errors.Is(err, admin.ErrNotFound) {
 			logext.Errorf(ctx, "[%s] admins.GetByID failed,user_id:%s,err:%+v",
 				where, auth.UserID, err.Error())
-			return dispatcher.Result[*attunev1.GetMeResponse]{}, dispatcher.NewError(
+			return dispatcher.Fail[*attunev1.GetMeResponse](
 				http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to look up admin")
 		}
 	}
 	if auth.TenantID == "" {
 		h.signer.ClearSessionCookie(ctx.Response())
-		return dispatcher.Result[*attunev1.GetMeResponse]{}, dispatcher.NewError(
+		return dispatcher.Fail[*attunev1.GetMeResponse](
 			http.StatusUnauthorized, attunev1.ErrorCode_USER_GONE, "session subject not found")
 	}
 	return h.meTenantUser(ctx, auth.TenantID, auth.UserID)
@@ -76,7 +76,7 @@ func (h *MeHandler) meAdmin(ctx *dispatcher.RequestContext[*session.AuthCtx], a 
 		CsrfToken: h.signer.CSRFToken(a.ID),
 	})
 	logext.Infof(ctx, "[%s] OK,admin_id:%s,tenant_id:%s", where, a.ID, tenantID)
-	return dispatcher.OK(http.StatusOK, me), nil
+	return dispatcher.OK(me)
 }
 
 func adminDisplay(a admin.Admin) string {
@@ -93,19 +93,19 @@ func (h *MeHandler) meTenantUser(ctx *dispatcher.RequestContext[*session.AuthCtx
 		if errors.Is(err, tenant.ErrTenantUserNotFound) {
 			logext.Warnf(ctx, "[%s] reject: user gone,user_id:%s", where, userID)
 			h.signer.ClearSessionCookie(ctx.Response())
-			return dispatcher.Result[*attunev1.GetMeResponse]{}, dispatcher.NewError(
+			return dispatcher.Fail[*attunev1.GetMeResponse](
 				http.StatusUnauthorized, attunev1.ErrorCode_USER_GONE, "user is disabled or deleted")
 		}
 		logext.Errorf(ctx, "[%s] users.GetByID failed,user_id:%s,err:%+v",
 			where, userID, err.Error())
-		return dispatcher.Result[*attunev1.GetMeResponse]{}, dispatcher.NewError(
+		return dispatcher.Fail[*attunev1.GetMeResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load user")
 	}
 	tenantRow, err := h.tenants.GetByID(ctx, tenantID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] tenants.GetByID failed,tenant_id:%s,err:%+v",
 			where, tenantID, err.Error())
-		return dispatcher.Result[*attunev1.GetMeResponse]{}, dispatcher.NewError(
+		return dispatcher.Fail[*attunev1.GetMeResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load tenant")
 	}
 
@@ -133,5 +133,5 @@ func (h *MeHandler) meTenantUser(ctx *dispatcher.RequestContext[*session.AuthCtx
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,user_id:%s,role:%s",
 		where, tenantID, userID, user.Role)
-	return dispatcher.OK(http.StatusOK, me), nil
+	return dispatcher.OK(me)
 }

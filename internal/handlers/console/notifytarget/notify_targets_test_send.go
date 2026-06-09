@@ -23,7 +23,7 @@ func (h *NotifyTargetsHandler) Test(ctx *dispatcher.RequestContext[*session.Auth
 	id, err := uuid.Parse(req.GetId())
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad uuid,tenant_id:%s", where, auth.TenantID)
-		return dispatcher.Result[*attunev1.TestNotifyTargetResponse]{}, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "id is not a UUID")
+		return dispatcher.Fail[*attunev1.TestNotifyTargetResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "id is not a UUID")
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,id:%s", where, auth.TenantID, id)
 	target, err := h.repo.GetByID(ctx, auth.TenantID, id)
@@ -31,18 +31,18 @@ func (h *NotifyTargetsHandler) Test(ctx *dispatcher.RequestContext[*session.Auth
 		if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
-			return dispatcher.Result[*attunev1.TestNotifyTargetResponse]{}, dispatcher.NewError(http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "notify target not found or not owned by tenant")
+			return dispatcher.Fail[*attunev1.TestNotifyTargetResponse](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "notify target not found or not owned by tenant")
 		}
 		logext.Errorf(ctx, "[%s] repo.GetByID failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		return dispatcher.Result[*attunev1.TestNotifyTargetResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load target")
+		return dispatcher.Fail[*attunev1.TestNotifyTargetResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load target")
 	}
 
 	result := notify.TestSend(ctx, ptrext.Indirect(target))
 	if !result.OK {
 		logext.Warnf(ctx, "[%s] reject: delivery failed,tenant_id:%s,id:%s,status:%d,latency_ms:%d,err:%s",
 			where, auth.TenantID, id, result.StatusCode, result.LatencyMs, errMessage(result.Err))
-		return dispatcher.Result[*attunev1.TestNotifyTargetResponse]{}, dispatcher.NewError(http.StatusBadGateway, attunev1.ErrorCode_DELIVERY_FAILED, errMessage(result.Err))
+		return dispatcher.Fail[*attunev1.TestNotifyTargetResponse](http.StatusBadGateway, attunev1.ErrorCode_DELIVERY_FAILED, errMessage(result.Err))
 	}
 	sc := int32(result.StatusCode)
 	lat := result.LatencyMs
@@ -53,7 +53,7 @@ func (h *NotifyTargetsHandler) Test(ctx *dispatcher.RequestContext[*session.Auth
 	})
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s,status:%d,latency_ms:%d",
 		where, auth.TenantID, id, result.StatusCode, result.LatencyMs)
-	return dispatcher.OK(http.StatusOK, resp), nil
+	return dispatcher.OK(resp)
 }
 
 func errMessage(err error) string {

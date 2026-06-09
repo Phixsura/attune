@@ -168,15 +168,15 @@ func (h *NotifyTargetsHandler) Delete(
 ) (dispatcher.Result[*v1.DeleteNotifyTargetResponse], error) {
     id, err := uuid.Parse(req.Id)
     if err != nil {
-        return dispatcher.Result[*v1.DeleteNotifyTargetResponse]{}, dispatcher.NewError(http.StatusBadRequest, v1.ErrorCode_BAD_ID, "id is not a UUID")
+        return dispatcher.Fail[*v1.DeleteNotifyTargetResponse](http.StatusBadRequest, v1.ErrorCode_BAD_ID, "id is not a UUID")
     }
     if err := h.repo.Delete(ctx, ctx.Auth.TenantID, id); err != nil {
         if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
-            return dispatcher.Result[*v1.DeleteNotifyTargetResponse]{}, dispatcher.NewError(http.StatusNotFound, v1.ErrorCode_NOT_FOUND, "notify target not found")
+            return dispatcher.Fail[*v1.DeleteNotifyTargetResponse](http.StatusNotFound, v1.ErrorCode_NOT_FOUND, "notify target not found")
         }
         return dispatcher.Result[*v1.DeleteNotifyTargetResponse]{}, err // → dispatcher: 500 envelope + logext.Errorf("err:%+v")
     }
-    return dispatcher.NoContent[*v1.DeleteNotifyTargetResponse](), nil
+    return dispatcher.NoContent[*v1.DeleteNotifyTargetResponse]()
 }
 ```
 
@@ -273,7 +273,7 @@ The route-local `authFn` and `Input` binder are the extension points. The 6-step
 
 ### Error model — single typed error, dispatcher-side dispatch
 
-Lower layers keep their `Err*` sentinels (`domain/apikey.go`, `repo/notifytarget/`, `repo/tenant/`, …). Handlers classify with `errors.Is` and return `dispatcher.NewError(status, code, msg)`. The factory shape matches `respond.Error(ctx, w, status, code, msg)` (`internal/respond/respond.go:64`) exactly — the dispatcher is a 1:1 lift of the existing wire-write call into the type system, so migration is near-mechanical and no new mental model is introduced.
+Lower layers keep their `Err*` sentinels (`domain/apikey.go`, `repo/notifytarget/`, `repo/tenant/`, …). Handlers classify with `errors.Is` and return `dispatcher.Fail[Resp](status, code, msg)`. The underlying `NewError` factory shape matches `respond.Error(ctx, w, status, code, msg)` (`internal/respond/respond.go:64`) exactly — the dispatcher is a 1:1 lift of the existing wire-write call into the type system, while `Fail` removes the repeated zero `Result` ceremony.
 
 Handlers no longer pass free-form code strings. They pass the `proto`-defined `ErrorCode` enum (see §"Error code IDL contract" below), and `respond.Error` serializes the enum name into the existing string field. That gives Go call-sites compile-time safety while keeping protobuf compatibility for `ErrorResponse`.
 
@@ -295,20 +295,32 @@ type Result[Resp proto.Message] struct {
     Body   Resp
 }
 
-func NoContent[Resp proto.Message]() Result[Resp] {
-    return Result[Resp]{Status: http.StatusNoContent}
+func Success[Resp proto.Message](status int, body Resp) (Result[Resp], error) {
+    return Result[Resp]{Status: status, Body: body}, nil
 }
 
-func OK[Resp proto.Message](status int, body Resp) Result[Resp] {
-    return Result[Resp]{Status: status, Body: body}
+func OK[Resp proto.Message](body Resp) (Result[Resp], error) {
+    return Success(http.StatusOK, body)
 }
 
-// NewError is the single error factory. Shape matches respond.Error
+func Created[Resp proto.Message](body Resp) (Result[Resp], error) {
+    return Success(http.StatusCreated, body)
+}
+
+func NoContent[Resp proto.Message]() (Result[Resp], error) {
+    return Result[Resp]{Status: http.StatusNoContent}, nil
+}
+
+// NewError is the typed error constructor. Shape matches respond.Error
 // (internal/respond/respond.go:64) after respond.Error itself absorbs
 // the ErrorCode upgrade — call-site migration is a near-mechanical
 // rewrite, no new mental model.
 func NewError(status int, code attunev1.ErrorCode, msg string) *Error {
     return &Error{Status: status, Code: code, Message: msg}
+}
+
+func Fail[Resp proto.Message](status int, code attunev1.ErrorCode, msg string) (Result[Resp], error) {
+    return Result[Resp]{}, NewError(status, code, msg)
 }
 ```
 
@@ -384,10 +396,10 @@ This is **attune's first `.proto`-defined `enum`** — `grep "^enum " proto/attu
 Handlers consume the enum directly:
 
 ```go
-return nil, dispatcher.NewError(http.StatusConflict, attunev1.ErrorCode_CONFLICT, "...")
+return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusConflict, attunev1.ErrorCode_CONFLICT, "...")
 ```
 
-`dispatcher.NewError`'s `code` parameter is `attunev1.ErrorCode`, not `string` — typos and drift caught at compile time. Likewise, `respond.Error`'s `code` parameter upgrades to `ErrorCode`; the apikey middleware, the OAuth/dev-login carve-outs, and the ingest writeError all migrate in the same wave (Implementation plan Commit 2). The audit step resolves the current `unauthenticated`/`err.Error()` outliers before that commit lands.
+`dispatcher.Fail` / `dispatcher.NewError` take `attunev1.ErrorCode`, not `string` — typos and drift are caught at compile time. Likewise, `respond.Error`'s `code` parameter upgrades to `ErrorCode`; the apikey middleware, the OAuth/dev-login carve-outs, and the ingest writeError all migrate in the same wave (Implementation plan Commit 2). The audit step resolves the current `unauthenticated`/`err.Error()` outliers before that commit lands.
 
 `buf breaking` allows enum value additions (non-breaking) but blocks enum renames/removals and any future `ErrorResponse` field-type churn. The remaining string-field emission is guarded by the typed `respond.Error` signature and endpoint smoke tests.
 
@@ -439,7 +451,7 @@ Predicted cost: reviewers need 2-3 clarification rounds on the generic-struct me
 1. **Self-build, not Huma.** Huma's `application/problem+json` envelope + struct-derived OpenAPI conflict with attune's `{code, message, requestId}` envelope and CLAUDE.md §11 (proto is the single source of truth). Adapting Huma costs more LOC than the 280-LOC self-build and leaves a permanent two-truth-source maintenance tax. (See Alternatives §A4.) The dispatcher package sits **at the handler layer** (same level as `respond` / `session` / `apikey`), not as a neutral framework — importing `session.AuthCtx` and `apikey.AuthCtx` for the type aliases matches the existing 14 import sites in handler subpackages (`grep -rn "handlers/console/internal/session\|infra/apikey" internal/handlers/`) and follows attune's hybrid feature-package convention (CLAUDE.md §5). There is no "framework purity" goal to violate.
 2. **Generic `RequestContext[Auth]`.** Single concept across all auth dimensions; compile-time type safety per dimension; `Auth` reachable as a typed field (`rc.Auth.TenantID`); `context.Context` embedded so `rc` is pass-throughable. (See Alternatives §A1–A3 for rejected paths.)
 3. **Embed `context.Context`.** Embedding turns the handler parameter into a drop-in `context.Context`, killing call-site ceremony at every service/repo boundary. The construction site (the dispatcher itself) controls nil-safety.
-4. **Single error factory `NewError(status, code, msg)`.** Shape matches `respond.Error(ctx, w, status, code, msg)` (`internal/respond/respond.go:64`); migration is a near-mechanical rewrite, no new mental model. The Huma-style nine `Error4XX`-named helpers were rejected because attune's existing call-sites do not have a 1:1 status→code mapping (400 is variously `"bad_request"` / `"bad_id"` / `"validation"`; 401 is `"unauthenticated"` / `"user_gone"`; etc.) — any "default code per helper" abstraction would be wrong half the time, leaving an override path as the de-facto convention. (See Alternatives §A8.)
+4. **Single failure helper `Fail[Resp](status, code, msg)`.** The underlying `NewError` shape matches `respond.Error(ctx, w, status, code, msg)` (`internal/respond/respond.go:64`); migration is a near-mechanical rewrite, with no zero-result ceremony at handler call-sites. The Huma-style nine `Error4XX`-named helpers were rejected because attune's existing call-sites do not have a 1:1 status→code mapping (400 is variously `"bad_request"` / `"bad_id"` / `"validation"`; 401 is `"unauthenticated"` / `"user_gone"`; etc.) — any "default code per helper" abstraction would be wrong half the time, leaving an override path as the de-facto convention. (See Alternatives §A8.)
 5. **No global mutable state, no factory hooks.** attune's framework-y packages document the convention explicitly: `internal/infra/observability/slog.go:28-29` — "Pure — no global state. Tests construct a handler over a bytes.Buffer here without touching slog.Default." A repo-wide `grep '^var [A-Z][a-zA-Z]* = func' internal/ cmd/` returns 0 results. The dispatcher follows the same convention — no `var NewError = func(...)` swap point. Envelope evolution (future RFC 9457, etc.) is achieved by editing the dispatcher's internal `respond.Error` call site, not by exposing a mutable factory.
 6. **Observability hard-default.** Entry/exit `logext` triple is mandatory. Quieter logging can be added later as an explicit option once there is a real quiet-by-design endpoint.
 7. **5 carve-outs.** `/healthz`, `/v1/lark/event`, and the three `/install/*` OAuth-flow endpoints stay native `http.HandlerFunc`. CLAUDE.md §11 already names lark; this proposal extends the carve-out list to the other four with the same justification (HTTP shape is not `proto.Message in → proto.Message out`).
@@ -530,7 +542,7 @@ Rejected on attune-codebase fit grounds:
 - **`var NewError` is a globally mutable function variable.** `grep '^var [A-Z][a-zA-Z]* = func' internal/ cmd/` returns **0** results — attune has zero precedent for this pattern. `internal/infra/observability/slog.go:28-29` documents the opposite convention explicitly ("Pure — no global state. Tests construct ... without touching slog.Default.").
 - **Test ergonomics are worse, not better.** Parallel `go test` packages racing on a shared `var NewError` would require `t.Cleanup` discipline at every call-site. Real testability comes from asserting the wire output (status + envelope bytes), which `NewError(status, code, msg)` enables directly via `errors.As(err, *dispatcher.Error)` — no hook needed.
 
-The replacement is the single `dispatcher.NewError(status, code, msg)` factory in Decision 4, matching `respond.Error` (`internal/respond/respond.go:64`) shape-for-shape.
+The replacement is the single `dispatcher.Fail[Resp](status, code, msg)` handler helper, backed by `NewError(status, code, msg)` matching `respond.Error` (`internal/respond/respond.go:64`) shape-for-shape.
 
 ### A9. `ErrorCode` enum design sub-choices
 
@@ -570,7 +582,7 @@ Phased implementation on the issue branch. Each slice should stay reviewable, ke
 - Existing tests continue to pass: the wire value changes from `"conflict"` to `"CONFLICT"` per-fixture (golden files regenerated), while the protobuf field shape stays compatible.
 
 **Commit 3 — `internal/dispatcher/` package.**
-- `types.go` — `RequestContext[Auth]`, `Result[Resp]`, `Error`, `NewError`, `DecodeJSON`.
+- `types.go` — `RequestContext[Auth]`, `Result[Resp]`, `OK`, `Created`, `Success`, `NoContent`, `Error`, `NewError`, `Fail`, `DecodeJSON`.
 - `input.go` — `Input[Req]`, `Empty`, `JSON`, `Path`, `Query`, `Param`, `ParamInt64`, `Combine`, and `Custom` bind helpers.
 - `bind.go` — generic `Bind(where, authFn, input, handler)` request loop, with package-local `bind` kept as the implementation adapter.
 - `bind_test.go` — coverage for OK, 204, typed errors, JSON body binding, path/query binding, context cancellation/deadline mapping, and oversized bodies.

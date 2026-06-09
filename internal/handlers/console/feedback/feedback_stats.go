@@ -26,7 +26,7 @@ func (h *FeedbackHandler) Stats(ctx *dispatcher.RequestContext[*session.AuthCtx]
 	if err != nil {
 		logext.Errorf(ctx, "[%s] read dim cfg failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		return dispatcher.Result[*attunev1.GetFeedbackStatsResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read tenant config")
+		return dispatcher.Fail[*attunev1.GetFeedbackStatsResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read tenant config")
 	}
 
 	// Total ingest count for the window — sum the daily buckets.
@@ -41,7 +41,7 @@ func (h *FeedbackHandler) Stats(ctx *dispatcher.RequestContext[*session.AuthCtx]
 	if err != nil {
 		logext.Errorf(ctx, "[%s] urgent count failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		return dispatcher.Result[*attunev1.GetFeedbackStatsResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read urgent stats")
+		return dispatcher.Fail[*attunev1.GetFeedbackStatsResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read urgent stats")
 	}
 
 	dims := make([]*attunev1.DimStats, 0, len(cfg.Dimensions))
@@ -68,5 +68,5 @@ func (h *FeedbackHandler) Stats(ctx *dispatcher.RequestContext[*session.AuthCtx]
 	})
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,total:%d,urgent:%d,dims:%d",
 		where, auth.TenantID, totalIngest, urgent, len(dims))
-	return dispatcher.OK(http.StatusOK, resp), nil
+	return dispatcher.OK(resp)
 }

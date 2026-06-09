@@ -27,7 +27,7 @@ func (h *NotifyTargetsHandler) Patch(ctx *dispatcher.RequestContext[*session.Aut
 	id, err := uuid.Parse(patch.GetId())
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad uuid,tenant_id:%s", where, auth.TenantID)
-		return dispatcher.Result[*attunev1.NotifyTarget]{}, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "id is not a UUID")
+		return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "id is not a UUID")
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,id:%s", where, auth.TenantID, id)
 
@@ -36,12 +36,12 @@ func (h *NotifyTargetsHandler) Patch(ctx *dispatcher.RequestContext[*session.Aut
 		if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
-			return dispatcher.Result[*attunev1.NotifyTarget]{}, dispatcher.NewError(http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND,
+			return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND,
 				"notify target not found or not owned by tenant")
 		}
 		logext.Errorf(ctx, "[%s] repo.GetByID failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		return dispatcher.Result[*attunev1.NotifyTarget]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read notify target")
+		return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read notify target")
 	}
 
 	// Apply present fields (proto optional → nil means "leave unchanged").
@@ -73,26 +73,26 @@ func (h *NotifyTargetsHandler) Patch(ctx *dispatcher.RequestContext[*session.Aut
 	})); err != nil {
 		logext.Warnf(ctx, "[%s] reject: validation,tenant_id:%s,id:%s,err:%s",
 			where, auth.TenantID, id, err.Error())
-		return dispatcher.Result[*attunev1.NotifyTarget]{}, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
+		return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	}
 
 	if err := h.repo.UpdateByID(ctx, auth.TenantID, id, ptrext.Indirect(cur)); err != nil {
 		if errors.Is(err, notifytarget.ErrNotifyTargetConflict) {
 			logext.Warnf(ctx, "[%s] reject: conflict,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
-			return dispatcher.Result[*attunev1.NotifyTarget]{}, dispatcher.NewError(http.StatusConflict, attunev1.ErrorCode_CONFLICT,
+			return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusConflict, attunev1.ErrorCode_CONFLICT,
 				"audience conflicts with another target of the same destination_type — revert or delete the other one first")
 		}
 		if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 			logext.Warnf(ctx, "[%s] reject: not found pre-update,tenant_id:%s,id:%s",
 				where, auth.TenantID, id)
-			return dispatcher.Result[*attunev1.NotifyTarget]{}, dispatcher.NewError(http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "notify target was deleted before the update could apply")
+			return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "notify target was deleted before the update could apply")
 		}
 		logext.Errorf(ctx, "[%s] repo.UpdateByID failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
-		return dispatcher.Result[*attunev1.NotifyTarget]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to update notify target")
+		return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to update notify target")
 	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s", where, auth.TenantID, id)
-	return dispatcher.OK(http.StatusOK, toNotifyProto(ptrext.Indirect(cur))), nil
+	return dispatcher.OK(toNotifyProto(ptrext.Indirect(cur)))
 }

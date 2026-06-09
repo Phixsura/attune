@@ -20,10 +20,10 @@ func (h *Handler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], _ *attun
 	v, err := h.svc.Get(ctx, auth.TenantID)
 	if err != nil {
 		if errors.Is(err, tenant.ErrTenantNotFound) {
-			return dispatcher.Result[*attunev1.GetEnrichConfigResponse]{}, dispatcher.NewError(http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "tenant not found")
+			return dispatcher.Fail[*attunev1.GetEnrichConfigResponse](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "tenant not found")
 		}
 		logext.Errorf(ctx, "[%s] get failed,err:%+v,tenant_id:%s", where, err, auth.TenantID)
-		return dispatcher.Result[*attunev1.GetEnrichConfigResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read enrich config")
+		return dispatcher.Fail[*attunev1.GetEnrichConfigResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read enrich config")
 	}
-	return dispatcher.OK(http.StatusOK, ptrext.Of(attunev1.GetEnrichConfigResponse{Config: toProtoConfig(v)})), nil
+	return dispatcher.OK(ptrext.Of(attunev1.GetEnrichConfigResponse{Config: toProtoConfig(v)}))
 }

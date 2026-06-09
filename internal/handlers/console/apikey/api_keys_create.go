@@ -21,12 +21,12 @@ func (h *APIKeysHandler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx]
 	label := strings.TrimSpace(req.GetLabel())
 	if label == "" {
 		logext.Warnf(ctx, "[%s] reject: missing label,tenant_id:%s", where, auth.TenantID)
-		return dispatcher.Result[*attunev1.CreateApiKeyResponse]{}, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_MISSING_LABEL, "label must not be empty")
+		return dispatcher.Fail[*attunev1.CreateApiKeyResponse](http.StatusBadRequest, attunev1.ErrorCode_MISSING_LABEL, "label must not be empty")
 	}
 	if len(label) > 200 {
 		logext.Warnf(ctx, "[%s] reject: label too long,tenant_id:%s,len:%d",
 			where, auth.TenantID, len(label))
-		return dispatcher.Result[*attunev1.CreateApiKeyResponse]{}, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_LABEL_TOO_LONG, "label must not exceed 200 characters")
+		return dispatcher.Fail[*attunev1.CreateApiKeyResponse](http.StatusBadRequest, attunev1.ErrorCode_LABEL_TOO_LONG, "label must not exceed 200 characters")
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,label:%s", where, auth.TenantID, label)
 
@@ -34,7 +34,7 @@ func (h *APIKeysHandler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx]
 	if err != nil {
 		logext.Errorf(ctx, "[%s] svc.Issue failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		return dispatcher.Result[*attunev1.CreateApiKeyResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to issue API key")
+		return dispatcher.Fail[*attunev1.CreateApiKeyResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to issue API key")
 	}
 
 	// Re-read the row so we return canonical timestamps. Cheap: N is tiny.
@@ -51,10 +51,10 @@ func (h *APIKeysHandler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx]
 		}
 	}
 
-	result := dispatcher.OK(http.StatusCreated, ptrext.Of(attunev1.CreateApiKeyResponse{
+	resp := ptrext.Of(attunev1.CreateApiKeyResponse{
 		Key:    toProtoAPIKey(newRow),
 		Secret: raw,
-	}))
+	})
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,key_id:%s", where, auth.TenantID, id)
-	return result, nil
+	return dispatcher.Created(resp)
 }

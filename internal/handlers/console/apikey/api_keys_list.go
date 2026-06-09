@@ -19,12 +19,12 @@ func (h *APIKeysHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 	if err != nil {
 		logext.Errorf(ctx, "[%s] svc.List failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
-		return dispatcher.Result[*attunev1.ListApiKeysResponse]{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to list API keys")
+		return dispatcher.Fail[*attunev1.ListApiKeysResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to list API keys")
 	}
 	items := make([]*attunev1.ApiKey, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toProtoAPIKey(row))
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
-	return dispatcher.OK(http.StatusOK, ptrext.Of(attunev1.ListApiKeysResponse{Items: items})), nil
+	return dispatcher.OK(ptrext.Of(attunev1.ListApiKeysResponse{Items: items}))
 }

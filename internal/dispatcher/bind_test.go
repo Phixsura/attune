@@ -34,7 +34,7 @@ func TestBindWithSessionWritesOK(t *testing.T) {
 		Empty(func() *attunev1.GetUsageRequest { return &attunev1.GetUsageRequest{} }),
 		func(rc *RequestContext[testAuth], _ *attunev1.GetUsageRequest) (Result[*attunev1.GetUsageResponse], error) {
 			require.Equal(t, "tenant-1", rc.Auth.TenantID)
-			return OK(http.StatusOK, &attunev1.GetUsageResponse{Total: 7}), nil
+			return OK(&attunev1.GetUsageResponse{Total: 7})
 		},
 	)
 
@@ -56,7 +56,7 @@ func TestBindWithSessionWritesNoContent(t *testing.T) {
 		func(context.Context) testAuth { return testAuth{TenantID: "tenant-1"} },
 		Empty(func() *attunev1.GetUsageRequest { return &attunev1.GetUsageRequest{} }),
 		func(*RequestContext[testAuth], *attunev1.GetUsageRequest) (Result[*attunev1.GetUsageResponse], error) {
-			return NoContent[*attunev1.GetUsageResponse](), nil
+			return NoContent[*attunev1.GetUsageResponse]()
 		},
 	)
 
@@ -78,7 +78,7 @@ func TestBindWithSessionPropagatesTypedError(t *testing.T) {
 		func(context.Context) testAuth { return testAuth{TenantID: "tenant-1"} },
 		Empty(func() *attunev1.GetUsageRequest { return &attunev1.GetUsageRequest{} }),
 		func(*RequestContext[testAuth], *attunev1.GetUsageRequest) (Result[*attunev1.GetUsageResponse], error) {
-			return Result[*attunev1.GetUsageResponse]{}, NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "bad input")
+			return Fail[*attunev1.GetUsageResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "bad input")
 		},
 	)
 
@@ -101,7 +101,7 @@ func TestBindBindsJSONBody(t *testing.T) {
 		JSON(func() *attunev1.CreateApiKeyRequest { return &attunev1.CreateApiKeyRequest{} }),
 		func(_ *RequestContext[testAuth], req *attunev1.CreateApiKeyRequest) (Result[*attunev1.CreateApiKeyResponse], error) {
 			require.Equal(t, "Primary", req.GetLabel())
-			return OK(http.StatusCreated, &attunev1.CreateApiKeyResponse{}), nil
+			return Created(&attunev1.CreateApiKeyResponse{})
 		},
 	)
 
@@ -175,7 +175,7 @@ func TestBindExposesResponseForCookieSideEffects(t *testing.T) {
 		Empty(func() *attunev1.LogoutRequest { return &attunev1.LogoutRequest{} }),
 		func(ctx *RequestContext[testAuth], _ *attunev1.LogoutRequest) (Result[*attunev1.LogoutResponse], error) {
 			http.SetCookie(ctx.Response(), &http.Cookie{Name: "session", Value: "", MaxAge: -1})
-			return NoContent[*attunev1.LogoutResponse](), nil
+			return NoContent[*attunev1.LogoutResponse]()
 		},
 	)
 	req := httptest.NewRequest(http.MethodPost, "/fb/v1/console/logout", nil)
