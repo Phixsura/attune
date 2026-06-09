@@ -10,14 +10,6 @@ import (
 	"github.com/Phixsura/attune/internal/infra/database"
 )
 
-// Integration coverage (lark rows present + env unset/set) is deferred to
-// the #12 testdb harness — Plan Task 24 gate 20 covers it via the manual
-// smoke + migration timing exercise.
-
-func TestConfirmLarkDelete_IntegrationCoverage_DeferredToTestdb(t *testing.T) {
-	t.Skip("requires testdb harness — tracked in #12")
-}
-
 // Unit smoke — verifies the env-bypass branch without needing a DB. The
 // guard MUST return nil immediately when the operator has opted in,
 // regardless of database state (it never even runs the count query).

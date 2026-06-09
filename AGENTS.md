@@ -22,6 +22,7 @@ AI assistants (Codex, Cursor, etc.) working on this repository.
 | Internal info | 0 leaks (IPs, /opt paths, brand names) | grep |
 | Outbound HTTP clients | must wrap with `otelhttp.NewTransport` | `scripts/lint-slog.sh` Rule 3 |
 | Logging | `logext.*` + `ctx` first | `scripts/lint-slog.sh` Rule 1 |
+| Integration layout | 0 misplaced integration-tagged tests | `scripts/lint-integration-layout.sh` |
 
 The pre-commit hook enforces a subset locally; CI enforces all. Red gates =
 PR cannot merge.
@@ -136,7 +137,30 @@ For the full layout, see [`README.md`](README.md).
 
 ---
 
-## 7 · Observability conventions
+## 7 · Integration test layout
+
+Integration tests are a repository-level tier, not package-adjacent one-offs.
+
+- Build-tagged integration suites live under `test/integration/<scope>/<area>/`.
+  For PostgreSQL, use `test/integration/postgres/<area>/`.
+- Reusable integration harness code may live under `internal/testdb/`; individual
+  suites must not copy container startup, DSN parsing, or migration setup.
+- Do not add `*_io_test.go` files in business packages. Use ordinary unit tests
+  next to code, and put real-service smoke tests in `test/integration/**`.
+- Handler-level integration tests should prefer public routers, public
+  constructors, signed cookies, and real middleware over package-private test
+  seams, so they remain in the repository-level integration tree.
+- Every directory containing only integration-tagged test files also needs a
+  tiny untagged `doc.go`; this keeps `go vet ./...` able to enumerate the
+  package when the `integration` tag is not set.
+
+The layout is enforced by `scripts/lint-integration-layout.sh` in pre-commit,
+`scripts/check.sh`, and CI. New integration scopes (for example `redis` or
+`webhook`) should extend this layout under `test/integration/<scope>/`.
+
+---
+
+## 8 · Observability conventions
 
 - All logs use `logext.Infof` / `logext.Warnf` / `logext.Errorf` with `ctx`
   as the first argument.
@@ -149,7 +173,7 @@ For the full layout, see [`README.md`](README.md).
 
 ---
 
-## 8 · Security baseline
+## 9 · Security baseline
 
 - No new external dependencies without a PR-described justification (bundle
   cost, activity, alternatives considered).
@@ -163,7 +187,7 @@ For the full layout, see [`README.md`](README.md).
 
 ---
 
-## 9 · For AI assistants specifically
+## 10 · For AI assistants specifically
 
 When Codex / Cursor / similar tooling is editing this repo:
 
@@ -173,11 +197,11 @@ When Codex / Cursor / similar tooling is editing this repo:
   evidence in the PR description.
 - Never bypass pre-commit hooks or CI gates to "make red go green." Fix the
   underlying issue.
-- **Every issue gets a proposal** (§10) written before/with the code.
+- **Every issue gets a proposal** (§11) written before/with the code.
 
 ---
 
-## 10 · Proposals (one per issue)
+## 11 · Proposals (one per issue)
 
 **Every issue we work on gets a short design proposal, written before/with the
 implementation and committed alongside the change.**
@@ -197,7 +221,7 @@ code (see §6). Update the `Status` as the work lands.
 
 ---
 
-## 11 · Proto IDL contract
+## 12 · Proto IDL contract
 
 The HTTP request/response contract is defined in `.proto` (`proto/attune/v1/`)
 and code-generated — not hand-written (#19):

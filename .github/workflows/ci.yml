@@ -58,6 +58,7 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'Dockerfile'
+              - 'scripts/lint-integration-layout.sh'
               - '.github/workflows/ci.yml'
             console:
               - 'console/**'
@@ -78,14 +79,28 @@ jobs:
               - 'buf.lock'
               - '.github/workflows/ci.yml'
 
-  # ── Go: integration tier — real Postgres via testcontainers-go ────────────
+  # ── Go: integration tier — real Postgres service container ────────────────
   # Gated behind the `integration` build tag so the unit tier (go-checks)
-  # stays fast. Each test spins up postgres:17-alpine inside the runner's
-  # Docker daemon; the whole suite takes well under a minute on a warm cache.
-  go-integration:
+  # stays fast. The CI job runs Postgres 18 as a GitHub Actions service
+  # container; internal/testdb creates an isolated database per test.
+  integration-postgres:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: attune
+          POSTGRES_PASSWORD: attune
+          POSTGRES_DB: attune
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -95,6 +110,8 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
       - name: Integration tests (real Postgres)
+        env:
+          ATTUNE_TEST_DATABASE_URL: postgres://attune:attune@localhost:5432/attune?sslmode=disable
         run: make test-integration
 
   # ── Go: vet / build / test ─────────────────────────────────────────────────
@@ -215,6 +232,17 @@ jobs:
         with:
           node-version: 22
       - run: npx -y jscpd . -f go -i '**/*.pb.go' -t 4 --silent
+
+  # ── Integration layout: keep build-tagged suites centralized ───────────────
+  integration-layout:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - run: bash scripts/lint-integration-layout.sh
 
   # ── govulncheck (informational — never blocks; see header) ─────────────────
   govulncheck:
@@ -371,7 +399,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, go-integration, golangci-lint, lint-slog, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, changelog, docker-build, compose-config, proto]
+    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, changelog, docker-build, compose-config, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:

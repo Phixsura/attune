@@ -35,6 +35,9 @@ go vet ./...
 step "lint-errorcode"
 bash scripts/lint-errorcode.sh
 
+step "lint-integration-layout"
+bash scripts/lint-integration-layout.sh
+
 step "go test ./..."
 go test ./...
 

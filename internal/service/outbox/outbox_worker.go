@@ -83,9 +83,15 @@ func (w *OutboxWorker) Run(ctx context.Context) {
 			logext.Infof(ctx, "[%s] outbox worker stopping", where)
 			return
 		case <-tick.C:
-			w.processBatch(ctx)
+			w.ProcessOnce(ctx)
 		}
 	}
+}
+
+// ProcessOnce claims and sends one batch. It is the deterministic one-shot
+// equivalent of one Run ticker cycle.
+func (w *OutboxWorker) ProcessOnce(ctx context.Context) {
+	w.processBatch(ctx)
 }
 
 // processBatch claims and sends one batch. Per-row failures don't
