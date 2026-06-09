@@ -196,7 +196,7 @@ func TestBindMapsContextCancellationErrors(t *testing.T) {
 		status int
 		code   string
 	}{
-		{name: "canceled", err: context.Canceled, status: 499, code: "CLIENT_CANCELED"},
+		{name: "canceled", err: context.Canceled, status: statusClientClosedRequest, code: "CLIENT_CANCELED"},
 		{name: "deadline", err: context.DeadlineExceeded, status: http.StatusGatewayTimeout, code: "DEADLINE_EXCEEDED"},
 	}
 	for _, tt := range tests {

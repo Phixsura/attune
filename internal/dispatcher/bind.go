@@ -14,6 +14,11 @@ import (
 	"github.com/Phixsura/attune/internal/respond"
 )
 
+// statusClientClosedRequest is Nginx's non-standard 499 convention for a
+// client closing the request before the server writes a response. net/http
+// intentionally has no constant for it because it is not an IETF status code.
+const statusClientClosedRequest = 499
+
 // Bind adapts a typed handler into an http.HandlerFunc using the supplied auth
 // extractor, input binder, and the shared envelope/logging rules.
 func Bind[Auth any, Req, Resp proto.Message](
@@ -90,7 +95,7 @@ func writeDecodeError(ctx context.Context, w http.ResponseWriter, err error, whe
 func writeHandlerError(ctx context.Context, w http.ResponseWriter, err error, where string, start time.Time) {
 	if errors.Is(err, context.Canceled) {
 		logext.Warnf(ctx, "[%s] canceled,latency_ms:%d", where, time.Since(start).Milliseconds())
-		respond.Error(ctx, w, 499, attunev1.ErrorCode_CLIENT_CANCELED, "client canceled request")
+		respond.Error(ctx, w, statusClientClosedRequest, attunev1.ErrorCode_CLIENT_CANCELED, "client canceled request")
 		return
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

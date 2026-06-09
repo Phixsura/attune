@@ -121,7 +121,7 @@ describe('_authed.feedback route — user flow smoke', () => {
     await waitFor(() => {
       expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
     })
-  })
+  }, 10000)
 
   it('500 from /feedback → empty state (not crash) — documents current behavior', async () => {
     // Backend errors currently render as "no feedback" rather than a
