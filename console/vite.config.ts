@@ -72,7 +72,7 @@ export default defineConfig({
         '**/*.test.{ts,tsx}',
         'src/main.tsx',
       ],
-      reporter: ['text', 'html'],
+      reporter: ['text', 'html', 'json-summary', 'lcov'],
       // Forward ratchet on every file the suite already covers ≥85%
       // lines. A regression that drags coverage below the threshold
       // fails CI loudly. Per-file (not global) so adding an untested

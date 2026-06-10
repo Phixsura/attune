@@ -1,0 +1,51 @@
+comment: false
+
+coverage:
+  precision: 2
+  round: down
+  status:
+    default_rules:
+      flag_coverage_not_uploaded_behavior: exclude
+    project:
+      default: false
+      go:
+        target: auto
+        threshold: 1%
+        informational: true
+        only_pulls: true
+        flags:
+          - go
+      console:
+        target: auto
+        threshold: 1%
+        informational: true
+        only_pulls: true
+        flags:
+          - console
+    patch:
+      default: false
+      go:
+        target: auto
+        threshold: 1%
+        informational: true
+        only_pulls: true
+        flags:
+          - go
+      console:
+        target: auto
+        threshold: 1%
+        informational: true
+        only_pulls: true
+        flags:
+          - console
+
+flags:
+  go:
+    paths:
+      - "**/*.go"
+  console:
+    paths:
+      - "console/src"
+
+github_checks:
+  annotations: false
