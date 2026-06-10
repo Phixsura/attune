@@ -24,20 +24,21 @@ interface RouterContext {
   queryClient: QueryClient
 }
 
-// Devtools only loaded outside of production builds. Lazy import keeps the
-// production bundle clean.
-const DevtoolsBundle = import.meta.env.PROD
-  ? () => null
-  : lazy(() =>
-      Promise.resolve({
-        default: () => (
-          <>
-            <TanStackRouterDevtools position="bottom-left" />
-            <ReactQueryDevtools buttonPosition="bottom-right" />
-          </>
-        ),
-      }),
-    )
+// Devtools stay opt-in even in dev so browser smoke tests and demos show the
+// product surface, not framework panels.
+const DevtoolsBundle =
+  import.meta.env.VITE_ATTUNE_DEVTOOLS === 'true'
+    ? lazy(() =>
+        Promise.resolve({
+          default: () => (
+            <>
+              <TanStackRouterDevtools position="bottom-left" />
+              <ReactQueryDevtools buttonPosition="bottom-right" />
+            </>
+          ),
+        }),
+      )
+    : () => null
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,

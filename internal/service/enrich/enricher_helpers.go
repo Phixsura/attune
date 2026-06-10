@@ -45,7 +45,7 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.E
 func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedback.EnrichInput, enriched domain.Enriched) error {
 	const where = "service.Enricher.persistFromTriage"
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
-	if err := e.persistEnriched(ctx, snapshot, enriched); err != nil {
+	if err := e.persistEnriched(ctx, snapshot, enriched, nil); err != nil {
 		return err
 	}
 	logext.Infof(ctx,

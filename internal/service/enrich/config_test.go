@@ -54,6 +54,9 @@ func TestErrToCode_AllBranches(t *testing.T) {
 		{domain.ErrTaxonomyValueDup, attunev1.ErrorCode_TAXONOMY_VALUE_DUP},
 		{domain.ErrTaxonomyDisplayEmpty, attunev1.ErrorCode_TAXONOMY_DISPLAY_EMPTY},
 		{domain.ErrUrgentNotInTaxonomy, attunev1.ErrorCode_URGENT_NOT_IN_TAXONOMY},
+		{domain.ErrRendererKindInvalid, attunev1.ErrorCode_RENDERER_KIND_INVALID},
+		{domain.ErrRendererValueInvalid, attunev1.ErrorCode_RENDERER_VALUE_INVALID},
+		{domain.ErrRendererTargetInvalid, attunev1.ErrorCode_RENDERER_TARGET_INVALID},
 		{tenant.ErrTenantNotFound, attunev1.ErrorCode_NOT_FOUND},
 		{errors.New("unmapped"), attunev1.ErrorCode_ERROR_CODE_UNSPECIFIED},
 		{nil, attunev1.ErrorCode_ERROR_CODE_UNSPECIFIED},
@@ -79,6 +82,9 @@ func TestErrToMessage_AllBranchesNonEmpty(t *testing.T) {
 		domain.ErrTaxonomyValueDup,
 		domain.ErrTaxonomyDisplayEmpty,
 		domain.ErrUrgentNotInTaxonomy,
+		domain.ErrRendererKindInvalid,
+		domain.ErrRendererValueInvalid,
+		domain.ErrRendererTargetInvalid,
 	}
 	for _, e := range errs {
 		if msg := ErrToMessage(e); msg == "" {

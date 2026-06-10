@@ -18,14 +18,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
 import {
   type AttrFilterEntry,
@@ -73,12 +65,17 @@ function FeedbackPage() {
       </div>
 
       {stats.data && Number(stats.data.total) > 0 && (
-        <Card className="mt-6">
-          <CardHeader>
+        <Card className="mt-6 gap-4 rounded-lg border-border/60 bg-muted/20 py-4 shadow-none">
+          <CardHeader className="px-4">
             <CardTitle className="text-base">{t('feedback.stats.title')}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <DimStatsBars dims={dims} stats={stats.data.dims} total={Number(stats.data.total)} />
+          <CardContent className="px-4">
+            <DimStatsBars
+              dims={dims}
+              stats={stats.data.dims}
+              total={Number(stats.data.total)}
+              urgentCount={Number(stats.data.urgentCount)}
+            />
           </CardContent>
         </Card>
       )}
@@ -91,12 +88,12 @@ function FeedbackPage() {
         onQ={setQInput}
       />
 
-      <Card className="mt-4">
-        <CardHeader>
+      <Card className="mt-4 gap-0 overflow-hidden rounded-lg border-border/60 py-0 shadow-none">
+        <CardHeader className="border-b border-border/60 bg-muted/20 px-4 py-3">
           <CardTitle>{t('nav.feedback')}</CardTitle>
           <CardDescription>{total}</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-0">
           {list.isPending ? (
             <Loading />
           ) : items.length > 0 ? (
@@ -162,7 +159,7 @@ function FilterBar({
             value={attrFilters[d.name] || '__all'}
             onValueChange={(v) => onAttrChange(d.name, v)}
           >
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="min-w-[10rem] max-w-[14rem] flex-1 sm:flex-none">
               <SelectValue placeholder={displayOf(d.displayName) || d.name} />
             </SelectTrigger>
             <SelectContent>
@@ -182,7 +179,7 @@ function FilterBar({
         placeholder={t('feedback.filter.search_placeholder')}
         value={q}
         onChange={(e) => onQ(e.target.value)}
-        className="max-w-[280px]"
+        className="min-w-[14rem] flex-1 sm:max-w-[280px]"
       />
     </div>
   )
@@ -200,50 +197,52 @@ function FeedbackTable({
   const { t } = useTranslation()
   const displayOf = useDisplayName()
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{t('feedback.table.title')}</TableHead>
-          {dims.map((d) => (
-            <TableHead key={d.name} className="w-[140px]">
-              {displayOf(d.displayName) || d.name}
-            </TableHead>
-          ))}
-          <TableHead className="w-[120px]">{t('feedback.table.user')}</TableHead>
-          <TableHead className="w-[120px]">{t('feedback.table.time')}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
+    <div>
+      <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(18rem,1.8fr)_7rem_7rem] gap-4 border-b border-border/60 px-4 py-2 text-[11px] font-medium text-muted-foreground max-lg:hidden">
+        <div>{t('feedback.table.title')}</div>
+        <div>{dims.map((d) => displayOf(d.displayName) || d.name).join(' / ')}</div>
+        <div>{t('feedback.table.user')}</div>
+        <div>{t('feedback.table.time')}</div>
+      </div>
+      <div className="divide-y divide-border/60">
         {items.map((f) => (
-          <TableRow
+          <button
+            type="button"
             key={f.id}
             onClick={() => onRowClick(f.id)}
-            className="cursor-pointer hover:bg-muted/40"
+            className="grid w-full gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/25 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,1.8fr)_7rem_7rem]"
           >
-            <TableCell className="max-w-[28rem]">
-              <div className="flex items-center gap-1 truncate font-medium">
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2 font-medium">
                 <UrgentDot urgent={f.isUrgent} />
-                {f.enrichedTitle || `#${f.id}`}
+                <span className="truncate">{f.enrichedTitle || `#${f.id}`}</span>
               </div>
               <div className="truncate text-xs text-muted-foreground">{f.content}</div>
-            </TableCell>
-            {dims.map((d) => (
-              <TableCell key={d.name}>
-                <DimensionChips
-                  dim={d}
-                  value={(f.enrichedAttrs as Record<string, unknown> | undefined)?.[d.name]}
-                />
-              </TableCell>
-            ))}
-            <TableCell className="truncate font-mono text-xs text-muted-foreground">
+            </div>
+            <dl className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-x-3 gap-y-2">
+              {dims.map((d) => (
+                <div key={d.name} className="min-w-0">
+                  <dt className="mb-1 truncate text-[11px] text-muted-foreground lg:hidden">
+                    {displayOf(d.displayName) || d.name}
+                  </dt>
+                  <dd className="min-w-0">
+                    <DimensionChips
+                      dim={d}
+                      value={(f.enrichedAttrs as Record<string, unknown> | undefined)?.[d.name]}
+                    />
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <div className="truncate font-mono text-xs text-muted-foreground">
               {f.userId || '—'}
-            </TableCell>
-            <TableCell className="text-xs text-muted-foreground">
+            </div>
+            <div className="text-xs text-muted-foreground">
               {formatDistanceToNow(new Date(f.createdAt), { addSuffix: true, locale: zhCN })}
-            </TableCell>
-          </TableRow>
+            </div>
+          </button>
         ))}
-      </TableBody>
-    </Table>
+      </div>
+    </div>
   )
 }

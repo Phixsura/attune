@@ -34,7 +34,12 @@ func TestI18nProtoNilHandled(t *testing.T) {
 
 func TestTaxonomyProtoRoundTrip(t *testing.T) {
 	in := []domain.Taxonomy{
-		{Value: "critical", DisplayName: domain.I18nString{"default": "Critical", "zh": "严重"}},
+		{
+			Value:       "critical",
+			DisplayName: domain.I18nString{"default": "Critical", "zh": "严重"},
+			Description: domain.I18nString{"default": "High impact"},
+			Examples:    []string{"checkout down"},
+		},
 		{Value: "minor", DisplayName: domain.I18nString{"default": "Minor"}},
 	}
 	got := taxonomyFromProto(taxonomyToProto(in))
@@ -44,6 +49,9 @@ func TestTaxonomyProtoRoundTrip(t *testing.T) {
 	if got[0].Value != "critical" || got[0].DisplayName["zh"] != "严重" {
 		t.Errorf("entry 0 corrupted: %+v", got[0])
 	}
+	if got[0].Description["default"] != "High impact" || len(got[0].Examples) != 1 {
+		t.Errorf("semantic metadata lost: %+v", got[0])
+	}
 }
 
 func TestDimsProtoRoundTrip(t *testing.T) {
@@ -51,12 +59,21 @@ func TestDimsProtoRoundTrip(t *testing.T) {
 		{
 			Name:        "severity",
 			DisplayName: domain.I18nString{"default": "Severity", "zh": "严重程度"},
+			Description: domain.I18nString{"default": "Impact level"},
 			Kind:        domain.DimSingle,
 			Taxonomy: []domain.Taxonomy{
 				{Value: "critical", DisplayName: domain.I18nString{"default": "Critical"}},
 			},
-			UrgentSet: []string{"critical"},
-			Required:  true,
+			UrgentSet:      []string{"critical"},
+			Required:       true,
+			Examples:       []string{"critical: checkout is down"},
+			ExtractionHint: "Prefer critical only for blocked core flows.",
+			Renderer: domain.RendererSpec{
+				Kind: "enum_badge",
+				Values: map[string]domain.RendererValue{
+					"critical": {Icon: "flame", Tone: "danger"},
+				},
+			},
 		},
 		{
 			Name:        "labels",
@@ -79,6 +96,12 @@ func TestDimsProtoRoundTrip(t *testing.T) {
 	}
 	if !got[0].Required {
 		t.Error("required flag lost")
+	}
+	if got[0].Description["default"] != "Impact level" || got[0].ExtractionHint == "" {
+		t.Errorf("semantic dim metadata lost: %+v", got[0])
+	}
+	if got[0].Renderer.Kind != "enum_badge" || got[0].Renderer.Values["critical"].Icon != "flame" {
+		t.Errorf("renderer lost: %+v", got[0].Renderer)
 	}
 	if got[1].Kind != domain.DimMulti {
 		t.Errorf("dim 1 kind: %v", got[1].Kind)

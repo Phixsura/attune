@@ -18,7 +18,7 @@ import (
 
 // seedTenantAndRow inserts a tenant + a pending user_feedback row,
 // returning the row id. The tenant is the demo seed shape, so the
-// migration's column DEFAULT plants the standard 3-dim configuration.
+// migration's column DEFAULT plants the standard semantic dimensions.
 func seedTenantAndRow(t *testing.T, pool *pgxpool.Pool, content string) (tenantID string, rowID int64) {
 	t.Helper()
 	ctx := context.Background()
@@ -49,22 +49,42 @@ func TestPG_MigrationSeedsDefaultDims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var dims []map[string]any
+	var dims domain.DimensionSet
 	if err := json.Unmarshal(dimsRaw, &dims); err != nil {
 		t.Fatal(err)
 	}
-	if len(dims) != 3 {
-		t.Fatalf("expected 3 default dims, got %d", len(dims))
+	if len(dims) != 4 {
+		t.Fatalf("expected 4 default dims, got %d", len(dims))
+	}
+	if err := dims.Validate(); err != nil {
+		t.Fatalf("seeded dimensions must validate: %v", err)
 	}
 	names := []string{}
 	for _, d := range dims {
-		names = append(names, d["name"].(string))
+		names = append(names, d.Name)
 	}
-	want := map[string]bool{"type": true, "severity": true, "labels": true}
+	want := map[string]bool{"type": true, "severity": true, "sentiment": true, "labels": true}
 	for _, n := range names {
 		if !want[n] {
 			t.Errorf("unexpected default dim: %s", n)
 		}
+	}
+	pack := domain.CustomerFeedbackPackV1()
+	if pack.Name != feedback.DefaultDomainPack {
+		t.Fatalf("domain pack constant drift: %s != %s", pack.Name, feedback.DefaultDomainPack)
+	}
+	sentiment, ok := dims.ByName("sentiment")
+	if !ok {
+		t.Fatal("sentiment dim missing")
+	}
+	packSentiment, ok := pack.Dimensions.ByName("sentiment")
+	if !ok {
+		t.Fatal("pack sentiment dim missing")
+	}
+	if sentiment.DisplayName["default"] != packSentiment.DisplayName["default"] ||
+		sentiment.Renderer.Kind != packSentiment.Renderer.Kind ||
+		len(sentiment.Taxonomy) != len(packSentiment.Taxonomy) {
+		t.Fatalf("seeded sentiment drifted from pack: got=%+v want=%+v", sentiment, packSentiment)
 	}
 }
 

@@ -60,6 +60,12 @@ type Enricher struct {
 	targets  *notifytarget.NotifyTargetRepo // optional, paired with outbox
 }
 
+type classifyResult struct {
+	Enriched          domain.Enriched
+	DropDiagnostics   []domain.AttrDropDiagnostic
+	DroppedAttrsAudit map[string]any
+}
+
 // NewEnricher takes the resolved enrichment model id (from config —
 // FEEDBACK_API_LLM_MODEL env / yaml `llm_model` / DefaultLLMModel) so
 // operators pointing at private gateways with aliased model names
@@ -148,12 +154,13 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 	start := time.Now()
 	cfg := classifyConfigFromRow(row)
 	mode := dimsMode(cfg)
-	enriched, err := e.classify(ctx, id, row.Content, cfg)
+	result, err := e.classify(ctx, id, row.Content, cfg)
 	if err != nil {
 		metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, classifyErrResult(err)).
 			Observe(time.Since(start).Seconds())
 		return err
 	}
+	enriched := result.Enriched
 	// Observe attrs payload size before persistence so the histogram
 	// captures every classification attempt, even ones rejected by the
 	// per-row size cap downstream.
@@ -161,7 +168,8 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 		metrics.EnrichAttrsSizeBytes.WithLabelValues(row.TenantID).Observe(float64(size))
 	}
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
-	if err := e.persistEnriched(ctx, snapshot, enriched); err != nil {
+	run := e.semanticRun(snapshot, cfg, result)
+	if err := e.persistEnriched(ctx, snapshot, enriched, ptrext.Of(run)); err != nil {
 		if errors.Is(err, feedback.ErrAttrsTooLarge) {
 			metrics.EnrichAttrsRejectedTotal.WithLabelValues(row.TenantID).Inc()
 		}
@@ -191,6 +199,14 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 // — that keeps routing under operator control and deterministic
 // across retries.
 func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyConfig) (domain.Enriched, error) {
+	result, err := e.classifyWithDiagnostics(ctx, content, cfg)
+	if err != nil {
+		return domain.Enriched{}, err
+	}
+	return result.Enriched, nil
+}
+
+func (e *Enricher) classifyWithDiagnostics(ctx context.Context, content string, cfg ClassifyConfig) (classifyResult, error) {
 	const where = "service.Enricher.Classify"
 	prompt := renderPrompt(cfg, content)
 	req := llmclient.CompletionRequest{
@@ -214,29 +230,34 @@ func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyCon
 	if err != nil {
 		logext.Errorf(ctx, "[%s] llm.Complete failed,model:%s,err:%+v",
 			where, e.model, err.Error())
-		return domain.Enriched{}, fmt.Errorf("llm: %w", err)
+		return classifyResult{}, fmt.Errorf("llm: %w", err)
 	}
 	parsed, err := parseEnrichJSON(resp.Text)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] parse failed,err:%s", where, err.Error())
-		return domain.Enriched{}, fmt.Errorf("parse: %w", err)
+		return classifyResult{}, fmt.Errorf("parse: %w", err)
 	}
 	tenant := cfg.TenantID
 	if tenant == "" {
 		tenant = "unknown"
 	}
-	parsed.Attrs = applyAttrsGate(ctx, tenant, parsed.Attrs, cfg.Dimensions)
+	kept, dropped := applyAttrsGate(ctx, tenant, parsed.Attrs, cfg.Dimensions)
+	parsed.Attrs = kept
 	parsed.IsUrgent = domain.ComputeIsUrgent(parsed.Attrs, cfg.Dimensions)
-	return parsed, nil
+	return classifyResult{
+		Enriched:          parsed,
+		DropDiagnostics:   dropped,
+		DroppedAttrsAudit: droppedAttrsAudit(dropped),
+	}, nil
 }
 
 // classify calls Classify and, on failure, marks the row 'failed' so the
 // next sweep won't retry immediately. Used by the main enricher loop.
-func (e *Enricher) classify(ctx context.Context, id int64, content string, cfg ClassifyConfig) (domain.Enriched, error) {
-	parsed, err := e.Classify(ctx, content, cfg)
+func (e *Enricher) classify(ctx context.Context, id int64, content string, cfg ClassifyConfig) (classifyResult, error) {
+	parsed, err := e.classifyWithDiagnostics(ctx, content, cfg)
 	if err != nil {
 		e.repo.MarkFailed(ctx, id, err.Error())
-		return domain.Enriched{}, err
+		return classifyResult{}, err
 	}
 	return parsed, nil
 }
@@ -254,15 +275,23 @@ func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {
 
 // applyAttrsGate runs gate (2) per dim and records observability for
 // off-list values. Returns the canonical kept attrs.
-func applyAttrsGate(ctx context.Context, tenantID string, produced map[string]any, dims domain.DimensionSet) map[string]any {
+func applyAttrsGate(
+	ctx context.Context,
+	tenantID string,
+	produced map[string]any,
+	dims domain.DimensionSet,
+) (map[string]any, []domain.AttrDropDiagnostic) {
 	const where = "service.Enricher.applyAttrsGate"
-	kept, dropped, suggested := domain.FilterAttrs(produced, dims)
-	if len(dropped) == 0 {
-		return kept
+	kept, diagnostics, suggested := domain.FilterAttrsWithDiagnostics(produced, dims)
+	if len(diagnostics) == 0 {
+		return kept, nil
 	}
-	for dim, n := range dropped {
-		for i := 0; i < n; i++ {
-			metrics.EnrichAttrsDroppedTotal.WithLabelValues(tenantID, dim).Inc()
+	for _, diag := range diagnostics {
+		if diag.Reason == domain.AttrDropUnknownDimension {
+			continue
+		}
+		for i := 0; i < diag.Count; i++ {
+			metrics.EnrichAttrsDroppedTotal.WithLabelValues(tenantID, diag.Dim).Inc()
 		}
 	}
 	seen := make(map[string]bool, len(suggested))
@@ -274,8 +303,15 @@ func applyAttrsGate(ctx context.Context, tenantID string, produced map[string]an
 		metrics.EnrichSuggestedAttrsTotal.WithLabelValues(tenantID, dim).Inc()
 	}
 	logext.Infof(ctx, "[%s] suggested,tenant_id:%s,dropped:%v",
-		where, tenantID, dropped)
-	return kept
+		where, tenantID, diagnostics)
+	return kept, diagnostics
+}
+
+func droppedAttrsAudit(diagnostics []domain.AttrDropDiagnostic) map[string]any {
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	return map[string]any{"diagnostics": diagnostics}
 }
 
 // fanOut pushes a freshly enriched snapshot to the snapshot of `notifier`

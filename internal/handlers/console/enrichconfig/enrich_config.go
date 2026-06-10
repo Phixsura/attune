@@ -41,12 +41,16 @@ func dimsToProto(dims domain.DimensionSet) []*attunev1.Dimension {
 	out := make([]*attunev1.Dimension, 0, len(dims))
 	for _, d := range dims {
 		out = append(out, ptrext.Of(attunev1.Dimension{
-			Name:        d.Name,
-			DisplayName: i18nToProto(d.DisplayName),
-			Kind:        string(d.Kind),
-			Taxonomy:    taxonomyToProto(d.Taxonomy),
-			UrgentSet:   d.UrgentSet,
-			Required:    d.Required,
+			Name:           d.Name,
+			DisplayName:    i18nToProto(d.DisplayName),
+			Description:    i18nToProto(d.Description),
+			Kind:           string(d.Kind),
+			Taxonomy:       taxonomyToProto(d.Taxonomy),
+			UrgentSet:      d.UrgentSet,
+			Required:       d.Required,
+			Examples:       d.Examples,
+			ExtractionHint: d.ExtractionHint,
+			Renderer:       rendererToProto(d.Renderer),
 		}))
 	}
 	return out
@@ -61,9 +65,25 @@ func taxonomyToProto(tax []domain.Taxonomy) []*attunev1.Taxonomy {
 		out = append(out, ptrext.Of(attunev1.Taxonomy{
 			Value:       t.Value,
 			DisplayName: i18nToProto(t.DisplayName),
+			Description: i18nToProto(t.Description),
+			Examples:    t.Examples,
 		}))
 	}
 	return out
+}
+
+func rendererToProto(r domain.RendererSpec) *attunev1.RendererSpec {
+	if r.Kind == "" && len(r.Values) == 0 {
+		return nil
+	}
+	values := make(map[string]*attunev1.RendererValue, len(r.Values))
+	for k, v := range r.Values {
+		values[k] = ptrext.Of(attunev1.RendererValue{
+			Icon: v.Icon,
+			Tone: v.Tone,
+		})
+	}
+	return ptrext.Of(attunev1.RendererSpec{Kind: r.Kind, Values: values})
 }
 
 func i18nToProto(s domain.I18nString) *attunev1.I18NString {
@@ -96,12 +116,16 @@ func dimsFromProto(in []*attunev1.Dimension) (domain.DimensionSet, error) {
 				i, d.GetKind(), domain.ErrDimensionKindInvalid)
 		}
 		out = append(out, domain.Dimension{
-			Name:        d.GetName(),
-			DisplayName: i18nFromProto(d.GetDisplayName()),
-			Kind:        kind,
-			Taxonomy:    taxonomyFromProto(d.GetTaxonomy()),
-			UrgentSet:   d.GetUrgentSet(),
-			Required:    d.GetRequired(),
+			Name:           d.GetName(),
+			DisplayName:    i18nFromProto(d.GetDisplayName()),
+			Description:    i18nFromProto(d.GetDescription()),
+			Kind:           kind,
+			Taxonomy:       taxonomyFromProto(d.GetTaxonomy()),
+			UrgentSet:      d.GetUrgentSet(),
+			Required:       d.GetRequired(),
+			Examples:       d.GetExamples(),
+			ExtractionHint: d.GetExtractionHint(),
+			Renderer:       rendererFromProto(d.GetRenderer()),
 		})
 	}
 	return out, nil
@@ -116,9 +140,25 @@ func taxonomyFromProto(in []*attunev1.Taxonomy) []domain.Taxonomy {
 		out = append(out, domain.Taxonomy{
 			Value:       t.GetValue(),
 			DisplayName: i18nFromProto(t.GetDisplayName()),
+			Description: i18nFromProto(t.GetDescription()),
+			Examples:    t.GetExamples(),
 		})
 	}
 	return out
+}
+
+func rendererFromProto(in *attunev1.RendererSpec) domain.RendererSpec {
+	if in == nil {
+		return domain.RendererSpec{}
+	}
+	values := make(map[string]domain.RendererValue, len(in.GetValues()))
+	for k, v := range in.GetValues() {
+		values[k] = domain.RendererValue{
+			Icon: v.GetIcon(),
+			Tone: v.GetTone(),
+		}
+	}
+	return domain.RendererSpec{Kind: in.GetKind(), Values: values}
 }
 
 func i18nFromProto(in *attunev1.I18NString) domain.I18nString {

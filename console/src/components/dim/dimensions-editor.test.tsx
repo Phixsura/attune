@@ -10,6 +10,7 @@ function makeTax(over: Partial<Taxonomy> = {}): Taxonomy {
   return {
     value: 'P0',
     displayName: { entries: { default: 'P0' } },
+    examples: [],
     ...over,
   } as Taxonomy
 }
@@ -22,6 +23,8 @@ function makeDim(over: Partial<Dimension> = {}): Dimension {
     taxonomy: [],
     urgentSet: [],
     required: false,
+    examples: [],
+    extractionHint: '',
     ...over,
   } as Dimension
 }

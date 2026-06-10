@@ -66,6 +66,9 @@ enum ErrorCode {
   TAXONOMY_VALUE_DUP     = 31;
   TAXONOMY_DISPLAY_EMPTY = 32;
   URGENT_NOT_IN_TAXONOMY = 33;
+  RENDERER_KIND_INVALID   = 41;
+  RENDERER_VALUE_INVALID  = 42;
+  RENDERER_TARGET_INVALID = 43;
 }
 
 // ErrorResponse is the JSON body returned on any 4xx/5xx across attune's HTTP
@@ -108,6 +111,27 @@ message I18nString {
 message Taxonomy {
   string value = 1;
   I18nString display_name = 2;
+  // Optional model/operator definition of this stable value.
+  I18nString description = 3;
+  // Short extraction examples for this value.
+  repeated string examples = 4;
+}
+
+// RendererValue configures one taxonomy value under a RendererSpec.
+message RendererValue {
+  // Generic icon key understood by the console renderer, e.g. "smile".
+  string icon = 1;
+  // Generic visual tone key, e.g. "success" / "warning" / "danger".
+  string tone = 2;
+}
+
+// RendererSpec is optional presentation metadata attached to a Dimension.
+// The console implements generic renderer kinds and does not need to know
+// domain-specific dimension names.
+message RendererSpec {
+  // e.g. "enum_badge".
+  string kind = 1;
+  map<string, RendererValue> values = 2;
 }
 
 // Dimension is one enrichment axis the LLM populates for each row.
@@ -128,4 +152,12 @@ message Dimension {
   repeated string urgent_set = 5;
   // When true, the LLM's JSON schema marks this property required.
   bool required = 6;
+  // Optional model/operator definition of this dimension.
+  I18nString description = 7;
+  // Short extraction examples for this dimension.
+  repeated string examples = 8;
+  // Concise model-facing instruction for tricky boundaries.
+  string extraction_hint = 9;
+  // Optional generic presentation metadata.
+  RendererSpec renderer = 10;
 }

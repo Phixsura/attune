@@ -61,6 +61,7 @@ func TestPG_IngestEnrichQueuesAndDrainsOutbox(t *testing.T) {
 	assertFeedbackDone(t, ctx, pool, id, rawContent)
 	assertLLMReceivedRedactedPrompt(t, llm)
 	assertOutboxStatus(t, ctx, pool, id, outboxrepo.OutboxStatusPending)
+	assertSemanticRun(t, ctx, pool, id)
 
 	worker := outboxsvc.NewOutboxWorker(
 		outboxrepo.NewOutbox(pool),
@@ -145,10 +146,12 @@ func (f *fakeLLM) Complete(_ context.Context, req llmclient.CompletionRequest) (
 	return llmclient.CompletionResponse{Text: `{
 		"title":"Payment submit fails",
 		"rationale":"The user reports a checkout-breaking error.",
-		"type":"bug",
-		"severity":"critical",
-		"labels":["payment"]
-	}`}, nil
+			"type":"bug",
+			"severity":"critical",
+			"sentiment":"frustrated",
+			"labels":["payment","sales"],
+			"buyer_intent":"renewal"
+		}`}, nil
 }
 
 func (f *fakeLLM) Close() error { return nil }
@@ -237,6 +240,46 @@ func assertFeedbackDone(t *testing.T, ctx context.Context, pool *pgxpool.Pool, i
 	}
 	if content != wantContent {
 		t.Fatalf("raw content changed: got %q want %q", content, wantContent)
+	}
+}
+
+func assertSemanticRun(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id int64) {
+	t.Helper()
+	var pack string
+	var model string
+	var attrsRaw []byte
+	var droppedRaw []byte
+	if err := pool.QueryRow(ctx, `
+		SELECT domain_pack, model, attrs, dropped_attrs
+		FROM semantic_extraction_runs
+		WHERE subject_type = 'feedback' AND subject_id = $1`, id,
+	).Scan(&pack, &model, &attrsRaw, &droppedRaw); err != nil {
+		t.Fatalf("load semantic run: %v", err)
+	}
+	if pack != feedback.DefaultDomainPack || model != "fake-model" {
+		t.Fatalf("semantic run provenance: pack=%s model=%s", pack, model)
+	}
+	var attrs map[string]any
+	if err := json.Unmarshal(attrsRaw, &attrs); err != nil {
+		t.Fatal(err)
+	}
+	if attrs["sentiment"] != "frustrated" || attrs["severity"] != "critical" {
+		t.Fatalf("semantic attrs: %v", attrs)
+	}
+	var dropped map[string][]domain.AttrDropDiagnostic
+	if err := json.Unmarshal(droppedRaw, &dropped); err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := dropped["diagnostics"]
+	if len(diagnostics) != 1 {
+		t.Fatalf("dropped diagnostics: %s", string(droppedRaw))
+	}
+	reasons := map[string]string{}
+	for _, diag := range diagnostics {
+		reasons[diag.Dim] = diag.Reason
+	}
+	if reasons["buyer_intent"] != domain.AttrDropUnknownDimension {
+		t.Fatalf("unknown diagnostic missing: %+v", diagnostics)
 	}
 }
 
