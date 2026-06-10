@@ -152,6 +152,26 @@ var TriageDecisionsTotal = prometheus.NewCounterVec(
 	[]string{"tenant", "decision"},
 )
 
+// GuardActionsTotal counts safe, bounded guard actions at LLM/outbound
+// boundaries. It records only entity/action counts — never matched text.
+var GuardActionsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_guard_actions_total",
+		Help: "Guard actions applied at AI and outbound boundaries.",
+	},
+	[]string{"tenant", "stage", "guard", "entity", "action"},
+)
+
+// GuardBlockedTotal counts guard decisions that block an operation before
+// calling an external model or destination.
+var GuardBlockedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_guard_blocked_total",
+		Help: "Operations blocked by guard policies.",
+	},
+	[]string{"tenant", "stage", "guard", "reason"},
+)
+
 // allMetrics is the registered set — the single source of truth that init()
 // registers and the drift-guard test checks against the documented reference
 // (observability/README.md). Add a metric here AND to that reference together.
@@ -167,6 +187,8 @@ var allMetrics = []prometheus.Collector{
 	ClaimContentionTotal,
 	IngestRateLimitTotal,
 	TriageDecisionsTotal,
+	GuardActionsTotal,
+	GuardBlockedTotal,
 }
 
 func init() {

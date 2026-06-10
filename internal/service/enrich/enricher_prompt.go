@@ -60,6 +60,9 @@ func DefaultPromptTemplate() string { return defaultPromptTmpl }
 // it, in which case dim guidance is left to the model.
 type ClassifyConfig struct {
 	TenantID       string
+	Channel        string
+	SourceID       string
+	SourceTags     []string
 	PromptTemplate *string
 	Dimensions     domain.DimensionSet
 }

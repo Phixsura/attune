@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -45,15 +46,17 @@ func (r *FeedbackRepo) Insert(ctx context.Context, tenantID, userID string, in d
 		}
 		sourceMetaJSON = b
 	}
+	inboundSourceID := inboundSourceIDFromMeta(in.SourceMeta)
 	var id int64
 	err := r.pool.QueryRow(
 		ctx, `
 		INSERT INTO user_feedback
-		 (user_id, tenant_id, type, content, page_url, attachments, source, source_meta)
+		 (user_id, tenant_id, type, content, page_url, attachments, source, source_meta, inbound_source_id)
 		VALUES
-		 ($1, $2, 'other', $3, $4, '[]'::jsonb, $5, $6)
+		 ($1, $2, 'other', $3, $4, '[]'::jsonb, $5, $6,
+		  (SELECT id FROM inbound_sources WHERE id = $7 AND tenant_id = $2 AND channel = $5))
 		RETURNING id`,
-		userID, tenantID, in.Content, in.PageURL, in.Source, sourceMetaJSON,
+		userID, tenantID, in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
 	).Scan(&id)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,source:%s,err:%+v",
@@ -94,13 +97,15 @@ func (r *FeedbackRepo) TryClaim(ctx context.Context, id int64) (bool, error) {
 // Snapshot.SubmittedAt into outbound envelopes (#82) so consumers see
 // the real timeline instead of an enrichment-delayed timestamp.
 type EnrichInput struct {
-	Content        string
-	Source         string
-	UserID         string
-	TenantID       string
-	CreatedAt      time.Time
-	PromptTemplate *string
-	Dimensions     domain.DimensionSet
+	Content         string
+	Source          string
+	UserID          string
+	TenantID        string
+	CreatedAt       time.Time
+	InboundSourceID string
+	SourceTags      []string
+	PromptTemplate  *string
+	Dimensions      domain.DimensionSet
 }
 
 // LoadForEnrich returns the columns the LLM prompt and the downstream
@@ -111,20 +116,26 @@ type EnrichInput struct {
 // import the tenant repo.
 func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInput, error) {
 	var (
-		in      EnrichInput
-		dimsRaw []byte
+		in            EnrichInput
+		dimsRaw       []byte
+		inboundSource *uuid.UUID
 	)
 	err := r.pool.QueryRow(
 		ctx,
 		`SELECT uf.content, uf.source, uf.user_id, uf.tenant_id, uf.created_at,
+		 uf.inbound_source_id, COALESCE(src.tags, '{}'::text[]),
 		 t.enrich_prompt_template, t.enrich_dimensions
 		 FROM user_feedback uf
 		 LEFT JOIN tenants t ON t.id = uf.tenant_id
+		 LEFT JOIN inbound_sources src ON src.id = uf.inbound_source_id
 		 WHERE uf.id = $1`, id,
 	).Scan(&in.Content, &in.Source, &in.UserID, &in.TenantID, &in.CreatedAt,
-		&in.PromptTemplate, &dimsRaw)
+		&inboundSource, &in.SourceTags, &in.PromptTemplate, &dimsRaw)
 	if err != nil {
 		return nil, fmt.Errorf("load feedback %d: %w", id, err)
+	}
+	if inboundSource != nil {
+		in.InboundSourceID = inboundSource.String()
 	}
 	if len(dimsRaw) > 0 {
 		if err := json.Unmarshal(dimsRaw, &in.Dimensions); err != nil {
@@ -132,6 +143,21 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 		}
 	}
 	return ptrext.Of(in), nil
+}
+
+func inboundSourceIDFromMeta(meta map[string]any) *uuid.UUID {
+	if meta == nil {
+		return nil
+	}
+	raw, ok := meta[domain.SourceMetaInboundSourceID].(string)
+	if !ok || raw == "" {
+		return nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil
+	}
+	return ptrext.Of(id)
 }
 
 // markDoneSQL is the body of MarkDone[/Tx]. Extracted so both flavors

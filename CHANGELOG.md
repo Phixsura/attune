@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Source-aware LLM guard policy foundation (#20).** Adds a
+  `guard_policies` ruleset table, `internal/infra/llmguard` LLMClient wrapper,
+  DB-backed policy resolver, Console API endpoints for per-policy
+  create/patch/delete plus tenant bulk replace and effective-policy preview,
+  bounded guard metrics, and a standalone `docs/guardrails.md` maintenance
+  guide. Guard policies resolve by tenant, channel, source, source tags,
+  purpose, and stage with `baseline` / `default` / `override` semantics; YAML
+  remains bootstrap-only rather than the long-term policy store.
 - **PostgreSQL integration tier (#12).** Adds a dual-mode
   `internal/testdb` harness: CI runs `make test-integration` against a
   GitHub Actions `postgres:18` service container, while local runs fall
@@ -134,6 +142,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **Console settings now owns configuration navigation.** The top navigation
+  keeps daily-use Feedback, Usage, and Settings entries in that order, while
+  `/settings` exposes an in-page sidebar for AI classification, Guardrails,
+  inbound sources, notify targets, and API key management instead of sending
+  those configuration workflows out to standalone pages.
 - **Error response codes are now proto-owned UPPER_SNAKE names.** `ErrorResponse.code` remains a string field for protobuf compatibility, but values are normalized from previous lower_snake strings such as `validation` / `bad_request` to `VALIDATION` / `BAD_REQUEST` via `attune.v1.ErrorCode`. Pre-1.0 breaking change for clients that switch on the `code` string.
 
 - **CI now verifies downloaded `buf` binaries by SHA-256 and ignores generated protobuf Go in the duplication gate.** The `jscpd` gate scans hand-written Go with `**/*.pb.go` excluded, keeping generated code noise out of the duplication signal.
@@ -205,6 +218,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Console dev login now respects the Vite basepath.** Local admin login and
+  logout route to `/` / `/login` in Vite dev and `/console/` /
+  `/console/login` in production, avoiding a post-login Not Found during
+  browser smoke tests.
 - **CodeQL `go/allocation-size-overflow` on AES-GCM encrypt paths**
   (#66 / commit `e6142cc`). The `internal/inbound/secrets.go` and
   `internal/inbound/inboundtest/fakes.go` Encrypt functions now bound
@@ -216,6 +233,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Security
 
+- **PII guardrails now redact sensitive feedback before LLM calls (#20).**
+  Migration `018_guard_policies.sql` seeds a system `default` policy for
+  `purpose=enrich` / `stage=llm_input` that redacts email, phone, Chinese
+  mobile, Chinese ID, and Luhn-validated credit-card entities before provider
+  calls. The canonical `user_feedback.content` row remains the original
+  user-submitted text; guard logs and metrics record only bounded entity/action
+  counts, never raw matched values. Because the seeded policy is a default and
+  not a baseline, tenants/sources can later relax it for trusted local LLM paths
+  or tighten it with blocking policies for regulated sources. Public API-key
+  ingest strips reserved inbound-source metadata so clients cannot spoof a
+  trusted source override, and LLM parse failures no longer persist or log raw
+  model output.
 - **#66 hardening pass (1 BLOCKER + 6 HIGH + 8 MEDIUM after Phase-4
   Chrome E2E)**.
   - Email adapter Shutdown now honours the per-adapter timeout —

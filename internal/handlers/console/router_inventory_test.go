@@ -14,6 +14,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
+	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
 	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
@@ -37,6 +38,7 @@ func TestRouterInventory(t *testing.T) {
 		feedback:       &feedback.FeedbackHandler{},
 		usage:          &usage.UsageHandler{},
 		enrichConfig:   &enrichconfig.Handler{},
+		guardPolicies:  &consoleguardpolicy.Handler{},
 		inbound:        &consoleinbound.Handler{},
 	}).Mount()
 
@@ -67,6 +69,12 @@ func TestRouterInventory(t *testing.T) {
 		"GET /enrich-config/",
 		"PUT /enrich-config/",
 		"POST /enrich-config/preview",
+		"GET /guard-policies/",
+		"POST /guard-policies/",
+		"PUT /guard-policies/",
+		"PATCH /guard-policies/{id}",
+		"DELETE /guard-policies/{id}",
+		"POST /guard-policies/effective",
 		"GET /inbound/sources/",
 		"POST /inbound/sources/",
 		"POST /inbound/sources/test-connection",

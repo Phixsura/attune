@@ -5,12 +5,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { type ApiError, api } from '@/lib/api-client'
+import { consolePath, routePathFromConsoleRedirect } from '@/lib/console-path'
 import type { LoginRequest, LoginResponse } from '@/proto/attune/v1/session'
 
 // Login is local-admin email + password (#66 replaces the external
 // OAuth button). The form POSTs JSON to /fb/v1/console/install/login; on
-// success the server returns { redirect: "/console/..." } which we
-// honour (or fall back to /console/).
+// success the server returns { redirect: "/console/..." } in production
+// or the dev-local route when Vite serves the SPA without a /console base.
 //
 // Body + response shapes come from the generated proto types
 // (proto/attune/v1/session.proto → console/src/proto/attune/v1/session.ts):
@@ -51,13 +52,13 @@ function LoginPage() {
       const body: LoginRequest = {
         email,
         password,
-        redirectUri: redirect ?? '/console/',
+        redirectUri: redirect ?? consolePath('/'),
       }
       const data = await api<LoginResponse>('/fb/v1/console/install/login', {
         method: 'POST',
         body,
       })
-      await navigate({ to: data.redirect || '/console/' })
+      await navigate({ to: routePathFromConsoleRedirect(data.redirect || consolePath('/')) })
     } catch (err) {
       const apiErr = err as ApiError
       setRequestId(apiErr.requestId)

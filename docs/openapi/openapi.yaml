@@ -224,6 +224,153 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/guard-policies:
+        get:
+            tags:
+                - GuardPolicyService
+            description: GET /fb/v1/console/guard-policies
+            operationId: GuardPolicyService_ListGuardPolicies
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListGuardPoliciesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        put:
+            tags:
+                - GuardPolicyService
+            description: PUT /fb/v1/console/guard-policies — replace current tenant policies.
+            operationId: GuardPolicyService_UpdateGuardPolicies
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateGuardPoliciesRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateGuardPoliciesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - GuardPolicyService
+            description: POST /fb/v1/console/guard-policies — create one tenant policy.
+            operationId: GuardPolicyService_CreateGuardPolicy
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateGuardPolicyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GuardPolicy'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/guard-policies/effective:
+        post:
+            tags:
+                - GuardPolicyService
+            description: POST /fb/v1/console/guard-policies/effective — preview resolved rules.
+            operationId: GuardPolicyService_ResolveGuardPolicy
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ResolveGuardPolicyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ResolveGuardPolicyResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/guard-policies/{id}:
+        delete:
+            tags:
+                - GuardPolicyService
+            description: DELETE /fb/v1/console/guard-policies/{id}
+            operationId: GuardPolicyService_DeleteGuardPolicy
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteGuardPolicyResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        patch:
+            tags:
+                - GuardPolicyService
+            description: PATCH /fb/v1/console/guard-policies/{id} — replace one tenant policy.
+            operationId: GuardPolicyService_PatchGuardPolicy
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PatchGuardPolicyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GuardPolicy'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/inbound/sources:
         get:
             tags:
@@ -791,6 +938,11 @@ components:
                 secret:
                     type: string
                     description: The raw secret — returned only here, once, at creation.
+        CreateGuardPolicyRequest:
+            type: object
+            properties:
+                policy:
+                    $ref: '#/components/schemas/GuardPolicy'
         CreateInboundSourceRequest:
             required:
                 - channel
@@ -841,6 +993,9 @@ components:
                 disabled:
                     type: boolean
         DeleteApiKeyResponse:
+            type: object
+            properties: {}
+        DeleteGuardPolicyResponse:
             type: object
             properties: {}
         DeleteInboundSourceResponse:
@@ -1085,6 +1240,72 @@ components:
                     description: The type of the serialized message.
             additionalProperties: true
             description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message.
+        GuardPolicy:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                name:
+                    type: string
+                kind:
+                    type: string
+                enabled:
+                    type: boolean
+                priority:
+                    type: integer
+                    format: int32
+                target:
+                    $ref: '#/components/schemas/GuardTarget'
+                rules:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GuardRule'
+                scope:
+                    type: string
+        GuardRule:
+            type: object
+            properties:
+                guard:
+                    type: string
+                stage:
+                    type: string
+                entities:
+                    type: array
+                    items:
+                        type: string
+                action:
+                    type: string
+                replacement:
+                    type: string
+        GuardTarget:
+            type: object
+            properties:
+                channels:
+                    type: array
+                    items:
+                        type: string
+                sourceIds:
+                    type: array
+                    items:
+                        type: string
+                sourceTags:
+                    type: array
+                    items:
+                        type: string
+                purposes:
+                    type: array
+                    items:
+                        type: string
+                stages:
+                    type: array
+                    items:
+                        type: string
+                environments:
+                    type: array
+                    items:
+                        type: string
         I18nString:
             type: object
             properties:
@@ -1183,6 +1404,13 @@ components:
                         $ref: '#/components/schemas/Feedback'
                 nextCursor:
                     type: string
+        ListGuardPoliciesResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GuardPolicy'
         ListInboundSourcesResponse:
             type: object
             properties:
@@ -1243,6 +1471,13 @@ components:
                 lastError:
                     type: string
             description: NotifyTarget never carries the secret — it is write-only once stored.
+        PatchGuardPolicyRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                policy:
+                    $ref: '#/components/schemas/GuardPolicy'
         PauseInboundSourceRequest:
             type: object
             properties:
@@ -1260,6 +1495,28 @@ components:
             properties:
                 renderedPrompt:
                     type: string
+        ResolveGuardPolicyRequest:
+            type: object
+            properties:
+                channel:
+                    type: string
+                sourceId:
+                    type: string
+                sourceTags:
+                    type: array
+                    items:
+                        type: string
+                purpose:
+                    type: string
+                environment:
+                    type: string
+        ResolveGuardPolicyResponse:
+            type: object
+            properties:
+                rules:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GuardRule'
         ResumeInboundSourceRequest:
             type: object
             properties:
@@ -1388,6 +1645,20 @@ components:
             properties:
                 config:
                     $ref: '#/components/schemas/EnrichConfig'
+        UpdateGuardPoliciesRequest:
+            type: object
+            properties:
+                policies:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GuardPolicy'
+        UpdateGuardPoliciesResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GuardPolicy'
         UpdateNotifyTargetRequest:
             type: object
             properties:
@@ -1461,6 +1732,12 @@ tags:
          We do NOT generate server stubs — chi routing stays. The google.api.http
          annotation exists only so protoc-gen-openapi emits the REST path + operation
          into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
+    - name: GuardPolicyService
+      description: |-
+        GuardPolicyService manages tenant-scoped guard policies and effective-policy
+         previews for the Console. System policies are returned read-only by list and
+         participate in effective resolution, but tenant sessions only write
+         tenant-scoped rows.
     - name: InboundSourceService
       description: |-
         InboundSourceService manages a tenant's inbound source rows (#66

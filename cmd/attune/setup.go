@@ -19,12 +19,14 @@ import (
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	guardpolicyrepo "github.com/Phixsura/attune/internal/repo/guardpolicy"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	"github.com/Phixsura/attune/internal/service/enrich"
+	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
 )
 
 // buildLLMClient picks an LLM backend from cfg.LLMProtocol (#10):
@@ -196,10 +198,11 @@ func buildConsoleRouter(
 	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
 	usage := console.NewUsageHandler(feedbackRepo)
 	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
+	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool)))
 	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
 
 	return console.NewRouter(
 		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback, usage,
-		enrichConfig, inboundHandler,
+		enrichConfig, guardPolicies, inboundHandler,
 	).Mount(), nil
 }
