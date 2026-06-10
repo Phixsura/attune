@@ -14,6 +14,8 @@ import { defineConfig } from 'vitest/config'
 // In production a same-origin nginx serves /console/* statically and
 // /fb/v1/* through to attune — see attune/docs/2026-05-15-console-tech-stack.md.
 
+const apiTarget = process.env.ATTUNE_CONSOLE_API_TARGET ?? 'http://127.0.0.1:8090'
+
 export default defineConfig({
   // Prod nginx serves the SPA under /console/* — vite's asset URLs must
   // be path-prefixed accordingly. Dev keeps absolute "/" because the
@@ -43,7 +45,7 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/fb/v1': {
-        target: 'http://127.0.0.1:8090',
+        target: apiTarget,
         changeOrigin: false,
       },
     },
@@ -57,6 +59,7 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/testing/setup-tests.ts'],
+    testTimeout: 10_000,
     // pool: 'forks' (vitest 4 default) gives each test file its own
     // child process, so MSW server instances, navigator.clipboard
     // prototype patches, and api-client's module-level CSRF state

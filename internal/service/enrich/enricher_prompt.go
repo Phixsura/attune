@@ -116,6 +116,15 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 	b := ptrext.Of(strings.Builder{})
 	for _, d := range dims {
 		fmt.Fprintf(b, " // %s (%s)\n", d.Name, d.Kind)
+		if desc := i18nHint(d.Description); desc != "" {
+			fmt.Fprintf(b, " // meaning: %s\n", desc)
+		}
+		if d.ExtractionHint != "" {
+			fmt.Fprintf(b, " // guidance: %s\n", d.ExtractionHint)
+		}
+		if len(d.Examples) > 0 {
+			fmt.Fprintf(b, " // examples: %s\n", strings.Join(d.Examples, " | "))
+		}
 		if len(d.Taxonomy) == 0 {
 			if d.Kind == domain.DimMulti {
 				fmt.Fprintf(b, " \"%s\": [/* freeform: any short string labels */],\n", d.Name)
@@ -126,17 +135,12 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 		}
 		opts := make([]string, 0, len(d.Taxonomy))
 		for _, t := range d.Taxonomy {
-			hint := t.DisplayName.Resolve([]string{"en"})
-			if hint == "" || hint == t.Value {
+			hint := taxonomyHint(t)
+			if hint == "" {
 				opts = append(opts, fmt.Sprintf("%q", t.Value))
 				continue
 			}
-			zh := t.DisplayName.Resolve([]string{"zh"})
-			if zh != "" && zh != hint {
-				opts = append(opts, fmt.Sprintf("%q (%s | %s)", t.Value, hint, zh))
-			} else {
-				opts = append(opts, fmt.Sprintf("%q (%s)", t.Value, hint))
-			}
+			opts = append(opts, fmt.Sprintf("%q (%s)", t.Value, hint))
 		}
 		if d.Kind == domain.DimSingle {
 			fmt.Fprintf(b, " // pick one: %s\n", strings.Join(opts, " | "))
@@ -147,6 +151,35 @@ func renderDimensionsClause(dims domain.DimensionSet) string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func taxonomyHint(t domain.Taxonomy) string {
+	parts := make([]string, 0, 4+len(t.Examples))
+	if display := i18nHint(t.DisplayName); display != "" && display != t.Value {
+		parts = append(parts, display)
+	}
+	if desc := i18nHint(t.Description); desc != "" {
+		parts = append(parts, desc)
+	}
+	if len(t.Examples) > 0 {
+		parts = append(parts, "examples: "+strings.Join(t.Examples, " / "))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func i18nHint(s domain.I18nString) string {
+	en := s.Resolve([]string{"en"})
+	zh := s.Resolve([]string{"zh"})
+	switch {
+	case en != "" && zh != "" && en != zh:
+		return en + " | " + zh
+	case en != "":
+		return en
+	case zh != "":
+		return zh
+	default:
+		return ""
+	}
 }
 
 // buildEnrichSchema constructs the JSON Schema sent to the LLM for

@@ -11,11 +11,13 @@ const dims: Dimension[] = [
     displayName: { entries: { default: 'Severity', 'zh-CN': '严重程度' } },
     kind: 'single',
     taxonomy: [
-      { value: 'P0', displayName: { entries: { default: 'P0' } } },
-      { value: 'P1', displayName: { entries: { default: 'P1' } } },
+      { value: 'P0', displayName: { entries: { default: 'P0' } }, examples: [] },
+      { value: 'P1', displayName: { entries: { default: 'P1' } }, examples: [] },
     ],
     urgentSet: ['P0'],
     required: false,
+    examples: [],
+    extractionHint: '',
   },
 ]
 

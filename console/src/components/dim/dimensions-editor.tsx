@@ -148,7 +148,7 @@ function DimensionCard({
   const setUrgentSet = (urgentSet: string[]) => onChange({ urgentSet })
 
   const addTaxonomy = () => {
-    const fresh: Taxonomy = { value: '', displayName: { entries: { default: '' } } }
+    const fresh: Taxonomy = { value: '', displayName: { entries: { default: '' } }, examples: [] }
     const id = taxIdOf(fresh)
     newTaxIds.current.add(id)
     setTaxonomy([...dim.taxonomy, fresh])
@@ -386,5 +386,7 @@ function emptyDimension(): Dimension {
     taxonomy: [],
     urgentSet: [],
     required: false,
+    examples: [],
+    extractionHint: '',
   }
 }

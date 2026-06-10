@@ -72,6 +72,9 @@ export enum ErrorCode {
   TAXONOMY_VALUE_DUP = "TAXONOMY_VALUE_DUP",
   TAXONOMY_DISPLAY_EMPTY = "TAXONOMY_DISPLAY_EMPTY",
   URGENT_NOT_IN_TAXONOMY = "URGENT_NOT_IN_TAXONOMY",
+  RENDERER_KIND_INVALID = "RENDERER_KIND_INVALID",
+  RENDERER_VALUE_INVALID = "RENDERER_VALUE_INVALID",
+  RENDERER_TARGET_INVALID = "RENDERER_TARGET_INVALID",
   UNRECOGNIZED = "UNRECOGNIZED",
 }
 
@@ -125,7 +128,39 @@ export interface I18nString_EntriesEntry {
  */
 export interface Taxonomy {
   value: string;
-  displayName?: I18nString | undefined;
+  displayName?:
+    | I18nString
+    | undefined;
+  /** Optional model/operator definition of this stable value. */
+  description?:
+    | I18nString
+    | undefined;
+  /** Short extraction examples for this value. */
+  examples: string[];
+}
+
+/** RendererValue configures one taxonomy value under a RendererSpec. */
+export interface RendererValue {
+  /** Generic icon key understood by the console renderer, e.g. "smile". */
+  icon: string;
+  /** Generic visual tone key, e.g. "success" / "warning" / "danger". */
+  tone: string;
+}
+
+/**
+ * RendererSpec is optional presentation metadata attached to a Dimension.
+ * The console implements generic renderer kinds and does not need to know
+ * domain-specific dimension names.
+ */
+export interface RendererSpec {
+  /** e.g. "enum_badge". */
+  kind: string;
+  values: { [key: string]: RendererValue };
+}
+
+export interface RendererSpec_ValuesEntry {
+  key: string;
+  value?: RendererValue | undefined;
 }
 
 /**
@@ -154,4 +189,14 @@ export interface Dimension {
   urgentSet: string[];
   /** When true, the LLM's JSON schema marks this property required. */
   required: boolean;
+  /** Optional model/operator definition of this dimension. */
+  description?:
+    | I18nString
+    | undefined;
+  /** Short extraction examples for this dimension. */
+  examples: string[];
+  /** Concise model-facing instruction for tricky boundaries. */
+  extractionHint: string;
+  /** Optional generic presentation metadata. */
+  renderer?: RendererSpec | undefined;
 }

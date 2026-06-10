@@ -1,6 +1,7 @@
+import { Flame, Frown, Minus, Smile } from 'lucide-react'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import { cn } from '@/lib/utils'
-import type { Dimension, Taxonomy } from '@/proto/attune/v1/common'
+import type { Dimension, RendererValue, Taxonomy } from '@/proto/attune/v1/common'
 
 // DimensionChips renders one Dimension's value(s) for a given row.
 // Single-kind dims render as one badge; multi-kind dims render as
@@ -25,11 +26,7 @@ export function DimensionChips({
   const displayOf = useDisplayName()
 
   if (dim.kind === 'single') {
-    if (typeof value !== 'string' || value === '') {
-      return emptyDash ? <span className="text-muted-foreground">—</span> : null
-    }
-    const label = displayForTaxonomy(dim.taxonomy, value, displayOf)
-    return <Badge className={className}>{label}</Badge>
+    return <DimensionValue dim={dim} value={value} emptyDash={emptyDash} className={className} />
   }
 
   const arr = toStringArray(value)
@@ -45,7 +42,49 @@ export function DimensionChips({
   )
 }
 
-function displayForTaxonomy(
+export function DimensionValue({
+  dim,
+  value,
+  emptyDash = true,
+  className,
+}: {
+  dim: Dimension
+  value: unknown
+  emptyDash?: boolean
+  className?: string
+}) {
+  const displayOf = useDisplayName()
+  if (typeof value !== 'string' || value === '') {
+    return emptyDash ? <span className="text-muted-foreground">—</span> : null
+  }
+  const label = displayForTaxonomy(dim.taxonomy, value, displayOf)
+  const renderValue = dim.renderer?.values?.[value]
+  if (dim.renderer?.kind === 'enum_badge' && renderValue) {
+    return (
+      <EnumBadge value={renderValue} className={className}>
+        {label}
+      </EnumBadge>
+    )
+  }
+  return <Badge className={className}>{label}</Badge>
+}
+
+export function rendererToneBarClass(tone: string | undefined): string {
+  switch (tone) {
+    case 'success':
+      return 'bg-emerald-500/70'
+    case 'warning':
+      return 'bg-amber-500/70'
+    case 'danger':
+      return 'bg-destructive/75'
+    case 'muted':
+      return 'bg-muted-foreground/40'
+    default:
+      return 'bg-foreground/55'
+  }
+}
+
+export function displayForTaxonomy(
   taxonomy: Taxonomy[],
   value: string,
   displayOf: ReturnType<typeof useDisplayName>,
@@ -67,7 +106,7 @@ function Badge({ children, className }: { children: React.ReactNode; className?:
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-md border border-border bg-muted px-1.5 py-0.5 text-xs font-medium',
+        'inline-flex max-w-full items-center rounded-md border border-border bg-muted px-1.5 py-0.5 text-xs font-medium whitespace-nowrap',
         className,
       )}
     >
@@ -76,9 +115,63 @@ function Badge({ children, className }: { children: React.ReactNode; className?:
   )
 }
 
+function EnumBadge({
+  value,
+  children,
+  className,
+}: {
+  value: RendererValue
+  children: React.ReactNode
+  className?: string
+}) {
+  const Icon = iconFor(value.icon)
+  return (
+    <span
+      className={cn(
+        'inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs font-medium whitespace-nowrap',
+        toneClass(value.tone),
+        className,
+      )}
+    >
+      {Icon && <Icon className="h-3 w-3" aria-hidden="true" />}
+      {children}
+    </span>
+  )
+}
+
+function iconFor(icon: string) {
+  switch (icon) {
+    case 'smile':
+      return Smile
+    case 'frown':
+      return Frown
+    case 'flame':
+      return Flame
+    case 'minus':
+      return Minus
+    default:
+      return null
+  }
+}
+
+function toneClass(tone: string): string {
+  switch (tone) {
+    case 'success':
+      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+    case 'warning':
+      return 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+    case 'danger':
+      return 'border-destructive/30 bg-destructive/10 text-destructive'
+    case 'muted':
+      return 'border-border bg-muted text-muted-foreground'
+    default:
+      return 'border-border bg-muted'
+  }
+}
+
 function Chip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs">
+    <span className="inline-flex max-w-full items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs whitespace-nowrap">
       {children}
     </span>
   )

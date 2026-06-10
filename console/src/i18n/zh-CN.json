@@ -413,9 +413,15 @@
     "empty_title": "还没有反馈",
     "empty_body": "把 API key 接到你的产品里。新反馈到了 1 分钟内会出现在这里，配置好的 webhook 目标也会同步。",
     "stats": {
-      "title": "本月分布",
+      "title": "本月概览",
       "summary": "汇总",
-      "total": "总数"
+      "total": "反馈",
+      "total_hint": "本月反馈",
+      "urgent": "紧急",
+      "urgent_hint": "{{pct}}% 需要优先看",
+      "urgent_empty": "暂无紧急反馈",
+      "signals": "信号",
+      "signals_hint": "已出现分类值"
     }
   },
   "usage": {

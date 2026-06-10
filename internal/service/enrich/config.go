@@ -115,34 +115,33 @@ func ValidatePromptTemplate(tmpl string) error {
 // for unknown errors so callers can detect "no mapping" via comparison with
 // the zero value.
 func ErrToCode(err error) attunev1.ErrorCode {
-	switch {
-	case errors.Is(err, ErrMissingContentToken):
-		return attunev1.ErrorCode_MISSING_CONTENT_TOKEN
-	case errors.Is(err, ErrTemplateTooLong):
-		return attunev1.ErrorCode_TEMPLATE_TOO_LONG
-	case errors.Is(err, domain.ErrDimensionNameFormat):
-		return attunev1.ErrorCode_DIM_NAME_FORMAT
-	case errors.Is(err, domain.ErrDimensionNameReserved):
-		return attunev1.ErrorCode_DIM_NAME_RESERVED
-	case errors.Is(err, domain.ErrDimensionNameDup):
-		return attunev1.ErrorCode_DIM_NAME_DUP
-	case errors.Is(err, domain.ErrDimensionKindInvalid):
-		return attunev1.ErrorCode_DIM_KIND_INVALID
-	case errors.Is(err, domain.ErrDimensionDisplayEmpty):
-		return attunev1.ErrorCode_DIM_DISPLAY_EMPTY
-	case errors.Is(err, domain.ErrTaxonomyValueEmpty):
-		return attunev1.ErrorCode_TAXONOMY_VALUE_EMPTY
-	case errors.Is(err, domain.ErrTaxonomyValueDup):
-		return attunev1.ErrorCode_TAXONOMY_VALUE_DUP
-	case errors.Is(err, domain.ErrTaxonomyDisplayEmpty):
-		return attunev1.ErrorCode_TAXONOMY_DISPLAY_EMPTY
-	case errors.Is(err, domain.ErrUrgentNotInTaxonomy):
-		return attunev1.ErrorCode_URGENT_NOT_IN_TAXONOMY
-	case errors.Is(err, tenant.ErrTenantNotFound):
-		return attunev1.ErrorCode_NOT_FOUND
-	default:
-		return attunev1.ErrorCode_ERROR_CODE_UNSPECIFIED
+	for _, m := range enrichErrCodeMap {
+		if errors.Is(err, m.err) {
+			return m.code
+		}
 	}
+	return attunev1.ErrorCode_ERROR_CODE_UNSPECIFIED
+}
+
+var enrichErrCodeMap = []struct {
+	err  error
+	code attunev1.ErrorCode
+}{
+	{ErrMissingContentToken, attunev1.ErrorCode_MISSING_CONTENT_TOKEN},
+	{ErrTemplateTooLong, attunev1.ErrorCode_TEMPLATE_TOO_LONG},
+	{domain.ErrDimensionNameFormat, attunev1.ErrorCode_DIM_NAME_FORMAT},
+	{domain.ErrDimensionNameReserved, attunev1.ErrorCode_DIM_NAME_RESERVED},
+	{domain.ErrDimensionNameDup, attunev1.ErrorCode_DIM_NAME_DUP},
+	{domain.ErrDimensionKindInvalid, attunev1.ErrorCode_DIM_KIND_INVALID},
+	{domain.ErrDimensionDisplayEmpty, attunev1.ErrorCode_DIM_DISPLAY_EMPTY},
+	{domain.ErrTaxonomyValueEmpty, attunev1.ErrorCode_TAXONOMY_VALUE_EMPTY},
+	{domain.ErrTaxonomyValueDup, attunev1.ErrorCode_TAXONOMY_VALUE_DUP},
+	{domain.ErrTaxonomyDisplayEmpty, attunev1.ErrorCode_TAXONOMY_DISPLAY_EMPTY},
+	{domain.ErrUrgentNotInTaxonomy, attunev1.ErrorCode_URGENT_NOT_IN_TAXONOMY},
+	{domain.ErrRendererKindInvalid, attunev1.ErrorCode_RENDERER_KIND_INVALID},
+	{domain.ErrRendererValueInvalid, attunev1.ErrorCode_RENDERER_VALUE_INVALID},
+	{domain.ErrRendererTargetInvalid, attunev1.ErrorCode_RENDERER_TARGET_INVALID},
+	{tenant.ErrTenantNotFound, attunev1.ErrorCode_NOT_FOUND},
 }
 
 // ErrToMessage returns a short user-facing message for validation
@@ -172,6 +171,12 @@ func ErrToMessage(err error) string {
 		return "taxonomy display name needs at least one non-empty locale entry"
 	case errors.Is(err, domain.ErrUrgentNotInTaxonomy):
 		return "urgent_set must reference values that exist in the taxonomy"
+	case errors.Is(err, domain.ErrRendererKindInvalid):
+		return "renderer kind is not supported"
+	case errors.Is(err, domain.ErrRendererValueInvalid):
+		return "renderer metadata contains an unsupported value"
+	case errors.Is(err, domain.ErrRendererTargetInvalid):
+		return "renderer values must reference taxonomy values"
 	default:
 		return ""
 	}

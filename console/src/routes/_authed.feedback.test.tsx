@@ -26,6 +26,8 @@ const dimsFixture = [
     ],
     urgentSet: ['P0'],
     required: false,
+    examples: [],
+    extractionHint: '',
   },
 ]
 

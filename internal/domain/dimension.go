@@ -32,9 +32,39 @@ func (k DimensionKind) IsValid() bool {
 // freely editable without breaking any persisted attrs or downstream
 // contract.
 type Taxonomy struct {
-	Value       string     `json:"value"`        // any non-empty Unicode, immutable after creation
-	DisplayName I18nString `json:"display_name"` // per-locale display surface
+	Value       string     `json:"value"`                 // any non-empty Unicode, immutable after creation
+	DisplayName I18nString `json:"display_name"`          // per-locale display surface
+	Description I18nString `json:"description,omitempty"` // optional model-facing definition
+	Examples    []string   `json:"examples,omitempty"`    // optional short examples for extraction hints
 }
+
+// RendererSpec is optional presentation metadata attached to a Dimension.
+// The console implements generic renderer kinds (for example enum_badge)
+// and never needs to know domain-specific dimension names like sentiment.
+type RendererSpec struct {
+	Kind   string                   `json:"kind,omitempty"`
+	Values map[string]RendererValue `json:"values,omitempty"`
+}
+
+// RendererValue configures one taxonomy value under a RendererSpec.
+type RendererValue struct {
+	Icon string `json:"icon,omitempty"`
+	Tone string `json:"tone,omitempty"`
+}
+
+const (
+	RendererEnumBadge = "enum_badge"
+
+	RendererIconSmile = "smile"
+	RendererIconFrown = "frown"
+	RendererIconFlame = "flame"
+	RendererIconMinus = "minus"
+
+	RendererToneSuccess = "success"
+	RendererToneWarning = "warning"
+	RendererToneDanger  = "danger"
+	RendererToneMuted   = "muted"
+)
 
 // Dimension is one enrichment axis the LLM populates for each row.
 // Per-tenant Dimensions are open in count (any number of dims) but
@@ -44,12 +74,16 @@ type Taxonomy struct {
 // uniformly from this struct — adding a new dim is a tenant-settings
 // edit, not a code change.
 type Dimension struct {
-	Name        string        `json:"name"`         // stable machine key: dimensionNameRe; immutable after creation
-	DisplayName I18nString    `json:"display_name"` // per-locale display surface for the dim itself
-	Kind        DimensionKind `json:"kind"`         // single | multi
-	Taxonomy    []Taxonomy    `json:"taxonomy"`     // allowed values; empty + Kind=multi = freeform (GitHub-labels style)
-	UrgentSet   []string      `json:"urgent_set"`   // subset of Taxonomy.Value whose presence flips is_urgent
-	Required    bool          `json:"required"`     // if true, LLM JSON schema marks the property required
+	Name           string        `json:"name"`                      // stable machine key: dimensionNameRe; immutable after creation
+	DisplayName    I18nString    `json:"display_name"`              // per-locale display surface for the dim itself
+	Description    I18nString    `json:"description,omitempty"`     // optional model/operator definition
+	Kind           DimensionKind `json:"kind"`                      // single | multi
+	Taxonomy       []Taxonomy    `json:"taxonomy"`                  // allowed values; empty + Kind=multi = freeform (GitHub-labels style)
+	UrgentSet      []string      `json:"urgent_set"`                // subset of Taxonomy.Value whose presence flips is_urgent
+	Required       bool          `json:"required"`                  // if true, LLM JSON schema marks the property required
+	Examples       []string      `json:"examples,omitempty"`        // optional short examples for prompt rendering
+	ExtractionHint string        `json:"extraction_hint,omitempty"` // optional concise LLM instruction
+	Renderer       RendererSpec  `json:"renderer,omitempty"`        // optional UI presentation hint
 }
 
 // DimensionSet is a tenant's ordered list of Dimensions. The order is
@@ -58,6 +92,26 @@ type Dimension struct {
 // outbound envelope (when stable order matters — JSON object key
 // order does not, but our rendered prompt does).
 type DimensionSet []Dimension
+
+const (
+	AttrDropUnknownDimension = "unknown_dimension"
+	AttrDropInvalidType      = "invalid_type"
+	AttrDropEmptyValue       = "empty_value"
+	AttrDropOffListValue     = "off_list_value"
+
+	maxDiagnosticValues = 5
+	maxDiagnosticLen    = 120
+)
+
+// AttrDropDiagnostic is the bounded, non-actioning explanation for values the
+// attrs gate rejected. It is persisted for audit/eval, while metrics still use
+// aggregate counts to avoid high-cardinality labels.
+type AttrDropDiagnostic struct {
+	Dim    string   `json:"dim"`
+	Reason string   `json:"reason"`
+	Values []string `json:"values,omitempty"`
+	Count  int      `json:"count"`
+}
 
 // ByName looks up a dimension by its stable Name. Returns (nil, false)
 // when not found.
@@ -103,6 +157,9 @@ var (
 	ErrTaxonomyValueDup      = errors.New("taxonomy value appears more than once in this dimension")
 	ErrTaxonomyDisplayEmpty  = errors.New("taxonomy display_name must have at least one non-empty entry")
 	ErrUrgentNotInTaxonomy   = errors.New("urgent_set value not present in taxonomy")
+	ErrRendererKindInvalid   = errors.New("renderer kind is invalid")
+	ErrRendererValueInvalid  = errors.New("renderer value is invalid")
+	ErrRendererTargetInvalid = errors.New("renderer target value is not present in taxonomy")
 )
 
 // Validate checks the dim in isolation. Tenant-level checks (unique
@@ -139,7 +196,55 @@ func (d Dimension) Validate() error {
 			return fmt.Errorf("%w: dim %q, urgent_set entry %q", ErrUrgentNotInTaxonomy, d.Name, u)
 		}
 	}
+	if err := d.Renderer.Validate(d.Kind, seenVal); err != nil {
+		return fmt.Errorf("dim %q: %w", d.Name, err)
+	}
 	return nil
+}
+
+// Validate checks optional Dimension renderer metadata. Renderers are UI hints,
+// but validating the grammar at config boundaries keeps pack definitions
+// portable across consoles and future SDKs.
+func (r RendererSpec) Validate(kind DimensionKind, taxonomy map[string]bool) error {
+	if r.Kind == "" && len(r.Values) == 0 {
+		return nil
+	}
+	if r.Kind != RendererEnumBadge {
+		return fmt.Errorf("%w: got %q", ErrRendererKindInvalid, r.Kind)
+	}
+	if kind != DimSingle || len(r.Values) == 0 {
+		return fmt.Errorf("%w: enum_badge requires a single-kind dimension with values", ErrRendererValueInvalid)
+	}
+	for value, spec := range r.Values {
+		if !taxonomy[value] {
+			return fmt.Errorf("%w: %q", ErrRendererTargetInvalid, value)
+		}
+		if spec.Icon != "" && !validRendererIcon(spec.Icon) {
+			return fmt.Errorf("%w: icon %q", ErrRendererValueInvalid, spec.Icon)
+		}
+		if spec.Tone != "" && !validRendererTone(spec.Tone) {
+			return fmt.Errorf("%w: tone %q", ErrRendererValueInvalid, spec.Tone)
+		}
+	}
+	return nil
+}
+
+func validRendererIcon(icon string) bool {
+	switch icon {
+	case RendererIconSmile, RendererIconFrown, RendererIconFlame, RendererIconMinus:
+		return true
+	default:
+		return false
+	}
+}
+
+func validRendererTone(tone string) bool {
+	switch tone {
+	case RendererToneSuccess, RendererToneWarning, RendererToneDanger, RendererToneMuted:
+		return true
+	default:
+		return false
+	}
 }
 
 // Validate checks the full set: every dim is individually valid, and
@@ -210,8 +315,30 @@ func ComputeIsUrgent(attrs map[string]any, dims DimensionSet) bool {
 func FilterAttrs(produced map[string]any, dims DimensionSet) (
 	kept map[string]any, dropped map[string]int, suggested []string,
 ) {
-	kept = make(map[string]any, len(dims))
+	kept, diagnostics, suggested := FilterAttrsWithDiagnostics(produced, dims)
 	dropped = make(map[string]int, len(dims))
+	dimNames := dimensionNameSet(dims)
+	for _, diag := range diagnostics {
+		if dimNames[diag.Dim] {
+			dropped[diag.Dim] += diag.Count
+		}
+	}
+	return kept, dropped, suggested
+}
+
+// FilterAttrsWithDiagnostics is FilterAttrs plus bounded explanations of what
+// was rejected. Unknown dimension keys are included in diagnostics for audit,
+// but they are excluded from the legacy dropped-count return of FilterAttrs.
+func FilterAttrsWithDiagnostics(produced map[string]any, dims DimensionSet) (
+	kept map[string]any, diagnostics []AttrDropDiagnostic, suggested []string,
+) {
+	kept = make(map[string]any, len(dims))
+	seenDims := dimensionNameSet(dims)
+	for key, value := range produced {
+		if !seenDims[key] {
+			diagnostics = append(diagnostics, attrDrop(key, AttrDropUnknownDimension, value, 1))
+		}
+	}
 	for _, d := range dims {
 		v, ok := produced[d.Name]
 		if !ok {
@@ -219,65 +346,116 @@ func FilterAttrs(produced map[string]any, dims DimensionSet) (
 		}
 		switch d.Kind {
 		case DimSingle:
-			if dropN := filterSingle(d, v, kept); dropN > 0 {
-				dropped[d.Name] += dropN
+			if diag, ok := filterSingle(d, v, kept); ok {
+				diagnostics = append(diagnostics, diag)
 				suggested = append(suggested, d.Name)
 			}
 		case DimMulti:
-			if dropN := filterMulti(d, v, kept); dropN > 0 {
-				dropped[d.Name] += dropN
+			if diag, ok := filterMulti(d, v, kept); ok {
+				diagnostics = append(diagnostics, diag)
 				suggested = append(suggested, d.Name)
 			}
 		}
 	}
-	return kept, dropped, suggested
+	return kept, diagnostics, suggested
+}
+
+func dimensionNameSet(dims DimensionSet) map[string]bool {
+	out := make(map[string]bool, len(dims))
+	for _, d := range dims {
+		out[d.Name] = true
+	}
+	return out
 }
 
 // filterSingle writes the kept value for one single-kind dim into kept
 // and returns how many values were dropped (0 or 1). Off-list / wrong-
 // type / empty values are dropped; freeform single-kind keeps anything
 // non-empty.
-func filterSingle(d Dimension, v any, kept map[string]any) int {
+func filterSingle(d Dimension, v any, kept map[string]any) (AttrDropDiagnostic, bool) {
 	s, ok := v.(string)
-	if !ok || s == "" {
-		return 0
+	if !ok {
+		return attrDrop(d.Name, AttrDropInvalidType, v, 1), true
+	}
+	if s == "" {
+		return attrDrop(d.Name, AttrDropEmptyValue, v, 1), true
 	}
 	allowed := taxonomyValues(d.Taxonomy)
 	if len(allowed) == 0 || containsString(allowed, s) {
 		kept[d.Name] = s
-		return 0
+		return AttrDropDiagnostic{}, false
 	}
-	return 1
+	return attrDrop(d.Name, AttrDropOffListValue, v, 1), true
 }
 
 // filterMulti writes the kept values for one multi-kind dim into kept
 // and returns how many values were dropped (always 0 for freeform).
-func filterMulti(d Dimension, v any, kept map[string]any) int {
+func filterMulti(d Dimension, v any, kept map[string]any) (AttrDropDiagnostic, bool) {
 	arr, ok := toStringSlice(v)
 	if !ok {
-		return 0
+		return attrDrop(d.Name, AttrDropInvalidType, v, 1), true
 	}
 	allowed := taxonomyValues(d.Taxonomy)
 	if len(allowed) == 0 {
 		kept[d.Name] = dedupeStrings(arr)
-		return 0
+		return AttrDropDiagnostic{}, false
 	}
 	outKept := make([]string, 0, len(arr))
 	outDropped := 0
+	droppedValues := make([]string, 0, maxDiagnosticValues)
 	seen := make(map[string]bool, len(arr))
 	for _, x := range arr {
-		if x == "" || seen[x] {
+		if seen[x] {
 			continue
 		}
 		seen[x] = true
+		if x == "" {
+			outDropped++
+			droppedValues = appendDiagnosticValue(droppedValues, x)
+			continue
+		}
 		if containsString(allowed, x) {
 			outKept = append(outKept, x)
 		} else {
 			outDropped++
+			droppedValues = appendDiagnosticValue(droppedValues, x)
 		}
 	}
 	kept[d.Name] = outKept
-	return outDropped
+	if outDropped == 0 {
+		return AttrDropDiagnostic{}, false
+	}
+	return AttrDropDiagnostic{
+		Dim:    d.Name,
+		Reason: AttrDropOffListValue,
+		Values: droppedValues,
+		Count:  outDropped,
+	}, true
+}
+
+func attrDrop(dim, reason string, value any, count int) AttrDropDiagnostic {
+	values := appendDiagnosticValue(nil, fmt.Sprint(value))
+	return AttrDropDiagnostic{
+		Dim:    truncateDiagnostic(dim),
+		Reason: reason,
+		Values: values,
+		Count:  count,
+	}
+}
+
+func appendDiagnosticValue(values []string, value string) []string {
+	if len(values) >= maxDiagnosticValues {
+		return values
+	}
+	return append(values, truncateDiagnostic(value))
+}
+
+func truncateDiagnostic(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxDiagnosticLen {
+		return s
+	}
+	return s[:maxDiagnosticLen] + "..."
 }
 
 // taxonomyValues extracts the Value list from a taxonomy slice.

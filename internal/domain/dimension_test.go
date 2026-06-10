@@ -128,6 +128,50 @@ func TestDimension_Validate(t *testing.T) {
 			t.Fatalf("want ErrUrgentNotInTaxonomy, got %v", err)
 		}
 	})
+
+	t.Run("valid enum badge renderer", func(t *testing.T) {
+		d := validDim("sentiment", DimSingle, "positive", "frustrated")
+		d.Renderer = RendererSpec{
+			Kind: RendererEnumBadge,
+			Values: map[string]RendererValue{
+				"positive":   {Icon: RendererIconSmile, Tone: RendererToneSuccess},
+				"frustrated": {Icon: RendererIconFlame, Tone: RendererToneDanger},
+			},
+		}
+		if err := d.Validate(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("renderer kind rejected", func(t *testing.T) {
+		d := validDim("sentiment", DimSingle, "positive")
+		d.Renderer = RendererSpec{Kind: "sparkles", Values: map[string]RendererValue{"positive": {}}}
+		err := d.Validate()
+		if !errors.Is(err, ErrRendererKindInvalid) {
+			t.Fatalf("want ErrRendererKindInvalid, got %v", err)
+		}
+	})
+
+	t.Run("renderer value target must exist", func(t *testing.T) {
+		d := validDim("sentiment", DimSingle, "positive")
+		d.Renderer = RendererSpec{Kind: RendererEnumBadge, Values: map[string]RendererValue{"missing": {}}}
+		err := d.Validate()
+		if !errors.Is(err, ErrRendererTargetInvalid) {
+			t.Fatalf("want ErrRendererTargetInvalid, got %v", err)
+		}
+	})
+
+	t.Run("renderer icon rejected", func(t *testing.T) {
+		d := validDim("sentiment", DimSingle, "positive")
+		d.Renderer = RendererSpec{
+			Kind:   RendererEnumBadge,
+			Values: map[string]RendererValue{"positive": {Icon: "sparkle"}},
+		}
+		err := d.Validate()
+		if !errors.Is(err, ErrRendererValueInvalid) {
+			t.Fatalf("want ErrRendererValueInvalid, got %v", err)
+		}
+	})
 }
 
 func TestDimensionSet_Validate_DuplicateName(t *testing.T) {
@@ -271,4 +315,65 @@ func TestFilterAttrs(t *testing.T) {
 			t.Errorf("missing dim should be silent")
 		}
 	})
+}
+
+func TestFilterAttrsWithDiagnostics(t *testing.T) {
+	dims := DimensionSet{
+		validDim("severity", DimSingle, "critical", "minor"),
+		validDim("labels", DimMulti, "payment", "ui"),
+	}
+	kept, diagnostics, suggested := FilterAttrsWithDiagnostics(map[string]any{
+		"severity": "bogus",
+		"labels":   []string{"payment", "sales", "ui"},
+		"invented": "maybe",
+	}, dims)
+	if kept["severity"] != nil {
+		t.Errorf("severity should be dropped, kept=%v", kept)
+	}
+	gotLabels, _ := kept["labels"].([]string)
+	if len(gotLabels) != 2 || gotLabels[0] != "payment" || gotLabels[1] != "ui" {
+		t.Fatalf("labels kept=%v", gotLabels)
+	}
+	if len(diagnostics) != 3 {
+		t.Fatalf("diagnostics count=%d got=%+v", len(diagnostics), diagnostics)
+	}
+	reasons := map[string]string{}
+	for _, d := range diagnostics {
+		reasons[d.Dim] = d.Reason
+		if d.Count < 1 {
+			t.Errorf("diagnostic count must be positive: %+v", d)
+		}
+	}
+	if reasons["invented"] != AttrDropUnknownDimension {
+		t.Errorf("invented reason=%q", reasons["invented"])
+	}
+	if reasons["severity"] != AttrDropOffListValue {
+		t.Errorf("severity reason=%q", reasons["severity"])
+	}
+	if reasons["labels"] != AttrDropOffListValue {
+		t.Errorf("labels reason=%q", reasons["labels"])
+	}
+	if len(suggested) != 2 || suggested[0] != "severity" || suggested[1] != "labels" {
+		t.Errorf("suggested=%v", suggested)
+	}
+}
+
+func TestCustomerFeedbackPackV1(t *testing.T) {
+	pack := CustomerFeedbackPackV1()
+	if pack.Name != CustomerFeedbackPackName || pack.SchemaVersion != CustomerFeedbackSchemaVersion {
+		t.Fatalf("pack identity: %+v", pack)
+	}
+	if err := pack.Dimensions.Validate(); err != nil {
+		t.Fatalf("pack dimensions must validate: %v", err)
+	}
+	sentiment, ok := pack.Dimensions.ByName("sentiment")
+	if !ok {
+		t.Fatal("customer pack missing sentiment")
+	}
+	if sentiment.Renderer.Kind != RendererEnumBadge {
+		t.Fatalf("sentiment renderer: %+v", sentiment.Renderer)
+	}
+	if sentiment.DisplayName["default"] != "Customer tone" {
+		t.Fatalf("sentiment display: %v", sentiment.DisplayName)
+	}
 }

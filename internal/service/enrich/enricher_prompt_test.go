@@ -122,6 +122,37 @@ func TestRenderDimensionsClause_NoEnglishHintFallsBackCleanly(t *testing.T) {
 	}
 }
 
+func TestRenderDimensionsClause_SemanticMetadata(t *testing.T) {
+	d := domain.Dimension{
+		Name:           "sentiment",
+		DisplayName:    domain.I18nString{"default": "Customer tone"},
+		Description:    domain.I18nString{"default": "The emotional tone of the user."},
+		Kind:           domain.DimSingle,
+		Examples:       []string{"frustrated: I paid and this still fails"},
+		ExtractionHint: "Use frustrated only when patience is running out.",
+		Taxonomy: []domain.Taxonomy{
+			{
+				Value:       "frustrated",
+				DisplayName: domain.I18nString{"default": "Frustrated"},
+				Description: domain.I18nString{"default": "Repeated failure or escalation language."},
+				Examples:    []string{"refund request", "cancel my account"},
+			},
+		},
+	}
+	out := renderDimensionsClause(domain.DimensionSet{d})
+	for _, want := range []string{
+		"The emotional tone",
+		"Use frustrated only",
+		"I paid and this still fails",
+		"Repeated failure",
+		"refund request",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("semantic prompt metadata %q missing from:\n%s", want, out)
+		}
+	}
+}
+
 func TestBuildEnrichSchema_OptionalSingleAllowsNull(t *testing.T) {
 	// sevDim() is Required=false → must accept null both as type and as
 	// an enum value (OpenAI strict mode contract).

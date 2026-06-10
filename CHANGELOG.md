@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Semantic understanding layer foundation + customer tone (#21).** Extends
+  metadata-driven Dimensions with descriptions, examples, extraction hints, and
+  renderer metadata; adds `sentiment` as the customer-feedback pack's default
+  Customer tone dimension (`positive` / `negative` / `neutral` /
+  `frustrated`); and introduces `semantic_extraction_runs` so each full LLM
+  classification records model/schema provenance, attrs, rationale, and
+  structured dropped-attr diagnostics separately from the fast
+  `user_feedback.enriched_attrs` snapshot. Renderer metadata is now validated
+  at the Dimension boundary, and the codebase has a typed
+  `customer_feedback.v1` semantic pack fixture for future vertical packs.
 - **Source-aware LLM guard policy foundation (#20).** Adds a
   `guard_policies` ruleset table, `internal/infra/llmguard` LLMClient wrapper,
   DB-backed policy resolver, Console API endpoints for per-policy

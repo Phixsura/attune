@@ -6,45 +6,77 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
 
-// persistEnriched flips user_feedback to 'done' and (when outbox is
-// wired) inserts one outbox row per active raw-webhook destination,
-// all in a single tx. If outbox isn't wired, falls back to the
-// single-statement MarkDone — preserves the the earlier path for dev
-// environments without outbox setup.
+// persistEnriched flips user_feedback to done, records semantic extraction
+// diagnostics when present, and queues outbox rows when configured.
 func (e *Enricher) persistEnriched(
 	ctx context.Context,
 	s domain.Snapshot,
 	enriched domain.Enriched,
+	run *feedback.SemanticExtractionRun,
 ) error {
 	const where = "service.Enricher.persistEnriched"
-	if e.outbox == nil || e.targets == nil {
+	if run == nil && (e.outbox == nil || e.targets == nil) {
 		return e.repo.MarkDone(ctx, s.ID, enriched)
 	}
+	plan, err := e.buildOutboxPlan(ctx, s, where)
+	if err != nil {
+		return err
+	}
+	return e.persistEnrichedTx(ctx, s, enriched, run, plan)
+}
 
+type outboxPlan struct {
+	traceID string
+	targets []notifytarget.NotifyTarget
+	payload []byte
+}
+
+func (e *Enricher) buildOutboxPlan(
+	ctx context.Context,
+	s domain.Snapshot,
+	where string,
+) (outboxPlan, error) {
 	// Look up active destinations BEFORE opening tx — list query
 	// doesn't need atomicity with the UPDATE/INSERT.
+	plan := outboxPlan{traceID: extractTraceID(ctx)}
+	if e.outbox == nil || e.targets == nil {
+		return plan, nil
+	}
 	allTargets, err := e.targets.ListActiveByTenant(ctx, s.TenantID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] list notify targets failed,tenant_id:%s,err:%+v",
 			where, s.TenantID, err.Error())
-		return fmt.Errorf("list notify targets: %w", err)
+		return outboxPlan{}, fmt.Errorf("list notify targets: %w", err)
 	}
-	selected := selectOutboxTargets(allTargets, s)
-	traceID := extractTraceID(ctx)
-	payload, err := buildOutboxEnvelope(s, traceID)
+	plan.targets = selectOutboxTargets(allTargets, s)
+	plan.payload, err = buildOutboxEnvelope(s, plan.traceID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] build envelope failed,feedback_id:%d,err:%+v",
 			where, s.ID, err.Error())
-		return fmt.Errorf("build outbox envelope: %w", err)
+		return outboxPlan{}, fmt.Errorf("build outbox envelope: %w", err)
 	}
+	return plan, nil
+}
 
+func (e *Enricher) persistEnrichedTx(
+	ctx context.Context,
+	s domain.Snapshot,
+	enriched domain.Enriched,
+	run *feedback.SemanticExtractionRun,
+	plan outboxPlan,
+) error {
+	const where = "service.Enricher.persistEnrichedTx"
 	tx, err := e.repo.BeginTx(ctx)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] begin tx failed,feedback_id:%d,err:%+v",
@@ -58,32 +90,91 @@ func (e *Enricher) persistEnriched(
 			where, s.ID, err.Error())
 		return err
 	}
-	for _, t := range selected {
-		if _, err := e.outbox.Insert(ctx, tx, outboxrepo.OutboxRow{
-			FeedbackID:        s.ID,
-			TenantID:          s.TenantID,
-			DestinationType:   t.DestinationType,
-			DestinationTarget: t.URL,
-			Audience:          t.Audience,
-			Payload:           payload,
-			TraceID:           traceID,
-		}); err != nil {
-			logext.Errorf(ctx, "[%s] outbox insert failed,feedback_id:%d,dest_type:%s,err:%+v",
-				where, s.ID, t.DestinationType, err.Error())
-			return fmt.Errorf("queue outbox: %w", err)
-		}
+	if err := e.insertSemanticRunTx(ctx, tx, s.ID, run, where); err != nil {
+		return err
+	}
+	if err := e.insertOutboxRows(ctx, tx, s, plan, where); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		logext.Errorf(ctx, "[%s] commit tx failed,feedback_id:%d,err:%+v",
 			where, s.ID, err.Error())
 		return fmt.Errorf("commit enrich tx: %w", err)
 	}
-	if len(selected) > 0 {
+	if len(plan.targets) > 0 {
 		logext.Infof(ctx,
 			"[%s] outbox rows queued,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,count:%d",
-			where, traceID, s.TenantID, s.ID, len(selected))
+			where, plan.traceID, s.TenantID, s.ID, len(plan.targets))
 	}
 	return nil
+}
+
+func (e *Enricher) insertSemanticRunTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	feedbackID int64,
+	run *feedback.SemanticExtractionRun,
+	where string,
+) error {
+	if run == nil {
+		return nil
+	}
+	if _, err := e.repo.InsertSemanticExtractionRunTx(ctx, tx, ptrext.Indirect(run)); err != nil {
+		logext.Errorf(ctx, "[%s] semantic run insert failed,feedback_id:%d,err:%+v",
+			where, feedbackID, err.Error())
+		return err
+	}
+	return nil
+}
+
+func (e *Enricher) insertOutboxRows(
+	ctx context.Context,
+	tx pgx.Tx,
+	s domain.Snapshot,
+	plan outboxPlan,
+	where string,
+) error {
+	for _, t := range plan.targets {
+		if _, err := e.outbox.Insert(ctx, tx, outboxrepo.OutboxRow{
+			FeedbackID:        s.ID,
+			TenantID:          s.TenantID,
+			DestinationType:   t.DestinationType,
+			DestinationTarget: t.URL,
+			Audience:          t.Audience,
+			Payload:           plan.payload,
+			TraceID:           plan.traceID,
+		}); err != nil {
+			logext.Errorf(ctx, "[%s] outbox insert failed,feedback_id:%d,dest_type:%s,err:%+v",
+				where, s.ID, t.DestinationType, err.Error())
+			return fmt.Errorf("queue outbox: %w", err)
+		}
+	}
+	return nil
+}
+
+func (e *Enricher) semanticRun(
+	s domain.Snapshot,
+	cfg ClassifyConfig,
+	result classifyResult,
+) feedback.SemanticExtractionRun {
+	promptVersion := "default"
+	if cfg.PromptTemplate != nil {
+		promptVersion = "tenant_custom"
+	}
+	return feedback.SemanticExtractionRun{
+		TenantID:      s.TenantID,
+		SubjectType:   feedback.SemanticSubjectFeedback,
+		SubjectID:     s.ID,
+		DomainPack:    feedback.DefaultDomainPack,
+		SchemaVersion: feedback.DefaultSchemaVersion,
+		PromptVersion: promptVersion,
+		Model:         e.model,
+		GuardSummary:  map[string]any{},
+		Attrs:         result.Enriched.Attrs,
+		Confidence:    map[string]any{},
+		Rationale:     map[string]any{"summary": result.Enriched.Rationale},
+		DroppedAttrs:  result.DroppedAttrsAudit,
+	}
 }
 
 // outboxDestTypes lists destination_type values that go through the

@@ -1044,6 +1044,22 @@ components:
                 required:
                     type: boolean
                     description: When true, the LLM's JSON schema marks this property required.
+                description:
+                    allOf:
+                        - $ref: '#/components/schemas/I18nString'
+                    description: Optional model/operator definition of this dimension.
+                examples:
+                    type: array
+                    items:
+                        type: string
+                    description: Short extraction examples for this dimension.
+                extractionHint:
+                    type: string
+                    description: Concise model-facing instruction for tricky boundaries.
+                renderer:
+                    allOf:
+                        - $ref: '#/components/schemas/RendererSpec'
+                    description: Optional generic presentation metadata.
             description: |-
                 Dimension is one enrichment axis the LLM populates for each row.
                  Per-tenant DimensionSet is open in count and closed in shape —
@@ -1495,6 +1511,30 @@ components:
             properties:
                 renderedPrompt:
                     type: string
+        RendererSpec:
+            type: object
+            properties:
+                kind:
+                    type: string
+                    description: e.g. "enum_badge".
+                values:
+                    type: object
+                    additionalProperties:
+                        $ref: '#/components/schemas/RendererValue'
+            description: |-
+                RendererSpec is optional presentation metadata attached to a Dimension.
+                 The console implements generic renderer kinds and does not need to know
+                 domain-specific dimension names.
+        RendererValue:
+            type: object
+            properties:
+                icon:
+                    type: string
+                    description: Generic icon key understood by the console renderer, e.g. "smile".
+                tone:
+                    type: string
+                    description: Generic visual tone key, e.g. "success" / "warning" / "danger".
+            description: RendererValue configures one taxonomy value under a RendererSpec.
         ResolveGuardPolicyRequest:
             type: object
             properties:
@@ -1572,6 +1612,15 @@ components:
                     type: string
                 displayName:
                     $ref: '#/components/schemas/I18nString'
+                description:
+                    allOf:
+                        - $ref: '#/components/schemas/I18nString'
+                    description: Optional model/operator definition of this stable value.
+                examples:
+                    type: array
+                    items:
+                        type: string
+                    description: Short extraction examples for this value.
             description: |-
                 Taxonomy is one allowed value for a Dimension. `value` is the
                  stable machine identifier the LLM emits and SQL filters use;
