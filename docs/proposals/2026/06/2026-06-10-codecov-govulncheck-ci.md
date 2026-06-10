@@ -94,6 +94,8 @@ Those examples point to three design choices for attune:
   skip label for exceptional PRs.
 - Keep console coverage path-gated to TypeScript/React/package changes, with a
   deliberate skip label for exceptional PRs.
+- Add Codecov `project` and `patch` status checks for the `go` and `console`
+  coverage flags as informational PR signals.
 - Add a weekly scheduled `govulncheck` SARIF workflow that uploads findings to
   GitHub code scanning.
 - Keep PR `govulncheck` informational and non-blocking.
@@ -108,14 +110,12 @@ Those examples point to three design choices for attune:
 ## Non-goals
 
 - Do not make Codecov a required merge gate in this issue.
-- Do not introduce new global coverage thresholds or Codecov status checks yet.
-  The current local Go unit coverage baseline is roughly 28.0% statements, and
-  the console suite already has targeted per-file Vitest thresholds. Any broader
-  ratchet should be introduced separately once the desired baseline and policy
-  are agreed.
-- Do not add Codecov PR comments, patch/project gates, badges, or repository
-  config in this issue. Go and console coverage get GitHub-native PR comments
-  and artifacts; Codecov remains the long-running trend dashboard.
+- Do not make Codecov `project` or `patch` status checks required in branch
+  protection yet. They are informational while the repository establishes a
+  stable baseline and noise profile.
+- Do not add Codecov PR comments or badges in this issue. Go and console
+  coverage get GitHub-native PR comments and artifacts; Codecov remains the
+  long-running trend dashboard plus informational status provider.
 - Do not include integration or live-test coverage in the first Codecov upload.
   The Go upload remains the default unit package coverage from `go test ./...`;
   `make test-integration` and `test/live/...` stay separate tiers.
@@ -331,10 +331,11 @@ Keep the existing `console` job in `.github/workflows/ci.yml` running
 `pnpm vitest run --coverage`; that remains the regular console quality gate.
 The new workflow is the richer review signal for console-changing PRs.
 
-### 5. Upload console coverage to Codecov on main
+### 5. Upload console coverage to Codecov
 
-For `push` to `main`, upload console coverage to Codecov as a repository trend
-signal. Extend Vitest reporters with `lcov` as well as `json-summary`:
+For same-repository PRs and `push` to `main`, upload console coverage to
+Codecov as a repository trend signal. Extend Vitest reporters with `lcov` as
+well as `json-summary`:
 
 ```ts
 reporter: ['text', 'html', 'json-summary', 'lcov'],
@@ -346,7 +347,9 @@ untrusted PRs:
 
 ```yaml
 - name: Upload console coverage to Codecov
-  if: github.event_name == 'push'
+  if: >-
+    github.event_name == 'push' ||
+    github.event.pull_request.head.repo.full_name == github.repository
   uses: codecov/codecov-action@... # v6.0.1
   continue-on-error: true
   with:
@@ -359,7 +362,55 @@ Codecov remains the long-running dashboard; the Grafana-style PR workflow is the
 review gate. The `console` flag keeps the TypeScript/React trend separate from
 the Go trend.
 
-### 6. Add a scheduled govulncheck SARIF workflow
+### 6. Add informational Codecov status checks
+
+Add `codecov.yml` with one `project` and one `patch` status for each coverage
+flag:
+
+```yaml
+comment: false
+
+coverage:
+  status:
+    default_rules:
+      flag_coverage_not_uploaded_behavior: exclude
+    project:
+      default: false
+      go:
+        target: auto
+        threshold: 1%
+        informational: true
+        only_pulls: true
+        flags: [go]
+      console:
+        target: auto
+        threshold: 1%
+        informational: true
+        only_pulls: true
+        flags: [console]
+    patch:
+      default: false
+      go:
+        target: auto
+        threshold: 1%
+        informational: true
+        only_pulls: true
+        flags: [go]
+      console:
+        target: auto
+        threshold: 1%
+        informational: true
+        only_pulls: true
+        flags: [console]
+```
+
+`project` shows whole-flag coverage movement, and `patch` shows coverage on the
+PR diff. Both are informational so they surface signal in the PR UI without
+changing branch protection. `comment: false` avoids duplicating the existing Go
+and console sticky comments. `flag_coverage_not_uploaded_behavior: exclude`
+keeps Go-only PRs from showing console statuses, and vice versa.
+
+### 7. Add a scheduled govulncheck SARIF workflow
 
 Create `.github/workflows/govulncheck-sarif.yml` as a standalone security
 workflow:
@@ -406,7 +457,7 @@ jobs.
 Do not add this job to `ci-gate`: it is not part of PR gating and only runs on
 schedule/manual dispatch.
 
-### 7. Leave the existing PR govulncheck job in place
+### 8. Leave the existing PR govulncheck job in place
 
 Keep the existing `.github/workflows/ci.yml` `govulncheck` job:
 
@@ -564,29 +615,35 @@ baseline is agreed.
    - post a sticky PR comment,
    - fail when aggregate console coverage decreases.
 8. Update the `.github/workflows/ci.yml` `console` job:
-   - on `push`, upload `./console/coverage/lcov.info` to Codecov with
-     `flags: console`,
+   - on `push` and same-repository PRs, upload
+     `./console/coverage/lcov.info` to Codecov with `flags: console`,
    - use the same `${{ secrets.CODECOV_TOKEN }}` secret,
    - keep the upload non-blocking.
-9. Add `.github/workflows/govulncheck-sarif.yml`:
+9. Add `codecov.yml`:
+   - disable Codecov PR comments,
+   - add informational `project` and `patch` statuses for `go`,
+   - add informational `project` and `patch` statuses for `console`,
+   - exclude statuses for flags that were not uploaded on a given PR.
+10. Add `.github/workflows/govulncheck-sarif.yml`:
    - weekly `schedule`,
    - `workflow_dispatch`,
    - minimal permissions,
    - checkout/setup-go,
    - `govulncheck -format sarif ./...`,
    - `github/codeql-action/upload-sarif`.
-10. Run `actionlint` if available locally; otherwise rely on existing workflow
+11. Run `actionlint` if available locally; otherwise rely on existing workflow
    lint CI and inspect YAML manually.
-11. Update this proposal status to `Implemented` when the workflow changes land.
-12. In the PR description:
+12. Update this proposal status to `Implemented` when the workflow changes land.
+13. In the PR description:
    - `Closes #16`,
    - note that changelog is skipped because this is a `ci:`/`type/chore`
      workflow-only change,
    - call out the required external `CODECOV_TOKEN` repository secret setup.
-13. After merge, a maintainer verifies:
+14. After merge, a maintainer verifies:
    - Codecov shows new Go and console coverage uploads for `main`,
    - a Go-changing PR gets a coverage artifact and sticky comment,
    - a console-changing PR gets a coverage artifact and sticky comment,
+   - Codecov emits informational project/patch statuses for uploaded flags,
    - manually dispatching `Govulncheck SARIF` uploads findings to Security ->
      Code scanning.
 
@@ -595,6 +652,7 @@ baseline is agreed.
 Pre-merge local checks:
 
 - `git diff --check`
+- `ruby -e "require 'yaml'; YAML.load_file('codecov.yml')"`
 - `go test -race -covermode=atomic -coverprofile=/tmp/attune-go-coverage.txt ./...`
 - `go tool cover -func=/tmp/attune-go-coverage.txt > /tmp/attune-go-coverage-func.txt`
 - `go tool cover -html=/tmp/attune-go-coverage.txt -o /tmp/attune-go-coverage.html`
@@ -626,6 +684,8 @@ Post-merge/manual checks:
 - Confirm the next `go-checks` run logs a Go coverage `total:` line.
 - Confirm the Codecov step no longer logs `Token length: 0` or `Token required`.
 - Confirm Codecov shows coverage for the relevant commit/PR with the `go` flag.
+- Confirm Codecov emits informational `project/go`, `patch/go`,
+  `project/console`, and `patch/console` statuses when both flags upload.
 - Confirm a Go-changing PR posts a sticky coverage comment and uploads the PR
   HTML coverage artifact.
 - Confirm a deliberate Go coverage decrease fails the `Go Coverage` workflow
