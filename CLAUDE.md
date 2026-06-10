@@ -13,25 +13,50 @@ AI assistants (Claude Code, Cursor, etc.) working on this repository.
 
 | Check | Threshold | How |
 |---|---|---|
-| **Go** | | |
+| **Go backend** | | |
 | `go vet ./...` | 0 warnings | pre-commit + CI |
 | `go build ./...` | 0 errors | pre-commit + CI |
-| `go test -short ./...` | All pass on changed code | CI |
-| Function CCN | ≤ 15 | `lizard . -l go -C 15` |
-| Function NLOC | ≤ 100 | `lizard . -l go -T nloc=100` |
-| Code duplication | < 4% | `npx -y jscpd . --pattern '**/*.go' --threshold 5` |
-| Internal info | 0 leaks (IPs, /opt paths, brand names) | grep |
-| Outbound HTTP clients | must wrap with `otelhttp.NewTransport` | `scripts/lint-slog.sh` Rule 3 |
-| Logging | `logext.*` + `ctx` first; no direct `log/slog` in business code | `golangci-lint` depguard `slog-facade` |
+| `go test -race ./...` | All pass on changed code | CI `go-checks` |
+| Go module files | `go.mod` / `go.sum` tidy output committed | `go mod tidy && git diff --exit-code go.mod go.sum` |
+| `golangci-lint` | 0 findings | CI (`govet`, `depguard`, `bodyclose`, `noctx`, etc.) |
+| Function CCN | ≤ 15 | `lizard . -l go -C 15 -T nloc=100 --warnings_only` |
+| Function NLOC | ≤ 100 | `lizard . -l go -C 15 -T nloc=100 --warnings_only` |
+| Code duplication | < 4% | `npx -y jscpd . -f go -i '**/*.pb.go' -t 4 --silent` |
+| Logging facade | no direct `log/slog` in business code | `golangci-lint` depguard `slog-facade` |
+| Log fields / outbound HTTP | 0 `lint-slog` findings | `scripts/lint-slog.sh --strict` (rules 2 + 3) |
 | Raw pointer ops | 0 bare `*p` deref / `&x` address-of (use `internal/pkg/ptrext`) | `scripts/lint-rawptr.sh` |
+| Error response codes | `ErrorResponse.code` comes from the enum | `scripts/lint-errorcode.sh` |
+| Integration layout | 0 misplaced integration-tagged tests | `scripts/lint-integration-layout.sh` |
+| PostgreSQL integration tests | All pass on Go changes | `make test-integration` in CI |
 | **Console (TS / React)** | | |
 | `pnpm tsc -b --noEmit` | 0 errors | CI |
 | `pnpm biome check` | 0 errors | pre-commit (staged) + CI |
+| `pnpm exec vite build` | 0 errors | CI build smoke test |
 | `pnpm vitest run --coverage` | All pass + per-file thresholds met (see `console/vite.config.ts`) | CI |
 | `pnpm arch` (dependency-cruiser) | 0 violations (shared → features → app, no cross-feature) | CI |
+| **Contracts / deploy** | | |
+| Proto contract | lint clean, no breaking drift, generated output committed | `buf lint`, `buf breaking`, `buf generate && git diff --exit-code` |
+| Docker image | smoke build succeeds | CI `docker-build` |
+| Compose config | base + observability overlay parses | `docker compose ... config -q` |
+| **Security / supply chain** | | |
+| Secrets | no verified or unknown committed secrets | TruffleHog `Secret Scan` workflow |
+| Code scanning | CodeQL completes for Go and JS/TS | `CodeQL` workflow |
+| Dependency review | no high-severity vulnerable deps; no denied copyleft licenses | `Dependency Review` workflow |
+| Workflow security | 0 zizmor findings | `Workflow Lint` workflow |
+| **PR process / coverage review** | | |
+| Changelog | code PRs update `[Unreleased]` unless exempt | CI `changelog` job |
+| PR title | Conventional Commit shape | `Semantic Pull Request` workflow |
+| Go coverage regression | aggregate coverage does not decrease unless skipped | `Go Coverage` workflow |
+| Console coverage regression | aggregate coverage does not decrease unless skipped | `Console Coverage` workflow |
 
-The pre-commit hook enforces a subset locally; CI enforces all. Red gates =
-PR cannot merge.
+The pre-commit hook enforces a subset locally. `.github/workflows/ci.yml` is
+aggregated by `ci-gate`; dedicated PR workflows run alongside it. Rows are listed
+only when an implemented command, script, or workflow owns the check.
+
+Informational / scheduled monitors are not red gates unless branch protection is
+changed to require them: PR `govulncheck ./...` is `continue-on-error`; Codecov
+uploads are `continue-on-error`; scheduled Govulncheck SARIF and OpenSSF
+Scorecard publish findings for follow-up.
 
 ---
 
