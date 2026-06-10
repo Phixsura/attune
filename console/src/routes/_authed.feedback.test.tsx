@@ -35,8 +35,11 @@ const itemFixture = {
   id: 'f-101',
   content: 'login is broken when password has unicode',
   enrichedTitle: 'Login fails on unicode password',
+  enrichedDisplayTitle: 'Unicode 密码登录失败',
+  enrichedDisplayLocale: 'zh',
   enrichedAttrs: { severity: 'P0' },
   isUrgent: true,
+  language: 'en',
   source: 'web',
   userId: 'user-7',
   createdAt: '2026-06-07T08:30:00Z',
@@ -52,9 +55,13 @@ const detailFixture = {
   userId: 'user-7',
   pageUrl: '',
   enrichedTitle: 'Login fails on unicode password',
+  enrichedDisplayTitle: 'Unicode 密码登录失败',
   enrichedRationale: 'Unicode normalization bug',
+  enrichedDisplayRationale: 'Unicode 规范化问题',
+  enrichedDisplayLocale: 'zh',
   enrichedAttrs: { severity: 'P0' },
   isUrgent: true,
+  language: 'en',
   enrichmentStatus: 'done',
   createdAt: '2026-06-07T08:30:00Z',
   attachments: [],
@@ -105,7 +112,7 @@ describe('_authed.feedback route — user flow smoke', () => {
 
     // Wait for the list query to land + render the row title.
     await waitFor(() => {
-      expect(screen.getByText('Login fails on unicode password')).toBeInTheDocument()
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
     })
     // Dim column header rendered from enrich-config dims. Two
     // matches expected: one in the stats card title, one in the
@@ -115,14 +122,16 @@ describe('_authed.feedback route — user flow smoke', () => {
     // the dim's taxonomy).
     const p0Badges = screen.getAllByText('P0')
     expect(p0Badges.length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByTitle('原文语言：英文').length).toBeGreaterThanOrEqual(1)
 
     // Click the row → setDetailId fires → FeedbackDetailSheet opens →
     // its useQuery(feedbackDetailQuery(id)) runs → MSW returns
     // detailFixture → sheet body renders the rationale.
-    await user.click(screen.getByText('Login fails on unicode password'))
+    await user.click(screen.getByText('Unicode 密码登录失败'))
     await waitFor(() => {
-      expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
+      expect(screen.getByText('Unicode 规范化问题')).toBeInTheDocument()
     })
+    expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
   }, 30000)
 
   it('500 from /feedback → empty state (not crash) — documents current behavior', async () => {

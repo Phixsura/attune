@@ -47,12 +47,52 @@ func TestRenderPrompt_SubstitutesBothTokens(t *testing.T) {
 
 func TestRenderPrompt_CustomTemplateRespected(t *testing.T) {
 	cfg := ClassifyConfig{
+		Language:       LanguageChinese,
 		PromptTemplate: ptrext.Of("custom: {{content}} | dims:\n{{dimensions}}"),
 		Dimensions:     domain.DimensionSet{sevDim()},
 	}
 	out := renderPrompt(cfg, "hi")
 	if !strings.HasPrefix(out, "custom: hi |") {
 		t.Errorf("custom template not used, got: %s", out)
+	}
+}
+
+func TestRenderPrompt_UsesLanguageVariant(t *testing.T) {
+	zh := renderPrompt(ClassifyConfig{Language: LanguageEnglish, DisplayLocale: LanguageChinese}, "checkout failed")
+	if !strings.Contains(zh, "你是产品反馈分类器") {
+		t.Fatalf("Chinese language should select zh prompt, got:\n%s", zh)
+	}
+	if !strings.Contains(zh, `"display_title"`) || !strings.Contains(zh, "Simplified Chinese") {
+		t.Fatalf("Chinese display prompt should request display fields, got:\n%s", zh)
+	}
+	traditional := renderPrompt(ClassifyConfig{DisplayLocale: "zh-TW"}, "checkout failed")
+	if !strings.Contains(traditional, "Traditional Chinese") {
+		t.Fatalf("zh-TW display prompt should request Traditional Chinese, got:\n%s", traditional)
+	}
+	en := renderPrompt(ClassifyConfig{Language: LanguageJapanese}, "ログインできません")
+	if !strings.Contains(en, "You are a product-feedback classifier") {
+		t.Fatalf("Japanese currently falls back to English prompt, got:\n%s", en)
+	}
+	if !strings.Contains(en, "same natural language") {
+		t.Fatalf("English prompt should preserve source language, got:\n%s", en)
+	}
+}
+
+func TestPromptVersion(t *testing.T) {
+	if got := promptVersion(ClassifyConfig{Language: LanguageJapanese}); got != "default:en" {
+		t.Fatalf("Japanese source should report English built-in prompt, got %q", got)
+	}
+	if got := promptVersion(ClassifyConfig{
+		Language:      LanguageEnglish,
+		DisplayLocale: LanguageChinese,
+	}); got != "default:zh" {
+		t.Fatalf("Chinese display locale should report zh built-in prompt, got %q", got)
+	}
+	if got := promptVersion(ClassifyConfig{
+		Language:       LanguageChinese,
+		PromptTemplate: ptrext.Of("custom {{content}}"),
+	}); got != "tenant_custom" {
+		t.Fatalf("custom prompt version=%q", got)
 	}
 }
 
@@ -164,6 +204,9 @@ func TestBuildEnrichSchema_OptionalSingleAllowsNull(t *testing.T) {
 	var got map[string]any
 	_ = json.Unmarshal(raw, &got)
 	props := got["properties"].(map[string]any)
+	if _, ok := props["display_title"]; !ok {
+		t.Fatalf("display_title missing from schema properties: %v", props)
+	}
 	sev := props["severity"].(map[string]any)
 	types, _ := sev["type"].([]any)
 	if len(types) != 2 || types[0] != "string" || types[1] != "null" {
@@ -264,14 +307,21 @@ func TestBuildEnrichSchema_AlwaysRequiresTitleAndRationale(t *testing.T) {
 	var got map[string]any
 	_ = json.Unmarshal(raw, &got)
 	required := got["required"].([]any)
-	wantSet := map[string]bool{"title": false, "rationale": false}
+	wantSet := map[string]bool{
+		"title":             false,
+		"display_title":     false,
+		"rationale":         false,
+		"display_rationale": false,
+	}
 	for _, x := range required {
 		if s, ok := x.(string); ok {
 			wantSet[s] = true
 		}
 	}
-	if !wantSet["title"] || !wantSet["rationale"] {
-		t.Errorf("title/rationale must always be required, got: %v", required)
+	for field, found := range wantSet {
+		if !found {
+			t.Errorf("%s must always be required, got: %v", field, required)
+		}
 	}
 }
 

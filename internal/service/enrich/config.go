@@ -87,11 +87,12 @@ func (s *ConfigService) Update(ctx context.Context, tenantID string, in View) er
 // Preview renders the prompt that would be sent to the LLM for the
 // given sample content, using the same renderPrompt path as Classify.
 func (s *ConfigService) Preview(ctx context.Context, tenantID, sampleContent string) (string, error) {
-	cfg, err := s.Get(ctx, tenantID)
+	cfg, err := s.tenants.GetEnrichConfigWithLocale(ctx, tenantID)
 	if err != nil {
 		return "", err
 	}
 	return renderPrompt(ClassifyConfig{
+		DisplayLocale:  cfg.Locale,
 		PromptTemplate: cfg.PromptTemplate,
 		Dimensions:     cfg.Dimensions,
 	}, sampleContent), nil

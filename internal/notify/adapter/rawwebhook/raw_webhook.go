@@ -176,13 +176,17 @@ func buildRawEnvelope(s domain.Snapshot) ([]byte, error) {
 			Content:     s.Content,
 			Source:      s.Source,
 			UserID:      s.UserID,
+			Language:    s.Language,
 			SubmittedAt: s.SubmittedAt.UTC().Format(time.RFC3339), // #82: actual ingest time (user_feedback.created_at)
 			Enriched: rawEnriched{
-				Title:      s.Title,
-				Attrs:      nilSafeAttrs(s.Attrs),
-				IsUrgent:   s.IsUrgent,
-				Rationale:  s.Rationale,
-				EnrichedAt: s.EnrichedAt.UTC().Format(time.RFC3339),
+				Title:            s.Title,
+				DisplayTitle:     s.DisplayTitle,
+				DisplayLocale:    s.DisplayLocale,
+				Attrs:            nilSafeAttrs(s.Attrs),
+				IsUrgent:         s.IsUrgent,
+				Rationale:        s.Rationale,
+				DisplayRationale: s.DisplayRationale,
+				EnrichedAt:       s.EnrichedAt.UTC().Format(time.RFC3339),
 			},
 		},
 	}
@@ -240,16 +244,20 @@ type rawFeedback struct {
 	Content     string      `json:"content"`
 	Source      string      `json:"source"`
 	UserID      string      `json:"user_id"`
+	Language    string      `json:"language,omitempty"`
 	SubmittedAt string      `json:"submitted_at"`
 	Enriched    rawEnriched `json:"enriched"`
 }
 
 type rawEnriched struct {
-	Title      string         `json:"title"`
-	Attrs      map[string]any `json:"attrs"`
-	IsUrgent   bool           `json:"is_urgent"`
-	Rationale  string         `json:"rationale"`
-	EnrichedAt string         `json:"enriched_at"`
+	Title            string         `json:"title"`
+	DisplayTitle     string         `json:"display_title,omitempty"`
+	DisplayLocale    string         `json:"display_locale,omitempty"`
+	Attrs            map[string]any `json:"attrs"`
+	IsUrgent         bool           `json:"is_urgent"`
+	Rationale        string         `json:"rationale"`
+	DisplayRationale string         `json:"display_rationale,omitempty"`
+	EnrichedAt       string         `json:"enriched_at"`
 }
 
 // nilSafeAttrs guarantees a non-nil map so the JSON encodes as `{}`

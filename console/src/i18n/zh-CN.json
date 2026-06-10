@@ -396,12 +396,21 @@
     "load_more": "加载更多",
     "table": {
       "title": "标题 / 内容",
+      "language": "原文语言",
       "user": "用户",
       "time": "时间"
+    },
+    "language": {
+      "zh": "中文",
+      "en": "英文",
+      "ja": "日文",
+      "unknown": "未知语言",
+      "source_title": "原文语言：{{language}}"
     },
     "detail": {
       "ai_summary": "AI 摘要",
       "ai_rationale": "AI 解读",
+      "ai_rationale_source": "原语言解读",
       "raw_content": "原始内容",
       "source": "来源",
       "sourceMeta": "元数据",

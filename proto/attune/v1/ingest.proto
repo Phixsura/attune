@@ -87,6 +87,9 @@ message Feedback {
   bool is_urgent = 9;
   string enrichment_status = 10;  // pending | enriching | done | failed
   string created_at = 11;         // RFC3339
+  optional string language = 12;   // ISO 639-1-ish detected source language
+  optional string enriched_display_title = 13;     // tenant-locale console title
+  optional string enriched_display_locale = 14;  // tenant locale used for display
 }
 
 // FeedbackDetail is the single-row view: the list fields plus extras (flat).
@@ -110,6 +113,10 @@ message FeedbackDetail {
   // via the outbox envelope; persisted to user_feedback.enriched_rationale
   // by migration 013.
   optional string enriched_rationale = 16;
+  optional string language = 17;  // ISO 639-1-ish detected source language
+  optional string enriched_display_title = 18;      // tenant-locale console title
+  optional string enriched_display_rationale = 19;  // tenant-locale "why these values"
+  optional string enriched_display_locale = 20;   // tenant locale used for display
 }
 
 message Attachment {

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Language-aware enrichment (#22).** Adds dependency-free source-language
+  detection for feedback rows (`zh`, `en`, `ja`, `unknown`), persists the
+  detected code on `user_feedback.language`, keeps native `title` /
+  `rationale` in the source language, generates tenant-locale display
+  summaries in new `enriched_display_*` fields, records language/prompt
+  provenance in semantic extraction runs, includes native/display summaries in
+  webhook envelopes, and renders source-language badges plus tenant-locale
+  summaries in the console list and detail views.
 - **Semantic understanding layer foundation + customer tone (#21).** Extends
   metadata-driven Dimensions with descriptions, examples, extraction hints, and
   renderer metadata; adds `sentiment` as the customer-feedback pack's default

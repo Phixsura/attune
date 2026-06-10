@@ -28,6 +28,13 @@ type EnrichConfig struct {
 	Dimensions     domain.DimensionSet
 }
 
+// EnrichConfigWithLocale adds the tenant locale needed to render the same
+// built-in prompt variant that the background enricher will use.
+type EnrichConfigWithLocale struct {
+	EnrichConfig
+	Locale string
+}
+
 // GetEnrichConfig returns the per-tenant enricher override. A nil
 // PromptTemplate means "use the built-in default"; the Dimensions
 // slice is exactly what migration 014's seed (or the operator's later
@@ -60,6 +67,42 @@ func (r *TenantRepo) GetEnrichConfig(ctx context.Context, tenantID string) (Enri
 		}
 	}
 	return cfg, nil
+}
+
+// GetEnrichConfigWithLocale returns the prompt/dimension override plus the
+// tenant locale in one query. Settings preview uses this so preview and actual
+// enrichment do not drift.
+func (r *TenantRepo) GetEnrichConfigWithLocale(
+	ctx context.Context,
+	tenantID string,
+) (EnrichConfigWithLocale, error) {
+	const where = "repo.TenantRepo.GetEnrichConfigWithLocale"
+	var (
+		out     EnrichConfigWithLocale
+		dimsRaw []byte
+	)
+	err := r.pool.QueryRow(
+		ctx,
+		`SELECT enrich_prompt_template, enrich_dimensions, locale
+		 FROM tenants
+		 WHERE id = $1`, tenantID,
+	).Scan(&out.PromptTemplate, &dimsRaw, &out.Locale)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return EnrichConfigWithLocale{}, ErrTenantNotFound
+	}
+	if err != nil {
+		logext.Errorf(ctx, "[%s] query failed,tenant_id:%s,err:%+v",
+			where, tenantID, err.Error())
+		return EnrichConfigWithLocale{}, fmt.Errorf("get enrich config with locale %s: %w", tenantID, err)
+	}
+	if len(dimsRaw) > 0 {
+		if err := json.Unmarshal(dimsRaw, &out.Dimensions); err != nil {
+			logext.Errorf(ctx, "[%s] unmarshal dims failed,tenant_id:%s,err:%+v",
+				where, tenantID, err.Error())
+			return EnrichConfigWithLocale{}, fmt.Errorf("decode enrich dimensions %s: %w", tenantID, err)
+		}
+	}
+	return out, nil
 }
 
 // UpdateEnrichConfig writes the per-tenant override. Pass nil

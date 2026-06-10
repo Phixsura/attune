@@ -70,6 +70,16 @@ export interface Feedback {
   enrichmentStatus: string;
   /** RFC3339 */
   createdAt: string;
+  /** ISO 639-1-ish detected source language */
+  language?:
+    | string
+    | undefined;
+  /** tenant-locale console title */
+  enrichedDisplayTitle?:
+    | string
+    | undefined;
+  /** tenant locale used for display */
+  enrichedDisplayLocale?: string | undefined;
 }
 
 /** FeedbackDetail is the single-row view: the list fields plus extras (flat). */
@@ -99,7 +109,23 @@ export interface FeedbackDetail {
    * via the outbox envelope; persisted to user_feedback.enriched_rationale
    * by migration 013.
    */
-  enrichedRationale?: string | undefined;
+  enrichedRationale?:
+    | string
+    | undefined;
+  /** ISO 639-1-ish detected source language */
+  language?:
+    | string
+    | undefined;
+  /** tenant-locale console title */
+  enrichedDisplayTitle?:
+    | string
+    | undefined;
+  /** tenant-locale "why these values" */
+  enrichedDisplayRationale?:
+    | string
+    | undefined;
+  /** tenant locale used for display */
+  enrichedDisplayLocale?: string | undefined;
 }
 
 export interface Attachment {

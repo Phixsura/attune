@@ -23,13 +23,20 @@ import (
 // (via the triage_decisions counter) so PMs can audit the ignore rate.
 func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.EnrichInput, reason string) error {
 	const where = "service.Enricher.persistIgnored"
+	row.Language = detectRowLanguage(row.Content)
+	row.DisplayLocale = displayLocaleForTenantLocale(row.DisplayLocale)
 	enriched := domain.Enriched{
-		Title:     "[triage-ignored]",
-		Attrs:     map[string]any{},
-		IsUrgent:  false,
-		Rationale: "triage v0: " + reason,
+		Title:            "[triage-ignored]",
+		DisplayTitle:     "[triage-ignored]",
+		Attrs:            map[string]any{},
+		IsUrgent:         false,
+		Rationale:        "triage v0: " + reason,
+		DisplayRationale: "triage v0: " + reason,
 	}
-	if err := e.repo.MarkDone(ctx, id, enriched); err != nil {
+	if err := e.repo.MarkDone(ctx, id, enriched, feedback.EnrichmentMetadata{
+		Language:      row.Language,
+		DisplayLocale: row.DisplayLocale,
+	}); err != nil {
 		return fmt.Errorf("mark ignored row done: %w", err)
 	}
 	logext.Infof(ctx,
@@ -44,6 +51,9 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.E
 // just without the LLM call.
 func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedback.EnrichInput, enriched domain.Enriched) error {
 	const where = "service.Enricher.persistFromTriage"
+	row.Language = detectRowLanguage(row.Content)
+	row.DisplayLocale = displayLocaleForTenantLocale(row.DisplayLocale)
+	enriched = normalizeEnrichedDisplay(enriched, row.Language, row.DisplayLocale)
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
 	if err := e.persistEnriched(ctx, snapshot, enriched, nil); err != nil {
 		return err

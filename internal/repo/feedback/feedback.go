@@ -100,6 +100,8 @@ type EnrichInput struct {
 	Content         string
 	Source          string
 	UserID          string
+	Language        string
+	DisplayLocale   string
 	TenantID        string
 	CreatedAt       time.Time
 	InboundSourceID string
@@ -122,14 +124,15 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 	)
 	err := r.pool.QueryRow(
 		ctx,
-		`SELECT uf.content, uf.source, uf.user_id, uf.tenant_id, uf.created_at,
-		 uf.inbound_source_id, COALESCE(src.tags, '{}'::text[]),
+		`SELECT uf.content, uf.source, uf.user_id, COALESCE(uf.language, ''),
+		 COALESCE(t.locale, 'en'), uf.tenant_id, uf.created_at,
+			 uf.inbound_source_id, COALESCE(src.tags, '{}'::text[]),
 		 t.enrich_prompt_template, t.enrich_dimensions
 		 FROM user_feedback uf
 		 LEFT JOIN tenants t ON t.id = uf.tenant_id
 		 LEFT JOIN inbound_sources src ON src.id = uf.inbound_source_id
 		 WHERE uf.id = $1`, id,
-	).Scan(&in.Content, &in.Source, &in.UserID, &in.TenantID, &in.CreatedAt,
+	).Scan(&in.Content, &in.Source, &in.UserID, &in.Language, &in.DisplayLocale, &in.TenantID, &in.CreatedAt,
 		&inboundSource, &in.SourceTags, &in.PromptTemplate, &dimsRaw)
 	if err != nil {
 		return nil, fmt.Errorf("load feedback %d: %w", id, err)
@@ -160,30 +163,41 @@ func inboundSourceIDFromMeta(meta map[string]any) *uuid.UUID {
 	return ptrext.Of(id)
 }
 
+type EnrichmentMetadata struct {
+	Language      string
+	DisplayLocale string
+}
+
 // markDoneSQL is the body of MarkDone[/Tx]. Extracted so both flavors
 // stay in lockstep — the only difference is who executes it.
 const markDoneSQL = `
-	UPDATE user_feedback
-	SET enriched_title = $1,
-	 enriched_attrs = $2::jsonb,
-	 is_urgent = $3,
-	 enriched_rationale = $4,
-	 enrichment_status = 'done',
-	 enrichment_error = NULL,
-	 enriched_at = NOW()
-	WHERE id = $5`
+		UPDATE user_feedback
+		SET enriched_title = $1,
+		 enriched_attrs = $2::jsonb,
+		 is_urgent = $3,
+		 enriched_rationale = $4,
+		 language = NULLIF($5, ''),
+		 enriched_display_title = NULLIF($6, ''),
+		 enriched_display_rationale = NULLIF($7, ''),
+		 enriched_display_locale = NULLIF($8, ''),
+		 enrichment_status = 'done',
+		 enrichment_error = NULL,
+		 enriched_at = NOW()
+		WHERE id = $9`
 
 // MarkDone persists the LLM classification and flips the row to 'done'.
 // Single-statement; no outer tx needed. Use MarkDoneTx when this
 // UPDATE must be atomic with other writes (e.g. outbox insertion).
-func (r *FeedbackRepo) MarkDone(ctx context.Context, id int64, e domain.Enriched) error {
+func (r *FeedbackRepo) MarkDone(ctx context.Context, id int64, e domain.Enriched, metas ...EnrichmentMetadata) error {
 	attrsJSON, err := marshalAttrs(e.Attrs)
 	if err != nil {
 		return err
 	}
+	meta := mergeEnrichmentMetadata(metas)
 	if _, err := r.pool.Exec(
 		ctx, markDoneSQL,
-		e.Title, attrsJSON, e.IsUrgent, e.Rationale, id,
+		e.Title, attrsJSON, e.IsUrgent, e.Rationale, meta.Language,
+		e.DisplayTitle, e.DisplayRationale, meta.DisplayLocale, id,
 	); err != nil {
 		return fmt.Errorf("update enrichment row %d: %w", id, err)
 	}
@@ -194,18 +208,33 @@ func (r *FeedbackRepo) MarkDone(ctx context.Context, id int64, e domain.Enriched
 // enricher uses this to flip user_feedback + INSERT outbox in one
 // atomic step (model is "feedback is enriched IFF outbox is queued",
 // anything else is undefined state).
-func (r *FeedbackRepo) MarkDoneTx(ctx context.Context, tx pgx.Tx, id int64, e domain.Enriched) error {
+func (r *FeedbackRepo) MarkDoneTx(ctx context.Context, tx pgx.Tx, id int64, e domain.Enriched, metas ...EnrichmentMetadata) error {
 	attrsJSON, err := marshalAttrs(e.Attrs)
 	if err != nil {
 		return err
 	}
+	meta := mergeEnrichmentMetadata(metas)
 	if _, err := tx.Exec(
 		ctx, markDoneSQL,
-		e.Title, attrsJSON, e.IsUrgent, e.Rationale, id,
+		e.Title, attrsJSON, e.IsUrgent, e.Rationale, meta.Language,
+		e.DisplayTitle, e.DisplayRationale, meta.DisplayLocale, id,
 	); err != nil {
 		return fmt.Errorf("update enrichment row %d (tx): %w", id, err)
 	}
 	return nil
+}
+
+func mergeEnrichmentMetadata(metas []EnrichmentMetadata) EnrichmentMetadata {
+	var out EnrichmentMetadata
+	for _, meta := range metas {
+		if meta.Language != "" {
+			out.Language = meta.Language
+		}
+		if meta.DisplayLocale != "" {
+			out.DisplayLocale = meta.DisplayLocale
+		}
+	}
+	return out
 }
 
 // MaxAttrsBytes is the upper bound on a single row's enriched_attrs

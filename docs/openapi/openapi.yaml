@@ -1150,6 +1150,12 @@ components:
                     type: string
                 createdAt:
                     type: string
+                language:
+                    type: string
+                enrichedDisplayTitle:
+                    type: string
+                enrichedDisplayLocale:
+                    type: string
             description: |-
                 Feedback is a console feedback list row. Post-E3 (metadata-driven
                  Dimensions): the per-row classification lives in `enriched_attrs`, a
@@ -1197,6 +1203,14 @@ components:
                         LLM's short "why these values" justification. Already delivered
                          via the outbox envelope; persisted to user_feedback.enriched_rationale
                          by migration 013.
+                language:
+                    type: string
+                enrichedDisplayTitle:
+                    type: string
+                enrichedDisplayRationale:
+                    type: string
+                enrichedDisplayLocale:
+                    type: string
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         GetEnrichConfigResponse:
             type: object

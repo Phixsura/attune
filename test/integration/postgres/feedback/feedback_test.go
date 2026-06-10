@@ -118,16 +118,21 @@ func TestPG_MarkDoneAndContainmentQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	enriched := domain.Enriched{
-		Title: "支付失败",
+		Title:        "Payment failed",
+		DisplayTitle: "支付失败",
 		Attrs: map[string]any{
 			"type":     "bug",
 			"severity": "critical",
 			"labels":   []string{"payment", "ux"},
 		},
-		IsUrgent:  true,
-		Rationale: "core flow",
+		IsUrgent:         true,
+		Rationale:        "core flow",
+		DisplayRationale: "核心流程受阻",
 	}
-	if err := repo.MarkDone(ctx, id, enriched); err != nil {
+	if err := repo.MarkDone(ctx, id, enriched, feedback.EnrichmentMetadata{
+		Language:      "en",
+		DisplayLocale: "zh",
+	}); err != nil {
 		t.Fatalf("MarkDone: %v", err)
 	}
 
@@ -141,11 +146,13 @@ func TestPG_MarkDoneAndContainmentQuery(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 row matching severity=critical, got %d", len(rows))
 	}
-	if !rows[0].IsUrgent {
-		t.Error("is_urgent should be true")
+	assertConsoleDisplayRow(t, rows[0])
+	detail, err := repo.GetForConsole(ctx, tenantID, id)
+	if err != nil {
+		t.Fatalf("GetForConsole: %v", err)
 	}
-	if rows[0].EnrichedTitle != "支付失败" {
-		t.Errorf("title: %q", rows[0].EnrichedTitle)
+	if detail.EnrichedDisplayRationale != "核心流程受阻" {
+		t.Errorf("display rationale: %q", detail.EnrichedDisplayRationale)
 	}
 
 	// Negative containment: severity=minor should match zero rows.
@@ -170,6 +177,25 @@ func TestPG_MarkDoneAndContainmentQuery(t *testing.T) {
 	}
 	if len(rows) != 1 {
 		t.Errorf("labels=payment should match 1 row, got %d", len(rows))
+	}
+}
+
+func assertConsoleDisplayRow(t *testing.T, row feedback.ConsoleListRow) {
+	t.Helper()
+	if !row.IsUrgent {
+		t.Error("is_urgent should be true")
+	}
+	if row.EnrichedTitle != "Payment failed" {
+		t.Errorf("title: %q", row.EnrichedTitle)
+	}
+	if row.EnrichedDisplayTitle != "支付失败" {
+		t.Errorf("display title: %q", row.EnrichedDisplayTitle)
+	}
+	if row.Language != "en" {
+		t.Errorf("language: %q", row.Language)
+	}
+	if row.EnrichedDisplayLocale != "zh" {
+		t.Errorf("display locale: %q", row.EnrichedDisplayLocale)
 	}
 }
 

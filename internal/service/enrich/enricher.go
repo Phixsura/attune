@@ -152,6 +152,8 @@ func (e *Enricher) EnrichOne(ctx context.Context, id int64) error {
 func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.EnrichInput) error {
 	const where = "service.Enricher.runFullEnrich"
 	start := time.Now()
+	row.Language = detectRowLanguage(row.Content)
+	row.DisplayLocale = displayLocaleForTenantLocale(row.DisplayLocale)
 	cfg := classifyConfigFromRow(row)
 	mode := dimsMode(cfg)
 	result, err := e.classify(ctx, id, row.Content, cfg)
@@ -199,6 +201,12 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 // — that keeps routing under operator control and deterministic
 // across retries.
 func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyConfig) (domain.Enriched, error) {
+	if cfg.Language == "" {
+		cfg.Language = detectRowLanguage(content)
+	}
+	if cfg.DisplayLocale == "" {
+		cfg.DisplayLocale = classifyDisplayLocale(cfg)
+	}
 	result, err := e.classifyWithDiagnostics(ctx, content, cfg)
 	if err != nil {
 		return domain.Enriched{}, err
@@ -237,6 +245,7 @@ func (e *Enricher) classifyWithDiagnostics(ctx context.Context, content string, 
 		logext.Warnf(ctx, "[%s] parse failed,err:%s", where, err.Error())
 		return classifyResult{}, fmt.Errorf("parse: %w", err)
 	}
+	parsed = normalizeEnrichedDisplay(parsed, cfg.Language, cfg.DisplayLocale)
 	tenant := cfg.TenantID
 	if tenant == "" {
 		tenant = "unknown"
@@ -268,6 +277,8 @@ func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {
 		Channel:        row.Source,
 		SourceID:       row.InboundSourceID,
 		SourceTags:     row.SourceTags,
+		Language:       row.Language,
+		DisplayLocale:  displayLocaleForTenantLocale(row.DisplayLocale),
 		PromptTemplate: row.PromptTemplate,
 		Dimensions:     row.Dimensions,
 	}
