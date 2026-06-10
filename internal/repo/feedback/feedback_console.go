@@ -6,6 +6,7 @@ package feedback
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,20 +44,21 @@ type ConsoleListOpts struct {
 // EnrichedAttrs is returned as a raw JSONB byte slice — the handler
 // decodes it into a structpb.Struct for the proto wire shape.
 type ConsoleListRow struct {
-	ID                    int64
-	Content               string
-	Source                string
-	Type                  string
-	UserID                string
-	Language              string
-	PageURL               string
-	EnrichedTitle         string
-	EnrichedDisplayTitle  string
-	EnrichedDisplayLocale string
-	EnrichedAttrs         []byte // raw JSONB
-	IsUrgent              bool
-	EnrichmentStatus      string
-	CreatedAt             time.Time
+	ID                       int64
+	Content                  string
+	Source                   string
+	Type                     string
+	UserID                   string
+	Language                 string
+	PageURL                  string
+	EnrichedTitle            string
+	EnrichedDisplayTitle     string
+	EnrichedDisplayLocale    string
+	EnrichedAttrs            []byte // raw JSONB
+	IsUrgent                 bool
+	ClassificationConfidence *float64
+	EnrichmentStatus         string
+	CreatedAt                time.Time
 }
 
 // ListForConsole returns one page newest-first, scoped to tenant. Uses
@@ -96,20 +98,21 @@ func (r *FeedbackRepo) ListForConsole(
 			" OR enriched_title ILIKE " + p +
 			" OR enriched_display_title ILIKE " + p + ")"
 	}
-	sql := `
+	query := `
 			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
 		 COALESCE(enriched_title, ''),
 		 COALESCE(enriched_display_title, ''),
 		 COALESCE(enriched_display_locale, ''),
 		 COALESCE(enriched_attrs, '{}'::jsonb),
 		 is_urgent,
+		 classification_confidence,
 		 enrichment_status,
 		 created_at
 		 FROM user_feedback
 		 ` + where + `
 		 ORDER BY id DESC
 		 LIMIT ` + addArg(opts.Limit)
-	rows, err := r.pool.Query(ctx, sql, args...)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		const where = "repo.FeedbackRepo.ListForConsole"
 		logext.Errorf(ctx, "[%s] query failed,tenant_id:%s,err:%+v",
@@ -120,14 +123,16 @@ func (r *FeedbackRepo) ListForConsole(
 	var out []ConsoleListRow
 	for rows.Next() {
 		var row ConsoleListRow
+		var confidence sql.NullFloat64
 		if err := rows.Scan(
 			&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.Language, &row.PageURL,
 			&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale,
-			&row.EnrichedAttrs, &row.IsUrgent,
+			&row.EnrichedAttrs, &row.IsUrgent, &confidence,
 			&row.EnrichmentStatus, &row.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan feedback row: %w", err)
 		}
+		row.ClassificationConfidence = nullFloatPtr(confidence)
 		out = append(out, row)
 	}
 	return out, rows.Err()
@@ -166,6 +171,7 @@ func (r *FeedbackRepo) GetForConsole(
 	ctx context.Context, tenantID string, id int64,
 ) (*ConsoleDetailRow, error) {
 	var row ConsoleDetailRow
+	var confidence sql.NullFloat64
 	err := r.pool.QueryRow(
 		ctx, `
 			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
@@ -174,6 +180,7 @@ func (r *FeedbackRepo) GetForConsole(
 		 COALESCE(enriched_display_locale, ''),
 		 COALESCE(enriched_attrs, '{}'::jsonb),
 		 is_urgent,
+		 classification_confidence,
 		 enrichment_status, created_at,
 		 source_meta, attachments,
 		 COALESCE(enrichment_error, ''),
@@ -186,7 +193,7 @@ func (r *FeedbackRepo) GetForConsole(
 	).Scan(
 		&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.Language, &row.PageURL,
 		&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale,
-		&row.EnrichedAttrs, &row.IsUrgent,
+		&row.EnrichedAttrs, &row.IsUrgent, &confidence,
 		&row.EnrichmentStatus, &row.CreatedAt,
 		&row.SourceMeta, &row.Attachments,
 		&row.EnrichmentError, &row.EnrichedAt,
@@ -201,5 +208,13 @@ func (r *FeedbackRepo) GetForConsole(
 			where, tenantID, id, err.Error())
 		return nil, fmt.Errorf("get feedback for console: %w", err)
 	}
+	row.ClassificationConfidence = nullFloatPtr(confidence)
 	return ptrext.Of(row), nil
+}
+
+func nullFloatPtr(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	return ptrext.Of(v.Float64)
 }

@@ -79,7 +79,11 @@ export interface Feedback {
     | string
     | undefined;
   /** tenant locale used for display */
-  enrichedDisplayLocale?: string | undefined;
+  enrichedDisplayLocale?:
+    | string
+    | undefined;
+  /** model self-rated review signal [0,1] */
+  classificationConfidence?: number | undefined;
 }
 
 /** FeedbackDetail is the single-row view: the list fields plus extras (flat). */
@@ -125,7 +129,11 @@ export interface FeedbackDetail {
     | string
     | undefined;
   /** tenant locale used for display */
-  enrichedDisplayLocale?: string | undefined;
+  enrichedDisplayLocale?:
+    | string
+    | undefined;
+  /** model self-rated review signal [0,1] */
+  classificationConfidence?: number | undefined;
 }
 
 export interface Attachment {

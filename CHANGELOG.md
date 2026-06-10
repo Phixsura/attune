@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **LLM classification confidence review signal (#24).** The enricher prompt
+  now asks models for `classification_confidence` in `[0.0, 1.0]` with `0.5`
+  defined as ambiguous enough for human review. The parser accepts numeric and
+  numeric-string values, clamps out-of-range responses, preserves missing or
+  invalid values as `NULL`, stores the fast snapshot on
+  `user_feedback.classification_confidence`, records structured confidence
+  evidence in `semantic_extraction_runs`, and surfaces green/yellow/red
+  confidence indicators in the console list and detail views.
+- **Per-tenant LLM cost observability (#24).** Adds the `llm_audit` call-level
+  fact table, a provider-agnostic LLM audit wrapper, a vendored LiteLLM model
+  price catalog, Prometheus metrics for LLM calls / tokens / estimated USD cost,
+  `GET /fb/v1/console/llm-usage` with
+  day/week/month grouping plus Grafana-style range filters, a console LLM cost dashboard, and
+  `observability/dashboards/llm-cost.json` for Grafana. A scheduled workflow
+  opens update PRs when the upstream LiteLLM price catalog changes.
 - **Language-aware enrichment (#22).** Adds dependency-free source-language
   detection for feedback rows (`zh`, `en`, `ja`, `unknown`), persists the
   detected code on `user_feedback.language`, keeps native `title` /

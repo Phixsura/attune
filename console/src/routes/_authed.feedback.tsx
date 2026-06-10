@@ -25,6 +25,7 @@ import {
   type FeedbackListFilters,
   feedbackListInfiniteQuery,
 } from '@/features/feedback/api/list-feedback-infinite'
+import { ConfidenceIndicator } from '@/features/feedback/components/confidence-indicator'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
 import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
 import { LanguageBadge } from '@/features/feedback/components/language-badge'
@@ -199,9 +200,10 @@ function FeedbackTable({
   const displayOf = useDisplayName()
   return (
     <div>
-      <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(18rem,1.8fr)_5rem_7rem_7rem] gap-4 border-b border-border/60 px-4 py-2 text-[11px] font-medium text-muted-foreground max-lg:hidden">
+      <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(18rem,1.8fr)_5rem_5rem_7rem_7rem] gap-4 border-b border-border/60 px-4 py-2 text-[11px] font-medium text-muted-foreground max-lg:hidden">
         <div>{t('feedback.table.title')}</div>
         <div>{dims.map((d) => displayOf(d.displayName) || d.name).join(' / ')}</div>
+        <div>{t('feedback.table.confidence')}</div>
         <div>{t('feedback.table.language')}</div>
         <div>{t('feedback.table.user')}</div>
         <div>{t('feedback.table.time')}</div>
@@ -214,7 +216,7 @@ function FeedbackTable({
               type="button"
               key={f.id}
               onClick={() => onRowClick(f.id)}
-              className="grid w-full gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/25 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,1.8fr)_5rem_7rem_7rem]"
+              className="grid w-full gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/25 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,1.8fr)_5rem_5rem_7rem_7rem]"
             >
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-2 font-medium">
@@ -238,6 +240,9 @@ function FeedbackTable({
                   </div>
                 ))}
               </dl>
+              <div>
+                <ConfidenceIndicator confidence={f.classificationConfidence} />
+              </div>
               <div>
                 <LanguageBadge language={f.language} />
               </div>

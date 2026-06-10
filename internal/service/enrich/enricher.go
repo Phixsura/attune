@@ -225,10 +225,11 @@ func (e *Enricher) classifyWithDiagnostics(ctx context.Context, content string, 
 		UserID:      enrichmentSystemUser,
 		Guard: llmclient.GuardMetadata{
 			TenantID:   cfg.TenantID,
+			FeedbackID: cfg.FeedbackID,
 			Channel:    cfg.Channel,
 			SourceID:   cfg.SourceID,
 			SourceTags: cfg.SourceTags,
-			Purpose:    "enrich",
+			Purpose:    classifyPurpose(cfg),
 		},
 	}
 	if cfg.HasConstrained() {
@@ -260,9 +261,17 @@ func (e *Enricher) classifyWithDiagnostics(ctx context.Context, content string, 
 	}, nil
 }
 
+func classifyPurpose(cfg ClassifyConfig) string {
+	if cfg.Purpose != "" {
+		return cfg.Purpose
+	}
+	return "enrich"
+}
+
 // classify calls Classify and, on failure, marks the row 'failed' so the
 // next sweep won't retry immediately. Used by the main enricher loop.
 func (e *Enricher) classify(ctx context.Context, id int64, content string, cfg ClassifyConfig) (classifyResult, error) {
+	cfg.FeedbackID = id
 	parsed, err := e.classifyWithDiagnostics(ctx, content, cfg)
 	if err != nil {
 		e.repo.MarkFailed(ctx, id, err.Error())
@@ -353,8 +362,9 @@ func (e *Enricher) EnrichPending(ctx context.Context, n int) {
 		return
 	}
 	for _, id := range ids {
-		if err := e.EnrichOne(ctx, id); err != nil {
-			logext.Warnf(ctx, "[%s] enrich failed,id:%d,err:%+v", where, id, err.Error())
+		rowCtx := trace.WithID(ctx, trace.New())
+		if err := e.EnrichOne(rowCtx, id); err != nil {
+			logext.Warnf(rowCtx, "[%s] enrich failed,id:%d,err:%+v", where, id, err.Error())
 		}
 	}
 }

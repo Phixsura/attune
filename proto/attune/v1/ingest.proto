@@ -90,6 +90,7 @@ message Feedback {
   optional string language = 12;   // ISO 639-1-ish detected source language
   optional string enriched_display_title = 13;     // tenant-locale console title
   optional string enriched_display_locale = 14;  // tenant locale used for display
+  optional double classification_confidence = 15;  // model self-rated review signal [0,1]
 }
 
 // FeedbackDetail is the single-row view: the list fields plus extras (flat).
@@ -117,6 +118,7 @@ message FeedbackDetail {
   optional string enriched_display_title = 18;      // tenant-locale console title
   optional string enriched_display_rationale = 19;  // tenant-locale "why these values"
   optional string enriched_display_locale = 20;   // tenant locale used for display
+  optional double classification_confidence = 21;  // model self-rated review signal [0,1]
 }
 
 message Attachment {

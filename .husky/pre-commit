@@ -44,8 +44,12 @@ fail=0
 
 # ── ① large-file guard — NEWLY-ADDED blobs only (à la check-added-large-files) ─
 MAXKB=500
+large_file_allowlist='^internal/infra/llmclient/model_prices_and_context_window\.json$'
 say "large-file guard (≤${MAXKB}KB, new files)"
 while IFS= read -r f; do
+  if printf '%s\n' "$f" | grep -Eq "$large_file_allowlist"; then
+    continue
+  fi
   sz=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
   if [ "$((sz / 1024))" -gt "$MAXKB" ]; then
     echo "✗ $f: $((sz / 1024))KB (>${MAXKB}KB) — large/binary blob; use git-lfs, or bypass for a one-off"

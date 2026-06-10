@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/testdb"
 )
@@ -125,9 +126,10 @@ func TestPG_MarkDoneAndContainmentQuery(t *testing.T) {
 			"severity": "critical",
 			"labels":   []string{"payment", "ux"},
 		},
-		IsUrgent:         true,
-		Rationale:        "core flow",
-		DisplayRationale: "核心流程受阻",
+		IsUrgent:                 true,
+		Rationale:                "core flow",
+		DisplayRationale:         "核心流程受阻",
+		ClassificationConfidence: ptrext.Of(0.42),
 	}
 	if err := repo.MarkDone(ctx, id, enriched, feedback.EnrichmentMetadata{
 		Language:      "en",
@@ -153,6 +155,9 @@ func TestPG_MarkDoneAndContainmentQuery(t *testing.T) {
 	}
 	if detail.EnrichedDisplayRationale != "核心流程受阻" {
 		t.Errorf("display rationale: %q", detail.EnrichedDisplayRationale)
+	}
+	if got := ptrext.Indirect(detail.ClassificationConfidence); got != 0.42 {
+		t.Errorf("detail confidence: %v", got)
 	}
 
 	// Negative containment: severity=minor should match zero rows.
@@ -196,6 +201,9 @@ func assertConsoleDisplayRow(t *testing.T, row feedback.ConsoleListRow) {
 	}
 	if row.EnrichedDisplayLocale != "zh" {
 		t.Errorf("display locale: %q", row.EnrichedDisplayLocale)
+	}
+	if got := ptrext.Indirect(row.ClassificationConfidence); got != 0.42 {
+		t.Errorf("confidence: %v", got)
 	}
 }
 

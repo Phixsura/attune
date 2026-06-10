@@ -25,11 +25,6 @@ package llmclient
 
 import "context"
 
-// upstreamBodyLogCap caps INFO-level upstream request/response logging
-// at 4 KB — enough to see the prompt, JSON structure, and most error
-// stacks; for larger payloads, use a sidecar like mitmproxy.
-const upstreamBodyLogCap = 4096
-
 // LLMClient is the single abstraction the rest of attune depends on.
 // Each backend file implements this interface; cmd/attune/setup.go
 // wires one concrete instance at boot.
@@ -74,6 +69,7 @@ type CompletionRequest struct {
 // guard decisions are explicit, testable, and provider-independent.
 type GuardMetadata struct {
 	TenantID    string
+	FeedbackID  int64
 	Channel     string
 	SourceID    string
 	SourceTags  []string
@@ -115,12 +111,4 @@ type OutputSchema struct {
 	Name string
 	// Schema is the JSON Schema body.
 	Schema map[string]any
-}
-
-// truncate caps s at limit bytes so upstream logs stay scannable.
-func truncate(s string, limit int) string {
-	if len(s) <= limit {
-		return s
-	}
-	return s[:limit] + "...(truncated)"
 }

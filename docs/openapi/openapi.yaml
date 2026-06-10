@@ -617,6 +617,42 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/llm-usage:
+        get:
+            tags:
+                - UsageService
+            description: GET /fb/v1/console/llm-usage — LLM token and cost usage.
+            operationId: UsageService_GetLLMUsage
+            parameters:
+                - name: granularity
+                  in: query
+                  description: day | week | month. Defaults to week.
+                  schema:
+                    enum:
+                        - USAGE_GRANULARITY_UNSPECIFIED
+                        - USAGE_GRANULARITY_DAY
+                        - USAGE_GRANULARITY_WEEK
+                        - USAGE_GRANULARITY_MONTH
+                    type: string
+                    format: enum
+                - name: range
+                  in: query
+                  description: 'Grafana-style from expression: now-7d | now-30d | now-90d | now/M. Defaults to now-30d.'
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetLLMUsageResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/logout:
         post:
             tags:
@@ -1156,6 +1192,9 @@ components:
                     type: string
                 enrichedDisplayLocale:
                     type: string
+                classificationConfidence:
+                    type: number
+                    format: double
             description: |-
                 Feedback is a console feedback list row. Post-E3 (metadata-driven
                  Dimensions): the per-row classification lives in `enriched_attrs`, a
@@ -1211,6 +1250,9 @@ components:
                     type: string
                 enrichedDisplayLocale:
                     type: string
+                classificationConfidence:
+                    type: number
+                    format: double
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         GetEnrichConfigResponse:
             type: object
@@ -1234,6 +1276,30 @@ components:
                 urgentCount:
                     type: string
                     description: Count of is_urgent = true rows within the window.
+        GetLLMUsageResponse:
+            type: object
+            properties:
+                periodStart:
+                    type: string
+                periodEnd:
+                    type: string
+                granularity:
+                    type: string
+                series:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/LLMUsageBucket'
+                promptTokens:
+                    type: string
+                completionTokens:
+                    type: string
+                costUsd:
+                    type: number
+                    format: double
+                calls:
+                    type: string
+                errors:
+                    type: string
         GetMeResponse:
             type: object
             properties:
@@ -1418,6 +1484,26 @@ components:
                     type: string
                     description: Enrichment lifecycle state at ingest time (always "pending" here).
             description: IngestResponse is returned on 200.
+        LLMUsageBucket:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                tenantId:
+                    type: string
+                modelId:
+                    type: string
+                promptTokens:
+                    type: string
+                completionTokens:
+                    type: string
+                costUsd:
+                    type: number
+                    format: double
+                calls:
+                    type: string
+                errors:
+                    type: string
         ListApiKeysResponse:
             type: object
             properties:

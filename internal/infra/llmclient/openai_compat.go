@@ -54,7 +54,7 @@ func NewOpenAICompat(baseURL, apiKey string) (*OpenAICompatBackend, error) {
 	}
 	trimmed := strings.TrimRight(baseURL, "/")
 	logext.Infof(context.Background(), "[%s] OK,base_url:%s,api_key_set:%t",
-		where, trimmed, apiKey != "")
+		where, logext.SafeURLForLog(trimmed), apiKey != "")
 	return ptrext.Of(OpenAICompatBackend{
 		baseURL: trimmed,
 		apiKey:  apiKey,
@@ -110,10 +110,6 @@ type openaiUsage struct {
 }
 
 // Complete implements LLMClient.
-//
-// Upstream HTTP body / response are logged at INFO with a 4KB cap —
-// the truncated, persisted record is what makes after-the-fact triage
-// of model misbehavior tractable.
 func (b *OpenAICompatBackend) Complete(
 	ctx context.Context, req CompletionRequest,
 ) (CompletionResponse, error) {
@@ -149,10 +145,9 @@ func (b *OpenAICompatBackend) Complete(
 	}
 
 	url := b.baseURL + "/v1/chat/completions"
-	logext.Infof(ctx, "[%s] upstream REQUEST,user_id:%s,model:%s,url:%s,temp:%v,max_tokens:%d,prompt_len:%d,structured:%t,body:%s",
-		where, req.UserID, req.Model, url, req.Temperature, req.MaxTokens,
-		len(req.Prompt), req.Schema != nil,
-		truncate(string(raw), upstreamBodyLogCap))
+	logext.Infof(ctx, "[%s] upstream REQUEST,user_id:%s,model:%s,url:%s,temp:%v,max_tokens:%d,prompt_len:%d,structured:%t,schema:%s,request_bytes:%d",
+		where, req.UserID, req.Model, logext.SafeURLForLog(url), req.Temperature, req.MaxTokens,
+		len(req.Prompt), req.Schema != nil, schemaName(req), len(raw))
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
 	if err != nil {
@@ -177,13 +172,11 @@ func (b *OpenAICompatBackend) Complete(
 			where, req.UserID, req.Model, resp.StatusCode, err.Error())
 		return CompletionResponse{}, fmt.Errorf("openai-compat: read body: %w", err)
 	}
-	logext.Infof(ctx, "[%s] upstream RESPONSE,user_id:%s,model:%s,status:%d,resp_len:%d,resp:%s",
-		where, req.UserID, req.Model, resp.StatusCode, len(respBytes),
-		truncate(string(respBytes), upstreamBodyLogCap))
+	logext.Infof(ctx, "[%s] upstream RESPONSE,user_id:%s,model:%s,status:%d,resp_len:%d",
+		where, req.UserID, req.Model, resp.StatusCode, len(respBytes))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return CompletionResponse{}, fmt.Errorf("openai-compat: status %d: %s",
-			resp.StatusCode, truncate(string(respBytes), 512))
+		return CompletionResponse{}, fmt.Errorf("openai-compat: status %d", resp.StatusCode)
 	}
 
 	var parsed openaiChatResponse

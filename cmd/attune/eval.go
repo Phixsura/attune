@@ -11,9 +11,11 @@ import (
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/eval"
+	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
 )
 
 // runEval dispatches the `attune eval` CLI. Three modes:
@@ -64,10 +66,11 @@ func runEval(args []string) error {
 	defer pool.Close()
 
 	feedbackRepo := feedback.NewFeedback(pool)
-	llm, err := buildLLMClient(cfg)
+	rawLLM, err := buildLLMClient(cfg)
 	if err != nil {
 		return fmt.Errorf("llm backend: %w", err)
 	}
+	llm := llmauditsvc.NewClient(rawLLM, llmauditrepo.New(pool))
 	defer llm.Close()
 	enricher := enrich.NewEnricher(feedbackRepo, llm, cfg.LLMModel)
 	evaluator := eval.NewEvaluator(feedbackRepo, tenant.NewTenant(pool), enricher)

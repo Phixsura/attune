@@ -61,7 +61,7 @@ func NewOpenAIResponses(baseURL, apiKey string) (*OpenAIResponsesBackend, error)
 		opts = append(opts, option.WithBaseURL(trimmed))
 	}
 	logext.Infof(context.Background(), "[%s] OK,base_url:%s,api_key_set:%t",
-		where, baseURL, apiKey != "")
+		where, logext.SafeURLForLog(baseURL), apiKey != "")
 	return ptrext.Of(OpenAIResponsesBackend{client: openai.NewClient(opts...)}), nil
 }
 
@@ -105,9 +105,9 @@ func (b *OpenAIResponsesBackend) Complete(
 		}
 	}
 
-	logext.Infof(ctx, "[%s] upstream REQUEST,user_id:%s,model:%s,temp:%v,max_tokens:%d,prompt_len:%d,structured:%t",
+	logext.Infof(ctx, "[%s] upstream REQUEST,user_id:%s,model:%s,temp:%v,max_tokens:%d,prompt_len:%d,structured:%t,schema:%s",
 		where, req.UserID, req.Model, req.Temperature, req.MaxTokens,
-		len(req.Prompt), req.Schema != nil)
+		len(req.Prompt), req.Schema != nil, schemaName(req))
 
 	resp, err := b.client.Responses.New(ctx, params)
 	if err != nil {
@@ -116,10 +116,9 @@ func (b *OpenAIResponsesBackend) Complete(
 		return CompletionResponse{}, fmt.Errorf("openai-responses: %w", err)
 	}
 	text := resp.OutputText()
-	logext.Infof(ctx, "[%s] upstream RESPONSE,user_id:%s,model:%s,output_len:%d,input_tokens:%d,output_tokens:%d,resp:%s",
+	logext.Infof(ctx, "[%s] upstream RESPONSE,user_id:%s,model:%s,output_len:%d,input_tokens:%d,output_tokens:%d",
 		where, req.UserID, req.Model, len(text),
-		resp.Usage.InputTokens, resp.Usage.OutputTokens,
-		truncate(text, upstreamBodyLogCap))
+		resp.Usage.InputTokens, resp.Usage.OutputTokens)
 
 	return CompletionResponse{
 		Text: text,

@@ -15,6 +15,7 @@ import {
   type FeedbackDetail,
   feedbackDetailQuery,
 } from '@/features/feedback/api/get-feedback-detail'
+import { ConfidenceIndicator } from '@/features/feedback/components/confidence-indicator'
 import { LanguageBadge, languagesDiffer } from '@/features/feedback/components/language-badge'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Dimension } from '@/proto/attune/v1/common'
@@ -123,6 +124,14 @@ function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] })
       {dims.length > 0 && (
         <Section label={t('feedback.detail.attrs')}>
           <dl className="space-y-2">
+            <div className="flex items-start gap-3">
+              <dt className="w-28 shrink-0 text-xs text-muted-foreground">
+                {t('feedback.detail.confidence')}
+              </dt>
+              <dd className="flex-1 text-sm">
+                <ConfidenceIndicator confidence={data.classificationConfidence} />
+              </dd>
+            </div>
             {dims.map((dim) => (
               <div key={dim.name} className="flex items-start gap-3">
                 <dt className="w-28 shrink-0 text-xs text-muted-foreground">

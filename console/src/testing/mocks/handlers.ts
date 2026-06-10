@@ -17,6 +17,7 @@ import type {
   TestNotifyTargetResponse,
 } from '@/proto/attune/v1/notify_target'
 import type { GetMeResponse } from '@/proto/attune/v1/session'
+import type { GetLLMUsageResponse } from '@/proto/attune/v1/usage'
 
 // Forward-friendly default handlers for every /fb/v1/console/* endpoint.
 // Per §4-G of the design proposal: cover the full surface so adding a
@@ -101,6 +102,7 @@ export const defaultFeedbackDetail: FeedbackDetail = {
   isUrgent: false,
   enrichmentStatus: 'done',
   createdAt: '2026-06-07T00:00:00Z',
+  classificationConfidence: 0.82,
   attachments: [],
   enrichedRationale: '',
   enrichedAt: '2026-06-07T00:00:00Z',
@@ -112,6 +114,17 @@ export const defaultFeedbackStats: GetFeedbackStatsResponse = {
   total: '0',
   dims: [],
   urgentCount: '0',
+}
+export const defaultLLMUsage: GetLLMUsageResponse = {
+  periodStart: '2026-06-01T00:00:00Z',
+  periodEnd: '2026-06-10T00:00:00Z',
+  granularity: 'week',
+  series: [],
+  promptTokens: '0',
+  completionTokens: '0',
+  costUsd: 0,
+  calls: '0',
+  errors: '0',
 }
 
 export const handlers = [
@@ -156,4 +169,5 @@ export const handlers = [
   http.get(`${BASE}/feedback/:id`, ({ params }) =>
     HttpResponse.json({ ...defaultFeedbackDetail, id: params.id }),
   ),
+  http.get(`${BASE}/llm-usage`, () => HttpResponse.json(defaultLLMUsage)),
 ]

@@ -31,6 +31,9 @@ func TestRegisteredMetricsMatchDocumentedReference(t *testing.T) {
 		"attune_triage_decisions_total":       true,
 		"attune_guard_actions_total":          true,
 		"attune_guard_blocked_total":          true,
+		"attune_llm_calls_total":              true,
+		"attune_llm_tokens_total":             true,
+		"attune_llm_cost_usd_total":           true,
 	}
 
 	got := registeredMetricNames(t)

@@ -194,9 +194,19 @@ func (e *Enricher) semanticRun(
 			"language": languageGuard,
 		},
 		Attrs:        result.Enriched.Attrs,
-		Confidence:   map[string]any{},
+		Confidence:   confidenceAudit(result.Enriched),
 		Rationale:    rationale,
 		DroppedAttrs: result.DroppedAttrsAudit,
+	}
+}
+
+func confidenceAudit(enriched domain.Enriched) map[string]any {
+	if enriched.ClassificationConfidence == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"overall": ptrext.Indirect(enriched.ClassificationConfidence),
+		"source":  "llm_self_report",
 	}
 }
 

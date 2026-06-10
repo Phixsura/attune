@@ -35,14 +35,15 @@ import (
 const defaultPromptTmpl = defaultPromptTmplEn
 
 const defaultPromptTmplEn = `You are a product-feedback classifier. Given one raw user-feedback string, emit ONE single-line JSON object (no markdown fences, no commentary, no leading or trailing blank lines). Write "title" and "rationale" in the same natural language as the raw feedback whenever the source language is clear. The schema is:
-Also write "display_title" and "display_rationale" in {{display_language_name}} for the product team reading the console. If the source language and display language are the same, the display fields may match the source-language fields.
+Also write "display_title" and "display_rationale" in {{display_language_name}} for the product team reading the console. If the source language and display language are the same, the display fields may match the source-language fields. Set "classification_confidence" to your overall classification confidence from 0.0 to 1.0; 0.5 means ambiguous enough for human review.
 
 {
  "title": "a 10-30 character one-sentence summary, no trailing punctuation",
  "display_title": "same summary translated/localized for console readers",
 {{dimensions}}
  "rationale": "<=30 characters: why these values",
- "display_rationale": "<=30 characters in {{display_language_name}}: why these values"
+ "display_rationale": "<=30 characters in {{display_language_name}}: why these values",
+ "classification_confidence": 0.72
 }
 
 Raw user feedback:
@@ -51,14 +52,15 @@ Raw user feedback:
 """`
 
 const defaultPromptTmplZh = `你是产品反馈分类器。给定一条原始用户反馈，只输出一个单行 JSON 对象（不要 markdown 代码块，不要解释，不要前后空行）。当原始反馈语言清晰时，"title" 和 "rationale" 必须使用与原文相同的自然语言。
-同时用 {{display_language_name}} 写 "display_title" 和 "display_rationale"，给控制台里的产品/运营团队阅读。如果原文语言和展示语言相同，display 字段可以与原语言字段一致。JSON schema 是：
+同时用 {{display_language_name}} 写 "display_title" 和 "display_rationale"，给控制台里的产品/运营团队阅读。如果原文语言和展示语言相同，display 字段可以与原语言字段一致。"classification_confidence" 是 0.0 到 1.0 的整体分类置信度；0.5 表示足够模糊，需要人工复核。JSON schema 是：
 
 {
  "title": "10-30 个字符的一句话摘要，不要句末标点",
  "display_title": "给控制台读者看的同一摘要",
 {{dimensions}}
  "rationale": "<=30 个字符：为什么选择这些值",
- "display_rationale": "<=30 个字符的 {{display_language_name}}：为什么选择这些值"
+ "display_rationale": "<=30 个字符的 {{display_language_name}}：为什么选择这些值",
+ "classification_confidence": 0.72
 }
 
 原始用户反馈：
@@ -81,9 +83,11 @@ func DefaultPromptTemplate() string { return defaultPromptTmpl }
 // it, in which case dim guidance is left to the model.
 type ClassifyConfig struct {
 	TenantID       string
+	FeedbackID     int64
 	Channel        string
 	SourceID       string
 	SourceTags     []string
+	Purpose        string
 	Language       string
 	DisplayLocale  string
 	PromptTemplate *string
@@ -269,21 +273,25 @@ func i18nHint(s domain.I18nString) string {
 // drop response_format.
 func buildEnrichSchema(dims domain.DimensionSet) *llmclient.OutputSchema {
 	props := map[string]any{
-		"title":             map[string]any{"type": "string"},
-		"display_title":     map[string]any{"type": "string"},
-		"rationale":         map[string]any{"type": "string"},
-		"display_rationale": map[string]any{"type": "string"},
+		"title":                     map[string]any{"type": "string"},
+		"display_title":             map[string]any{"type": "string"},
+		"rationale":                 map[string]any{"type": "string"},
+		"display_rationale":         map[string]any{"type": "string"},
+		"classification_confidence": map[string]any{"type": "number"},
 	}
 	// Strict mode: every property in `properties` must appear in
 	// `required`. Optionality is encoded in the property type itself
 	// (string|null for single; array (with empty arr allowed) for multi).
-	required := []string{"title", "display_title", "rationale", "display_rationale"}
+	required := []string{
+		"title", "display_title", "rationale", "display_rationale",
+		"classification_confidence",
+	}
 	for _, d := range dims {
 		props[d.Name] = dimPropertySchema(d)
 		required = append(required, d.Name)
 	}
 	return ptrext.Of(llmclient.OutputSchema{
-		Name: "attune_enriched_v2",
+		Name: "attune_enriched_v3",
 		Schema: map[string]any{
 			"type":                 "object",
 			"properties":           props,

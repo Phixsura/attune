@@ -7,11 +7,14 @@ package enrich
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
@@ -20,21 +23,22 @@ import (
 // value so the notifier can outlive any DB tx or HTTP scope.
 func buildSnapshot(id int64, row *feedback.EnrichInput, e domain.Enriched, at time.Time) domain.Snapshot {
 	return domain.Snapshot{
-		ID:               id,
-		TenantID:         row.TenantID,
-		Content:          row.Content,
-		Source:           row.Source,
-		UserID:           row.UserID,
-		Language:         row.Language,
-		DisplayLocale:    snapshotDisplayLocale(row.DisplayLocale, e),
-		Title:            e.Title,
-		DisplayTitle:     e.DisplayTitle,
-		Attrs:            e.Attrs,
-		IsUrgent:         e.IsUrgent,
-		Rationale:        e.Rationale,
-		DisplayRationale: e.DisplayRationale,
-		SubmittedAt:      row.CreatedAt, // #82: actual user submission time, not enrichment time
-		EnrichedAt:       at,
+		ID:                       id,
+		TenantID:                 row.TenantID,
+		Content:                  row.Content,
+		Source:                   row.Source,
+		UserID:                   row.UserID,
+		Language:                 row.Language,
+		DisplayLocale:            snapshotDisplayLocale(row.DisplayLocale, e),
+		Title:                    e.Title,
+		DisplayTitle:             e.DisplayTitle,
+		Attrs:                    e.Attrs,
+		IsUrgent:                 e.IsUrgent,
+		Rationale:                e.Rationale,
+		DisplayRationale:         e.DisplayRationale,
+		ClassificationConfidence: e.ClassificationConfidence,
+		SubmittedAt:              row.CreatedAt, // #82: actual user submission time, not enrichment time
+		EnrichedAt:               at,
 	}
 }
 
@@ -100,17 +104,48 @@ func parseEnrichJSON(s string) (domain.Enriched, error) {
 	rationale, _ := raw["rationale"].(string)
 	displayTitle, _ := raw["display_title"].(string)
 	displayRationale, _ := raw["display_rationale"].(string)
+	confidence := parseClassificationConfidence(raw["classification_confidence"])
 	delete(raw, "title")
 	delete(raw, "rationale")
 	delete(raw, "display_title")
 	delete(raw, "display_rationale")
+	delete(raw, "classification_confidence")
 	return domain.Enriched{
-		Title:            title,
-		DisplayTitle:     displayTitle,
-		Rationale:        rationale,
-		DisplayRationale: displayRationale,
-		Attrs:            raw,
+		Title:                    title,
+		DisplayTitle:             displayTitle,
+		Rationale:                rationale,
+		DisplayRationale:         displayRationale,
+		ClassificationConfidence: confidence,
+		Attrs:                    raw,
 	}, nil
+}
+
+func parseClassificationConfidence(v any) *float64 {
+	var n float64
+	switch x := v.(type) {
+	case nil:
+		return nil
+	case float64:
+		n = x
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(x), 64)
+		if err != nil {
+			return nil
+		}
+		n = parsed
+	default:
+		return nil
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		return nil
+	}
+	if n < 0 {
+		n = 0
+	}
+	if n > 1 {
+		n = 1
+	}
+	return ptrext.Of(n)
 }
 
 // classifyErrResult buckets classify failures for the duration

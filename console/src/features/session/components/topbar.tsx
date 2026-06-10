@@ -37,6 +37,7 @@ export function TopBar({ me }: TopBarProps) {
         <nav className="ml-6 flex items-center gap-4 text-sm">
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
           <NavLink to="/usage">{t('nav.usage')}</NavLink>
+          <NavLink to="/llm-usage">{t('nav.llm_usage')}</NavLink>
           <NavLink to="/settings">{t('nav.settings')}</NavLink>
         </nav>
         <div className="ml-auto">

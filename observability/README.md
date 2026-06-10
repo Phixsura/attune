@@ -40,6 +40,9 @@ exposition plus the portable assets in this directory.
 | `attune_triage_decisions_total` | counter | `tenant`, `decision` | triage-stage routing decisions |
 | `attune_guard_actions_total` | counter | `tenant`, `stage`, `guard`, `entity`, `action` | guard actions applied at AI and outbound boundaries; raw findings are never labels |
 | `attune_guard_blocked_total` | counter | `tenant`, `stage`, `guard`, `reason` | operations blocked by guard policies before external calls |
+| `attune_llm_calls_total` | counter | `tenant`, `model`, `status` | LLM provider calls that reached a backend |
+| `attune_llm_tokens_total` | counter | `tenant`, `model`, `direction` | provider-reported prompt/completion token usage |
+| `attune_llm_cost_usd_total` | counter | `tenant`, `model` | estimated USD cost from the static model-price table |
 
 Label values:
 
@@ -57,6 +60,9 @@ Label values:
 - guard `action` — `audit` · `redact` · `hash` · `tokenize` · `block`.
 - guard `entity` — bounded detector-owned names such as `email`, `phone`,
   `cn_mobile`, `cn_id`, `credit_card`.
+- LLM `status` — `ok` · `error`.
+- LLM token `direction` — `prompt` · `completion`.
+- LLM `model` — configured model id; keep private gateway aliases bounded.
 
 The registered set is drift-guarded by `internal/infra/metrics/metrics_test.go` —
 it must match this table.
