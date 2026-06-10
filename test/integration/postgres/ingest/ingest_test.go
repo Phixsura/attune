@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,9 +18,11 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
+	"github.com/Phixsura/attune/internal/infra/llmguard"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/guardpolicy"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -38,8 +41,9 @@ func TestPG_IngestEnrichQueuesAndDrainsOutbox(t *testing.T) {
 	insertRawWebhookTarget(t, ctx, pool, tenantID, receiver.URL)
 
 	feedbackRepo := feedback.NewFeedback(pool)
+	rawContent := "Payment form fails after submit, contact alice@example.com"
 	id, err := ingest.NewIngestor(feedbackRepo, nil).IngestRow(ctx, tenantID, uuid.New(), domain.IngestInput{
-		Content:    "Payment form fails after submit",
+		Content:    rawContent,
 		Source:     "api",
 		SourceUser: "user-1",
 	})
@@ -47,12 +51,15 @@ func TestPG_IngestEnrichQueuesAndDrainsOutbox(t *testing.T) {
 		t.Fatalf("IngestRow: %v", err)
 	}
 
-	enricher := enrich.NewEnricher(feedbackRepo, fakeLLM{}, "fake-model")
+	llm := &fakeLLM{}
+	guardedLLM := llmguard.NewClient(llm, guardpolicy.New(pool))
+	enricher := enrich.NewEnricher(feedbackRepo, guardedLLM, "fake-model")
 	enricher.SetOutbox(outboxrepo.NewOutbox(pool), notifytarget.NewNotifyTarget(pool))
 	if err := enricher.EnrichOne(ctx, id); err != nil {
 		t.Fatalf("EnrichOne: %v", err)
 	}
-	assertFeedbackDone(t, ctx, pool, id)
+	assertFeedbackDone(t, ctx, pool, id, rawContent)
+	assertLLMReceivedRedactedPrompt(t, llm)
 	assertOutboxStatus(t, ctx, pool, id, outboxrepo.OutboxStatusPending)
 
 	worker := outboxsvc.NewOutboxWorker(
@@ -67,9 +74,74 @@ func TestPG_IngestEnrichQueuesAndDrainsOutbox(t *testing.T) {
 	assertOutboxStatus(t, ctx, pool, id, outboxrepo.OutboxStatusDelivered)
 }
 
-type fakeLLM struct{}
+func TestPG_SourceOverrideRequiresTrustedInboundSourceID(t *testing.T) {
+	pool := testdb.NewPool(t)
+	ctx := context.Background()
+	tenantID := createTenant(t, ctx, pool)
+	sourceID := insertInboundSource(t, ctx, pool, tenantID)
+	if err := guardpolicy.New(pool).ReplaceTenantPolicies(ctx, tenantID, "test", []llmguard.Policy{{
+		Name:     "Trusted webhook may keep email",
+		Kind:     llmguard.KindOverride,
+		Enabled:  true,
+		Priority: 10,
+		Target:   llmguard.Target{SourceIDs: []string{sourceID}, Purposes: []string{"enrich"}},
+		Rules: []llmguard.Rule{{
+			Guard: "pii", Stage: llmguard.StageLLMInput, Entities: []string{"email"}, Action: llmguard.ActionOff,
+		}},
+	}}); err != nil {
+		t.Fatalf("ReplaceTenantPolicies: %v", err)
+	}
 
-func (fakeLLM) Complete(context.Context, llmclient.CompletionRequest) (llmclient.CompletionResponse, error) {
+	feedbackRepo := feedback.NewFeedback(pool)
+	adapterLLM := &fakeLLM{}
+	adapterEnricher := enrich.NewEnricher(
+		feedbackRepo,
+		llmguard.NewClient(adapterLLM, guardpolicy.New(pool)),
+		"fake-model",
+	)
+	adapterID, err := ingest.NewIngestor(feedbackRepo, nil).IngestRow(ctx, tenantID, uuid.Nil, domain.IngestInput{
+		Content: "trusted webhook contact alice@example.com",
+		Source:  "webhook",
+		SourceMeta: map[string]any{
+			domain.SourceMetaInboundSourceID: sourceID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("trusted IngestRow: %v", err)
+	}
+	if err := adapterEnricher.EnrichOne(ctx, adapterID); err != nil {
+		t.Fatalf("trusted EnrichOne: %v", err)
+	}
+	assertLLMReceivedRawEmail(t, adapterLLM)
+
+	publicLLM := &fakeLLM{}
+	publicEnricher := enrich.NewEnricher(
+		feedbackRepo,
+		llmguard.NewClient(publicLLM, guardpolicy.New(pool)),
+		"fake-model",
+	)
+	publicID, err := ingest.NewIngestor(feedbackRepo, nil).IngestRow(ctx, tenantID, uuid.New(), domain.IngestInput{
+		Content: "public spoof contact alice@example.com",
+		Source:  "webhook",
+		SourceMeta: map[string]any{
+			domain.SourceMetaInboundSourceID: sourceID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("public IngestRow: %v", err)
+	}
+	if err := publicEnricher.EnrichOne(ctx, publicID); err != nil {
+		t.Fatalf("public EnrichOne: %v", err)
+	}
+	assertLLMReceivedRedactedPrompt(t, publicLLM)
+}
+
+type fakeLLM struct {
+	prompt string
+}
+
+func (f *fakeLLM) Complete(_ context.Context, req llmclient.CompletionRequest) (llmclient.CompletionResponse, error) {
+	f.prompt = req.Prompt
 	return llmclient.CompletionResponse{Text: `{
 		"title":"Payment submit fails",
 		"rationale":"The user reports a checkout-breaking error.",
@@ -79,7 +151,7 @@ func (fakeLLM) Complete(context.Context, llmclient.CompletionRequest) (llmclient
 	}`}, nil
 }
 
-func (fakeLLM) Close() error { return nil }
+func (f *fakeLLM) Close() error { return nil }
 
 func createTenant(t *testing.T, ctx context.Context, pool *pgxpool.Pool) string {
 	t.Helper()
@@ -103,6 +175,19 @@ func insertRawWebhookTarget(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 	if err != nil {
 		t.Fatalf("insert raw webhook target: %v", err)
 	}
+}
+
+func insertInboundSource(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string) string {
+	t.Helper()
+	id := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO inbound_sources (id, tenant_id, channel, name, slug, config, enabled)
+		VALUES ($1, $2, 'webhook', 'Trusted Webhook', 'trusted-webhook', $3, TRUE)`,
+		id, tenantID, []byte("{}"),
+	); err != nil {
+		t.Fatalf("insert inbound source: %v", err)
+	}
+	return id
 }
 
 func newReceiver(t *testing.T) (*httptest.Server, *atomic.Bool) {
@@ -135,19 +220,43 @@ func assertEnvelope(t *testing.T, body []byte) {
 	}
 }
 
-func assertFeedbackDone(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id int64) {
+func assertFeedbackDone(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id int64, wantContent string) {
 	t.Helper()
 	var status string
 	var urgent bool
 	var title string
+	var content string
 	if err := pool.QueryRow(ctx, `
-		SELECT enrichment_status, is_urgent, enriched_title
+		SELECT enrichment_status, is_urgent, enriched_title, content
 		FROM user_feedback WHERE id = $1`, id,
-	).Scan(&status, &urgent, &title); err != nil {
+	).Scan(&status, &urgent, &title, &content); err != nil {
 		t.Fatalf("load feedback: %v", err)
 	}
 	if status != "done" || !urgent || title != "Payment submit fails" {
 		t.Fatalf("feedback state: status=%s urgent=%t title=%q", status, urgent, title)
+	}
+	if content != wantContent {
+		t.Fatalf("raw content changed: got %q want %q", content, wantContent)
+	}
+}
+
+func assertLLMReceivedRedactedPrompt(t *testing.T, llm *fakeLLM) {
+	t.Helper()
+	if strings.Contains(llm.prompt, "alice@example.com") {
+		t.Fatalf("LLM saw raw email in prompt: %q", llm.prompt)
+	}
+	if !strings.Contains(llm.prompt, "<PII:email>") {
+		t.Fatalf("LLM prompt missing redaction marker: %q", llm.prompt)
+	}
+}
+
+func assertLLMReceivedRawEmail(t *testing.T, llm *fakeLLM) {
+	t.Helper()
+	if !strings.Contains(llm.prompt, "alice@example.com") {
+		t.Fatalf("LLM prompt missing raw email: %q", llm.prompt)
+	}
+	if strings.Contains(llm.prompt, "<PII:email>") {
+		t.Fatalf("LLM prompt unexpectedly redacted email: %q", llm.prompt)
 	}
 }
 

@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import type { SessionMe } from '@/features/session/api/get-me'
 import { useLogout } from '@/features/session/api/logout'
+import { consolePath } from '@/lib/console-path'
 
 interface TopBarProps {
   me: SessionMe
@@ -35,11 +36,8 @@ export function TopBar({ me }: TopBarProps) {
         <span className="text-sm text-muted-foreground">{me.tenant?.name}</span>
         <nav className="ml-6 flex items-center gap-4 text-sm">
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
-          <NavLink to="/notify-targets">{t('nav.notify_targets')}</NavLink>
-          <NavLink to="/inbound-sources">{t('nav.inbound_sources')}</NavLink>
-          <NavLink to="/api-keys">{t('nav.api_keys')}</NavLink>
-          <NavLink to="/settings">{t('nav.settings')}</NavLink>
           <NavLink to="/usage">{t('nav.usage')}</NavLink>
+          <NavLink to="/settings">{t('nav.settings')}</NavLink>
         </nav>
         <div className="ml-auto">
           <DropdownMenu>
@@ -68,7 +66,7 @@ export function TopBar({ me }: TopBarProps) {
                 onSelect={() => {
                   logout.mutate(undefined, {
                     onSuccess: () => {
-                      window.location.href = '/console/login'
+                      window.location.href = consolePath('/login')
                     },
                   })
                 }}

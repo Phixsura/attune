@@ -61,12 +61,124 @@
     "feedback": "反馈",
     "notify_targets": "通知目标",
     "inbound_sources": "入站源",
+    "guard_policies": "防护策略",
     "api_keys": "API key",
-    "settings": "分类设置",
+    "settings": "设置",
     "usage": "用量"
   },
+  "guard_policies": {
+    "subtitle": "管理 LLM 防护策略。策略按系统默认 → 租户默认 → 渠道默认 → 来源覆盖解析，原始反馈内容仍保留为事实来源。",
+    "refresh": "刷新",
+    "create": "新建策略",
+    "effective_title": "生效预览",
+    "effective_help": "服务端实时解析系统默认 → 租户默认 → 渠道默认 → 来源覆盖。",
+    "channel": "渠道",
+    "purpose": "用途",
+    "source_id": "来源 ID",
+    "source_tags": "来源标签",
+    "preview": "预览生效规则",
+    "created": "防护策略已创建",
+    "updated": "防护策略已更新",
+    "deleted": "防护策略已删除",
+    "policies_title": "策略列表",
+    "policies_help": "系统策略只读；租户策略可由当前租户按渠道、来源 ID、来源标签、用途、阶段收窄或覆盖。",
+    "empty": "还没有防护策略",
+    "edit": "编辑策略",
+    "delete": "删除策略",
+    "system_readonly": "系统策略只读",
+    "create_title": "新建防护策略",
+    "edit_title": "编辑防护策略",
+    "dialog_help": "v1 先支持内置 PII 防护；来源 ID 和来源标签会在未来的入站源工作流中自动填充。",
+    "delete_title": "删除防护策略",
+    "delete_help": "删除后该租户策略将不再参与生效规则解析。系统策略不可在 Console 删除。",
+    "delete_confirm": "删除策略",
+    "name": "名称",
+    "kind": "类型",
+    "priority": "优先级",
+    "priority_value": "优先级 {{value}}",
+    "stage": "阶段",
+    "environment": "环境",
+    "entities": "实体",
+    "action": "动作",
+    "replacement": "替换模板",
+    "enabled": "启用",
+    "disabled": "停用",
+    "no_rules": "没有规则",
+    "rule_guard": "防护",
+    "rule_stage": "阶段",
+    "rule_entities": "实体",
+    "rule_action": "动作",
+    "all_targets": "全部目标",
+    "target_labels": {
+      "channels": "渠道",
+      "source_ids": "来源 ID",
+      "source_tags": "来源标签",
+      "purposes": "用途",
+      "stages": "阶段",
+      "env": "环境"
+    },
+    "scopes": {
+      "system": "系统",
+      "tenant": "租户"
+    },
+    "kinds": {
+      "baseline": "基线",
+      "default": "默认",
+      "override": "覆盖"
+    },
+    "channels": {
+      "all": "全部渠道",
+      "api": "API",
+      "webhook": "Webhook",
+      "email": "邮件"
+    },
+    "purposes": {
+      "enrich": "分类增强",
+      "digest": "摘要",
+      "reply_draft": "回复草稿",
+      "eval": "评估",
+      "outbound": "出站"
+    },
+    "stages": {
+      "llm_input": "LLM 输入",
+      "llm_output": "LLM 输出",
+      "outbound": "出站",
+      "tool_call": "工具调用"
+    },
+    "actions": {
+      "off": "关闭",
+      "audit": "审计",
+      "redact": "脱敏",
+      "block": "阻断"
+    }
+  },
   "settings": {
-    "subtitle": "自定义 AI 分类提示词与维度元数据。维度可任意增删改、跨语言展示。",
+    "subtitle": "统一管理 Console 配置入口：AI 分类、防护策略、入站源、通知目标和 API key。",
+    "sidebar_label": "设置项",
+    "classification_title": "AI 分类设置",
+    "classification_help": "自定义 AI 分类提示词与维度元数据。维度可任意增删改、跨语言展示。",
+    "areas": {
+      "classification": {
+        "title": "AI 分类",
+        "body": "提示词、维度、分类值与分类预览。"
+      },
+      "guardrails": {
+        "title": "防护策略",
+        "body": "PII、来源标签、渠道与生效规则。"
+      },
+      "inbound": {
+        "title": "入站源",
+        "body": "Webhook、邮件来源、密钥轮换与暂停。"
+      },
+      "notify": {
+        "title": "通知目标",
+        "body": "Webhook 通知、发送范围、密钥与测试。"
+      },
+      "api_keys": {
+        "title": "API key",
+        "body": "租户 API key、前缀、状态与撤销。"
+      }
+    },
     "prompt_title": "分类提示词",
     "prompt_label": "提示词模板",
     "prompt_help": "使用 {{content}} 插入反馈原文，{{dimensions}} 插入维度元数据",

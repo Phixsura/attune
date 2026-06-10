@@ -38,6 +38,8 @@ exposition plus the portable assets in this directory.
 | `attune_claim_contention_total` | counter | — | enricher `tryClaim` lost to another worker |
 | `attune_ingest_rate_limit_total` | counter | `tenant` | ingest requests rejected (429) by the rate limiter |
 | `attune_triage_decisions_total` | counter | `tenant`, `decision` | triage-stage routing decisions |
+| `attune_guard_actions_total` | counter | `tenant`, `stage`, `guard`, `entity`, `action` | guard actions applied at AI and outbound boundaries; raw findings are never labels |
+| `attune_guard_blocked_total` | counter | `tenant`, `stage`, `guard`, `reason` | operations blocked by guard policies before external calls |
 
 Label values:
 
@@ -51,6 +53,10 @@ Label values:
 - `destination_type` — `lark-pool` · `lark-radar` · `raw-webhook`.
 - `reason` — `transport` · `terminal`.
 - `decision` — `ignore` · `fast` · `full`.
+- guard `stage` — `llm_input` · `llm_output` · `outbound` · `tool_call`.
+- guard `action` — `audit` · `redact` · `hash` · `tokenize` · `block`.
+- guard `entity` — bounded detector-owned names such as `email`, `phone`,
+  `cn_mobile`, `cn_id`, `credit_card`.
 
 The registered set is drift-guarded by `internal/infra/metrics/metrics_test.go` —
 it must match this table.

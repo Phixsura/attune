@@ -28,6 +28,7 @@ import (
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/infra/llmguard"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/notify"
@@ -36,6 +37,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/guardpolicy"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
@@ -80,10 +82,11 @@ func runServer() error {
 	}
 	defer pool.Close()
 
-	llm, err := buildLLMClient(cfg)
+	rawLLM, err := buildLLMClient(cfg)
 	if err != nil {
 		return err
 	}
+	llm := llmguard.NewClient(rawLLM, guardpolicy.New(pool))
 	defer llm.Close()
 	logext.Infof(ctx, "[%s] llm backend ready,endpoint:%s", where, cfg.LLMOpenAIBaseURL)
 

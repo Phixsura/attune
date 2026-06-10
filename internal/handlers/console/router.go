@@ -20,6 +20,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
+	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
 	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
@@ -48,6 +49,7 @@ var (
 	NewFeedbackHandler       = feedback.NewFeedbackHandler
 	NewUsageHandler          = usage.NewUsageHandler
 	NewEnrichConfigHandler   = enrichconfig.NewHandler
+	NewGuardPolicyHandler    = consoleguardpolicy.NewHandler
 	NewInboundHandler        = consoleinbound.NewHandler
 	BootstrapAdmin           = auth.BootstrapAdmin
 )
@@ -78,6 +80,12 @@ var (
 //	 GET /enrich-config -> dispatcher.Bind(enrichconfig.Handler.Get)
 //	 PUT /enrich-config -> dispatcher.Bind(enrichconfig.Handler.Update)
 //	 POST /enrich-config/preview -> dispatcher.Bind(enrichconfig.Handler.Preview)
+//	 GET /guard-policies -> dispatcher.Bind(guardpolicy.Handler.List)
+//	 POST /guard-policies -> dispatcher.Bind(guardpolicy.Handler.Create)
+//	 PUT /guard-policies -> dispatcher.Bind(guardpolicy.Handler.Update)
+//	 PATCH /guard-policies/{id} -> dispatcher.Bind(guardpolicy.Handler.Patch)
+//	 DELETE /guard-policies/{id} -> dispatcher.Bind(guardpolicy.Handler.Delete)
+//	 POST /guard-policies/effective -> dispatcher.Bind(guardpolicy.Handler.Resolve)
 //	 GET /inbound/sources -> dispatcher.Bind(inbound.Handler.List)
 //	 POST /inbound/sources -> dispatcher.Bind(inbound.Handler.Create)
 //	 GET /inbound/sources/{id} -> dispatcher.Bind(inbound.Handler.Get)
@@ -96,6 +104,7 @@ type Router struct {
 	feedback       *feedback.FeedbackHandler
 	usage          *usage.UsageHandler
 	enrichConfig   *enrichconfig.Handler
+	guardPolicies  *consoleguardpolicy.Handler
 	inbound        *consoleinbound.Handler
 }
 
@@ -109,6 +118,7 @@ func NewRouter(
 	feedback *feedback.FeedbackHandler,
 	usage *usage.UsageHandler,
 	enrichConfig *enrichconfig.Handler,
+	guardPolicies *consoleguardpolicy.Handler,
 	inbound *consoleinbound.Handler,
 ) *Router {
 	return ptrext.Of(Router{
@@ -121,6 +131,7 @@ func NewRouter(
 		feedback:       feedback,
 		usage:          usage,
 		enrichConfig:   enrichConfig,
+		guardPolicies:  guardPolicies,
 		inbound:        inbound,
 	})
 }
@@ -193,6 +204,7 @@ func (r *Router) mountSession(m chi.Router) {
 		}),
 	))
 	r.mountEnrichConfig(m)
+	r.mountGuardPolicies(m)
 	r.mountInbound(m)
 }
 
@@ -349,6 +361,82 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 			dispatcher.JSON(func() *attunev1.PreviewEnrichPromptRequest { return ptrext.Of(attunev1.PreviewEnrichPromptRequest{}) }),
 			r.enrichConfig.Preview,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PreviewEnrichPromptRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+}
+
+func (r *Router) mountGuardPolicies(m chi.Router) {
+	m.Route("/guard-policies", func(g chi.Router) {
+		g.Get("/", dispatcher.Bind(
+			"console.GuardPolicyHandler.List",
+			dispatcher.Empty(func() *attunev1.ListGuardPoliciesRequest {
+				return ptrext.Of(attunev1.ListGuardPoliciesRequest{})
+			}),
+			r.guardPolicies.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListGuardPoliciesRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Post("/", dispatcher.Bind(
+			"console.GuardPolicyHandler.Create",
+			dispatcher.JSON(func() *attunev1.CreateGuardPolicyRequest {
+				return ptrext.Of(attunev1.CreateGuardPolicyRequest{})
+			}),
+			r.guardPolicies.Create,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateGuardPolicyRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Put("/", dispatcher.Bind(
+			"console.GuardPolicyHandler.Update",
+			dispatcher.JSON(func() *attunev1.UpdateGuardPoliciesRequest {
+				return ptrext.Of(attunev1.UpdateGuardPoliciesRequest{})
+			}),
+			r.guardPolicies.Update,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateGuardPoliciesRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Patch("/{id}", dispatcher.Bind(
+			"console.GuardPolicyHandler.Patch",
+			dispatcher.Combine(
+				func() *attunev1.PatchGuardPolicyRequest {
+					return ptrext.Of(attunev1.PatchGuardPolicyRequest{})
+				},
+				dispatcher.JSONBody[*attunev1.PatchGuardPolicyRequest],
+				dispatcher.Param("id", func(req *attunev1.PatchGuardPolicyRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.guardPolicies.Patch,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PatchGuardPolicyRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Delete("/{id}", dispatcher.Bind(
+			"console.GuardPolicyHandler.Delete",
+			dispatcher.Path(
+				func() *attunev1.DeleteGuardPolicyRequest {
+					return ptrext.Of(attunev1.DeleteGuardPolicyRequest{})
+				},
+				dispatcher.Param("id", func(req *attunev1.DeleteGuardPolicyRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.guardPolicies.Delete,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteGuardPolicyRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Post("/effective", dispatcher.Bind(
+			"console.GuardPolicyHandler.Resolve",
+			dispatcher.JSON(func() *attunev1.ResolveGuardPolicyRequest {
+				return ptrext.Of(attunev1.ResolveGuardPolicyRequest{})
+			}),
+			r.guardPolicies.Resolve,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ResolveGuardPolicyRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))

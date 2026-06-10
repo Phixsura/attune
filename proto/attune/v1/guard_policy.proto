@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+// GuardPolicyService manages tenant-scoped guard policies and effective-policy
+// previews for the Console. System policies are returned read-only by list and
+// participate in effective resolution, but tenant sessions only write
+// tenant-scoped rows.
+service GuardPolicyService {
+  // GET /fb/v1/console/guard-policies
+  rpc ListGuardPolicies(ListGuardPoliciesRequest) returns (ListGuardPoliciesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/guard-policies"};
+  }
+  // POST /fb/v1/console/guard-policies — create one tenant policy.
+  rpc CreateGuardPolicy(CreateGuardPolicyRequest) returns (GuardPolicy) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/guard-policies"
+      body: "*"
+    };
+  }
+  // PATCH /fb/v1/console/guard-policies/{id} — replace one tenant policy.
+  rpc PatchGuardPolicy(PatchGuardPolicyRequest) returns (GuardPolicy) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/guard-policies/{id}"
+      body: "*"
+    };
+  }
+  // DELETE /fb/v1/console/guard-policies/{id}
+  rpc DeleteGuardPolicy(DeleteGuardPolicyRequest) returns (DeleteGuardPolicyResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/guard-policies/{id}"};
+  }
+  // PUT /fb/v1/console/guard-policies — replace current tenant policies.
+  rpc UpdateGuardPolicies(UpdateGuardPoliciesRequest) returns (UpdateGuardPoliciesResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/guard-policies"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/guard-policies/effective — preview resolved rules.
+  rpc ResolveGuardPolicy(ResolveGuardPolicyRequest) returns (ResolveGuardPolicyResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/guard-policies/effective"
+      body: "*"
+    };
+  }
+}
+
+message GuardPolicy {
+  string id = 1;
+  optional string tenant_id = 2;  // absent for system policies
+  string name = 3;
+  string kind = 4;     // baseline | default | override
+  bool enabled = 5;
+  int32 priority = 6;
+  GuardTarget target = 7;
+  repeated GuardRule rules = 8;
+  string scope = 9;    // system | tenant
+}
+
+message GuardTarget {
+  repeated string channels = 1;
+  repeated string source_ids = 2;
+  repeated string source_tags = 3;
+  repeated string purposes = 4;
+  repeated string stages = 5;
+  repeated string environments = 6;
+}
+
+message GuardRule {
+  string guard = 1;       // v1: pii
+  string stage = 2;       // llm_input | llm_output | outbound | tool_call
+  repeated string entities = 3;
+  string action = 4;      // off | audit | redact | block
+  string replacement = 5;
+}
+
+message ListGuardPoliciesRequest {}
+
+message ListGuardPoliciesResponse {
+  repeated GuardPolicy items = 1;
+}
+
+message CreateGuardPolicyRequest {
+  GuardPolicy policy = 1;
+}
+
+message PatchGuardPolicyRequest {
+  string id = 1;
+  GuardPolicy policy = 2;
+}
+
+message DeleteGuardPolicyRequest {
+  string id = 1;
+}
+
+message DeleteGuardPolicyResponse {}
+
+message UpdateGuardPoliciesRequest {
+  repeated GuardPolicy policies = 1;
+}
+
+message UpdateGuardPoliciesResponse {
+  repeated GuardPolicy items = 1;
+}
+
+message ResolveGuardPolicyRequest {
+  string channel = 1;
+  string source_id = 2;
+  repeated string source_tags = 3;
+  string purpose = 4;      // defaults server-side to enrich
+  string environment = 5;
+}
+
+message ResolveGuardPolicyResponse {
+  repeated GuardRule rules = 1;
+}

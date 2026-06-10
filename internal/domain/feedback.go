@@ -36,6 +36,11 @@ var ValidSources = map[string]bool{
 	"other":   true, // catch-all for misc integrations
 }
 
+const (
+	SourceMetaInboundSourceID   = "inbound_source_id"
+	SourceMetaInboundSourceName = "inbound_source_name"
+)
+
 // SourceDisplayName returns the human-facing label for a source enum.
 // Used by dispatch envelopes (github-issue body, raw-webhook envelope)
 // so downstream readers see "Email" instead of the bare "email"

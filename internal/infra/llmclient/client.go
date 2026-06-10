@@ -66,6 +66,19 @@ type CompletionRequest struct {
 	MaxTokens   int32         // upper bound on completion tokens
 	UserID      string        // audit + OpenAI `user` field; backends without one log it
 	Schema      *OutputSchema // nil = free-form text; non-nil = request structured output
+	Guard       GuardMetadata // optional policy context for LLM guard wrappers
+}
+
+// GuardMetadata carries source-aware policy context for middleware that wraps
+// LLMClient. It deliberately lives on the request instead of context.Context so
+// guard decisions are explicit, testable, and provider-independent.
+type GuardMetadata struct {
+	TenantID    string
+	Channel     string
+	SourceID    string
+	SourceTags  []string
+	Purpose     string
+	Environment string
 }
 
 // CompletionResponse is the provider-agnostic output.

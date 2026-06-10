@@ -199,6 +199,13 @@ func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyCon
 		Temperature: 0.0,
 		MaxTokens:   512,
 		UserID:      enrichmentSystemUser,
+		Guard: llmclient.GuardMetadata{
+			TenantID:   cfg.TenantID,
+			Channel:    cfg.Channel,
+			SourceID:   cfg.SourceID,
+			SourceTags: cfg.SourceTags,
+			Purpose:    "enrich",
+		},
 	}
 	if cfg.HasConstrained() {
 		req.Schema = buildEnrichSchema(cfg.Dimensions)
@@ -211,9 +218,8 @@ func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyCon
 	}
 	parsed, err := parseEnrichJSON(resp.Text)
 	if err != nil {
-		logext.Warnf(ctx, "[%s] parse failed,err:%s,raw:%s",
-			where, err.Error(), truncate(resp.Text, 300))
-		return domain.Enriched{}, fmt.Errorf("parse: %w; raw=%s", err, truncate(resp.Text, 300))
+		logext.Warnf(ctx, "[%s] parse failed,err:%s", where, err.Error())
+		return domain.Enriched{}, fmt.Errorf("parse: %w", err)
 	}
 	tenant := cfg.TenantID
 	if tenant == "" {
@@ -238,6 +244,9 @@ func (e *Enricher) classify(ctx context.Context, id int64, content string, cfg C
 func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {
 	return ClassifyConfig{
 		TenantID:       row.TenantID,
+		Channel:        row.Source,
+		SourceID:       row.InboundSourceID,
+		SourceTags:     row.SourceTags,
 		PromptTemplate: row.PromptTemplate,
 		Dimensions:     row.Dimensions,
 	}

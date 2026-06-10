@@ -85,7 +85,7 @@ Every field in [`config.example.yaml`](config.example.yaml) has an env-var overr
 |---|---|---|
 | HTTP server | Go 1.25, chi router, structured slog | Single static binary |
 | Storage | PostgreSQL 14+ | pgvector for clustering (v0.5+) |
-| LLM enrichment | OpenAI Chat / OpenAI Responses / Anthropic / Gemini | Multi-protocol with structured output |
+| LLM enrichment | OpenAI Chat / OpenAI Responses / Anthropic / Gemini | Multi-protocol with structured output + [guardrails](docs/guardrails.md) |
 | Outbound | customer HTTPS webhooks · GitHub Issues | Slack / Discord / email in v0.6 (#34) |
 | Console | React + Vite + biome (`console/`) | Triage UI, served as static files |
 | Observability | OpenTelemetry + Prometheus `/metrics` | Grafana dashboards in `observability/dashboards/` |

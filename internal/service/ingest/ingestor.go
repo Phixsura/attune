@@ -42,6 +42,7 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 			where, tenantID, in.Source, err.Error())
 		return 0, err
 	}
+	in = scrubUntrustedSourceMeta(keyID, in)
 	userID := composeUserID(keyID, in.SourceUser)
 	id, err := i.repo.Insert(ctx, tenantID, userID, in)
 	if err != nil {
@@ -59,6 +60,28 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 		go i.fireEnrich(ctx, id, trace.FromContext(ctx))
 	}
 	return id, nil
+}
+
+func scrubUntrustedSourceMeta(keyID uuid.UUID, in domain.IngestInput) domain.IngestInput {
+	if keyID == uuid.Nil || in.SourceMeta == nil {
+		return in
+	}
+	if _, ok := in.SourceMeta[domain.SourceMetaInboundSourceID]; !ok {
+		if _, ok := in.SourceMeta[domain.SourceMetaInboundSourceName]; !ok {
+			return in
+		}
+	}
+	meta := make(map[string]any, len(in.SourceMeta))
+	for k, v := range in.SourceMeta {
+		switch k {
+		case domain.SourceMetaInboundSourceID, domain.SourceMetaInboundSourceName:
+			continue
+		default:
+			meta[k] = v
+		}
+	}
+	in.SourceMeta = meta
+	return in
 }
 
 // composeUserID prefixes every external-source row with the api key
