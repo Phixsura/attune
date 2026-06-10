@@ -27,7 +27,10 @@ func (e *Enricher) persistEnriched(
 ) error {
 	const where = "service.Enricher.persistEnriched"
 	if run == nil && (e.outbox == nil || e.targets == nil) {
-		return e.repo.MarkDone(ctx, s.ID, enriched)
+		return e.repo.MarkDone(ctx, s.ID, enriched, feedback.EnrichmentMetadata{
+			Language:      s.Language,
+			DisplayLocale: s.DisplayLocale,
+		})
 	}
 	plan, err := e.buildOutboxPlan(ctx, s, where)
 	if err != nil {
@@ -85,7 +88,10 @@ func (e *Enricher) persistEnrichedTx(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := e.repo.MarkDoneTx(ctx, tx, s.ID, enriched); err != nil {
+	if err := e.repo.MarkDoneTx(ctx, tx, s.ID, enriched, feedback.EnrichmentMetadata{
+		Language:      s.Language,
+		DisplayLocale: s.DisplayLocale,
+	}); err != nil {
 		logext.Errorf(ctx, "[%s] MarkDoneTx failed,feedback_id:%d,err:%+v",
 			where, s.ID, err.Error())
 		return err
@@ -157,9 +163,24 @@ func (e *Enricher) semanticRun(
 	cfg ClassifyConfig,
 	result classifyResult,
 ) feedback.SemanticExtractionRun {
-	promptVersion := "default"
-	if cfg.PromptTemplate != nil {
-		promptVersion = "tenant_custom"
+	promptLang := promptLanguageForSemanticRun(cfg)
+	detectedLang := normalizeLanguage(s.Language)
+	displayLocale := s.DisplayLocale
+	rationale := map[string]any{
+		"summary":  result.Enriched.Rationale,
+		"language": detectedLang,
+	}
+	if displayLocale != "" {
+		rationale["display_summary"] = result.Enriched.DisplayRationale
+		rationale["display_locale"] = displayLocale
+	}
+	languageGuard := map[string]any{
+		"detected":        detectedLang,
+		"detector":        languageDetectorVersion,
+		"prompt_language": promptLang,
+	}
+	if displayLocale != "" {
+		languageGuard["display_locale"] = displayLocale
 	}
 	return feedback.SemanticExtractionRun{
 		TenantID:      s.TenantID,
@@ -167,14 +188,23 @@ func (e *Enricher) semanticRun(
 		SubjectID:     s.ID,
 		DomainPack:    feedback.DefaultDomainPack,
 		SchemaVersion: feedback.DefaultSchemaVersion,
-		PromptVersion: promptVersion,
+		PromptVersion: promptVersion(cfg),
 		Model:         e.model,
-		GuardSummary:  map[string]any{},
-		Attrs:         result.Enriched.Attrs,
-		Confidence:    map[string]any{},
-		Rationale:     map[string]any{"summary": result.Enriched.Rationale},
-		DroppedAttrs:  result.DroppedAttrsAudit,
+		GuardSummary: map[string]any{
+			"language": languageGuard,
+		},
+		Attrs:        result.Enriched.Attrs,
+		Confidence:   map[string]any{},
+		Rationale:    rationale,
+		DroppedAttrs: result.DroppedAttrsAudit,
 	}
+}
+
+func promptLanguageForSemanticRun(cfg ClassifyConfig) string {
+	if cfg.PromptTemplate != nil && ptrext.Indirect(cfg.PromptTemplate) != "" {
+		return "custom"
+	}
+	return promptLanguageFor(displayLanguageForLocale(cfg.DisplayLocale))
 }
 
 // outboxDestTypes lists destination_type values that go through the
@@ -235,11 +265,14 @@ func extractTraceID(ctx context.Context) string {
 // preserves struct field order — change with caution.
 func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 	type enrichedOut struct {
-		Title      string         `json:"title"`
-		Attrs      map[string]any `json:"attrs"`
-		IsUrgent   bool           `json:"is_urgent"`
-		Rationale  string         `json:"rationale"`
-		EnrichedAt string         `json:"enriched_at"`
+		Title            string         `json:"title"`
+		DisplayTitle     string         `json:"display_title,omitempty"`
+		DisplayLocale    string         `json:"display_locale,omitempty"`
+		Attrs            map[string]any `json:"attrs"`
+		IsUrgent         bool           `json:"is_urgent"`
+		Rationale        string         `json:"rationale"`
+		DisplayRationale string         `json:"display_rationale,omitempty"`
+		EnrichedAt       string         `json:"enriched_at"`
 	}
 	type feedbackOut struct {
 		ID          int64       `json:"id"`
@@ -247,6 +280,7 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 		Content     string      `json:"content"`
 		Source      string      `json:"source"`
 		UserID      string      `json:"user_id"`
+		Language    string      `json:"language,omitempty"`
 		SubmittedAt string      `json:"submitted_at"`
 		Enriched    enrichedOut `json:"enriched"`
 	}
@@ -274,13 +308,17 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 			Content:     s.Content,
 			Source:      s.Source,
 			UserID:      s.UserID,
+			Language:    s.Language,
 			SubmittedAt: submittedAt, // #82: actual ingest time, not enrichment time
 			Enriched: enrichedOut{
-				Title:      s.Title,
-				Attrs:      attrs,
-				IsUrgent:   s.IsUrgent,
-				Rationale:  s.Rationale,
-				EnrichedAt: at,
+				Title:            s.Title,
+				DisplayTitle:     s.DisplayTitle,
+				DisplayLocale:    s.DisplayLocale,
+				Attrs:            attrs,
+				IsUrgent:         s.IsUrgent,
+				Rationale:        s.Rationale,
+				DisplayRationale: s.DisplayRationale,
+				EnrichedAt:       at,
 			},
 		},
 	}

@@ -11,16 +11,22 @@ import (
 )
 
 func TestParseEnrichJSON_HappyPath(t *testing.T) {
-	in := `{"title":"支付崩溃","type":"bug","severity":"critical","labels":["pay","ux"],"rationale":"core flow"}`
+	in := `{"title":"Payment fails","display_title":"支付失败","type":"bug","severity":"critical","labels":["pay","ux"],"rationale":"core flow","display_rationale":"核心流程受阻"}`
 	e, err := parseEnrichJSON(in)
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
-	if e.Title != "支付崩溃" {
+	if e.Title != "Payment fails" {
 		t.Errorf("title: %q", e.Title)
+	}
+	if e.DisplayTitle != "支付失败" {
+		t.Errorf("display title: %q", e.DisplayTitle)
 	}
 	if e.Rationale != "core flow" {
 		t.Errorf("rationale: %q", e.Rationale)
+	}
+	if e.DisplayRationale != "核心流程受阻" {
+		t.Errorf("display rationale: %q", e.DisplayRationale)
 	}
 	if e.Attrs["type"] != "bug" {
 		t.Errorf("type attr: %v", e.Attrs["type"])
@@ -100,7 +106,7 @@ func TestParseEnrichJSON_OptionalRationale(t *testing.T) {
 
 func TestParseEnrichJSON_AttrsExcludesReservedKeys(t *testing.T) {
 	// title + rationale should NOT leak into Attrs.
-	e, err := parseEnrichJSON(`{"title":"x","rationale":"y","type":"bug"}`)
+	e, err := parseEnrichJSON(`{"title":"x","display_title":"dx","rationale":"y","display_rationale":"dy","type":"bug"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +115,38 @@ func TestParseEnrichJSON_AttrsExcludesReservedKeys(t *testing.T) {
 	}
 	if _, ok := e.Attrs["rationale"]; ok {
 		t.Error("rationale leaked into Attrs")
+	}
+	if _, ok := e.Attrs["display_title"]; ok {
+		t.Error("display_title leaked into Attrs")
+	}
+	if _, ok := e.Attrs["display_rationale"]; ok {
+		t.Error("display_rationale leaked into Attrs")
+	}
+}
+
+func TestParseEnrichJSON_DisplayFieldsRemainEmptyWhenMissing(t *testing.T) {
+	e, err := parseEnrichJSON(`{"title":"x","rationale":"y","type":"bug"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.DisplayTitle != "" {
+		t.Errorf("display title should stay empty when omitted: %q", e.DisplayTitle)
+	}
+	if e.DisplayRationale != "" {
+		t.Errorf("display rationale should stay empty when omitted: %q", e.DisplayRationale)
+	}
+}
+
+func TestNormalizeEnrichedDisplay_FillsOnlySameLanguageRows(t *testing.T) {
+	same := domain.Enriched{Title: "支付失败", Rationale: "支付流程受阻"}
+	same = normalizeEnrichedDisplay(same, LanguageChinese, "zh-CN")
+	if same.DisplayTitle != same.Title || same.DisplayRationale != same.Rationale {
+		t.Fatalf("same-language display should fall back to native: %+v", same)
+	}
+	cross := domain.Enriched{Title: "Payment failed", Rationale: "Checkout blocked"}
+	cross = normalizeEnrichedDisplay(cross, LanguageEnglish, "zh-CN")
+	if cross.DisplayTitle != "" || cross.DisplayRationale != "" {
+		t.Fatalf("cross-language display should not be invented: %+v", cross)
 	}
 }
 
@@ -128,17 +166,21 @@ func TestParseEnrichJSON_ExtraDimsPassThrough(t *testing.T) {
 
 func TestBuildSnapshot_CopiesAttrs(t *testing.T) {
 	row := ptrext.Of(feedback.EnrichInput{
-		Content:   "c",
-		Source:    "s",
-		UserID:    "u",
-		TenantID:  "t",
-		CreatedAt: time.Now(),
+		Content:       "c",
+		Source:        "s",
+		UserID:        "u",
+		Language:      "en",
+		DisplayLocale: "zh",
+		TenantID:      "t",
+		CreatedAt:     time.Now(),
 	})
 	enriched := domain.Enriched{
-		Title:     "t",
-		Attrs:     map[string]any{"type": "bug"},
-		IsUrgent:  true,
-		Rationale: "r",
+		Title:            "t",
+		DisplayTitle:     "dt",
+		Attrs:            map[string]any{"type": "bug"},
+		IsUrgent:         true,
+		Rationale:        "r",
+		DisplayRationale: "dr",
 	}
 	snap := buildSnapshot(42, row, enriched, time.Now())
 	if snap.ID != 42 {
@@ -146,6 +188,15 @@ func TestBuildSnapshot_CopiesAttrs(t *testing.T) {
 	}
 	if snap.Attrs["type"] != "bug" {
 		t.Error("attrs not copied")
+	}
+	if snap.Language != "en" {
+		t.Errorf("language: %q", snap.Language)
+	}
+	if snap.DisplayLocale != "zh" {
+		t.Errorf("display locale: %q", snap.DisplayLocale)
+	}
+	if snap.DisplayTitle != "dt" {
+		t.Errorf("display title: %q", snap.DisplayTitle)
 	}
 	if !snap.IsUrgent {
 		t.Error("urgent not copied")

@@ -27,20 +27,41 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
-// defaultPromptTmpl is the built-in classification prompt. Tokens
+// defaultPromptTmpl is the built-in English classification prompt. Tokens
 // {{content}} and {{dimensions}} are substituted by renderPrompt. The
 // prompt is intentionally English-canonical — the per-dim i18n hints
 // printed under {{dimensions}} let the model handle Chinese content
 // without forcing a Chinese prompt body.
-const defaultPromptTmpl = `You are a product-feedback classifier. Given one raw user-feedback string, emit ONE single-line JSON object (no markdown fences, no commentary, no leading or trailing blank lines). The schema is:
+const defaultPromptTmpl = defaultPromptTmplEn
+
+const defaultPromptTmplEn = `You are a product-feedback classifier. Given one raw user-feedback string, emit ONE single-line JSON object (no markdown fences, no commentary, no leading or trailing blank lines). Write "title" and "rationale" in the same natural language as the raw feedback whenever the source language is clear. The schema is:
+Also write "display_title" and "display_rationale" in {{display_language_name}} for the product team reading the console. If the source language and display language are the same, the display fields may match the source-language fields.
 
 {
  "title": "a 10-30 character one-sentence summary, no trailing punctuation",
+ "display_title": "same summary translated/localized for console readers",
 {{dimensions}}
- "rationale": "<=30 characters: why these values"
+ "rationale": "<=30 characters: why these values",
+ "display_rationale": "<=30 characters in {{display_language_name}}: why these values"
 }
 
 Raw user feedback:
+"""
+{{content}}
+"""`
+
+const defaultPromptTmplZh = `你是产品反馈分类器。给定一条原始用户反馈，只输出一个单行 JSON 对象（不要 markdown 代码块，不要解释，不要前后空行）。当原始反馈语言清晰时，"title" 和 "rationale" 必须使用与原文相同的自然语言。
+同时用 {{display_language_name}} 写 "display_title" 和 "display_rationale"，给控制台里的产品/运营团队阅读。如果原文语言和展示语言相同，display 字段可以与原语言字段一致。JSON schema 是：
+
+{
+ "title": "10-30 个字符的一句话摘要，不要句末标点",
+ "display_title": "给控制台读者看的同一摘要",
+{{dimensions}}
+ "rationale": "<=30 个字符：为什么选择这些值",
+ "display_rationale": "<=30 个字符的 {{display_language_name}}：为什么选择这些值"
+}
+
+原始用户反馈：
 """
 {{content}}
 """`
@@ -63,6 +84,8 @@ type ClassifyConfig struct {
 	Channel        string
 	SourceID       string
 	SourceTags     []string
+	Language       string
+	DisplayLocale  string
 	PromptTemplate *string
 	Dimensions     domain.DimensionSet
 }
@@ -91,14 +114,61 @@ func (c ClassifyConfig) HasConstrained() bool {
 // literal {{content}} inside the data cannot trigger further
 // substitution.
 func renderPrompt(cfg ClassifyConfig, content string) string {
-	body := defaultPromptTmpl
+	displayLocale := classifyDisplayLocale(cfg)
+	displayLanguage := displayLanguageForLocale(displayLocale)
+	body := defaultPromptTemplateFor(displayLanguage)
 	if cfg.PromptTemplate != nil && ptrext.Indirect(cfg.PromptTemplate) != "" {
 		body = ptrext.Indirect(cfg.PromptTemplate)
 	}
 	return strings.NewReplacer(
 		"{{content}}", content,
 		"{{dimensions}}", renderDimensionsClause(cfg.Dimensions),
+		"{{display_locale}}", displayLocale,
+		"{{display_language}}", displayLanguage,
+		"{{display_language_name}}", displayLanguageName(displayLocale),
 	).Replace(body)
+}
+
+func classifyDisplayLocale(cfg ClassifyConfig) string {
+	if cfg.DisplayLocale != "" {
+		return displayLocaleForTenantLocale(cfg.DisplayLocale)
+	}
+	if cfg.Language != "" {
+		return displayLocaleForTenantLocale(displayLanguageForLocale(cfg.Language))
+	}
+	return LanguageEnglish
+}
+
+func defaultPromptTemplateFor(language string) string {
+	if promptLanguageFor(language) == LanguageChinese {
+		return defaultPromptTmplZh
+	}
+	return defaultPromptTmplEn
+}
+
+func displayLanguageName(code string) string {
+	lower := strings.ToLower(strings.TrimSpace(code))
+	if strings.Contains(lower, "hant") ||
+		strings.HasPrefix(lower, "zh-tw") ||
+		strings.HasPrefix(lower, "zh-hk") ||
+		strings.HasPrefix(lower, "zh-mo") {
+		return "Traditional Chinese"
+	}
+	switch displayLanguageForLocale(code) {
+	case LanguageChinese:
+		return "Simplified Chinese"
+	case LanguageJapanese:
+		return "Japanese"
+	default:
+		return "English"
+	}
+}
+
+func promptVersion(cfg ClassifyConfig) string {
+	if cfg.PromptTemplate != nil && ptrext.Indirect(cfg.PromptTemplate) != "" {
+		return "tenant_custom"
+	}
+	return "default:" + promptLanguageFor(displayLanguageForLocale(classifyDisplayLocale(cfg)))
 }
 
 // renderDimensionsClause expands the {{dimensions}} slot — one line
@@ -199,13 +269,15 @@ func i18nHint(s domain.I18nString) string {
 // drop response_format.
 func buildEnrichSchema(dims domain.DimensionSet) *llmclient.OutputSchema {
 	props := map[string]any{
-		"title":     map[string]any{"type": "string"},
-		"rationale": map[string]any{"type": "string"},
+		"title":             map[string]any{"type": "string"},
+		"display_title":     map[string]any{"type": "string"},
+		"rationale":         map[string]any{"type": "string"},
+		"display_rationale": map[string]any{"type": "string"},
 	}
 	// Strict mode: every property in `properties` must appear in
 	// `required`. Optionality is encoded in the property type itself
 	// (string|null for single; array (with empty arr allowed) for multi).
-	required := []string{"title", "rationale"}
+	required := []string{"title", "display_title", "rationale", "display_rationale"}
 	for _, d := range dims {
 		props[d.Name] = dimPropertySchema(d)
 		required = append(required, d.Name)

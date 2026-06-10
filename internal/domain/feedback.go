@@ -106,25 +106,31 @@ func (in IngestInput) Validate() error {
 // boolean is persisted at write time so historical urgent/non-urgent
 // status is a snapshot of the operator's policy at classification.
 type Enriched struct {
-	Title     string         `json:"title"`
-	Attrs     map[string]any `json:"attrs"`     // map<dim.Name, string|[]string>
-	IsUrgent  bool           `json:"is_urgent"` // derived; never set by the LLM
-	Rationale string         `json:"rationale"`
+	Title            string         `json:"title"`
+	DisplayTitle     string         `json:"display_title,omitempty"`
+	Attrs            map[string]any `json:"attrs"`     // map<dim.Name, string|[]string>
+	IsUrgent         bool           `json:"is_urgent"` // derived; never set by the LLM
+	Rationale        string         `json:"rationale"`
+	DisplayRationale string         `json:"display_rationale,omitempty"`
 }
 
 // Snapshot is the wire-format handed from service.Enricher to a
 // Notifier after a row finishes classification. Copy-by-value so the
 // notifier can outlive any DB transaction or HTTP request scope.
 type Snapshot struct {
-	ID        int64
-	TenantID  string
-	Content   string
-	Source    string
-	UserID    string
-	Title     string
-	Attrs     map[string]any // map<dim.Name, string|[]string>
-	IsUrgent  bool           // routes to the radar channel when true
-	Rationale string         // LLM's short explanation; surfaced in outbox envelopes
+	ID               int64
+	TenantID         string
+	Content          string
+	Source           string
+	UserID           string
+	Language         string
+	DisplayLocale    string
+	Title            string
+	DisplayTitle     string
+	Attrs            map[string]any // map<dim.Name, string|[]string>
+	IsUrgent         bool           // routes to the radar channel when true
+	Rationale        string         // LLM's short explanation; surfaced in outbox envelopes
+	DisplayRationale string
 	// SubmittedAt is the user's original submission time
 	// (user_feedback.created_at), independent of when the LLM finished
 	// classifying. Surfaced in outbound envelopes so consumers doing

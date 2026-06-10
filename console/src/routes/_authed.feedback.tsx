@@ -27,6 +27,7 @@ import {
 } from '@/features/feedback/api/list-feedback-infinite'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
 import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
+import { LanguageBadge } from '@/features/feedback/components/language-badge'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Dimension } from '@/proto/attune/v1/common'
@@ -198,50 +199,57 @@ function FeedbackTable({
   const displayOf = useDisplayName()
   return (
     <div>
-      <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(18rem,1.8fr)_7rem_7rem] gap-4 border-b border-border/60 px-4 py-2 text-[11px] font-medium text-muted-foreground max-lg:hidden">
+      <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(18rem,1.8fr)_5rem_7rem_7rem] gap-4 border-b border-border/60 px-4 py-2 text-[11px] font-medium text-muted-foreground max-lg:hidden">
         <div>{t('feedback.table.title')}</div>
         <div>{dims.map((d) => displayOf(d.displayName) || d.name).join(' / ')}</div>
+        <div>{t('feedback.table.language')}</div>
         <div>{t('feedback.table.user')}</div>
         <div>{t('feedback.table.time')}</div>
       </div>
       <div className="divide-y divide-border/60">
-        {items.map((f) => (
-          <button
-            type="button"
-            key={f.id}
-            onClick={() => onRowClick(f.id)}
-            className="grid w-full gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/25 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,1.8fr)_7rem_7rem]"
-          >
-            <div className="min-w-0">
-              <div className="flex min-w-0 items-center gap-2 font-medium">
-                <UrgentDot urgent={f.isUrgent} />
-                <span className="truncate">{f.enrichedTitle || `#${f.id}`}</span>
-              </div>
-              <div className="truncate text-xs text-muted-foreground">{f.content}</div>
-            </div>
-            <dl className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-x-3 gap-y-2">
-              {dims.map((d) => (
-                <div key={d.name} className="min-w-0">
-                  <dt className="mb-1 truncate text-[11px] text-muted-foreground lg:hidden">
-                    {displayOf(d.displayName) || d.name}
-                  </dt>
-                  <dd className="min-w-0">
-                    <DimensionChips
-                      dim={d}
-                      value={(f.enrichedAttrs as Record<string, unknown> | undefined)?.[d.name]}
-                    />
-                  </dd>
+        {items.map((f) => {
+          const title = f.enrichedDisplayTitle || f.enrichedTitle || `#${f.id}`
+          return (
+            <button
+              type="button"
+              key={f.id}
+              onClick={() => onRowClick(f.id)}
+              className="grid w-full gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/25 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,1.8fr)_5rem_7rem_7rem]"
+            >
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-2 font-medium">
+                  <UrgentDot urgent={f.isUrgent} />
+                  <span className="truncate">{title}</span>
                 </div>
-              ))}
-            </dl>
-            <div className="truncate font-mono text-xs text-muted-foreground">
-              {f.userId || '—'}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(f.createdAt), { addSuffix: true, locale: zhCN })}
-            </div>
-          </button>
-        ))}
+                <div className="truncate text-xs text-muted-foreground">{f.content}</div>
+              </div>
+              <dl className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-x-3 gap-y-2">
+                {dims.map((d) => (
+                  <div key={d.name} className="min-w-0">
+                    <dt className="mb-1 truncate text-[11px] text-muted-foreground lg:hidden">
+                      {displayOf(d.displayName) || d.name}
+                    </dt>
+                    <dd className="min-w-0">
+                      <DimensionChips
+                        dim={d}
+                        value={(f.enrichedAttrs as Record<string, unknown> | undefined)?.[d.name]}
+                      />
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <div>
+                <LanguageBadge language={f.language} />
+              </div>
+              <div className="truncate font-mono text-xs text-muted-foreground">
+                {f.userId || '—'}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {formatDistanceToNow(new Date(f.createdAt), { addSuffix: true, locale: zhCN })}
+              </div>
+            </button>
+          )
+        })}
       </div>
     </div>
   )

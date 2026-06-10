@@ -15,6 +15,7 @@ import {
   type FeedbackDetail,
   feedbackDetailQuery,
 } from '@/features/feedback/api/get-feedback-detail'
+import { LanguageBadge, languagesDiffer } from '@/features/feedback/components/language-badge'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Dimension } from '@/proto/attune/v1/common'
 
@@ -42,7 +43,9 @@ export function FeedbackDetailSheet({
           <SheetTitle>
             <span className="inline-flex items-center gap-2">
               <UrgentDot urgent={detail.data?.isUrgent} />
-              {detail.data?.enrichedTitle || `#${id ?? '?'}`}
+              {detail.data
+                ? detail.data.enrichedDisplayTitle || detail.data.enrichedTitle || `#${id ?? '?'}`
+                : `#${id ?? '?'}`}
             </span>
           </SheetTitle>
           <SheetDescription>
@@ -60,6 +63,10 @@ export function FeedbackDetailSheet({
                     emptyDash={false}
                   />
                 ))}
+                <LanguageBadge
+                  language={detail.data.language}
+                  className="h-5 min-w-8 px-1.5 text-[10px]"
+                />
                 <span className="text-muted-foreground">
                   {format(new Date(detail.data.createdAt), 'PPP HH:mm', { locale: zhCN })}
                 </span>
@@ -85,15 +92,29 @@ function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] })
   const { t } = useTranslation()
   const displayOf = useDisplayName()
   const attrs = (data.enrichedAttrs ?? {}) as Record<string, unknown>
+  const displayRationale = data.enrichedDisplayRationale || data.enrichedRationale
+  const showNativeRationale =
+    data.enrichedRationale &&
+    data.enrichedDisplayRationale &&
+    languagesDiffer(data.language, data.enrichedDisplayLocale) &&
+    data.enrichedRationale !== data.enrichedDisplayRationale
   return (
     <div className="space-y-6">
       <Section label={t('feedback.detail.raw_content')}>
         <p className="whitespace-pre-wrap break-words">{data.content}</p>
       </Section>
 
-      {data.enrichedRationale ? (
+      {displayRationale ? (
         <Section label={t('feedback.detail.ai_rationale')}>
           <p className="rounded-md border border-border bg-muted/40 p-3 whitespace-pre-wrap break-words text-muted-foreground">
+            {displayRationale}
+          </p>
+        </Section>
+      ) : null}
+
+      {showNativeRationale ? (
+        <Section label={t('feedback.detail.ai_rationale_source')}>
+          <p className="rounded-md border border-border bg-background p-3 whitespace-pre-wrap break-words text-muted-foreground">
             {data.enrichedRationale}
           </p>
         </Section>

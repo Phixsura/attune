@@ -34,7 +34,7 @@ type AttrFilter struct {
 type ConsoleListOpts struct {
 	Attrs  []AttrFilter // per-dim filters, AND-composed via JSONB containment
 	Urgent *bool        // nil = no filter; true = is_urgent only; false = not urgent only
-	Q      string       // ILIKE on content + enriched_title
+	Q      string       // ILIKE on content + native/display titles
 	Cursor int64        // last id seen; 0 = first page
 	Limit  int
 }
@@ -43,17 +43,20 @@ type ConsoleListOpts struct {
 // EnrichedAttrs is returned as a raw JSONB byte slice — the handler
 // decodes it into a structpb.Struct for the proto wire shape.
 type ConsoleListRow struct {
-	ID               int64
-	Content          string
-	Source           string
-	Type             string
-	UserID           string
-	PageURL          string
-	EnrichedTitle    string
-	EnrichedAttrs    []byte // raw JSONB
-	IsUrgent         bool
-	EnrichmentStatus string
-	CreatedAt        time.Time
+	ID                    int64
+	Content               string
+	Source                string
+	Type                  string
+	UserID                string
+	Language              string
+	PageURL               string
+	EnrichedTitle         string
+	EnrichedDisplayTitle  string
+	EnrichedDisplayLocale string
+	EnrichedAttrs         []byte // raw JSONB
+	IsUrgent              bool
+	EnrichmentStatus      string
+	CreatedAt             time.Time
 }
 
 // ListForConsole returns one page newest-first, scoped to tenant. Uses
@@ -89,11 +92,15 @@ func (r *FeedbackRepo) ListForConsole(
 	}
 	if opts.Q != "" {
 		p := addArg("%" + opts.Q + "%")
-		where += " AND (content ILIKE " + p + " OR enriched_title ILIKE " + p + ")"
+		where += " AND (content ILIKE " + p +
+			" OR enriched_title ILIKE " + p +
+			" OR enriched_display_title ILIKE " + p + ")"
 	}
 	sql := `
-		SELECT id, content, source, type, user_id, page_url,
+			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
 		 COALESCE(enriched_title, ''),
+		 COALESCE(enriched_display_title, ''),
+		 COALESCE(enriched_display_locale, ''),
 		 COALESCE(enriched_attrs, '{}'::jsonb),
 		 is_urgent,
 		 enrichment_status,
@@ -114,8 +121,9 @@ func (r *FeedbackRepo) ListForConsole(
 	for rows.Next() {
 		var row ConsoleListRow
 		if err := rows.Scan(
-			&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.PageURL,
-			&row.EnrichedTitle, &row.EnrichedAttrs, &row.IsUrgent,
+			&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.Language, &row.PageURL,
+			&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale,
+			&row.EnrichedAttrs, &row.IsUrgent,
 			&row.EnrichmentStatus, &row.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan feedback row: %w", err)
@@ -142,11 +150,12 @@ func containmentClause(f AttrFilter) ([]byte, error) {
 // attachments, enrichment_error, enriched_at, enriched_rationale).
 type ConsoleDetailRow struct {
 	ConsoleListRow
-	SourceMeta        []byte // raw JSONB
-	Attachments       []byte // raw JSONB
-	EnrichmentError   string
-	EnrichedAt        *time.Time
-	EnrichedRationale string // LLM's short "why these values"; empty when not classified
+	SourceMeta               []byte // raw JSONB
+	Attachments              []byte // raw JSONB
+	EnrichmentError          string
+	EnrichedAt               *time.Time
+	EnrichedRationale        string // LLM's short "why these values"; empty when not classified
+	EnrichedDisplayRationale string
 }
 
 // ErrFeedbackNotFound returned by GetForConsole when id doesn't match
@@ -159,25 +168,29 @@ func (r *FeedbackRepo) GetForConsole(
 	var row ConsoleDetailRow
 	err := r.pool.QueryRow(
 		ctx, `
-		SELECT id, content, source, type, user_id, page_url,
+			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
 		 COALESCE(enriched_title, ''),
+		 COALESCE(enriched_display_title, ''),
+		 COALESCE(enriched_display_locale, ''),
 		 COALESCE(enriched_attrs, '{}'::jsonb),
 		 is_urgent,
 		 enrichment_status, created_at,
 		 source_meta, attachments,
 		 COALESCE(enrichment_error, ''),
 		 enriched_at,
-		 COALESCE(enriched_rationale, '')
+		 COALESCE(enriched_rationale, ''),
+		 COALESCE(enriched_display_rationale, '')
 		 FROM user_feedback
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
 	).Scan(
-		&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.PageURL,
-		&row.EnrichedTitle, &row.EnrichedAttrs, &row.IsUrgent,
+		&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.Language, &row.PageURL,
+		&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale,
+		&row.EnrichedAttrs, &row.IsUrgent,
 		&row.EnrichmentStatus, &row.CreatedAt,
 		&row.SourceMeta, &row.Attachments,
 		&row.EnrichmentError, &row.EnrichedAt,
-		&row.EnrichedRationale,
+		&row.EnrichedRationale, &row.EnrichedDisplayRationale,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrFeedbackNotFound

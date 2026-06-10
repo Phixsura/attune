@@ -20,18 +20,46 @@ import (
 // value so the notifier can outlive any DB tx or HTTP scope.
 func buildSnapshot(id int64, row *feedback.EnrichInput, e domain.Enriched, at time.Time) domain.Snapshot {
 	return domain.Snapshot{
-		ID:          id,
-		TenantID:    row.TenantID,
-		Content:     row.Content,
-		Source:      row.Source,
-		UserID:      row.UserID,
-		Title:       e.Title,
-		Attrs:       e.Attrs,
-		IsUrgent:    e.IsUrgent,
-		Rationale:   e.Rationale,
-		SubmittedAt: row.CreatedAt, // #82: actual user submission time, not enrichment time
-		EnrichedAt:  at,
+		ID:               id,
+		TenantID:         row.TenantID,
+		Content:          row.Content,
+		Source:           row.Source,
+		UserID:           row.UserID,
+		Language:         row.Language,
+		DisplayLocale:    snapshotDisplayLocale(row.DisplayLocale, e),
+		Title:            e.Title,
+		DisplayTitle:     e.DisplayTitle,
+		Attrs:            e.Attrs,
+		IsUrgent:         e.IsUrgent,
+		Rationale:        e.Rationale,
+		DisplayRationale: e.DisplayRationale,
+		SubmittedAt:      row.CreatedAt, // #82: actual user submission time, not enrichment time
+		EnrichedAt:       at,
 	}
+}
+
+func snapshotDisplayLocale(displayLocale string, e domain.Enriched) string {
+	if !hasDisplayOutput(e) {
+		return ""
+	}
+	return displayLocaleForTenantLocale(displayLocale)
+}
+
+func hasDisplayOutput(e domain.Enriched) bool {
+	return e.DisplayTitle != "" || e.DisplayRationale != ""
+}
+
+func normalizeEnrichedDisplay(e domain.Enriched, sourceLanguage, displayLocale string) domain.Enriched {
+	if !sameLanguage(sourceLanguage, displayLocale) {
+		return e
+	}
+	if e.DisplayTitle == "" {
+		e.DisplayTitle = e.Title
+	}
+	if e.DisplayRationale == "" {
+		e.DisplayRationale = e.Rationale
+	}
+	return e
 }
 
 // jsonObjRe pulls the first {...} block out of an LLM reply that
@@ -70,12 +98,18 @@ func parseEnrichJSON(s string) (domain.Enriched, error) {
 		return domain.Enriched{}, fmt.Errorf("missing required field: title")
 	}
 	rationale, _ := raw["rationale"].(string)
+	displayTitle, _ := raw["display_title"].(string)
+	displayRationale, _ := raw["display_rationale"].(string)
 	delete(raw, "title")
 	delete(raw, "rationale")
+	delete(raw, "display_title")
+	delete(raw, "display_rationale")
 	return domain.Enriched{
-		Title:     title,
-		Rationale: rationale,
-		Attrs:     raw,
+		Title:            title,
+		DisplayTitle:     displayTitle,
+		Rationale:        rationale,
+		DisplayRationale: displayRationale,
+		Attrs:            raw,
 	}, nil
 }
 

@@ -145,7 +145,9 @@ func (f *fakeLLM) Complete(_ context.Context, req llmclient.CompletionRequest) (
 	f.prompt = req.Prompt
 	return llmclient.CompletionResponse{Text: `{
 		"title":"Payment submit fails",
+		"display_title":"支付提交失败",
 		"rationale":"The user reports a checkout-breaking error.",
+		"display_rationale":"用户反馈结账流程受阻。",
 			"type":"bug",
 			"severity":"critical",
 			"sentiment":"frustrated",
@@ -221,6 +223,23 @@ func assertEnvelope(t *testing.T, body []byte) {
 	if env["version"] != "2" || env["event_type"] != "feedback.enriched" {
 		t.Errorf("unexpected envelope: %v", env)
 	}
+	fb, ok := env["feedback"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing feedback object: %v", env)
+	}
+	if fb["language"] != "en" {
+		t.Errorf("feedback.language=%v, want en", fb["language"])
+	}
+	enriched, ok := fb["enriched"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing enriched object: %v", fb)
+	}
+	if enriched["display_title"] != "支付提交失败" {
+		t.Errorf("enriched.display_title=%v", enriched["display_title"])
+	}
+	if enriched["display_locale"] != "zh-CN" {
+		t.Errorf("enriched.display_locale=%v, want zh-CN", enriched["display_locale"])
+	}
 }
 
 func assertFeedbackDone(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id int64, wantContent string) {
@@ -228,11 +247,15 @@ func assertFeedbackDone(t *testing.T, ctx context.Context, pool *pgxpool.Pool, i
 	var status string
 	var urgent bool
 	var title string
+	var displayTitle string
 	var content string
+	var language string
+	var displayLanguage string
 	if err := pool.QueryRow(ctx, `
-		SELECT enrichment_status, is_urgent, enriched_title, content
+		SELECT enrichment_status, is_urgent, enriched_title, COALESCE(enriched_display_title, ''),
+		 content, COALESCE(language, ''), COALESCE(enriched_display_locale, '')
 		FROM user_feedback WHERE id = $1`, id,
-	).Scan(&status, &urgent, &title, &content); err != nil {
+	).Scan(&status, &urgent, &title, &displayTitle, &content, &language, &displayLanguage); err != nil {
 		t.Fatalf("load feedback: %v", err)
 	}
 	if status != "done" || !urgent || title != "Payment submit fails" {
@@ -240,6 +263,15 @@ func assertFeedbackDone(t *testing.T, ctx context.Context, pool *pgxpool.Pool, i
 	}
 	if content != wantContent {
 		t.Fatalf("raw content changed: got %q want %q", content, wantContent)
+	}
+	if displayTitle != "支付提交失败" {
+		t.Fatalf("display title=%q, want 支付提交失败", displayTitle)
+	}
+	if language != "en" {
+		t.Fatalf("language=%q, want en", language)
+	}
+	if displayLanguage != "zh-CN" {
+		t.Fatalf("display locale=%q, want zh-CN", displayLanguage)
 	}
 }
 
