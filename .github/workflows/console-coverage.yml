@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   coverage:
+    name: Console Coverage
     if: "!contains(github.event.pull_request.labels.*.name, 'skip-console-coverage')"
     runs-on: ubuntu-latest
     permissions:

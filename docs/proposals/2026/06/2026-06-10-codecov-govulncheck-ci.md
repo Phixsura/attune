@@ -71,10 +71,10 @@ Go/TypeScript repositories, scaled down to attune's size:
 Those examples point to three design choices for attune:
 
 - Keep scheduled vulnerability monitoring separate from path-gated CI.
-- Upload Go coverage to Codecov, and treat console coverage as its own review
-  signal instead of pretending a Go-only report represents the whole repository.
-- Borrow Grafana's frontend coverage operating model, scaled down for a
-  single-console app instead of a large code-owner matrix.
+- Upload Go coverage to Codecov, and treat Go and console coverage as review
+  signals instead of relying only on external dashboard ingestion.
+- Borrow Grafana's coverage operating model, scaled down for one Go aggregate
+  and one console aggregate instead of a large code-owner matrix.
 
 ## Goals
 
@@ -82,10 +82,16 @@ Those examples point to three design choices for attune:
   where a valid repository secret is available.
 - Keep coverage reports visible in CI logs so coverage remains observable even
   if the external Codecov upload has a transient outage.
+- Add a Grafana-style Go coverage workflow that compares PR statement coverage
+  against `main`, uploads the PR branch HTML coverage report as an artifact,
+  comments the result on the PR, and fails when aggregate Go coverage
+  decreases.
 - Add a Grafana-style console coverage workflow that compares PR coverage
   against `main`, uploads the PR branch HTML coverage report as an artifact,
   comments the result on the PR, and fails when aggregate console coverage
   decreases.
+- Keep Go coverage path-gated to Go/module/workflow changes, with a deliberate
+  skip label for exceptional PRs.
 - Keep console coverage path-gated to TypeScript/React/package changes, with a
   deliberate skip label for exceptional PRs.
 - Add a weekly scheduled `govulncheck` SARIF workflow that uploads findings to
@@ -108,8 +114,8 @@ Those examples point to three design choices for attune:
   ratchet should be introduced separately once the desired baseline and policy
   are agreed.
 - Do not add Codecov PR comments, patch/project gates, badges, or repository
-  config in this issue. Go coverage uses Codecov ingestion only; console coverage
-  gets its own GitHub PR comment and artifact workflow.
+  config in this issue. Go and console coverage get GitHub-native PR comments
+  and artifacts; Codecov remains the long-running trend dashboard.
 - Do not include integration or live-test coverage in the first Codecov upload.
   The Go upload remains the default unit package coverage from `go test ./...`;
   `make test-integration` and `test/live/...` stay separate tiers.
@@ -164,7 +170,55 @@ This prints a stable `total: (statements) X%` line in the job log. It is not a
 threshold and should not fail the job unless the coverage file is missing, which
 would indicate the preceding test step did not produce the expected artifact.
 
-### 3. Add Grafana-style console coverage review
+### 3. Add Grafana-style Go coverage review
+
+Add a dedicated `.github/workflows/go-coverage.yml` with the same review model
+for Go package coverage:
+
+```yaml
+name: Go Coverage
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "scripts/compare-go-coverage.mjs"
+      - ".github/workflows/go-coverage.yml"
+
+jobs:
+  coverage:
+    name: Go Coverage
+    if: "!contains(github.event.pull_request.labels.*.name, 'skip-go-coverage')"
+    steps:
+      - name: Checkout main
+      - name: Checkout PR
+      - name: Test coverage on main
+        run: |
+          go test -race -covermode=atomic -coverprofile=coverage.txt ./...
+          go tool cover -func=coverage.txt > coverage-func.txt
+          go tool cover -html=coverage.txt -o coverage.html
+      - name: Test coverage on PR
+      - name: Compare coverage
+      - name: Upload PR Go coverage
+      - name: Comment coverage
+      - name: Fail if coverage decreased
+```
+
+Add `scripts/compare-go-coverage.mjs` to parse the `total: (statements) X%`
+line from `go tool cover -func`, write a compact Markdown table, and write
+`go-coverage-result.json` with `{ "passed": true | false }`. The workflow uses
+`skip-go-coverage` as the explicit escape hatch label for reviewer-accepted
+coverage decreases.
+
+This PR workflow is separate from Codecov: Codecov remains the long-running
+dashboard for Go coverage, while the GitHub-native workflow gives reviewers an
+immediate before/after regression signal.
+
+### 4. Add Grafana-style console coverage review
 
 Extend the Vitest coverage reporters in `console/vite.config.ts`:
 
@@ -277,7 +331,7 @@ Keep the existing `console` job in `.github/workflows/ci.yml` running
 `pnpm vitest run --coverage`; that remains the regular console quality gate.
 The new workflow is the richer review signal for console-changing PRs.
 
-### 4. Upload console coverage to Codecov on main
+### 5. Upload console coverage to Codecov on main
 
 For `push` to `main`, upload console coverage to Codecov as a repository trend
 signal. Extend Vitest reporters with `lcov` as well as `json-summary`:
@@ -305,7 +359,7 @@ Codecov remains the long-running dashboard; the Grafana-style PR workflow is the
 review gate. The `console` flag keeps the TypeScript/React trend separate from
 the Go trend.
 
-### 5. Add a scheduled govulncheck SARIF workflow
+### 6. Add a scheduled govulncheck SARIF workflow
 
 Create `.github/workflows/govulncheck-sarif.yml` as a standalone security
 workflow:
@@ -352,7 +406,7 @@ jobs.
 Do not add this job to `ci-gate`: it is not part of PR gating and only runs on
 schedule/manual dispatch.
 
-### 6. Leave the existing PR govulncheck job in place
+### 7. Leave the existing PR govulncheck job in place
 
 Keep the existing `.github/workflows/ci.yml` `govulncheck` job:
 
@@ -385,8 +439,9 @@ design deliberately avoided blocking on a coverage-upload hiccup. The coverage
 summary step gives maintainers an in-log fallback, and the first post-merge run
 can be checked manually to confirm Codecov ingestion.
 
-Console coverage is different: the Grafana-style GitHub workflow compares PR
-coverage directly against `main` and can fail without depending on Codecov.
+Go and console coverage are different: the Grafana-style GitHub workflows
+compare PR coverage directly against `main` and can fail without depending on
+Codecov.
 
 ### Put scheduled SARIF in `.github/workflows/ci.yml`
 
@@ -427,9 +482,9 @@ and script surface.
 
 A threshold is useful once the baseline and ratchet policy are agreed. Starting
 with a global Go threshold in this issue would mix observability plumbing with
-test coverage policy. Console already gets a relative no-regression gate by
-comparing PR coverage to `main`; Go thresholding can follow once the baseline is
-agreed.
+test coverage policy. The Go review workflow gets a relative no-regression gate
+by comparing PR coverage to `main`; an absolute threshold can follow once the
+baseline is agreed.
 
 ## Risks / tradeoffs
 
@@ -443,12 +498,20 @@ agreed.
   sticky comment uses `pull-requests: write`, so forked PRs may need to skip the
   comment step or run with reduced behavior. The comparison and artifact upload
   can still run with read permissions.
+- **Go coverage comments need PR write permission.** The Go workflow follows
+  the same sticky-comment permission model. The comment step is skipped for fork
+  PRs, while comparison and artifact upload can still run.
+- **Go coverage doubles unit-test runtime on Go PRs.** The workflow runs
+  coverage once on `main` and once on the PR branch. It uses the same
+  `go test -race -covermode=atomic -coverprofile=coverage.txt ./...` shape as
+  `go-checks` so the PR review signal lines up with the Codecov upload.
 - **Console coverage doubles Vitest runtime on console PRs.** The workflow runs
   coverage once on `main` and once on the PR branch. The current console suite is
   small enough for this, and the richer review signal is worth the extra runtime.
-- **Coverage can decrease for legitimate reasons.** The `skip-console-coverage`
-  label provides an explicit escape hatch. The PR description should explain why
-  the decrease is acceptable when the label is used.
+- **Coverage can decrease for legitimate reasons.** The `skip-go-coverage` and
+  `skip-console-coverage` labels provide explicit escape hatches. The PR
+  description should explain why the decrease is acceptable when either label is
+  used.
 - **Console coverage needs JSON and LCOV reporters.** Vitest already produces
   text/html output, but the comparison script needs `coverage-summary.json` and
   Codecov ingestion is simplest with `console/coverage/lcov.info`.
@@ -473,13 +536,26 @@ agreed.
 2. Update `.github/workflows/ci.yml`:
    - add `go tool cover -func=coverage.txt | tail -1`,
    - pass `${{ secrets.CODECOV_TOKEN }}` to the Codecov action.
-3. Update `console/vite.config.ts`:
+3. Add `scripts/compare-go-coverage.mjs`:
+   - parse the `total: (statements) X%` line from `go tool cover -func`,
+   - emit a Markdown table and machine-readable pass/fail JSON,
+   - fail on aggregate statement coverage decrease.
+4. Add `.github/workflows/go-coverage.yml`:
+   - run on Go-changing PRs,
+   - support `skip-go-coverage`,
+   - checkout `main` and PR revisions,
+   - run `go test -race -covermode=atomic -coverprofile=coverage.txt ./...` on
+     both,
+   - upload PR HTML coverage and raw coverage files as artifacts,
+   - post a sticky PR comment,
+   - fail when aggregate Go statement coverage decreases.
+5. Update `console/vite.config.ts`:
    - add `json-summary` and `lcov` reporters while keeping `text` and `html`.
-4. Add `scripts/compare-console-coverage.mjs`:
+6. Add `scripts/compare-console-coverage.mjs`:
    - compare total `lines`, `statements`, `branches`, and `functions`,
    - emit a Markdown table and machine-readable pass/fail JSON,
    - fail on any aggregate percentage decrease.
-5. Add `.github/workflows/console-coverage.yml`:
+7. Add `.github/workflows/console-coverage.yml`:
    - run on console-changing PRs,
    - support `skip-console-coverage`,
    - checkout `main` and PR revisions,
@@ -487,28 +563,29 @@ agreed.
    - upload PR HTML coverage as an artifact,
    - post a sticky PR comment,
    - fail when aggregate console coverage decreases.
-6. Update the `.github/workflows/ci.yml` `console` job:
+8. Update the `.github/workflows/ci.yml` `console` job:
    - on `push`, upload `./console/coverage/lcov.info` to Codecov with
      `flags: console`,
    - use the same `${{ secrets.CODECOV_TOKEN }}` secret,
    - keep the upload non-blocking.
-7. Add `.github/workflows/govulncheck-sarif.yml`:
+9. Add `.github/workflows/govulncheck-sarif.yml`:
    - weekly `schedule`,
    - `workflow_dispatch`,
    - minimal permissions,
    - checkout/setup-go,
    - `govulncheck -format sarif ./...`,
    - `github/codeql-action/upload-sarif`.
-8. Run `actionlint` if available locally; otherwise rely on existing workflow
+10. Run `actionlint` if available locally; otherwise rely on existing workflow
    lint CI and inspect YAML manually.
-9. Update this proposal status to `Implemented` when the workflow changes land.
-10. In the PR description:
+11. Update this proposal status to `Implemented` when the workflow changes land.
+12. In the PR description:
    - `Closes #16`,
    - note that changelog is skipped because this is a `ci:`/`type/chore`
      workflow-only change,
    - call out the required external `CODECOV_TOKEN` repository secret setup.
-11. After merge, a maintainer verifies:
+13. After merge, a maintainer verifies:
    - Codecov shows new Go and console coverage uploads for `main`,
+   - a Go-changing PR gets a coverage artifact and sticky comment,
    - a console-changing PR gets a coverage artifact and sticky comment,
    - manually dispatching `Govulncheck SARIF` uploads findings to Security ->
      Code scanning.
@@ -518,6 +595,14 @@ agreed.
 Pre-merge local checks:
 
 - `git diff --check`
+- `go test -race -covermode=atomic -coverprofile=/tmp/attune-go-coverage.txt ./...`
+- `go tool cover -func=/tmp/attune-go-coverage.txt > /tmp/attune-go-coverage-func.txt`
+- `go tool cover -html=/tmp/attune-go-coverage.txt -o /tmp/attune-go-coverage.html`
+- `node scripts/compare-go-coverage.mjs \
+  /tmp/attune-go-coverage-func.txt \
+  /tmp/attune-go-coverage-func.txt \
+  /tmp/go-coverage.md \
+  /tmp/go-coverage-result.json`
 - `cd console && pnpm vitest run --coverage`
 - `test -s console/coverage/coverage-summary.json`
 - `test -s console/coverage/lcov.info`
@@ -541,6 +626,10 @@ Post-merge/manual checks:
 - Confirm the next `go-checks` run logs a Go coverage `total:` line.
 - Confirm the Codecov step no longer logs `Token length: 0` or `Token required`.
 - Confirm Codecov shows coverage for the relevant commit/PR with the `go` flag.
+- Confirm a Go-changing PR posts a sticky coverage comment and uploads the PR
+  HTML coverage artifact.
+- Confirm a deliberate Go coverage decrease fails the `Go Coverage` workflow
+  unless `skip-go-coverage` is present.
 - Confirm a console-changing PR posts a sticky coverage comment and uploads the
   PR HTML coverage artifact.
 - Confirm a deliberate console coverage decrease fails the `Console Coverage`
