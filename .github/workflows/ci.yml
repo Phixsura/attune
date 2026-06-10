@@ -131,10 +131,13 @@ jobs:
       - run: go build ./...
       - name: Test (race + coverage)
         run: go test -race -covermode=atomic -coverprofile=coverage.txt ./...
+      - name: Go coverage summary
+        run: go tool cover -func=coverage.txt | tail -1
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         continue-on-error: true # never block on a coverage-upload hiccup
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
           flags: go
       - name: go.mod / go.sum tidy
@@ -291,6 +294,14 @@ jobs:
       - run: pnpm exec vite build
       - run: pnpm tsc -b --noEmit
       - run: pnpm vitest run --coverage
+      - name: Upload console coverage to Codecov
+        if: github.event_name == 'push'
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        continue-on-error: true # never block on a coverage-upload hiccup
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./console/coverage/lcov.info
+          flags: console
       # dependency-cruiser enforces architectural import boundaries (#19):
       # no cross-feature imports, shared → features → app one-way,
       # no circular deps. See console/.dependency-cruiser.cjs.
