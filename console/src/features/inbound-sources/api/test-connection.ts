@@ -11,8 +11,9 @@ export type TestInboundConnectionResult = TestInboundConnectionResponse
 
 // useTestInboundSourceConnection — currently email-only. Validates the
 // IMAP creds (dial + login + select + logout) without persisting. The
-// server always returns 200 with ok=true|false so the wizard UI can
-// render the result without special-case branching on HTTP status.
+// server returns 200 with ok=true|false for connection probe outcomes;
+// malformed requests still use the shared {code,message,requestId}
+// error envelope.
 export function useTestInboundSourceConnection() {
   return useMutation({
     mutationFn: (body: TestInboundConnectionInput) =>

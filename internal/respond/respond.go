@@ -1,19 +1,14 @@
-// Package respond is the single canonical home for the HTTP response
-// shapes attune emits everywhere: protoJSON for typed bodies, and the
-// unified ErrorResponse {code, message, requestId} for any 4xx/5xx.
+// Package respond is the low-level encoder behind dispatcher-owned HTTP
+// responses: protoJSON for typed bodies, and the unified ErrorResponse
+// {code, message, requestId} for any 4xx/5xx.
 //
-// Lives at internal/ (not under handlers/) so that both handler
-// subpackages AND infra-layer middlewares (apikey, future rate-limit)
-// can call it — every customer-facing error then shares one shape,
-// closing the gap E2E discovered with apikey middleware (#19 follow-up).
-//
-// handlers/console/internal/respond is a thin re-export of this package
-// so existing console handlers don't need to change their imports.
+// Production handlers and middleware should use internal/dispatcher instead of
+// calling this package directly; respond stays separate so dispatcher can keep
+// the concrete serialization code small and testable.
 package respond
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -70,34 +65,4 @@ func Error(ctx context.Context, w http.ResponseWriter, status int, code attunev1
 		Message:   message,
 		RequestId: middleware.GetReqID(ctx),
 	}))
-}
-
-// ErrorWithExtra writes the unified ErrorResponse plus a small map of
-// extra top-level fields. Used by endpoints whose spec explicitly
-// requires a structured detail beside {code, message, requestId} —
-// e.g. webhook rotate's `next_eligible_at` (spec
-// §Webhook adapter / Rotate behavior). Keys are emitted as JSON
-// lowerCamelCase verbatim; values are marshaled by encoding/json.
-//
-// Prefer Error() — only reach for this helper when a spec field shape
-// truly forces a top-level detail.
-func ErrorWithExtra(ctx context.Context, w http.ResponseWriter, status int, code attunev1.ErrorCode, message string, extra map[string]any) {
-	body := map[string]any{
-		"code":      code.String(),
-		"message":   message,
-		"requestId": middleware.GetReqID(ctx),
-	}
-	for k, v := range extra {
-		body[k] = v
-	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		// Fall back to the standard envelope; the loss of the extra
-		// fields is preferable to a 500 cascade.
-		Error(ctx, w, status, code, message)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_, _ = w.Write(raw)
 }

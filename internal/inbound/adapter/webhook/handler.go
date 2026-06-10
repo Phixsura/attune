@@ -4,6 +4,7 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -12,12 +13,12 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/respond"
 )
 
 // Channel is the registered channel name for this adapter. Exported so
@@ -46,11 +47,15 @@ const (
 // fields (mirrors /v1/feedback/ingest decoder for behavioural parity).
 var ingestUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
 
-// handle serves POST /v1/inbound/webhook/{tenant-slug}/{source-slug}.
+type webhookAuth struct {
+	Source inbound.Source
+	Start  time.Time
+}
+
+// bindRequest authenticates and decodes POST /v1/inbound/webhook/{tenant-slug}/{source-slug}.
 // Spec: docs/proposals/2026/06/2026-06-08-channel-agnostic-inbound.md
 // §Webhook adapter.
-func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
-	const where = "inbound.webhook.handle"
+func (a *adapter) bindRequest(r *http.Request, req *attunev1.IngestRequest) (webhookAuth, error) {
 	ctx := r.Context()
 	start := nowFn()
 
@@ -60,7 +65,7 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	sig := r.Header.Get(hdrSignature)
 
 	// Read body BEFORE branching on the source lookup so timing does
-	// not leak source existence. MaxBytesReader caps unauthenticated
+	// not leak source existence. readCappedBody caps unauthenticated
 	// work at maxBodyBytes.
 	//
 	// Metric labels for unauthenticated paths use the fixed "unknown"
@@ -68,11 +73,13 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 	// label vectors lets any client pump label cardinality to OOM
 	// (review B4, #66). Authenticated paths (post GetBySlugs success
 	// + src.Enabled) use the real tenant_id / slug below.
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	body, err := readCappedBody(r.Body, maxBodyBytes)
 	if err != nil {
 		a.deps.Metrics.Total(channelName, unknownLabel, unknownLabel, "validate_err")
-		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "body too large or unreadable")
-		return
+		if errors.Is(err, dispatcher.ErrBodyTooLarge) {
+			return webhookAuth{}, err
+		}
+		return webhookAuth{}, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "body too large or unreadable")
 	}
 
 	src, srcErr := a.deps.Sources.GetBySlugs(ctx, tenantSlug, channelName, sourceSlug)
@@ -84,22 +91,24 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 		// path — we stay literal to keep the surface small.)
 		_ = verifyHMACAgainstStub(ProcessStubSecret(), ts, body, sig)
 		a.deps.Metrics.Total(channelName, unknownLabel, unknownLabel, "auth_err")
-		respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "signature or timestamp invalid")
-		return
+		return webhookAuth{}, dispatcher.NewError(http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "signature or timestamp invalid")
 	}
 
 	if status, code, msg, ok := a.authenticate(ctx, src, ts, body, sig); !ok {
-		respond.Error(ctx, w, status, code, msg)
-		return
+		return webhookAuth{}, dispatcher.NewError(status, code, msg)
 	}
 
-	var req attunev1.IngestRequest
-	if err := ingestUnmarshal.Unmarshal(body, &req); err != nil {
+	if err := ingestUnmarshal.Unmarshal(body, req); err != nil {
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
-		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
-		return
+		return webhookAuth{}, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
 	}
+	return webhookAuth{Source: src, Start: start}, nil
+}
 
+func (a *adapter) handle(ctx *dispatcher.RequestContext[webhookAuth], req *attunev1.IngestRequest) (dispatcher.Result[*attunev1.IngestResponse], error) {
+	const where = "inbound.webhook.handle"
+	auth := ctx.Auth
+	src := auth.Source
 	meta := map[string]any{
 		"inbound_source_id":   src.ID,
 		"inbound_source_name": src.Name,
@@ -125,12 +134,11 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 		// service.Ingestor.IngestRow only returns Validate()-style
 		// errors; map to 400 + validate_err uniformly.
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
-		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
-		return
+		return dispatcher.Fail[*attunev1.IngestResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	}
 
 	a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
-	a.deps.Metrics.Latency(channelName, src.TenantID, src.Slug, time.Since(start).Seconds())
+	a.deps.Metrics.Latency(channelName, src.TenantID, src.Slug, time.Since(auth.Start).Seconds())
 	// Touch the per-source state gauge so an ops dashboard filtering by
 	// {state="enabled"} reflects active sources — webhook is push-mode,
 	// so we mark the source as enabled on every successful delivery.
@@ -144,10 +152,21 @@ func (a *adapter) handle(w http.ResponseWriter, r *http.Request) {
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,source_id:%s,feedback_id:%d",
 		where, src.TenantID, src.ID, id)
-	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.IngestResponse{
+	return dispatcher.OK(ptrext.Of(attunev1.IngestResponse{
 		Id:               id,
 		EnrichmentStatus: "pending",
 	}))
+}
+
+func readCappedBody(r io.Reader, limit int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, dispatcher.ErrBodyTooLarge
+	}
+	return body, nil
 }
 
 // authenticate decodes the source's secret envelope and verifies the

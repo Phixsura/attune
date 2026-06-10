@@ -40,9 +40,11 @@ func (h *IngestHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/ingest", dispatcher.Bind(
 		"handlers.IngestHandler.Ingest",
-		apikey.FromContext,
 		dispatcher.Custom(func() *attunev1.IngestRequest { return ptrext.Of(attunev1.IngestRequest{}) }, BindIngestRequest),
 		h.Ingest,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.IngestRequest) (*apikey.AuthCtx, error) {
+			return apikey.FromContext(r.Context()), nil
+		}),
 	))
 	return r
 }

@@ -1,9 +1,13 @@
 package session
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 const testKey = "test-signer-key-32-bytes-padding!" // unit-test only, never used in prod
@@ -69,6 +73,69 @@ func TestCSRF_RoundTrip(t *testing.T) {
 	}
 	if s.VerifyCSRF("user-1", "") {
 		t.Fatal("empty CSRF must be rejected")
+	}
+}
+
+func TestRequireSession_MissingCookieUsesDispatcherEnvelope(t *testing.T) {
+	s, _ := NewSigner(testKey)
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next handler should not run without a session")
+	})
+	req := httptest.NewRequest(http.MethodGet, "/fb/v1/console/me", nil)
+	rec := httptest.NewRecorder()
+
+	s.RequireSession(next).ServeHTTP(rec, req)
+
+	assertDispatcherEnvelope(t, rec, http.StatusUnauthorized, "UNAUTHORIZED")
+}
+
+func TestRequireSession_InvalidCookieUsesDispatcherEnvelope(t *testing.T) {
+	s, _ := NewSigner(testKey)
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next handler should not run with an invalid session")
+	})
+	req := httptest.NewRequest(http.MethodGet, "/fb/v1/console/me", nil)
+	req.AddCookie(ptrext.Of(http.Cookie{Name: SessionCookieName, Value: "not-a-valid-session"}))
+	rec := httptest.NewRecorder()
+
+	s.RequireSession(next).ServeHTTP(rec, req)
+
+	assertDispatcherEnvelope(t, rec, http.StatusUnauthorized, "UNAUTHORIZED")
+}
+
+func TestRequireSession_InvalidCSRFUsesDispatcherEnvelope(t *testing.T) {
+	s, _ := NewSigner(testKey)
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next handler should not run with invalid csrf")
+	})
+	token, err := s.SignSession(Payload{
+		TenantID:  "tenant-1",
+		UserID:    "user-1",
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/fb/v1/console/me/change-password", nil)
+	req.AddCookie(ptrext.Of(http.Cookie{Name: SessionCookieName, Value: token}))
+	req.Header.Set(CSRFHeader, "wrong-token")
+	rec := httptest.NewRecorder()
+
+	s.RequireSession(next).ServeHTTP(rec, req)
+
+	assertDispatcherEnvelope(t, rec, http.StatusForbidden, "CSRF_INVALID")
+}
+
+func assertDispatcherEnvelope(t *testing.T, rec *httptest.ResponseRecorder, status int, code string) {
+	t.Helper()
+	if rec.Code != status {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, status, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"`+code+`"`) {
+		t.Fatalf("want %s envelope, got %s", code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"error"`) {
+		t.Fatalf("legacy error field leaked: %s", rec.Body.String())
 	}
 }
 

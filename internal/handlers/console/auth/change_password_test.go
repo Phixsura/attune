@@ -9,9 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
 // fakeChangePasswordRepo isn't viable: the real Repo wraps *pgxpool.Pool
@@ -67,6 +69,25 @@ func newTestHandler(t *testing.T) *auth.ChangePasswordHandler {
 	return auth.NewChangePasswordHandler(nil, signer)
 }
 
+func serveChangePassword(t *testing.T, h *auth.ChangePasswordHandler, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	handler := dispatcher.Bind(
+		"test.ChangePassword",
+		dispatcher.Combine(
+			func() *attunev1.ChangePasswordRequest { return ptrext.Of(attunev1.ChangePasswordRequest{}) },
+			dispatcher.JSONBody[*attunev1.ChangePasswordRequest],
+			h.ValidateRequest,
+		),
+		h.ChangePassword,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ChangePasswordRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	)
+	handler(w, authedRequest(t, "", "admin-1", body))
+	return w
+}
+
 // TestChangePassword_RejectsTenantSession used to assert that a session
 // with TenantID != "" was 403'd before any repo lookup. After review
 // fixes B1 + single-tenant scoping (Phase 4), admin sessions also carry
@@ -79,9 +100,7 @@ func newTestHandler(t *testing.T) *auth.ChangePasswordHandler {
 
 func TestChangePassword_RejectsMissingBody(t *testing.T) {
 	h := newTestHandler(t)
-	r := authedRequest(t, "", "admin-1", `not-json`)
-	w := httptest.NewRecorder()
-	h.ChangePassword(w, r)
+	w := serveChangePassword(t, h, `not-json`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d want 400; body=%s", w.Code, w.Body.String())
 	}
@@ -98,9 +117,7 @@ func TestChangePassword_RejectsMissingFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := authedRequest(t, "", "admin-1", tc.body)
-			w := httptest.NewRecorder()
-			h.ChangePassword(w, r)
+			w := serveChangePassword(t, h, tc.body)
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("status: got %d want 400; body=%s", w.Code, w.Body.String())
 			}
@@ -110,9 +127,7 @@ func TestChangePassword_RejectsMissingFields(t *testing.T) {
 
 func TestChangePassword_RejectsShortNewPassword(t *testing.T) {
 	h := newTestHandler(t)
-	r := authedRequest(t, "", "admin-1", `{"currentPassword":"old","newPassword":"short"}`)
-	w := httptest.NewRecorder()
-	h.ChangePassword(w, r)
+	w := serveChangePassword(t, h, `{"currentPassword":"old","newPassword":"short"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d want 400; body=%s", w.Code, w.Body.String())
 	}
@@ -124,10 +139,7 @@ func TestChangePassword_RejectsShortNewPassword(t *testing.T) {
 
 func TestChangePassword_RejectsSamePassword(t *testing.T) {
 	h := newTestHandler(t)
-	r := authedRequest(t, "", "admin-1",
-		`{"currentPassword":"sameSecretValue!","newPassword":"sameSecretValue!"}`)
-	w := httptest.NewRecorder()
-	h.ChangePassword(w, r)
+	w := serveChangePassword(t, h, `{"currentPassword":"sameSecretValue!","newPassword":"sameSecretValue!"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d want 400; body=%s", w.Code, w.Body.String())
 	}
@@ -146,9 +158,7 @@ func TestChangePassword_ValidationOrder(t *testing.T) {
 	h := newTestHandler(t)
 	// New password is OK length, but admin lookup would happen — we
 	// shortcut by sending a body that fails at the field-required gate.
-	r := authedRequest(t, "", "admin-1", `{}`)
-	w := httptest.NewRecorder()
-	h.ChangePassword(w, r)
+	w := serveChangePassword(t, h, `{}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d want 400; body=%s", w.Code, w.Body.String())
 	}

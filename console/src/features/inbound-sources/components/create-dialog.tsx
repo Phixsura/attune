@@ -124,7 +124,11 @@ export function CreateInboundSourceDialog({
       },
       {
         onSuccess: (res) => setTestResult(res),
-        onError: () => setTestResult({ ok: false, error: t('common.error') }),
+        onError: (err) =>
+          setTestResult({
+            ok: false,
+            error: err instanceof Error ? err.message : t('common.error'),
+          }),
       },
     )
   }

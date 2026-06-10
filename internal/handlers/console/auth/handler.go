@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Phixsura/attune/internal/handlers/console/internal/respond"
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -38,44 +38,45 @@ func NewHandler(signer *session.Signer, admins *admin.Repo, tenants *tenant.Tena
 	})
 }
 
+// RequireLoginOrigin handles the login-only origin check before dispatcher
+// decodes the proto request body.
+func (h *Handler) RequireLoginOrigin(r *http.Request, _ *attunev1.LoginRequest) error {
+	const where = "console.auth.Handler.Login"
+	ctx := r.Context()
+	if !originAllowed(r, h.baseURL) {
+		logext.Warnf(ctx, "[%s] reject: bad origin,origin:%s",
+			where, r.Header.Get("Origin"))
+		return dispatcher.NewError(http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "cross-site login not allowed")
+	}
+	return nil
+}
+
+// ValidateRequest enforces endpoint-specific body rules after
+// dispatcher.JSONBody has decoded the proto request.
+func (h *Handler) ValidateRequest(_ *http.Request, req *attunev1.LoginRequest) error {
+	if req.GetEmail() == "" || req.GetPassword() == "" {
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "email and password required")
+	}
+	return nil
+}
+
 // Login handles POST /install/login. The request/response shapes are
 // attune.v1.LoginRequest / LoginResponse (proto, per CLAUDE.md §11).
 // The response never distinguishes "unknown email" from "wrong password"
 // (dummy bcrypt + generic 401); failure counts are tracked on the admin
 // row so a real attacker hits the 5-strike / 15-minute lockout, but
 // enumeration via timing is not possible.
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Login(ctx *dispatcher.RequestContext[struct{}], req *attunev1.LoginRequest) (dispatcher.Result[*attunev1.LoginResponse], error) {
 	const where = "console.auth.Handler.Login"
-	ctx := r.Context()
-
-	// Login-CSRF defence (review H6, #66). Login is the one console
-	// endpoint that runs without a prior session cookie + CSRF token,
-	// so we need an out-of-band origin check. SameSite=Lax stops
-	// the browser from *sending* a cookie cross-site but does NOT stop
-	// a malicious origin from forcing a victim's browser to set a
-	// fresh session cookie ("login fixation").
-	if !originAllowed(r, h.baseURL) {
-		logext.Warnf(ctx, "[%s] reject: bad origin,origin:%s",
-			where, r.Header.Get("Origin"))
-		respond.Error(ctx, w, http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "cross-site login not allowed")
-		return
-	}
-
-	req, ok := decodeLoginRequest(ctx, w, r)
-	if !ok {
-		return
-	}
-
-	a, ok := h.authenticate(ctx, w, req) // *LoginRequest — proto messages carry sync.Mutex
-	if !ok {
-		return
+	a, err := h.authenticate(ctx, req) // *LoginRequest — proto messages carry sync.Mutex
+	if err != nil {
+		return dispatcher.Result[*attunev1.LoginResponse]{}, err
 	}
 
 	scopeTenantID := h.resolveAdminScope(ctx, where)
-	if err := h.signer.IssueSessionCookie(w, scopeTenantID, a.ID); err != nil {
+	if err := h.signer.IssueSessionCookie(ctx, scopeTenantID, a.ID); err != nil {
 		logext.Errorf(ctx, "[%s] IssueSessionCookie failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "internal error")
-		return
+		return dispatcher.Fail[*attunev1.LoginResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "internal error")
 	}
 
 	redirect := "/console/"
@@ -84,47 +85,23 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logext.Infof(ctx, "[%s] OK,admin_id:%s,redirect:%s", where, a.ID, redirect)
-	respond.Proto(w, http.StatusOK, ptrext.Of(attunev1.LoginResponse{Redirect: redirect}))
-}
-
-// decodeLoginRequest reads + validates the proto body shape. Returns
-// (req, true) on success; on failure writes a 400/413 and returns ok=false.
-// Returns a pointer because proto messages carry a sync.Mutex; copying
-// by value trips `vet copylocks`.
-func decodeLoginRequest(ctx context.Context, w http.ResponseWriter, r *http.Request) (*attunev1.LoginRequest, bool) {
-	req := ptrext.Of(attunev1.LoginRequest{})
-	if err := respond.Decode(r.Body, req); err != nil {
-		if errors.Is(err, respond.ErrBodyTooLarge) {
-			respond.Error(ctx, w, http.StatusRequestEntityTooLarge, attunev1.ErrorCode_BODY_TOO_LARGE, "request body exceeds 1 MiB")
-			return nil, false
-		}
-		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
-		return nil, false
-	}
-	if req.GetEmail() == "" || req.GetPassword() == "" {
-		respond.Error(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "email and password required")
-		return nil, false
-	}
-	return req, true
+	return dispatcher.OK(ptrext.Of(attunev1.LoginResponse{Redirect: redirect}))
 }
 
 // authenticate resolves the admin row by email and verifies the password.
-// On success returns (admin, true). On any failure writes the response
-// and returns ok=false. Timing is equalised across "unknown email",
-// "locked", and "wrong password" by always running a bcrypt op.
-func (h *Handler) authenticate(ctx context.Context, w http.ResponseWriter, req *attunev1.LoginRequest) (admin.Admin, bool) {
+// Timing is equalised across "unknown email", "locked", and "wrong password"
+// by always running a bcrypt op.
+func (h *Handler) authenticate(ctx context.Context, req *attunev1.LoginRequest) (admin.Admin, error) {
 	const where = "console.auth.Handler.authenticate"
 	a, err := h.admins.GetByEmail(ctx, req.GetEmail())
 	switch {
 	case errors.Is(err, admin.ErrNotFound):
 		// Equalise timing with a dummy bcrypt run; result discarded.
 		_ = VerifyOrDummy("", req.GetPassword())
-		respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "invalid credentials")
-		return admin.Admin{}, false
+		return admin.Admin{}, dispatcher.NewError(http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "invalid credentials")
 	case err != nil:
 		logext.Errorf(ctx, "[%s] GetByEmail failed,err:%+v", where, err.Error())
-		respond.Error(ctx, w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "internal error")
-		return admin.Admin{}, false
+		return admin.Admin{}, dispatcher.NewError(http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "internal error")
 	}
 
 	if a.LockedUntil != nil && a.LockedUntil.After(time.Now()) {
@@ -132,8 +109,7 @@ func (h *Handler) authenticate(ctx context.Context, w http.ResponseWriter, req *
 		// locked-account oracle can't distinguish "exists + locked" from
 		// "wrong password" by response time (review M1, #66).
 		_ = VerifyOrDummy("", req.GetPassword())
-		respond.Error(ctx, w, http.StatusLocked, attunev1.ErrorCode_LOCKED, "account locked due to too many failed attempts")
-		return admin.Admin{}, false
+		return admin.Admin{}, dispatcher.NewError(http.StatusLocked, attunev1.ErrorCode_LOCKED, "account locked due to too many failed attempts")
 	}
 
 	// Lock expired but counter still hot — fresh attempt window starts
@@ -151,14 +127,13 @@ func (h *Handler) authenticate(ctx context.Context, w http.ResponseWriter, req *
 		if err := h.admins.IncrementFailedAttempts(ctx, a.ID); err != nil {
 			logext.Warnf(ctx, "[%s] IncrementFailedAttempts failed,err:%+v", where, err.Error())
 		}
-		respond.Error(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "invalid credentials")
-		return admin.Admin{}, false
+		return admin.Admin{}, dispatcher.NewError(http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "invalid credentials")
 	}
 
 	if err := h.admins.ResetFailedAttempts(ctx, a.ID); err != nil {
 		logext.Warnf(ctx, "[%s] ResetFailedAttempts failed,err:%+v", where, err.Error())
 	}
-	return a, true
+	return a, nil
 }
 
 // resolveAdminScope returns the TEXT id of the lex-first active tenant

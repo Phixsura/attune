@@ -29,7 +29,7 @@ func TestRouterInventory(t *testing.T) {
 
 	router := (&Router{
 		signer:         signer,
-		auth:           &auth.Handler{},
+		login:          &auth.Handler{},
 		changePassword: &auth.ChangePasswordHandler{},
 		me:             &me.MeHandler{},
 		apiKeys:        &apikey.APIKeysHandler{},

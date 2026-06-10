@@ -96,7 +96,6 @@ func authCtxRequest(method, body string, id uuid.UUID) *http.Request {
 func patchHandler(h *NotifyTargetsHandler) http.HandlerFunc {
 	return dispatcher.Bind(
 		"console.NotifyTargetsHandler.Patch",
-		func(ctx context.Context) *session.AuthCtx { return session.FromContext(ctx) },
 		dispatcher.Combine(
 			func() *attunev1.UpdateNotifyTargetRequest { return &attunev1.UpdateNotifyTargetRequest{} },
 			dispatcher.JSONBody[*attunev1.UpdateNotifyTargetRequest],
@@ -105,6 +104,9 @@ func patchHandler(h *NotifyTargetsHandler) http.HandlerFunc {
 			}),
 		),
 		h.Patch,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateNotifyTargetRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
 	)
 }
 

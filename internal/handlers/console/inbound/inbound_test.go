@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/inbound/adapter/webhook"
@@ -101,6 +102,123 @@ func authedRequest(method, urlStr, body, id string) *http.Request {
 		UserID:   "user-1",
 	}))
 	return r.WithContext(ctx)
+}
+
+func serveGet(h *Handler, id string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	handler := dispatcher.Bind(
+		"test.inbound.Get",
+		dispatcher.Path(
+			func() *attunev1.GetInboundSourceRequest { return ptrext.Of(attunev1.GetInboundSourceRequest{}) },
+			dispatcher.Param("id", func(req *attunev1.GetInboundSourceRequest, id string) { req.Id = id }),
+		),
+		h.Get,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetInboundSourceRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	)
+	handler(w, authedRequest(http.MethodGet, "/x", "", id))
+	return w
+}
+
+func servePause(h *Handler, id string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	handler := dispatcher.Bind(
+		"test.inbound.Pause",
+		dispatcher.Path(
+			func() *attunev1.PauseInboundSourceRequest { return ptrext.Of(attunev1.PauseInboundSourceRequest{}) },
+			dispatcher.Param("id", func(req *attunev1.PauseInboundSourceRequest, id string) { req.Id = id }),
+		),
+		h.Pause,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PauseInboundSourceRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	)
+	handler(w, authedRequest(http.MethodPost, "/x", "", id))
+	return w
+}
+
+func serveResume(h *Handler, id string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	handler := dispatcher.Bind(
+		"test.inbound.Resume",
+		dispatcher.Path(
+			func() *attunev1.ResumeInboundSourceRequest { return ptrext.Of(attunev1.ResumeInboundSourceRequest{}) },
+			dispatcher.Param("id", func(req *attunev1.ResumeInboundSourceRequest, id string) { req.Id = id }),
+		),
+		h.Resume,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ResumeInboundSourceRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	)
+	handler(w, authedRequest(http.MethodPost, "/x", "", id))
+	return w
+}
+
+func serveDelete(h *Handler, id string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	handler := dispatcher.Bind(
+		"test.inbound.Delete",
+		dispatcher.Path(
+			func() *attunev1.DeleteInboundSourceRequest { return ptrext.Of(attunev1.DeleteInboundSourceRequest{}) },
+			dispatcher.Param("id", func(req *attunev1.DeleteInboundSourceRequest, id string) { req.Id = id }),
+		),
+		h.Delete,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteInboundSourceRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	)
+	handler(w, authedRequest(http.MethodDelete, "/x", "", id))
+	return w
+}
+
+func serveRotate(h *Handler, id string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	handler := dispatcher.Bind(
+		"test.inbound.Rotate",
+		dispatcher.Path(
+			func() *attunev1.RotateInboundSourceSecretRequest {
+				return ptrext.Of(attunev1.RotateInboundSourceSecretRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.RotateInboundSourceSecretRequest, id string) { req.Id = id }),
+		),
+		h.Rotate,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RotateInboundSourceSecretRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	)
+	handler(w, authedRequest(http.MethodPost, "/x", "", id))
+	return w
+}
+
+func serveTestConnection(h *Handler, body string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	handler := dispatcher.Bind(
+		"test.inbound.TestConnection",
+		dispatcher.JSON(func() *attunev1.TestInboundConnectionRequest {
+			return ptrext.Of(attunev1.TestInboundConnectionRequest{})
+		}),
+		h.TestConnection,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TestInboundConnectionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	)
+	handler(w, authedRequest(http.MethodPost, "/x", body, ""))
+	return w
+}
+
+func serveCreate(h *Handler, body string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	handler := dispatcher.Bind(
+		"test.inbound.Create",
+		dispatcher.JSON(func() *attunev1.CreateInboundSourceRequest { return ptrext.Of(attunev1.CreateInboundSourceRequest{}) }),
+		h.Create,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateInboundSourceRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	)
+	handler(w, authedRequest(http.MethodPost, "/x", body, ""))
+	return w
 }
 
 // --- pure helpers ----------------------------------------------------
@@ -198,8 +316,7 @@ func TestValidateEmailCreateConfig_Validation(t *testing.T) {
 func TestGet_404(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{getErr: inboundsource.ErrNotFound})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Get(w, authedRequest(http.MethodGet, "/x", "", uuid.NewString()))
+	w := serveGet(h, uuid.NewString())
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", w.Code)
 	}
@@ -211,8 +328,7 @@ func TestGet_CrossTenant(t *testing.T) {
 		ID: id, TenantID: "tenant-OTHER", Channel: "webhook", Name: "n", Slug: "n", Enabled: true,
 	}})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Get(w, authedRequest(http.MethodGet, "/x", "", id))
+	w := serveGet(h, id)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("cross-tenant must 404, got %d", w.Code)
 	}
@@ -231,8 +347,7 @@ func TestGet_HappyPath(t *testing.T) {
 		State:    inbound.SourceState{LastEventAt: ptrext.Of(ts)},
 	}})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Get(w, authedRequest(http.MethodGet, "/x", "", id))
+	w := serveGet(h, id)
 	if w.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -254,8 +369,7 @@ func TestPause_FlipsEnabled(t *testing.T) {
 		ID: id, TenantID: "tenant-1", Channel: "webhook", Enabled: true,
 	}})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Pause(w, authedRequest(http.MethodPost, "/x", "", id))
+	w := servePause(h, id)
 	if w.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -271,8 +385,7 @@ func TestResume_FlipsEnabled(t *testing.T) {
 		ID: id, TenantID: "tenant-1", Channel: "webhook", Enabled: false,
 	}})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Resume(w, authedRequest(http.MethodPost, "/x", "", id))
+	w := serveResume(h, id)
 	if w.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d", w.Code)
 	}
@@ -284,8 +397,7 @@ func TestResume_FlipsEnabled(t *testing.T) {
 func TestDelete_404OnMissing(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{getErr: inboundsource.ErrNotFound})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Delete(w, authedRequest(http.MethodDelete, "/x", "", uuid.NewString()))
+	w := serveDelete(h, uuid.NewString())
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", w.Code)
 	}
@@ -302,8 +414,7 @@ func TestDelete_NoPoolReturns500(t *testing.T) {
 		ID: id, TenantID: "tenant-1", Channel: "webhook", Enabled: true,
 	}})
 	h := newTestHandler(repo, nil) // pool stays nil
-	w := httptest.NewRecorder()
-	h.Delete(w, authedRequest(http.MethodDelete, "/x", "", id))
+	w := serveDelete(h, id)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("nil-pool Delete must 500; got %d", w.Code)
 	}
@@ -315,8 +426,7 @@ func TestRotate_RejectsEmailChannel(t *testing.T) {
 		ID: id, TenantID: "tenant-1", Channel: "email",
 	}})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Rotate(w, authedRequest(http.MethodPost, "/x", "", id))
+	w := serveRotate(h, id)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("want 400 for email rotate, got %d: %s", w.Code, w.Body.String())
 	}
@@ -330,8 +440,7 @@ func TestRotate_GraceWindow_Returns409(t *testing.T) {
 	next := time.Now().Add(2 * time.Hour)
 	h := newTestHandler(repo, nil)
 	h.rotate = stubRotate(webhook.ErrRotationInGraceWindow, next)
-	w := httptest.NewRecorder()
-	h.Rotate(w, authedRequest(http.MethodPost, "/x", "", id))
+	w := serveRotate(h, id)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("want 409, got %d: %s", w.Code, w.Body.String())
 	}
@@ -340,8 +449,8 @@ func TestRotate_GraceWindow_Returns409(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "ROTATION_IN_GRACE_WINDOW") {
 		t.Fatalf("want ROTATION_IN_GRACE_WINDOW error code; got %s", w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), next.UTC().Format(time.RFC3339)[:10]) {
-		t.Fatalf("want next_eligible_at hint in body; got %s", w.Body.String())
+	if strings.Contains(w.Body.String(), "nextEligibleAt") {
+		t.Fatalf("error envelope should not include ad-hoc top-level fields; got %s", w.Body.String())
 	}
 }
 
@@ -351,8 +460,7 @@ func TestRotate_HappyPath(t *testing.T) {
 		ID: id, TenantID: "tenant-1", Channel: "webhook",
 	}})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Rotate(w, authedRequest(http.MethodPost, "/x", "", id))
+	w := serveRotate(h, id)
 	if w.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -376,8 +484,7 @@ func TestTestConnection_EmailHappyPath(t *testing.T) {
 	h := newTestHandler(repo, nil)
 	// tls:true is mandatory post-H2 (review fix #66); plain IMAP is disallowed.
 	body := `{"channel":"email","emailConfig":{"host":"h","port":993,"tls":true,"username":"u","password":"p"}}`
-	w := httptest.NewRecorder()
-	h.TestConnection(w, authedRequest(http.MethodPost, "/x", body, ""))
+	w := serveTestConnection(h, body)
 	if w.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -396,8 +503,7 @@ func TestTestConnection_DialFailure_Surfaces(t *testing.T) {
 	h.testConn = stubProbe(errors.New("connection refused"))
 	// tls:true is mandatory post-H2 (review fix #66); plain IMAP is disallowed.
 	body := `{"channel":"email","emailConfig":{"host":"h","port":993,"tls":true,"username":"u","password":"p"}}`
-	w := httptest.NewRecorder()
-	h.TestConnection(w, authedRequest(http.MethodPost, "/x", body, ""))
+	w := serveTestConnection(h, body)
 	if w.Code != http.StatusOK {
 		t.Fatalf("test-connection MUST never 500; got %d", w.Code)
 	}
@@ -417,8 +523,7 @@ func TestTestConnection_RejectsWebhookChannel(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
 	h := newTestHandler(repo, nil)
 	body := `{"channel":"webhook"}`
-	w := httptest.NewRecorder()
-	h.TestConnection(w, authedRequest(http.MethodPost, "/x", body, ""))
+	w := serveTestConnection(h, body)
 	if w.Code != http.StatusOK {
 		t.Fatalf("want 200 (never-500 contract), got %d", w.Code)
 	}
@@ -431,11 +536,22 @@ func TestTestConnection_RejectsWebhookChannel(t *testing.T) {
 	}
 }
 
+func TestTestConnection_RejectsBadJSON(t *testing.T) {
+	repo := ptrext.Of(fakeSourceRepo{})
+	h := newTestHandler(repo, nil)
+	w := serveTestConnection(h, `not-json`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"BAD_REQUEST"`) {
+		t.Fatalf("want BAD_REQUEST envelope, got %s", w.Body.String())
+	}
+}
+
 func TestCreate_RejectsUnknownChannel(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Create(w, authedRequest(http.MethodPost, "/x", `{"channel":"bogus","name":"X"}`, ""))
+	w := serveCreate(h, `{"channel":"bogus","name":"X"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d: %s", w.Code, w.Body.String())
 	}
@@ -444,8 +560,7 @@ func TestCreate_RejectsUnknownChannel(t *testing.T) {
 func TestCreate_RejectsBadJSON(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Create(w, authedRequest(http.MethodPost, "/x", `{not-json`, ""))
+	w := serveCreate(h, `{not-json`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d", w.Code)
 	}
@@ -454,8 +569,7 @@ func TestCreate_RejectsBadJSON(t *testing.T) {
 func TestCreate_RejectsEmptyName(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Create(w, authedRequest(http.MethodPost, "/x", `{"channel":"webhook","name":"   "}`, ""))
+	w := serveCreate(h, `{"channel":"webhook","name":"   "}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d", w.Code)
 	}
@@ -464,8 +578,7 @@ func TestCreate_RejectsEmptyName(t *testing.T) {
 func TestCreate_RejectsNonAlphanumericName(t *testing.T) {
 	repo := ptrext.Of(fakeSourceRepo{})
 	h := newTestHandler(repo, nil)
-	w := httptest.NewRecorder()
-	h.Create(w, authedRequest(http.MethodPost, "/x", `{"channel":"webhook","name":"!!!"}`, ""))
+	w := serveCreate(h, `{"channel":"webhook","name":"!!!"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d: %s", w.Code, w.Body.String())
 	}

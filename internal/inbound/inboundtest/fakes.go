@@ -158,10 +158,11 @@ func (FakeSecrets) Decrypt(b []byte) ([]byte, error) {
 // FakeMetrics — recorder; tests can introspect every emitted call to
 // confirm the adapter wired the four standard inbound metrics.
 type FakeMetrics struct {
-	Totals     []string
-	Latencies  []string
-	StateCalls []string
-	PollLags   []string
+	Totals         []string
+	Latencies      []string
+	LatencySeconds []float64
+	StateCalls     []string
+	PollLags       []string
 }
 
 // Total appends "channel|tenant|source|result" for later assertions.
@@ -169,11 +170,11 @@ func (f *FakeMetrics) Total(channel, tenant, sourceSlug, result string) {
 	f.Totals = append(f.Totals, channel+"|"+tenant+"|"+sourceSlug+"|"+result)
 }
 
-// Latency appends "channel|tenant|source" (we drop the float so tests
-// can assert call ordering deterministically; latency wall-clock is
-// inherently jittery).
-func (f *FakeMetrics) Latency(channel, tenant, sourceSlug string, _ float64) {
+// Latency appends "channel|tenant|source" plus the observed seconds for tests
+// that need to pin measurement boundaries.
+func (f *FakeMetrics) Latency(channel, tenant, sourceSlug string, seconds float64) {
 	f.Latencies = append(f.Latencies, channel+"|"+tenant+"|"+sourceSlug)
+	f.LatencySeconds = append(f.LatencySeconds, seconds)
 }
 
 // SetSourceState appends "channel|tenant|source|state=on|off" so tests

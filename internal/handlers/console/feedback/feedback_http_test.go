@@ -13,6 +13,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	feedbackrepo "github.com/Phixsura/attune/internal/repo/feedback"
 	tenantrepo "github.com/Phixsura/attune/internal/repo/tenant"
@@ -99,9 +100,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := &FeedbackHandler{repo: repo, tenants: tenants}
 		handler := dispatcher.Bind(
 			"console.FeedbackHandler.List",
-			dispatchtest.Auth,
 			dispatcher.Query(func() *attunev1.ListFeedbackRequest { return &attunev1.ListFeedbackRequest{} }, BindListRequest),
 			h.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListFeedbackRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -150,12 +153,14 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := &FeedbackHandler{repo: repo, tenants: tenants}
 		handler := dispatcher.Bind(
 			"console.FeedbackHandler.Get",
-			dispatchtest.Auth,
 			dispatcher.Path(
 				func() *attunev1.GetFeedbackRequest { return &attunev1.GetFeedbackRequest{} },
 				dispatcher.ParamInt64("id", func(req *attunev1.GetFeedbackRequest, id int64) { req.Id = id }, "id must be an integer"),
 			),
 			h.Get,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetFeedbackRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -190,9 +195,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := &FeedbackHandler{repo: repo, tenants: tenants}
 		handler := dispatcher.Bind(
 			"console.FeedbackHandler.Stats",
-			dispatchtest.Auth,
 			dispatcher.Empty(func() *attunev1.GetFeedbackStatsRequest { return &attunev1.GetFeedbackStatsRequest{} }),
 			h.Stats,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetFeedbackStatsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()

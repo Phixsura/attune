@@ -17,8 +17,8 @@ import (
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
-// ErrBodyTooLarge is returned when DecodeJSON reads more than the 1 MiB cap.
-var ErrBodyTooLarge = errors.New("dispatcher: request body exceeds 1 MiB")
+// ErrBodyTooLarge is returned when a dispatcher binder reads past its body cap.
+var ErrBodyTooLarge = errors.New("dispatcher: request body exceeds size limit")
 
 var decode = protojson.UnmarshalOptions{DiscardUnknown: true}
 
@@ -30,10 +30,10 @@ type RequestContext[Auth any] struct {
 	response http.ResponseWriter
 }
 
-// Response exposes the response writer for narrow side-effects such as setting
-// or clearing cookies. Response body/status writing stays owned by dispatcher.
-func (c *RequestContext[Auth]) Response() http.ResponseWriter {
-	return c.response
+// SetCookie allows handlers to attach cookie side-effects while keeping
+// response body/status writing owned by dispatcher.
+func (c *RequestContext[Auth]) SetCookie(cookie *http.Cookie) {
+	http.SetCookie(c.response, cookie)
 }
 
 // Result carries the successful response payload and HTTP status.
@@ -84,8 +84,8 @@ func Fail[Resp proto.Message](status int, code attunev1.ErrorCode, msg string) (
 	return Result[Resp]{}, NewError(status, code, msg)
 }
 
-// DecodeJSON reads a protoJSON request body with the shared 1 MiB limit.
-func DecodeJSON[Req proto.Message](r io.Reader, m Req) error {
+// decodeJSON reads a protoJSON request body with the shared 1 MiB limit.
+func decodeJSON[Req proto.Message](r io.Reader, m Req) error {
 	const limit = 1 << 20
 	b, err := io.ReadAll(io.LimitReader(r, limit+1))
 	if err != nil {

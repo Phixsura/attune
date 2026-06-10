@@ -70,9 +70,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := &MeHandler{signer: signer, tenants: tenants, users: users}
 		handler := dispatcher.Bind(
 			"console.MeHandler.Me",
-			dispatchtest.Auth,
 			dispatcher.Empty(func() *attunev1.GetMeRequest { return &attunev1.GetMeRequest{} }),
 			h.Me,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetMeRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
@@ -93,9 +95,11 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		h := &MeHandler{signer: signer}
 		handler := dispatcher.Bind(
 			"console.MeHandler.Logout",
-			dispatchtest.Auth,
 			dispatcher.Empty(func() *attunev1.LogoutRequest { return &attunev1.LogoutRequest{} }),
 			h.Logout,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.LogoutRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
 		)
 
 		w := httptest.NewRecorder()
