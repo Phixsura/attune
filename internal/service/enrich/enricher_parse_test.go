@@ -11,7 +11,7 @@ import (
 )
 
 func TestParseEnrichJSON_HappyPath(t *testing.T) {
-	in := `{"title":"Payment fails","display_title":"支付失败","type":"bug","severity":"critical","labels":["pay","ux"],"rationale":"core flow","display_rationale":"核心流程受阻"}`
+	in := `{"title":"Payment fails","display_title":"支付失败","type":"bug","severity":"critical","labels":["pay","ux"],"rationale":"core flow","display_rationale":"核心流程受阻","classification_confidence":0.84}`
 	e, err := parseEnrichJSON(in)
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -27,6 +27,9 @@ func TestParseEnrichJSON_HappyPath(t *testing.T) {
 	}
 	if e.DisplayRationale != "核心流程受阻" {
 		t.Errorf("display rationale: %q", e.DisplayRationale)
+	}
+	if got := ptrext.Indirect(e.ClassificationConfidence); got != 0.84 {
+		t.Errorf("confidence: %v", got)
 	}
 	if e.Attrs["type"] != "bug" {
 		t.Errorf("type attr: %v", e.Attrs["type"])
@@ -106,7 +109,7 @@ func TestParseEnrichJSON_OptionalRationale(t *testing.T) {
 
 func TestParseEnrichJSON_AttrsExcludesReservedKeys(t *testing.T) {
 	// title + rationale should NOT leak into Attrs.
-	e, err := parseEnrichJSON(`{"title":"x","display_title":"dx","rationale":"y","display_rationale":"dy","type":"bug"}`)
+	e, err := parseEnrichJSON(`{"title":"x","display_title":"dx","rationale":"y","display_rationale":"dy","classification_confidence":0.5,"type":"bug"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +124,45 @@ func TestParseEnrichJSON_AttrsExcludesReservedKeys(t *testing.T) {
 	}
 	if _, ok := e.Attrs["display_rationale"]; ok {
 		t.Error("display_rationale leaked into Attrs")
+	}
+	if _, ok := e.Attrs["classification_confidence"]; ok {
+		t.Error("classification_confidence leaked into Attrs")
+	}
+}
+
+func TestParseEnrichJSON_ClassificationConfidenceBoundaries(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		raw  string
+		want *float64
+	}{
+		{name: "zero", raw: `0.0`, want: ptrext.Of(0.0)},
+		{name: "one", raw: `1.0`, want: ptrext.Of(1.0)},
+		{name: "string", raw: `"0.25"`, want: ptrext.Of(0.25)},
+		{name: "missing", raw: `null`, want: nil},
+		{name: "invalid string", raw: `"review"`, want: nil},
+		{name: "clamp low", raw: `-0.5`, want: ptrext.Of(0.0)},
+		{name: "clamp high", raw: `1.5`, want: ptrext.Of(1.0)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			in := `{"title":"x","rationale":"y","classification_confidence":` + tc.raw + `}`
+			got, err := parseEnrichJSON(in)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if tc.want == nil {
+				if got.ClassificationConfidence != nil {
+					t.Fatalf("confidence should be nil, got %v", ptrext.Indirect(got.ClassificationConfidence))
+				}
+				return
+			}
+			if ptrext.Indirect(got.ClassificationConfidence) != ptrext.Indirect(tc.want) {
+				t.Fatalf("confidence: got %v want %v",
+					ptrext.Indirect(got.ClassificationConfidence), ptrext.Indirect(tc.want))
+			}
+		})
 	}
 }
 
@@ -175,12 +217,13 @@ func TestBuildSnapshot_CopiesAttrs(t *testing.T) {
 		CreatedAt:     time.Now(),
 	})
 	enriched := domain.Enriched{
-		Title:            "t",
-		DisplayTitle:     "dt",
-		Attrs:            map[string]any{"type": "bug"},
-		IsUrgent:         true,
-		Rationale:        "r",
-		DisplayRationale: "dr",
+		Title:                    "t",
+		DisplayTitle:             "dt",
+		Attrs:                    map[string]any{"type": "bug"},
+		IsUrgent:                 true,
+		Rationale:                "r",
+		DisplayRationale:         "dr",
+		ClassificationConfidence: ptrext.Of(0.61),
 	}
 	snap := buildSnapshot(42, row, enriched, time.Now())
 	if snap.ID != 42 {
@@ -197,6 +240,9 @@ func TestBuildSnapshot_CopiesAttrs(t *testing.T) {
 	}
 	if snap.DisplayTitle != "dt" {
 		t.Errorf("display title: %q", snap.DisplayTitle)
+	}
+	if got := ptrext.Indirect(snap.ClassificationConfidence); got != 0.61 {
+		t.Errorf("confidence: %v", got)
 	}
 	if !snap.IsUrgent {
 		t.Error("urgent not copied")

@@ -74,7 +74,7 @@ func (c *Client) Complete(ctx context.Context, req llmclient.CompletionRequest) 
 	}
 	text, err := c.applyStage(ctx, StageLLMOutput, resp.Text, plan, req.Guard)
 	if err != nil {
-		return llmclient.CompletionResponse{}, err
+		return resp, err
 	}
 	resp.Text = text
 	return resp, nil

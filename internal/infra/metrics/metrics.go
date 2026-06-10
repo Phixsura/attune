@@ -172,6 +172,37 @@ var GuardBlockedTotal = prometheus.NewCounterVec(
 	[]string{"tenant", "stage", "guard", "reason"},
 )
 
+// LLMCallsTotal counts provider calls that reached an LLM backend. status ∈
+// {ok, error}; guard-blocked requests do not increment because they have no
+// provider-side token cost.
+var LLMCallsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_llm_calls_total",
+		Help: "LLM provider calls by tenant, model, and status.",
+	},
+	[]string{"tenant", "model", "status"},
+)
+
+// LLMTokensTotal counts provider-reported tokens. direction ∈
+// {prompt, completion}. Providers that omit usage simply add zero.
+var LLMTokensTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_llm_tokens_total",
+		Help: "LLM provider token usage by tenant, model, and direction.",
+	},
+	[]string{"tenant", "model", "direction"},
+)
+
+// LLMCostUSDTotal counts estimated USD cost using llmclient's vendored LiteLLM
+// price catalog. Unknown models add zero cost but still appear in calls/tokens.
+var LLMCostUSDTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_llm_cost_usd_total",
+		Help: "Estimated LLM provider cost in USD by tenant and model.",
+	},
+	[]string{"tenant", "model"},
+)
+
 // allMetrics is the registered set — the single source of truth that init()
 // registers and the drift-guard test checks against the documented reference
 // (observability/README.md). Add a metric here AND to that reference together.
@@ -189,6 +220,9 @@ var allMetrics = []prometheus.Collector{
 	TriageDecisionsTotal,
 	GuardActionsTotal,
 	GuardBlockedTotal,
+	LLMCallsTotal,
+	LLMTokensTotal,
+	LLMCostUSDTotal,
 }
 
 func init() {

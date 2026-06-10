@@ -58,16 +58,53 @@ func TestClient_BlockSkipsBackend(t *testing.T) {
 	}
 }
 
+func TestClient_OutputBlockPreservesUsage(t *testing.T) {
+	backend := ptrext.Of(recordingLLM{
+		resp:  "card 4111 1111 1111 1111",
+		usage: llmclient.Usage{InputTokens: 12, OutputTokens: 34},
+	})
+	client := NewClient(backend, StaticResolver{Plan: Plan{Rules: []Rule{{
+		Guard: "pii", Stage: StageLLMOutput, Entities: []string{"credit_card"}, Action: ActionBlock,
+	}}}})
+	resp, err := client.Complete(context.Background(), llmclient.CompletionRequest{Prompt: "classify"})
+	if !errors.Is(err, ErrBlocked) {
+		t.Fatalf("err: got %v want ErrBlocked", err)
+	}
+	if resp.Usage.InputTokens != 12 || resp.Usage.OutputTokens != 34 {
+		t.Fatalf("usage lost on output block: %+v", resp.Usage)
+	}
+}
+
+func TestClient_InputBlockReturnsZeroUsage(t *testing.T) {
+	backend := ptrext.Of(recordingLLM{
+		resp:  `{"title":"ok","rationale":"ok"}`,
+		usage: llmclient.Usage{InputTokens: 12, OutputTokens: 34},
+	})
+	client := NewClient(backend, StaticResolver{Plan: Plan{Rules: []Rule{{
+		Guard: "pii", Stage: StageLLMInput, Entities: []string{"credit_card"}, Action: ActionBlock,
+	}}}})
+	resp, err := client.Complete(context.Background(), llmclient.CompletionRequest{
+		Prompt: "card 4111 1111 1111 1111",
+	})
+	if !errors.Is(err, ErrBlocked) {
+		t.Fatalf("err: got %v want ErrBlocked", err)
+	}
+	if resp.Usage.InputTokens != 0 || resp.Usage.OutputTokens != 0 {
+		t.Fatalf("input block should not report provider usage: %+v", resp.Usage)
+	}
+}
+
 type recordingLLM struct {
 	prompt string
 	resp   string
+	usage  llmclient.Usage
 	calls  int
 }
 
 func (r *recordingLLM) Complete(_ context.Context, req llmclient.CompletionRequest) (llmclient.CompletionResponse, error) {
 	r.calls++
 	r.prompt = req.Prompt
-	return llmclient.CompletionResponse{Text: r.resp}, nil
+	return llmclient.CompletionResponse{Text: r.resp, Usage: r.usage}, nil
 }
 
 func (r *recordingLLM) Close() error { return nil }

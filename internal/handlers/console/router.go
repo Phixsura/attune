@@ -77,6 +77,7 @@ var (
 //	 GET /feedback/stats -> dispatcher.Bind(feedback.Handler.Stats)
 //	 GET /feedback/{id} -> dispatcher.Bind(feedback.Handler.Get)
 //	 GET /usage -> dispatcher.Bind(usage.Handler.Get)
+//	 GET /llm-usage -> dispatcher.Bind(usage.Handler.GetLLMUsage)
 //	 GET /enrich-config -> dispatcher.Bind(enrichconfig.Handler.Get)
 //	 PUT /enrich-config -> dispatcher.Bind(enrichconfig.Handler.Update)
 //	 POST /enrich-config/preview -> dispatcher.Bind(enrichconfig.Handler.Preview)
@@ -200,6 +201,17 @@ func (r *Router) mountSession(m chi.Router) {
 		dispatcher.Empty(func() *attunev1.GetUsageRequest { return ptrext.Of(attunev1.GetUsageRequest{}) }),
 		r.usage.Get,
 		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetUsageRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.Get("/llm-usage", dispatcher.Bind(
+		"console.UsageHandler.GetLLMUsage",
+		dispatcher.Query(
+			func() *attunev1.GetLLMUsageRequest { return ptrext.Of(attunev1.GetLLMUsageRequest{}) },
+			usage.BindLLMUsageRequest,
+		),
+		r.usage.GetLLMUsage,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetLLMUsageRequest) (*session.AuthCtx, error) {
 			return session.FromContext(r.Context()), nil
 		}),
 	))

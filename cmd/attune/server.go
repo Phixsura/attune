@@ -39,12 +39,14 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/guardpolicy"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
+	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/ingest"
+	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
 	"github.com/Phixsura/attune/internal/service/outbox"
 )
 
@@ -86,9 +88,10 @@ func runServer() error {
 	if err != nil {
 		return err
 	}
-	llm := llmguard.NewClient(rawLLM, guardpolicy.New(pool))
+	guardedLLM := llmguard.NewClient(rawLLM, guardpolicy.New(pool))
+	llm := llmauditsvc.NewClient(guardedLLM, llmauditrepo.New(pool))
 	defer llm.Close()
-	logext.Infof(ctx, "[%s] llm backend ready,endpoint:%s", where, cfg.LLMOpenAIBaseURL)
+	logext.Infof(ctx, "[%s] llm backend ready,endpoint:%s", where, logext.SafeURLForLog(cfg.LLMOpenAIBaseURL))
 
 	feedbackRepo := feedback.NewFeedback(pool)
 	apikeyRepo := apikeyrepo.NewAPIKey(pool)

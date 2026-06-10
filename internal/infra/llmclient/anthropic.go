@@ -52,7 +52,7 @@ func NewAnthropic(baseURL, apiKey string) (*AnthropicBackend, error) {
 		opts = append(opts, option.WithBaseURL(strings.TrimRight(baseURL, "/")))
 	}
 	logext.Infof(context.Background(), "[%s] OK,base_url:%s,api_key_set:%t",
-		where, baseURL, apiKey != "")
+		where, logext.SafeURLForLog(baseURL), apiKey != "")
 	return ptrext.Of(AnthropicBackend{client: anthropic.NewClient(opts...)}), nil
 }
 
@@ -94,9 +94,9 @@ func (b *AnthropicBackend) Complete(
 		params.ToolChoice = anthropic.ToolChoiceParamOfTool(req.Schema.Name)
 	}
 
-	logext.Infof(ctx, "[%s] upstream REQUEST,user_id:%s,model:%s,temp:%v,max_tokens:%d,prompt_len:%d,structured:%t",
+	logext.Infof(ctx, "[%s] upstream REQUEST,user_id:%s,model:%s,temp:%v,max_tokens:%d,prompt_len:%d,structured:%t,schema:%s",
 		where, req.UserID, req.Model, req.Temperature, maxTokens,
-		len(req.Prompt), req.Schema != nil)
+		len(req.Prompt), req.Schema != nil, schemaName(req))
 
 	msg, err := b.client.Messages.New(ctx, params)
 	if err != nil {
@@ -106,10 +106,9 @@ func (b *AnthropicBackend) Complete(
 	}
 
 	text := extractAnthropicText(msg.Content, req.Schema != nil)
-	logext.Infof(ctx, "[%s] upstream RESPONSE,user_id:%s,model:%s,output_len:%d,input_tokens:%d,output_tokens:%d,resp:%s",
+	logext.Infof(ctx, "[%s] upstream RESPONSE,user_id:%s,model:%s,output_len:%d,input_tokens:%d,output_tokens:%d",
 		where, req.UserID, req.Model, len(text),
-		msg.Usage.InputTokens, msg.Usage.OutputTokens,
-		truncate(text, upstreamBodyLogCap))
+		msg.Usage.InputTokens, msg.Usage.OutputTokens)
 
 	return CompletionResponse{
 		Text: text,

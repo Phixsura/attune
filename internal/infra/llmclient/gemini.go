@@ -49,7 +49,7 @@ func NewGemini(baseURL, apiKey string) (*GeminiBackend, error) {
 		return nil, fmt.Errorf("gemini backend: new client: %w", err)
 	}
 	logext.Infof(context.Background(), "[%s] OK,base_url:%s,api_key_set:%t",
-		where, baseURL, apiKey != "")
+		where, logext.SafeURLForLog(baseURL), apiKey != "")
 	return ptrext.Of(GeminiBackend{client: client}), nil
 }
 
@@ -79,9 +79,9 @@ func (b *GeminiBackend) Complete(
 		cfg.ResponseJsonSchema = req.Schema.Schema
 	}
 
-	logext.Infof(ctx, "[%s] upstream REQUEST,user_id:%s,model:%s,temp:%v,max_tokens:%d,prompt_len:%d,structured:%t",
+	logext.Infof(ctx, "[%s] upstream REQUEST,user_id:%s,model:%s,temp:%v,max_tokens:%d,prompt_len:%d,structured:%t,schema:%s",
 		where, req.UserID, req.Model, req.Temperature, req.MaxTokens,
-		len(req.Prompt), req.Schema != nil)
+		len(req.Prompt), req.Schema != nil, schemaName(req))
 
 	resp, err := b.client.Models.GenerateContent(ctx, req.Model, genai.Text(req.Prompt), cfg)
 	if err != nil {
@@ -98,9 +98,9 @@ func (b *GeminiBackend) Complete(
 			OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
 		}
 	}
-	logext.Infof(ctx, "[%s] upstream RESPONSE,user_id:%s,model:%s,output_len:%d,input_tokens:%d,output_tokens:%d,resp:%s",
+	logext.Infof(ctx, "[%s] upstream RESPONSE,user_id:%s,model:%s,output_len:%d,input_tokens:%d,output_tokens:%d",
 		where, req.UserID, req.Model, len(text), usage.InputTokens, usage.OutputTokens,
-		truncate(text, upstreamBodyLogCap))
+	)
 
 	return CompletionResponse{Text: text, Usage: usage}, nil
 }

@@ -1,0 +1,82 @@
+# LiteLLM Price Catalog — watches the vendored model price JSON and opens a
+# reviewable PR when upstream changes. Dependabot does not support arbitrary raw
+# JSON assets, so this workflow acts as the dedicated updater.
+name: LiteLLM Price Catalog
+
+on:
+  schedule:
+    - cron: "17 2 * * 2" # weekly (Tue 02:17 UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Fetch upstream catalog
+        id: catalog
+        env:
+          SOURCE_URL: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+          TARGET: internal/infra/llmclient/model_prices_and_context_window.json
+        run: |
+          tmp="$(mktemp)"
+          curl -fsSL --retry 3 --retry-delay 5 "$SOURCE_URL" -o "$tmp"
+          node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$tmp"
+          if cmp -s "$tmp" "$TARGET"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cp "$tmp" "$TARGET"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verify catalog embed
+        if: steps.catalog.outputs.changed == 'true'
+        run: go test ./internal/infra/llmclient
+
+      - name: Open update pull request
+        if: steps.catalog.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: codex/litellm-price-catalog
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add internal/infra/llmclient/model_prices_and_context_window.json
+          git commit -m "chore(llm): update LiteLLM price catalog"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin "HEAD:$BRANCH"
+          body="$(mktemp)"
+          cat > "$body" <<'EOF'
+          Updates the vendored LiteLLM `model_prices_and_context_window.json` catalog.
+
+          Verification:
+          - `go test ./internal/infra/llmclient`
+
+          Changelog: exempt (`chore` catalog refresh).
+          EOF
+          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh pr edit "$BRANCH" --repo "$GITHUB_REPOSITORY" \
+              --title "chore(llm): update LiteLLM price catalog" \
+              --body-file "$body"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$BRANCH" \
+              --title "chore(llm): update LiteLLM price catalog" \
+              --body-file "$body"
+          fi

@@ -111,7 +111,7 @@ func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample
 		Dims:        map[string]DimScore{},
 	})
 	for _, r := range rows {
-		cfg := enrich.ClassifyConfig{TenantID: r.TenantID}
+		cfg := enrich.ClassifyConfig{TenantID: r.TenantID, Purpose: "eval"}
 		if ev.tenants != nil {
 			tenantCfg, err := ev.tenants.GetEnrichConfig(ctx, r.TenantID)
 			if err == nil {

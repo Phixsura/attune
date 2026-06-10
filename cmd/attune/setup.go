@@ -21,6 +21,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	guardpolicyrepo "github.com/Phixsura/attune/internal/repo/guardpolicy"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
+	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -196,7 +197,7 @@ func buildConsoleRouter(
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
 	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
-	usage := console.NewUsageHandler(feedbackRepo)
+	usage := console.NewUsageHandler(feedbackRepo, llmauditrepo.New(pool))
 	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
 	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool)))
 	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)

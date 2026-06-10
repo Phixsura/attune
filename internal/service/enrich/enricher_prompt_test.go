@@ -43,6 +43,10 @@ func TestRenderPrompt_SubstitutesBothTokens(t *testing.T) {
 	if strings.Contains(out, "{{content}}") || strings.Contains(out, "{{dimensions}}") {
 		t.Error("raw tokens leaked into output")
 	}
+	if !strings.Contains(out, `"classification_confidence"`) ||
+		!strings.Contains(out, "0.5 means ambiguous enough for human review") {
+		t.Fatalf("confidence instruction missing from prompt:\n%s", out)
+	}
 }
 
 func TestRenderPrompt_CustomTemplateRespected(t *testing.T) {
@@ -207,6 +211,9 @@ func TestBuildEnrichSchema_OptionalSingleAllowsNull(t *testing.T) {
 	if _, ok := props["display_title"]; !ok {
 		t.Fatalf("display_title missing from schema properties: %v", props)
 	}
+	if _, ok := props["classification_confidence"]; !ok {
+		t.Fatalf("classification_confidence missing from schema properties: %v", props)
+	}
 	sev := props["severity"].(map[string]any)
 	types, _ := sev["type"].([]any)
 	if len(types) != 2 || types[0] != "string" || types[1] != "null" {
@@ -308,10 +315,11 @@ func TestBuildEnrichSchema_AlwaysRequiresTitleAndRationale(t *testing.T) {
 	_ = json.Unmarshal(raw, &got)
 	required := got["required"].([]any)
 	wantSet := map[string]bool{
-		"title":             false,
-		"display_title":     false,
-		"rationale":         false,
-		"display_rationale": false,
+		"title":                     false,
+		"display_title":             false,
+		"rationale":                 false,
+		"display_rationale":         false,
+		"classification_confidence": false,
 	}
 	for _, x := range required {
 		if s, ok := x.(string); ok {

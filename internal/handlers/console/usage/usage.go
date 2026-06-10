@@ -11,6 +11,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/llmaudit"
 )
 
 // UsageHandler serves GET /fb/v1/console/usage. Today's handler ships only the
@@ -19,14 +20,24 @@ import (
 // real choices.
 type UsageHandler struct {
 	repo usageRepo
+	llm  llmUsageRepo
 }
 
 type usageRepo interface {
 	UsageByDay(ctx context.Context, tenantID string, from, to time.Time) ([]feedback.UsageBucket, error)
 }
 
-func NewUsageHandler(r *feedback.FeedbackRepo) *UsageHandler {
-	return ptrext.Of(UsageHandler{repo: r})
+type llmUsageRepo interface {
+	UsageByTenant(
+		ctx context.Context,
+		tenantID string,
+		granularity llmaudit.UsageGranularity,
+		from, to time.Time,
+	) ([]llmaudit.UsageBucket, error)
+}
+
+func NewUsageHandler(r *feedback.FeedbackRepo, llm *llmaudit.Repo) *UsageHandler {
+	return ptrext.Of(UsageHandler{repo: r, llm: llm})
 }
 
 // Get handles GET /fb/v1/console/usage.

@@ -180,10 +180,11 @@ const markDoneSQL = `
 		 enriched_display_title = NULLIF($6, ''),
 		 enriched_display_rationale = NULLIF($7, ''),
 		 enriched_display_locale = NULLIF($8, ''),
+		 classification_confidence = $9,
 		 enrichment_status = 'done',
 		 enrichment_error = NULL,
 		 enriched_at = NOW()
-		WHERE id = $9`
+		WHERE id = $10`
 
 // MarkDone persists the LLM classification and flips the row to 'done'.
 // Single-statement; no outer tx needed. Use MarkDoneTx when this
@@ -197,7 +198,8 @@ func (r *FeedbackRepo) MarkDone(ctx context.Context, id int64, e domain.Enriched
 	if _, err := r.pool.Exec(
 		ctx, markDoneSQL,
 		e.Title, attrsJSON, e.IsUrgent, e.Rationale, meta.Language,
-		e.DisplayTitle, e.DisplayRationale, meta.DisplayLocale, id,
+		e.DisplayTitle, e.DisplayRationale, meta.DisplayLocale,
+		e.ClassificationConfidence, id,
 	); err != nil {
 		return fmt.Errorf("update enrichment row %d: %w", id, err)
 	}
@@ -217,7 +219,8 @@ func (r *FeedbackRepo) MarkDoneTx(ctx context.Context, tx pgx.Tx, id int64, e do
 	if _, err := tx.Exec(
 		ctx, markDoneSQL,
 		e.Title, attrsJSON, e.IsUrgent, e.Rationale, meta.Language,
-		e.DisplayTitle, e.DisplayRationale, meta.DisplayLocale, id,
+		e.DisplayTitle, e.DisplayRationale, meta.DisplayLocale,
+		e.ClassificationConfidence, id,
 	); err != nil {
 		return fmt.Errorf("update enrichment row %d (tx): %w", id, err)
 	}

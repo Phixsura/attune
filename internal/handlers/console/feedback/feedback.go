@@ -72,20 +72,21 @@ func attrsToStruct(raw []byte) *structpb.Struct {
 
 func toProtoFeedback(row feedback.ConsoleListRow) *attunev1.Feedback {
 	return ptrext.Of(attunev1.Feedback{
-		Id:                    row.ID,
-		Content:               row.Content,
-		Source:                row.Source,
-		Type:                  row.Type,
-		UserId:                row.UserID,
-		Language:              nullableString(row.Language),
-		PageUrl:               row.PageURL,
-		EnrichedTitle:         nullableString(row.EnrichedTitle),
-		EnrichedDisplayTitle:  nullableString(row.EnrichedDisplayTitle),
-		EnrichedDisplayLocale: nullableString(row.EnrichedDisplayLocale),
-		EnrichedAttrs:         attrsToStruct(row.EnrichedAttrs),
-		IsUrgent:              row.IsUrgent,
-		EnrichmentStatus:      row.EnrichmentStatus,
-		CreatedAt:             row.CreatedAt.UTC().Format(time.RFC3339),
+		Id:                       row.ID,
+		Content:                  row.Content,
+		Source:                   row.Source,
+		Type:                     row.Type,
+		UserId:                   row.UserID,
+		Language:                 nullableString(row.Language),
+		PageUrl:                  row.PageURL,
+		EnrichedTitle:            nullableString(row.EnrichedTitle),
+		EnrichedDisplayTitle:     nullableString(row.EnrichedDisplayTitle),
+		EnrichedDisplayLocale:    nullableString(row.EnrichedDisplayLocale),
+		EnrichedAttrs:            attrsToStruct(row.EnrichedAttrs),
+		IsUrgent:                 row.IsUrgent,
+		ClassificationConfidence: row.ClassificationConfidence,
+		EnrichmentStatus:         row.EnrichmentStatus,
+		CreatedAt:                row.CreatedAt.UTC().Format(time.RFC3339),
 	})
 }
 

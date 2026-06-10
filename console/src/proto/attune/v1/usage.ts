@@ -8,6 +8,14 @@
 
 export const protobufPackage = "attune.v1";
 
+export enum UsageGranularity {
+  USAGE_GRANULARITY_UNSPECIFIED = "USAGE_GRANULARITY_UNSPECIFIED",
+  USAGE_GRANULARITY_DAY = "USAGE_GRANULARITY_DAY",
+  USAGE_GRANULARITY_WEEK = "USAGE_GRANULARITY_WEEK",
+  USAGE_GRANULARITY_MONTH = "USAGE_GRANULARITY_MONTH",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
 export interface GetUsageRequest {
   /** Reserved for future billing surfaces; currently ignored by the handler. */
   granularity: string;
@@ -33,8 +41,49 @@ export interface UsageBucket {
   value: string;
 }
 
+export interface GetLLMUsageRequest {
+  /** day | week | month. Defaults to week. */
+  granularity: UsageGranularity;
+  /** Grafana-style from expression: now-7d | now-30d | now-90d | now/M. Defaults to now-30d. */
+  range: string;
+}
+
+export interface GetLLMUsageResponse {
+  periodStart: string;
+  periodEnd: string;
+  granularity: string;
+  series: LLMUsageBucket[];
+  /** JSON string */
+  promptTokens: string;
+  /** JSON string */
+  completionTokens: string;
+  costUsd: number;
+  /** JSON string */
+  calls: string;
+  /** JSON string */
+  errors: string;
+}
+
+export interface LLMUsageBucket {
+  /** RFC3339 bucket boundary (UTC) */
+  bucket: string;
+  tenantId: string;
+  modelId: string;
+  /** JSON string */
+  promptTokens: string;
+  /** JSON string */
+  completionTokens: string;
+  costUsd: number;
+  /** JSON string */
+  calls: string;
+  /** JSON string */
+  errors: string;
+}
+
 /** UsageService serves the console usage dashboard. */
 export interface UsageService {
   /** GET /fb/v1/console/usage — ingest volume for the current calendar month. */
   GetUsage(request: GetUsageRequest): Promise<GetUsageResponse>;
+  /** GET /fb/v1/console/llm-usage — LLM token and cost usage. */
+  GetLLMUsage(request: GetLLMUsageRequest): Promise<GetLLMUsageResponse>;
 }

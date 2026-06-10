@@ -64,7 +64,8 @@
     "guard_policies": "防护策略",
     "api_keys": "API key",
     "settings": "设置",
-    "usage": "用量"
+    "usage": "用量",
+    "llm_usage": "LLM 成本"
   },
   "guard_policies": {
     "subtitle": "管理 LLM 防护策略。策略按系统默认 → 租户默认 → 渠道默认 → 来源覆盖解析，原始反馈内容仍保留为事实来源。",
@@ -396,9 +397,16 @@
     "load_more": "加载更多",
     "table": {
       "title": "标题 / 内容",
+      "confidence": "置信度",
       "language": "原文语言",
       "user": "用户",
       "time": "时间"
+    },
+    "confidence": {
+      "none": "暂无置信度",
+      "low": "低置信度",
+      "medium": "中置信度",
+      "high": "高置信度"
     },
     "language": {
       "zh": "中文",
@@ -416,6 +424,7 @@
       "sourceMeta": "元数据",
       "attachments": "附件",
       "attrs": "AI 分类",
+      "confidence": "置信度",
       "enrichmentError": "AI 富化失败原因",
       "enrichedAt": "富化于"
     },
@@ -446,5 +455,37 @@
     "empty_title": "本月还没有反馈",
     "empty_body": "客户开始用了之后，这里会按天显示接收量。",
     "trend_30d": "近 30 天趋势"
+  },
+  "llm_usage": {
+    "subtitle": "按租户查看 LLM 调用、token 与成本。成本来自静态价格表，未知模型仍记录 token。",
+    "total_cost": "总成本",
+    "prompt_tokens": "输入 tokens",
+    "completion_tokens": "输出 tokens",
+    "tokens_unit": "tokens",
+    "calls": "调用",
+    "errors": "{{value}} 次错误",
+    "period": "{{start}} — {{end}}",
+    "range": {
+      "7d": "7 天",
+      "30d": "30 天",
+      "90d": "90 天",
+      "month": "本月"
+    },
+    "granularity": {
+      "day": "按天",
+      "week": "按周",
+      "month": "按月"
+    },
+    "table": {
+      "title": "模型成本明细",
+      "bucket": "时间",
+      "model": "模型",
+      "prompt": "输入",
+      "completion": "输出",
+      "cost": "成本",
+      "calls": "调用"
+    },
+    "empty_title": "还没有 LLM 调用",
+    "empty_body": "反馈进入 AI 分类后，这里会按模型和时间显示 token 与成本。"
   }
 }

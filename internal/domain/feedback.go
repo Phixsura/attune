@@ -106,12 +106,13 @@ func (in IngestInput) Validate() error {
 // boolean is persisted at write time so historical urgent/non-urgent
 // status is a snapshot of the operator's policy at classification.
 type Enriched struct {
-	Title            string         `json:"title"`
-	DisplayTitle     string         `json:"display_title,omitempty"`
-	Attrs            map[string]any `json:"attrs"`     // map<dim.Name, string|[]string>
-	IsUrgent         bool           `json:"is_urgent"` // derived; never set by the LLM
-	Rationale        string         `json:"rationale"`
-	DisplayRationale string         `json:"display_rationale,omitempty"`
+	Title                    string         `json:"title"`
+	DisplayTitle             string         `json:"display_title,omitempty"`
+	Attrs                    map[string]any `json:"attrs"`     // map<dim.Name, string|[]string>
+	IsUrgent                 bool           `json:"is_urgent"` // derived; never set by the LLM
+	Rationale                string         `json:"rationale"`
+	DisplayRationale         string         `json:"display_rationale,omitempty"`
+	ClassificationConfidence *float64       `json:"classification_confidence,omitempty"`
 }
 
 // Snapshot is the wire-format handed from service.Enricher to a
@@ -131,6 +132,9 @@ type Snapshot struct {
 	IsUrgent         bool           // routes to the radar channel when true
 	Rationale        string         // LLM's short explanation; surfaced in outbox envelopes
 	DisplayRationale string
+	// ClassificationConfidence is the model's self-rated review signal in
+	// [0,1]. Nil means the model or prompt did not provide one.
+	ClassificationConfidence *float64
 	// SubmittedAt is the user's original submission time
 	// (user_feedback.created_at), independent of when the LLM finished
 	// classifying. Surfaced in outbound envelopes so consumers doing

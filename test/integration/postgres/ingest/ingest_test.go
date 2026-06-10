@@ -23,11 +23,13 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/guardpolicy"
+	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/ingest"
+	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
 	outboxsvc "github.com/Phixsura/attune/internal/service/outbox"
 	"github.com/Phixsura/attune/internal/testdb"
 )
@@ -53,13 +55,15 @@ func TestPG_IngestEnrichQueuesAndDrainsOutbox(t *testing.T) {
 
 	llm := &fakeLLM{}
 	guardedLLM := llmguard.NewClient(llm, guardpolicy.New(pool))
-	enricher := enrich.NewEnricher(feedbackRepo, guardedLLM, "fake-model")
+	auditedLLM := llmauditsvc.NewClient(guardedLLM, llmauditrepo.New(pool))
+	enricher := enrich.NewEnricher(feedbackRepo, auditedLLM, "fake-model")
 	enricher.SetOutbox(outboxrepo.NewOutbox(pool), notifytarget.NewNotifyTarget(pool))
 	if err := enricher.EnrichOne(ctx, id); err != nil {
 		t.Fatalf("EnrichOne: %v", err)
 	}
 	assertFeedbackDone(t, ctx, pool, id, rawContent)
 	assertLLMReceivedRedactedPrompt(t, llm)
+	assertLLMAudit(t, ctx, pool, id, tenantID)
 	assertOutboxStatus(t, ctx, pool, id, outboxrepo.OutboxStatusPending)
 	assertSemanticRun(t, ctx, pool, id)
 
@@ -143,7 +147,8 @@ type fakeLLM struct {
 
 func (f *fakeLLM) Complete(_ context.Context, req llmclient.CompletionRequest) (llmclient.CompletionResponse, error) {
 	f.prompt = req.Prompt
-	return llmclient.CompletionResponse{Text: `{
+	return llmclient.CompletionResponse{
+		Text: `{
 		"title":"Payment submit fails",
 		"display_title":"支付提交失败",
 		"rationale":"The user reports a checkout-breaking error.",
@@ -152,8 +157,11 @@ func (f *fakeLLM) Complete(_ context.Context, req llmclient.CompletionRequest) (
 			"severity":"critical",
 			"sentiment":"frustrated",
 			"labels":["payment","sales"],
+			"classification_confidence":0.91,
 			"buyer_intent":"renewal"
-		}`}, nil
+		}`,
+		Usage: llmclient.Usage{InputTokens: 120, OutputTokens: 40},
+	}, nil
 }
 
 func (f *fakeLLM) Close() error { return nil }
@@ -251,11 +259,16 @@ func assertFeedbackDone(t *testing.T, ctx context.Context, pool *pgxpool.Pool, i
 	var content string
 	var language string
 	var displayLanguage string
+	var confidence float64
 	if err := pool.QueryRow(ctx, `
 		SELECT enrichment_status, is_urgent, enriched_title, COALESCE(enriched_display_title, ''),
-		 content, COALESCE(language, ''), COALESCE(enriched_display_locale, '')
+		 content, COALESCE(language, ''), COALESCE(enriched_display_locale, ''),
+		 COALESCE(classification_confidence, -1)
 		FROM user_feedback WHERE id = $1`, id,
-	).Scan(&status, &urgent, &title, &displayTitle, &content, &language, &displayLanguage); err != nil {
+	).Scan(
+		&status, &urgent, &title, &displayTitle, &content, &language,
+		&displayLanguage, &confidence,
+	); err != nil {
 		t.Fatalf("load feedback: %v", err)
 	}
 	if status != "done" || !urgent || title != "Payment submit fails" {
@@ -273,23 +286,58 @@ func assertFeedbackDone(t *testing.T, ctx context.Context, pool *pgxpool.Pool, i
 	if displayLanguage != "zh-CN" {
 		t.Fatalf("display locale=%q, want zh-CN", displayLanguage)
 	}
+	if confidence != 0.91 {
+		t.Fatalf("classification confidence=%f, want 0.91", confidence)
+	}
+}
+
+func assertLLMAudit(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id int64, tenantID string) {
+	t.Helper()
+	var feedbackID int64
+	var auditTenantID string
+	var model string
+	var purpose string
+	var status string
+	var promptTokens int
+	var completionTokens int
+	if err := pool.QueryRow(ctx, `
+		SELECT feedback_id, tenant_id, model_id, purpose, status, prompt_tokens, completion_tokens
+		FROM llm_audit
+		WHERE feedback_id = $1`, id,
+	).Scan(
+		&feedbackID, &auditTenantID, &model, &purpose, &status,
+		&promptTokens, &completionTokens,
+	); err != nil {
+		t.Fatalf("load llm audit: %v", err)
+	}
+	if feedbackID != id || auditTenantID != tenantID || model != "fake-model" || purpose != "enrich" || status != "ok" {
+		t.Fatalf("llm audit identity: feedback_id=%d tenant=%s model=%s purpose=%s status=%s",
+			feedbackID, auditTenantID, model, purpose, status)
+	}
+	if promptTokens != 120 || completionTokens != 40 {
+		t.Fatalf("llm audit tokens: prompt=%d completion=%d", promptTokens, completionTokens)
+	}
 }
 
 func assertSemanticRun(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id int64) {
 	t.Helper()
 	var pack string
 	var model string
+	var confidence float64
 	var attrsRaw []byte
 	var droppedRaw []byte
 	if err := pool.QueryRow(ctx, `
-		SELECT domain_pack, model, attrs, dropped_attrs
+		SELECT domain_pack, model, COALESCE((confidence->>'overall')::float8, -1), attrs, dropped_attrs
 		FROM semantic_extraction_runs
 		WHERE subject_type = 'feedback' AND subject_id = $1`, id,
-	).Scan(&pack, &model, &attrsRaw, &droppedRaw); err != nil {
+	).Scan(&pack, &model, &confidence, &attrsRaw, &droppedRaw); err != nil {
 		t.Fatalf("load semantic run: %v", err)
 	}
 	if pack != feedback.DefaultDomainPack || model != "fake-model" {
 		t.Fatalf("semantic run provenance: pack=%s model=%s", pack, model)
+	}
+	if confidence != 0.91 {
+		t.Fatalf("semantic confidence=%f, want 0.91", confidence)
 	}
 	var attrs map[string]any
 	if err := json.Unmarshal(attrsRaw, &attrs); err != nil {

@@ -10,6 +10,11 @@ service UsageService {
   rpc GetUsage(GetUsageRequest) returns (GetUsageResponse) {
     option (google.api.http) = {get: "/fb/v1/console/usage"};
   }
+
+  // GET /fb/v1/console/llm-usage — LLM token and cost usage.
+  rpc GetLLMUsage(GetLLMUsageRequest) returns (GetLLMUsageResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/llm-usage"};
+  }
 }
 
 message GetUsageRequest {
@@ -38,4 +43,41 @@ message UsageBucket {
   string bucket = 1;
   // Rows in the bucket. (int64 → JSON string.)
   int64 value = 2;
+}
+
+enum UsageGranularity {
+  USAGE_GRANULARITY_UNSPECIFIED = 0;
+  USAGE_GRANULARITY_DAY = 1;
+  USAGE_GRANULARITY_WEEK = 2;
+  USAGE_GRANULARITY_MONTH = 3;
+}
+
+message GetLLMUsageRequest {
+  // day | week | month. Defaults to week.
+  UsageGranularity granularity = 1;
+  // Grafana-style from expression: now-7d | now-30d | now-90d | now/M. Defaults to now-30d.
+  string range = 2;
+}
+
+message GetLLMUsageResponse {
+  string period_start = 1;
+  string period_end = 2;
+  string granularity = 3;
+  repeated LLMUsageBucket series = 4;
+  int64 prompt_tokens = 5;      // JSON string
+  int64 completion_tokens = 6;  // JSON string
+  double cost_usd = 7;
+  int64 calls = 8;   // JSON string
+  int64 errors = 9;  // JSON string
+}
+
+message LLMUsageBucket {
+  string bucket = 1;  // RFC3339 bucket boundary (UTC)
+  string tenant_id = 2;
+  string model_id = 3;
+  int64 prompt_tokens = 4;      // JSON string
+  int64 completion_tokens = 5;  // JSON string
+  double cost_usd = 6;
+  int64 calls = 7;   // JSON string
+  int64 errors = 8;  // JSON string
 }
