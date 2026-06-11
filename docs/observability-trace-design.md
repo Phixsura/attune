@@ -51,8 +51,8 @@ internal/infra/observability/
    an empty `Endpoint` still installs a real `TracerProvider` (AlwaysSample +
    `ReadableIDGenerator`); it just has no exporter, so spans are dropped after
    `End`. `SpanFromContext` is still valid, so logs still carry `trace_id` in
-   local dev. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to additionally export to a
-   collector (SLS Trace, Jaeger, Tempo — any OTLP/HTTP sink).
+  local dev. Set `observability.otlp_endpoint` in `config.yaml` to additionally
+  export to a collector (SLS Trace, Jaeger, Tempo — any OTLP/HTTP sink).
 
 ## Readable trace IDs (`ReadableIDGenerator`)
 
@@ -84,9 +84,8 @@ the time straight off the ID:
 
 ## Logging facade & field names
 
-- Default handler emits **JSON** (prod; aggregator field indexing). `ENV=dev`
-  switches to text for readable `docker logs`. Installed by
-  `observability.InstallDefaultLogger()` at startup.
+- Default handler emits **JSON** for consistent aggregator field indexing.
+  Installed by `observability.InstallDefaultLogger()` at startup.
 - Single entry point: business code calls `logext.{Info,Warn,Error}f(ctx, …)`
   (printf-style). Three levels only — #48 dropped Debug from the facade on
   the rule "if a record is worth shipping, it's an Info; otherwise it doesn't

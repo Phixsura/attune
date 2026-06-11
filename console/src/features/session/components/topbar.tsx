@@ -38,6 +38,7 @@ export function TopBar({ me }: TopBarProps) {
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
           <NavLink to="/usage">{t('nav.usage')}</NavLink>
           <NavLink to="/llm-usage">{t('nav.llm_usage')}</NavLink>
+          <NavLink to="/llm-config">{t('nav.llm_config')}</NavLink>
           <NavLink to="/settings">{t('nav.settings')}</NavLink>
         </nav>
         <div className="ml-auto">

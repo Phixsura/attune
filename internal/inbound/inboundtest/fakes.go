@@ -128,12 +128,11 @@ func (f *FakeSources) SetEnabled(_ context.Context, id string, enabled bool, _ s
 	return nil
 }
 
-// FakeSecrets — identity passthrough; tests don't need real encryption.
-// Layout matches inbound's real envelope (version + key_id bytes) so
-// fixtures can be reasoned about.
+// FakeSecrets — deterministic test-only envelope; tests don't need real
+// encryption.
 type FakeSecrets struct{}
 
-// Encrypt prepends version + key_id (0x01 0x00) to plaintext. Caps
+// Encrypt prepends a tiny marker to plaintext. Caps
 // input at 1 MiB so the `2+len(b)` capacity computation cannot overflow
 // int on 32-bit builds (CodeQL #30) — fixtures never approach this.
 func (FakeSecrets) Encrypt(b []byte) ([]byte, error) {
@@ -147,7 +146,7 @@ func (FakeSecrets) Encrypt(b []byte) ([]byte, error) {
 	return out, nil
 }
 
-// Decrypt strips version + key_id.
+// Decrypt strips the test marker.
 func (FakeSecrets) Decrypt(b []byte) ([]byte, error) {
 	if len(b) < 2 {
 		return nil, errCrypto

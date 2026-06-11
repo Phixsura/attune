@@ -1,0 +1,34 @@
+flowchart TD
+    Operator["Operator edits private config.yaml"] --> Load["config.Load(path)"]
+    Load --> Validate["Known-field decode and process config validation"]
+    Validate --> Runtime["Process runtime config"]
+
+    Runtime --> DB["Open Postgres"]
+    Runtime --> Console["Console session and bootstrap admin"]
+    Runtime --> SecretStore["Tink-backed secret store"]
+    Runtime --> Obs["Logging and tracing"]
+    Runtime --> Notify["Custom webhook bootstrap sync"]
+
+    DB --> Migrate["Migration preflight and migrations"]
+    Migrate --> Tables["llm_channels, llm_channel_abilities, llm_routes"]
+    Console --> Router["HTTP router and Console API"]
+    SecretStore --> Encrypt["Encrypt provider API keys"]
+    SecretStore --> Inbound["Inbound adapters"]
+    Notify --> Outbox["Notify targets and outbox"]
+
+    Admin["Operator via Console/API/CLI"] --> CRUD["LLM channel and route CRUD"]
+    CRUD --> Encrypt
+    Encrypt --> Tables
+    CRUD --> Test["Channel test"]
+
+    Tables --> LLMRouter["LLM router"]
+    LLMRouter --> Guard["LLM guard"]
+    Guard --> Audit["LLM audit and cost"]
+    Audit --> Enricher["Background enricher"]
+
+    Enricher --> RouteCheck{"Route and channel available?"}
+    RouteCheck -->|No| NotConfigured["llm_not_configured"]
+    RouteCheck -->|Yes| Select["Select priority tier, then weight"]
+    Select --> Mapping["Apply model mapping"]
+    Mapping --> Provider["Provider backend"]
+    Provider --> Audit

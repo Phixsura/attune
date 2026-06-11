@@ -22,6 +22,15 @@ func IsUniqueViolation(err error) bool {
 	return false
 }
 
+// IsForeignKeyViolation reports SQLSTATE 23503.
+func IsForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23503"
+	}
+	return false
+}
+
 // Truncate caps a string to n bytes — for keeping log lines and error
 // reasons short in TEXT columns. Returns the input unchanged when shorter.
 func Truncate(s string, n int) string {

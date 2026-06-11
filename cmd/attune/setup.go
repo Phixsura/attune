@@ -10,10 +10,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/handlers/console"
-	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
-	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/admin"
@@ -22,40 +21,15 @@ import (
 	guardpolicyrepo "github.com/Phixsura/attune/internal/repo/guardpolicy"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
+	llmconfigrepo "github.com/Phixsura/attune/internal/repo/llmconfig"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
+	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
 )
-
-// buildLLMClient picks an LLM backend from cfg.LLMProtocol (#10):
-//
-//   - LLMProtocolOpenAICompat hand-rolled /v1/chat/completions; covers
-//     OpenAI / Azure / vLLM / ollama / oneapi.
-//   - LLMProtocolOpenAIResponses openai-go/v3 client.Responses.New.
-//   - LLMProtocolAnthropic anthropic-sdk-go with forced tool_use.
-//   - LLMProtocolGemini google.golang.org/genai responseJsonSchema.
-//
-// config.validate() enforces protocol legality and required URL/key for
-// each, so this function trusts cfg to be coherent.
-//
-// Adding a new backend is three edits: an entry in config.KnownLLMProtocols,
-// a constant in config/llm_protocol.go, and a case here. There is no
-// plugin registry on purpose.
-func buildLLMClient(cfg *config.Config) (llmclient.LLMClient, error) {
-	switch cfg.LLMProtocol {
-	case config.LLMProtocolOpenAIResponses:
-		return llmclient.NewOpenAIResponses(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
-	case config.LLMProtocolAnthropic:
-		return llmclient.NewAnthropic(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
-	case config.LLMProtocolGemini:
-		return llmclient.NewGemini(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
-	default: // LLMProtocolOpenAICompat — config.validate() already accepted the value
-		return llmclient.NewOpenAICompat(cfg.LLMOpenAIBaseURL, cfg.LLMOpenAIAPIKey)
-	}
-}
 
 // syncCustomWebhooks upserts every entry in cfg.CustomWebhooks into
 // tenant_notify_targets. Slug is resolved against the tenants table;
@@ -166,19 +140,19 @@ func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 // buildConsoleRouter wires the Console (auth + /me + /logout + resource
 // endpoints + #66 inbound source management). Pre-#66 the console relied
 // on an external OAuth + dev-login backdoor; both are gone, replaced by
-// the local-admin password flow (auth.Handler + admin.Repo + bootstrap env).
+// the local-admin password flow (auth.Handler + admin.Repo + bootstrap config).
 //
 // Console boots when ConsoleSessionKey is set and ConsoleBaseURL is
 // non-empty. No more dev-login / insecure-cookies escape hatches.
 func buildConsoleRouter(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
-	secrets inbound.SecretStore,
+	secrets *secretstore.TinkStore,
 	sourceRepo *inboundsourcerepo.Repo,
 	adminRepo *admin.Repo,
 ) (chi.Router, error) {
 	if cfg.ConsoleBaseURL == "" {
-		return nil, fmt.Errorf("console requires console_base_url")
+		return nil, fmt.Errorf("console requires console.base_url")
 	}
 	signer, err := console.NewSigner(cfg.ConsoleSessionKey)
 	if err != nil {
@@ -201,9 +175,12 @@ func buildConsoleRouter(
 	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
 	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool)))
 	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
+	llmConfig := console.NewLLMConfigHandler(
+		llmconfigsvc.NewService(llmconfigrepo.New(pool), secrets),
+	)
 
 	return console.NewRouter(
 		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback, usage,
-		enrichConfig, guardPolicies, inboundHandler,
+		enrichConfig, guardPolicies, inboundHandler, llmConfig, adminRepo,
 	).Mount(), nil
 }

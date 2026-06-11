@@ -15,6 +15,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/repo/secretlock"
 )
 
 // ErrRotationInGraceWindow — RotateSecret refuses a second rotation
@@ -55,6 +56,9 @@ func RotateSecret(
 		return nil, time.Time{}, fmt.Errorf("rotate: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := secretlock.LockTx(ctx, tx); err != nil {
+		return nil, time.Time{}, fmt.Errorf("rotate: %w", err)
+	}
 
 	cfg, err := loadRotateConfig(ctx, tx, secrets, sourceID)
 	if err != nil {
@@ -65,6 +69,9 @@ func RotateSecret(
 		return nil, time.Time{}, err
 	}
 
+	if err := secretlock.EnsureWritableKey(ctx, tx, inbound.PrimaryKeyID(secrets)); err != nil {
+		return nil, time.Time{}, fmt.Errorf("rotate: %w", err)
+	}
 	newSecret, updatedEnvelope, expires, err := buildRotatedConfig(secrets, cfg)
 	if err != nil {
 		return nil, time.Time{}, err

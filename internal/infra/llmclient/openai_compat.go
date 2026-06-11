@@ -8,19 +8,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
-
-// openaiHTTPTimeout — OpenAI-compatible endpoint HTTP timeout. 60s
-// covers most 4-8K-token inferences; vLLM / ollama on a slow box with a
-// large prompt may exceed — for those, use a reverse-proxy with a larger
-// timeout.
-const openaiHTTPTimeout = 60 * time.Second
 
 // OpenAICompatBackend POSTs OpenAI-compatible /v1/chat/completions over
 // hand-rolled net/http. One transport covers every wire-compatible
@@ -60,7 +53,6 @@ func NewOpenAICompat(baseURL, apiKey string) (*OpenAICompatBackend, error) {
 		apiKey:  apiKey,
 		client: ptrext.Of(http.Client{
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
-			Timeout:   openaiHTTPTimeout,
 		}),
 	}), nil
 }

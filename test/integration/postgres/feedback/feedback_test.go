@@ -109,6 +109,73 @@ func TestPG_TryClaim_FlipsStatusOnce(t *testing.T) {
 	}
 }
 
+func TestPG_MarkFailedSchedulesRetryAndStopsAfterMaxAttempts(t *testing.T) {
+	pool := testdb.NewPool(t)
+	_, id := seedTenantAndRow(t, pool, "retry me")
+	repo := feedback.NewFeedback(pool)
+	ctx := context.Background()
+
+	ok, err := repo.TryClaim(ctx, id)
+	if err != nil || !ok {
+		t.Fatalf("claim before failure: ok=%v err=%v", ok, err)
+	}
+	repo.MarkFailed(ctx, id, "provider unavailable")
+
+	var (
+		status    string
+		attempts  int
+		nextRetry time.Time
+	)
+	if err := pool.QueryRow(ctx, `
+		SELECT enrichment_status, enrichment_attempts, enrichment_next_retry_at
+		  FROM user_feedback
+		 WHERE id = $1`, id).Scan(&status, &attempts, &nextRetry); err != nil {
+		t.Fatalf("read failed retry state: %v", err)
+	}
+	if status != "failed" || attempts != 1 {
+		t.Fatalf("retry state = %s/%d; want failed/1", status, attempts)
+	}
+	if !nextRetry.After(time.Now()) {
+		t.Fatalf("next retry = %s; want future timestamp", nextRetry)
+	}
+
+	ok, err = repo.TryClaim(ctx, id)
+	if err != nil {
+		t.Fatalf("claim before backoff elapsed: %v", err)
+	}
+	if ok {
+		t.Fatal("row should not be claimable before next retry")
+	}
+	assertPendingListExcludes(t, repo, id)
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE user_feedback SET enrichment_next_retry_at = NOW() - INTERVAL '1 second' WHERE id = $1`, id); err != nil {
+		t.Fatalf("force retry due: %v", err)
+	}
+	ok, err = repo.TryClaim(ctx, id)
+	if err != nil || !ok {
+		t.Fatalf("claim after backoff elapsed: ok=%v err=%v", ok, err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE user_feedback
+		   SET enrichment_status = 'failed',
+		       enrichment_attempts = 5,
+		       enrichment_next_retry_at = NULL,
+		       enrichment_claimed_at = NULL
+		 WHERE id = $1`, id); err != nil {
+		t.Fatalf("force max attempts: %v", err)
+	}
+	ok, err = repo.TryClaim(ctx, id)
+	if err != nil {
+		t.Fatalf("claim after max attempts: %v", err)
+	}
+	if ok {
+		t.Fatal("row should not be claimable after max attempts")
+	}
+	assertPendingListExcludes(t, repo, id)
+}
+
 func TestPG_MarkDoneAndContainmentQuery(t *testing.T) {
 	pool := testdb.NewPool(t)
 	tenantID, id := seedTenantAndRow(t, pool, "payment broke")
@@ -182,6 +249,19 @@ func TestPG_MarkDoneAndContainmentQuery(t *testing.T) {
 	}
 	if len(rows) != 1 {
 		t.Errorf("labels=payment should match 1 row, got %d", len(rows))
+	}
+}
+
+func assertPendingListExcludes(t *testing.T, repo *feedback.FeedbackRepo, blockedID int64) {
+	t.Helper()
+	rows, err := repo.ListPending(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	for _, id := range rows {
+		if id == blockedID {
+			t.Fatalf("ListPending returned blocked id %d: %v", blockedID, rows)
+		}
 	}
 }
 

@@ -97,13 +97,25 @@ func auditRow(
 		status = "error"
 		errText = safeError(err)
 	}
-	price := llmclient.PriceUsage(req.Model, resp.Usage)
+	logicalModel := strings.TrimSpace(req.Model)
+	providerModel := strings.TrimSpace(resp.Route.ProviderModel)
+	if resp.Route.LogicalModel != "" {
+		logicalModel = strings.TrimSpace(resp.Route.LogicalModel)
+	}
+	priceModel := logicalModel
+	if providerModel != "" {
+		priceModel = providerModel
+	}
+	price := llmclient.PriceUsage(priceModel, resp.Usage)
 	return auditrepo.Row{
 		TenantID:         labelOrUnknown(req.Guard.TenantID),
 		FeedbackID:       req.Guard.FeedbackID,
 		InboundTraceID:   biztrace.FromContext(ctx),
 		OtelTraceID:      otelTraceID(ctx),
-		ModelID:          strings.TrimSpace(req.Model),
+		ModelID:          logicalModel,
+		ProviderModelID:  providerModel,
+		ChannelID:        strings.TrimSpace(resp.Route.ChannelID),
+		LLMProtocol:      strings.TrimSpace(resp.Route.Protocol),
 		Purpose:          labelOrUnknown(req.Guard.Purpose),
 		PromptTokens:     resp.Usage.InputTokens,
 		CompletionTokens: resp.Usage.OutputTokens,

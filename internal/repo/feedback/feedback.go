@@ -27,6 +27,13 @@ type FeedbackRepo struct {
 	pool *pgxpool.Pool
 }
 
+const (
+	maxEnrichmentAttempts      = 5
+	initialEnrichmentBackoff   = time.Minute
+	maxEnrichmentBackoff       = 30 * time.Minute
+	staleEnrichmentClaimWindow = 5 * time.Minute
+)
+
 func NewFeedback(pool *pgxpool.Pool) *FeedbackRepo {
 	return ptrext.Of(FeedbackRepo{pool: pool})
 }
@@ -67,18 +74,26 @@ func (r *FeedbackRepo) Insert(ctx context.Context, tenantID, userID string, in d
 }
 
 // TryClaim atomically transitions a row into 'enriching' if it's eligible:
-// either still pending/failed, or stuck in 'enriching' past 5 minutes.
+// pending, retryable failed after backoff, or stuck in 'enriching' past the
+// stale claim window.
 // Returns true iff this caller now owns the row.
 func (r *FeedbackRepo) TryClaim(ctx context.Context, id int64) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE user_feedback
 		SET enrichment_status = 'enriching',
 		 enrichment_claimed_at = NOW(),
-		 enrichment_error = NULL
+		 enrichment_error = NULL,
+		 enrichment_next_retry_at = NULL
 		WHERE id = $1
-		 AND (enrichment_status IN ('pending','failed')
+		 AND (
+		  enrichment_status = 'pending'
+		 OR (enrichment_status = 'failed'
+		     AND enrichment_attempts < $2
+		     AND (enrichment_next_retry_at IS NULL OR enrichment_next_retry_at <= NOW()))
 		 OR (enrichment_status = 'enriching'
-		 AND enrichment_claimed_at < NOW() - INTERVAL '5 minutes'))`, id)
+		     AND enrichment_claimed_at < NOW() - make_interval(secs => $3))
+		 )`,
+		id, maxEnrichmentAttempts, int(staleEnrichmentClaimWindow.Seconds()))
 	if err != nil {
 		return false, fmt.Errorf("claim feedback %d: %w", id, err)
 	}
@@ -183,6 +198,9 @@ const markDoneSQL = `
 		 classification_confidence = $9,
 		 enrichment_status = 'done',
 		 enrichment_error = NULL,
+		 enrichment_attempts = 0,
+		 enrichment_next_retry_at = NULL,
+		 enrichment_claimed_at = NULL,
 		 enriched_at = NOW()
 		WHERE id = $10`
 
@@ -278,13 +296,28 @@ func (r *FeedbackRepo) BeginTx(ctx context.Context) (pgx.Tx, error) {
 	return r.pool.Begin(ctx)
 }
 
-// MarkFailed records an enrichment error without changing the row's
-// payload. Best-effort: errors here only surface in logs.
+// MarkFailed records an enrichment error and schedules exponential retry.
+// Attempts stop after maxEnrichmentAttempts; the row remains visible as
+// status=failed with no next retry so operators can inspect/remediate.
+// Best-effort: errors here only surface in logs.
 func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) {
 	const where = "repo.FeedbackRepo.MarkFailed"
 	if _, err := r.pool.Exec(ctx,
-		`UPDATE user_feedback SET enrichment_status='failed', enrichment_error=$1 WHERE id=$2`,
-		pgxutil.Truncate(errMsg, 1000), id); err != nil {
+		`UPDATE user_feedback
+		    SET enrichment_status = 'failed',
+		        enrichment_error = $1,
+		        enrichment_attempts = enrichment_attempts + 1,
+		        enrichment_next_retry_at = CASE
+		          WHEN enrichment_attempts + 1 >= $3 THEN NULL
+		          ELSE NOW() + make_interval(secs => LEAST(
+		            $4 * CAST(POWER(2, LEAST(enrichment_attempts, 10)) AS INTEGER),
+		            $5
+		          ))
+		        END,
+		        enrichment_claimed_at = NULL
+		  WHERE id = $2`,
+		pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
+		int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds())); err != nil {
 		logext.Errorf(ctx, "[%s] update failed,id:%d,err:%+v", where, id, err.Error())
 	}
 }
@@ -295,11 +328,14 @@ func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) 
 func (r *FeedbackRepo) ListPending(ctx context.Context, n int) ([]int64, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id FROM user_feedback
-		WHERE enrichment_status IN ('pending','failed')
+		WHERE enrichment_status = 'pending'
+		 OR (enrichment_status = 'failed'
+		     AND enrichment_attempts < $2
+		     AND (enrichment_next_retry_at IS NULL OR enrichment_next_retry_at <= NOW()))
 		 OR (enrichment_status = 'enriching'
-		 AND enrichment_claimed_at < NOW() - INTERVAL '5 minutes')
+		     AND enrichment_claimed_at < NOW() - make_interval(secs => $3))
 		ORDER BY created_at ASC
-		LIMIT $1`, n)
+		LIMIT $1`, n, maxEnrichmentAttempts, int(staleEnrichmentClaimWindow.Seconds()))
 	if err != nil {
 		return nil, fmt.Errorf("list pending: %w", err)
 	}

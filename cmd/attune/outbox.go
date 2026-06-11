@@ -16,9 +16,7 @@ import (
 //
 //	attune outbox prune --older-than 1h Mark every pending/failed row
 //	 older than 1h as 'dead'.
-//	 Reads DB URL from FEEDBACK_API_*
-//	 env vars / config.yaml exactly
-//	 like `server`.
+//	 Reads the DB URL from config.yaml exactly like `server`.
 //
 // Designed for one-shot cleanup after the pgx-encode-bug era left
 // orphan rows in pending state (commit 2054e71 fixed the bug; legacy

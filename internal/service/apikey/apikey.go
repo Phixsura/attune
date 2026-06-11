@@ -26,8 +26,8 @@ const (
 
 // APIKeys issues and verifies external API keys backed by the
 // external_api_keys table. Keys are random 128-bit strings stored as
-// sha256 hashes; the raw value is shown to the operator exactly once
-// at issuance.
+// deterministic lookup digests; the raw value is shown to the operator
+// exactly once at issuance.
 type APIKeys struct {
 	repo *apikeyrepo.APIKeyRepo
 	// touchCache debounces TouchLastUsed: if a key was touched within the
@@ -89,8 +89,8 @@ func (s *APIKeys) Lookup(ctx context.Context, raw string) (tenantID string, keyI
 		logext.Warnf(ctx, "[%s] reject: bad key length,len:%d", where, len(raw))
 		return "", uuid.Nil, domain.ErrInvalidAPIKey
 	}
-	sum := sha256.Sum256([]byte(raw))
-	row, err := s.repo.LookupByHash(ctx, sum[:])
+	digest := apiKeyLookupDigest(raw)
+	row, err := s.repo.LookupByHash(ctx, digest)
 	if errors.Is(err, apikeyrepo.ErrAPIKeyNotFound) {
 		logext.Warnf(ctx, "[%s] reject: hash not found", where)
 		return "", uuid.Nil, domain.ErrInvalidAPIKey
@@ -99,7 +99,7 @@ func (s *APIKeys) Lookup(ctx context.Context, raw string) (tenantID string, keyI
 		logext.Errorf(ctx, "[%s] apikey.LookupByHash failed,err:%+v", where, err.Error())
 		return "", uuid.Nil, err
 	}
-	if !hmac.Equal(row.StoredHash, sum[:]) {
+	if !hmac.Equal(row.StoredHash, digest) {
 		logext.Warnf(ctx, "[%s] reject: hmac mismatch,key_id:%s", where, row.ID)
 		return "", uuid.Nil, domain.ErrInvalidAPIKey
 	}
@@ -121,25 +121,30 @@ func (s *APIKeys) touchAsync(id uuid.UUID) {
 	go s.repo.TouchLastUsed(id)
 }
 
-// generate is the random-key + hash + display-prefix construction.
-// Lives here rather than in repo because the secret value never leaves
-// service — repo only sees the hash.
+// generate is the random-key + lookup-digest + display-prefix construction.
+// Lives here rather than in repo because the raw value never leaves service;
+// repo only sees the digest.
 func generate() (raw string, hash []byte, prefix string, err error) {
 	buf := make([]byte, rawKeyHexLen/2)
 	if _, err = rand.Read(buf); err != nil {
 		return "", nil, "", fmt.Errorf("rand: %w", err)
 	}
 	raw = domain.APIKeyPrefix + hex.EncodeToString(buf)
-	// SHA-256 is appropriate here: we are hashing API keys (not user passwords)
-	// for lookup verification. The raw key is a 192-bit random value —
-	// preimage resistance of SHA-256 is sufficient; we are not defending
-	// against offline brute-force of low-entropy secrets.
-	sum := sha256.Sum256([]byte(raw))
-	hash = sum[:]
+	hash = apiKeyLookupDigest(raw)
 	if len(raw) >= displayPrefLen {
 		prefix = raw[:displayPrefLen]
 	} else {
 		prefix = raw
 	}
 	return raw, hash, prefix, nil
+}
+
+func apiKeyLookupDigest(raw string) []byte {
+	// The input is a 128-bit CSPRNG API token used for deterministic DB
+	// lookup, not a low-entropy password. Preimage resistance of SHA-256 is
+	// sufficient for this indexed lookup digest.
+
+	// codeql[go/weak-sensitive-data-hashing]
+	sum := sha256.Sum256([]byte(raw))
+	return sum[:]
 }

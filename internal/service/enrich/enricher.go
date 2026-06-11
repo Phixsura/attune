@@ -64,12 +64,11 @@ type classifyResult struct {
 	Enriched          domain.Enriched
 	DropDiagnostics   []domain.AttrDropDiagnostic
 	DroppedAttrsAudit map[string]any
+	Route             llmclient.RouteMetadata
 }
 
-// NewEnricher takes the resolved enrichment model id (from config —
-// FEEDBACK_API_LLM_MODEL env / yaml `llm_model` / DefaultLLMModel) so
-// operators pointing at private gateways with aliased model names
-// don't have to fork the binary.
+// NewEnricher takes an optional legacy model id. New deployments leave it empty
+// and let the DB-managed LLM router resolve model/channel by purpose.
 func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient, model string) *Enricher {
 	return ptrext.Of(Enricher{repo: r, llm: llm, model: model})
 }
@@ -177,6 +176,7 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 		}
 		metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "db_err").
 			Observe(time.Since(start).Seconds())
+		e.repo.MarkFailed(ctx, id, err.Error())
 		return err
 	}
 	metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "ok").
@@ -258,6 +258,7 @@ func (e *Enricher) classifyWithDiagnostics(ctx context.Context, content string, 
 		Enriched:          parsed,
 		DropDiagnostics:   dropped,
 		DroppedAttrsAudit: droppedAttrsAudit(dropped),
+		Route:             resp.Route,
 	}, nil
 }
 

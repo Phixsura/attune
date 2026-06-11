@@ -22,28 +22,23 @@ import (
 )
 
 // BuildDefaultHandler returns the attune-standard slog handler chain: a JSON
-// handler (or TextHandler when ENV=dev) wrapped in TraceIDHandler so every
-// record carries trace_id/span_id from the active OTel span on ctx.
+// handler wrapped in TraceIDHandler so every record carries trace_id/span_id
+// from the active OTel span on ctx.
 //
 // Pure — no global state. Tests construct a handler over a bytes.Buffer here
 // without touching slog.Default. Production wiring is InstallDefaultLogger.
 func BuildDefaultHandler(w io.Writer) slog.Handler {
 	opts := ptrext.Of(slog.HandlerOptions{Level: slog.LevelInfo})
-	var inner slog.Handler
-	if os.Getenv("ENV") == "dev" {
-		inner = slog.NewTextHandler(w, opts)
-	} else {
-		inner = slog.NewJSONHandler(w, opts)
-	}
+	inner := slog.NewJSONHandler(w, opts)
 	return NewTraceIDHandler(inner)
 }
 
-// InstallDefaultLogger builds the default handler over os.Stdout and installs
+// InstallDefaultLogger builds the default handler over os.Stderr and installs
 // it as slog's package-level default. Call once at process start, before any
-// logging. CLAUDE.md §7 routes all log calls through internal/pkg/logext,
-// which forwards to this default.
+// logging. Command results and keyset material stay on stdout; CLAUDE.md §7
+// routes all log calls through internal/pkg/logext, which forwards here.
 func InstallDefaultLogger() {
-	slog.SetDefault(slog.New(BuildDefaultHandler(os.Stdout)))
+	slog.SetDefault(slog.New(BuildDefaultHandler(os.Stderr)))
 }
 
 // TraceIDHandler wraps an underlying slog.Handler and adds trace_id/span_id

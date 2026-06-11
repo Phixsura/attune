@@ -38,38 +38,32 @@ cd deploy
 cp .env.example .env
 ```
 
-Edit `.env` and set **at minimum** these values:
+Edit `.env` and set:
 
 | Variable | What to set |
 |---|---|
-| `POSTGRES_PASSWORD` | A strong password. Left empty in the example so a misconfigured first boot fails loudly. |
-| `FEEDBACK_API_DATABASE_URL` | Paste the **same** password into the DSN: `<your-postgres-connection-string>` |
-| `FEEDBACK_API_LLM_OPENAI_API_KEY` | Your OpenAI / compatible API key. The stack boots and `/healthz` passes without it, but enrichment will 401 until it is real. |
-| `ATTUNE_INBOUND_MASTER_KEY` | **32-byte AES-GCM key** (hex preferred, base64 fallback). attune uses this to encrypt customer webhook secrets / IMAP credentials at rest (#66). Generate with `openssl rand -hex 32`. Required on first start of every deploy; **back up alongside DB credentials** — losing it means re-onboarding every inbound source. |
-| `ATTUNE_BOOTSTRAP_ADMIN_EMAIL` | First console admin's email. Read **only when** `admins` is empty (typically first start). Unset after first start so the credential does not linger in env. |
-| `ATTUNE_BOOTSTRAP_ADMIN_PASSWORD` | First console admin's password. Same one-shot semantics. On Linux prefer the `_FILE` variant (`ATTUNE_BOOTSTRAP_ADMIN_PASSWORD_FILE=/run/secrets/admin_pw`) to keep the plaintext out of `/proc/<pid>/environ`. |
+| `POSTGRES_PASSWORD` | A strong password, also pasted into `database.url` in `config.yaml`. |
 
-All other variables are optional and have sensible defaults. See the annotated
-`.env.example` for the full list.
-
-### Generating the inbound master key
+Then edit `config.yaml` and set `database.url`, `console.*`, and
+`secrets.tink_keyset`. Generate the keyset with:
 
 ```bash
-# Linux / macOS — 32 random bytes, hex-encoded (preferred)
-openssl rand -hex 32
-
-# base64 fallback (also accepted)
-openssl rand -base64 32
+docker compose run --rm attune secrets generate-keyset
 ```
 
-> ⚠️ **Treat this key like a database password.** Lose it, and every
-> stored inbound webhook secret / IMAP credential becomes unrecoverable —
-> you'll need to re-onboard every source. Back it up to the same secret
-> manager you use for `POSTGRES_PASSWORD`. Master-key rotation lands in
-> #94 (read once, encrypt with new, write back).
+> ⚠️ **Treat this Tink keyset like a database password.** Lose it, and every
+> stored inbound webhook secret, IMAP credential, and managed LLM API key
+> becomes unrecoverable. Back it up to the same secret manager you use for
+> `POSTGRES_PASSWORD`.
 
-> **Secrets stay in `.env`** — it is gitignored. Never commit real keys to
-> `config.yaml` or any tracked file.
+> **The real `config.yaml` is private**. Never commit real DB URLs, bootstrap
+> credentials, provider keys, or Tink keysets.
+
+If this deployment already has inbound sources encrypted by the old
+`ATTUNE_INBOUND_MASTER_KEY`, paste that old 32-byte key as hex/base64 into
+`secrets.legacy_inbound_master_key` before the first rollout. After startup,
+run `attune secrets reencrypt --apply` so old inbound envelopes are rewritten
+with Tink, then remove `legacy_inbound_master_key` from every replica config.
 
 ---
 
@@ -82,6 +76,10 @@ docker compose up -d
 attune waits for Postgres to become healthy, then **runs schema migrations
 automatically on startup**. The first boot creates all tables; subsequent boots
 apply incremental migrations.
+
+The production image serves the built Console SPA under `/console/*`, so the
+first login page is `http://localhost:8090/console/login` for the default
+compose stack.
 
 ---
 
@@ -126,35 +124,38 @@ docker compose exec postgres psql -U attune attune \
 
 ## Choosing an LLM protocol
 
-attune supports four LLM backends. The default (`openai-compat`) works with any
-OpenAI-compatible endpoint. Set `FEEDBACK_API_LLM_PROTOCOL` in `.env` to switch:
+attune supports four DB-managed LLM channel protocols. Configure them after the
+server has run migrations. For day-to-day operation, sign in to the Console and
+use `/console/llm-config`; the CLI below is the scriptable equivalent.
 
-| Protocol | Env value | What it calls | Key required |
-|---|---|---|---|
-| OpenAI Chat Completions | `openai-compat` (default) | Any `/v1/chat/completions` endpoint | `FEEDBACK_API_LLM_OPENAI_API_KEY` (blank OK for local ollama) |
-| OpenAI Responses | `openai-responses` | OpenAI Responses API (official SDK) | Yes |
-| Anthropic Messages | `anthropic` | Anthropic Messages API (official SDK) | Yes |
-| Google Gemini | `gemini` | Gemini GenerateContent (official SDK) | Yes |
+| Protocol | What it calls | Key required |
+|---|---|---|
+| `openai-compat` | Any `/v1/chat/completions` endpoint | Bearer key, unless `auth_mode=none` |
+| `openai-responses` | OpenAI Responses API (official SDK) | Yes |
+| `anthropic` | Anthropic Messages API (official SDK) | Yes |
+| `gemini` | Gemini GenerateContent (official SDK) | Yes |
 
-Example -- switching to Anthropic:
+Example -- Anthropic:
 
 ```bash
-# in deploy/.env
-FEEDBACK_API_LLM_PROTOCOL=anthropic
-FEEDBACK_API_LLM_OPENAI_API_KEY=sk-ant-...
+docker compose run --rm attune llm channels create \
+  --name anthropic --protocol anthropic --api-key sk-ant-...
+docker compose run --rm attune llm channels test \
+  --id <channel-id> --provider-model claude-sonnet-4-5
+docker compose run --rm attune llm abilities upsert \
+  --channel <channel-id> --logical-model enrich-default --provider-model claude-sonnet-4-5
+docker compose run --rm attune llm routes upsert \
+  --purpose enrich --logical-model enrich-default
 ```
-
-> The env var name `FEEDBACK_API_LLM_OPENAI_API_KEY` is kept across all
-> protocols for backward compatibility. For SDK-backed protocols the base URL
-> field (`FEEDBACK_API_LLM_OPENAI_BASE_URL`) is ignored -- the SDK uses the
-> vendor's default host.
 
 ### Using local ollama
 
 ```bash
-# in deploy/.env
-FEEDBACK_API_LLM_OPENAI_BASE_URL=http://host.docker.internal:11434
-FEEDBACK_API_LLM_OPENAI_API_KEY=
+docker compose run --rm attune llm channels create \
+  --name ollama --protocol openai-compat --base-url http://host.docker.internal:11434 \
+  --auth-mode none
+docker compose run --rm attune llm channels test \
+  --id <channel-id> --provider-model llama3.1
 ```
 
 On Linux, add `extra_hosts` to the attune service in `docker-compose.yml`:
@@ -285,9 +286,11 @@ server {
 }
 ```
 
-Set `ATTUNE_BIND=0.0.0.0` in `.env` **only** behind your TLS proxy. For
-certificate management, [Let's Encrypt](https://letsencrypt.org/getting-started/)
-with certbot is the simplest path.
+Set the compose port-mapping variable `ATTUNE_BIND=0.0.0.0` in `.env` **only**
+behind your TLS proxy. This changes Docker's host bind address, not Attune's
+runtime config. For certificate management,
+[Let's Encrypt](https://letsencrypt.org/getting-started/) with certbot is the
+simplest path.
 
 ---
 
@@ -333,12 +336,11 @@ columns are hard-deleted. Pre-1.0 carries no retention guarantee.
      --table=user_feedback --table=tenant_lark_install \
      --table=lark_install > pre-v0.3-lark-snapshot.sql
    ```
-3. **Generate** `ATTUNE_INBOUND_MASTER_KEY` (`openssl rand -hex 32`) and
-   save it to your secret manager.
-4. **Set** `ATTUNE_BOOTSTRAP_ADMIN_EMAIL` + `ATTUNE_BOOTSTRAP_ADMIN_PASSWORD`
-   (or `_FILE` variants) in `.env` for the **first start only**.
-5. **Opt in** to the Lark delete by adding `ATTUNE_CONFIRM_LARK_DELETE=yes`
-   to `.env`. Without it, startup hard-fails when lark-typed rows exist —
+3. **Generate** `secrets.tink_keyset` with `attune secrets generate-keyset`
+   and back up the config alongside DB credentials.
+4. **Set** `console.bootstrap_admin` in `config.yaml` for the first start.
+5. **Opt in** to the Lark delete by setting `migrations.confirm_lark_delete: true`
+   in `config.yaml`. Without it, startup hard-fails when lark-typed rows exist —
    a deliberate guard against silent loss.
 6. **Pull and start.**
    ```bash
@@ -347,8 +349,8 @@ columns are hard-deleted. Pre-1.0 carries no retention guarantee.
    Watch the logs for `ConfirmLarkDelete OK` → `migrations 015..017 applied`
    → `inbound_adapters:[email webhook]`.
 7. **Sign in** at `http://localhost:8090/console/login` with the bootstrap
-   credentials, change the password, then **unset** the bootstrap env vars
-   and `ATTUNE_CONFIRM_LARK_DELETE` so they don't linger in the next start.
+   credentials, change the password, then clear `console.bootstrap_admin`
+   and reset `migrations.confirm_lark_delete` if desired.
 8. **Re-onboard** any feedback that used to flow via Lark — the console's
    `Inbound Sources` page (route `/console/inbound-sources`) is where you
    create webhook + email sources. The webhook adapter speaks Stripe-style
@@ -381,6 +383,51 @@ preferred backup tool.
 
 ---
 
+## Rotating the Tink keyset
+
+All replicas must share a decrypt-capable `secrets.tink_keyset`. Rotate it in
+stages so old and new replicas can decrypt the same Postgres state throughout
+the rollout.
+
+1. Inspect the current key ids without printing key material:
+   ```bash
+   docker compose run --rm attune secrets keyset-info
+   ```
+2. Print a new keyset JSON that contains the old key plus a new enabled key.
+   Paste the output into `secrets.tink_keyset` and roll it to every replica while
+   the old key remains primary:
+   ```bash
+   docker compose run --rm attune secrets add-key
+   ```
+3. Make the new key primary, paste the output into `secrets.tink_keyset`, and
+   roll every replica again:
+   ```bash
+   docker compose run --rm attune secrets set-primary --key-id <new-key-id>
+   ```
+4. Dry-run and then apply DB-wide re-encryption for old-key ciphertexts:
+   ```bash
+   docker compose run --rm attune secrets reencrypt --from-key-id <old-key-id>
+   docker compose run --rm attune secrets reencrypt --from-key-id <old-key-id> --apply
+   ```
+5. Dry-run and then apply registry retirement. Apply refuses while any LLM or
+   inbound secret still references the old key:
+   ```bash
+   docker compose run --rm attune secrets retire-key --key-id <old-key-id>
+   docker compose run --rm attune secrets retire-key --key-id <old-key-id> --apply
+   ```
+6. Remove the old key from the local keyset JSON only after retirement succeeds,
+   paste the output into `secrets.tink_keyset`, and roll every replica one final
+   time:
+   ```bash
+   docker compose run --rm attune secrets delete-key --key-id <old-key-id>
+   ```
+
+`reencrypt` locks the affected secret rows in one transaction and rewrites
+managed LLM channel credentials plus inbound source configs, including nested
+webhook current/previous secrets and email passwords.
+
+---
+
 ## Troubleshooting
 
 ### LLM returns 401 / rate limit / unknown model
@@ -388,10 +435,10 @@ preferred backup tool.
 **Symptoms:** enrichment never completes; logs show `llm_err` or HTTP 401/429.
 
 **Fix:**
-- Verify `FEEDBACK_API_LLM_OPENAI_API_KEY` is set and valid:
-  `docker compose logs attune | grep api_key_set` should show `api_key_set:true`.
-- For `openai-compat`, confirm `FEEDBACK_API_LLM_OPENAI_BASE_URL` points to
-  a reachable endpoint. Try: `curl <base_url>/v1/models`.
+- Verify the DB-managed LLM channel has `has_api_key=true` unless it is a local
+  `auth_mode=none` channel.
+- For `openai-compat`, confirm the channel `base_url` points to a reachable
+  endpoint. Try: `curl <base_url>/v1/models`.
 - Check rate limits with your LLM provider.
 
 ### Inbound webhook returns 401
@@ -417,23 +464,19 @@ preferred backup tool.
   `409 rotation_in_grace_window` — wait for the grace to expire (the
   response's `next_eligible_at` tells you when) and try again.
 
-### Inbound master key was lost
+### Tink keyset was lost
 
-**Symptoms:** `BootstrapValidate failed` on startup, or every webhook
-fires `decrypt_failed`.
+**Symptoms:** startup rejects `secrets.tink_keyset`, or every encrypted runtime
+secret fails to decrypt.
 
-**Fix:** There is no recovery — every stored inbound secret was encrypted
-with that key. You must:
+**Fix:** There is no recovery — every stored runtime secret was encrypted with
+that keyset. You must:
 
-1. Restore the key from the secret-manager backup you took at
+1. Restore the keyset from the secret-manager backup you took at
    provisioning time, OR
-2. Set a fresh `ATTUNE_INBOUND_MASTER_KEY`, then delete + recreate every
-   inbound source in the console (the operator copies the new revealed
-   secret to each upstream system). Existing `feedback` data is
+2. Generate a fresh Tink keyset, then delete + recreate every inbound source
+   and rotate every managed LLM channel API key. Existing `feedback` data is
    unaffected.
-
-This is exactly the disaster #94 (master-key rotation) prevents going
-forward.
 
 ### Port 8090 already in use
 
@@ -453,12 +496,13 @@ config to match.
 
 **Symptoms:** attune fails to start; logs show Postgres connection errors.
 
-**Fix:** URL-encode special characters in `FEEDBACK_API_DATABASE_URL`. For
+**Fix:** URL-encode special characters in `database.url` in `config.yaml`. For
 example, `p@ss:word` becomes `p%40ss%3Aword`:
 
 ```bash
 <!-- trufflehog:ignore -->
-FEEDBACK_API_DATABASE_URL=<your-postgres-connection-string>
+database:
+  url: "<your-postgres-connection-string>"
 <!-- /trufflehog:ignore -->
 ```
 
@@ -495,8 +539,8 @@ fixed vocabulary and enforces it with a post-parse filter.
 ## References
 
 - [`deploy/README.md`](../deploy/README.md) -- compose kit quick-reference.
-- [`config.example.yaml`](../config.example.yaml) -- full annotated config
-  reference with env-var overrides.
+- [`config.example.yaml`](../config.example.yaml) -- full annotated
+  config-first reference.
 - [`observability/README.md`](../observability/README.md) -- metric contract
   and dashboard details.
 - [CLAUDE.md](../CLAUDE.md) -- engineering guidelines (for contributors).

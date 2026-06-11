@@ -34,7 +34,6 @@ func NewGemini(baseURL, apiKey string) (*GeminiBackend, error) {
 	}
 	httpClient := ptrext.Of(http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
-		Timeout:   openaiHTTPTimeout,
 	})
 	cfg := ptrext.Of(genai.ClientConfig{
 		APIKey:     apiKey,

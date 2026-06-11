@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -182,6 +184,16 @@ func (e *Enricher) semanticRun(
 	if displayLocale != "" {
 		languageGuard["display_locale"] = displayLocale
 	}
+	model := strings.TrimSpace(result.Route.ProviderModel)
+	if model == "" {
+		model = strings.TrimSpace(e.model)
+	}
+	guardSummary := map[string]any{
+		"language": languageGuard,
+	}
+	if route := semanticRouteGuard(result.Route); len(route) > 0 {
+		guardSummary["routing"] = route
+	}
 	return feedback.SemanticExtractionRun{
 		TenantID:      s.TenantID,
 		SubjectType:   feedback.SemanticSubjectFeedback,
@@ -189,15 +201,33 @@ func (e *Enricher) semanticRun(
 		DomainPack:    feedback.DefaultDomainPack,
 		SchemaVersion: feedback.DefaultSchemaVersion,
 		PromptVersion: promptVersion(cfg),
-		Model:         e.model,
-		GuardSummary: map[string]any{
-			"language": languageGuard,
-		},
-		Attrs:        result.Enriched.Attrs,
-		Confidence:   confidenceAudit(result.Enriched),
-		Rationale:    rationale,
-		DroppedAttrs: result.DroppedAttrsAudit,
+		Model:         model,
+		GuardSummary:  guardSummary,
+		Attrs:         result.Enriched.Attrs,
+		Confidence:    confidenceAudit(result.Enriched),
+		Rationale:     rationale,
+		DroppedAttrs:  result.DroppedAttrsAudit,
 	}
+}
+
+func semanticRouteGuard(route llmclient.RouteMetadata) map[string]any {
+	out := map[string]any{}
+	if route.LogicalModel != "" {
+		out["logical_model"] = route.LogicalModel
+	}
+	if route.ProviderModel != "" {
+		out["provider_model"] = route.ProviderModel
+	}
+	if route.ChannelID != "" {
+		out["channel_id"] = route.ChannelID
+	}
+	if route.ChannelName != "" {
+		out["channel_name"] = route.ChannelName
+	}
+	if route.Protocol != "" {
+		out["protocol"] = route.Protocol
+	}
+	return out
 }
 
 func confidenceAudit(enriched domain.Enriched) map[string]any {

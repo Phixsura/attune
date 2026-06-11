@@ -1,8 +1,8 @@
 -- 016_create_admins.sql — local console admin login table (#66 Plan T8).
 --
 -- Companion to console/auth: bcrypt-hashed passwords, 5-strike lockout.
--- Bootstrap is operator-supplied via ATTUNE_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD}[_FILE]
--- on the first start when this table is empty (see internal/handlers/console/auth/bootstrap.go).
+-- Bootstrap is operator-supplied via console.bootstrap_admin on the first start
+-- when this table is empty (see internal/handlers/console/auth/bootstrap.go).
 
 CREATE TABLE IF NOT EXISTS admins (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

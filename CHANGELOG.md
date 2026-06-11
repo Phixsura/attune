@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Config-first runtime and DB-managed LLM channels (#23).** Adds a
+  Tink-backed shared secret store (`secrets.tink_keyset`), DB metadata for
+  runtime secret-key registry state, managed `llm_channels`,
+  `llm_channel_abilities`, and `llm_routes` tables, Console API endpoints,
+  a `/console/llm-config` React management page, `attune llm ...` CLI commands
+  for provider CRUD/routing, and a DB-backed LLM router that records
+  channel/protocol/provider-model metadata in `llm_audit`. Channel `api_key`
+  input is write-only and persisted encrypted with the shared Tink keyset.
+  The Console/API can discover provider model IDs from a channel and use them
+  as selectable candidates in ability/test forms while still allowing manual
+  entry for local or non-discoverable providers. Console admin sessions minted
+  before the first tenant exists now self-heal to the first active tenant once
+  one is created, so tenant-scoped pages such as Feedback do not require a
+  logout/login cycle after first-tenant bootstrap.
+  Startup now refuses split-brain secret-key rollouts when stored LLM
+  credentials, inbound outer configs, or nested webhook/email ciphertexts
+  reference key ids missing from the local keyset; it also rejects LLM
+  credential rows whose stored key-id metadata disagrees with the Tink
+  ciphertext prefix. Legacy inbound AES-GCM envelopes can be read with the
+  migration-only `secrets.legacy_inbound_master_key` and rewritten to Tink with
+  `attune secrets reencrypt --apply`. Runtime LLM routing now applies
+  per-channel timeouts, skips routeable bearer channels without credentials,
+  and fails over across eligible channel candidates. The command family
+  `attune secrets keyset-info|add-key|set-primary|reencrypt|retire-key|delete-key`
+  provides an explicit distributed key rotation path. The managed LLM surface is
+  admin-gated, validates tenant routes and provider base URLs, sanitizes channel
+  test errors before persistence, prevents disabled tenant routes from falling
+  back to global routes, preserves existing encrypted credentials on metadata
+  edits, and records enrichment retry/backoff metadata so permanent provider or
+  persistence failures do not burn tokens forever.
 - **LLM classification confidence review signal (#24).** The enricher prompt
   now asks models for `classification_confidence` in `[0.0, 1.0]` with `0.5`
   defined as ambiguous enough for human review. The parser accepts numeric and
@@ -119,12 +149,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     replaced the documented v2-beta no-op with `clientOps.MarkSeen` /
     `clientOps.MoveTo` against a narrow `imapOps` interface).
   - **Encryption at rest**: every inbound secret (webhook HMAC,
-    IMAP username / password) is sealed AES-GCM-256 with envelope
-    `version(1) + key_id(1) + nonce(12) + ct + tag(16)`. The
-    `ATTUNE_INBOUND_MASTER_KEY` env var (32 bytes hex/base64) seeds the
-    store and is validated at boot via
-    `internal/inbound.BootstrapValidate`; reserved bytes leave room for
-    master-key rotation (#94).
+    IMAP username / password) is sealed by the shared Tink AEAD runtime
+    keyset (`secrets.tink_keyset`), the same keyring used for managed LLM
+    provider credentials. The earlier inbound-only master-key envelope is
+    replaced by the #23 Tink key registry and rotation commands.
   - **Boundary enforcement**: two depguard rules ship in `.golangci.yml` —
     `inbound-boundary` (framework core `internal/inbound/*` may NOT import
     adapters under `.../adapter/*`) and `inbound-framework-isolation`
@@ -151,12 +179,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `next=` query. Session cookies retain `HttpOnly + Secure +
   SameSite=Lax + Path=/`.
 - **Bootstrap admin** (#66). On first start, attune reads
-  `ATTUNE_BOOTSTRAP_ADMIN_EMAIL` + `ATTUNE_BOOTSTRAP_ADMIN_PASSWORD`
-  (or `_FILE` variants — secret-file pattern documented in
-  `internal/infra/config.GetOrFile`) and creates the first console
-  admin. TOCTOU-safe via `pg_advisory_xact_lock` + `ON CONFLICT (email)
-  DO NOTHING`; subsequent starts read `admins` and skip the env vars
-  entirely, so the credentials don't linger.
+  `console.bootstrap_admin` from the private YAML config and creates the first
+  console admin. TOCTOU-safe via `pg_advisory_xact_lock` + `ON CONFLICT (email)
+  DO NOTHING`; subsequent starts read `admins` and skip bootstrap creation.
 
 - **`internal/dispatcher` typed HTTP helper and product API migration.** Adds a generic bind/result layer with `Empty` / `JSON` / `Path` / `Query` / `Param` / `ParamInt64` / `Combine` / `Custom` input helpers, moves all 18 in-scope product endpoints onto it, and adds typed session/API-key auth contexts for dispatcher handlers.
 
@@ -175,6 +200,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **Breaking: process config is now YAML-only (#23).** `attune` reads one
+  private config file via `--config` (default `config.yaml`) and rejects unknown
+  old fields. Database URL, console bootstrap, migration guard, observability,
+  rate limits, custom webhook bootstrap, and the shared Tink keyset now live in
+  YAML; LLM provider state moved to DB-managed channels/routes.
 - **Console settings now owns configuration navigation.** The top navigation
   keeps daily-use Feedback, Usage, and Settings entries in that order, while
   `/settings` exposes an in-page sidebar for AI classification, Guardrails,
@@ -248,6 +278,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   a one-shot wire failure is recoverable on the next round without
   duplicate ingest. `move_to:` with an empty folder degrades to
   `mark_seen` rather than passing an empty mailbox to IMAP.
+
+### Removed
+
+- **Removed env-var and `*_FILE` runtime config paths (#23).** The old
+  `FEEDBACK_API_*`, `ATTUNE_INBOUND_MASTER_KEY`,
+  `ATTUNE_BOOTSTRAP_ADMIN_*`, `ATTUNE_CONFIRM_LARK_DELETE`, and
+  `OTEL_EXPORTER_OTLP_*` process configuration paths no longer affect attune
+  runtime configuration.
 
 ### Fixed
 
@@ -339,8 +377,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     tenants.lark_tenant_key`, `DROP TABLE tenant_lark_install / lark_install`.
     The deploy startup path runs `internal/infra/database.ConfirmLarkDelete`
     **before** the migration: if any lark-typed row exists AND
-    `ATTUNE_CONFIRM_LARK_DELETE=yes` is not set, startup hard-fails with a
-    pointer to `docs/private-deploy.md` — silent loss is impossible.
+    `migrations.confirm_lark_delete: true` is not set in the private YAML
+    config, startup hard-fails with a pointer to `docs/private-deploy.md` —
+    silent loss is impossible.
   - **Proto**: `proto/attune/v1/session.proto` adds `Login` /
     `LoginRequest` / `LoginResponse`; the `Tenant` message uses
     `reserved 4; reserved "lark_tenant_key";` so the field number can't
@@ -725,14 +764,13 @@ authored — wire-stable, never auto-renamed.
 
 ### Security
 
-- **Encryption at rest for inbound secrets** (#66). All customer
-  webhook HMAC secrets and IMAP credentials are sealed with AES-GCM-256
-  via `internal/inbound.NewAESGCMSecretStore`. The wire envelope
-  reserves `version + key_id` bytes so #94 (master-key rotation) is a
-  read-decrypt-with-old → write-encrypt-with-new sweep with no schema
-  churn. Plaintext never enters the database, the OpenAPI surface, or
-  the console UI; on reveal the secret is shown **once**, post-creation
-  RPCs return only an opaque last-4 hint.
+- **Encryption at rest for inbound secrets** (#66 / #23). All customer
+  webhook HMAC secrets and IMAP credentials are sealed with the shared Tink
+  AEAD keyset in `secrets.tink_keyset`. Plaintext never enters the database,
+  the OpenAPI surface, or the console UI; on reveal the secret is shown
+  **once**, post-creation RPCs return only an opaque last-4 hint. Key rotation
+  is now handled by the same `attune secrets reencrypt` / `retire-key` path as
+  managed LLM credentials.
 - **Webhook replay + enumeration resistance** (#66). The webhook
   adapter rejects requests outside a ±300 s timestamp window
   (Stripe-style) and computes a stub HMAC on unknown source slugs so

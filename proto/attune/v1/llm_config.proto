@@ -1,0 +1,228 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+// LLMConfigService manages DB-backed provider channels and routes.
+service LLMConfigService {
+  rpc ListLLMChannels(ListLLMChannelsRequest) returns (ListLLMChannelsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/llm/channels"};
+  }
+  rpc CreateLLMChannel(CreateLLMChannelRequest) returns (LLMChannel) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/llm/channels"
+      body: "*"
+    };
+  }
+  rpc GetLLMChannel(GetLLMChannelRequest) returns (LLMChannel) {
+    option (google.api.http) = {get: "/fb/v1/console/llm/channels/{id}"};
+  }
+  rpc UpdateLLMChannel(UpdateLLMChannelRequest) returns (LLMChannel) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/llm/channels/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteLLMChannel(DeleteLLMChannelRequest) returns (DeleteLLMChannelResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/llm/channels/{id}"};
+  }
+  rpc TestLLMChannel(TestLLMChannelRequest) returns (TestLLMChannelResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/llm/channels/{id}/test"
+      body: "*"
+    };
+  }
+  rpc ListLLMChannelModels(ListLLMChannelModelsRequest) returns (ListLLMChannelModelsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/llm/channels/{channel_id}/models"};
+  }
+  rpc ListLLMChannelAbilities(ListLLMChannelAbilitiesRequest) returns (ListLLMChannelAbilitiesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/llm/channels/{channel_id}/abilities"};
+  }
+  rpc UpsertLLMChannelAbility(UpsertLLMChannelAbilityRequest) returns (LLMChannelAbility) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/llm/channels/{channel_id}/abilities"
+      body: "*"
+    };
+  }
+  rpc DeleteLLMChannelAbility(DeleteLLMChannelAbilityRequest) returns (DeleteLLMChannelAbilityResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/llm/channels/{channel_id}/abilities/delete"
+      body: "*"
+    };
+  }
+  rpc ListLLMRoutes(ListLLMRoutesRequest) returns (ListLLMRoutesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/llm/routes"};
+  }
+  rpc UpsertLLMRoute(UpsertLLMRouteRequest) returns (LLMRoute) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/llm/routes"
+      body: "*"
+    };
+  }
+  rpc DeleteLLMRoute(DeleteLLMRouteRequest) returns (DeleteLLMRouteResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/llm/routes/delete"
+      body: "*"
+    };
+  }
+}
+
+// LLMChannel never returns api_key. API keys are write-only and persisted
+// encrypted with the shared Tink keyset.
+message LLMChannel {
+  string id = 1;
+  string name = 2;
+  string protocol = 3;   // openai-compat | openai-responses | anthropic | gemini
+  string base_url = 4;
+  string auth_mode = 5;  // bearer | none
+  bool has_api_key = 6;
+  string credential_key_id = 7;
+  string status = 8;  // enabled | disabled | draining
+  int32 priority = 9;
+  int32 weight = 10;
+  int32 timeout_seconds = 11;
+  string created_at = 12;
+  string updated_at = 13;
+  optional string last_tested_at = 14;
+  string last_test_status = 15;
+  string last_error = 16;
+}
+
+message ListLLMChannelsRequest {}
+
+message ListLLMChannelsResponse {
+  repeated LLMChannel items = 1;
+}
+
+message CreateLLMChannelRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  string protocol = 2 [(google.api.field_behavior) = REQUIRED];
+  string base_url = 3;
+  string auth_mode = 4;  // defaults to bearer
+  optional string api_key = 5;  // write-only
+  string status = 6;            // defaults to enabled
+  int32 priority = 7;
+  optional int32 weight = 8;             // omitted defaults to 1; explicit 0 is valid
+  optional int32 timeout_seconds = 9;    // omitted defaults to 60
+}
+
+message GetLLMChannelRequest {
+  string id = 1;
+}
+
+message UpdateLLMChannelRequest {
+  string id = 1;
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  string protocol = 3 [(google.api.field_behavior) = REQUIRED];
+  string base_url = 4;
+  string auth_mode = 5;
+  optional string api_key = 6;  // omitted = keep existing; set only to rotate
+  string status = 7;
+  int32 priority = 8;
+  optional int32 weight = 9;             // omitted keeps existing value
+  optional int32 timeout_seconds = 10;   // omitted keeps existing value
+}
+
+message DeleteLLMChannelRequest {
+  string id = 1;
+}
+
+message DeleteLLMChannelResponse {}
+
+message TestLLMChannelRequest {
+  string id = 1;
+  string provider_model = 2;  // optional; defaults to highest-priority enabled ability
+  string prompt = 3;          // optional; defaults to a tiny attune-ok prompt
+}
+
+message TestLLMChannelResponse {
+  bool ok = 1;
+  string provider_model = 2;
+  string text = 3;
+  int32 input_tokens = 4;
+  int32 output_tokens = 5;
+  int64 latency_ms = 6;
+  LLMChannel channel = 7;
+}
+
+message LLMProviderModel {
+  string id = 1;
+  string display_name = 2;
+  string owned_by = 3;
+}
+
+message ListLLMChannelModelsRequest {
+  string channel_id = 1;
+}
+
+message ListLLMChannelModelsResponse {
+  repeated LLMProviderModel items = 1;
+}
+
+message LLMChannelAbility {
+  string id = 1;
+  string channel_id = 2;
+  string logical_model = 3;
+  string provider_model = 4;
+  bool enabled = 5;
+  int32 priority = 6;
+  int32 weight = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message ListLLMChannelAbilitiesRequest {
+  string channel_id = 1;
+}
+
+message ListLLMChannelAbilitiesResponse {
+  repeated LLMChannelAbility items = 1;
+}
+
+message UpsertLLMChannelAbilityRequest {
+  string channel_id = 1;
+  string logical_model = 2 [(google.api.field_behavior) = REQUIRED];
+  string provider_model = 3;
+  optional bool enabled = 4;  // defaults to true when omitted
+  int32 priority = 5;
+  optional int32 weight = 6;  // omitted defaults to 1; explicit 0 is valid
+}
+
+message DeleteLLMChannelAbilityRequest {
+  string channel_id = 1;
+  string logical_model = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message DeleteLLMChannelAbilityResponse {}
+
+message LLMRoute {
+  string id = 1;
+  string tenant_id = 2;  // empty = global default
+  string purpose = 3;
+  string logical_model = 4;
+  bool enabled = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}
+
+message ListLLMRoutesRequest {}
+
+message ListLLMRoutesResponse {
+  repeated LLMRoute items = 1;
+}
+
+message UpsertLLMRouteRequest {
+  string tenant_id = 1;  // empty = global default
+  string purpose = 2 [(google.api.field_behavior) = REQUIRED];
+  string logical_model = 3 [(google.api.field_behavior) = REQUIRED];
+  optional bool enabled = 4;  // defaults to true when omitted
+}
+
+message DeleteLLMRouteRequest {
+  string tenant_id = 1;
+  string purpose = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message DeleteLLMRouteResponse {}

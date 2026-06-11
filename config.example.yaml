@@ -1,76 +1,67 @@
-# Attune configuration. Override path via FEEDBACK_API_CONFIG env var.
-# Every field below has an env var override — see internal/infra/config/env.go.
+# Attune runtime config.
+#
+# This file is the single source of process configuration. There are no env-var
+# overrides and no *_file indirections. Keep the real file private.
+#
+# Generate a fresh Tink AEAD keyset before first start:
+#
+#   attune secrets generate-keyset
 
-# HTTP listen port.
 port: 8090
 
-# Postgres connection string.
-# Format: postgres://<user>:<password>@<host>:5432/<db>?sslmode=<mode>
-#
-# First-time setup on a fresh DB:
-#   1. Apply migrations (auto on attune server startup, or:
-#      psql ... -f internal/infra/database/migrations/001_init.sql)
-#   2. Create your first tenant:
-#      attune tenant create --slug acme-corp --name "Acme Corp"
-#   3. Mint an API key:
-#      attune keys issue --tenant acme-corp --label "main-app"
-database_url: "postgres://<user>:<password>@<host>:5432/attune?sslmode=require"
+database:
+  url: "postgres://<user>@<host>:5432/attune?sslmode=require"
 
-# ── LLM endpoint ──────────────────────────────────────────────────
-# Enricher hits any OpenAI-compatible /v1/chat/completions endpoint.
-# Common base_url values:
-#   OpenAI 官方:    https://api.openai.com
-#   Azure OpenAI:   https://<resource>.openai.azure.com/openai/deployments/<deployment>
-#   vllm local:     http://localhost:8000
-#   ollama local:   http://localhost:11434
-#   oneapi proxy:   http://your-oneapi-host:3000
-# Attune auto-appends "/v1/chat/completions" — don't include it in base_url.
-llm_openai_base_url: "https://api.openai.com"
+migrations:
+  # Set true only after exporting any legacy lark-* user_feedback rows.
+  confirm_lark_delete: false
 
-# Bearer token. Local ollama / vllm without auth may leave this blank.
-# Prefer FEEDBACK_API_LLM_OPENAI_API_KEY env injection over committing to yaml.
-llm_openai_api_key: ""
+enricher:
+  interval: "30s"
+  batch: 10
 
-# Background enricher cadence.
-enricher_interval: "30s"
-enricher_batch:    10
+console:
+  base_url: "https://attune.example.com"
+  # At least 32 random characters. Used to sign console session cookies.
+  session_key: "replace-with-32-or-more-random-characters"
+  bootstrap_admin:
+    # Used only while admins is empty.
+    email: "admin@example.com"
+    password: "replace-this-after-first-login"
 
-# ── Lark / Feishu event subscription (optional) ────────────────
-# Leave empty to disable the /v1/lark/event handler entirely (it returns 404).
-# These come from the Lark Open Platform "事件订阅" tab of your app.
-lark_signing_secret:      ""
-lark_verification_token:  ""
-# Tenant slug to associate Lark-sourced feedback with. Resolved to UUID at
-# startup; service refuses to start if this slug doesn't exist in the
-# tenants table when lark_signing_secret is set.
-lark_default_tenant_slug: ""
+secrets:
+  # Paste the JSON printed by `attune secrets generate-keyset`.
+  # All replicas must run with the same keyset. Tink ciphertexts carry key ids,
+  # so rolling rotation works by:
+  #   1. `attune secrets add-key`
+  #   2. `attune secrets set-primary --key-id <new>`
+  #   3. `attune secrets reencrypt --from-key-id <old> --apply`
+  #   4. `attune secrets retire-key --key-id <old> --apply`
+  #   5. `attune secrets delete-key --key-id <old>`
+  # Optional migration-only fallback for installs that already have
+  # inbound_sources encrypted by the old ATTUNE_INBOUND_MASTER_KEY. Set the
+  # old 32-byte key here as hex/base64, run `attune secrets reencrypt --apply`,
+  # then remove this field from every replica config.
+  # legacy_inbound_master_key: ""
+  tink_keyset: |
+    {
+      "primaryKeyId": 0,
+      "key": []
+    }
 
-# ── Outbound webhooks ────────────────────────────────────────────
-# Each is a Lark custom group bot webhook URL (the "自定义机器人" URL in
-# any Lark chat). Leave blank to disable that destination. Secrets are
-# optional — set them only if the bot has signature verification enabled.
-#
-# Pool  = all-feedback channel:   every enriched row.
-# Radar = critical-only channel:  P0 / P1 only.
-feedback_pool_webhook_url:    ""
-feedback_pool_webhook_secret: ""
-dev_radar_webhook_url:        ""
-dev_radar_webhook_secret:     ""
+observability:
+  service_version: "dev"
+  environment: "dev"
+  otlp_endpoint: ""
+  otlp_traces_path: "/opentelemetry/v1/traces"
+  otlp_headers: {}
+  otlp_insecure: false
 
-# ── Per-tenant custom HTTPS webhooks ──────────────────────────────
-# Each entry is synced into tenant_notify_targets at startup. The console
-# UI takes over CRUD; this env path is kept as a bootstrap escape hatch.
-#
-# tenant_slug must already exist in tenants.slug or startup will fail.
-# url must be https://. secret must be ≥ 16 chars (used for HMAC-SHA256
-# over POST body; customer verifies via X-Attune-Signature header).
-# audience ∈ {pool, radar, all}; default pool.
+rate_limit:
+  per_minute: 60
+  burst: 300
+  disabled: false
+
+# Optional bootstrap raw-webhook destinations. The console/API can manage
+# runtime targets after startup.
 custom_webhooks: []
-# Example:
-# custom_webhooks:
-#   - tenant_slug: "acme-corp"
-#     url:    "https://example.com/api/internal/attune-webhook"
-#     secret: "<set-via-env-or-ops-handoff>"
-#     audience: "all"     # optional, default "pool"
-#     timeout_seconds: 10 # optional, default 10
-#     disabled: false     # optional, default false (kill switch)

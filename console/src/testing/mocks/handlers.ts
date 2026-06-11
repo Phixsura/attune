@@ -12,6 +12,17 @@ import type {
   ListFeedbackResponse,
 } from '@/proto/attune/v1/ingest'
 import type {
+  ListLLMChannelAbilitiesResponse,
+  ListLLMChannelModelsResponse,
+  ListLLMChannelsResponse,
+  ListLLMRoutesResponse,
+  LLMChannel,
+  LLMChannelAbility,
+  LLMProviderModel,
+  LLMRoute,
+  TestLLMChannelResponse,
+} from '@/proto/attune/v1/llm_config'
+import type {
   ListNotifyTargetsResponse,
   NotifyTarget,
   TestNotifyTargetResponse,
@@ -78,6 +89,64 @@ const sampleNotifyTarget: NotifyTarget = {
   lastError: '',
 }
 const defaultTestNotifyTargetResponse: TestNotifyTargetResponse = { ok: true, statusCode: 200 }
+
+// LLM config ---------------------------------------------------------------
+const sampleLLMChannel: LLMChannel = {
+  id: '11111111-1111-1111-1111-111111111111',
+  name: 'Primary',
+  protocol: 'openai-compat',
+  baseUrl: 'http://localhost:11434',
+  authMode: 'bearer',
+  hasApiKey: true,
+  credentialKeyId: '123',
+  status: 'enabled',
+  priority: 100,
+  weight: 1,
+  timeoutSeconds: 60,
+  createdAt: '2026-06-11T00:00:00Z',
+  updatedAt: '2026-06-11T00:00:00Z',
+  lastTestStatus: '',
+  lastError: '',
+}
+const sampleLLMAbility: LLMChannelAbility = {
+  id: '22222222-2222-2222-2222-222222222222',
+  channelId: sampleLLMChannel.id,
+  logicalModel: 'enrich-default',
+  providerModel: 'gpt-4o-mini',
+  enabled: true,
+  priority: 100,
+  weight: 1,
+  createdAt: '2026-06-11T00:00:00Z',
+  updatedAt: '2026-06-11T00:00:00Z',
+}
+const sampleLLMModels: LLMProviderModel[] = [
+  { id: 'gpt-4o-mini', displayName: 'GPT 4o mini', ownedBy: 'openai' },
+  { id: 'gpt-4.1-mini', displayName: 'GPT 4.1 mini', ownedBy: 'openai' },
+]
+const sampleLLMRoute: LLMRoute = {
+  id: '33333333-3333-3333-3333-333333333333',
+  tenantId: '',
+  purpose: 'enrich',
+  logicalModel: 'enrich-default',
+  enabled: true,
+  createdAt: '2026-06-11T00:00:00Z',
+  updatedAt: '2026-06-11T00:00:00Z',
+}
+export const defaultLLMChannelsList: ListLLMChannelsResponse = { items: [sampleLLMChannel] }
+export const defaultLLMAbilitiesList: ListLLMChannelAbilitiesResponse = {
+  items: [sampleLLMAbility],
+}
+export const defaultLLMModelsList: ListLLMChannelModelsResponse = { items: sampleLLMModels }
+export const defaultLLMRoutesList: ListLLMRoutesResponse = { items: [sampleLLMRoute] }
+const defaultTestLLMChannelResponse: TestLLMChannelResponse = {
+  ok: true,
+  providerModel: 'gpt-4o-mini',
+  text: 'attune-ok',
+  inputTokens: 3,
+  outputTokens: 2,
+  latencyMs: '42',
+  channel: sampleLLMChannel,
+}
 
 // Enrich config ------------------------------------------------------------
 export const defaultEnrichConfig: EnrichConfig = {
@@ -147,6 +216,29 @@ export const handlers = [
   http.post(`${BASE}/notify-targets/:id/test`, () =>
     HttpResponse.json(defaultTestNotifyTargetResponse),
   ),
+
+  http.get(`${BASE}/llm/channels`, () => HttpResponse.json(defaultLLMChannelsList)),
+  http.post(`${BASE}/llm/channels`, () => HttpResponse.json(sampleLLMChannel)),
+  http.get(`${BASE}/llm/channels/:id`, ({ params }) =>
+    HttpResponse.json({ ...sampleLLMChannel, id: String(params.id) }),
+  ),
+  http.patch(`${BASE}/llm/channels/:id`, ({ params }) =>
+    HttpResponse.json({ ...sampleLLMChannel, id: String(params.id) }),
+  ),
+  http.delete(`${BASE}/llm/channels/:id`, () => new HttpResponse(null, { status: 204 })),
+  http.post(`${BASE}/llm/channels/:id/test`, () =>
+    HttpResponse.json(defaultTestLLMChannelResponse),
+  ),
+  http.get(`${BASE}/llm/channels/:id/models`, () => HttpResponse.json(defaultLLMModelsList)),
+  http.get(`${BASE}/llm/channels/:id/abilities`, () => HttpResponse.json(defaultLLMAbilitiesList)),
+  http.put(`${BASE}/llm/channels/:id/abilities`, () => HttpResponse.json(sampleLLMAbility)),
+  http.post(
+    `${BASE}/llm/channels/:id/abilities/delete`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.get(`${BASE}/llm/routes`, () => HttpResponse.json(defaultLLMRoutesList)),
+  http.put(`${BASE}/llm/routes`, () => HttpResponse.json(sampleLLMRoute)),
+  http.post(`${BASE}/llm/routes/delete`, () => new HttpResponse(null, { status: 204 })),
 
   http.get(`${BASE}/enrich-config`, () => HttpResponse.json(defaultGetEnrichConfig)),
   http.put(`${BASE}/enrich-config`, async ({ request }) => {

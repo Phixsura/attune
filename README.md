@@ -47,11 +47,22 @@ Self-host with the docker-compose kit (attune + Postgres):
 
 ```bash
 cd deploy
-cp .env.example .env        # set POSTGRES_PASSWORD + FEEDBACK_API_LLM_OPENAI_API_KEY
+cp .env.example .env        # set POSTGRES_PASSWORD
+docker compose run --rm attune secrets generate-keyset
+# paste the keyset into config.yaml, then set database.url + console.*
 docker compose up -d
 curl http://localhost:8090/healthz                                     # -> ok
 docker compose run --rm attune tenant create --slug <slug> --name <name>
 docker compose run --rm attune keys issue --tenant <slug> --label <s>  # mint an API key
+docker compose run --rm attune llm channels create \
+  --name openai --protocol openai-compat --base-url https://api.openai.com \
+  --api-key sk-...
+docker compose run --rm attune llm channels test \
+  --id <channel-id> --provider-model gpt-4o-mini
+docker compose run --rm attune llm abilities upsert \
+  --channel <channel-id> --logical-model enrich-default --provider-model gpt-4o-mini
+docker compose run --rm attune llm routes upsert \
+  --purpose enrich --logical-model enrich-default
 ```
 
 See [`deploy/README.md`](deploy/README.md) for the compose-kit quick-reference, or the full [private deployment guide](docs/private-deploy.md) for a step-by-step walk-through with monitoring, SSL, upgrades, and troubleshooting. Or build from source:
@@ -61,21 +72,28 @@ go build ./cmd/attune
 go run ./cmd/attune server                                  # start HTTP server
 ```
 
-Every field in [`config.example.yaml`](config.example.yaml) has an env-var override — see [`internal/infra/config/env.go`](internal/infra/config/env.go) for the full table.
+Attune is config-first: process config is loaded from one private YAML file
+(`--config ./config.yaml`) and env-var overrides are intentionally unsupported.
+LLM provider channels and routes are runtime state managed in Postgres through
+Console/API/CLI. The authenticated Console includes `/console/llm-config` for
+channel, model-ability, route, and channel-test operations.
 
-| Required | Env var | Notes |
-|---|---|---|
-| `database_url` | `FEEDBACK_API_DATABASE_URL` | PostgreSQL DSN, e.g. `postgres://<user>:<password>@<host>:5432/attune` |
-| `llm_protocol` | `FEEDBACK_API_LLM_PROTOCOL` | `openai-compat` (default), `openai-responses`, `anthropic`, or `gemini` |
-| `llm_openai_base_url` | `FEEDBACK_API_LLM_OPENAI_BASE_URL` | Any OpenAI-compatible endpoint (only for `openai-compat`) |
-| `llm_openai_api_key` | `FEEDBACK_API_LLM_OPENAI_API_KEY` | Bearer token / API key (required for all protocols) |
-| `inbound_master_key` | `ATTUNE_INBOUND_MASTER_KEY` | 32 bytes (hex or base64) — AES-GCM key for encrypted inbound source secrets / IMAP credentials (#66). Required on first start of every deploy; back up alongside DB credentials. |
-| `bootstrap_admin_email` | `ATTUNE_BOOTSTRAP_ADMIN_EMAIL` (+ `_FILE` variant) | First console admin's email (#66). Read only when `admins` is empty; unset after first start. |
-| `bootstrap_admin_password` | `ATTUNE_BOOTSTRAP_ADMIN_PASSWORD` (+ `_FILE` variant) | First console admin's password (#66). Use `_FILE` variant on Linux to avoid `/proc/<pid>/environ` exposure. |
+| Required config | Notes |
+|---|---|
+| `database.url` | PostgreSQL DSN, e.g. `postgres://<user>@<host>:5432/attune` |
+| `secrets.tink_keyset` | Shared Tink AEAD keyset from `attune secrets generate-keyset`; all replicas need the same keyset. |
+| `secrets.legacy_inbound_master_key` | Optional migration-only old inbound master key, hex/base64; remove after `attune secrets reencrypt --apply`. |
+| `console.base_url` + `console.session_key` | Console origin and >=32-char session signing secret. |
+| `console.bootstrap_admin` | First admin credentials, used only while `admins` is empty. |
+
+Runtime secret material is encrypted with the shared Tink keyset. Rotate it in
+distributed deployments with `attune secrets add-key`, `set-primary`,
+`reencrypt --apply`, `retire-key --apply`, and `delete-key`; see
+[`docs/private-deploy.md`](docs/private-deploy.md#rotating-the-tink-keyset).
 
 > ⚠️ **Upgrading from a v0.2 install with Lark data?** v0.3 hard-deletes
 > `user_feedback` rows where `source LIKE 'lark-%'`. Set
-> `ATTUNE_CONFIRM_LARK_DELETE=yes` to opt in, or `pg_dump` and export
+> `migrations.confirm_lark_delete: true` to opt in, or `pg_dump` and export
 > those rows first. See [`docs/private-deploy.md`](docs/private-deploy.md)
 > for the full preflight runbook.
 
@@ -85,7 +103,7 @@ Every field in [`config.example.yaml`](config.example.yaml) has an env-var overr
 |---|---|---|
 | HTTP server | Go 1.25, chi router, structured slog | Single static binary |
 | Storage | PostgreSQL 14+ | pgvector for clustering (v0.5+) |
-| LLM enrichment | OpenAI Chat / OpenAI Responses / Anthropic / Gemini | Multi-protocol with structured output + [guardrails](docs/guardrails.md) |
+| LLM enrichment | DB-managed OpenAI Chat / OpenAI Responses / Anthropic / Gemini channels | Multi-protocol with structured output + [guardrails](docs/guardrails.md) |
 | Outbound | customer HTTPS webhooks · GitHub Issues | Slack / Discord / email in v0.6 (#34) |
 | Console | React + Vite + biome (`console/`) | Triage UI, served as static files |
 | Observability | OpenTelemetry + Prometheus `/metrics` | Grafana dashboards in `observability/dashboards/` |
@@ -111,7 +129,7 @@ internal/
       rawwebhook/  githubissue/
   infra/
     apikey/                  HTTP middleware + context keys
-    config/                  YAML + env override
+    config/                  Config-first YAML loader
     database/                Schema migrations
     llmclient/               Multi-protocol LLM client (OpenAI / Anthropic / Gemini)
     observability/           Vendored OTel + slog helpers

@@ -17,8 +17,8 @@ import type { LoginRequest, LoginResponse } from '@/proto/attune/v1/session'
 // (proto/attune/v1/session.proto → console/src/proto/attune/v1/session.ts):
 // canonical protoJSON uses camelCase keys (redirectUri, not redirect_uri).
 // The first admin is bootstrapped by the backend at startup from
-// ATTUNE_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD}[_FILE] env vars when the
-// admins table is empty — there is no first-time signup UI here.
+// console.bootstrap_admin in config.yaml when the admins table is empty;
+// there is no first-time signup UI here.
 //
 // We route through the shared `api()` helper (review M8, #66) so login
 // errors surface the same {code, message, requestId} envelope as every
