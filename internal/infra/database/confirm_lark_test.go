@@ -10,13 +10,12 @@ import (
 	"github.com/Phixsura/attune/internal/infra/database"
 )
 
-// Unit smoke — verifies the env-bypass branch without needing a DB. The
-// guard MUST return nil immediately when the operator has opted in,
-// regardless of database state (it never even runs the count query).
-func TestConfirmLarkDelete_EnvOptInBypassesDB(t *testing.T) {
-	t.Setenv("ATTUNE_CONFIRM_LARK_DELETE", "yes")
-	if err := database.ConfirmLarkDelete(context.Background(), nil); err != nil {
-		t.Errorf("env opt-in path returned %v; want nil", err)
+// Unit smoke — verifies the config-bypass branch without needing a DB. The
+// guard MUST return nil immediately when the operator has opted in, regardless
+// of database state (it never even runs the count query).
+func TestConfirmLarkDelete_ConfigOptInBypassesDB(t *testing.T) {
+	if err := database.ConfirmLarkDelete(context.Background(), nil, true); err != nil {
+		t.Errorf("config opt-in path returned %v; want nil", err)
 	}
 }
 

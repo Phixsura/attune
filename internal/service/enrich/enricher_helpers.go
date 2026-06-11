@@ -37,6 +37,7 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.E
 		Language:      row.Language,
 		DisplayLocale: row.DisplayLocale,
 	}); err != nil {
+		e.repo.MarkFailed(ctx, id, err.Error())
 		return fmt.Errorf("mark ignored row done: %w", err)
 	}
 	logext.Infof(ctx,
@@ -56,6 +57,7 @@ func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedbac
 	enriched = normalizeEnrichedDisplay(enriched, row.Language, row.DisplayLocale)
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
 	if err := e.persistEnriched(ctx, snapshot, enriched, nil); err != nil {
+		e.repo.MarkFailed(ctx, id, err.Error())
 		return err
 	}
 	logext.Infof(ctx,

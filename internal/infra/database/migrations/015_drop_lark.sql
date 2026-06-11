@@ -3,8 +3,8 @@
 -- Hard-delete all Lark-bound data + schema. Pre-1.0 product; no
 -- customer retention guarantee. The upstream cmd/attune startup path
 -- runs database.ConfirmLarkDelete BEFORE this migration to guard
--- against silent loss when lark-* rows exist and the operator has not
--- opted in via ATTUNE_CONFIRM_LARK_DELETE=yes (see #66 Plan T10).
+-- against silent loss when lark-* rows exist and the operator has not opted in
+-- via migrations.confirm_lark_delete=true (see #66 Plan T10).
 
 -- 1. Delete user_feedback rows produced via Lark source enums.
 DELETE FROM user_feedback WHERE source LIKE 'lark-%';

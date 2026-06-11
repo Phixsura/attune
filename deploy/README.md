@@ -16,10 +16,15 @@ Edit `.env` and set **at least**:
 
 - `POSTGRES_PASSWORD` — a strong password (left empty in the example so a
   misconfig fails loudly).
-- the password slot in `FEEDBACK_API_DATABASE_URL` — **same** password.
-- `FEEDBACK_API_LLM_OPENAI_API_KEY` — your OpenAI-compatible key. The stack
-  boots and `/healthz` passes without it, but enrichment will 401 until it's
-  real.
+
+Then edit `config.yaml`:
+
+- put the same password into `database.url`;
+- set `console.base_url`, `console.session_key`, and `console.bootstrap_admin`;
+- generate a fresh Tink keyset and paste it into `secrets.tink_keyset`:
+  ```bash
+  docker compose run --rm attune secrets generate-keyset
+  ```
 
 ## 2. Start
 
@@ -31,11 +36,11 @@ docker compose up -d
 Check it came up:
 
 ```bash
-docker compose logs attune        # expect: ...OK,port:8090,console_enabled:false,lark_enabled:false
+docker compose logs attune        # expect: ...OK,path:/app/config.yaml,port:8090
 curl http://localhost:8090/healthz   # -> ok
 ```
 
-## 3. Create the first tenant + API key
+## 3. Create tenant, API key, and LLM route
 
 The admin subcommands do **not** run migrations, so run them only **after** the
 server above is up (it migrates on boot):
@@ -43,6 +48,15 @@ server above is up (it migrates on boot):
 ```bash
 docker compose run --rm attune tenant create --slug acme --name "Acme"
 docker compose run --rm attune keys issue --tenant acme --label main
+docker compose run --rm attune llm channels create \
+  --name openai --protocol openai-compat --base-url https://api.openai.com \
+  --api-key sk-...
+docker compose run --rm attune llm channels test \
+  --id <channel-id> --provider-model gpt-4o-mini
+docker compose run --rm attune llm abilities upsert \
+  --channel <channel-id> --logical-model enrich-default --provider-model gpt-4o-mini
+docker compose run --rm attune llm routes upsert \
+  --purpose enrich --logical-model enrich-default
 ```
 
 Send feedback with the printed key:
@@ -88,8 +102,7 @@ docker compose -f docker-compose.yml -f docker-compose.obs.yml down
 > unauthenticated — keep `:8090` off the public internet.
 >
 > The `attune_enrich_duration_seconds` panels stay empty until enrichment runs
-> against a real (or mock/ollama) LLM — see `FEEDBACK_API_LLM_OPENAI_BASE_URL` in
-> `.env.example`.
+> against a real (or mock/ollama) LLM channel configured with `attune llm`.
 
 attune exposes standard Prometheus/OpenMetrics — to use VictoriaMetrics, the
 OpenTelemetry Collector, or another backend instead, point it at `/metrics` (see
@@ -104,15 +117,14 @@ OpenTelemetry Collector, or another backend instead, point it at `/metrics` (see
   docker compose exec postgres pg_dump -U attune attune > backup.sql
   cat backup.sql | docker compose exec -T postgres psql -U attune attune
   ```
+- **Tink key rotation:** generate the next keyset JSON with `attune secrets
+  add-key`, roll it to every replica, switch primary with `set-primary`, run
+  `reencrypt --apply`, retire the old DB key metadata with `retire-key --apply`,
+  then remove the old key from YAML with `delete-key`. The full runbook is in
+  [`../docs/private-deploy.md`](../docs/private-deploy.md#rotating-the-tink-keyset).
 - **Exposure:** the host port binds `127.0.0.1` by default. Front attune with
   your own TLS reverse proxy; set `ATTUNE_BIND=0.0.0.0` only behind one.
 - **Pinning:** `:latest` moves. Pin `ATTUNE_IMAGE` to a version or, best, a
   `@sha256:` digest for reproducible deploys.
 - **No published image yet?** Build from source: `docker compose up -d --build`
   (uncomment the `build:` block in `docker-compose.yml`).
-
-## Not included
-
-The **web console UI** is a separate deployment (its own front-door, image, and
-local-login feature) — tracked in a follow-up issue. This kit is the backend +
-Postgres only.

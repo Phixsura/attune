@@ -63,7 +63,6 @@ func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
 			semconv.ServiceVersion(opts.ServiceVersion),
 			semconv.DeploymentEnvironmentName(opts.Environment),
 		),
-		resource.WithFromEnv(), // allow env to add to OTEL_RESOURCE_ATTRIBUTES
 		resource.WithProcess(), // auto-add process.pid / process.runtime
 		resource.WithTelemetrySDK(),
 	)
@@ -82,7 +81,7 @@ func InitTracer(ctx context.Context, opts Options) (ShutdownFunc, error) {
 	// SpanFromContext returns a valid SpanContext; without a BatchSpanProcessor
 	// every ended span is simply discarded.
 	if opts.Endpoint == "" {
-		slog.InfoContext(ctx, "otel: noop tracer (no OTEL_EXPORTER_OTLP_ENDPOINT)",
+		slog.InfoContext(ctx, "otel: noop tracer (observability.otlp_endpoint is empty)",
 			"service", opts.ServiceName)
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithResource(res),

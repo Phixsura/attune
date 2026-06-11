@@ -14,10 +14,12 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	inboundcore "github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/inbound/adapter/webhook"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/repo/secretlock"
 )
 
 const secretLen = 32
@@ -35,27 +37,30 @@ func (h *Handler) createWebhook(ctx context.Context, auth *session.AuthCtx, name
 		logext.Errorf(ctx, "[%s] rand failed,err:%+v", where, err.Error())
 		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to generate secret")
 	}
-	encSecret, err := h.secrets.Encrypt(rawSecret)
-	if err != nil {
-		logext.Errorf(ctx, "[%s] encrypt secret failed,err:%+v", where, err.Error())
-		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to encrypt secret")
-	}
-	cfg := webhook.Config{
-		Version:                webhook.ConfigVersion,
-		SecretCurrentEncrypted: encSecret,
-		HMACAlgo:               "sha256",
-	}
-	cfgBytes, err := json.Marshal(cfg)
-	if err != nil {
-		logext.Errorf(ctx, "[%s] marshal cfg failed,err:%+v", where, err.Error())
-		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to encode config")
-	}
-	envelope, err := h.secrets.Encrypt(cfgBytes)
-	if err != nil {
-		logext.Errorf(ctx, "[%s] encrypt cfg failed,err:%+v", where, err.Error())
-		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to encrypt config")
-	}
-	if err := h.insertRow(ctx, id, auth.TenantID, channelWebhook, name, slug, envelope); err != nil {
+
+	if err := secretlock.WithTx(ctx, h.pool, true, func(ctx context.Context, tx secretlock.Tx) error {
+		if err := secretlock.EnsureWritableKey(ctx, tx, inboundcore.PrimaryKeyID(h.secrets)); err != nil {
+			return err
+		}
+		encSecret, err := h.secrets.Encrypt(rawSecret)
+		if err != nil {
+			return fmt.Errorf("encrypt webhook secret: %w", err)
+		}
+		cfg := webhook.Config{
+			Version:                webhook.ConfigVersion,
+			SecretCurrentEncrypted: encSecret,
+			HMACAlgo:               "sha256",
+		}
+		cfgBytes, err := json.Marshal(cfg)
+		if err != nil {
+			return fmt.Errorf("marshal webhook config: %w", err)
+		}
+		envelope, err := h.secrets.Encrypt(cfgBytes)
+		if err != nil {
+			return fmt.Errorf("encrypt webhook config: %w", err)
+		}
+		return h.insertRowTx(ctx, tx, id, auth.TenantID, channelWebhook, name, slug, envelope)
+	}); err != nil {
 		return dispatcher.Result[*attunev1.CreateInboundSourceResponse]{}, h.insertErr(ctx, where, auth.TenantID, err)
 	}
 

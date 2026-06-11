@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS user_feedback (
     -- Worker claim (formerly migration 002). Stale claim ≥ 5min is
     -- re-eligible — see service/enricher.go tryClaim semantics.
     enrichment_claimed_at TIMESTAMPTZ,
+    enrichment_attempts INTEGER NOT NULL DEFAULT 0
+        CONSTRAINT chk_user_feedback_enrichment_attempts_nonnegative CHECK (enrichment_attempts >= 0),
+    enrichment_next_retry_at TIMESTAMPTZ,
     -- Historical mirror columns (formerly migration 003). The mirror
     -- collaborator was abandoned in Wave 1.1; columns retained so an
     -- ops mistake reverting code doesn't crash on missing columns.
@@ -89,7 +92,7 @@ CREATE INDEX IF NOT EXISTS idx_user_feedback_user
 CREATE INDEX IF NOT EXISTS idx_user_feedback_tenant_created
   ON user_feedback (tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_user_feedback_enrichment_status
-  ON user_feedback (enrichment_status, created_at)
+  ON user_feedback (enrichment_status, enrichment_next_retry_at, created_at)
   WHERE enrichment_status IN ('pending', 'failed');
 CREATE INDEX IF NOT EXISTS idx_user_feedback_enrichment_claim
   ON user_feedback (enrichment_status, enrichment_claimed_at)

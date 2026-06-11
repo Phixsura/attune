@@ -23,9 +23,20 @@ import (
 // that replace the deleted external-OAuth flow.
 type Handler struct {
 	signer  *session.Signer
-	admins  *admin.Repo
-	tenants *tenant.TenantRepo
+	admins  adminStore
+	tenants tenantScopeResolver
 	baseURL string
+}
+
+type adminStore interface {
+	GetByEmail(ctx context.Context, email string) (admin.Admin, error)
+	GetByID(ctx context.Context, id string) (admin.Admin, error)
+	IncrementFailedAttempts(ctx context.Context, id string) error
+	ResetFailedAttempts(ctx context.Context, id string) error
+}
+
+type tenantScopeResolver interface {
+	FirstActiveID(ctx context.Context) (string, error)
 }
 
 // NewHandler wires the dependencies.
@@ -35,6 +46,40 @@ func NewHandler(signer *session.Signer, admins *admin.Repo, tenants *tenant.Tena
 		admins:  admins,
 		tenants: tenants,
 		baseURL: strings.TrimRight(baseURL, "/"),
+	})
+}
+
+// ScopeAdminSession scopes stale admin sessions that were minted before the
+// first tenant existed. That keeps tenant-scoped console pages usable after
+// operators create the first tenant without forcing a logout/login cycle.
+func (h *Handler) ScopeAdminSession(next http.Handler) http.Handler {
+	const where = "console.auth.Handler.ScopeAdminSession"
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authCtx := session.FromContext(r.Context())
+		if h == nil || authCtx.TenantID != "" || h.admins == nil || h.tenants == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if _, err := h.admins.GetByID(r.Context(), authCtx.UserID); err != nil {
+			if !errors.Is(err, admin.ErrNotFound) {
+				logext.Warnf(r.Context(), "[%s] admin lookup failed,user_id:%s,err:%+v",
+					where, authCtx.UserID, err.Error())
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		tenantID, err := h.tenants.FirstActiveID(r.Context())
+		if err != nil {
+			if !errors.Is(err, tenant.ErrTenantNotFound) {
+				logext.Warnf(r.Context(), "[%s] FirstActiveID failed,user_id:%s,err:%+v",
+					where, authCtx.UserID, err.Error())
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		scoped := ptrext.Indirect(authCtx)
+		scoped.TenantID = tenantID
+		next.ServeHTTP(w, r.WithContext(session.WithAuthCtx(r.Context(), ptrext.Of(scoped))))
 	})
 }
 

@@ -67,6 +67,32 @@ func TestClientRecordsSuccessfulCall(t *testing.T) {
 	require.Positive(t, row.CostUSD)
 }
 
+func TestClientRecordsRouteMetadataAndPricesProviderModel(t *testing.T) {
+	rec := ptrext.Of(fakeRecorder{})
+	client := NewClient(fakeLLM{resp: llmclient.CompletionResponse{
+		Text:  "{}",
+		Usage: llmclient.Usage{InputTokens: 1000, OutputTokens: 500},
+		Route: llmclient.RouteMetadata{
+			ChannelID:     "33333333-3333-3333-3333-333333333333",
+			Protocol:      "anthropic",
+			LogicalModel:  "enrich-default",
+			ProviderModel: "gpt-4o-mini",
+		},
+	}}, rec)
+
+	_, err := client.Complete(context.Background(), llmclient.CompletionRequest{
+		Model: "enrich-default",
+	})
+	require.NoError(t, err)
+	require.Len(t, rec.rows, 1)
+	row := rec.rows[0]
+	require.Equal(t, "enrich-default", row.ModelID)
+	require.Equal(t, "gpt-4o-mini", row.ProviderModelID)
+	require.Equal(t, "33333333-3333-3333-3333-333333333333", row.ChannelID)
+	require.Equal(t, "anthropic", row.LLMProtocol)
+	require.Positive(t, row.CostUSD)
+}
+
 func TestClientRecordsProviderError(t *testing.T) {
 	rec := ptrext.Of(fakeRecorder{})
 	upstreamErr := errors.New("provider unavailable")

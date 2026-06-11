@@ -18,7 +18,7 @@
 // - gemini.go — google.golang.org/genai generateContent with
 // responseSchema + responseMimeType="application/json".
 //
-// Backend selection is wired by cmd/attune (config llm_protocol).
+// Backend selection is wired by the DB-managed LLM router.
 // Users can plug their own backend by implementing LLMClient and
 // wiring it in cmd/attune/setup.go — no registration mechanism needed.
 package llmclient
@@ -86,6 +86,18 @@ type CompletionResponse struct {
 	// Usage carries token counts when the provider returns them.
 	// Zero-valued when unavailable; never an error.
 	Usage Usage
+	// Route carries DB-managed LLM routing metadata when a router selected the
+	// concrete upstream channel. Direct backend tests leave it zero-valued.
+	Route RouteMetadata
+}
+
+// RouteMetadata describes the logical-to-provider selection for one request.
+type RouteMetadata struct {
+	ChannelID     string
+	ChannelName   string
+	Protocol      string
+	LogicalModel  string
+	ProviderModel string
 }
 
 // Usage is provider-reported token accounting. Optional — backends

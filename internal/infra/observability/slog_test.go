@@ -38,7 +38,7 @@ func TestBuildDefaultHandlerInjectsTraceID(t *testing.T) {
 	if line == "" {
 		t.Fatal("expected a log line, got empty buffer")
 	}
-	// Default (no ENV=dev) is JSON; trace_id/span_id are top-level string fields.
+	// Default output is JSON; trace_id/span_id are top-level string fields.
 	var rec map[string]any
 	if err := json.Unmarshal([]byte(line), &rec); err != nil {
 		t.Fatalf("expected JSON output, parse failed: %v · line=%q", err, line)

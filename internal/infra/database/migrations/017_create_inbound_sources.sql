@@ -4,8 +4,8 @@
 -- N:1 model: a tenant may register many webhook sources and many email
 -- mailboxes, but slug must be unique within (tenant, channel).
 --
--- config is AES-GCM-256 envelope-encrypted JSON; the framework's
--- inbound.SecretStore (NewAESGCMSecretStore) is the only legal decoder.
+-- config is Tink AEAD-encrypted JSON; inbound.SecretStore is the legal decoder
+-- interface.
 
 CREATE TABLE IF NOT EXISTS inbound_sources (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

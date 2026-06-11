@@ -15,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Phixsura/attune/internal/infra/config"
@@ -35,18 +36,20 @@ import (
 )
 
 // subcommands routes each CLI verb to its handler. `server` ignores its args
-// (it reads config + env); the rest receive args[1:]. A dispatch table keeps
+// after global flags; the rest receive args[1:]. A dispatch table keeps
 // main() a thin router instead of a long switch.
 var subcommands = map[string]func([]string) error{
-	"server": func([]string) error { return runServer() },
-	"keys":   runKeys,
-	"tenant": runTenant,
-	"eval":   runEval,
-	"outbox": runOutbox,
+	"server":  func([]string) error { return runServer() },
+	"keys":    runKeys,
+	"tenant":  runTenant,
+	"eval":    runEval,
+	"outbox":  runOutbox,
+	"secrets": runSecrets,
+	"llm":     runLLM,
 }
 
 func main() {
-	// Install the slog default (JSON in prod, Text under ENV=dev) wrapped in
+	// Install the JSON slog default wrapped in
 	// TraceIDHandler so every log record carries trace_id/span_id. CLAUDE.md
 	// §7 routes all log calls through internal/pkg/logext on top of this.
 	// Rationale: docs/observability-trace-design.md.
@@ -54,6 +57,12 @@ func main() {
 
 	ctx := context.Background()
 	args := os.Args[1:]
+	var err error
+	args, err = parseGlobalArgs(args)
+	if err != nil {
+		logext.Errorf(ctx, "parse args failed,err:%+v", err)
+		os.Exit(2)
+	}
 	if len(args) == 0 {
 		args = []string{"server"}
 	}
@@ -78,12 +87,35 @@ func printUsage() {
 	fmt.Fprint(os.Stderr, `attune
 
 Usage:
+ attune --config ./config.yaml server
  attune server Run the HTTP server (default)
  attune tenant create --slug <s> [--name <n>] Create a new tenant
  attune keys issue --tenant <slug> [--label <s>] Mint an API key
  attune eval --mode <m> [--tenant <slug>] ... AI accuracy report (--tenant required for export-for-human / score-human)
  attune outbox prune --older-than <dur> Mark stale pending rows dead
+ attune secrets generate-keyset|keyset-info|add-key|set-primary|delete-key|reencrypt|retire-key Manage Tink runtime secrets
+ attune llm channels|abilities|routes ... Manage DB-backed LLM config
 `)
+}
+
+func parseGlobalArgs(args []string) ([]string, error) {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--config":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("--config requires a path")
+			}
+			i++
+			config.SetPath(args[i])
+		case strings.HasPrefix(arg, "--config="):
+			config.SetPath(strings.TrimPrefix(arg, "--config="))
+		default:
+			out = append(out, arg)
+		}
+	}
+	return out, nil
 }
 
 // ── keys ──────────────────────────────────────────────────────────────────
