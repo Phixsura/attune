@@ -9,13 +9,17 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
+	llmconfigrepo "github.com/Phixsura/attune/internal/repo/llmconfig"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/eval"
 	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
+	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
+	"github.com/Phixsura/attune/internal/service/llmrouter"
 )
 
 // runEval dispatches the `attune eval` CLI. Three modes:
@@ -66,13 +70,21 @@ func runEval(args []string) error {
 	defer pool.Close()
 
 	feedbackRepo := feedback.NewFeedback(pool)
-	rawLLM, err := buildLLMClient(cfg)
+	secrets, err := secretstore.NewTinkStoreFromJSONWithLegacy(
+		cfg.Secrets.TinkKeyset,
+		cfg.Secrets.LegacyInboundMasterKey,
+	)
 	if err != nil {
-		return fmt.Errorf("llm backend: %w", err)
+		return fmt.Errorf("secrets: %w", err)
 	}
+	llmConfigRepo := llmconfigrepo.New(pool)
+	if err := llmconfigsvc.NewService(llmConfigRepo, secrets).SyncKeyRegistry(ctx); err != nil {
+		return fmt.Errorf("sync secret key registry: %w", err)
+	}
+	rawLLM := llmrouter.New(llmConfigRepo, secrets)
 	llm := llmauditsvc.NewClient(rawLLM, llmauditrepo.New(pool))
 	defer llm.Close()
-	enricher := enrich.NewEnricher(feedbackRepo, llm, cfg.LLMModel)
+	enricher := enrich.NewEnricher(feedbackRepo, llm, "")
 	evaluator := eval.NewEvaluator(feedbackRepo, tenant.NewTenant(pool), enricher)
 
 	switch ptrext.Indirect(mode) {

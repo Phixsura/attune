@@ -28,10 +28,10 @@ type OpenAIResponsesBackend struct {
 	client openai.Client
 }
 
-// NewOpenAIResponses builds the SDK-backed Responses client. baseURL is
-// the same value operators use for llm_openai_base_url (e.g.
-// "https://api.openai.com"); /v1 is appended automatically because the
-// SDK concatenates it directly onto the base URL for /v1/responses.
+// NewOpenAIResponses builds the SDK-backed Responses client. baseURL is the
+// DB-managed channel base URL (e.g. "https://api.openai.com"); /v1 is appended
+// automatically because the SDK concatenates it directly onto the base URL for
+// /v1/responses.
 // apiKey is required (the SDK refuses empty keys for OpenAI).
 //
 // Transport is an *http.Client wrapped with otelhttp.NewTransport so
@@ -44,7 +44,6 @@ func NewOpenAIResponses(baseURL, apiKey string) (*OpenAIResponsesBackend, error)
 	}
 	httpClient := ptrext.Of(http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
-		Timeout:   openaiHTTPTimeout,
 	})
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),

@@ -211,8 +211,12 @@ The layout is enforced by `scripts/lint-integration-layout.sh` in pre-commit,
 - Customer-facing webhook secrets must be ≥ 16 chars (enforced in config).
 - HTTPS for all outbound customer URLs; loopback `http://127.0.0.1` /
   `localhost` / `[::1]` are the documented exemptions.
-- Database connection strings, LLM API keys, signing secrets — only via env
-  vars or mounted files. Never committed to YAML.
+- Process runtime config is one private YAML file selected by `--config`; never
+  commit real deploy config with live database URLs, signing keys, Tink keysets,
+  or bootstrap credentials.
+- LLM provider API keys are write-only inputs through Console/API/CLI and are
+  persisted encrypted with `secrets.tink_keyset`; never store provider keys in
+  process YAML or committed fixtures.
 - Console `dev_login` + `insecure_cookies` flags are HTTP-only test loops;
   combined check refuses startup if either is set in a TLS-fronted deploy.
 
@@ -269,5 +273,5 @@ and code-generated — not hand-written (#19):
 ---
 
 For project-level architecture, overview, and quickstart, see
-[README.md](README.md). For private deployment, see `docs/private-deploy.md`
-(coming in a follow-up issue).
+[README.md](README.md). For private deployment, see
+[`docs/private-deploy.md`](docs/private-deploy.md).

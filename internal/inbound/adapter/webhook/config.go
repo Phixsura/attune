@@ -12,9 +12,8 @@ import (
 )
 
 // Config — the decrypted shape of inbound_sources.config for a
-// "webhook" channel row. The two ciphertexts are envelope-encrypted via
-// inbound.SecretStore (AES-GCM-256, version + key_id bytes — see
-// internal/inbound/secrets.go for the layout). PreviousExpiresAt is
+// "webhook" channel row. The two ciphertexts are encrypted via the shared
+// inbound.SecretStore. PreviousExpiresAt is
 // populated by RotateSecret; when nil OR in the past the previous
 // secret is considered expired.
 //
@@ -34,7 +33,7 @@ const ConfigVersion = 1
 
 // parseConfig returns the current secret, the previous secret (or
 // nil/empty), and whether the previous secret has expired. raw is the
-// AES-GCM envelope ciphertext stored in inbound_sources.config; the
+// encrypted ciphertext stored in inbound_sources.config; the
 // inner JSON has the webhookConfig shape.
 func parseConfig(raw []byte, secrets inbound.SecretStore) (current, previous []byte, prevExpired bool, err error) {
 	decoded, err := secrets.Decrypt(raw)

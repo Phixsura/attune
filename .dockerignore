@@ -1,10 +1,12 @@
-# Keep the Docker build context to what `go build ./cmd/attune` needs.
-# The console SPA is built + served separately (not embedded in the binary),
-# so its 310 MB node_modules must never enter the build context.
+# Keep the Docker build context lean while still allowing the Dockerfile to
+# build the Console SPA in its own Node stage.
 .git
 .github
 .claude
-console
+console/node_modules
+console/dist
+console/coverage
+console/*.tsbuildinfo
 docs
 *.md
 LICENSE

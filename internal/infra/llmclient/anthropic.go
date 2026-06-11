@@ -42,7 +42,6 @@ func NewAnthropic(baseURL, apiKey string) (*AnthropicBackend, error) {
 	}
 	httpClient := ptrext.Of(http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
-		Timeout:   openaiHTTPTimeout,
 	})
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),

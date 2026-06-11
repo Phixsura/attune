@@ -11,6 +11,8 @@
 package console
 
 import (
+	"context"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -23,18 +25,22 @@ import (
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
 	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	consolellmconfig "github.com/Phixsura/attune/internal/handlers/console/llmconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/repo/admin"
 )
 
 // Re-exports so cmd/attune can keep a single `console.X` surface even
 // after the per-feature split. Lets the bootstrap (setup.go) stay close
 // to the previous shape without learning every new package path.
 type (
-	Signer = session.Signer
+	Signer          = session.Signer
+	BootstrapConfig = auth.BootstrapConfig
 )
 
 // Constructor re-exports so cmd/attune/setup.go can keep building
@@ -51,6 +57,7 @@ var (
 	NewEnrichConfigHandler   = enrichconfig.NewHandler
 	NewGuardPolicyHandler    = consoleguardpolicy.NewHandler
 	NewInboundHandler        = consoleinbound.NewHandler
+	NewLLMConfigHandler      = consolellmconfig.NewHandler
 	BootstrapAdmin           = auth.BootstrapAdmin
 )
 
@@ -95,6 +102,8 @@ var (
 //	 POST /inbound/sources/{id}/resume -> dispatcher.Bind(inbound.Handler.Resume)
 //	 DELETE /inbound/sources/{id} -> dispatcher.Bind(inbound.Handler.Delete)
 //	 POST /inbound/sources/test-connection -> dispatcher.Bind(inbound.Handler.TestConnection)
+//	 POST /llm/channels/{id}/test -> dispatcher.Bind(llmconfig.Handler.TestChannel)
+//	 GET /llm/channels/{channel_id}/models -> dispatcher.Bind(llmconfig.Handler.ListChannelModels)
 type Router struct {
 	signer         *session.Signer
 	login          *auth.Handler
@@ -107,6 +116,12 @@ type Router struct {
 	enrichConfig   *enrichconfig.Handler
 	guardPolicies  *consoleguardpolicy.Handler
 	inbound        *consoleinbound.Handler
+	llmConfig      *consolellmconfig.Handler
+	admins         adminReader
+}
+
+type adminReader interface {
+	GetByID(ctx context.Context, id string) (admin.Admin, error)
 }
 
 func NewRouter(
@@ -121,6 +136,8 @@ func NewRouter(
 	enrichConfig *enrichconfig.Handler,
 	guardPolicies *consoleguardpolicy.Handler,
 	inbound *consoleinbound.Handler,
+	llmConfig *consolellmconfig.Handler,
+	admins adminReader,
 ) *Router {
 	return ptrext.Of(Router{
 		signer:         signer,
@@ -134,6 +151,8 @@ func NewRouter(
 		enrichConfig:   enrichConfig,
 		guardPolicies:  guardPolicies,
 		inbound:        inbound,
+		llmConfig:      llmConfig,
+		admins:         admins,
 	})
 }
 
@@ -156,6 +175,9 @@ func (r *Router) Mount() chi.Router {
 
 	mux.Group(func(m chi.Router) {
 		m.Use(r.signer.RequireSession)
+		if r.login != nil {
+			m.Use(r.login.ScopeAdminSession)
+		}
 		r.mountSession(m)
 	})
 
@@ -218,6 +240,203 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountEnrichConfig(m)
 	r.mountGuardPolicies(m)
 	r.mountInbound(m)
+	r.mountLLMConfig(m)
+}
+
+func (r *Router) mountLLMConfig(m chi.Router) {
+	if r.llmConfig == nil {
+		return
+	}
+	m.Route("/llm", func(l chi.Router) {
+		l.Use(r.requireAdmin)
+		l.Get("/channels", dispatcher.Bind(
+			"console.llmconfig.ListChannels",
+			dispatcher.Empty(func() *attunev1.ListLLMChannelsRequest { return ptrext.Of(attunev1.ListLLMChannelsRequest{}) }),
+			r.llmConfig.ListChannels,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListLLMChannelsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		l.Post("/channels", dispatcher.Bind(
+			"console.llmconfig.CreateChannel",
+			dispatcher.JSON(func() *attunev1.CreateLLMChannelRequest { return ptrext.Of(attunev1.CreateLLMChannelRequest{}) }),
+			r.llmConfig.CreateChannel,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateLLMChannelRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		l.Get("/channels/{id}", dispatcher.Bind(
+			"console.llmconfig.GetChannel",
+			dispatcher.Path(
+				func() *attunev1.GetLLMChannelRequest { return ptrext.Of(attunev1.GetLLMChannelRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.GetLLMChannelRequest, id string) { req.Id = id }),
+			),
+			r.llmConfig.GetChannel,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetLLMChannelRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		l.Patch("/channels/{id}", dispatcher.Bind(
+			"console.llmconfig.UpdateChannel",
+			dispatcher.Combine(
+				func() *attunev1.UpdateLLMChannelRequest { return ptrext.Of(attunev1.UpdateLLMChannelRequest{}) },
+				dispatcher.JSONBody[*attunev1.UpdateLLMChannelRequest],
+				dispatcher.Param("id", func(req *attunev1.UpdateLLMChannelRequest, id string) { req.Id = id }),
+			),
+			r.llmConfig.UpdateChannel,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateLLMChannelRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		l.Delete("/channels/{id}", dispatcher.Bind(
+			"console.llmconfig.DeleteChannel",
+			dispatcher.Path(
+				func() *attunev1.DeleteLLMChannelRequest { return ptrext.Of(attunev1.DeleteLLMChannelRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.DeleteLLMChannelRequest, id string) { req.Id = id }),
+			),
+			r.llmConfig.DeleteChannel,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteLLMChannelRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		l.Post("/channels/{id}/test", dispatcher.Bind(
+			"console.llmconfig.TestChannel",
+			dispatcher.Combine(
+				func() *attunev1.TestLLMChannelRequest { return ptrext.Of(attunev1.TestLLMChannelRequest{}) },
+				dispatcher.JSONBody[*attunev1.TestLLMChannelRequest],
+				dispatcher.Param("id", func(req *attunev1.TestLLMChannelRequest, id string) { req.Id = id }),
+			),
+			r.llmConfig.TestChannel,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TestLLMChannelRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		l.Get("/channels/{channel_id}/models", dispatcher.Bind(
+			"console.llmconfig.ListChannelModels",
+			dispatcher.Path(
+				func() *attunev1.ListLLMChannelModelsRequest {
+					return ptrext.Of(attunev1.ListLLMChannelModelsRequest{})
+				},
+				dispatcher.Param("channel_id", func(req *attunev1.ListLLMChannelModelsRequest, id string) {
+					req.ChannelId = id
+				}),
+			),
+			r.llmConfig.ListChannelModels,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListLLMChannelModelsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		r.mountLLMAbilities(l)
+		r.mountLLMRoutes(l)
+	})
+}
+
+func (r *Router) requireAdmin(next http.Handler) http.Handler {
+	const where = "console.Router.requireAdmin"
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		authCtx := session.FromContext(req.Context())
+		if r.admins == nil {
+			logext.Warnf(req.Context(), "[%s] reject: admin repo not configured,user_id:%s", where, authCtx.UserID)
+			dispatcher.Reject(req.Context(), w, http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "admin session required")
+			return
+		}
+		adminRow, err := r.admins.GetByID(req.Context(), authCtx.UserID)
+		if err != nil {
+			if errors.Is(err, admin.ErrNotFound) {
+				logext.Warnf(req.Context(), "[%s] reject: non-admin session,user_id:%s", where, authCtx.UserID)
+				dispatcher.Reject(req.Context(), w, http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "admin session required")
+				return
+			}
+			logext.Errorf(req.Context(), "[%s] admin lookup failed,user_id:%s,err:%+v",
+				where, authCtx.UserID, err.Error())
+			dispatcher.Reject(req.Context(), w, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to verify admin session")
+			return
+		}
+		if adminRow.Role != "admin" {
+			logext.Warnf(req.Context(), "[%s] reject: non-admin role,user_id:%s,role:%s",
+				where, authCtx.UserID, adminRow.Role)
+			dispatcher.Reject(req.Context(), w, http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "admin session required")
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
+}
+
+func (r *Router) mountLLMAbilities(l chi.Router) {
+	l.Get("/channels/{channel_id}/abilities", dispatcher.Bind(
+		"console.llmconfig.ListAbilities",
+		dispatcher.Path(
+			func() *attunev1.ListLLMChannelAbilitiesRequest {
+				return ptrext.Of(attunev1.ListLLMChannelAbilitiesRequest{})
+			},
+			dispatcher.Param("channel_id", func(req *attunev1.ListLLMChannelAbilitiesRequest, id string) {
+				req.ChannelId = id
+			}),
+		),
+		r.llmConfig.ListAbilities,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListLLMChannelAbilitiesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	l.Put("/channels/{channel_id}/abilities", dispatcher.Bind(
+		"console.llmconfig.UpsertAbility",
+		dispatcher.Combine(
+			func() *attunev1.UpsertLLMChannelAbilityRequest {
+				return ptrext.Of(attunev1.UpsertLLMChannelAbilityRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpsertLLMChannelAbilityRequest],
+			dispatcher.Param("channel_id", func(req *attunev1.UpsertLLMChannelAbilityRequest, id string) {
+				req.ChannelId = id
+			}),
+		),
+		r.llmConfig.UpsertAbility,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpsertLLMChannelAbilityRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	l.Post("/channels/{channel_id}/abilities/delete", dispatcher.Bind(
+		"console.llmconfig.DeleteAbility",
+		dispatcher.Combine(
+			func() *attunev1.DeleteLLMChannelAbilityRequest {
+				return ptrext.Of(attunev1.DeleteLLMChannelAbilityRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.DeleteLLMChannelAbilityRequest],
+			dispatcher.Param("channel_id", func(req *attunev1.DeleteLLMChannelAbilityRequest, id string) {
+				req.ChannelId = id
+			}),
+		),
+		r.llmConfig.DeleteAbility,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteLLMChannelAbilityRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountLLMRoutes(l chi.Router) {
+	l.Get("/routes", dispatcher.Bind(
+		"console.llmconfig.ListRoutes",
+		dispatcher.Empty(func() *attunev1.ListLLMRoutesRequest { return ptrext.Of(attunev1.ListLLMRoutesRequest{}) }),
+		r.llmConfig.ListRoutes,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListLLMRoutesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	l.Put("/routes", dispatcher.Bind(
+		"console.llmconfig.UpsertRoute",
+		dispatcher.JSON(func() *attunev1.UpsertLLMRouteRequest { return ptrext.Of(attunev1.UpsertLLMRouteRequest{}) }),
+		r.llmConfig.UpsertRoute,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpsertLLMRouteRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	l.Post("/routes/delete", dispatcher.Bind(
+		"console.llmconfig.DeleteRoute",
+		dispatcher.JSON(func() *attunev1.DeleteLLMRouteRequest { return ptrext.Of(attunev1.DeleteLLMRouteRequest{}) }),
+		r.llmConfig.DeleteRoute,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteLLMRouteRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountAPIKeys(m chi.Router) {

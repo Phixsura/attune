@@ -76,7 +76,9 @@ Current coverage includes migration idempotency, the destructive
 Lark-delete preflight guard, feedback JSONB queries, API key
 issue/lookup/revoke, tenant + notify-target CRUD, admin bootstrap /
 lockout state, inbound source repo state, console inbound delete
-branches that require a real `pgxpool`, and the
+branches that require a real `pgxpool`, DB-managed LLM channel/ability/route
+CRUD with encrypted write-only credentials, shared Tink key registry startup
+checks, enrichment retry/backoff state, and the
 ingest → enrich → outbox queue → outbox drain path.
 
 ## Live tier — `make test-live`

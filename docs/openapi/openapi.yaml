@@ -653,6 +653,325 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/llm/channels:
+        get:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_ListLLMChannels
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListLLMChannelsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_CreateLLMChannel
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateLLMChannelRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LLMChannel'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/llm/channels/{channelId}/abilities:
+        get:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_ListLLMChannelAbilities
+            parameters:
+                - name: channelId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListLLMChannelAbilitiesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        put:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_UpsertLLMChannelAbility
+            parameters:
+                - name: channelId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpsertLLMChannelAbilityRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LLMChannelAbility'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/llm/channels/{channelId}/abilities/delete:
+        post:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_DeleteLLMChannelAbility
+            parameters:
+                - name: channelId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DeleteLLMChannelAbilityRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteLLMChannelAbilityResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/llm/channels/{channelId}/models:
+        get:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_ListLLMChannelModels
+            parameters:
+                - name: channelId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListLLMChannelModelsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/llm/channels/{id}:
+        get:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_GetLLMChannel
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LLMChannel'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        delete:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_DeleteLLMChannel
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteLLMChannelResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        patch:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_UpdateLLMChannel
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateLLMChannelRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LLMChannel'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/llm/channels/{id}/test:
+        post:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_TestLLMChannel
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TestLLMChannelRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TestLLMChannelResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/llm/routes:
+        get:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_ListLLMRoutes
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListLLMRoutesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        put:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_UpsertLLMRoute
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpsertLLMRouteRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LLMRoute'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/llm/routes/delete:
+        post:
+            tags:
+                - LLMConfigService
+            operationId: LLMConfigService_DeleteLLMRoute
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DeleteLLMRouteRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteLLMRouteResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/logout:
         post:
             tags:
@@ -1009,6 +1328,33 @@ components:
                  For webhook channels, webhook_secret_reveal is also populated — this is
                  the only place the raw secret is ever transmitted; clients must store
                  it immediately because rotate is the only path to a new value.
+        CreateLLMChannelRequest:
+            required:
+                - name
+                - protocol
+            type: object
+            properties:
+                name:
+                    type: string
+                protocol:
+                    type: string
+                baseUrl:
+                    type: string
+                authMode:
+                    type: string
+                apiKey:
+                    type: string
+                status:
+                    type: string
+                priority:
+                    type: integer
+                    format: int32
+                weight:
+                    type: integer
+                    format: int32
+                timeoutSeconds:
+                    type: integer
+                    format: int32
         CreateNotifyTargetRequest:
             required:
                 - destinationType
@@ -1035,6 +1381,33 @@ components:
             type: object
             properties: {}
         DeleteInboundSourceResponse:
+            type: object
+            properties: {}
+        DeleteLLMChannelAbilityRequest:
+            required:
+                - logicalModel
+            type: object
+            properties:
+                channelId:
+                    type: string
+                logicalModel:
+                    type: string
+        DeleteLLMChannelAbilityResponse:
+            type: object
+            properties: {}
+        DeleteLLMChannelResponse:
+            type: object
+            properties: {}
+        DeleteLLMRouteRequest:
+            required:
+                - purpose
+            type: object
+            properties:
+                tenantId:
+                    type: string
+                purpose:
+                    type: string
+        DeleteLLMRouteResponse:
             type: object
             properties: {}
         DeleteNotifyTargetResponse:
@@ -1484,6 +1857,96 @@ components:
                     type: string
                     description: Enrichment lifecycle state at ingest time (always "pending" here).
             description: IngestResponse is returned on 200.
+        LLMChannel:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                protocol:
+                    type: string
+                baseUrl:
+                    type: string
+                authMode:
+                    type: string
+                hasApiKey:
+                    type: boolean
+                credentialKeyId:
+                    type: string
+                status:
+                    type: string
+                priority:
+                    type: integer
+                    format: int32
+                weight:
+                    type: integer
+                    format: int32
+                timeoutSeconds:
+                    type: integer
+                    format: int32
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                lastTestedAt:
+                    type: string
+                lastTestStatus:
+                    type: string
+                lastError:
+                    type: string
+            description: |-
+                LLMChannel never returns api_key. API keys are write-only and persisted
+                 encrypted with the shared Tink keyset.
+        LLMChannelAbility:
+            type: object
+            properties:
+                id:
+                    type: string
+                channelId:
+                    type: string
+                logicalModel:
+                    type: string
+                providerModel:
+                    type: string
+                enabled:
+                    type: boolean
+                priority:
+                    type: integer
+                    format: int32
+                weight:
+                    type: integer
+                    format: int32
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        LLMProviderModel:
+            type: object
+            properties:
+                id:
+                    type: string
+                displayName:
+                    type: string
+                ownedBy:
+                    type: string
+        LLMRoute:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                purpose:
+                    type: string
+                logicalModel:
+                    type: string
+                enabled:
+                    type: boolean
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
         LLMUsageBucket:
             type: object
             properties:
@@ -1534,6 +1997,34 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/InboundSource'
+        ListLLMChannelAbilitiesResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/LLMChannelAbility'
+        ListLLMChannelModelsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/LLMProviderModel'
+        ListLLMChannelsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/LLMChannel'
+        ListLLMRoutesResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/LLMRoute'
         ListNotifyTargetsResponse:
             type: object
             properties:
@@ -1763,6 +2254,34 @@ components:
                     type: string
                 latencyMs:
                     type: string
+        TestLLMChannelRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                providerModel:
+                    type: string
+                prompt:
+                    type: string
+        TestLLMChannelResponse:
+            type: object
+            properties:
+                ok:
+                    type: boolean
+                providerModel:
+                    type: string
+                text:
+                    type: string
+                inputTokens:
+                    type: integer
+                    format: int32
+                outputTokens:
+                    type: integer
+                    format: int32
+                latencyMs:
+                    type: string
+                channel:
+                    $ref: '#/components/schemas/LLMChannel'
         TestNotifyTargetRequest:
             type: object
             properties:
@@ -1808,6 +2327,35 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/GuardPolicy'
+        UpdateLLMChannelRequest:
+            required:
+                - name
+                - protocol
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                protocol:
+                    type: string
+                baseUrl:
+                    type: string
+                authMode:
+                    type: string
+                apiKey:
+                    type: string
+                status:
+                    type: string
+                priority:
+                    type: integer
+                    format: int32
+                weight:
+                    type: integer
+                    format: int32
+                timeoutSeconds:
+                    type: integer
+                    format: int32
         UpdateNotifyTargetRequest:
             type: object
             properties:
@@ -1823,6 +2371,39 @@ components:
                     type: integer
                     format: int32
                 disabled:
+                    type: boolean
+        UpsertLLMChannelAbilityRequest:
+            required:
+                - logicalModel
+            type: object
+            properties:
+                channelId:
+                    type: string
+                logicalModel:
+                    type: string
+                providerModel:
+                    type: string
+                enabled:
+                    type: boolean
+                priority:
+                    type: integer
+                    format: int32
+                weight:
+                    type: integer
+                    format: int32
+        UpsertLLMRouteRequest:
+            required:
+                - purpose
+                - logicalModel
+            type: object
+            properties:
+                tenantId:
+                    type: string
+                purpose:
+                    type: string
+                logicalModel:
+                    type: string
+                enabled:
                     type: boolean
         UsageBucket:
             type: object
@@ -1893,6 +2474,8 @@ tags:
          channel-agnostic inbound framework). Sources back the webhook and
          email IMAP adapters; future channels (RSS, scrape, MQ, …) hang off
          the same shape.
+    - name: LLMConfigService
+      description: LLMConfigService manages DB-backed provider channels and routes.
     - name: NotifyTargetService
       description: NotifyTargetService manages a tenant's outbound notification destinations.
     - name: SessionService

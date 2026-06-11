@@ -33,14 +33,12 @@ func TestPG_ConfirmLarkDelete_GuardsLegacyRows(t *testing.T) {
 	tenantID := insertTenant(t, ctx, pool)
 	insertFeedback(t, ctx, pool, tenantID, "lark-webhook")
 
-	t.Setenv("ATTUNE_CONFIRM_LARK_DELETE", "")
-	err := database.ConfirmLarkDelete(ctx, pool)
+	err := database.ConfirmLarkDelete(ctx, pool, false)
 	if !errors.Is(err, database.ErrDestructiveMigrationGuard) {
 		t.Fatalf("ConfirmLarkDelete error: got %v want %v", err, database.ErrDestructiveMigrationGuard)
 	}
 
-	t.Setenv("ATTUNE_CONFIRM_LARK_DELETE", "yes")
-	if err := database.ConfirmLarkDelete(ctx, pool); err != nil {
+	if err := database.ConfirmLarkDelete(ctx, pool, true); err != nil {
 		t.Fatalf("ConfirmLarkDelete with opt-in: %v", err)
 	}
 }

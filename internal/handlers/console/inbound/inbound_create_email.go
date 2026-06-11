@@ -14,10 +14,12 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	inboundcore "github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/inbound/adapter/email"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/repo/secretlock"
 )
 
 // createEmail handles the email-channel branch of Create. Validates the
@@ -32,13 +34,17 @@ func (h *Handler) createEmail(ctx context.Context, auth *session.AuthCtx, req *a
 	if err := validateEmailCreateConfig(cfg); err != nil {
 		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	}
-	envelope, err := h.encryptEmailConfig(cfg)
-	if err != nil {
-		logext.Errorf(ctx, "[%s] encrypt failed,err:%+v", where, err.Error())
-		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to encrypt config")
-	}
 	id := uuid.NewString()
-	if err := h.insertRow(ctx, id, auth.TenantID, channelEmail, name, slug, envelope); err != nil {
+	if err := secretlock.WithTx(ctx, h.pool, true, func(ctx context.Context, tx secretlock.Tx) error {
+		if err := secretlock.EnsureWritableKey(ctx, tx, inboundcore.PrimaryKeyID(h.secrets)); err != nil {
+			return err
+		}
+		envelope, err := h.encryptEmailConfig(cfg)
+		if err != nil {
+			return err
+		}
+		return h.insertRowTx(ctx, tx, id, auth.TenantID, channelEmail, name, slug, envelope)
+	}); err != nil {
 		return dispatcher.Result[*attunev1.CreateInboundSourceResponse]{}, h.insertErr(ctx, where, auth.TenantID, err)
 	}
 	stored, err := h.sources.Get(ctx, id)

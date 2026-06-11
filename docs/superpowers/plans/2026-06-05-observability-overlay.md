@@ -593,8 +593,7 @@ docker compose -f docker-compose.yml -f docker-compose.obs.yml down
 > unauthenticated — keep `:8090` off the public internet.
 >
 > The `attune_enrich_duration_seconds` panels stay empty until enrichment runs
-> against a real (or mock/ollama) LLM — see `FEEDBACK_API_LLM_OPENAI_BASE_URL` in
-> `.env.example`.
+> against a real (or mock/ollama) DB-managed LLM channel.
 
 attune exposes standard Prometheus/OpenMetrics — to use VictoriaMetrics, the
 OpenTelemetry Collector, or another backend instead, point it at `/metrics` (see

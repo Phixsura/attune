@@ -26,6 +26,9 @@ type Row struct {
 	InboundTraceID   string
 	OtelTraceID      string
 	ModelID          string
+	ProviderModelID  string
+	ChannelID        string
+	LLMProtocol      string
 	Purpose          string
 	PromptTokens     int32
 	CompletionTokens int32
@@ -41,11 +44,14 @@ func (r *Repo) Insert(ctx context.Context, row Row) error {
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO llm_audit
-		 (tenant_id, feedback_id, inbound_trace_id, otel_trace_id, model_id, purpose, prompt_tokens,
+		 (tenant_id, feedback_id, inbound_trace_id, otel_trace_id, model_id,
+		  provider_model_id, channel_id, llm_protocol, purpose, prompt_tokens,
 		  completion_tokens, cost_usd, status, error, latency_ms)
-		VALUES ($1, NULLIF($2, 0), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		VALUES ($1, NULLIF($2, 0), $3, $4, $5, $6, NULLIF($7, '')::uuid, $8,
+		        $9, $10, $11, $12, $13, $14, $15)`,
 		row.TenantID, nonNegativeInt64(row.FeedbackID), row.InboundTraceID, row.OtelTraceID,
-		row.ModelID, row.Purpose, nonNegativeI32(row.PromptTokens),
+		row.ModelID, row.ProviderModelID, row.ChannelID, row.LLMProtocol, row.Purpose,
+		nonNegativeI32(row.PromptTokens),
 		nonNegativeI32(row.CompletionTokens), row.CostUSD, row.Status, row.Error,
 		nonNegativeInt(row.LatencyMS),
 	)

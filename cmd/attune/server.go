@@ -2,9 +2,8 @@
 // OpenTelemetry, the pgx pool, the LLM client, repos/services, the outbox
 // background worker, the chi router (ingest + inbound framework + console
 // mounts) and runs the HTTP server until SIGINT/SIGTERM. The small OTel
-// header helpers and the signal-driven context live here too since they are
-// only used by the server path. Subcommand dispatch and CLI plumbing stay in
-// main.go.
+// signal-driven context lives here too since it is only used by the server
+// path. Subcommand dispatch and CLI plumbing stay in main.go.
 package main
 
 import (
@@ -14,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -31,6 +29,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/llmguard"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/observability"
+	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -40,6 +39,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/guardpolicy"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
+	llmconfigrepo "github.com/Phixsura/attune/internal/repo/llmconfig"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -47,6 +47,8 @@ import (
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/ingest"
 	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
+	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
+	"github.com/Phixsura/attune/internal/service/llmrouter"
 	"github.com/Phixsura/attune/internal/service/outbox"
 )
 
@@ -63,16 +65,16 @@ func runServer() error {
 	defer cancel()
 	logext.Infof(ctx, "[%s] start,port:%d", where, cfg.Port)
 
-	// OpenTelemetry tracer. Empty endpoint = noop (local dev works
-	// without config); set OTEL_EXPORTER_OTLP_ENDPOINT in .env to ship
-	// spans to a real collector. Details: docs/observability-trace-design.md.
+	// OpenTelemetry tracer. Empty endpoint = noop; configure
+	// observability.otlp_endpoint to ship spans to a real collector.
+	// Details: docs/observability-trace-design.md.
 	//
 	// attune is a customer-facing service (private-deploy / SaaS), so
 	// OTel stays non-invasive:
 	// - clients may pass a W3C traceparent header; if absent we generate one
 	// - the X-Trace-Id response header is an optional debug aid, not contract
 	// - business logs carry trace_id for operators; clients don't see it
-	otelShutdown, err := setupTracing(ctx)
+	otelShutdown, err := setupTracing(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("otel init: %w", err)
 	}
@@ -84,21 +86,30 @@ func runServer() error {
 	}
 	defer pool.Close()
 
-	rawLLM, err := buildLLMClient(cfg)
+	secrets, err := secretstore.NewTinkStoreFromJSONWithLegacy(
+		cfg.Secrets.TinkKeyset,
+		cfg.Secrets.LegacyInboundMasterKey,
+	)
 	if err != nil {
 		return err
 	}
+	llmConfigRepo := llmconfigrepo.New(pool)
+	llmConfig := llmconfigsvc.NewService(llmConfigRepo, secrets)
+	if err := llmConfig.SyncKeyRegistry(ctx); err != nil {
+		return fmt.Errorf("sync secret key registry: %w", err)
+	}
+	rawLLM := llmrouter.New(llmConfigRepo, secrets)
 	guardedLLM := llmguard.NewClient(rawLLM, guardpolicy.New(pool))
 	llm := llmauditsvc.NewClient(guardedLLM, llmauditrepo.New(pool))
 	defer llm.Close()
-	logext.Infof(ctx, "[%s] llm backend ready,endpoint:%s", where, logext.SafeURLForLog(cfg.LLMOpenAIBaseURL))
+	logext.Infof(ctx, "[%s] llm router ready,primary_secret_key:%s", where, secrets.PrimaryKeyID())
 
 	feedbackRepo := feedback.NewFeedback(pool)
 	apikeyRepo := apikeyrepo.NewAPIKey(pool)
 	tenantRepo := tenant.NewTenant(pool)
 	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
 	outboxRepo := outboxrepo.NewOutbox(pool)
-	enricher := enrich.NewEnricher(feedbackRepo, llm, cfg.LLMModel)
+	enricher := enrich.NewEnricher(feedbackRepo, llm, "")
 	ingestor := ingest.NewIngestor(feedbackRepo, enricher)
 	apiKeys := apikey.NewAPIKeys(apikeyRepo)
 
@@ -130,7 +141,7 @@ func runServer() error {
 
 	ingestHandler := handlers.NewIngestHandler(ingestor)
 
-	inb, err := setupInbound(ctx, pool, ingestor)
+	inb, err := setupInbound(ctx, pool, ingestor, secrets, cfg.Console.BootstrapAdmin, cfg.ConsoleSessionKey != "")
 	if err != nil {
 		return err
 	}
@@ -170,22 +181,21 @@ func runServer() error {
 	}
 }
 
-// setupTracing builds the OpenTelemetry tracer from env. An empty
+// setupTracing builds the OpenTelemetry tracer from config. An empty
 // endpoint reduces to a no-op (so local dev runs without extra
-// configuration); set OTEL_EXPORTER_OTLP_ENDPOINT in prod to ship
-// spans. OTel stays non-invasive to attune's API contract — clients
+// configuration). OTel stays non-invasive to attune's API contract — clients
 // may pass W3C traceparent, the X-Trace-Id response header is an
 // operator debug aid, and trace_id in internal logs serves operators
 // only. Details: docs/observability-trace-design.md.
-func setupTracing(ctx context.Context) (func(context.Context) error, error) {
+func setupTracing(ctx context.Context, cfg *config.Config) (func(context.Context) error, error) {
 	return observability.InitTracer(ctx, observability.Options{
 		ServiceName:    "attune",
-		ServiceVersion: envOrDefault("APP_VERSION", "dev"),
-		Environment:    envOrDefault("ENV", "dev"),
-		Endpoint:       os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-		URLPath:        envOrDefault("OTEL_EXPORTER_OTLP_TRACES_PATH", "/opentelemetry/v1/traces"),
-		Headers:        parseOTelHeaders(os.Getenv("OTEL_EXPORTER_OTLP_HEADERS")),
-		Insecure:       os.Getenv("OTEL_EXPORTER_OTLP_INSECURE") == "true",
+		ServiceVersion: cfg.Observability.ServiceVersion,
+		Environment:    cfg.Observability.Environment,
+		Endpoint:       cfg.Observability.OTLPEndpoint,
+		URLPath:        cfg.Observability.OTLPTracesPath,
+		Headers:        cfg.Observability.OTLPHeaders,
+		Insecure:       cfg.Observability.OTLPInsecure,
 	})
 }
 
@@ -215,7 +225,7 @@ func setupDatabase(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, erro
 	// Destructive-data guard before applying 015_drop_lark.sql — see
 	// docs/proposals/2026/06/2026-06-08-channel-agnostic-inbound.md
 	// §Data migrations.
-	if err := database.ConfirmLarkDelete(ctx, pool); err != nil {
+	if err := database.ConfirmLarkDelete(ctx, pool, cfg.Migrations.ConfirmLarkDelete); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("migrations preflight: %w", err)
 	}
@@ -237,22 +247,13 @@ func signalContext() (context.Context, context.CancelFunc) {
 	return ctx, cancel
 }
 
-// ── OTel helpers ──
-
-func envOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
 // inboundWiring bundles the inbound-framework deps runServer needs to
 // thread into buildRouter + into its shutdown defer. Extracted from
 // runServer in #66 Plan T24 so the boot function stays under the §1
 // CCN/NLOC threshold.
 type inboundWiring struct {
 	subRouter *chi.Mux
-	secrets   inbound.SecretStore
+	secrets   *secretstore.TinkStore
 	sources   *inboundsourcerepo.Repo
 	adminRepo *admin.Repo
 	manager   *inbound.Manager
@@ -276,20 +277,24 @@ func (w inboundWiring) shutdown() {
 // every registered adapter on a fresh chi sub-router. The caller mounts
 // the returned sub-router at /v1/inbound and calls w.shutdown() in a
 // defer.
-func setupInbound(ctx context.Context, pool *pgxpool.Pool, ingestor *ingest.Ingestor) (inboundWiring, error) {
+func setupInbound(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	ingestor *ingest.Ingestor,
+	secrets *secretstore.TinkStore,
+	bootstrap config.BootstrapAdminConfig,
+	consoleEnabled bool,
+) (inboundWiring, error) {
 	const where = "main.setupInbound"
-	inboundKey, err := inbound.BootstrapValidate()
-	if err != nil {
-		return inboundWiring{}, fmt.Errorf("inbound boot: %w", err)
-	}
-	secrets, err := inbound.NewAESGCMSecretStore(inboundKey)
-	if err != nil {
-		return inboundWiring{}, fmt.Errorf("inbound secrets: %w", err)
-	}
 	sources := inboundsourcerepo.NewRepo(pool)
 	adminRepo := admin.NewRepo(pool)
-	if err := console.BootstrapAdmin(ctx, adminRepo); err != nil {
-		return inboundWiring{}, fmt.Errorf("bootstrap admin: %w", err)
+	if consoleEnabled {
+		if err := console.BootstrapAdmin(ctx, adminRepo, console.BootstrapConfig{
+			Email:    bootstrap.Email,
+			Password: bootstrap.Password,
+		}); err != nil {
+			return inboundWiring{}, fmt.Errorf("bootstrap admin: %w", err)
+		}
 	}
 
 	// Adapters mount their channel-relative routes onto subRouter during
@@ -320,23 +325,4 @@ func setupInbound(ctx context.Context, pool *pgxpool.Pool, ingestor *ingest.Inge
 		adminRepo: adminRepo,
 		manager:   manager,
 	}, nil
-}
-
-func parseOTelHeaders(raw string) map[string]string {
-	out := map[string]string{}
-	if raw == "" {
-		return out
-	}
-	for _, pair := range strings.Split(raw, ",") {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
-			continue
-		}
-		idx := strings.Index(pair, "=")
-		if idx <= 0 {
-			continue
-		}
-		out[strings.TrimSpace(pair[:idx])] = strings.TrimSpace(pair[idx+1:])
-	}
-	return out
 }
