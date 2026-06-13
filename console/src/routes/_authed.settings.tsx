@@ -6,6 +6,7 @@ import {
   KeyRound,
   Loader2,
   Mailbox,
+  Newspaper,
   RotateCcw,
   ShieldCheck,
   Sparkles,
@@ -19,6 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiKeysPage } from '@/features/api-keys/components/api-keys-page'
+import { DigestSubscriptionPage } from '@/features/digest-subscription/components/digest-subscription-page'
 import { GuardPoliciesPage } from '@/features/guard-policies/components/guard-policies-page'
 import { InboundSourcesPage } from '@/features/inbound-sources/components/inbound-sources-page'
 import { NotifyTargetsPage } from '@/features/notify-targets/components/notify-targets-page'
@@ -32,6 +34,7 @@ type SettingsSection =
   | 'guard_policies'
   | 'inbound_sources'
   | 'notify_targets'
+  | 'digest_subscription'
   | 'api_keys'
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
@@ -39,6 +42,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'guard_policies',
   'inbound_sources',
   'notify_targets',
+  'digest_subscription',
   'api_keys',
 ]
 
@@ -281,6 +285,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
       {section === 'guard_policies' ? <GuardPoliciesPage /> : null}
       {section === 'inbound_sources' ? <InboundSourcesPage /> : null}
       {section === 'notify_targets' ? <NotifyTargetsPage /> : null}
+      {section === 'digest_subscription' ? <DigestSubscriptionPage /> : null}
       {section === 'api_keys' ? <ApiKeysPage /> : null}
     </section>
   )
@@ -318,6 +323,12 @@ function SettingsSidebar({
       icon: Bell,
       title: t('settings.areas.notify.title'),
       body: t('settings.areas.notify.body'),
+    },
+    {
+      section: 'digest_subscription',
+      icon: Newspaper,
+      title: t('settings.areas.digest.title'),
+      body: t('settings.areas.digest.body'),
     },
     {
       section: 'api_keys',

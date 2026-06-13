@@ -1,5 +1,6 @@
 import { HttpResponse, http } from 'msw'
 import type { ApiKey, CreateApiKeyResponse, ListApiKeysResponse } from '@/proto/attune/v1/api_key'
+import type { DigestSubscription } from '@/proto/attune/v1/digest_subscription'
 import type {
   EnrichConfig,
   GetEnrichConfigResponse,
@@ -197,6 +198,18 @@ export const defaultLLMUsage: GetLLMUsageResponse = {
   errors: '0',
 }
 
+const sampleDigestSubscription: DigestSubscription = {
+  enabled: true,
+  frequency: 'daily',
+  sendHour: 9,
+  llmMinFeedback: 6,
+  sendOnEmpty: false,
+  nextRunAt: '2026-06-14T09:00:00Z',
+  lastRunAt: '2026-06-13T09:00:00Z',
+  createdAt: '2026-06-07T00:00:00Z',
+  updatedAt: '2026-06-13T21:00:00Z',
+}
+
 export const handlers = [
   http.get(`${BASE}/me`, () => HttpResponse.json(defaultMe)),
 
@@ -214,6 +227,9 @@ export const handlers = [
   http.post(`${BASE}/notify-targets`, () => HttpResponse.json(sampleNotifyTarget)),
   http.patch(`${BASE}/notify-targets/:id`, () => HttpResponse.json(sampleNotifyTarget)),
   http.delete(`${BASE}/notify-targets/:id`, () => new HttpResponse(null, { status: 204 })),
+  http.get(`${BASE}/digest-subscription`, () => HttpResponse.json(sampleDigestSubscription)),
+  http.put(`${BASE}/digest-subscription`, () => HttpResponse.json(sampleDigestSubscription)),
+  http.delete(`${BASE}/digest-subscription`, () => new HttpResponse(null, { status: 204 })),
   http.post(`${BASE}/notify-targets/:id/test`, () =>
     HttpResponse.json(defaultTestNotifyTargetResponse),
   ),

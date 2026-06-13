@@ -51,6 +51,8 @@ exposition plus the portable assets in this directory.
 | `attune_reply_draft_errors_total` | counter | `tenant`, `error_type` | reply-draft generation errors by type (#26) |
 | `attune_reply_draft_duration_seconds` | histogram | `tenant` | end-to-end reply-draft generation latency per row (#26) |
 | `attune_reply_draft_queue_depth` | gauge | `tenant` | number of pending reply-draft tasks per tenant (#26) |
+| `attune_digest_runs_total` | counter | `tenant`, `status` | daily digest runs by outcome — `sent` / `skipped_empty` / `failed` (#27) |
+| `attune_digest_duration_seconds` | histogram | `tenant` | end-to-end digest aggregation + delivery latency per run (#27) |
 
 Label values:
 

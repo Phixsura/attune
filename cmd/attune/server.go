@@ -45,6 +45,7 @@ import (
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
+	digestsvc "github.com/Phixsura/attune/internal/service/digest"
 	embeddingsvc "github.com/Phixsura/attune/internal/service/embedding"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/ingest"
@@ -54,6 +55,8 @@ import (
 	"github.com/Phixsura/attune/internal/service/outbox"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
 
+	digestrunrepo "github.com/Phixsura/attune/internal/repo/digestrun"
+	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 )
@@ -148,9 +151,10 @@ func runServer() error {
 	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
 	startReplyDraftWorker(ctx, pool, enricher, llm)
 
-	// (Weekly digest scheduler removed with #66 Plan T17 — its only
-	// channel was an IM group bot. A channel-agnostic digest sender
-	// lands on the #34 outbound adapter SDK.)
+	// Daily digest scheduler + worker (#27). Channel-agnostic: it delivers a
+	// rendered roll-up to the tenant's raw-webhook digest target via the shared
+	// notify.Transport, with digest_runs as the exactly-once / retry ledger.
+	startDigestWorker(ctx, pool, llm)
 
 	ingestHandler := handlers.NewIngestHandler(ingestor)
 
@@ -244,6 +248,24 @@ func startReplyDraftWorker(ctx context.Context, pool *pgxpool.Pool, enricher *en
 	go runQueueDepthRefresher(ctx, "reply_draft", repo.QueueDepthByTenant, func(d map[string]int64) {
 		metrics.RefreshQueueDepth(metrics.ReplyDraftQueueDepth, d)
 	})
+}
+
+// startDigestWorker wires the daily digest scheduler + worker (#27). llm is the
+// audit-wrapping client; the naive theme-naming path rides the enrich route, so
+// no extra LLM routing config is required. The cluster path (tenants with
+// clustering enabled) reuses #114's labels and makes no LLM call.
+func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LLMClient) {
+	embedRepo := embeddingrepo.NewTaskRepo(pool)
+	agg := digestsvc.NewNaiveAggregator(embedRepo, feedback.NewFeedback(pool), llm)
+	worker := digestsvc.NewWorker(
+		digestsubrepo.New(pool),
+		digestrunrepo.New(pool),
+		agg,
+		notifytarget.NewNotifyTarget(pool),
+		embedRepo,
+		notify.NewTransport(nil, notify.DefaultRetry()),
+	)
+	go worker.Run(ctx)
 }
 
 // runQueueDepthRefresher feeds a per-tenant queue-depth gauge on a 30s tick — a

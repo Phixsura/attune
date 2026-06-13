@@ -12,6 +12,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
+	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
@@ -29,17 +30,18 @@ func TestRouterInventory(t *testing.T) {
 	require.NoError(t, err)
 
 	router := (&Router{
-		signer:         signer,
-		login:          &auth.Handler{},
-		changePassword: &auth.ChangePasswordHandler{},
-		me:             &me.MeHandler{},
-		apiKeys:        &apikey.APIKeysHandler{},
-		notifyTargets:  &notifytarget.NotifyTargetsHandler{},
-		feedback:       &feedback.FeedbackHandler{},
-		usage:          &usage.UsageHandler{},
-		enrichConfig:   &enrichconfig.Handler{},
-		guardPolicies:  &consoleguardpolicy.Handler{},
-		inbound:        &consoleinbound.Handler{},
+		signer:             signer,
+		login:              &auth.Handler{},
+		changePassword:     &auth.ChangePasswordHandler{},
+		me:                 &me.MeHandler{},
+		apiKeys:            &apikey.APIKeysHandler{},
+		notifyTargets:      &notifytarget.NotifyTargetsHandler{},
+		digestSubscription: &digestsubscription.Handler{},
+		feedback:           &feedback.FeedbackHandler{},
+		usage:              &usage.UsageHandler{},
+		enrichConfig:       &enrichconfig.Handler{},
+		guardPolicies:      &consoleguardpolicy.Handler{},
+		inbound:            &consoleinbound.Handler{},
 	}).Mount()
 
 	got := make(map[string]bool)
@@ -62,6 +64,9 @@ func TestRouterInventory(t *testing.T) {
 		"PATCH /notify-targets/{id}",
 		"DELETE /notify-targets/{id}",
 		"POST /notify-targets/{id}/test",
+		"GET /digest-subscription",
+		"PUT /digest-subscription",
+		"DELETE /digest-subscription",
 		"GET /feedback/",
 		"GET /feedback/stats",
 		"GET /feedback/{id}",

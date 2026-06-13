@@ -21,6 +21,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/clusters"
+	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
@@ -47,20 +48,21 @@ type (
 // Constructor re-exports so cmd/attune/setup.go can keep building
 // handlers via `console.NewXHandler(...)` after the split.
 var (
-	NewSigner                = session.NewSigner
-	NewAuthHandler           = auth.NewHandler
-	NewChangePasswordHandler = auth.NewChangePasswordHandler
-	NewMeHandler             = me.NewMeHandler
-	NewAPIKeysHandler        = apikey.NewAPIKeysHandler
-	NewNotifyTargetsHandler  = notifytarget.NewNotifyTargetsHandler
-	NewFeedbackHandler       = feedback.NewFeedbackHandler
-	NewUsageHandler          = usage.NewUsageHandler
-	NewEnrichConfigHandler   = enrichconfig.NewHandler
-	NewGuardPolicyHandler    = consoleguardpolicy.NewHandler
-	NewInboundHandler        = consoleinbound.NewHandler
-	NewLLMConfigHandler      = consolellmconfig.NewHandler
-	NewClustersHandler       = clusters.NewClustersHandler
-	BootstrapAdmin           = auth.BootstrapAdmin
+	NewSigner                    = session.NewSigner
+	NewAuthHandler               = auth.NewHandler
+	NewChangePasswordHandler     = auth.NewChangePasswordHandler
+	NewMeHandler                 = me.NewMeHandler
+	NewAPIKeysHandler            = apikey.NewAPIKeysHandler
+	NewNotifyTargetsHandler      = notifytarget.NewNotifyTargetsHandler
+	NewFeedbackHandler           = feedback.NewFeedbackHandler
+	NewUsageHandler              = usage.NewUsageHandler
+	NewEnrichConfigHandler       = enrichconfig.NewHandler
+	NewGuardPolicyHandler        = consoleguardpolicy.NewHandler
+	NewInboundHandler            = consoleinbound.NewHandler
+	NewLLMConfigHandler          = consolellmconfig.NewHandler
+	NewClustersHandler           = clusters.NewClustersHandler
+	NewDigestSubscriptionHandler = digestsubscription.NewHandler
+	BootstrapAdmin               = auth.BootstrapAdmin
 )
 
 // Router wires every console endpoint into a single chi.Router.
@@ -109,20 +111,21 @@ var (
 //	 GET /clusters -> dispatcher.Bind(clusters.Handler.List)
 //	 GET /clusters/{cluster_id}/members -> dispatcher.Bind(clusters.Handler.GetMembers)
 type Router struct {
-	signer         *session.Signer
-	login          *auth.Handler
-	changePassword *auth.ChangePasswordHandler
-	me             *me.MeHandler
-	apiKeys        *apikey.APIKeysHandler
-	notifyTargets  *notifytarget.NotifyTargetsHandler
-	feedback       *feedback.FeedbackHandler
-	usage          *usage.UsageHandler
-	enrichConfig   *enrichconfig.Handler
-	guardPolicies  *consoleguardpolicy.Handler
-	inbound        *consoleinbound.Handler
-	llmConfig      *consolellmconfig.Handler
-	clusters       *clusters.ClustersHandler
-	admins         adminReader
+	signer             *session.Signer
+	login              *auth.Handler
+	changePassword     *auth.ChangePasswordHandler
+	me                 *me.MeHandler
+	apiKeys            *apikey.APIKeysHandler
+	notifyTargets      *notifytarget.NotifyTargetsHandler
+	feedback           *feedback.FeedbackHandler
+	usage              *usage.UsageHandler
+	enrichConfig       *enrichconfig.Handler
+	guardPolicies      *consoleguardpolicy.Handler
+	inbound            *consoleinbound.Handler
+	llmConfig          *consolellmconfig.Handler
+	clusters           *clusters.ClustersHandler
+	digestSubscription *digestsubscription.Handler
+	admins             adminReader
 }
 
 type adminReader interface {
@@ -143,23 +146,25 @@ func NewRouter(
 	inbound *consoleinbound.Handler,
 	llmConfig *consolellmconfig.Handler,
 	clustersH *clusters.ClustersHandler,
+	digestSubscription *digestsubscription.Handler,
 	admins adminReader,
 ) *Router {
 	return ptrext.Of(Router{
-		signer:         signer,
-		login:          authH,
-		changePassword: changePassword,
-		me:             me,
-		apiKeys:        apiKeys,
-		notifyTargets:  notifyTargets,
-		feedback:       feedback,
-		usage:          usage,
-		enrichConfig:   enrichConfig,
-		guardPolicies:  guardPolicies,
-		inbound:        inbound,
-		llmConfig:      llmConfig,
-		clusters:       clustersH,
-		admins:         admins,
+		signer:             signer,
+		login:              authH,
+		changePassword:     changePassword,
+		me:                 me,
+		apiKeys:            apiKeys,
+		notifyTargets:      notifyTargets,
+		feedback:           feedback,
+		usage:              usage,
+		enrichConfig:       enrichConfig,
+		guardPolicies:      guardPolicies,
+		inbound:            inbound,
+		llmConfig:          llmConfig,
+		clusters:           clustersH,
+		digestSubscription: digestSubscription,
+		admins:             admins,
 	})
 }
 
@@ -224,6 +229,7 @@ func (r *Router) mountSession(m chi.Router) {
 	}
 	r.mountAPIKeys(m)
 	r.mountNotifyTargets(m)
+	r.mountDigestSubscription(m)
 	r.mountFeedback(m)
 	m.Get("/usage", dispatcher.Bind(
 		"console.UsageHandler.Get",
@@ -540,6 +546,42 @@ func (r *Router) mountNotifyTargets(m chi.Router) {
 			}),
 		))
 	})
+}
+
+// mountDigestSubscription mounts the per-tenant daily digest config (#27). It is
+// a singleton resource (one subscription per tenant), so get / upsert / delete
+// with no id path param.
+func (r *Router) mountDigestSubscription(m chi.Router) {
+	m.Get("/digest-subscription", dispatcher.Bind(
+		"console.DigestSubscriptionHandler.Get",
+		dispatcher.Empty(func() *attunev1.GetDigestSubscriptionRequest {
+			return ptrext.Of(attunev1.GetDigestSubscriptionRequest{})
+		}),
+		r.digestSubscription.Get,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetDigestSubscriptionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.Put("/digest-subscription", dispatcher.Bind(
+		"console.DigestSubscriptionHandler.Upsert",
+		dispatcher.JSON(func() *attunev1.UpsertDigestSubscriptionRequest {
+			return ptrext.Of(attunev1.UpsertDigestSubscriptionRequest{})
+		}),
+		r.digestSubscription.Upsert,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpsertDigestSubscriptionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.Delete("/digest-subscription", dispatcher.Bind(
+		"console.DigestSubscriptionHandler.Delete",
+		dispatcher.Empty(func() *attunev1.DeleteDigestSubscriptionRequest {
+			return ptrext.Of(attunev1.DeleteDigestSubscriptionRequest{})
+		}),
+		r.digestSubscription.Delete,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteDigestSubscriptionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountFeedback(m chi.Router) {

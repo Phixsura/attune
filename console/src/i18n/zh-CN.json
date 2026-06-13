@@ -259,6 +259,34 @@
       "block": "阻断"
     }
   },
+  "digest": {
+    "title": "日报摘要",
+    "subtitle": "每天在你设定的本地时间，把昨天的反馈汇总成一封摘要，推送到 audience=digest 的 raw-webhook 目标。",
+    "enabled_field": "启用摘要",
+    "frequency_field": "频率",
+    "frequency_daily": "每天",
+    "frequency_weekly": "每周",
+    "send_hour_field": "发送时间（本地小时）",
+    "send_hour_help": "0–23，按租户时区。例如 9 表示当地上午 9 点。",
+    "weekday_field": "星期几",
+    "weekday": {
+      "0": "周日",
+      "1": "周一",
+      "2": "周二",
+      "3": "周三",
+      "4": "周四",
+      "5": "周五",
+      "6": "周六"
+    },
+    "llm_min_field": "LLM 主题阈值",
+    "llm_min_help": "富集行数达到该值才用 LLM 抽主题；不足则发简版列表。",
+    "send_on_empty_field": "无反馈也发送",
+    "theme_prompt_field": "主题命名提示词（可选）",
+    "theme_prompt_placeholder": "留空使用默认",
+    "next_run": "下次发送",
+    "delete_button": "删除订阅",
+    "deleted": "已删除"
+  },
   "settings": {
     "subtitle": "统一管理 Console 配置入口：AI 分类、防护策略、入站源、通知目标和 API key。",
     "sidebar_label": "设置项",
@@ -280,6 +308,10 @@
       "notify": {
         "title": "通知目标",
         "body": "Webhook 通知、发送范围、密钥与测试。"
+      },
+      "digest": {
+        "title": "日报摘要",
+        "body": "频率、发送时间、主题阈值与投递目标。"
       },
       "api_keys": {
         "title": "API key",

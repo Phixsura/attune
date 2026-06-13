@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Daily digest roll-up with LLM-labeled top themes (#27).** A new per-tenant
+  scheduled worker (`internal/service/digest`) delivers one morning summary of
+  yesterday's enriched feedback instead of per-row noise. At the tenant's local
+  send hour it aggregates the day's feedback and surfaces the top themes by
+  **reusing the #114 embedding clusters** — counts and example IDs are
+  SQL/code-derived, never LLM-fabricated; a naive single LLM call (over the
+  already-configured `enrich` route, so no new routing config) is the fallback
+  for clustering-off tenants — then POSTs a rendered JSON+markdown payload to the
+  tenant's `audience='digest'` raw-webhook target via the shared
+  `notify.Transport`. The schedule is a first-class entity, configurable in
+  Console (Settings → 日报摘要) and over the API
+  (`GET/PUT/DELETE /fb/v1/console/digest-subscription`): enabled, daily/weekly,
+  local send hour, weekday, LLM theme threshold, send-on-empty, prompt override.
+  Volume tiers the output — 0 enriched rows skip (unless opted in), 1–5 send a
+  themeless list, ≥ threshold send LLM themes. A `digest_runs(tenant_id,
+  run_date)` ledger with a `UNIQUE` claim guarantees **at most one digest per
+  tenant per local day** across restarts and replicas; the scheduler is
+  timezone-/DST-correct (civil-time math, no cron dependency) and defers when the
+  embedding queue is backlogged so themes aren't computed on half-clustered data.
+  Migration 027 adds `digest_subscriptions` (+ a `digest` audience value on
+  `tenant_notify_targets`); migration 028 adds `digest_runs`.
 - **Per-feedback LLM reply draft (#26).** After classification, an opt-in
   per-tenant pipeline pre-generates an empathetic, operator-facing reply draft
   via a second LLM call. It runs on a new async `reply_draft_task` outbox +
