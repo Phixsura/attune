@@ -20,6 +20,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
+	"github.com/Phixsura/attune/internal/handlers/console/clusters"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
@@ -58,6 +59,7 @@ var (
 	NewGuardPolicyHandler    = consoleguardpolicy.NewHandler
 	NewInboundHandler        = consoleinbound.NewHandler
 	NewLLMConfigHandler      = consolellmconfig.NewHandler
+	NewClustersHandler       = clusters.NewClustersHandler
 	BootstrapAdmin           = auth.BootstrapAdmin
 )
 
@@ -104,6 +106,8 @@ var (
 //	 POST /inbound/sources/test-connection -> dispatcher.Bind(inbound.Handler.TestConnection)
 //	 POST /llm/channels/{id}/test -> dispatcher.Bind(llmconfig.Handler.TestChannel)
 //	 GET /llm/channels/{channel_id}/models -> dispatcher.Bind(llmconfig.Handler.ListChannelModels)
+//	 GET /clusters -> dispatcher.Bind(clusters.Handler.List)
+//	 GET /clusters/{cluster_id}/members -> dispatcher.Bind(clusters.Handler.GetMembers)
 type Router struct {
 	signer         *session.Signer
 	login          *auth.Handler
@@ -117,6 +121,7 @@ type Router struct {
 	guardPolicies  *consoleguardpolicy.Handler
 	inbound        *consoleinbound.Handler
 	llmConfig      *consolellmconfig.Handler
+	clusters       *clusters.ClustersHandler
 	admins         adminReader
 }
 
@@ -137,6 +142,7 @@ func NewRouter(
 	guardPolicies *consoleguardpolicy.Handler,
 	inbound *consoleinbound.Handler,
 	llmConfig *consolellmconfig.Handler,
+	clustersH *clusters.ClustersHandler,
 	admins adminReader,
 ) *Router {
 	return ptrext.Of(Router{
@@ -152,6 +158,7 @@ func NewRouter(
 		guardPolicies:  guardPolicies,
 		inbound:        inbound,
 		llmConfig:      llmConfig,
+		clusters:       clustersH,
 		admins:         admins,
 	})
 }
@@ -241,6 +248,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountGuardPolicies(m)
 	r.mountInbound(m)
 	r.mountLLMConfig(m)
+	r.mountClusters(m)
 }
 
 func (r *Router) mountLLMConfig(m chi.Router) {
@@ -759,6 +767,39 @@ func (r *Router) mountInbound(m chi.Router) {
 			),
 			r.inbound.Resume,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ResumeInboundSourceRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+}
+
+func (r *Router) mountClusters(m chi.Router) {
+	if r.clusters == nil {
+		return
+	}
+	m.Route("/clusters", func(c chi.Router) {
+		c.Get("/", dispatcher.Bind(
+			"console.ClustersHandler.List",
+			dispatcher.Query(
+				func() *attunev1.ListClustersRequest { return ptrext.Of(attunev1.ListClustersRequest{}) },
+				clusters.BindListRequest,
+			),
+			r.clusters.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListClustersRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		c.Get("/{cluster_id}/members", dispatcher.Bind(
+			"console.ClustersHandler.GetMembers",
+			dispatcher.Combine(
+				func() *attunev1.GetClusterMembersRequest { return ptrext.Of(attunev1.GetClusterMembersRequest{}) },
+				dispatcher.Param("cluster_id", func(req *attunev1.GetClusterMembersRequest, id string) {
+					req.ClusterId = id
+				}),
+				clusters.BindGetMembersQuery,
+			),
+			r.clusters.GetMembers,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetClusterMembersRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))

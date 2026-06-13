@@ -74,6 +74,87 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/clusters:
+        get:
+            tags:
+                - ClustersService
+            description: GET /fb/v1/console/clusters — list cluster summaries.
+            operationId: ClustersService_ListClusters
+            parameters:
+                - name: recencyDays
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: minCount
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: sort
+                  in: query
+                  schema:
+                    type: string
+                - name: q
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListClustersResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/clusters/{clusterId}/members:
+        get:
+            tags:
+                - ClustersService
+            description: GET /fb/v1/console/clusters/{cluster_id}/members — list feedback in a cluster.
+            operationId: ClustersService_GetClusterMembers
+            parameters:
+                - name: clusterId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetClusterMembersResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrich-config:
         get:
             tags:
@@ -1278,6 +1359,38 @@ components:
             description: |-
                 ChangePasswordResponse is empty on success (200). Errors travel through
                  the standard {code, message, requestId} envelope.
+        ClusterMember:
+            type: object
+            properties:
+                id:
+                    type: string
+                content:
+                    type: string
+                enrichedTitle:
+                    type: string
+                source:
+                    type: string
+                createdAt:
+                    type: string
+                similarity:
+                    type: number
+                    format: double
+            description: ClusterMember is a feedback item within a cluster.
+        ClusterSummary:
+            type: object
+            properties:
+                clusterId:
+                    type: string
+                count:
+                    type: integer
+                    format: int32
+                latestAt:
+                    type: string
+                label:
+                    type: string
+                sampleTitle:
+                    type: string
+            description: ClusterSummary is a condensed view of a feedback cluster.
         CreateApiKeyRequest:
             required:
                 - label
@@ -1627,6 +1740,20 @@ components:
                     type: number
                     format: double
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
+        GetClusterMembersResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ClusterMember'
+                clusterLabel:
+                    type: string
+                totalCount:
+                    type: integer
+                    format: int32
+                nextCursor:
+                    type: string
         GetEnrichConfigResponse:
             type: object
             properties:
@@ -1974,6 +2101,20 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ApiKey'
+        ListClustersResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ClusterSummary'
+                clusteringEnabled:
+                    type: boolean
+                nextCursor:
+                    type: string
+                totalCount:
+                    type: integer
+                    format: int32
         ListFeedbackResponse:
             type: object
             properties:
@@ -2448,6 +2589,8 @@ components:
 tags:
     - name: ApiKeyService
       description: ApiKeyService manages a tenant's external ingest API keys (console).
+    - name: ClustersService
+      description: ClustersService provides semantic cluster views for the console (#25).
     - name: EnrichConfigService
       description: |-
         EnrichConfigService manages per-tenant enricher prompt + the

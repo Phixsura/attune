@@ -59,6 +59,7 @@
   },
   "nav": {
     "feedback": "反馈",
+    "clusters": "语义聚类",
     "notify_targets": "通知目标",
     "inbound_sources": "入站源",
     "guard_policies": "防护策略",
@@ -545,6 +546,33 @@
       "urgent_empty": "暂无紧急反馈",
       "signals": "信号",
       "signals_hint": "已出现分类值"
+    },
+    "clusters": {
+      "title": "语义聚类",
+      "subtitle": "AI 自动识别相似反馈。点击展开查看详情。",
+      "page_subtitle": "AI 基于语义相似度聚合反馈，帮助发现模式和共性问题。",
+      "empty_title": "暂无聚类",
+      "empty_body": "当相似反馈达到 2 条以上，会自动聚类显示在这里。",
+      "disabled_title": "聚类未启用",
+      "disabled_body": "租户未开启 embedding 聚类功能。",
+      "count": "{{count}} 条",
+      "total": "共 {{total}} 个聚类",
+      "latest": "最新",
+      "view_all": "查看全部聚类",
+      "members_title": "聚类成员",
+      "members_empty": "暂无成员",
+      "similarity": "相似度",
+      "sort": {
+        "latest_at": "最新更新",
+        "count": "反馈数量"
+      },
+      "filter": {
+        "search_placeholder": "搜索聚类标签...",
+        "recency": "近 {{days}} 天",
+        "min_count": "至少 {{count}} 条"
+      },
+      "load_more": "加载更多",
+      "loaded_of_total": "已加载 {{loaded}} / {{total}} 条"
     }
   },
   "usage": {

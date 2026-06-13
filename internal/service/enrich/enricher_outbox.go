@@ -28,7 +28,9 @@ func (e *Enricher) persistEnriched(
 	run *feedback.SemanticExtractionRun,
 ) error {
 	const where = "service.Enricher.persistEnriched"
-	if run == nil && (e.outbox == nil || e.targets == nil) {
+	// Fast path: skip transaction if no semantic run, no outbox, AND no embedding task.
+	// Must check embeddingTask too, otherwise embedding clustering is silently skipped.
+	if run == nil && (e.outbox == nil || e.targets == nil) && e.embeddingTask == nil {
 		return e.repo.MarkDone(ctx, s.ID, enriched, feedback.EnrichmentMetadata{
 			Language:      s.Language,
 			DisplayLocale: s.DisplayLocale,
@@ -104,6 +106,9 @@ func (e *Enricher) persistEnrichedTx(
 	if err := e.insertOutboxRows(ctx, tx, s, plan, where); err != nil {
 		return err
 	}
+	if err := e.insertEmbeddingTask(ctx, tx, s, where); err != nil {
+		return err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		logext.Errorf(ctx, "[%s] commit tx failed,feedback_id:%d,err:%+v",
 			where, s.ID, err.Error())
@@ -156,6 +161,23 @@ func (e *Enricher) insertOutboxRows(
 				where, s.ID, t.DestinationType, err.Error())
 			return fmt.Errorf("queue outbox: %w", err)
 		}
+	}
+	return nil
+}
+
+func (e *Enricher) insertEmbeddingTask(
+	ctx context.Context,
+	tx pgx.Tx,
+	s domain.Snapshot,
+	where string,
+) error {
+	if e.embeddingTask == nil {
+		return nil
+	}
+	if err := e.embeddingTask.CreateTaskTx(ctx, tx, s.ID, s.TenantID); err != nil {
+		logext.Errorf(ctx, "[%s] embedding task insert failed,feedback_id:%d,err:%+v",
+			where, s.ID, err.Error())
+		return fmt.Errorf("queue embedding task: %w", err)
 	}
 	return nil
 }

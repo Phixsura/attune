@@ -25,6 +25,7 @@ import {
   type FeedbackListFilters,
   feedbackListInfiniteQuery,
 } from '@/features/feedback/api/list-feedback-infinite'
+import { ClustersCard } from '@/features/feedback/components/clusters-card'
 import { ConfidenceIndicator } from '@/features/feedback/components/confidence-indicator'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
 import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
@@ -81,6 +82,8 @@ function FeedbackPage() {
           </CardContent>
         </Card>
       )}
+
+      <ClustersCard />
 
       <FilterBar
         dims={dims}
