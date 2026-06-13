@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { format } from 'date-fns'
+import { format, formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { Copy, Loader2, RefreshCw } from 'lucide-react'
+import { Check, Copy, Loader2, RefreshCw, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
@@ -13,6 +14,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   type FeedbackDetail,
   feedbackDetailQuery,
@@ -21,6 +23,7 @@ import { useRegenerateReplyDraft } from '@/features/feedback/api/regenerate-repl
 import { ConfidenceIndicator } from '@/features/feedback/components/confidence-indicator'
 import { LanguageBadge, languagesDiffer } from '@/features/feedback/components/language-badge'
 import { useDisplayName } from '@/lib/i18n-resolve'
+import { cn } from '@/lib/utils'
 import type { Dimension } from '@/proto/attune/v1/common'
 
 // `dims` is supplied by the parent route so this component does not
@@ -42,8 +45,8 @@ export function FeedbackDetailSheet({
   const detail = useQuery({ ...feedbackDetailQuery(id ?? ''), enabled: open })
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
-        <SheetHeader>
+      <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-2xl">
+        <SheetHeader className="gap-2 border-b px-6 pt-6 pb-4 pr-12">
           <SheetTitle>
             <span className="inline-flex items-center gap-2">
               <UrgentDot urgent={detail.data?.isUrgent} />
@@ -52,33 +55,36 @@ export function FeedbackDetailSheet({
                 : `#${id ?? '?'}`}
             </span>
           </SheetTitle>
-          <SheetDescription>
-            {detail.data && (
-              <span className="flex flex-wrap items-center gap-2 text-xs">
-                {dims.map((dim) => (
-                  <DimensionChips
-                    key={dim.name}
-                    dim={dim}
-                    value={
-                      (detail.data?.enrichedAttrs as Record<string, unknown> | undefined)?.[
-                        dim.name
-                      ]
-                    }
-                    emptyDash={false}
-                  />
-                ))}
-                <LanguageBadge
-                  language={detail.data.language}
-                  className="h-5 min-w-8 px-1.5 text-[10px]"
+          {/* Meta chips render <div>s, so they live in a sibling div — never
+              inside SheetDescription, which renders a <p> (block-in-p is an
+              invalid-nesting hydration error). The description stays as an
+              sr-only line so Radix still has an aria-describedby target. */}
+          {detail.data && (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
+              {dims.map((dim) => (
+                <DimensionChips
+                  key={dim.name}
+                  dim={dim}
+                  value={
+                    (detail.data?.enrichedAttrs as Record<string, unknown> | undefined)?.[dim.name]
+                  }
+                  emptyDash={false}
                 />
-                <span className="text-muted-foreground">
-                  {format(new Date(detail.data.createdAt), 'PPP HH:mm', { locale: zhCN })}
-                </span>
+              ))}
+              <LanguageBadge
+                language={detail.data.language}
+                className="h-5 min-w-8 px-1.5 text-[10px]"
+              />
+              <span className="text-muted-foreground">
+                {format(new Date(detail.data.createdAt), 'PPP HH:mm', { locale: zhCN })}
               </span>
-            )}
+            </div>
+          )}
+          <SheetDescription className="sr-only">
+            {t('feedback.detail.sheet_summary')}
           </SheetDescription>
         </SheetHeader>
-        <div className="px-1 py-6 text-sm">
+        <div className="space-y-6 px-6 py-6 text-sm">
           {detail.isPending && (
             <div className="flex justify-center py-8 text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -103,13 +109,17 @@ function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] })
     languagesDiffer(data.language, data.enrichedDisplayLocale) &&
     data.enrichedRationale !== data.enrichedDisplayRationale
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <Section label={t('feedback.detail.raw_content')}>
         <p className="whitespace-pre-wrap break-words">{data.content}</p>
       </Section>
 
       {data.replyDraftEnabled ? (
-        <ReplyDraftSection id={String(data.id)} draft={data.replyDraft ?? ''} />
+        <ReplyDraftSection
+          id={String(data.id)}
+          draft={data.replyDraft ?? ''}
+          generatedAt={data.replyDraftGeneratedAt ?? ''}
+        />
       ) : null}
 
       {displayRationale ? (
@@ -130,7 +140,7 @@ function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] })
 
       {dims.length > 0 && (
         <Section label={t('feedback.detail.attrs')}>
-          <dl className="space-y-2">
+          <dl className="space-y-3">
             <div className="flex items-start gap-3">
               <dt className="w-28 shrink-0 text-xs text-muted-foreground">
                 {t('feedback.detail.confidence')}
@@ -200,50 +210,123 @@ function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] })
 // enabled-but-empty row (the confidence gate skipped auto-generation, or a
 // prior generation degraded to an empty draft) still offers a Generate entry
 // point. The draft is a suggestion only — never auto-sent.
-function ReplyDraftSection({ id, draft }: { id: string; draft: string }) {
+//
+// This is the one *actionable* artifact in an otherwise read-only sheet, so it
+// earns a brand-tinted surface (the same vocabulary the enrichment-error block
+// uses with a destructive tint) and full interactive-state cycles: a skeleton
+// while the LLM runs, a composed empty state, and an inline copied confirmation.
+// Copy is the primary action (filled), Regenerate drops to ghost.
+function ReplyDraftSection({
+  id,
+  draft,
+  generatedAt,
+}: {
+  id: string
+  draft: string
+  generatedAt: string
+}) {
   const { t } = useTranslation()
   const regen = useRegenerateReplyDraft(id)
+  const [justCopied, setJustCopied] = useState(false)
+  const copyTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(copyTimer.current), [])
+
   // Explicit empty check: an empty string is a valid state and must NOT fall
-  // through to a stale prop value via `??`.
+  // through to a stale prop value via `??`. A fresh regenerate response wins
+  // over the prop once it lands.
   const current = regen.data ? regen.data.replyDraft : draft
+  const stamp = regen.data ? regen.data.replyDraftGeneratedAt : generatedAt
+  const ago = relativeTime(stamp)
   const hasDraft = current !== ''
+  const pending = regen.isPending
+
   const onCopy = () => {
     navigator.clipboard
       .writeText(current)
-      .then(() => toast.success(t('feedback.detail.reply_draft_copied')))
+      .then(() => {
+        toast.success(t('feedback.detail.reply_draft_copied'))
+        setJustCopied(true)
+        copyTimer.current = window.setTimeout(() => setJustCopied(false), 1500)
+      })
       .catch(() => toast.error(t('feedback.detail.reply_draft_copy_failed')))
   }
   const onRegenerate = () => {
     regen.mutate(undefined, {
-      onError: () => toast.error(t('feedback.detail.reply_draft_failed')),
+      onError: (err) => {
+        // A 429 is the per-row cooldown backstop — message it distinctly so the
+        // operator knows to wait, not that generation broke.
+        const status = (err as { status?: number }).status
+        toast.error(
+          status === 429
+            ? t('feedback.detail.reply_draft_cooldown')
+            : t('feedback.detail.reply_draft_failed'),
+        )
+      },
     })
   }
+
   return (
-    <Section label={t('feedback.detail.reply_draft')}>
-      <div className="space-y-3 rounded-md border border-border bg-muted/40 p-3">
-        {hasDraft ? (
-          <p className="whitespace-pre-wrap break-words">{current}</p>
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        <Sparkles className="size-3.5 text-primary" />
+        <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {t('feedback.detail.reply_draft')}
+        </h4>
+        {hasDraft && ago ? (
+          <span className="ml-auto text-[11px] text-muted-foreground">
+            {t('feedback.detail.reply_draft_generated_at', { ago })}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="rounded-md border border-primary/20 bg-primary/[0.04] p-4">
+        {pending ? (
+          <DraftSkeleton />
+        ) : hasDraft ? (
+          <p className="whitespace-pre-wrap break-words leading-relaxed">{current}</p>
         ) : (
-          <p className="text-muted-foreground italic">{t('feedback.detail.reply_draft_empty')}</p>
+          <div className="flex items-start gap-3">
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
+              <Sparkles className="size-4 text-primary" />
+            </div>
+            <div className="space-y-0.5">
+              <p className="text-muted-foreground">{t('feedback.detail.reply_draft_empty')}</p>
+              <p className="text-xs text-muted-foreground/80">
+                {t('feedback.detail.reply_draft_empty_hint')}
+              </p>
+            </div>
+          </div>
         )}
-        <div className="flex items-center gap-2">
+
+        <div className="mt-4 flex items-center gap-1.5">
           {hasDraft ? (
-            <Button type="button" size="sm" variant="outline" onClick={onCopy}>
-              <Copy className="h-3.5 w-3.5" />
-              {t('feedback.detail.reply_draft_copy')}
+            <Button
+              type="button"
+              size="sm"
+              onClick={onCopy}
+              disabled={pending}
+              className="motion-safe:active:scale-[0.98]"
+            >
+              {justCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              {justCopied
+                ? t('feedback.detail.reply_draft_copied_short')
+                : t('feedback.detail.reply_draft_copy')}
             </Button>
           ) : null}
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant={hasDraft ? 'ghost' : 'default'}
             onClick={onRegenerate}
-            disabled={regen.isPending}
+            disabled={pending}
+            className={cn('motion-safe:active:scale-[0.98]', hasDraft && 'text-muted-foreground')}
           >
-            {regen.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {pending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : hasDraft ? (
+              <RefreshCw className="size-3.5" />
             ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
+              <Sparkles className="size-3.5" />
             )}
             {hasDraft
               ? t('feedback.detail.reply_draft_regenerate')
@@ -251,7 +334,30 @@ function ReplyDraftSection({ id, draft }: { id: string; draft: string }) {
           </Button>
         </div>
       </div>
-    </Section>
+    </div>
+  )
+}
+
+// relativeTime renders a server timestamp as "x ago", or null when the value is
+// absent or unparseable — so a malformed value degrades to no line instead of
+// throwing RangeError on new Date(...) and blanking the whole sheet.
+function relativeTime(stamp: string): string | null {
+  if (!stamp) return null
+  const d = new Date(stamp)
+  return Number.isNaN(d.getTime())
+    ? null
+    : formatDistanceToNow(d, { addSuffix: true, locale: zhCN })
+}
+
+// DraftSkeleton mimics the shape of generated prose (a few ragged lines) so the
+// LLM round-trip reads as "drafting", not a generic spinner.
+function DraftSkeleton() {
+  return (
+    <div className="space-y-2" aria-hidden>
+      <Skeleton className="h-3.5 w-[92%]" />
+      <Skeleton className="h-3.5 w-full" />
+      <Skeleton className="h-3.5 w-[76%]" />
+    </div>
   )
 }
 

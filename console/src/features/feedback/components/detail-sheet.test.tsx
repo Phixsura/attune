@@ -1,5 +1,5 @@
 import userEvent from '@testing-library/user-event'
-import { HttpResponse, http } from 'msw'
+import { delay, HttpResponse, http } from 'msw'
 import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
@@ -197,6 +197,71 @@ describe('FeedbackDetailSheet', () => {
     await waitFor(() => expect(screen.getByText('old')).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /重新生成/ }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('重新生成失败'))
+  })
+
+  it('shows a skeleton and disables the buttons while regenerating', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(draftRow('f-10', { replyDraft: 'old draft' })),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/regenerate', async () => {
+        await delay('infinite') // hold the request open so the pending UI stays
+        return HttpResponse.json({ replyDraft: 'unused', replyDraftGeneratedAt: '' })
+      }),
+    )
+    renderWithProviders(<FeedbackDetailSheet id="f-10" dims={dims} onOpenChange={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('old draft')).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: /重新生成/ }))
+    // Pending: the draft body becomes a skeleton and both buttons disable.
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="skeleton"]')).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('old draft')).toBeNull()
+    expect(screen.getByRole('button', { name: /复制/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /重新生成/ })).toBeDisabled()
+  })
+
+  it('swaps the copy button to a copied confirmation after copying', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(draftRow('f-11', { replyDraft: 'copy me' })),
+      ),
+    )
+    renderWithProviders(<FeedbackDetailSheet id="f-11" dims={dims} onOpenChange={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('copy me')).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: /复制/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /已复制/ })).toBeInTheDocument())
+  })
+
+  it('renders the generated-at provenance when the draft carries a timestamp', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-12', {
+            replyDraft: 'drafted',
+            replyDraftGeneratedAt: '2026-06-13T10:00:00Z',
+          }),
+        ),
+      ),
+    )
+    renderWithProviders(<FeedbackDetailSheet id="f-12" dims={dims} onOpenChange={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('drafted')).toBeInTheDocument())
+    expect(screen.getByText(/生成于/)).toBeInTheDocument()
+  })
+
+  it('regenerate cooldown (429) shows the distinct cooldown toast', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(draftRow('f-13', { replyDraft: 'old' })),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/regenerate', () =>
+        HttpResponse.json({ code: 'RATE_LIMITED', message: 'cooldown' }, { status: 429 }),
+      ),
+    )
+    renderWithProviders(<FeedbackDetailSheet id="f-13" dims={dims} onOpenChange={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('old')).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: /重新生成/ }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('操作过于频繁，请稍候再试'))
   })
 })
 
