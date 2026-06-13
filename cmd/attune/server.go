@@ -161,7 +161,7 @@ func runServer() error {
 	defer inb.shutdown()
 
 	r, err := buildRouter(
-		ctx, cfg, ingestHandler, apiKeys, pool,
+		ctx, cfg, ingestHandler, apiKeys, pool, llm,
 		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo,
 	)
 	if err != nil {

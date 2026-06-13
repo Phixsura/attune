@@ -25,6 +25,7 @@ type fakeFeedbackRepo struct {
 	listTenant string
 
 	getRow    *feedbackrepo.ConsoleDetailRow
+	getErr    error
 	getID     int64
 	getTenant string
 
@@ -46,7 +47,7 @@ func (f *fakeFeedbackRepo) GetForConsole(
 ) (*feedbackrepo.ConsoleDetailRow, error) {
 	f.getTenant = tenantID
 	f.getID = id
-	return f.getRow, nil
+	return f.getRow, f.getErr
 }
 
 func (f *fakeFeedbackRepo) UsageByDay(

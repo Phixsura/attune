@@ -24,7 +24,17 @@ import (
 type FeedbackHandler struct {
 	repo    feedbackRepo
 	tenants tenantConfigRepo
+	drafter Drafter // optional reply-draft generator; nil disables Regenerate
 }
+
+// Drafter regenerates a reply draft synchronously, sharing the worker's
+// Generate core. Optional — nil disables the Regenerate endpoint.
+type Drafter interface {
+	Generate(ctx context.Context, feedbackID int64) (string, error)
+}
+
+// SetDrafter wires the reply-draft generator used by Regenerate.
+func (h *FeedbackHandler) SetDrafter(d Drafter) { h.drafter = d }
 
 type feedbackRepo interface {
 	ListForConsole(ctx context.Context, tenantID string, opts feedback.ConsoleListOpts) ([]feedback.ConsoleListRow, error)
