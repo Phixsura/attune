@@ -52,8 +52,10 @@ import (
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
 	"github.com/Phixsura/attune/internal/service/llmrouter"
 	"github.com/Phixsura/attune/internal/service/outbox"
+	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
 
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
+	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 )
 
 // ── server ────────────────────────────────────────────────────────────────
@@ -144,6 +146,7 @@ func runServer() error {
 	go runOutboxLagRefresher(ctx, outboxRepo)
 
 	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
+	startReplyDraftWorker(ctx, pool, enricher, llm)
 
 	// (Weekly digest scheduler removed with #66 Plan T17 — its only
 	// channel was an IM group bot. A channel-agnostic digest sender
@@ -224,6 +227,16 @@ func startEmbeddingWorker(ctx context.Context, pool *pgxpool.Pool, enricher *enr
 	taskRepo := embeddingrepo.NewTaskRepo(pool)
 	enricher.SetEmbeddingTask(taskRepo)
 	worker := embeddingsvc.NewWorker(taskRepo, rawLLM, llm, llmauditrepo.New(pool))
+	go worker.Run(ctx)
+}
+
+// startReplyDraftWorker wires the reply-draft outbox + worker. llm is the
+// audit-wrapping client so each draft call lands in llm_audit
+// (purpose='reply_draft').
+func startReplyDraftWorker(ctx context.Context, pool *pgxpool.Pool, enricher *enrich.Enricher, llm llmclient.LLMClient) {
+	repo := replydraftrepo.NewDraftTaskRepo(pool)
+	enricher.SetDraftTask(repo)
+	worker := replydraftsvc.NewWorker(repo, llm)
 	go worker.Run(ctx)
 }
 
