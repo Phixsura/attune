@@ -21,10 +21,12 @@ import (
 const digestThemePurpose = "enrich"
 
 const (
-	naiveTemp       = 0.2
-	naiveMaxTokens  = 512
-	naiveThemeCap   = 3
-	naiveSystemUser = "system-digest"
+	naiveTemp         = 0.2
+	naiveMaxTokens    = 1024 // headroom so a busy day's id list doesn't truncate the JSON
+	naiveThemeCap     = 3
+	naiveSystemUser   = "system-digest"
+	naiveTitleMax     = 120 // per-row prompt caps so a few pathological rows can't
+	naiveRationaleMax = 200 // blow past the model's context window
 )
 
 // naiveNamer extracts top themes from a batch of enriched rows with a single
@@ -93,13 +95,23 @@ func naivePrompt(rows []feedback.DigestFeedbackRow) string {
 	var b strings.Builder
 	b.WriteString("Feedback items (id: title — rationale):\n")
 	for _, r := range rows {
-		fmt.Fprintf(&b, "%d: %s", r.ID, r.Title)
+		fmt.Fprintf(&b, "%d: %s", r.ID, truncateRunes(r.Title, naiveTitleMax))
 		if r.Rationale != "" {
-			fmt.Fprintf(&b, " — %s", r.Rationale)
+			fmt.Fprintf(&b, " — %s", truncateRunes(r.Rationale, naiveRationaleMax))
 		}
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// truncateRunes bounds a string to n runes (rune-safe so the prompt never
+// carries invalid UTF-8), keeping the per-row prompt cost predictable.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 func naiveSchema() *llmclient.OutputSchema {

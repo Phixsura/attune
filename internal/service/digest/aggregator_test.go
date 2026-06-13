@@ -6,6 +6,7 @@ package digest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,7 @@ func (f fakeClusters) ClusterExamplesInWindow(_ context.Context, _ string, id uu
 
 type fakeNamer struct {
 	themes []Theme
+	err    error
 	called *bool
 }
 
@@ -57,7 +59,7 @@ func (f fakeNamer) Name(context.Context, string, string, []feedback.DigestFeedba
 	if f.called != nil {
 		*f.called = true
 	}
-	return f.themes, nil
+	return f.themes, f.err
 }
 
 func TestAggregateTiers(t *testing.T) {
@@ -207,5 +209,119 @@ func TestRenderPayload(t *testing.T) {
 	md, _ := p["markdown"].(string)
 	if !strings.Contains(md, "checkout — 12 reports") || !strings.Contains(md, "#1024") {
 		t.Fatalf("markdown = %q", md)
+	}
+}
+
+// TestAggregateDegradesToThemeless proves a themed-eligible day still ships a
+// (themeless) digest when theme extraction fails or yields nothing — the digest
+// must never be sunk by a flaky LLM (the naive path is the clustering-off default).
+func TestAggregateDegradesToThemeless(t *testing.T) {
+	ctx := context.Background()
+	from, to := time.Now().Add(-24*time.Hour), time.Now()
+	fb := fakeFeedback{
+		stats: feedback.DigestWindowStats{Total: 10, Enriched: 10},
+		rows:  []feedback.DigestFeedbackRow{{ID: 1, Title: "a"}, {ID: 2, Title: "b"}},
+	}
+	off := fakeClusters{cfg: embedding.ClusteringConfig{Enabled: false}}
+
+	t.Run("naive namer error degrades", func(t *testing.T) {
+		agg := NewAggregator(off, fb, fakeNamer{err: errors.New("llm down")})
+		res, err := agg.Aggregate(ctx, AggInput{TenantID: "t", LLMMin: 6}, from, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Tier != TierThemeless || len(res.Items) != 2 {
+			t.Fatalf("tier=%v items=%d, want themeless+2", res.Tier, len(res.Items))
+		}
+	})
+
+	t.Run("naive namer empty degrades", func(t *testing.T) {
+		agg := NewAggregator(off, fb, fakeNamer{themes: nil})
+		res, err := agg.Aggregate(ctx, AggInput{TenantID: "t", LLMMin: 6}, from, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Tier != TierThemeless || len(res.Items) != 2 {
+			t.Fatalf("tier=%v items=%d, want themeless+2", res.Tier, len(res.Items))
+		}
+	})
+
+	t.Run("real naive path with unparseable LLM output degrades", func(t *testing.T) {
+		agg := NewNaiveAggregator(off, fb, fakeLLM{text: "this is not json at all"})
+		res, err := agg.Aggregate(ctx, AggInput{TenantID: "t", LLMMin: 6}, from, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Tier != TierThemeless || len(res.Items) != 2 {
+			t.Fatalf("tier=%v items=%d, want themeless+2", res.Tier, len(res.Items))
+		}
+	})
+}
+
+func TestAggregateBoundaries(t *testing.T) {
+	ctx := context.Background()
+	from, to := time.Now().Add(-24*time.Hour), time.Now()
+	cid := uuid.New()
+	clustered := fakeClusters{
+		cfg:      embedding.ClusteringConfig{Enabled: true},
+		clusters: []embedding.DigestCluster{{ClusterID: cid, Count: 6, Label: "x"}},
+		examples: map[uuid.UUID][]embedding.DigestExample{cid: {{ID: 1, Title: "x"}}},
+	}
+
+	t.Run("enriched == llm_min is themed", func(t *testing.T) {
+		agg := NewAggregator(clustered, fakeFeedback{stats: feedback.DigestWindowStats{Total: 6, Enriched: 6}}, fakeNamer{})
+		res, err := agg.Aggregate(ctx, AggInput{TenantID: "t", LLMMin: 6}, from, to)
+		if err != nil || res.Tier != TierThemed {
+			t.Fatalf("tier=%v err=%v, want TierThemed at the boundary", res.Tier, err)
+		}
+	})
+
+	t.Run("enriched == llm_min-1 is themeless", func(t *testing.T) {
+		fb := fakeFeedback{
+			stats: feedback.DigestWindowStats{Total: 5, Enriched: 5},
+			rows:  []feedback.DigestFeedbackRow{{ID: 1, Title: "a"}},
+		}
+		agg := NewAggregator(clustered, fb, fakeNamer{})
+		res, err := agg.Aggregate(ctx, AggInput{TenantID: "t", LLMMin: 6}, from, to)
+		if err != nil || res.Tier != TierThemeless {
+			t.Fatalf("tier=%v err=%v, want TierThemeless below the boundary", res.Tier, err)
+		}
+	})
+
+	t.Run("send_on_empty ships an empty themeless digest", func(t *testing.T) {
+		agg := NewAggregator(fakeClusters{}, fakeFeedback{stats: feedback.DigestWindowStats{}}, fakeNamer{})
+		res, err := agg.Aggregate(ctx, AggInput{TenantID: "t", LLMMin: 6, SendOnEmpty: true}, from, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Tier != TierThemeless || len(res.Themes) != 0 || len(res.Items) != 0 {
+			t.Fatalf("tier=%v themes=%d items=%d, want empty themeless", res.Tier, len(res.Themes), len(res.Items))
+		}
+	})
+}
+
+func TestNaivePromptTruncates(t *testing.T) {
+	long := strings.Repeat("x", 500)
+	p := naivePrompt([]feedback.DigestFeedbackRow{{ID: 1, Title: long, Rationale: long}})
+	if n := strings.Count(p, "x"); n > naiveTitleMax+naiveRationaleMax {
+		t.Fatalf("prompt not truncated: %d x's (cap %d)", n, naiveTitleMax+naiveRationaleMax)
+	}
+}
+
+func TestParseNaiveThemesTruncatedJSON(t *testing.T) {
+	// A truncated/garbage response must error so the aggregator degrades.
+	if _, err := parseNaiveThemes(`{"themes":[{"title":"Bug","member_ids":[1`, map[int64]string{1: "a"}); err == nil {
+		t.Fatal("expected error on truncated JSON")
+	}
+}
+
+func TestBuildClusterThemePlaceholderTitle(t *testing.T) {
+	// No label and an empty sample title must not yield a blank theme title.
+	th := buildClusterTheme(embedding.DigestCluster{Count: 4}, []embedding.DigestExample{{ID: 1, Title: ""}})
+	if strings.TrimSpace(th.Title) == "" {
+		t.Fatal("expected a placeholder title, got empty")
+	}
+	if th.Count != 4 {
+		t.Fatalf("count = %d, want 4", th.Count)
 	}
 }

@@ -4,10 +4,12 @@ package digest
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/embedding"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -111,7 +113,21 @@ func (a *Aggregator) Aggregate(ctx context.Context, in AggInput, from, to time.T
 	}
 	themes, err := a.themes(ctx, in, from, to)
 	if err != nil {
-		return Result{}, err
+		// Theme extraction is best-effort: a flaky LLM (the naive path's default
+		// for clustering-off tenants) must not sink the whole digest. Degrade to
+		// a themeless list so the roll-up still goes out.
+		logext.Warnf(ctx, "[service.digest.Aggregator.Aggregate] theme extraction failed, degrading to themeless,tenant_id:%s,err:%+v",
+			in.TenantID, err.Error())
+		themes = nil
+	}
+	if len(themes) == 0 {
+		// Themed-eligible but no themes produced (clustering on yet nothing
+		// clustered in-window, or the naive call failed / returned nothing).
+		items, err := a.feedback.EnrichedInWindow(ctx, in.TenantID, from, to, themelessLimit)
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{Tier: TierThemeless, Stats: stats, Items: items}, nil
 	}
 	return Result{Tier: TierThemed, Stats: stats, Themes: themes}, nil
 }
@@ -161,6 +177,9 @@ func buildClusterTheme(c embedding.DigestCluster, examples []embedding.DigestExa
 	title := c.Label
 	if title == "" && len(examples) > 0 {
 		title = examples[0].Title // label-on-read fallback for an unlabeled same-day cluster
+	}
+	if strings.TrimSpace(title) == "" {
+		title = "Untitled theme" // both label and sample title empty — keep the count visible
 	}
 	t := Theme{Title: title, Count: c.Count}
 	for _, e := range examples {

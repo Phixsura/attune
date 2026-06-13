@@ -195,3 +195,122 @@ func insertDigestTarget(t *testing.T, ctx context.Context, pool *pgxpool.Pool, t
 	})
 	require.NoError(t, err)
 }
+
+func buildWorker(pool *pgxpool.Pool, subs *digestsubrepo.Repo, llmText string) *digestsvc.Worker {
+	embed := embeddingrepo.NewTaskRepo(pool)
+	return digestsvc.NewWorker(
+		subs, digestrunrepo.New(pool),
+		digestsvc.NewNaiveAggregator(embed, feedbackrepo.NewFeedback(pool), &fakeLLM{text: llmText}),
+		notifytarget.NewNotifyTarget(pool), embed,
+		notify.NewTransport(nil, notify.DefaultRetry()),
+	)
+}
+
+func nextRunAt(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string) time.Time {
+	t.Helper()
+	var nr *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT next_run_at FROM digest_subscriptions WHERE tenant_id=$1`, tenantID).Scan(&nr))
+	require.NotNil(t, nr)
+	return ptrext.Indirect(nr)
+}
+
+func runCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM digest_runs WHERE tenant_id=$1`, tenantID).Scan(&n))
+	return n
+}
+
+// TestDigestWorker_ConflictAdvancesCursor proves the cursor advances even when
+// another replica already claimed the day (ClaimDay ON CONFLICT loses), so a
+// duplicate tick can never hot-loop or re-deliver.
+func TestDigestWorker_ConflictAdvancesCursor(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	defer pool.Close()
+	now := time.Date(2026, 6, 13, 9, 0, 0, 0, time.UTC)
+	tenantID := insertTenant(t, ctx, pool, "digest-conflict", "UTC")
+	spy := &webhookSpy{}
+	insertDigestTarget(t, ctx, pool, tenantID, spy.server(t).URL)
+
+	subs := digestsubrepo.New(pool)
+	sub, err := subs.Upsert(ctx, digestsubrepo.Subscription{
+		TenantID: tenantID, Enabled: true, Frequency: "daily", SendHour: 9,
+		LLMMinFeedback: 6, NextRunAt: ptrext.Of(now.Add(-time.Minute)),
+	})
+	require.NoError(t, err)
+	// Another replica already finished today's run.
+	_, err = pool.Exec(ctx, `INSERT INTO digest_runs (tenant_id, subscription_id, run_date, status)
+		VALUES ($1, $2, '2026-06-13', 'sent')`, tenantID, sub.ID)
+	require.NoError(t, err)
+
+	buildWorker(pool, subs, `{"themes":[]}`).ProcessOnce(ctx, now)
+
+	require.Equal(t, int32(0), spy.count.Load(), "no re-delivery when the day is already claimed")
+	require.True(t, nextRunAt(t, ctx, pool, tenantID).After(now), "cursor advances despite the claim conflict")
+}
+
+// TestDigestWorker_InvalidTimezoneSkips proves an unloadable IANA timezone is
+// survived: no panic, no run, no delivery, and the cursor advances so the broken
+// subscription stops hot-looping.
+func TestDigestWorker_InvalidTimezoneSkips(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	defer pool.Close()
+	now := time.Date(2026, 6, 13, 9, 0, 0, 0, time.UTC)
+	tenantID := insertTenant(t, ctx, pool, "digest-badtz", "UTC")
+	spy := &webhookSpy{}
+	insertDigestTarget(t, ctx, pool, tenantID, spy.server(t).URL)
+
+	subs := digestsubrepo.New(pool)
+	_, err := subs.Upsert(ctx, digestsubrepo.Subscription{
+		TenantID: tenantID, Enabled: true, Frequency: "daily", SendHour: 9,
+		LLMMinFeedback: 6, Timezone: ptrext.Of("Not/AZone"),
+		NextRunAt: ptrext.Of(now.Add(-time.Minute)),
+	})
+	require.NoError(t, err)
+
+	buildWorker(pool, subs, `{"themes":[]}`).ProcessOnce(ctx, now) // must not panic
+
+	require.Equal(t, int32(0), spy.count.Load(), "no delivery on unloadable timezone")
+	require.Equal(t, 0, runCount(t, ctx, pool, tenantID), "no run claimed for a broken-tz subscription")
+	require.True(t, nextRunAt(t, ctx, pool, tenantID).After(now), "cursor advanced to stop hot-looping")
+}
+
+// TestDigestWorker_DefersOnEmbeddingBacklog proves the digest defers while the
+// embedding queue is backlogged (so themes aren't computed on half-clustered
+// data) within the grace window, then proceeds once grace is exhausted.
+func TestDigestWorker_DefersOnEmbeddingBacklog(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	defer pool.Close()
+	now := time.Date(2026, 6, 13, 9, 0, 0, 0, time.UTC)
+	yesterdayNoon := time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC)
+	tenantID := insertTenant(t, ctx, pool, "digest-backlog", "UTC")
+	spy := &webhookSpy{}
+	insertDigestTarget(t, ctx, pool, tenantID, spy.server(t).URL)
+
+	fid := insertEnrichedFeedback(t, ctx, pool, tenantID, "still embedding", yesterdayNoon)
+	_, err := pool.Exec(ctx,
+		`INSERT INTO embedding_task (feedback_id, tenant_id, status) VALUES ($1,$2,'pending')`, fid, tenantID)
+	require.NoError(t, err)
+
+	subs := digestsubrepo.New(pool)
+	_, err = subs.Upsert(ctx, digestsubrepo.Subscription{
+		TenantID: tenantID, Enabled: true, Frequency: "daily", SendHour: 9,
+		LLMMinFeedback: 1, NextRunAt: ptrext.Of(now.Add(-time.Minute)),
+	})
+	require.NoError(t, err)
+	w := buildWorker(pool, subs, `{"themes":[]}`)
+
+	// Within the grace window → defer: no run, cursor unchanged.
+	w.ProcessOnce(ctx, now)
+	require.Equal(t, 0, runCount(t, ctx, pool, tenantID), "deferred while backlogged within grace")
+	require.Equal(t, int32(0), spy.count.Load())
+
+	// Past the 2h grace window → proceed despite the still-pending backlog.
+	w.ProcessOnce(ctx, now.Add(3*time.Hour))
+	require.Equal(t, 1, runCount(t, ctx, pool, tenantID), "proceeds once grace is exhausted")
+}
