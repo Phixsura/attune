@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+// ClustersService provides semantic cluster views for the console (#25).
+service ClustersService {
+  // GET /fb/v1/console/clusters — list cluster summaries.
+  rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/clusters"};
+  }
+  // GET /fb/v1/console/clusters/{cluster_id}/members — list feedback in a cluster.
+  rpc GetClusterMembers(GetClusterMembersRequest) returns (GetClusterMembersResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/clusters/{cluster_id}/members"};
+  }
+}
+
+// ClusterSummary is a condensed view of a feedback cluster.
+message ClusterSummary {
+  string cluster_id = 1;      // UUID
+  int32 count = 2;            // number of feedback items in this cluster
+  string latest_at = 3;       // RFC3339 timestamp of most recent feedback
+  string label = 4;           // LLM-generated label or latest title
+  string sample_title = 5;    // first feedback title for preview
+}
+
+message ListClustersRequest {
+  optional int32 recency_days = 1;  // default 30
+  optional int32 min_count = 2;     // minimum cluster size, default 2
+  optional int32 limit = 3;         // max clusters to return, default 50
+  optional string cursor = 4;       // keyset pagination cursor
+  optional string sort = 5;         // sort field: count, latest_at (default)
+  optional string q = 6;            // search query for cluster label
+}
+
+message ListClustersResponse {
+  repeated ClusterSummary items = 1;
+  bool clustering_enabled = 2;      // false if tenant has clustering disabled
+  optional string next_cursor = 3;  // cursor for next page, empty if no more
+  int32 total_count = 4;            // total clusters matching filters
+}
+
+message GetClusterMembersRequest {
+  string cluster_id = 1;        // path param (UUID)
+  optional int32 limit = 2;     // default 50
+  optional string cursor = 3;   // keyset pagination cursor
+}
+
+// ClusterMember is a feedback item within a cluster.
+message ClusterMember {
+  int64 id = 1;
+  string content = 2;
+  string enriched_title = 3;
+  string source = 4;
+  string created_at = 5;        // RFC3339
+  double similarity = 6;        // cosine similarity to cluster centroid (0-1)
+}
+
+message GetClusterMembersResponse {
+  repeated ClusterMember items = 1;
+  string cluster_label = 2;         // cluster label if available
+  int32 total_count = 3;            // total members in cluster
+  optional string next_cursor = 4;  // cursor for next page
+}

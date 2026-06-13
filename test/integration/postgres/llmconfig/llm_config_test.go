@@ -368,6 +368,7 @@ func newConsoleRouter(
 		nil,
 		nil,
 		console.NewLLMConfigHandler(svc),
+		nil,
 		fakeAdminReader{},
 	)
 	return router.Mount(), signer

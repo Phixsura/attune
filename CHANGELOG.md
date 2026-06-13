@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Embedding-based feedback clustering (#25).** Adds semantic deduplication of
+  user feedback using pgvector embeddings with HNSW indexing. Feedback items
+  are automatically grouped into clusters when cosine similarity exceeds a
+  configurable threshold (default 0.85). Uses Matryoshka 256-dim embeddings for
+  6x storage savings with ~95% quality retention. The implementation follows
+  an outbox pattern (`embedding_task` table) for reliable async processing
+  with backpressure and retry. Clusters with 3+ members get LLM-generated labels.
+  Migration 024 enables the pgvector extension and adds embedding columns,
+  cluster assignment, and tenant clustering config. The embedding worker
+  processes tasks and writes usage to `llm_audit` with `purpose='embed'`.
+  Includes metrics: `attune_embed_cluster_assignments_total`,
+  `attune_embed_errors_total`, `attune_embed_duration_seconds`,
+  `attune_embed_queue_depth`. Requires pgvector >= 0.5.0 for HNSW indexes.
+  Console: adds independent `/clusters` page with keyset-cursor pagination,
+  virtual scrolling via react-window v2, search/filter/sort controls, and
+  sidebar member details. The clusters card on the feedback page shows a
+  summary with a link to the full clusters page. Cursor pagination format:
+  `"unix_nanos:uuid"` for clusters, `"unix_nanos:id"` for members.
 - **Config-first runtime and DB-managed LLM channels (#23).** Adds a
   Tink-backed shared secret store (`secrets.tink_keyset`), DB metadata for
   runtime secret-key registry state, managed `llm_channels`,

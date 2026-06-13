@@ -26,6 +26,7 @@ import (
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/llmguard"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/observability"
@@ -44,12 +45,15 @@ import (
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
+	embeddingsvc "github.com/Phixsura/attune/internal/service/embedding"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/ingest"
 	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
 	"github.com/Phixsura/attune/internal/service/llmrouter"
 	"github.com/Phixsura/attune/internal/service/outbox"
+
+	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 )
 
 // ── server ────────────────────────────────────────────────────────────────
@@ -85,6 +89,10 @@ func runServer() error {
 		return err
 	}
 	defer pool.Close()
+
+	if err := database.CheckPgvector(ctx, pool); err != nil {
+		return fmt.Errorf("pgvector check: %w", err)
+	}
 
 	secrets, err := secretstore.NewTinkStoreFromJSONWithLegacy(
 		cfg.Secrets.TinkKeyset,
@@ -134,6 +142,8 @@ func runServer() error {
 	// attune_outbox_lag_seconds is refreshed on a 30s ticker rather than
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
+
+	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
 
 	// (Weekly digest scheduler removed with #66 Plan T17 — its only
 	// channel was an IM group bot. A channel-agnostic digest sender
@@ -207,6 +217,14 @@ func shutdownTracing(shutdown func(context.Context) error) {
 	if err := shutdown(shutdownCtx); err != nil {
 		logext.Warnf(shutdownCtx, "[%s] otel shutdown failed,err:%+v", where, err.Error())
 	}
+}
+
+// startEmbeddingWorker initializes and runs the embedding clustering worker.
+func startEmbeddingWorker(ctx context.Context, pool *pgxpool.Pool, enricher *enrich.Enricher, rawLLM *llmrouter.Router, llm llmclient.LLMClient) {
+	taskRepo := embeddingrepo.NewTaskRepo(pool)
+	enricher.SetEmbeddingTask(taskRepo)
+	worker := embeddingsvc.NewWorker(taskRepo, rawLLM, llm, llmauditrepo.New(pool))
+	go worker.Run(ctx)
 }
 
 // setupDatabase opens the pgx pool, verifies connectivity, and applies

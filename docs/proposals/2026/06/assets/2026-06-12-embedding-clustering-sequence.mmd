@@ -1,0 +1,73 @@
+sequenceDiagram
+    autonumber
+    participant Client as Client
+    participant Ingest as Ingest Handler
+    participant DB as PostgreSQL
+    participant Enricher as Enricher Service
+    participant LLM as LLM Client
+    participant Clusterer as Clusterer Service
+    participant Embed as Embedding API
+    participant pgvec as pgvector Index
+
+    %% Ingestion Phase
+    rect rgb(49, 130, 206)
+        Note over Client,DB: 1. Ingestion
+        Client->>Ingest: POST /v1/feedback/ingest
+        Ingest->>DB: INSERT user_feedback<br/>status='pending'
+        Ingest-->>Client: 201 Created
+    end
+
+    %% Enrichment Phase
+    rect rgb(72, 187, 120)
+        Note over Enricher,DB: 2. Enrichment (Background Worker)
+        Enricher->>DB: TryClaim(id)<br/>status='enriching'
+        DB-->>Enricher: claimed=true
+        Enricher->>DB: LoadForEnrich(id)
+        DB-->>Enricher: content, tenant config
+
+        alt Triage = ignore
+            Enricher->>DB: Mark ignored
+        else Triage = full
+            Enricher->>LLM: Classify(content, schema)
+            LLM-->>Enricher: {title, attrs, confidence}
+            Enricher->>Enricher: Gate 2: whitelist filter
+            Enricher->>DB: persistEnriched (tx)<br/>status='enriched'
+        end
+    end
+
+    %% Async Phase - Outbox Pattern
+    rect rgb(237, 137, 54)
+        Note over Enricher,pgvec: 3. Async Embedding (Outbox Pattern)
+        Enricher->>DB: INSERT embedding_task<br/>status='pending'
+
+        loop EmbeddingWorker polls
+            Clusterer->>DB: TryClaim (pending → processing)
+            DB-->>Clusterer: task claimed
+
+            Clusterer->>Embed: POST /v1/embeddings<br/>model=text-embedding-3-small, dims=256
+            Embed-->>Clusterer: []float32 (256 dims)
+
+            Clusterer->>pgvec: FindSimilarIterative<br/>cosine > 0.85, same model
+            pgvec-->>Clusterer: nearest neighbor or nil
+
+            alt similar found
+                Clusterer->>Clusterer: cluster_id = neighbor.cluster_id
+            else no similar
+                Clusterer->>Clusterer: cluster_id = uuid.New()
+            end
+
+            Clusterer->>DB: UPDATE feedback (embedding, cluster_id)
+            Clusterer->>DB: Mark task done
+            Clusterer->>DB: INSERT llm_audit (purpose='embed')
+        end
+    end
+
+    %% Query Phase
+    rect rgb(159, 122, 234)
+        Note over Client,DB: 4. Console Query
+        Client->>DB: GET /clusters<br/>GROUP BY cluster_id
+        DB-->>Client: [{cluster_id, count, latest_title}]
+
+        Client->>DB: GET /clusters/{id}/members
+        DB-->>Client: [feedback items]
+    end
