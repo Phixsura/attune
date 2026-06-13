@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   SQL/code-derived, never LLM-fabricated; a naive single LLM call (over the
   already-configured `enrich` route, so no new routing config) is the fallback
   for clustering-off tenants — then POSTs a rendered JSON+markdown payload to the
-  tenant's `audience='digest'` raw-webhook target via the shared
+  tenant's `audience='digest'` raw-webhook target — created in the notify-targets
+  UI/API (Settings → 通知目标, audience=digest) — via the shared
   `notify.Transport`. The schedule is a first-class entity, configurable in
   Console (Settings → 日报摘要) and over the API
   (`GET/PUT/DELETE /fb/v1/console/digest-subscription`): enabled, daily/weekly,

@@ -43,7 +43,7 @@ export function EditNotifyDialog({
 }) {
   const { t } = useTranslation()
   const [url, setUrl] = useState('')
-  const [audience, setAudience] = useState<'pool' | 'radar' | 'all'>('all')
+  const [audience, setAudience] = useState<'pool' | 'radar' | 'all' | 'digest'>('all')
   const [timeout, setTimeoutSec] = useState(10)
   const [disabled, setDisabled] = useState(false)
   const [secret, setSecret] = useState('')
@@ -53,7 +53,7 @@ export function EditNotifyDialog({
   useEffect(() => {
     if (!target) return
     setUrl(target.url ?? '')
-    setAudience(target.audience as 'pool' | 'radar' | 'all')
+    setAudience(target.audience as 'pool' | 'radar' | 'all' | 'digest')
     setTimeoutSec(target.timeoutSeconds ?? 10)
     setDisabled(target.disabled)
     setSecret('')
@@ -110,7 +110,7 @@ export function EditNotifyDialog({
               </Label>
               <Select
                 value={audience}
-                onValueChange={(v) => setAudience(v as 'pool' | 'radar' | 'all')}
+                onValueChange={(v) => setAudience(v as 'pool' | 'radar' | 'all' | 'digest')}
                 disabled={pending}
               >
                 <SelectTrigger id="ent-audience">
@@ -120,6 +120,7 @@ export function EditNotifyDialog({
                   <SelectItem value="all">all</SelectItem>
                   <SelectItem value="pool">pool</SelectItem>
                   <SelectItem value="radar">radar</SelectItem>
+                  <SelectItem value="digest">digest</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -12,6 +12,13 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import type { NotifyTargetCreate } from '@/features/notify-targets/api/create-notify-target'
 import type { NotifyTarget } from '@/features/notify-targets/api/list-notify-targets'
 
@@ -34,11 +41,13 @@ export function CreateNotifyDialog({
   const [url, setUrl] = useState('')
   const [secret, setSecret] = useState('')
   const [timeout, setTimeoutSec] = useState(10)
+  const [audience, setAudience] = useState<'pool' | 'radar' | 'all' | 'digest'>('all')
 
   const reset = () => {
     setUrl('')
     setSecret('')
     setTimeoutSec(10)
+    setAudience('all')
   }
 
   return (
@@ -59,7 +68,7 @@ export function CreateNotifyDialog({
             const body: NotifyTargetCreate = {
               destinationType: FIXED_DEST_TYPE,
               url: url.trim(),
-              audience: 'all',
+              audience,
               timeoutSeconds: timeout,
               disabled: false,
             }
@@ -112,6 +121,27 @@ export function CreateNotifyDialog({
                 onChange={(e) => setTimeoutSec(Number(e.target.value) || 10)}
                 disabled={pending}
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="nt-audience">
+                {t('notify_targets.create_dialog.audience_field')}
+              </Label>
+              <Select
+                value={audience}
+                onValueChange={(v) => setAudience(v as 'pool' | 'radar' | 'all' | 'digest')}
+                disabled={pending}
+              >
+                <SelectTrigger id="nt-audience">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">all</SelectItem>
+                  <SelectItem value="pool">pool</SelectItem>
+                  <SelectItem value="radar">radar</SelectItem>
+                  <SelectItem value="digest">digest</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
