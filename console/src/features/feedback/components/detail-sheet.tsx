@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { Loader2 } from 'lucide-react'
+import { Copy, Loader2, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
+import { Button } from '@/components/ui/button'
 import {
   Sheet,
   SheetContent,
@@ -15,6 +17,7 @@ import {
   type FeedbackDetail,
   feedbackDetailQuery,
 } from '@/features/feedback/api/get-feedback-detail'
+import { useRegenerateReplyDraft } from '@/features/feedback/api/regenerate-reply-draft'
 import { ConfidenceIndicator } from '@/features/feedback/components/confidence-indicator'
 import { LanguageBadge, languagesDiffer } from '@/features/feedback/components/language-badge'
 import { useDisplayName } from '@/lib/i18n-resolve'
@@ -105,6 +108,8 @@ function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] })
         <p className="whitespace-pre-wrap break-words">{data.content}</p>
       </Section>
 
+      {data.replyDraft ? <ReplyDraftSection id={String(data.id)} draft={data.replyDraft} /> : null}
+
       {displayRationale ? (
         <Section label={t('feedback.detail.ai_rationale')}>
           <p className="rounded-md border border-border bg-muted/40 p-3 whitespace-pre-wrap break-words text-muted-foreground">
@@ -185,6 +190,46 @@ function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] })
         </Section>
       ) : null}
     </div>
+  )
+}
+
+// ReplyDraftSection shows the operator-facing LLM draft with Copy and
+// Regenerate. The draft is a suggestion only — never auto-sent. Regenerate
+// re-runs the LLM synchronously and the detail query re-reads the new draft.
+function ReplyDraftSection({ id, draft }: { id: string; draft: string }) {
+  const { t } = useTranslation()
+  const regen = useRegenerateReplyDraft(id)
+  const current = regen.data?.replyDraft ?? draft
+  const onCopy = () => {
+    void navigator.clipboard.writeText(current)
+    toast.success(t('feedback.detail.reply_draft_copied'))
+  }
+  return (
+    <Section label={t('feedback.detail.reply_draft')}>
+      <div className="space-y-3 rounded-md border border-border bg-muted/40 p-3">
+        <p className="whitespace-pre-wrap break-words">{current}</p>
+        <div className="flex items-center gap-2">
+          <Button type="button" size="sm" variant="outline" onClick={onCopy}>
+            <Copy className="h-3.5 w-3.5" />
+            {t('feedback.detail.reply_draft_copy')}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => regen.mutate()}
+            disabled={regen.isPending}
+          >
+            {regen.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            {t('feedback.detail.reply_draft_regenerate')}
+          </Button>
+        </div>
+      </div>
+    </Section>
   )
 }
 

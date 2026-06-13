@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
@@ -91,5 +92,66 @@ describe('FeedbackDetailSheet', () => {
     await waitFor(() => expect(screen.getByText('展示侧：支付流程受阻')).toBeInTheDocument())
     expect(screen.queryByText('原语言解读')).toBeNull()
     expect(screen.queryByText('原文侧：支付流程受阻')).toBeNull()
+  })
+
+  it('shows the reply draft with copy + regenerate when present', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-3',
+          content: 'app crashes on login',
+          enrichedTitle: 'Crash',
+          enrichedAttrs: {},
+          replyDraft: 'Sorry to hear that — we are investigating and will update you shortly.',
+          replyDraftGeneratedAt: '2026-06-09T10:00:00Z',
+          language: 'en',
+          isUrgent: false,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentError: '',
+        }),
+      ),
+    )
+    renderWithProviders(<FeedbackDetailSheet id="f-3" dims={dims} onOpenChange={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText(/Sorry to hear that/i)).toBeInTheDocument())
+    expect(screen.getByText('回复草稿')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /复制/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /重新生成/ })).toBeInTheDocument()
+  })
+
+  it('regenerate posts and shows the new draft', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-4',
+          content: 'x',
+          enrichedAttrs: {},
+          replyDraft: 'old draft',
+          language: 'en',
+          isUrgent: false,
+          source: 'web',
+          userId: '',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentError: '',
+        }),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/regenerate', () =>
+        HttpResponse.json({
+          replyDraft: 'new draft',
+          replyDraftGeneratedAt: '2026-06-09T11:00:00Z',
+        }),
+      ),
+    )
+    renderWithProviders(<FeedbackDetailSheet id="f-4" dims={dims} onOpenChange={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('old draft')).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: /重新生成/ }))
+    await waitFor(() => expect(screen.getByText('new draft')).toBeInTheDocument())
   })
 })

@@ -532,7 +532,11 @@
       "attrs": "AI 分类",
       "confidence": "置信度",
       "enrichmentError": "AI 富化失败原因",
-      "enrichedAt": "富化于"
+      "enrichedAt": "富化于",
+      "reply_draft": "回复草稿",
+      "reply_draft_copy": "复制",
+      "reply_draft_regenerate": "重新生成",
+      "reply_draft_copied": "草稿已复制到剪贴板"
     },
     "empty_title": "还没有反馈",
     "empty_body": "把 API key 接到你的产品里。新反馈到了 1 分钟内会出现在这里，配置好的 webhook 目标也会同步。",
