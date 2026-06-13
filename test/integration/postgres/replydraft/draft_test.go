@@ -4,6 +4,7 @@ package replydraft
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -164,14 +165,15 @@ func TestDraftPrecheck(t *testing.T) {
 	tn := setupTenant(t, ctx, pool, true, 0)
 	fb := createEnrichedFeedback(t, ctx, pool, tn)
 
-	status, enabled, err := repo.DraftPrecheck(ctx, fb, tn)
+	status, enabled, lastGen, err := repo.DraftPrecheck(ctx, fb, tn)
 	require.NoError(t, err)
 	require.Equal(t, "done", status)
 	require.True(t, enabled)
+	require.Nil(t, lastGen) // never drafted yet → no cooldown
 
 	// Cross-tenant precheck → not found.
 	other := setupTenant(t, ctx, pool, false, 0)
-	_, _, err = repo.DraftPrecheck(ctx, fb, other)
+	_, _, _, err = repo.DraftPrecheck(ctx, fb, other)
 	require.ErrorIs(t, err, replydraft.ErrNotFound)
 }
 
@@ -194,4 +196,68 @@ func TestTraceID_And_QueueDepthByTenant(t *testing.T) {
 	depths, err := repo.QueueDepthByTenant(ctx)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), depths[tn])
+}
+
+// TestRetryBackoff_NotReclaimableUntilDue is the regression guard for the
+// taskoutbox backoff bug: a just-failed (non-exhausted) task must NOT be
+// re-claimable until its next_retry_at window passes. Before the fix, MarkFailed
+// returned the row to 'pending' and TryClaim's pending branch ignored
+// next_retry_at, so the worker re-hit a failing provider every poll with zero
+// backoff.
+func TestRetryBackoff_NotReclaimableUntilDue(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	defer pool.Close()
+	repo := replydraft.NewDraftTaskRepo(pool)
+
+	tn := setupTenant(t, ctx, pool, true, 0)
+	fb := createEnrichedFeedback(t, ctx, pool, tn)
+	enqueue(t, ctx, pool, repo, fb, tn, nil)
+
+	claimed, err := repo.TryClaim(ctx, time.Minute) // attempts -> 1
+	require.NoError(t, err)
+	require.Equal(t, fb, claimed.FeedbackID)
+	require.NoError(t, repo.MarkFailed(ctx, claimed.ID, errors.New("transient"), 5))
+
+	// Backoff in effect: not immediately re-claimable.
+	_, err = repo.TryClaim(ctx, time.Minute)
+	require.ErrorIs(t, err, replydraft.ErrNoTask, "failed task must wait out its backoff window")
+
+	// Force the window into the past → claimable again, attempts increments.
+	_, err = pool.Exec(ctx,
+		`UPDATE reply_draft_task SET next_retry_at = NOW() - INTERVAL '1 second' WHERE id=$1`, claimed.ID)
+	require.NoError(t, err)
+	reclaimed, err := repo.TryClaim(ctx, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, claimed.ID, reclaimed.ID)
+	require.Equal(t, 2, reclaimed.Attempts)
+}
+
+// TestRetryBackoff_ExhaustedIsTerminal verifies an exhausted task stays 'failed'
+// with a NULL next_retry_at and is never re-claimed (the predicate never matches
+// a NULL comparison).
+func TestRetryBackoff_ExhaustedIsTerminal(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	defer pool.Close()
+	repo := replydraft.NewDraftTaskRepo(pool)
+
+	tn := setupTenant(t, ctx, pool, true, 0)
+	fb := createEnrichedFeedback(t, ctx, pool, tn)
+	enqueue(t, ctx, pool, repo, fb, tn, nil)
+
+	claimed, err := repo.TryClaim(ctx, time.Minute) // attempts -> 1
+	require.NoError(t, err)
+	// maxAttempts=1 → this failure exhausts it.
+	require.NoError(t, repo.MarkFailed(ctx, claimed.ID, errors.New("permanent"), 1))
+
+	var status string
+	var nextRetryAt *time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status, next_retry_at FROM reply_draft_task WHERE id=$1`, claimed.ID).Scan(&status, &nextRetryAt))
+	require.Equal(t, "failed", status)
+	require.Nil(t, nextRetryAt, "exhausted task has no next_retry_at (terminal)")
+
+	_, err = repo.TryClaim(ctx, time.Minute)
+	require.ErrorIs(t, err, replydraft.ErrNoTask, "exhausted task is terminal")
 }

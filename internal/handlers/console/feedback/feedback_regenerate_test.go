@@ -24,14 +24,15 @@ type fakeDrafter struct {
 	gotID     int64
 	gotTenant string
 
-	pcStatus  string
-	pcEnabled bool
-	pcFound   bool
-	pcErr     error
+	pcStatus      string
+	pcEnabled     bool
+	pcFound       bool
+	pcGeneratedAt *time.Time
+	pcErr         error
 }
 
-func (f *fakeDrafter) Precheck(_ context.Context, _ int64, _ string) (string, bool, bool, error) {
-	return f.pcStatus, f.pcEnabled, f.pcFound, f.pcErr
+func (f *fakeDrafter) Precheck(_ context.Context, _ int64, _ string) (string, bool, bool, *time.Time, error) {
+	return f.pcStatus, f.pcEnabled, f.pcFound, f.pcGeneratedAt, f.pcErr
 }
 
 func (f *fakeDrafter) Generate(_ context.Context, feedbackID int64, tenantID string) (string, time.Time, error) {
@@ -135,4 +136,30 @@ func TestRegenerate_GenerateError(t *testing.T) {
 	regenerateHandler(h)(w, regenRequest())
 
 	require.Equal(t, http.StatusBadGateway, w.Code)
+}
+
+func TestRegenerate_Cooldown(t *testing.T) {
+	recent := time.Now().Add(-2 * time.Second) // within the 10s cooldown
+	drafter := okDrafter("should not be generated")
+	drafter.pcGeneratedAt = &recent
+	h := &FeedbackHandler{drafter: drafter}
+
+	w := httptest.NewRecorder()
+	regenerateHandler(h)(w, regenRequest())
+
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.False(t, drafter.called) // no LLM call spent inside the cooldown window
+}
+
+func TestRegenerate_CooldownElapsed(t *testing.T) {
+	old := time.Now().Add(-time.Hour) // well past the cooldown
+	drafter := okDrafter("fresh draft")
+	drafter.pcGeneratedAt = &old
+	h := &FeedbackHandler{drafter: drafter}
+
+	w := httptest.NewRecorder()
+	regenerateHandler(h)(w, regenRequest())
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, drafter.called)
 }

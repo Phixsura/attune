@@ -94,9 +94,19 @@ func (q *Queue) MarkDone(ctx context.Context, taskID int64) error {
 	return nil
 }
 
-// MarkFailed records an attempt failure. While attempts < maxAttempts the
-// task returns to 'pending' with exponential backoff (30s · 2^(attempts-1));
-// once exhausted it stays 'failed'.
+// MarkFailed records an attempt failure. The task stays in 'failed': while
+// attempts < maxAttempts it carries a future next_retry_at (exponential backoff
+// 30s · 2^(attempts-1)) so TryClaim's `status='failed' AND next_retry_at<=NOW()`
+// branch re-claims it only once the backoff window passes; once exhausted it
+// keeps status='failed' with next_retry_at=NULL, which that predicate never
+// matches (a NULL comparison is never true) — making it terminal. claimed_at is
+// cleared so a failed row no longer carries a stale claim timestamp.
+//
+// Retries deliberately stay 'failed' rather than returning to 'pending': the
+// pending claim branch is unconditional (no next_retry_at gate), so a 'pending'
+// retry would be re-claimed on the very next poll and the backoff would never
+// take effect. This mirrors the proven enrichment retry path in
+// internal/repo/feedback.
 func (q *Queue) MarkFailed(ctx context.Context, taskID int64, lastErr error, maxAttempts int) error {
 	errMsg := ""
 	if lastErr != nil {
@@ -104,11 +114,12 @@ func (q *Queue) MarkFailed(ctx context.Context, taskID int64, lastErr error, max
 	}
 	sql := fmt.Sprintf(`
 		UPDATE %s
-		SET status = CASE WHEN attempts >= $3 THEN 'failed' ELSE 'pending' END,
+		SET status = 'failed',
 		    next_retry_at = CASE
 		        WHEN attempts >= $3 THEN NULL
 		        ELSE NOW() + (INTERVAL '30 seconds' * POWER(2, attempts - 1))
 		    END,
+		    claimed_at = NULL,
 		    last_error = $2
 		WHERE id = $1`, q.table)
 	if _, err := q.pool.Exec(ctx, sql, taskID, errMsg, maxAttempts); err != nil {

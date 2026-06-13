@@ -11,6 +11,13 @@ import (
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
+// regenerateCooldown is the minimum gap between manual reply-draft regenerations
+// of the same row. It's the per-row cost backstop on the synchronous operator
+// endpoint (the auto path is gated by opt-in + confidence at enrich time); a
+// human re-reading a 2-3 sentence draft before retrying rarely beats it, while a
+// scripted loop of POSTs is capped instead of running unbounded LLM spend.
+const regenerateCooldown = 10 * time.Second
+
 // Regenerate handles POST /fb/v1/console/feedback/{id}/reply-draft/regenerate.
 // It re-runs the shared ReplyDrafter.Generate core synchronously and returns
 // the fresh draft. All guards are tenant-scoped via Precheck: the row must be
@@ -31,7 +38,7 @@ func (h *FeedbackHandler) Regenerate(
 		logext.Warnf(ctx, "[%s] reject: reply-draft not configured,tenant_id:%s,id:%d", where, auth.TenantID, id)
 		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusServiceUnavailable, attunev1.ErrorCode_INTERNAL, "reply-draft generation is not configured")
 	}
-	status, enabled, found, err := h.drafter.Precheck(ctx, id, auth.TenantID)
+	status, enabled, found, lastGeneratedAt, err := h.drafter.Precheck(ctx, id, auth.TenantID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] precheck failed,tenant_id:%s,id:%d,err:%+v", where, auth.TenantID, id, err.Error())
 		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load feedback")
@@ -47,6 +54,15 @@ func (h *FeedbackHandler) Regenerate(
 	if status != "done" {
 		logext.Warnf(ctx, "[%s] reject: not enriched,tenant_id:%s,id:%d,status:%s", where, auth.TenantID, id, status)
 		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusConflict, attunev1.ErrorCode_CONFLICT, "feedback is not enriched yet")
+	}
+	// Per-row cooldown: the async/auto path is cost-gated at enrich time (opt-in
+	// + confidence); this is the matching backstop on the synchronous operator
+	// endpoint so a loop of POSTs against one row can't drive unbounded LLM
+	// spend. The client also disables the button while pending, but that is
+	// trivially bypassed by calling the endpoint directly.
+	if lastGeneratedAt != nil && time.Since(ptrext.Indirect(lastGeneratedAt)) < regenerateCooldown {
+		logext.Warnf(ctx, "[%s] reject: cooldown,tenant_id:%s,id:%d", where, auth.TenantID, id)
+		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusTooManyRequests, attunev1.ErrorCode_RATE_LIMITED, "reply draft was just regenerated; please wait a few seconds before retrying")
 	}
 	draft, generatedAt, err := h.drafter.Generate(ctx, id, auth.TenantID)
 	if err != nil {

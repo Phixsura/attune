@@ -14,7 +14,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   via a second LLM call. It runs on a new async `reply_draft_task` outbox +
   worker — built on a new generic `internal/repo/taskoutbox` queue that
   `embedding_task` was refactored onto — so a draft-LLM failure is isolated from,
-  and never rolls back, the classification result. Enablement is per-tenant
+  and never rolls back, the classification result. The shared `taskoutbox` queue
+  claims with `FOR UPDATE SKIP LOCKED` and enforces exponential-backoff retries
+  (a queue fix that also corrects `embedding_task`); a single draft call is
+  bounded by a timeout so a hung provider can't stall the worker. Enablement is
+  per-tenant
   (`tenants.reply_draft_enabled`, default off — it doubles LLM cost) with an
   optional confidence gate (`reply_draft_min_confidence`, only draft rows whose
   classification confidence clears the threshold) and a prompt override
@@ -24,8 +28,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   schema change). Console shows the draft below the raw content with Copy and a
   synchronous Regenerate
   (`POST /fb/v1/console/feedback/{id}/reply-draft/regenerate`), which is
-  tenant-scoped and guarded (ownership / opt-in / enriched) and stays reachable
-  for an enabled-but-empty row via a Generate entry point. The draft is
+  tenant-scoped, guarded (ownership / opt-in / enriched), rate-limited by a
+  per-row cooldown, and stays reachable for an enabled-but-empty row via a
+  Generate entry point. The draft is
   operator-facing only and is never auto-sent. Migration 026 adds the feedback
   and tenant columns plus the `reply_draft_task` table; new metrics
   `attune_reply_draft_generated_total`, `attune_reply_draft_errors_total`,

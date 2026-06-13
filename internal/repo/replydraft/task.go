@@ -190,22 +190,23 @@ func (r *DraftTaskRepo) UpdateReplyDraft(ctx context.Context, feedbackID int64, 
 	return generatedAt, nil
 }
 
-// DraftPrecheck returns the enrichment status and the tenant's reply-draft
-// opt-in flag for a tenant-scoped feedback row — the inputs to the Regenerate
-// endpoint's guards. Returns ErrNotFound when the row is not owned by the tenant.
-func (r *DraftTaskRepo) DraftPrecheck(ctx context.Context, feedbackID int64, tenantID string) (enrichmentStatus string, replyDraftEnabled bool, err error) {
+// DraftPrecheck returns the enrichment status, the tenant's reply-draft opt-in
+// flag, and when the row was last drafted (nil if never) for a tenant-scoped
+// feedback row — the inputs to the Regenerate endpoint's guards, including the
+// per-row cooldown. Returns ErrNotFound when the row is not owned by the tenant.
+func (r *DraftTaskRepo) DraftPrecheck(ctx context.Context, feedbackID int64, tenantID string) (enrichmentStatus string, replyDraftEnabled bool, lastGeneratedAt *time.Time, err error) {
 	err = r.pool.QueryRow(ctx, `
-		SELECT f.enrichment_status, t.reply_draft_enabled
+		SELECT f.enrichment_status, t.reply_draft_enabled, f.reply_draft_generated_at
 		FROM user_feedback f
 		JOIN tenants t ON t.id = f.tenant_id
 		WHERE f.id = $1 AND f.tenant_id = $2`,
 		feedbackID, tenantID,
-	).Scan(&enrichmentStatus, &replyDraftEnabled)
+	).Scan(&enrichmentStatus, &replyDraftEnabled, &lastGeneratedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, ErrNotFound
+		return "", false, nil, ErrNotFound
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("draft precheck: %w", err)
+		return "", false, nil, fmt.Errorf("draft precheck: %w", err)
 	}
-	return enrichmentStatus, replyDraftEnabled, nil
+	return enrichmentStatus, replyDraftEnabled, lastGeneratedAt, nil
 }

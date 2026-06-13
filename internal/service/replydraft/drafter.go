@@ -27,6 +27,11 @@ const (
 	draftMaxTokens  = 256
 	draftTemp       = 0.4 // warmer than classification (0.0) for a natural tone
 	draftMaxRunes   = 2000
+	// draftCallTimeout bounds a single provider completion. The chat clients
+	// set no http.Client timeout, so this is the backstop that keeps a hung or
+	// cold provider from blocking the worker (or the synchronous Regenerate
+	// request) indefinitely.
+	draftCallTimeout = 60 * time.Second
 )
 
 // ReplyDrafter produces and stores a reply draft for one feedback row. It is
@@ -61,7 +66,13 @@ func (d *ReplyDrafter) Generate(ctx context.Context, feedbackID int64, tenantID 
 			Purpose:    draftPurpose,
 		},
 	}
-	resp, err := d.llm.Complete(ctx, req)
+	// Bound the provider call so a hung/cold provider can't block the worker or
+	// the synchronous Regenerate request forever (the chat clients set no HTTP
+	// timeout). On timeout the worker's MarkFailed path applies backoff like any
+	// other failure.
+	callCtx, cancel := context.WithTimeout(ctx, draftCallTimeout)
+	defer cancel()
+	resp, err := d.llm.Complete(callCtx, req)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] llm.Complete failed,feedback_id:%d,err:%+v", where, feedbackID, err.Error())
 		return "", time.Time{}, fmt.Errorf("llm: %w", err)
@@ -75,18 +86,19 @@ func (d *ReplyDrafter) Generate(ctx context.Context, feedbackID int64, tenantID 
 }
 
 // Precheck returns the enrichment status, the tenant's reply-draft opt-in flag,
-// and whether the row is owned by the tenant — the Regenerate endpoint's guard
-// inputs. found=false means the row does not exist or is not this tenant's, so
+// whether the row is owned by the tenant, and when the row was last drafted (nil
+// if never) — the Regenerate endpoint's guard inputs, including the per-row
+// cooldown. found=false means the row does not exist or is not this tenant's, so
 // the handler never has to import the repo's sentinel error.
-func (d *ReplyDrafter) Precheck(ctx context.Context, feedbackID int64, tenantID string) (status string, enabled, found bool, err error) {
-	status, enabled, err = d.repo.DraftPrecheck(ctx, feedbackID, tenantID)
+func (d *ReplyDrafter) Precheck(ctx context.Context, feedbackID int64, tenantID string) (status string, enabled, found bool, lastGeneratedAt *time.Time, err error) {
+	status, enabled, lastGeneratedAt, err = d.repo.DraftPrecheck(ctx, feedbackID, tenantID)
 	if errors.Is(err, replydraftrepo.ErrNotFound) {
-		return "", false, false, nil
+		return "", false, false, nil, nil
 	}
 	if err != nil {
-		return "", false, false, err
+		return "", false, false, nil, err
 	}
-	return status, enabled, true, nil
+	return status, enabled, true, lastGeneratedAt, nil
 }
 
 // renderDraftPrompt builds the prompt from the enriched row. sentiment and

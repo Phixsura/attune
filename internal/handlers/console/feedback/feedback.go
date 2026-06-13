@@ -30,9 +30,10 @@ type FeedbackHandler struct {
 // Drafter regenerates a reply draft synchronously, sharing the worker's
 // Generate core. Optional — nil disables the Regenerate endpoint. Precheck
 // supplies the tenant-scoped guard inputs (ownership / enrichment status /
-// opt-in) so the handler enforces them before spending an LLM call.
+// opt-in / last-drafted time) so the handler enforces them — including the
+// per-row cooldown — before spending an LLM call.
 type Drafter interface {
-	Precheck(ctx context.Context, feedbackID int64, tenantID string) (status string, enabled, found bool, err error)
+	Precheck(ctx context.Context, feedbackID int64, tenantID string) (status string, enabled, found bool, lastGeneratedAt *time.Time, err error)
 	Generate(ctx context.Context, feedbackID int64, tenantID string) (string, time.Time, error)
 }
 

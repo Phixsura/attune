@@ -262,9 +262,12 @@ var ReplyDraftErrors = prometheus.NewCounterVec(
 // ReplyDraftDuration tracks reply-draft generation wall time.
 var ReplyDraftDuration = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
-		Name:    "attune_reply_draft_duration_seconds",
-		Help:    "End-to-end reply-draft generation latency per row.",
-		Buckets: prometheus.ExponentialBuckets(0.1, 2, 8), // 0.1s..12.8s
+		Name: "attune_reply_draft_duration_seconds",
+		Help: "End-to-end reply-draft generation latency per row.",
+		// 0.25s..64s — wide enough for the long LLM-call tail. A 12.8s ceiling
+		// (the old default) saturates p95/p99 at +Inf exactly when a slow/cold
+		// provider is the thing operators need to see.
+		Buckets: prometheus.ExponentialBuckets(0.25, 2, 9),
 	},
 	[]string{"tenant"},
 )

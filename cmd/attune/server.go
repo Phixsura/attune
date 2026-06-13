@@ -264,6 +264,13 @@ func refreshReplyDraftQueueDepth(ctx context.Context, repo *replydraftrepo.Draft
 		logext.Warnf(ctx, "[main.refreshReplyDraftQueueDepth] failed,err:%+v", err.Error())
 		return
 	}
+	// Reset before repopulating: QueueDepthByTenant only returns tenants with
+	// outstanding tasks, so a tenant that has fully drained drops out of the
+	// map. Without the reset its per-label series would latch at its last
+	// non-zero value forever (a GaugeVec child persists until cleared), keeping
+	// "depth > N" alerts stuck on. Reset clears all children; the loop below
+	// repopulates the still-active ones, so drained tenants correctly read 0.
+	metrics.ReplyDraftQueueDepth.Reset()
 	for tenant, n := range depths {
 		metrics.ReplyDraftQueueDepth.WithLabelValues(tenant).Set(float64(n))
 	}
