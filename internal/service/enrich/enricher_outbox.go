@@ -199,7 +199,7 @@ func (e *Enricher) insertDraftTask(
 	if e.draftTask == nil {
 		return nil
 	}
-	if err := e.draftTask.CreateTaskTx(ctx, tx, s.ID, s.TenantID, s.ClassificationConfidence); err != nil {
+	if err := e.draftTask.CreateTaskTx(ctx, tx, s.ID, s.TenantID, s.ClassificationConfidence, extractTraceID(ctx)); err != nil {
 		logext.Errorf(ctx, "[%s] reply draft task insert failed,feedback_id:%d,err:%+v",
 			where, s.ID, err.Error())
 		return fmt.Errorf("queue reply draft task: %w", err)

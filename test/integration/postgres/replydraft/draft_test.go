@@ -53,7 +53,7 @@ func enqueue(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *replyd
 	t.Helper()
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	require.NoError(t, repo.CreateTaskTx(ctx, tx, fbID, tenantID, conf))
+	require.NoError(t, repo.CreateTaskTx(ctx, tx, fbID, tenantID, conf, "trace-test"))
 	require.NoError(t, tx.Commit(ctx))
 }
 
@@ -173,4 +173,25 @@ func TestDraftPrecheck(t *testing.T) {
 	other := setupTenant(t, ctx, pool, false, 0)
 	_, _, err = repo.DraftPrecheck(ctx, fb, other)
 	require.ErrorIs(t, err, replydraft.ErrNotFound)
+}
+
+func TestTraceID_And_QueueDepthByTenant(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	defer pool.Close()
+	repo := replydraft.NewDraftTaskRepo(pool)
+
+	tn := setupTenant(t, ctx, pool, true, 0)
+	fb := createEnrichedFeedback(t, ctx, pool, tn)
+	enqueue(t, ctx, pool, repo, fb, tn, nil) // stamps inbound_trace_id="trace-test"
+
+	var taskID int64
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id FROM reply_draft_task WHERE feedback_id=$1`, fb).Scan(&taskID))
+	traceID, err := repo.TaskTraceID(ctx, taskID)
+	require.NoError(t, err)
+	require.Equal(t, "trace-test", traceID)
+
+	depths, err := repo.QueueDepthByTenant(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), depths[tn])
 }

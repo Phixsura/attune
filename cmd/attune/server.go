@@ -238,6 +238,35 @@ func startReplyDraftWorker(ctx context.Context, pool *pgxpool.Pool, enricher *en
 	enricher.SetDraftTask(repo)
 	worker := replydraftsvc.NewWorker(repo, llm)
 	go worker.Run(ctx)
+	go runReplyDraftQueueDepthRefresher(ctx, repo)
+}
+
+// runReplyDraftQueueDepthRefresher feeds attune_reply_draft_queue_depth per
+// tenant on a 30s tick (a gauge, otherwise stuck at 0), mirroring
+// runOutboxLagRefresher.
+func runReplyDraftQueueDepthRefresher(ctx context.Context, repo *replydraftrepo.DraftTaskRepo) {
+	tick := time.NewTicker(30 * time.Second)
+	defer tick.Stop()
+	refreshReplyDraftQueueDepth(ctx, repo)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			refreshReplyDraftQueueDepth(ctx, repo)
+		}
+	}
+}
+
+func refreshReplyDraftQueueDepth(ctx context.Context, repo *replydraftrepo.DraftTaskRepo) {
+	depths, err := repo.QueueDepthByTenant(ctx)
+	if err != nil {
+		logext.Warnf(ctx, "[main.refreshReplyDraftQueueDepth] failed,err:%+v", err.Error())
+		return
+	}
+	for tenant, n := range depths {
+		metrics.ReplyDraftQueueDepth.WithLabelValues(tenant).Set(float64(n))
+	}
 }
 
 // setupDatabase opens the pgx pool, verifies connectivity, and applies

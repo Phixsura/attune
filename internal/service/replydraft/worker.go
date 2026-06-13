@@ -9,6 +9,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
@@ -88,6 +89,11 @@ func (w *DraftWorker) ProcessOnce(ctx context.Context) {
 func (w *DraftWorker) processTask(ctx context.Context, task *replydraftrepo.Task) {
 	const where = "service.replydraft.Worker.processTask"
 	start := time.Now()
+	// Rebuild ctx with the inbound trace id captured at enqueue so this LLM
+	// call's llm_audit row links back to the source ingest.
+	if traceID, err := w.repo.TaskTraceID(ctx, task.ID); err == nil && traceID != "" {
+		ctx = trace.WithID(ctx, traceID)
+	}
 	if _, _, err := w.drafter.Generate(ctx, task.FeedbackID, task.TenantID); err != nil {
 		logext.Errorf(ctx, "[%s] generate failed,task_id:%d,feedback_id:%d,err:%+v",
 			where, task.ID, task.FeedbackID, err.Error())

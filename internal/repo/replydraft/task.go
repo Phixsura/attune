@@ -46,10 +46,10 @@ func NewDraftTaskRepo(pool *pgxpool.Pool) *DraftTaskRepo {
 // tenant opted in AND classification confidence clears the per-tenant
 // threshold. A nil confidence is admitted only when the threshold is 0 (no
 // self-rating → don't spend tokens once a gate is set).
-func (r *DraftTaskRepo) CreateTaskTx(ctx context.Context, tx pgx.Tx, feedbackID int64, tenantID string, confidence *float64) error {
+func (r *DraftTaskRepo) CreateTaskTx(ctx context.Context, tx pgx.Tx, feedbackID int64, tenantID string, confidence *float64, traceID string) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO reply_draft_task (feedback_id, tenant_id, status)
-		SELECT $1, $2, 'pending'
+		INSERT INTO reply_draft_task (feedback_id, tenant_id, status, inbound_trace_id)
+		SELECT $1, $2, 'pending', $4
 		WHERE EXISTS (
 			SELECT 1 FROM tenants
 			WHERE id = $2 AND reply_draft_enabled = TRUE
@@ -57,11 +57,46 @@ func (r *DraftTaskRepo) CreateTaskTx(ctx context.Context, tx pgx.Tx, feedbackID 
 			       OR ($3::float8 IS NOT NULL AND $3 >= reply_draft_min_confidence))
 		)
 		ON CONFLICT (feedback_id) DO NOTHING`,
-		feedbackID, tenantID, confidence)
+		feedbackID, tenantID, confidence, traceID)
 	if err != nil {
 		return fmt.Errorf("create reply draft task: %w", err)
 	}
 	return nil
+}
+
+// QueueDepthByTenant returns outstanding (pending/processing/failed) task
+// counts grouped by tenant — used to feed attune_reply_draft_queue_depth.
+func (r *DraftTaskRepo) QueueDepthByTenant(ctx context.Context) (map[string]int64, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT tenant_id, COUNT(*) FROM reply_draft_task
+		WHERE status IN ('pending', 'processing', 'failed')
+		GROUP BY tenant_id`)
+	if err != nil {
+		return nil, fmt.Errorf("queue depth by tenant: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]int64)
+	for rows.Next() {
+		var tenant string
+		var n int64
+		if err := rows.Scan(&tenant, &n); err != nil {
+			return nil, fmt.Errorf("scan queue depth: %w", err)
+		}
+		out[tenant] = n
+	}
+	return out, rows.Err()
+}
+
+// TaskTraceID returns the inbound trace id captured when the task was enqueued,
+// so the worker can rebuild ctx and link its llm_audit row back to the source
+// ingest. Empty string when none.
+func (r *DraftTaskRepo) TaskTraceID(ctx context.Context, taskID int64) (string, error) {
+	var traceID string
+	if err := r.pool.QueryRow(ctx,
+		`SELECT inbound_trace_id FROM reply_draft_task WHERE id = $1`, taskID).Scan(&traceID); err != nil {
+		return "", fmt.Errorf("task trace id: %w", err)
+	}
+	return traceID, nil
 }
 
 // TryClaim claims one eligible draft task (gated on reply_draft_enabled).
