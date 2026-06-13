@@ -108,7 +108,7 @@ func TestLoadForDraft_And_UpdateRoundTrip(t *testing.T) {
 	tn := setupTenant(t, ctx, pool, true, 0)
 	fb := createEnrichedFeedback(t, ctx, pool, tn)
 
-	in, err := repo.LoadForDraft(ctx, fb)
+	in, err := repo.LoadForDraft(ctx, fb, tn)
 	require.NoError(t, err)
 	require.Equal(t, "the app keeps crashing on login", in.Content)
 	require.Equal(t, "Login crash", in.EnrichedTitle)
@@ -116,7 +116,9 @@ func TestLoadForDraft_And_UpdateRoundTrip(t *testing.T) {
 	require.Equal(t, "frustrated", in.Attrs["sentiment"])
 	require.Equal(t, tn, in.TenantID)
 
-	require.NoError(t, repo.UpdateReplyDraft(ctx, fb, "Sorry to hear that — we're on it."))
+	gotTS, err := repo.UpdateReplyDraft(ctx, fb, tn, "Sorry to hear that — we're on it.")
+	require.NoError(t, err)
+	require.False(t, gotTS.IsZero()) // DB-stamped time returned
 
 	var draft string
 	var generatedAt *time.Time
@@ -125,4 +127,50 @@ func TestLoadForDraft_And_UpdateRoundTrip(t *testing.T) {
 		Scan(&draft, &generatedAt))
 	require.Equal(t, "Sorry to hear that — we're on it.", draft)
 	require.NotNil(t, generatedAt)
+}
+
+func TestLoadAndUpdate_TenantScoped(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	defer pool.Close()
+	repo := replydraft.NewDraftTaskRepo(pool)
+
+	owner := setupTenant(t, ctx, pool, true, 0)
+	other := setupTenant(t, ctx, pool, true, 0)
+	fb := createEnrichedFeedback(t, ctx, pool, owner)
+
+	// Cross-tenant load is denied at the SQL layer, not just the handler.
+	_, err := repo.LoadForDraft(ctx, fb, other)
+	require.ErrorIs(t, err, replydraft.ErrNotFound)
+
+	// Cross-tenant update writes nothing and reports not-found.
+	_, err = repo.UpdateReplyDraft(ctx, fb, other, "hijacked")
+	require.ErrorIs(t, err, replydraft.ErrNotFound)
+	var draft *string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT reply_draft FROM user_feedback WHERE id=$1`, fb).Scan(&draft))
+	require.Nil(t, draft) // owner's row untouched
+
+	in, err := repo.LoadForDraft(ctx, fb, owner)
+	require.NoError(t, err)
+	require.Equal(t, owner, in.TenantID)
+}
+
+func TestDraftPrecheck(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	defer pool.Close()
+	repo := replydraft.NewDraftTaskRepo(pool)
+
+	tn := setupTenant(t, ctx, pool, true, 0)
+	fb := createEnrichedFeedback(t, ctx, pool, tn)
+
+	status, enabled, err := repo.DraftPrecheck(ctx, fb, tn)
+	require.NoError(t, err)
+	require.Equal(t, "done", status)
+	require.True(t, enabled)
+
+	// Cross-tenant precheck → not found.
+	other := setupTenant(t, ctx, pool, false, 0)
+	_, _, err = repo.DraftPrecheck(ctx, fb, other)
+	require.ErrorIs(t, err, replydraft.ErrNotFound)
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -14,20 +15,35 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	feedbackrepo "github.com/Phixsura/attune/internal/repo/feedback"
 )
 
 type fakeDrafter struct {
-	draft  string
-	err    error
-	gotID  int64
-	called bool
+	draft     string
+	genErr    error
+	called    bool
+	gotID     int64
+	gotTenant string
+
+	pcStatus  string
+	pcEnabled bool
+	pcFound   bool
+	pcErr     error
 }
 
-func (f *fakeDrafter) Generate(_ context.Context, feedbackID int64) (string, error) {
+func (f *fakeDrafter) Precheck(_ context.Context, _ int64, _ string) (string, bool, bool, error) {
+	return f.pcStatus, f.pcEnabled, f.pcFound, f.pcErr
+}
+
+func (f *fakeDrafter) Generate(_ context.Context, feedbackID int64, tenantID string) (string, time.Time, error) {
 	f.called = true
 	f.gotID = feedbackID
-	return f.draft, f.err
+	f.gotTenant = tenantID
+	return f.draft, time.Now(), f.genErr
+}
+
+// okDrafter passes all three guards (found / enabled / enriched).
+func okDrafter(draft string) *fakeDrafter {
+	return &fakeDrafter{draft: draft, pcFound: true, pcEnabled: true, pcStatus: "done"}
 }
 
 func regenerateHandler(h *FeedbackHandler) http.HandlerFunc {
@@ -54,9 +70,8 @@ func regenRequest() *http.Request {
 }
 
 func TestRegenerate_Success(t *testing.T) {
-	repo := &fakeFeedbackRepo{getRow: &feedbackrepo.ConsoleDetailRow{}}
-	drafter := &fakeDrafter{draft: "Sorry to hear that — we're on it."}
-	h := &FeedbackHandler{repo: repo, drafter: drafter}
+	drafter := okDrafter("Sorry to hear that — we're on it.")
+	h := &FeedbackHandler{drafter: drafter}
 
 	w := httptest.NewRecorder()
 	regenerateHandler(h)(w, regenRequest())
@@ -64,15 +79,14 @@ func TestRegenerate_Success(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.True(t, drafter.called)
 	require.Equal(t, int64(123), drafter.gotID)
-	require.Equal(t, dispatchtest.TenantID, repo.getTenant) // tenant-scoped ownership check ran
+	require.Equal(t, dispatchtest.TenantID, drafter.gotTenant) // tenant scope threaded into Generate
 	body, err := dispatchtest.DecodeJSON(w.Body)
 	require.NoError(t, err)
 	require.Equal(t, "Sorry to hear that — we're on it.", body["replyDraft"])
 }
 
 func TestRegenerate_NotConfigured(t *testing.T) {
-	repo := &fakeFeedbackRepo{getRow: &feedbackrepo.ConsoleDetailRow{}}
-	h := &FeedbackHandler{repo: repo} // no drafter wired
+	h := &FeedbackHandler{} // no drafter wired
 
 	w := httptest.NewRecorder()
 	regenerateHandler(h)(w, regenRequest())
@@ -81,21 +95,41 @@ func TestRegenerate_NotConfigured(t *testing.T) {
 }
 
 func TestRegenerate_NotFound(t *testing.T) {
-	repo := &fakeFeedbackRepo{getErr: feedbackrepo.ErrFeedbackNotFound}
-	drafter := &fakeDrafter{draft: "x"}
-	h := &FeedbackHandler{repo: repo, drafter: drafter}
+	drafter := &fakeDrafter{pcFound: false}
+	h := &FeedbackHandler{drafter: drafter}
 
 	w := httptest.NewRecorder()
 	regenerateHandler(h)(w, regenRequest())
 
 	require.Equal(t, http.StatusNotFound, w.Code)
-	require.False(t, drafter.called) // never reaches the LLM on a cross-tenant / missing id
+	require.False(t, drafter.called)
+}
+
+func TestRegenerate_Disabled(t *testing.T) {
+	drafter := &fakeDrafter{pcFound: true, pcEnabled: false, pcStatus: "done"}
+	h := &FeedbackHandler{drafter: drafter}
+
+	w := httptest.NewRecorder()
+	regenerateHandler(h)(w, regenRequest())
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.False(t, drafter.called) // opt-in gate enforced before any LLM call
+}
+
+func TestRegenerate_NotEnriched(t *testing.T) {
+	drafter := &fakeDrafter{pcFound: true, pcEnabled: true, pcStatus: "pending"}
+	h := &FeedbackHandler{drafter: drafter}
+
+	w := httptest.NewRecorder()
+	regenerateHandler(h)(w, regenRequest())
+
+	require.Equal(t, http.StatusConflict, w.Code)
+	require.False(t, drafter.called) // no draft for an un-enriched row
 }
 
 func TestRegenerate_GenerateError(t *testing.T) {
-	repo := &fakeFeedbackRepo{getRow: &feedbackrepo.ConsoleDetailRow{}}
-	drafter := &fakeDrafter{err: errors.New("provider down")}
-	h := &FeedbackHandler{repo: repo, drafter: drafter}
+	drafter := &fakeDrafter{pcFound: true, pcEnabled: true, pcStatus: "done", genErr: errors.New("provider down")}
+	h := &FeedbackHandler{drafter: drafter}
 
 	w := httptest.NewRecorder()
 	regenerateHandler(h)(w, regenRequest())

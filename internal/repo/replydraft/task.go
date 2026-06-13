@@ -101,7 +101,7 @@ type DraftInput struct {
 
 // LoadForDraft loads the content + enriched fields + the tenant's optional
 // prompt override for one feedback row.
-func (r *DraftTaskRepo) LoadForDraft(ctx context.Context, feedbackID int64) (*DraftInput, error) {
+func (r *DraftTaskRepo) LoadForDraft(ctx context.Context, feedbackID int64, tenantID string) (*DraftInput, error) {
 	var (
 		in        DraftInput
 		attrsJSON []byte
@@ -115,8 +115,8 @@ func (r *DraftTaskRepo) LoadForDraft(ctx context.Context, feedbackID int64) (*Dr
 		       COALESCE(t.reply_draft_prompt_template, '')
 		FROM user_feedback f
 		JOIN tenants t ON t.id = f.tenant_id
-		WHERE f.id = $1`,
-		feedbackID,
+		WHERE f.id = $1 AND f.tenant_id = $2`,
+		feedbackID, tenantID,
 	).Scan(&in.Content, &in.EnrichedTitle, &attrsJSON, &in.Language, &in.TenantID, &in.PromptTemplate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -132,15 +132,43 @@ func (r *DraftTaskRepo) LoadForDraft(ctx context.Context, feedbackID int64) (*Dr
 	return ptrext.Of(in), nil
 }
 
-// UpdateReplyDraft overwrites the draft column and stamps the time.
-func (r *DraftTaskRepo) UpdateReplyDraft(ctx context.Context, feedbackID int64, draft string) error {
-	_, err := r.pool.Exec(ctx, `
+// UpdateReplyDraft overwrites the draft column (tenant-scoped) and returns the
+// DB-stamped generation time. Returns ErrNotFound when the row is not owned by
+// the tenant, so a missing tenant scope can never write another tenant's row.
+func (r *DraftTaskRepo) UpdateReplyDraft(ctx context.Context, feedbackID int64, tenantID, draft string) (time.Time, error) {
+	var generatedAt time.Time
+	err := r.pool.QueryRow(ctx, `
 		UPDATE user_feedback
-		SET reply_draft = $2, reply_draft_generated_at = NOW()
-		WHERE id = $1`,
-		feedbackID, draft)
-	if err != nil {
-		return fmt.Errorf("update reply draft: %w", err)
+		SET reply_draft = $3, reply_draft_generated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2
+		RETURNING reply_draft_generated_at`,
+		feedbackID, tenantID, draft,
+	).Scan(&generatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, ErrNotFound
 	}
-	return nil
+	if err != nil {
+		return time.Time{}, fmt.Errorf("update reply draft: %w", err)
+	}
+	return generatedAt, nil
+}
+
+// DraftPrecheck returns the enrichment status and the tenant's reply-draft
+// opt-in flag for a tenant-scoped feedback row — the inputs to the Regenerate
+// endpoint's guards. Returns ErrNotFound when the row is not owned by the tenant.
+func (r *DraftTaskRepo) DraftPrecheck(ctx context.Context, feedbackID int64, tenantID string) (enrichmentStatus string, replyDraftEnabled bool, err error) {
+	err = r.pool.QueryRow(ctx, `
+		SELECT f.enrichment_status, t.reply_draft_enabled
+		FROM user_feedback f
+		JOIN tenants t ON t.id = f.tenant_id
+		WHERE f.id = $1 AND f.tenant_id = $2`,
+		feedbackID, tenantID,
+	).Scan(&enrichmentStatus, &replyDraftEnabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, ErrNotFound
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("draft precheck: %w", err)
+	}
+	return enrichmentStatus, replyDraftEnabled, nil
 }

@@ -88,7 +88,7 @@ func (w *DraftWorker) ProcessOnce(ctx context.Context) {
 func (w *DraftWorker) processTask(ctx context.Context, task *replydraftrepo.Task) {
 	const where = "service.replydraft.Worker.processTask"
 	start := time.Now()
-	if _, err := w.drafter.Generate(ctx, task.FeedbackID); err != nil {
+	if _, _, err := w.drafter.Generate(ctx, task.FeedbackID, task.TenantID); err != nil {
 		logext.Errorf(ctx, "[%s] generate failed,task_id:%d,feedback_id:%d,err:%+v",
 			where, task.ID, task.FeedbackID, err.Error())
 		_ = w.repo.MarkFailed(ctx, task.ID, err, w.maxAttempts)

@@ -7,9 +7,11 @@ package replydraft
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -42,11 +44,11 @@ func NewReplyDrafter(repo *replydraftrepo.DraftTaskRepo, llm llmclient.LLMClient
 // user_feedback.reply_draft. The LLM call goes through the audit-wrapping
 // client (Guard.Purpose='reply_draft'), so token/cost are recorded
 // automatically — no explicit audit write here.
-func (d *ReplyDrafter) Generate(ctx context.Context, feedbackID int64) (string, error) {
+func (d *ReplyDrafter) Generate(ctx context.Context, feedbackID int64, tenantID string) (string, time.Time, error) {
 	const where = "service.replydraft.Generate"
-	in, err := d.repo.LoadForDraft(ctx, feedbackID)
+	in, err := d.repo.LoadForDraft(ctx, feedbackID, tenantID)
 	if err != nil {
-		return "", fmt.Errorf("load: %w", err)
+		return "", time.Time{}, fmt.Errorf("load: %w", err)
 	}
 	req := llmclient.CompletionRequest{
 		Prompt:      renderDraftPrompt(ptrext.Indirect(in)),
@@ -62,13 +64,29 @@ func (d *ReplyDrafter) Generate(ctx context.Context, feedbackID int64) (string, 
 	resp, err := d.llm.Complete(ctx, req)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] llm.Complete failed,feedback_id:%d,err:%+v", where, feedbackID, err.Error())
-		return "", fmt.Errorf("llm: %w", err)
+		return "", time.Time{}, fmt.Errorf("llm: %w", err)
 	}
 	draft := cleanDraft(resp.Text)
-	if err := d.repo.UpdateReplyDraft(ctx, feedbackID, draft); err != nil {
-		return "", fmt.Errorf("persist: %w", err)
+	generatedAt, err := d.repo.UpdateReplyDraft(ctx, feedbackID, tenantID, draft)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("persist: %w", err)
 	}
-	return draft, nil
+	return draft, generatedAt, nil
+}
+
+// Precheck returns the enrichment status, the tenant's reply-draft opt-in flag,
+// and whether the row is owned by the tenant — the Regenerate endpoint's guard
+// inputs. found=false means the row does not exist or is not this tenant's, so
+// the handler never has to import the repo's sentinel error.
+func (d *ReplyDrafter) Precheck(ctx context.Context, feedbackID int64, tenantID string) (status string, enabled, found bool, err error) {
+	status, enabled, err = d.repo.DraftPrecheck(ctx, feedbackID, tenantID)
+	if errors.Is(err, replydraftrepo.ErrNotFound) {
+		return "", false, false, nil
+	}
+	if err != nil {
+		return "", false, false, err
+	}
+	return status, enabled, true, nil
 }
 
 // renderDraftPrompt builds the prompt from the enriched row. sentiment and

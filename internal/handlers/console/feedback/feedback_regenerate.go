@@ -1,7 +1,6 @@
 package feedback
 
 import (
-	"errors"
 	"net/http"
 	"time"
 
@@ -10,16 +9,17 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
 // Regenerate handles POST /fb/v1/console/feedback/{id}/reply-draft/regenerate.
-// It re-runs the shared Generate core synchronously and returns the fresh
-// draft. A manual regenerate is an explicit operator action, so it bypasses
-// the per-tenant opt-in/confidence gate (that gate only governs automatic
-// pre-generation at enrich time). Token/cost are still recorded via the
-// audit-wrapping client. The tenant-scoped load first prevents cross-tenant id
-// probing.
+// It re-runs the shared ReplyDrafter.Generate core synchronously and returns
+// the fresh draft. All guards are tenant-scoped via Precheck: the row must be
+// owned by the tenant (404), reply-draft must be enabled for the tenant (403),
+// and the row must be enriched (409) — only then is an LLM call spent. A manual
+// regenerate is an explicit operator action and so bypasses only the
+// *confidence* gate (which governs automatic pre-generation at enrich time),
+// never the opt-in flag. Token/cost are audited via the wrapped client. The
+// draft is operator-facing only — never auto-sent.
 func (h *FeedbackHandler) Regenerate(
 	ctx *dispatcher.RequestContext[*session.AuthCtx],
 	req *attunev1.RegenerateReplyDraftRequest,
@@ -31,22 +31,31 @@ func (h *FeedbackHandler) Regenerate(
 		logext.Warnf(ctx, "[%s] reject: reply-draft not configured,tenant_id:%s,id:%d", where, auth.TenantID, id)
 		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusServiceUnavailable, attunev1.ErrorCode_INTERNAL, "reply-draft generation is not configured")
 	}
-	if _, err := h.repo.GetForConsole(ctx, auth.TenantID, id); err != nil {
-		if errors.Is(err, feedback.ErrFeedbackNotFound) {
-			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%d", where, auth.TenantID, id)
-			return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "feedback not found or not owned by tenant")
-		}
-		logext.Errorf(ctx, "[%s] load failed,tenant_id:%s,id:%d,err:%+v", where, auth.TenantID, id, err.Error())
+	status, enabled, found, err := h.drafter.Precheck(ctx, id, auth.TenantID)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] precheck failed,tenant_id:%s,id:%d,err:%+v", where, auth.TenantID, id, err.Error())
 		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load feedback")
 	}
-	draft, err := h.drafter.Generate(ctx, id)
+	if !found {
+		logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,id:%d", where, auth.TenantID, id)
+		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "feedback not found or not owned by tenant")
+	}
+	if !enabled {
+		logext.Warnf(ctx, "[%s] reject: reply-draft disabled for tenant,tenant_id:%s,id:%d", where, auth.TenantID, id)
+		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "reply-draft is not enabled for this tenant")
+	}
+	if status != "done" {
+		logext.Warnf(ctx, "[%s] reject: not enriched,tenant_id:%s,id:%d,status:%s", where, auth.TenantID, id, status)
+		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusConflict, attunev1.ErrorCode_CONFLICT, "feedback is not enriched yet")
+	}
+	draft, generatedAt, err := h.drafter.Generate(ctx, id, auth.TenantID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] generate failed,tenant_id:%s,id:%d,err:%+v", where, auth.TenantID, id, err.Error())
-		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusBadGateway, attunev1.ErrorCode_INTERNAL, "failed to regenerate reply draft")
+		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusBadGateway, attunev1.ErrorCode_BAD_GATEWAY, "failed to regenerate reply draft")
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%d", where, auth.TenantID, id)
 	return dispatcher.OK(ptrext.Of(attunev1.RegenerateReplyDraftResponse{
 		ReplyDraft:            draft,
-		ReplyDraftGeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		ReplyDraftGeneratedAt: generatedAt.UTC().Format(time.RFC3339),
 	}))
 }
