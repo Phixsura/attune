@@ -43,6 +43,10 @@ exposition plus the portable assets in this directory.
 | `attune_llm_calls_total` | counter | `tenant`, `model`, `status` | LLM provider calls that reached a backend |
 | `attune_llm_tokens_total` | counter | `tenant`, `model`, `direction` | provider-reported prompt/completion token usage |
 | `attune_llm_cost_usd_total` | counter | `tenant`, `model` | estimated USD cost from the static model-price table |
+| `attune_embed_cluster_assignments_total` | counter | `tenant`, `cluster_type` | feedback items assigned to clusters (#25) |
+| `attune_embed_errors_total` | counter | `tenant`, `error_type` | embedding processing errors by type (#25) |
+| `attune_embed_duration_seconds` | histogram | `tenant` | end-to-end embedding and clustering latency per row (#25) |
+| `attune_embed_queue_depth` | gauge | `tenant` | number of pending embedding tasks per tenant (#25) |
 
 Label values:
 
@@ -63,6 +67,8 @@ Label values:
 - LLM `status` — `ok` · `error`.
 - LLM token `direction` — `prompt` · `completion`.
 - LLM `model` — configured model id; keep private gateway aliases bounded.
+- embed `cluster_type` — `new` · `existing`.
+- embed `error_type` — `embed_api` · `find_similar` · `update_embedding`.
 
 The registered set is drift-guarded by `internal/infra/metrics/metrics_test.go` —
 it must match this table.

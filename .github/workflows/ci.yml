@@ -83,15 +83,15 @@ jobs:
 
   # ── Go: integration tier — real Postgres service container ────────────────
   # Gated behind the `integration` build tag so the unit tier (go-checks)
-  # stays fast. The CI job runs Postgres 18 as a GitHub Actions service
-  # container; internal/testdb creates an isolated database per test.
+  # stays fast. The CI job runs pgvector/pgvector:pg17 as a GitHub Actions
+  # service container; internal/testdb creates an isolated database per test.
   integration-postgres:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:18
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: attune
           POSTGRES_PASSWORD: attune

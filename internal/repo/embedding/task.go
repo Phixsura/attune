@@ -1,0 +1,840 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package embedding provides repository methods for embedding tasks and
+// feedback embedding columns.
+package embedding
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
+)
+
+// VecToString converts a []float32 to pgvector's text format: "[1.0,2.0,3.0]".
+func VecToString(v []float32) string {
+	if len(v) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, f := range v {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatFloat(float64(f), 'f', -1, 32))
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+var (
+	ErrTaskNotFound = errors.New("embedding task not found")
+	ErrNoTask       = errors.New("no embedding task to claim")
+)
+
+// TaskRepo wraps the embedding_task outbox table.
+type TaskRepo struct {
+	pool *pgxpool.Pool
+}
+
+func NewTaskRepo(pool *pgxpool.Pool) *TaskRepo {
+	return ptrext.Of(TaskRepo{pool: pool})
+}
+
+// Task represents an embedding_task row.
+type Task struct {
+	ID          int64
+	FeedbackID  int64
+	TenantID    string
+	Status      string
+	Attempts    int
+	ClaimedAt   *time.Time
+	NextRetryAt *time.Time
+	LastError   string
+	CreatedAt   time.Time
+	CompletedAt *time.Time
+}
+
+// CreateTask inserts a new embedding task for a feedback item.
+func (r *TaskRepo) CreateTask(ctx context.Context, feedbackID int64, tenantID string) (int64, error) {
+	var id int64
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO embedding_task (feedback_id, tenant_id, status)
+		VALUES ($1, $2, 'pending')
+		ON CONFLICT (feedback_id) DO NOTHING
+		RETURNING id`,
+		feedbackID, tenantID,
+	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("create embedding task: %w", err)
+	}
+	return id, nil
+}
+
+// CreateTaskTx inserts a new embedding task within a transaction.
+// Only creates the task if clustering is enabled for the tenant.
+func (r *TaskRepo) CreateTaskTx(ctx context.Context, tx pgx.Tx, feedbackID int64, tenantID string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO embedding_task (feedback_id, tenant_id, status)
+		SELECT $1, $2, 'pending'
+		WHERE EXISTS (
+			SELECT 1 FROM tenants
+			WHERE id = $2 AND clustering_enabled = TRUE
+		)
+		ON CONFLICT (feedback_id) DO NOTHING`,
+		feedbackID, tenantID,
+	)
+	if err != nil {
+		return fmt.Errorf("create embedding task tx: %w", err)
+	}
+	return nil
+}
+
+// BackfillTasks queues unembedded feedback for embedding processing.
+// If force is true, re-queues already embedded feedback.
+// Returns the number of tasks created.
+func (r *TaskRepo) BackfillTasks(ctx context.Context, tenantID string, batchSize int, force bool) (int64, error) {
+	whereClause := "embedding IS NULL"
+	if force {
+		whereClause = "TRUE"
+	}
+	result, err := r.pool.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO embedding_task (feedback_id, tenant_id, status)
+		SELECT id, tenant_id, 'pending'
+		FROM user_feedback
+		WHERE tenant_id = $1
+		  AND enrichment_status = 'done'
+		  AND %s
+		  AND NOT EXISTS (
+		      SELECT 1 FROM embedding_task et WHERE et.feedback_id = user_feedback.id
+		  )
+		LIMIT $2
+		ON CONFLICT (feedback_id) DO NOTHING`,
+		whereClause,
+	), tenantID, batchSize)
+	if err != nil {
+		return 0, fmt.Errorf("backfill embedding tasks: %w", err)
+	}
+	return result.RowsAffected(), nil
+}
+
+// TryClaim atomically claims a pending task for processing.
+// Only claims tasks from tenants with clustering_enabled = true.
+// Returns ErrNoTask if no task is available.
+func (r *TaskRepo) TryClaim(ctx context.Context, staleDuration time.Duration) (*Task, error) {
+	row := r.pool.QueryRow(ctx, `
+		UPDATE embedding_task
+		SET status = 'processing',
+		    claimed_at = NOW(),
+		    attempts = attempts + 1
+		WHERE id = (
+			SELECT et.id FROM embedding_task et
+			JOIN tenants t ON t.id = et.tenant_id AND t.clustering_enabled = TRUE
+			WHERE (et.status = 'pending' OR (et.status = 'failed' AND et.next_retry_at <= NOW()))
+			  OR (et.status = 'processing' AND et.claimed_at < NOW() - make_interval(secs => $1))
+			ORDER BY et.created_at
+			LIMIT 1
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING id, feedback_id, tenant_id, status, attempts, claimed_at,
+		          next_retry_at, last_error, created_at, completed_at`,
+		staleDuration.Seconds(),
+	)
+	task, err := scanTask(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNoTask
+	}
+	if err != nil {
+		return nil, fmt.Errorf("try claim embedding task: %w", err)
+	}
+	return ptrext.Of(task), nil
+}
+
+// MarkDone marks a task as completed successfully.
+func (r *TaskRepo) MarkDone(ctx context.Context, taskID int64) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE embedding_task
+		SET status = 'done',
+		    completed_at = NOW(),
+		    last_error = ''
+		WHERE id = $1`,
+		taskID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark embedding task done: %w", err)
+	}
+	return nil
+}
+
+// MarkFailed marks a task as failed with retry backoff.
+func (r *TaskRepo) MarkFailed(ctx context.Context, taskID int64, lastErr error, maxAttempts int) error {
+	errMsg := ""
+	if lastErr != nil {
+		errMsg = lastErr.Error()
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE embedding_task
+		SET status = CASE WHEN attempts >= $3 THEN 'failed' ELSE 'pending' END,
+		    next_retry_at = CASE
+		        WHEN attempts >= $3 THEN NULL
+		        ELSE NOW() + (INTERVAL '30 seconds' * POWER(2, attempts - 1))
+		    END,
+		    last_error = $2
+		WHERE id = $1`,
+		taskID, errMsg, maxAttempts,
+	)
+	if err != nil {
+		return fmt.Errorf("mark embedding task failed: %w", err)
+	}
+	return nil
+}
+
+// ResetStaleClaims resets tasks stuck in processing state.
+func (r *TaskRepo) ResetStaleClaims(ctx context.Context, staleDuration time.Duration) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE embedding_task
+		SET status = 'pending',
+		    claimed_at = NULL
+		WHERE status = 'processing'
+		  AND claimed_at < NOW() - make_interval(secs => $1)`,
+		staleDuration.Seconds(),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("reset stale embedding claims: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// QueueDepth returns the count of pending tasks for a tenant.
+func (r *TaskRepo) QueueDepth(ctx context.Context, tenantID string) (int64, error) {
+	var count int64
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM embedding_task
+		WHERE tenant_id = $1 AND status IN ('pending', 'processing', 'failed')`,
+		tenantID,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("embedding queue depth: %w", err)
+	}
+	return count, nil
+}
+
+type taskScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanTask(row taskScanner) (Task, error) {
+	var t Task
+	err := row.Scan(
+		&t.ID, &t.FeedbackID, &t.TenantID, &t.Status, &t.Attempts,
+		&t.ClaimedAt, &t.NextRetryAt, &t.LastError, &t.CreatedAt, &t.CompletedAt,
+	)
+	return t, err
+}
+
+// FeedbackEmbedding holds embedding data for a feedback item.
+type FeedbackEmbedding struct {
+	Embedding      []float32
+	EmbeddingModel string
+	EmbeddingDims  int
+	ClusterID      uuid.UUID
+}
+
+// UpdateEmbedding stores the embedding and cluster assignment atomically.
+func (r *TaskRepo) UpdateEmbedding(
+	ctx context.Context,
+	feedbackID int64,
+	emb FeedbackEmbedding,
+) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE user_feedback
+		SET embedding = $2::vector,
+		    embedding_model = $3,
+		    embedding_dims = $4,
+		    embedded_at = NOW(),
+		    cluster_id = $5,
+		    cluster_assigned_at = NOW()
+		WHERE id = $1`,
+		feedbackID, VecToString(emb.Embedding), emb.EmbeddingModel, emb.EmbeddingDims, emb.ClusterID,
+	)
+	if err != nil {
+		return fmt.Errorf("update feedback embedding: %w", err)
+	}
+	return nil
+}
+
+// FindSimilarOpts are options for FindSimilar queries.
+type FindSimilarOpts struct {
+	TenantID       string
+	Embedding      []float32
+	EmbeddingModel string
+	Threshold      float64
+	RecencyDays    int
+	EfSearch       int
+}
+
+// SimilarRow is the result of a similarity search.
+type SimilarRow struct {
+	ID         int64
+	ClusterID  uuid.UUID
+	Similarity float64
+}
+
+// FindSimilar finds the most similar feedback with an existing cluster.
+// Uses iterative-scan pattern to handle pgvector's post-filter behavior.
+// Runs in a transaction to ensure SET LOCAL ef_search takes effect.
+func (r *TaskRepo) FindSimilar(ctx context.Context, opts FindSimilarOpts) (*SimilarRow, error) {
+	if opts.EfSearch == 0 {
+		opts.EfSearch = 200
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin find similar tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL hnsw.ef_search = %d", opts.EfSearch))
+	if err != nil {
+		return nil, fmt.Errorf("set ef_search: %w", err)
+	}
+
+	row := tx.QueryRow(ctx, `
+		SELECT id, cluster_id, 1 - (embedding <=> $2::vector) AS similarity
+		FROM user_feedback
+		WHERE tenant_id = $1
+		  AND embedding IS NOT NULL
+		  AND cluster_id IS NOT NULL
+		  AND embedding_model = $5
+		  AND created_at > NOW() - make_interval(days => $4)
+		  AND 1 - (embedding <=> $2::vector) > $3
+		ORDER BY embedding <=> $2::vector
+		LIMIT 1`,
+		opts.TenantID, VecToString(opts.Embedding), opts.Threshold, opts.RecencyDays, opts.EmbeddingModel,
+	)
+
+	var s SimilarRow
+	if err := row.Scan(&s.ID, &s.ClusterID, &s.Similarity); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find similar: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit find similar tx: %w", err)
+	}
+	return ptrext.Of(s), nil
+}
+
+// GetFeedbackContent retrieves the content field for embedding generation.
+func (r *TaskRepo) GetFeedbackContent(ctx context.Context, feedbackID int64) (string, error) {
+	var content string
+	err := r.pool.QueryRow(ctx, `
+		SELECT content FROM user_feedback WHERE id = $1`,
+		feedbackID,
+	).Scan(&content)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrTaskNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("get feedback content: %w", err)
+	}
+	return content, nil
+}
+
+// GetClusterInfo returns info about a cluster.
+type ClusterInfo struct {
+	Count int
+	Label string
+}
+
+func (r *TaskRepo) GetClusterInfo(ctx context.Context, tenantID string, clusterID uuid.UUID) (*ClusterInfo, error) {
+	var info ClusterInfo
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(MAX(cluster_label), '')
+		FROM user_feedback
+		WHERE tenant_id = $1 AND cluster_id = $2`,
+		tenantID, clusterID,
+	).Scan(&info.Count, &info.Label)
+	if err != nil {
+		return nil, fmt.Errorf("get cluster info: %w", err)
+	}
+	return ptrext.Of(info), nil
+}
+
+// GetClusterTitles returns sample enriched titles from a cluster.
+func (r *TaskRepo) GetClusterTitles(ctx context.Context, tenantID string, clusterID uuid.UUID, limit int) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT COALESCE(enriched_title, LEFT(content, 100))
+		FROM user_feedback
+		WHERE tenant_id = $1 AND cluster_id = $2
+		  AND (enriched_title IS NOT NULL OR content <> '')
+		ORDER BY created_at DESC
+		LIMIT $3`,
+		tenantID, clusterID, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get cluster titles: %w", err)
+	}
+	defer rows.Close()
+
+	var titles []string
+	for rows.Next() {
+		var title string
+		if err := rows.Scan(&title); err != nil {
+			return nil, err
+		}
+		titles = append(titles, title)
+	}
+	return titles, rows.Err()
+}
+
+// UpdateClusterLabel sets the cluster label on all feedback in the cluster.
+func (r *TaskRepo) UpdateClusterLabel(ctx context.Context, tenantID string, clusterID uuid.UUID, label string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE user_feedback
+		SET cluster_label = $3
+		WHERE tenant_id = $1 AND cluster_id = $2`,
+		tenantID, clusterID, label,
+	)
+	if err != nil {
+		return fmt.Errorf("update cluster label: %w", err)
+	}
+	return nil
+}
+
+// ClusterListOpts are options for ListClusters.
+type ClusterListOpts struct {
+	RecencyDays int
+	MinCount    int
+	Limit       int
+	Cursor      string // keyset cursor: "unix_ts:uuid"
+	Sort        string // "count" or "latest_at" (default)
+	Query       string // search in cluster label
+}
+
+// ClusterSummary is a condensed view of a cluster.
+type ClusterSummary struct {
+	ClusterID   uuid.UUID
+	Count       int
+	LatestAt    time.Time
+	Label       string
+	SampleTitle string
+}
+
+// ClusterListResult holds cluster list with pagination metadata.
+type ClusterListResult struct {
+	Items      []ClusterSummary
+	NextCursor string
+	TotalCount int
+}
+
+// ListClusters returns cluster summaries for a tenant with cursor pagination.
+func (r *TaskRepo) ListClusters(ctx context.Context, tenantID string, opts ClusterListOpts) (*ClusterListResult, error) {
+	if opts.RecencyDays == 0 {
+		opts.RecencyDays = 30
+	}
+	if opts.MinCount == 0 {
+		opts.MinCount = 2
+	}
+	if opts.Limit == 0 {
+		opts.Limit = 50
+	}
+	if opts.Limit > 500 {
+		opts.Limit = 500
+	}
+	if opts.Sort != "" && opts.Sort != "count" && opts.Sort != "latest_at" {
+		opts.Sort = "latest_at"
+	}
+
+	// Parse cursor if provided: "unix_nanos:uuid"
+	var cursorTime time.Time
+	var cursorID uuid.UUID
+	if opts.Cursor != "" {
+		parts := strings.SplitN(opts.Cursor, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid cursor format")
+		}
+		nanos, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cursor timestamp: %w", err)
+		}
+		cursorTime = time.Unix(0, nanos)
+		cursorID, err = uuid.Parse(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid cursor id: %w", err)
+		}
+	}
+
+	// Build query with optional cursor and search
+	baseWhere := `
+		tenant_id = $1
+		AND cluster_id IS NOT NULL
+		AND created_at > NOW() - make_interval(days => $2)`
+
+	// Count total matching clusters
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT cluster_id)
+		FROM user_feedback
+		WHERE %s`, baseWhere)
+	if opts.Query != "" {
+		countQuery = fmt.Sprintf(`
+			SELECT COUNT(*) FROM (
+				SELECT cluster_id
+				FROM user_feedback
+				WHERE %s
+				GROUP BY cluster_id
+				HAVING COUNT(*) >= $3
+				   AND COALESCE(MAX(cluster_label), '') ILIKE '%%' || $4 || '%%'
+			) sub`, baseWhere)
+	}
+
+	var totalCount int
+	if opts.Query != "" {
+		err := r.pool.QueryRow(ctx, countQuery, tenantID, opts.RecencyDays, opts.MinCount, opts.Query).Scan(&totalCount)
+		if err != nil {
+			return nil, fmt.Errorf("count clusters: %w", err)
+		}
+	} else {
+		err := r.pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM (
+				SELECT cluster_id
+				FROM user_feedback
+				WHERE tenant_id = $1
+				  AND cluster_id IS NOT NULL
+				  AND created_at > NOW() - make_interval(days => $2)
+				GROUP BY cluster_id
+				HAVING COUNT(*) >= $3
+			) sub`,
+			tenantID, opts.RecencyDays, opts.MinCount,
+		).Scan(&totalCount)
+		if err != nil {
+			return nil, fmt.Errorf("count clusters: %w", err)
+		}
+	}
+
+	// Build main query with cursor support
+	var rows pgx.Rows
+	var err error
+
+	orderBy := "MAX(created_at) DESC, cluster_id DESC"
+	if opts.Sort == "count" {
+		orderBy = "COUNT(*) DESC, cluster_id DESC"
+	}
+
+	if opts.Cursor != "" && !cursorTime.IsZero() {
+		// Keyset pagination
+		query := fmt.Sprintf(`
+			SELECT
+				cluster_id,
+				COUNT(*) AS count,
+				MAX(created_at) AS latest_at,
+				COALESCE(
+					MAX(cluster_label),
+					(SELECT COALESCE(enriched_title, LEFT(content, 100))
+					 FROM user_feedback f2
+					 WHERE f2.cluster_id = f.cluster_id
+					 ORDER BY f2.created_at DESC
+					 LIMIT 1)
+				) AS label,
+				(SELECT COALESCE(enriched_title, LEFT(content, 100))
+				 FROM user_feedback f3
+				 WHERE f3.cluster_id = f.cluster_id
+				 ORDER BY f3.created_at DESC
+				 LIMIT 1) AS sample_title
+			FROM user_feedback f
+			WHERE tenant_id = $1
+			  AND cluster_id IS NOT NULL
+			  AND created_at > NOW() - make_interval(days => $2)
+			GROUP BY cluster_id
+			HAVING COUNT(*) >= $3
+			   AND (MAX(created_at), cluster_id) < ($5, $6)
+			   %s
+			ORDER BY %s
+			LIMIT $4`,
+			buildLabelFilter(opts.Query, 7), orderBy)
+
+		if opts.Query != "" {
+			rows, err = r.pool.Query(ctx, query,
+				tenantID, opts.RecencyDays, opts.MinCount, opts.Limit+1,
+				cursorTime, cursorID, opts.Query)
+		} else {
+			rows, err = r.pool.Query(ctx, query,
+				tenantID, opts.RecencyDays, opts.MinCount, opts.Limit+1,
+				cursorTime, cursorID)
+		}
+	} else {
+		query := fmt.Sprintf(`
+			SELECT
+				cluster_id,
+				COUNT(*) AS count,
+				MAX(created_at) AS latest_at,
+				COALESCE(
+					MAX(cluster_label),
+					(SELECT COALESCE(enriched_title, LEFT(content, 100))
+					 FROM user_feedback f2
+					 WHERE f2.cluster_id = f.cluster_id
+					 ORDER BY f2.created_at DESC
+					 LIMIT 1)
+				) AS label,
+				(SELECT COALESCE(enriched_title, LEFT(content, 100))
+				 FROM user_feedback f3
+				 WHERE f3.cluster_id = f.cluster_id
+				 ORDER BY f3.created_at DESC
+				 LIMIT 1) AS sample_title
+			FROM user_feedback f
+			WHERE tenant_id = $1
+			  AND cluster_id IS NOT NULL
+			  AND created_at > NOW() - make_interval(days => $2)
+			GROUP BY cluster_id
+			HAVING COUNT(*) >= $3
+			   %s
+			ORDER BY %s
+			LIMIT $4`,
+			buildLabelFilter(opts.Query, 5), orderBy)
+
+		if opts.Query != "" {
+			rows, err = r.pool.Query(ctx, query,
+				tenantID, opts.RecencyDays, opts.MinCount, opts.Limit+1, opts.Query)
+		} else {
+			rows, err = r.pool.Query(ctx, query,
+				tenantID, opts.RecencyDays, opts.MinCount, opts.Limit+1)
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list clusters: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ClusterSummary
+	for rows.Next() {
+		var s ClusterSummary
+		var label, sampleTitle *string
+		if err := rows.Scan(&s.ClusterID, &s.Count, &s.LatestAt, &label, &sampleTitle); err != nil {
+			return nil, fmt.Errorf("scan cluster: %w", err)
+		}
+		s.Label = ptrext.Indirect(label)
+		s.SampleTitle = ptrext.Indirect(sampleTitle)
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Check if there's a next page
+	var nextCursor string
+	if len(out) > opts.Limit {
+		out = out[:opts.Limit]
+		last := out[len(out)-1]
+		nextCursor = fmt.Sprintf("%d:%s", last.LatestAt.UnixNano(), last.ClusterID.String())
+	}
+
+	return ptrext.Of(ClusterListResult{
+		Items:      out,
+		NextCursor: nextCursor,
+		TotalCount: totalCount,
+	}), nil
+}
+
+func buildLabelFilter(query string, paramIdx int) string {
+	if query == "" {
+		return ""
+	}
+	return fmt.Sprintf("AND COALESCE(MAX(cluster_label), '') ILIKE '%%' || $%d || '%%'", paramIdx)
+}
+
+// ClusterMember is a feedback item within a cluster.
+type ClusterMember struct {
+	ID            int64
+	Content       string
+	EnrichedTitle string
+	Source        string
+	CreatedAt     time.Time
+	Similarity    float64
+}
+
+// ClusterMembersOpts are options for GetClusterMembers.
+type ClusterMembersOpts struct {
+	Limit  int
+	Cursor string // keyset cursor: "unix_nanos:id"
+}
+
+// ClusterMembersResult holds cluster members and metadata.
+type ClusterMembersResult struct {
+	Items      []ClusterMember
+	Label      string
+	TotalCount int
+	NextCursor string
+}
+
+// GetClusterMembers returns feedback items in a cluster with cursor pagination.
+func (r *TaskRepo) GetClusterMembers(ctx context.Context, tenantID string, clusterID uuid.UUID, opts ClusterMembersOpts) (*ClusterMembersResult, error) {
+	if opts.Limit == 0 {
+		opts.Limit = 50
+	}
+	if opts.Limit > 500 {
+		opts.Limit = 500
+	}
+
+	var result ClusterMembersResult
+
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(MAX(cluster_label), '')
+		FROM user_feedback
+		WHERE tenant_id = $1 AND cluster_id = $2`,
+		tenantID, clusterID,
+	).Scan(&result.TotalCount, &result.Label)
+	if err != nil {
+		return nil, fmt.Errorf("get cluster metadata: %w", err)
+	}
+
+	// Parse cursor if provided: "unix_nanos:id"
+	var cursorTime time.Time
+	var cursorID int64
+	if opts.Cursor != "" {
+		parts := strings.SplitN(opts.Cursor, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid cursor format")
+		}
+		nanos, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cursor timestamp: %w", err)
+		}
+		cursorTime = time.Unix(0, nanos)
+		cursorID, err = strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cursor id: %w", err)
+		}
+	}
+
+	// Get reference embedding for similarity calculation (first member with embedding)
+	var refEmbedding string
+	_ = r.pool.QueryRow(ctx, `
+		SELECT embedding::text FROM user_feedback
+		WHERE tenant_id = $1 AND cluster_id = $2 AND embedding IS NOT NULL
+		ORDER BY created_at ASC LIMIT 1`,
+		tenantID, clusterID,
+	).Scan(&refEmbedding)
+
+	var rows pgx.Rows
+	if opts.Cursor != "" && !cursorTime.IsZero() {
+		if refEmbedding != "" {
+			rows, err = r.pool.Query(ctx, `
+				SELECT id, content, COALESCE(enriched_title, ''), source, created_at,
+				       CASE WHEN embedding IS NOT NULL THEN 1 - (embedding <=> $6::vector) ELSE 0 END AS similarity
+				FROM user_feedback
+				WHERE tenant_id = $1 AND cluster_id = $2
+				  AND (created_at, id) < ($4, $5)
+				ORDER BY created_at DESC, id DESC
+				LIMIT $3`,
+				tenantID, clusterID, opts.Limit+1, cursorTime, cursorID, refEmbedding,
+			)
+		} else {
+			rows, err = r.pool.Query(ctx, `
+				SELECT id, content, COALESCE(enriched_title, ''), source, created_at, 0::float8 AS similarity
+				FROM user_feedback
+				WHERE tenant_id = $1 AND cluster_id = $2
+				  AND (created_at, id) < ($4, $5)
+				ORDER BY created_at DESC, id DESC
+				LIMIT $3`,
+				tenantID, clusterID, opts.Limit+1, cursorTime, cursorID,
+			)
+		}
+	} else {
+		if refEmbedding != "" {
+			rows, err = r.pool.Query(ctx, `
+				SELECT id, content, COALESCE(enriched_title, ''), source, created_at,
+				       CASE WHEN embedding IS NOT NULL THEN 1 - (embedding <=> $4::vector) ELSE 0 END AS similarity
+				FROM user_feedback
+				WHERE tenant_id = $1 AND cluster_id = $2
+				ORDER BY created_at DESC, id DESC
+				LIMIT $3`,
+				tenantID, clusterID, opts.Limit+1, refEmbedding,
+			)
+		} else {
+			rows, err = r.pool.Query(ctx, `
+				SELECT id, content, COALESCE(enriched_title, ''), source, created_at, 0::float8 AS similarity
+				FROM user_feedback
+				WHERE tenant_id = $1 AND cluster_id = $2
+				ORDER BY created_at DESC, id DESC
+				LIMIT $3`,
+				tenantID, clusterID, opts.Limit+1,
+			)
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get cluster members: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var m ClusterMember
+		if err := rows.Scan(&m.ID, &m.Content, &m.EnrichedTitle, &m.Source, &m.CreatedAt, &m.Similarity); err != nil {
+			return nil, fmt.Errorf("scan cluster member: %w", err)
+		}
+		result.Items = append(result.Items, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Check if there's a next page
+	if len(result.Items) > opts.Limit {
+		result.Items = result.Items[:opts.Limit]
+		last := result.Items[len(result.Items)-1]
+		result.NextCursor = fmt.Sprintf("%d:%d", last.CreatedAt.UnixNano(), last.ID)
+	}
+
+	return ptrext.Of(result), nil
+}
+
+// IsClusteringEnabled checks if clustering is enabled for a tenant.
+func (r *TaskRepo) IsClusteringEnabled(ctx context.Context, tenantID string) (bool, error) {
+	var enabled bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT clustering_enabled FROM tenants WHERE id = $1`,
+		tenantID,
+	).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check clustering enabled: %w", err)
+	}
+	return enabled, nil
+}
+
+// ClusteringConfig holds tenant-specific clustering settings.
+type ClusteringConfig struct {
+	Enabled   bool
+	Threshold float64
+}
+
+// GetClusteringConfig returns clustering settings for a tenant.
+func (r *TaskRepo) GetClusteringConfig(ctx context.Context, tenantID string) (ClusteringConfig, error) {
+	var cfg ClusteringConfig
+	err := r.pool.QueryRow(ctx, `
+		SELECT clustering_enabled, clustering_threshold FROM tenants WHERE id = $1`,
+		tenantID,
+	).Scan(&cfg.Enabled, &cfg.Threshold)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ClusteringConfig{Threshold: 0.75}, nil
+	}
+	if err != nil {
+		return ClusteringConfig{}, fmt.Errorf("get clustering config: %w", err)
+	}
+	return cfg, nil
+}

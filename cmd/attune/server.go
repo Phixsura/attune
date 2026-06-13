@@ -44,12 +44,15 @@ import (
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
+	embeddingsvc "github.com/Phixsura/attune/internal/service/embedding"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/ingest"
 	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
 	"github.com/Phixsura/attune/internal/service/llmrouter"
 	"github.com/Phixsura/attune/internal/service/outbox"
+
+	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 )
 
 // ── server ────────────────────────────────────────────────────────────────
@@ -85,6 +88,10 @@ func runServer() error {
 		return err
 	}
 	defer pool.Close()
+
+	if err := database.CheckPgvector(ctx, pool); err != nil {
+		return fmt.Errorf("pgvector check: %w", err)
+	}
 
 	secrets, err := secretstore.NewTinkStoreFromJSONWithLegacy(
 		cfg.Secrets.TinkKeyset,
@@ -134,6 +141,19 @@ func runServer() error {
 	// attune_outbox_lag_seconds is refreshed on a 30s ticker rather than
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
+
+	// Embedding worker processes the embedding_task outbox and assigns
+	// feedback to semantic clusters. Uses the same LLM router for embedding
+	// routes (purpose='embed') and cluster label generation.
+	embeddingTaskRepo := embeddingrepo.NewTaskRepo(pool)
+	enricher.SetEmbeddingTask(embeddingTaskRepo)
+	embeddingWorker := embeddingsvc.NewWorker(
+		embeddingTaskRepo,
+		rawLLM,
+		llm,
+		llmauditrepo.New(pool),
+	)
+	go embeddingWorker.Run(ctx)
 
 	// (Weekly digest scheduler removed with #66 Plan T17 — its only
 	// channel was an IM group bot. A channel-agnostic digest sender
