@@ -143,6 +143,30 @@ func (q *Queue) ResetStaleClaims(ctx context.Context, staleDuration time.Duratio
 	return tag.RowsAffected(), nil
 }
 
+// QueueDepthByTenant returns outstanding (pending/processing/failed) task counts
+// grouped by tenant — feeds the per-tenant queue-depth gauge for this table.
+func (q *Queue) QueueDepthByTenant(ctx context.Context) (map[string]int64, error) {
+	sql := fmt.Sprintf(`
+		SELECT tenant_id, COUNT(*) FROM %s
+		WHERE status IN ('pending', 'processing', 'failed')
+		GROUP BY tenant_id`, q.table)
+	rows, err := q.pool.Query(ctx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("%s queue depth by tenant: %w", q.table, err)
+	}
+	defer rows.Close()
+	out := make(map[string]int64)
+	for rows.Next() {
+		var tenant string
+		var n int64
+		if err := rows.Scan(&tenant, &n); err != nil {
+			return nil, fmt.Errorf("scan %s queue depth: %w", q.table, err)
+		}
+		out[tenant] = n
+	}
+	return out, rows.Err()
+}
+
 // QueueDepth counts outstanding (pending/processing/failed) tasks for a tenant.
 func (q *Queue) QueueDepth(ctx context.Context, tenantID string) (int64, error) {
 	sql := fmt.Sprintf(`

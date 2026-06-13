@@ -8,12 +8,22 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
+
+// chatHTTPTimeout bounds a single chat-completion request across every provider
+// backend (OpenAI-compat, Anthropic, Gemini, OpenAI-Responses). Those clients
+// set no timeout of their own, so without this a hung or cold provider would
+// block the calling goroutine — the enrich worker, the reply-draft worker, or a
+// synchronous Regenerate request — indefinitely. It is generous on purpose: long
+// completions are legitimate; this only kills a true hang. (The embedding client
+// keeps its own 60s timeout — embeddings are a single fast round-trip.)
+const chatHTTPTimeout = 120 * time.Second
 
 // OpenAICompatBackend POSTs OpenAI-compatible /v1/chat/completions over
 // hand-rolled net/http. One transport covers every wire-compatible
@@ -53,6 +63,7 @@ func NewOpenAICompat(baseURL, apiKey string) (*OpenAICompatBackend, error) {
 		apiKey:  apiKey,
 		client: ptrext.Of(http.Client{
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Timeout:   chatHTTPTimeout,
 		}),
 	}), nil
 }

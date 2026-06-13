@@ -14,6 +14,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
@@ -162,4 +163,16 @@ func TestRegenerate_CooldownElapsed(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	require.True(t, drafter.called)
+}
+
+func TestRegenerate_RateLimited(t *testing.T) {
+	drafter := okDrafter("should not be generated")
+	h := &FeedbackHandler{drafter: drafter}
+	h.SetRegenLimiter(ratelimit.New(60, 0, false, nil)) // burst 0 → every request denied
+
+	w := httptest.NewRecorder()
+	regenerateHandler(h)(w, regenRequest())
+
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.False(t, drafter.called) // rejected before any LLM call
 }

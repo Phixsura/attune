@@ -28,9 +28,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   schema change). Console shows the draft below the raw content with Copy and a
   synchronous Regenerate
   (`POST /fb/v1/console/feedback/{id}/reply-draft/regenerate`), which is
-  tenant-scoped, guarded (ownership / opt-in / enriched), rate-limited by a
-  per-row cooldown, and stays reachable for an enabled-but-empty row via a
-  Generate entry point. The draft is
+  tenant-scoped, guarded (ownership / opt-in / enriched), rate-limited by both a
+  per-row cooldown and a per-tenant ceiling, and stays reachable for an
+  enabled-but-empty row via a Generate entry point. The draft is
   operator-facing only and is never auto-sent. Migration 026 adds the feedback
   and tenant columns plus the `reply_draft_task` table; new metrics
   `attune_reply_draft_generated_total`, `attune_reply_draft_errors_total`,
@@ -244,6 +244,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **All LLM provider HTTP clients now set a request timeout.** The chat backends
+  (OpenAI-compatible, Anthropic, Gemini, OpenAI-Responses) previously had no
+  `http.Client` timeout — only the embedding client did — so a hung or cold
+  provider could block an enrich, embedding, or reply-draft worker (or a
+  synchronous Regenerate request) indefinitely. They now share a 120s timeout.
 - **Breaking: process config is now YAML-only (#23).** `attune` reads one
   private config file via `--config` (default `config.yaml`) and rejects unknown
   old fields. Database URL, console bootstrap, migration guard, observability,

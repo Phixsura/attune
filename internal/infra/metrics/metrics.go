@@ -281,6 +281,18 @@ var ReplyDraftQueueDepth = prometheus.NewGaugeVec(
 	[]string{"tenant"},
 )
 
+// RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
+// tenant's outstanding count. The Reset matters: callers pass only tenants that
+// still have outstanding tasks, so a drained tenant drops out — without the
+// clear its GaugeVec child would latch at its last non-zero value forever and
+// keep "depth > N" alerts stuck on. After Reset, drained tenants read 0.
+func RefreshQueueDepth(g *prometheus.GaugeVec, depths map[string]int64) {
+	g.Reset()
+	for tenant, n := range depths {
+		g.WithLabelValues(tenant).Set(float64(n))
+	}
+}
+
 // allMetrics is the registered set — the single source of truth that init()
 // registers and the drift-guard test checks against the documented reference
 // (observability/README.md). Add a metric here AND to that reference together.

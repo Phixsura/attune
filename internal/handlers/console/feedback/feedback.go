@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -22,9 +23,10 @@ import (
 // into the per-dim AttrFilter shape the repo's JSONB containment
 // queries expect.
 type FeedbackHandler struct {
-	repo    feedbackRepo
-	tenants tenantConfigRepo
-	drafter Drafter // optional reply-draft generator; nil disables Regenerate
+	repo         feedbackRepo
+	tenants      tenantConfigRepo
+	drafter      Drafter            // optional reply-draft generator; nil disables Regenerate
+	regenLimiter *ratelimit.Limiter // optional per-tenant rate limit on Regenerate; nil disables
 }
 
 // Drafter regenerates a reply draft synchronously, sharing the worker's
@@ -39,6 +41,12 @@ type Drafter interface {
 
 // SetDrafter wires the reply-draft generator used by Regenerate.
 func (h *FeedbackHandler) SetDrafter(d Drafter) { h.drafter = d }
+
+// SetRegenLimiter wires the per-tenant token-bucket that backstops the
+// synchronous Regenerate endpoint: the per-row cooldown caps one row, this caps
+// a tenant's total regenerations so a script can't spread unbounded LLM spend
+// across many owned rows. nil leaves Regenerate unlimited.
+func (h *FeedbackHandler) SetRegenLimiter(l *ratelimit.Limiter) { h.regenLimiter = l }
 
 type feedbackRepo interface {
 	ListForConsole(ctx context.Context, tenantID string, opts feedback.ConsoleListOpts) ([]feedback.ConsoleListRow, error)

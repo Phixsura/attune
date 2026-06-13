@@ -38,6 +38,13 @@ func (h *FeedbackHandler) Regenerate(
 		logext.Warnf(ctx, "[%s] reject: reply-draft not configured,tenant_id:%s,id:%d", where, auth.TenantID, id)
 		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusServiceUnavailable, attunev1.ErrorCode_INTERNAL, "reply-draft generation is not configured")
 	}
+	// Per-tenant rate limit first (in-memory, no DB): caps a tenant's total
+	// regenerations so a script can't spread unbounded LLM spend across many
+	// owned rows, which the per-row cooldown below alone wouldn't stop.
+	if h.regenLimiter != nil && !h.regenLimiter.Allow(auth.TenantID) {
+		logext.Warnf(ctx, "[%s] reject: rate limited,tenant_id:%s,id:%d", where, auth.TenantID, id)
+		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusTooManyRequests, attunev1.ErrorCode_RATE_LIMITED, "too many reply-draft regenerations; please slow down")
+	}
 	status, enabled, found, lastGeneratedAt, err := h.drafter.Precheck(ctx, id, auth.TenantID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] precheck failed,tenant_id:%s,id:%d,err:%+v", where, auth.TenantID, id, err.Error())

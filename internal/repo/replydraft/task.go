@@ -69,24 +69,7 @@ func (r *DraftTaskRepo) CreateTaskTx(ctx context.Context, tx pgx.Tx, feedbackID 
 // QueueDepthByTenant returns outstanding (pending/processing/failed) task
 // counts grouped by tenant — used to feed attune_reply_draft_queue_depth.
 func (r *DraftTaskRepo) QueueDepthByTenant(ctx context.Context) (map[string]int64, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT tenant_id, COUNT(*) FROM reply_draft_task
-		WHERE status IN ('pending', 'processing', 'failed')
-		GROUP BY tenant_id`)
-	if err != nil {
-		return nil, fmt.Errorf("queue depth by tenant: %w", err)
-	}
-	defer rows.Close()
-	out := make(map[string]int64)
-	for rows.Next() {
-		var tenant string
-		var n int64
-		if err := rows.Scan(&tenant, &n); err != nil {
-			return nil, fmt.Errorf("scan queue depth: %w", err)
-		}
-		out[tenant] = n
-	}
-	return out, rows.Err()
+	return r.q.QueueDepthByTenant(ctx)
 }
 
 // TaskTraceID returns the inbound trace id captured when the task was enqueued,

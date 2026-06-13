@@ -157,6 +157,12 @@ func (r *TaskRepo) QueueDepth(ctx context.Context, tenantID string) (int64, erro
 	return r.q.QueueDepth(ctx, tenantID)
 }
 
+// QueueDepthByTenant returns outstanding tasks grouped by tenant — feeds
+// attune_embed_queue_depth.
+func (r *TaskRepo) QueueDepthByTenant(ctx context.Context) (map[string]int64, error) {
+	return r.q.QueueDepthByTenant(ctx)
+}
+
 // FeedbackEmbedding holds embedding data for a feedback item.
 type FeedbackEmbedding struct {
 	Embedding      []float32

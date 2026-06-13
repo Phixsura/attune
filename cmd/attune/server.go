@@ -228,6 +228,9 @@ func startEmbeddingWorker(ctx context.Context, pool *pgxpool.Pool, enricher *enr
 	enricher.SetEmbeddingTask(taskRepo)
 	worker := embeddingsvc.NewWorker(taskRepo, rawLLM, llm, llmauditrepo.New(pool))
 	go worker.Run(ctx)
+	go runQueueDepthRefresher(ctx, "embed", taskRepo.QueueDepthByTenant, func(d map[string]int64) {
+		metrics.RefreshQueueDepth(metrics.EmbedQueueDepth, d)
+	})
 }
 
 // startReplyDraftWorker wires the reply-draft outbox + worker. llm is the
@@ -238,41 +241,39 @@ func startReplyDraftWorker(ctx context.Context, pool *pgxpool.Pool, enricher *en
 	enricher.SetDraftTask(repo)
 	worker := replydraftsvc.NewWorker(repo, llm)
 	go worker.Run(ctx)
-	go runReplyDraftQueueDepthRefresher(ctx, repo)
+	go runQueueDepthRefresher(ctx, "reply_draft", repo.QueueDepthByTenant, func(d map[string]int64) {
+		metrics.RefreshQueueDepth(metrics.ReplyDraftQueueDepth, d)
+	})
 }
 
-// runReplyDraftQueueDepthRefresher feeds attune_reply_draft_queue_depth per
-// tenant on a 30s tick (a gauge, otherwise stuck at 0), mirroring
-// runOutboxLagRefresher.
-func runReplyDraftQueueDepthRefresher(ctx context.Context, repo *replydraftrepo.DraftTaskRepo) {
+// runQueueDepthRefresher feeds a per-tenant queue-depth gauge on a 30s tick — a
+// gauge is otherwise stuck at its last value (or never set at all). query
+// returns the outstanding counts per tenant; apply pushes them into the gauge.
+// Shared by the reply-draft and embedding outboxes.
+func runQueueDepthRefresher(
+	ctx context.Context,
+	name string,
+	query func(context.Context) (map[string]int64, error),
+	apply func(map[string]int64),
+) {
+	refresh := func() {
+		depths, err := query(ctx)
+		if err != nil {
+			logext.Warnf(ctx, "[main.runQueueDepthRefresher] %s failed,err:%+v", name, err.Error())
+			return
+		}
+		apply(depths)
+	}
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
-	refreshReplyDraftQueueDepth(ctx, repo)
+	refresh()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			refreshReplyDraftQueueDepth(ctx, repo)
+			refresh()
 		}
-	}
-}
-
-func refreshReplyDraftQueueDepth(ctx context.Context, repo *replydraftrepo.DraftTaskRepo) {
-	depths, err := repo.QueueDepthByTenant(ctx)
-	if err != nil {
-		logext.Warnf(ctx, "[main.refreshReplyDraftQueueDepth] failed,err:%+v", err.Error())
-		return
-	}
-	// Reset before repopulating: QueueDepthByTenant only returns tenants with
-	// outstanding tasks, so a tenant that has fully drained drops out of the
-	// map. Without the reset its per-label series would latch at its last
-	// non-zero value forever (a GaugeVec child persists until cleared), keeping
-	// "depth > N" alerts stuck on. Reset clears all children; the loop below
-	// repopulates the still-active ones, so drained tenants correctly read 0.
-	metrics.ReplyDraftQueueDepth.Reset()
-	for tenant, n := range depths {
-		metrics.ReplyDraftQueueDepth.WithLabelValues(tenant).Set(float64(n))
 	}
 }
 
