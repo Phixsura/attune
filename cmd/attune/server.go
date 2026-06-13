@@ -26,6 +26,7 @@ import (
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/llmguard"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/observability"
@@ -142,18 +143,7 @@ func runServer() error {
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
 
-	// Embedding worker processes the embedding_task outbox and assigns
-	// feedback to semantic clusters. Uses the same LLM router for embedding
-	// routes (purpose='embed') and cluster label generation.
-	embeddingTaskRepo := embeddingrepo.NewTaskRepo(pool)
-	enricher.SetEmbeddingTask(embeddingTaskRepo)
-	embeddingWorker := embeddingsvc.NewWorker(
-		embeddingTaskRepo,
-		rawLLM,
-		llm,
-		llmauditrepo.New(pool),
-	)
-	go embeddingWorker.Run(ctx)
+	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
 
 	// (Weekly digest scheduler removed with #66 Plan T17 — its only
 	// channel was an IM group bot. A channel-agnostic digest sender
@@ -227,6 +217,14 @@ func shutdownTracing(shutdown func(context.Context) error) {
 	if err := shutdown(shutdownCtx); err != nil {
 		logext.Warnf(shutdownCtx, "[%s] otel shutdown failed,err:%+v", where, err.Error())
 	}
+}
+
+// startEmbeddingWorker initializes and runs the embedding clustering worker.
+func startEmbeddingWorker(ctx context.Context, pool *pgxpool.Pool, enricher *enrich.Enricher, rawLLM *llmrouter.Router, llm llmclient.LLMClient) {
+	taskRepo := embeddingrepo.NewTaskRepo(pool)
+	enricher.SetEmbeddingTask(taskRepo)
+	worker := embeddingsvc.NewWorker(taskRepo, rawLLM, llm, llmauditrepo.New(pool))
+	go worker.Run(ctx)
 }
 
 // setupDatabase opens the pgx pool, verifies connectivity, and applies
