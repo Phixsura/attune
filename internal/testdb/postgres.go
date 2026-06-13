@@ -41,7 +41,7 @@ func newContainerPool(t *testing.T) *pgxpool.Pool {
 
 	pg, err := tcpg.Run(
 		ctx,
-		"pgvector/pgvector:pg17",
+		"postgres:18",
 		tcpg.WithDatabase("attune"),
 		tcpg.WithUsername("attune"),
 		tcpg.WithPassword("attune"),

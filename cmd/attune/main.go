@@ -46,7 +46,6 @@ var subcommands = map[string]func([]string) error{
 	"outbox":  runOutbox,
 	"secrets": runSecrets,
 	"llm":     runLLM,
-	"embed":   runEmbed,
 }
 
 func main() {
@@ -96,7 +95,6 @@ Usage:
  attune outbox prune --older-than <dur> Mark stale pending rows dead
  attune secrets generate-keyset|keyset-info|add-key|set-primary|delete-key|reencrypt|retire-key Manage Tink runtime secrets
  attune llm channels|abilities|routes ... Manage DB-backed LLM config
- attune embed backfill|reset|status --tenant <slug> Manage feedback embeddings (#25)
 `)
 }
 

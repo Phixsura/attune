@@ -15,7 +15,6 @@ import (
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
-	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
@@ -56,10 +55,9 @@ type Enricher struct {
 	// (typically once at startup, but a follow-up plans dynamic per-tenant
 	// re-wiring). atomic.Pointer keeps the read race-free without
 	// per-call locking — fanOut takes a snapshot via .Load().
-	notifier      atomic.Pointer[notify.Notifier]
-	outbox        *outboxrepo.OutboxRepo         // optional outbox writer
-	targets       *notifytarget.NotifyTargetRepo // optional, paired with outbox
-	embeddingTask *embeddingrepo.TaskRepo        // optional embedding task outbox
+	notifier atomic.Pointer[notify.Notifier]
+	outbox   *outboxrepo.OutboxRepo         // optional outbox writer
+	targets  *notifytarget.NotifyTargetRepo // optional, paired with outbox
 }
 
 type classifyResult struct {
@@ -93,13 +91,6 @@ func (e *Enricher) SetNotifier(n notify.Notifier) {
 func (e *Enricher) SetOutbox(outbox *outboxrepo.OutboxRepo, targets *notifytarget.NotifyTargetRepo) {
 	e.outbox = outbox
 	e.targets = targets
-}
-
-// SetEmbeddingTask wires embedding task creation after enrichment.
-// When set, every enrich success inserts an embedding_task row in the
-// same tx as MarkDone, enabling the embedding worker to process it.
-func (e *Enricher) SetEmbeddingTask(repo *embeddingrepo.TaskRepo) {
-	e.embeddingTask = repo
 }
 
 // EnrichOne runs the full pipeline for one row: claim, load, LLM,

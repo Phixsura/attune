@@ -203,44 +203,6 @@ var LLMCostUSDTotal = prometheus.NewCounterVec(
 	[]string{"tenant", "model"},
 )
 
-// EmbedClusterAssignments counts cluster assignments by type.
-// cluster_type ∈ {new, existing}.
-var EmbedClusterAssignments = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "attune_embed_cluster_assignments_total",
-		Help: "Feedback items assigned to clusters.",
-	},
-	[]string{"tenant", "cluster_type"},
-)
-
-// EmbedErrors counts embedding failures by error type.
-var EmbedErrors = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "attune_embed_errors_total",
-		Help: "Embedding processing errors by type.",
-	},
-	[]string{"tenant", "error_type"},
-)
-
-// EmbedDuration tracks embedding + clustering wall time.
-var EmbedDuration = prometheus.NewHistogramVec(
-	prometheus.HistogramOpts{
-		Name:    "attune_embed_duration_seconds",
-		Help:    "End-to-end embedding and clustering latency per row.",
-		Buckets: prometheus.ExponentialBuckets(0.1, 2, 8), // 0.1s..12.8s
-	},
-	[]string{"tenant"},
-)
-
-// EmbedQueueDepth gauges pending embedding tasks per tenant.
-var EmbedQueueDepth = prometheus.NewGaugeVec(
-	prometheus.GaugeOpts{
-		Name: "attune_embed_queue_depth",
-		Help: "Number of pending embedding tasks per tenant.",
-	},
-	[]string{"tenant"},
-)
-
 // allMetrics is the registered set — the single source of truth that init()
 // registers and the drift-guard test checks against the documented reference
 // (observability/README.md). Add a metric here AND to that reference together.
@@ -261,10 +223,6 @@ var allMetrics = []prometheus.Collector{
 	LLMCallsTotal,
 	LLMTokensTotal,
 	LLMCostUSDTotal,
-	EmbedClusterAssignments,
-	EmbedErrors,
-	EmbedDuration,
-	EmbedQueueDepth,
 }
 
 func init() {
