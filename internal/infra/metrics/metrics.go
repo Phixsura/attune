@@ -241,6 +241,43 @@ var EmbedQueueDepth = prometheus.NewGaugeVec(
 	[]string{"tenant"},
 )
 
+// ReplyDraftGenerated counts reply drafts successfully generated and stored.
+var ReplyDraftGenerated = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_reply_draft_generated_total",
+		Help: "Reply drafts successfully generated and stored.",
+	},
+	[]string{"tenant"},
+)
+
+// ReplyDraftErrors counts reply-draft generation failures by error type.
+var ReplyDraftErrors = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_reply_draft_errors_total",
+		Help: "Reply-draft generation errors by type.",
+	},
+	[]string{"tenant", "error_type"},
+)
+
+// ReplyDraftDuration tracks reply-draft generation wall time.
+var ReplyDraftDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_reply_draft_duration_seconds",
+		Help:    "End-to-end reply-draft generation latency per row.",
+		Buckets: prometheus.ExponentialBuckets(0.1, 2, 8), // 0.1s..12.8s
+	},
+	[]string{"tenant"},
+)
+
+// ReplyDraftQueueDepth gauges pending reply-draft tasks per tenant.
+var ReplyDraftQueueDepth = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_reply_draft_queue_depth",
+		Help: "Number of pending reply-draft tasks per tenant.",
+	},
+	[]string{"tenant"},
+)
+
 // allMetrics is the registered set — the single source of truth that init()
 // registers and the drift-guard test checks against the documented reference
 // (observability/README.md). Add a metric here AND to that reference together.
@@ -265,6 +302,10 @@ var allMetrics = []prometheus.Collector{
 	EmbedErrors,
 	EmbedDuration,
 	EmbedQueueDepth,
+	ReplyDraftGenerated,
+	ReplyDraftErrors,
+	ReplyDraftDuration,
+	ReplyDraftQueueDepth,
 }
 
 func init() {
