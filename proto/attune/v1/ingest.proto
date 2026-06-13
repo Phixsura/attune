@@ -33,6 +33,13 @@ service FeedbackService {
   rpc GetFeedbackStats(GetFeedbackStatsRequest) returns (GetFeedbackStatsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/feedback/stats"};
   }
+  // POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; session auth)
+  rpc RegenerateReplyDraft(RegenerateReplyDraftRequest) returns (RegenerateReplyDraftResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/{id}/reply-draft/regenerate"
+      body: "*"
+    };
+  }
 }
 
 // IngestRequest is the JSON body of POST /v1/feedback/ingest.
@@ -119,6 +126,8 @@ message FeedbackDetail {
   optional string enriched_display_rationale = 19;  // tenant-locale "why these values"
   optional string enriched_display_locale = 20;   // tenant locale used for display
   optional double classification_confidence = 21;  // model self-rated review signal [0,1]
+  optional string reply_draft = 22;                 // operator-facing LLM draft (#26); never auto-sent
+  optional string reply_draft_generated_at = 23;    // RFC3339; when the draft was last generated
 }
 
 message Attachment {
@@ -154,6 +163,16 @@ message ListFeedbackResponse {
 
 message GetFeedbackRequest {
   int64 id = 1;  // path param
+}
+
+// RegenerateReplyDraftRequest re-runs reply-draft generation for one row (#26).
+message RegenerateReplyDraftRequest {
+  int64 id = 1;  // path param
+}
+
+message RegenerateReplyDraftResponse {
+  string reply_draft = 1;
+  string reply_draft_generated_at = 2;  // RFC3339
 }
 
 message GetFeedbackStatsRequest {}

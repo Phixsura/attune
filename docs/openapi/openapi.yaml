@@ -305,6 +305,37 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/{id}/reply-draft/regenerate:
+        post:
+            tags:
+                - FeedbackService
+            description: POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; session auth)
+            operationId: FeedbackService_RegenerateReplyDraft
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RegenerateReplyDraftRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RegenerateReplyDraftResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/guard-policies:
         get:
             tags:
@@ -1739,6 +1770,10 @@ components:
                 classificationConfidence:
                     type: number
                     format: double
+                replyDraft:
+                    type: string
+                replyDraftGeneratedAt:
+                    type: string
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         GetClusterMembersResponse:
             type: object
@@ -2242,6 +2277,19 @@ components:
             type: object
             properties:
                 renderedPrompt:
+                    type: string
+        RegenerateReplyDraftRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+            description: RegenerateReplyDraftRequest re-runs reply-draft generation for one row (#26).
+        RegenerateReplyDraftResponse:
+            type: object
+            properties:
+                replyDraft:
+                    type: string
+                replyDraftGeneratedAt:
                     type: string
         RendererSpec:
             type: object

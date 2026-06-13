@@ -54,6 +54,7 @@ func (h *FeedbackHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 		EnrichmentError:          nullableString(row.EnrichmentError),
 		EnrichedRationale:        nullableString(row.EnrichedRationale),
 		EnrichedDisplayRationale: nullableString(row.EnrichedDisplayRationale),
+		ReplyDraft:               nullableString(row.ReplyDraft),
 	})
 	if len(row.SourceMeta) > 0 {
 		var m map[string]any
@@ -81,6 +82,9 @@ func (h *FeedbackHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 	}
 	if row.EnrichedAt != nil {
 		detail.EnrichedAt = ptrext.Of(row.EnrichedAt.UTC().Format(time.RFC3339))
+	}
+	if row.ReplyDraftGeneratedAt != nil {
+		detail.ReplyDraftGeneratedAt = ptrext.Of(row.ReplyDraftGeneratedAt.UTC().Format(time.RFC3339))
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%d", where, auth.TenantID, id)
 	return dispatcher.OK(detail)
