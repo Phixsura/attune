@@ -506,17 +506,21 @@ func TestMarkDoneAndFailed(t *testing.T) {
 			RETURNING id`, feedbackID, tenantID).Scan(&taskID)
 		require.NoError(t, err)
 
-		// attempts(1) < maxAttempts(3), should set to 'pending' for retry
+		// attempts(1) < maxAttempts(3): stays 'failed' with a future next_retry_at
+		// so the backoff window is actually enforced. (Returning to 'pending' would
+		// be re-claimed on the next poll, defeating the backoff — see queue.go.)
 		err = repo.MarkFailed(ctx, taskID, errors.New("transient error"), 3)
 		require.NoError(t, err)
 
 		var status, lastErr string
-		var nextRetryAt *time.Time
-		err = pool.QueryRow(ctx, `SELECT status, last_error, next_retry_at FROM embedding_task WHERE id = $1`, taskID).Scan(&status, &lastErr, &nextRetryAt)
+		var nextRetryAt, claimedAt *time.Time
+		err = pool.QueryRow(ctx, `SELECT status, last_error, next_retry_at, claimed_at FROM embedding_task WHERE id = $1`, taskID).Scan(&status, &lastErr, &nextRetryAt, &claimedAt)
 		require.NoError(t, err)
-		require.Equal(t, "pending", status, "should be pending when retries remain")
+		require.Equal(t, "failed", status, "retries stay 'failed' so backoff is enforced")
 		require.Equal(t, "transient error", lastErr)
 		require.NotNil(t, nextRetryAt, "next_retry_at should be set for retry")
+		require.True(t, nextRetryAt.After(time.Now()), "backoff window must be in the future")
+		require.Nil(t, claimedAt, "claimed_at is cleared on failure")
 	})
 
 	t.Run("mark_failed_permanently", func(t *testing.T) {

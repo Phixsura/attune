@@ -241,6 +241,58 @@ var EmbedQueueDepth = prometheus.NewGaugeVec(
 	[]string{"tenant"},
 )
 
+// ReplyDraftGenerated counts reply drafts successfully generated and stored.
+var ReplyDraftGenerated = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_reply_draft_generated_total",
+		Help: "Reply drafts successfully generated and stored.",
+	},
+	[]string{"tenant"},
+)
+
+// ReplyDraftErrors counts reply-draft generation failures by error type.
+var ReplyDraftErrors = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_reply_draft_errors_total",
+		Help: "Reply-draft generation errors by type.",
+	},
+	[]string{"tenant", "error_type"},
+)
+
+// ReplyDraftDuration tracks reply-draft generation wall time.
+var ReplyDraftDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name: "attune_reply_draft_duration_seconds",
+		Help: "End-to-end reply-draft generation latency per row.",
+		// 0.25s..64s — wide enough for the long LLM-call tail. A 12.8s ceiling
+		// (the old default) saturates p95/p99 at +Inf exactly when a slow/cold
+		// provider is the thing operators need to see.
+		Buckets: prometheus.ExponentialBuckets(0.25, 2, 9),
+	},
+	[]string{"tenant"},
+)
+
+// ReplyDraftQueueDepth gauges pending reply-draft tasks per tenant.
+var ReplyDraftQueueDepth = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_reply_draft_queue_depth",
+		Help: "Number of pending reply-draft tasks per tenant.",
+	},
+	[]string{"tenant"},
+)
+
+// RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
+// tenant's outstanding count. The Reset matters: callers pass only tenants that
+// still have outstanding tasks, so a drained tenant drops out — without the
+// clear its GaugeVec child would latch at its last non-zero value forever and
+// keep "depth > N" alerts stuck on. After Reset, drained tenants read 0.
+func RefreshQueueDepth(g *prometheus.GaugeVec, depths map[string]int64) {
+	g.Reset()
+	for tenant, n := range depths {
+		g.WithLabelValues(tenant).Set(float64(n))
+	}
+}
+
 // allMetrics is the registered set — the single source of truth that init()
 // registers and the drift-guard test checks against the documented reference
 // (observability/README.md). Add a metric here AND to that reference together.
@@ -265,6 +317,10 @@ var allMetrics = []prometheus.Collector{
 	EmbedErrors,
 	EmbedDuration,
 	EmbedQueueDepth,
+	ReplyDraftGenerated,
+	ReplyDraftErrors,
+	ReplyDraftDuration,
+	ReplyDraftQueueDepth,
 }
 
 func init() {

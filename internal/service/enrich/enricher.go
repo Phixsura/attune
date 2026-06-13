@@ -19,6 +19,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
+	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 )
 
 // attrsSizeBytes returns the JSON-encoded size of attrs without
@@ -60,6 +61,7 @@ type Enricher struct {
 	outbox        *outboxrepo.OutboxRepo         // optional outbox writer
 	targets       *notifytarget.NotifyTargetRepo // optional, paired with outbox
 	embeddingTask *embeddingrepo.TaskRepo        // optional embedding task outbox
+	draftTask     *replydraftrepo.DraftTaskRepo  // optional reply-draft task outbox
 }
 
 type classifyResult struct {
@@ -100,6 +102,14 @@ func (e *Enricher) SetOutbox(outbox *outboxrepo.OutboxRepo, targets *notifytarge
 // same tx as MarkDone, enabling the embedding worker to process it.
 func (e *Enricher) SetEmbeddingTask(repo *embeddingrepo.TaskRepo) {
 	e.embeddingTask = repo
+}
+
+// SetDraftTask wires reply-draft task creation after enrichment. When set,
+// every enrich success inserts a reply_draft_task row in the same tx as
+// MarkDone — gated by the repo SQL on the tenant's reply_draft_enabled and
+// confidence threshold — so the reply-draft worker can process it.
+func (e *Enricher) SetDraftTask(repo *replydraftrepo.DraftTaskRepo) {
+	e.draftTask = repo
 }
 
 // EnrichOne runs the full pipeline for one row: claim, load, LLM,

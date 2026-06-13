@@ -133,7 +133,19 @@ export interface FeedbackDetail {
     | string
     | undefined;
   /** model self-rated review signal [0,1] */
-  classificationConfidence?: number | undefined;
+  classificationConfidence?:
+    | number
+    | undefined;
+  /** operator-facing LLM draft (#26); never auto-sent */
+  replyDraft?:
+    | string
+    | undefined;
+  /** RFC3339; when the draft was last generated */
+  replyDraftGeneratedAt?:
+    | string
+    | undefined;
+  /** tenant opt-in; lets the UI tell off / on-but-empty / has-draft apart */
+  replyDraftEnabled: boolean;
 }
 
 export interface Attachment {
@@ -181,6 +193,18 @@ export interface GetFeedbackRequest {
   id: string;
 }
 
+/** RegenerateReplyDraftRequest re-runs reply-draft generation for one row (#26). */
+export interface RegenerateReplyDraftRequest {
+  /** path param */
+  id: string;
+}
+
+export interface RegenerateReplyDraftResponse {
+  replyDraft: string;
+  /** RFC3339 */
+  replyDraftGeneratedAt: string;
+}
+
 export interface GetFeedbackStatsRequest {
 }
 
@@ -223,4 +247,6 @@ export interface FeedbackService {
   GetFeedback(request: GetFeedbackRequest): Promise<FeedbackDetail>;
   /** GET /fb/v1/console/feedback/stats */
   GetFeedbackStats(request: GetFeedbackStatsRequest): Promise<GetFeedbackStatsResponse>;
+  /** POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; session auth) */
+  RegenerateReplyDraft(request: RegenerateReplyDraftRequest): Promise<RegenerateReplyDraftResponse>;
 }

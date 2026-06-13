@@ -44,6 +44,7 @@ func NewOpenAIResponses(baseURL, apiKey string) (*OpenAIResponsesBackend, error)
 	}
 	httpClient := ptrext.Of(http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   chatHTTPTimeout,
 	})
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),

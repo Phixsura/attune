@@ -23,7 +23,19 @@
 // wiring it in cmd/attune/setup.go — no registration mechanism needed.
 package llmclient
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+// chatHTTPTimeout bounds a single chat-completion request across every backend
+// (OpenAI-compat, Anthropic, Gemini, OpenAI-Responses). Those clients set no
+// timeout of their own, so without it a hung or cold provider would block the
+// calling goroutine — the enrich worker, the reply-draft worker, or a
+// synchronous Regenerate request — indefinitely. Generous on purpose: long
+// completions are legitimate; this only kills a true hang. (The embedding client
+// keeps its own 60s timeout — embeddings are a single fast round-trip.)
+const chatHTTPTimeout = 120 * time.Second
 
 // LLMClient is the single abstraction the rest of attune depends on.
 // Each backend file implements this interface; cmd/attune/setup.go

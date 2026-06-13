@@ -169,6 +169,7 @@ export const defaultFeedbackDetail: FeedbackDetail = {
   enrichedTitle: 'Sample',
   enrichedAttrs: {},
   isUrgent: false,
+  replyDraftEnabled: false,
   enrichmentStatus: 'done',
   createdAt: '2026-06-07T00:00:00Z',
   classificationConfidence: 0.82,

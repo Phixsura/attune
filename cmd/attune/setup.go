@@ -11,7 +11,9 @@ import (
 
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -25,11 +27,13 @@ import (
 	llmconfigrepo "github.com/Phixsura/attune/internal/repo/llmconfig"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
+	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
+	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
 )
 
 // syncCustomWebhooks upserts every entry in cfg.CustomWebhooks into
@@ -151,6 +155,7 @@ func buildConsoleRouter(
 	secrets *secretstore.TinkStore,
 	sourceRepo *inboundsourcerepo.Repo,
 	adminRepo *admin.Repo,
+	llm llmclient.LLMClient,
 ) (chi.Router, error) {
 	if cfg.ConsoleBaseURL == "" {
 		return nil, fmt.Errorf("console requires console.base_url")
@@ -172,6 +177,11 @@ func buildConsoleRouter(
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
 	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
+	feedback.SetDrafter(replydraftsvc.NewReplyDrafter(replydraftrepo.NewDraftTaskRepo(pool), llm))
+	// Per-tenant backstop on the synchronous Regenerate endpoint: generous
+	// enough never to bother a human triaging (60/min, burst 20), tight enough
+	// to bound a scripted loop's LLM spend on top of the per-row cooldown.
+	feedback.SetRegenLimiter(ratelimit.New(60, 20, false, nil))
 	usage := console.NewUsageHandler(feedbackRepo, llmauditrepo.New(pool))
 	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
 	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool)))

@@ -65,6 +65,7 @@ func TestRouterInventory(t *testing.T) {
 		"GET /feedback/",
 		"GET /feedback/stats",
 		"GET /feedback/{id}",
+		"POST /feedback/{id}/reply-draft/regenerate",
 		"GET /usage",
 		"GET /llm-usage",
 		"GET /enrich-config/",

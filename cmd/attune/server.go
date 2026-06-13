@@ -52,8 +52,10 @@ import (
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
 	"github.com/Phixsura/attune/internal/service/llmrouter"
 	"github.com/Phixsura/attune/internal/service/outbox"
+	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
 
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
+	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 )
 
 // ── server ────────────────────────────────────────────────────────────────
@@ -144,6 +146,7 @@ func runServer() error {
 	go runOutboxLagRefresher(ctx, outboxRepo)
 
 	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
+	startReplyDraftWorker(ctx, pool, enricher, llm)
 
 	// (Weekly digest scheduler removed with #66 Plan T17 — its only
 	// channel was an IM group bot. A channel-agnostic digest sender
@@ -158,7 +161,7 @@ func runServer() error {
 	defer inb.shutdown()
 
 	r, err := buildRouter(
-		ctx, cfg, ingestHandler, apiKeys, pool,
+		ctx, cfg, ingestHandler, apiKeys, pool, llm,
 		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo,
 	)
 	if err != nil {
@@ -225,6 +228,53 @@ func startEmbeddingWorker(ctx context.Context, pool *pgxpool.Pool, enricher *enr
 	enricher.SetEmbeddingTask(taskRepo)
 	worker := embeddingsvc.NewWorker(taskRepo, rawLLM, llm, llmauditrepo.New(pool))
 	go worker.Run(ctx)
+	go runQueueDepthRefresher(ctx, "embed", taskRepo.QueueDepthByTenant, func(d map[string]int64) {
+		metrics.RefreshQueueDepth(metrics.EmbedQueueDepth, d)
+	})
+}
+
+// startReplyDraftWorker wires the reply-draft outbox + worker. llm is the
+// audit-wrapping client so each draft call lands in llm_audit
+// (purpose='reply_draft').
+func startReplyDraftWorker(ctx context.Context, pool *pgxpool.Pool, enricher *enrich.Enricher, llm llmclient.LLMClient) {
+	repo := replydraftrepo.NewDraftTaskRepo(pool)
+	enricher.SetDraftTask(repo)
+	worker := replydraftsvc.NewWorker(repo, llm)
+	go worker.Run(ctx)
+	go runQueueDepthRefresher(ctx, "reply_draft", repo.QueueDepthByTenant, func(d map[string]int64) {
+		metrics.RefreshQueueDepth(metrics.ReplyDraftQueueDepth, d)
+	})
+}
+
+// runQueueDepthRefresher feeds a per-tenant queue-depth gauge on a 30s tick — a
+// gauge is otherwise stuck at its last value (or never set at all). query
+// returns the outstanding counts per tenant; apply pushes them into the gauge.
+// Shared by the reply-draft and embedding outboxes.
+func runQueueDepthRefresher(
+	ctx context.Context,
+	name string,
+	query func(context.Context) (map[string]int64, error),
+	apply func(map[string]int64),
+) {
+	refresh := func() {
+		depths, err := query(ctx)
+		if err != nil {
+			logext.Warnf(ctx, "[main.runQueueDepthRefresher] %s failed,err:%+v", name, err.Error())
+			return
+		}
+		apply(depths)
+	}
+	tick := time.NewTicker(30 * time.Second)
+	defer tick.Stop()
+	refresh()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			refresh()
+		}
+	}
 }
 
 // setupDatabase opens the pgx pool, verifies connectivity, and applies

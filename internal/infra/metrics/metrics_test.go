@@ -38,6 +38,10 @@ func TestRegisteredMetricsMatchDocumentedReference(t *testing.T) {
 		"attune_embed_errors_total":              true,
 		"attune_embed_duration_seconds":          true,
 		"attune_embed_queue_depth":               true,
+		"attune_reply_draft_generated_total":     true,
+		"attune_reply_draft_errors_total":        true,
+		"attune_reply_draft_duration_seconds":    true,
+		"attune_reply_draft_queue_depth":         true,
 	}
 
 	got := registeredMetricNames(t)

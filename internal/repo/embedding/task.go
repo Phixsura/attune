@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/repo/taskoutbox"
 )
 
 // VecToString converts a []float32 to pgvector's text format: "[1.0,2.0,3.0]".
@@ -36,33 +37,30 @@ func VecToString(v []float32) string {
 	return b.String()
 }
 
-var (
-	ErrTaskNotFound = errors.New("embedding task not found")
-	ErrNoTask       = errors.New("no embedding task to claim")
-)
+var ErrTaskNotFound = errors.New("embedding task not found")
 
-// TaskRepo wraps the embedding_task outbox table.
+// ErrNoTask aliases the generic queue sentinel so existing callers keep
+// using embedding.ErrNoTask.
+var ErrNoTask = taskoutbox.ErrNoTask
+
+// TaskRepo wraps the embedding_task outbox table. The generic claim/retry
+// machinery lives in taskoutbox.Queue; embedding-specific enqueue and
+// vector/cluster methods stay here.
 type TaskRepo struct {
 	pool *pgxpool.Pool
+	q    *taskoutbox.Queue
 }
 
 func NewTaskRepo(pool *pgxpool.Pool) *TaskRepo {
-	return ptrext.Of(TaskRepo{pool: pool})
+	return ptrext.Of(TaskRepo{
+		pool: pool,
+		q:    taskoutbox.New(pool, "embedding_task", "clustering_enabled"),
+	})
 }
 
-// Task represents an embedding_task row.
-type Task struct {
-	ID          int64
-	FeedbackID  int64
-	TenantID    string
-	Status      string
-	Attempts    int
-	ClaimedAt   *time.Time
-	NextRetryAt *time.Time
-	LastError   string
-	CreatedAt   time.Time
-	CompletedAt *time.Time
-}
+// Task aliases the generic outbox row so existing callers keep using
+// embedding.Task.
+type Task = taskoutbox.Task
 
 // CreateTask inserts a new embedding task for a feedback item.
 func (r *TaskRepo) CreateTask(ctx context.Context, feedbackID int64, tenantID string) (int64, error) {
@@ -133,123 +131,36 @@ func (r *TaskRepo) BackfillTasks(ctx context.Context, tenantID string, batchSize
 	return result.RowsAffected(), nil
 }
 
-// TryClaim atomically claims a pending task for processing.
-// Only claims tasks from tenants with clustering_enabled = true.
-// Returns ErrNoTask if no task is available.
+// TryClaim atomically claims one eligible embedding task. Delegates to the
+// generic outbox queue (gated on tenants.clustering_enabled).
 func (r *TaskRepo) TryClaim(ctx context.Context, staleDuration time.Duration) (*Task, error) {
-	row := r.pool.QueryRow(
-		ctx, `
-		UPDATE embedding_task
-		SET status = 'processing',
-		    claimed_at = NOW(),
-		    attempts = attempts + 1
-		WHERE id = (
-			SELECT et.id FROM embedding_task et
-			JOIN tenants t ON t.id = et.tenant_id AND t.clustering_enabled = TRUE
-			WHERE (et.status = 'pending' OR (et.status = 'failed' AND et.next_retry_at <= NOW()))
-			  OR (et.status = 'processing' AND et.claimed_at < NOW() - make_interval(secs => $1))
-			ORDER BY et.created_at
-			LIMIT 1
-			FOR UPDATE SKIP LOCKED
-		)
-		RETURNING id, feedback_id, tenant_id, status, attempts, claimed_at,
-		          next_retry_at, last_error, created_at, completed_at`,
-		staleDuration.Seconds(),
-	)
-	task, err := scanTask(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNoTask
-	}
-	if err != nil {
-		return nil, fmt.Errorf("try claim embedding task: %w", err)
-	}
-	return ptrext.Of(task), nil
+	return r.q.TryClaim(ctx, staleDuration)
 }
 
-// MarkDone marks a task as completed successfully.
+// MarkDone marks a task completed.
 func (r *TaskRepo) MarkDone(ctx context.Context, taskID int64) error {
-	_, err := r.pool.Exec(
-		ctx, `
-		UPDATE embedding_task
-		SET status = 'done',
-		    completed_at = NOW(),
-		    last_error = ''
-		WHERE id = $1`,
-		taskID,
-	)
-	if err != nil {
-		return fmt.Errorf("mark embedding task done: %w", err)
-	}
-	return nil
+	return r.q.MarkDone(ctx, taskID)
 }
 
-// MarkFailed marks a task as failed with retry backoff.
+// MarkFailed records a failure with retry backoff.
 func (r *TaskRepo) MarkFailed(ctx context.Context, taskID int64, lastErr error, maxAttempts int) error {
-	errMsg := ""
-	if lastErr != nil {
-		errMsg = lastErr.Error()
-	}
-	_, err := r.pool.Exec(
-		ctx, `
-		UPDATE embedding_task
-		SET status = CASE WHEN attempts >= $3 THEN 'failed' ELSE 'pending' END,
-		    next_retry_at = CASE
-		        WHEN attempts >= $3 THEN NULL
-		        ELSE NOW() + (INTERVAL '30 seconds' * POWER(2, attempts - 1))
-		    END,
-		    last_error = $2
-		WHERE id = $1`,
-		taskID, errMsg, maxAttempts,
-	)
-	if err != nil {
-		return fmt.Errorf("mark embedding task failed: %w", err)
-	}
-	return nil
+	return r.q.MarkFailed(ctx, taskID, lastErr, maxAttempts)
 }
 
-// ResetStaleClaims resets tasks stuck in processing state.
+// ResetStaleClaims recovers tasks stuck in processing.
 func (r *TaskRepo) ResetStaleClaims(ctx context.Context, staleDuration time.Duration) (int64, error) {
-	tag, err := r.pool.Exec(
-		ctx, `
-		UPDATE embedding_task
-		SET status = 'pending',
-		    claimed_at = NULL
-		WHERE status = 'processing'
-		  AND claimed_at < NOW() - make_interval(secs => $1)`,
-		staleDuration.Seconds(),
-	)
-	if err != nil {
-		return 0, fmt.Errorf("reset stale embedding claims: %w", err)
-	}
-	return tag.RowsAffected(), nil
+	return r.q.ResetStaleClaims(ctx, staleDuration)
 }
 
-// QueueDepth returns the count of pending tasks for a tenant.
+// QueueDepth returns outstanding tasks for a tenant.
 func (r *TaskRepo) QueueDepth(ctx context.Context, tenantID string) (int64, error) {
-	var count int64
-	err := r.pool.QueryRow(
-		ctx, `
-		SELECT COUNT(*) FROM embedding_task
-		WHERE tenant_id = $1 AND status IN ('pending', 'processing', 'failed')`,
-		tenantID,
-	).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("embedding queue depth: %w", err)
-	}
-	return count, nil
+	return r.q.QueueDepth(ctx, tenantID)
 }
 
-type taskScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanTask(row taskScanner) (Task, error) {
-	var t Task
-	err := row.Scan(
-		&t.ID, &t.FeedbackID, &t.TenantID, &t.Status, &t.Attempts,
-		&t.ClaimedAt, &t.NextRetryAt, &t.LastError, &t.CreatedAt, &t.CompletedAt,
-	)
-	return t, err
+// QueueDepthByTenant returns outstanding tasks grouped by tenant — feeds
+// attune_embed_queue_depth.
+func (r *TaskRepo) QueueDepthByTenant(ctx context.Context) (map[string]int64, error) {
+	return r.q.QueueDepthByTenant(ctx)
 }
 
 // FeedbackEmbedding holds embedding data for a feedback item.

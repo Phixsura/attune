@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Per-feedback LLM reply draft (#26).** After classification, an opt-in
+  per-tenant pipeline pre-generates an empathetic, operator-facing reply draft
+  via a second LLM call. It runs on a new async `reply_draft_task` outbox +
+  worker — built on a new generic `internal/repo/taskoutbox` queue that
+  `embedding_task` was refactored onto — so a draft-LLM failure is isolated from,
+  and never rolls back, the classification result. The shared `taskoutbox` queue
+  claims with `FOR UPDATE SKIP LOCKED` and enforces exponential-backoff retries
+  (a queue fix that also corrects `embedding_task`); a single draft call is
+  bounded by a timeout so a hung provider can't stall the worker. Enablement is
+  per-tenant
+  (`tenants.reply_draft_enabled`, default off — it doubles LLM cost) with an
+  optional confidence gate (`reply_draft_min_confidence`, only draft rows whose
+  classification confidence clears the threshold) and a prompt override
+  (`reply_draft_prompt_template`). The draft is overwrite-stored on
+  `user_feedback.reply_draft`; token usage and cost are recorded in `llm_audit`
+  with `purpose='reply_draft'` through the existing audit-wrapping client (no
+  schema change). Console shows the draft below the raw content with Copy and a
+  synchronous Regenerate
+  (`POST /fb/v1/console/feedback/{id}/reply-draft/regenerate`), which is
+  tenant-scoped, guarded (ownership / opt-in / enriched), rate-limited by both a
+  per-row cooldown and a per-tenant ceiling, and stays reachable for an
+  enabled-but-empty row via a Generate entry point. The draft is
+  operator-facing only and is never auto-sent. Migration 026 adds the feedback
+  and tenant columns plus the `reply_draft_task` table; new metrics
+  `attune_reply_draft_generated_total`, `attune_reply_draft_errors_total`,
+  `attune_reply_draft_duration_seconds`, `attune_reply_draft_queue_depth`.
 - **Embedding-based feedback clustering (#25).** Adds semantic deduplication of
   user feedback using pgvector embeddings with HNSW indexing. Feedback items
   are automatically grouped into clusters when cosine similarity exceeds a
@@ -218,6 +244,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **All LLM provider HTTP clients now set a request timeout.** The chat backends
+  (OpenAI-compatible, Anthropic, Gemini, OpenAI-Responses) previously had no
+  `http.Client` timeout — only the embedding client did — so a hung or cold
+  provider could block an enrich, embedding, or reply-draft worker (or a
+  synchronous Regenerate request) indefinitely. They now share a 120s timeout.
 - **Breaking: process config is now YAML-only (#23).** `attune` reads one
   private config file via `--config` (default `config.yaml`) and rejects unknown
   old fields. Database URL, console bootstrap, migration guard, observability,

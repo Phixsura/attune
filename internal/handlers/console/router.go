@@ -574,6 +574,19 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		f.Post("/{id}/reply-draft/regenerate", dispatcher.Bind(
+			"console.FeedbackHandler.Regenerate",
+			dispatcher.Path(
+				func() *attunev1.RegenerateReplyDraftRequest { return ptrext.Of(attunev1.RegenerateReplyDraftRequest{}) },
+				dispatcher.ParamInt64("id", func(req *attunev1.RegenerateReplyDraftRequest, id int64) {
+					req.Id = id
+				}, "id must be an integer"),
+			),
+			r.feedback.Regenerate,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RegenerateReplyDraftRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 	})
 }
 

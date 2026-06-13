@@ -30,7 +30,7 @@ func (e *Enricher) persistEnriched(
 	const where = "service.Enricher.persistEnriched"
 	// Fast path: skip transaction if no semantic run, no outbox, AND no embedding task.
 	// Must check embeddingTask too, otherwise embedding clustering is silently skipped.
-	if run == nil && (e.outbox == nil || e.targets == nil) && e.embeddingTask == nil {
+	if run == nil && (e.outbox == nil || e.targets == nil) && e.embeddingTask == nil && e.draftTask == nil {
 		return e.repo.MarkDone(ctx, s.ID, enriched, feedback.EnrichmentMetadata{
 			Language:      s.Language,
 			DisplayLocale: s.DisplayLocale,
@@ -109,6 +109,9 @@ func (e *Enricher) persistEnrichedTx(
 	if err := e.insertEmbeddingTask(ctx, tx, s, where); err != nil {
 		return err
 	}
+	if err := e.insertDraftTask(ctx, tx, s, where); err != nil {
+		return err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		logext.Errorf(ctx, "[%s] commit tx failed,feedback_id:%d,err:%+v",
 			where, s.ID, err.Error())
@@ -178,6 +181,28 @@ func (e *Enricher) insertEmbeddingTask(
 		logext.Errorf(ctx, "[%s] embedding task insert failed,feedback_id:%d,err:%+v",
 			where, s.ID, err.Error())
 		return fmt.Errorf("queue embedding task: %w", err)
+	}
+	return nil
+}
+
+// insertDraftTask queues a reply-draft task in the same tx as MarkDone. The
+// repo SQL gates on the tenant's reply_draft_enabled + confidence threshold,
+// so this is a no-op for opted-out or low-confidence rows. A later draft-LLM
+// failure is isolated in the worker and never affects this committed
+// classification.
+func (e *Enricher) insertDraftTask(
+	ctx context.Context,
+	tx pgx.Tx,
+	s domain.Snapshot,
+	where string,
+) error {
+	if e.draftTask == nil {
+		return nil
+	}
+	if err := e.draftTask.CreateTaskTx(ctx, tx, s.ID, s.TenantID, s.ClassificationConfidence, extractTraceID(ctx)); err != nil {
+		logext.Errorf(ctx, "[%s] reply draft task insert failed,feedback_id:%d,err:%+v",
+			where, s.ID, err.Error())
+		return fmt.Errorf("queue reply draft task: %w", err)
 	}
 	return nil
 }

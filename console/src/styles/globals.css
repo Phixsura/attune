@@ -95,3 +95,18 @@ html, body, #root {
   background-color: var(--background);
   color: var(--foreground);
 }
+
+/* Honor prefers-reduced-motion globally: neutralize animations (skeleton
+   pulse, spinners, sheet slide-ins) and transitions for users who ask for
+   reduced motion. Near-zero (not 0) durations so animationend/transitionend
+   still fire for any logic that waits on them (e.g. Radix exit transitions). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
