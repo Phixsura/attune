@@ -163,6 +163,7 @@ type ConsoleDetailRow struct {
 	EnrichedDisplayRationale string
 	ReplyDraft               string // operator-facing LLM draft (#26); empty when none
 	ReplyDraftGeneratedAt    *time.Time
+	ReplyDraftEnabled        bool // tenant opt-in flag (joined from tenants)
 }
 
 // ErrFeedbackNotFound returned by GetForConsole when id doesn't match
@@ -190,7 +191,8 @@ func (r *FeedbackRepo) GetForConsole(
 		 COALESCE(enriched_rationale, ''),
 		 COALESCE(enriched_display_rationale, ''),
 		 COALESCE(reply_draft, ''),
-		 reply_draft_generated_at
+		 reply_draft_generated_at,
+		 COALESCE((SELECT reply_draft_enabled FROM tenants WHERE id = $2), FALSE)
 		 FROM user_feedback
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
@@ -202,7 +204,7 @@ func (r *FeedbackRepo) GetForConsole(
 		&row.SourceMeta, &row.Attachments,
 		&row.EnrichmentError, &row.EnrichedAt,
 		&row.EnrichedRationale, &row.EnrichedDisplayRationale,
-		&row.ReplyDraft, &row.ReplyDraftGeneratedAt,
+		&row.ReplyDraft, &row.ReplyDraftGeneratedAt, &row.ReplyDraftEnabled,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrFeedbackNotFound

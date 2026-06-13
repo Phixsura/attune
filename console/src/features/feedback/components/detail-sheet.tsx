@@ -108,7 +108,9 @@ function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] })
         <p className="whitespace-pre-wrap break-words">{data.content}</p>
       </Section>
 
-      {data.replyDraft ? <ReplyDraftSection id={String(data.id)} draft={data.replyDraft} /> : null}
+      {data.replyDraftEnabled ? (
+        <ReplyDraftSection id={String(data.id)} draft={data.replyDraft ?? ''} />
+      ) : null}
 
       {displayRationale ? (
         <Section label={t('feedback.detail.ai_rationale')}>
@@ -194,30 +196,48 @@ function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] })
 }
 
 // ReplyDraftSection shows the operator-facing LLM draft with Copy and
-// Regenerate. The draft is a suggestion only — never auto-sent. Regenerate
-// re-runs the LLM synchronously and the detail query re-reads the new draft.
+// Regenerate. It renders whenever the tenant has reply-draft enabled, so an
+// enabled-but-empty row (the confidence gate skipped auto-generation, or a
+// prior generation degraded to an empty draft) still offers a Generate entry
+// point. The draft is a suggestion only — never auto-sent.
 function ReplyDraftSection({ id, draft }: { id: string; draft: string }) {
   const { t } = useTranslation()
   const regen = useRegenerateReplyDraft(id)
-  const current = regen.data?.replyDraft ?? draft
+  // Explicit empty check: an empty string is a valid state and must NOT fall
+  // through to a stale prop value via `??`.
+  const current = regen.data ? regen.data.replyDraft : draft
+  const hasDraft = current !== ''
   const onCopy = () => {
-    void navigator.clipboard.writeText(current)
-    toast.success(t('feedback.detail.reply_draft_copied'))
+    navigator.clipboard
+      .writeText(current)
+      .then(() => toast.success(t('feedback.detail.reply_draft_copied')))
+      .catch(() => toast.error(t('feedback.detail.reply_draft_copy_failed')))
+  }
+  const onRegenerate = () => {
+    regen.mutate(undefined, {
+      onError: () => toast.error(t('feedback.detail.reply_draft_failed')),
+    })
   }
   return (
     <Section label={t('feedback.detail.reply_draft')}>
       <div className="space-y-3 rounded-md border border-border bg-muted/40 p-3">
-        <p className="whitespace-pre-wrap break-words">{current}</p>
+        {hasDraft ? (
+          <p className="whitespace-pre-wrap break-words">{current}</p>
+        ) : (
+          <p className="text-muted-foreground italic">{t('feedback.detail.reply_draft_empty')}</p>
+        )}
         <div className="flex items-center gap-2">
-          <Button type="button" size="sm" variant="outline" onClick={onCopy}>
-            <Copy className="h-3.5 w-3.5" />
-            {t('feedback.detail.reply_draft_copy')}
-          </Button>
+          {hasDraft ? (
+            <Button type="button" size="sm" variant="outline" onClick={onCopy}>
+              <Copy className="h-3.5 w-3.5" />
+              {t('feedback.detail.reply_draft_copy')}
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => regen.mutate()}
+            onClick={onRegenerate}
             disabled={regen.isPending}
           >
             {regen.isPending ? (
@@ -225,7 +245,9 @@ function ReplyDraftSection({ id, draft }: { id: string; draft: string }) {
             ) : (
               <RefreshCw className="h-3.5 w-3.5" />
             )}
-            {t('feedback.detail.reply_draft_regenerate')}
+            {hasDraft
+              ? t('feedback.detail.reply_draft_regenerate')
+              : t('feedback.detail.reply_draft_generate')}
           </Button>
         </div>
       </div>

@@ -1774,6 +1774,8 @@ components:
                     type: string
                 replyDraftGeneratedAt:
                     type: string
+                replyDraftEnabled:
+                    type: boolean
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         GetClusterMembersResponse:
             type: object

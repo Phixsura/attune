@@ -141,7 +141,11 @@ export interface FeedbackDetail {
     | string
     | undefined;
   /** RFC3339; when the draft was last generated */
-  replyDraftGeneratedAt?: string | undefined;
+  replyDraftGeneratedAt?:
+    | string
+    | undefined;
+  /** tenant opt-in; lets the UI tell off / on-but-empty / has-draft apart */
+  replyDraftEnabled: boolean;
 }
 
 export interface Attachment {

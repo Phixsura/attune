@@ -128,6 +128,7 @@ message FeedbackDetail {
   optional double classification_confidence = 21;  // model self-rated review signal [0,1]
   optional string reply_draft = 22;                 // operator-facing LLM draft (#26); never auto-sent
   optional string reply_draft_generated_at = 23;    // RFC3339; when the draft was last generated
+  bool reply_draft_enabled = 24;                    // tenant opt-in; lets the UI tell off / on-but-empty / has-draft apart
 }
 
 message Attachment {
