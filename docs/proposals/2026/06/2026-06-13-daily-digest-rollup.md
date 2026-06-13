@@ -15,6 +15,17 @@
 > [Review hardening](#review-hardening) for the full list and where each was
 > verified.
 
+> **Multi-channel rendering moved to #34 (2026-06-14).** v1 here delivers one
+> `raw-webhook` JSON+markdown payload (the receiver renders it). The issue's
+> "Lark / Slack" rendering — and the "太拉" richness gap (period-over-period Δ,
+> per-theme representative quotes, lifecycle badges, deep links, native cards) —
+> is designed as the **outbound channel-adapter framework** in
+> [`2026-06-14-outbound-adapter-framework.md`](2026-06-14-outbound-adapter-framework.md)
+> (#34). The digest becomes its first multi-channel consumer; `output_format`
+> collapses into the target's `destination_type` (a `lark`/`slack`/`raw-webhook`
+> target picks the renderer). This v1 proposal stays as-is and rebases onto that
+> framework.
+
 ## Problem
 
 Per-row notifications fire as each feedback finishes enrichment — right for a P0
