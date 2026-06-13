@@ -8,6 +8,7 @@ package replydraft
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -23,7 +24,7 @@ const (
 	draftSystemUser = "system-reply-drafter"
 	draftMaxTokens  = 256
 	draftTemp       = 0.4 // warmer than classification (0.0) for a natural tone
-	draftMaxLen     = 2000
+	draftMaxRunes   = 2000
 )
 
 // ReplyDrafter produces and stores a reply draft for one feedback row. It is
@@ -148,19 +149,25 @@ func attrToString(v any) string {
 	}
 }
 
-// cleanDraft trims the model output, drops a leading "Here's a draft:"-style
-// preamble line, and caps the length.
+// preambleLine matches a whole first line that is purely a label like
+// "Here's a draft:", "Reply draft:", or "Draft:" — anchored start-to-end so a
+// real sentence that merely contains "here"/"reply" and ends in ':' is NOT
+// stripped.
+var preambleLine = regexp.MustCompile(`(?i)^\s*(here'?s\s+|here\s+is\s+)?(a\s+|the\s+|your\s+)?(reply\s+)?draft(\s+reply)?\s*:\s*$|^\s*reply\s*:\s*$`)
+
+// cleanDraft trims the model output, drops a leading pure-preamble line, and
+// caps the length by rune count (never splitting a multi-byte character).
 func cleanDraft(s string) string {
 	s = strings.TrimSpace(s)
 	if idx := strings.IndexByte(s, '\n'); idx > 0 {
-		first := strings.TrimSpace(s[:idx])
-		lower := strings.ToLower(first)
-		if strings.HasSuffix(first, ":") && (strings.Contains(lower, "draft") || strings.Contains(lower, "reply") || strings.Contains(lower, "here")) {
+		// Only strip a short, anchored preamble line — not a real first
+		// sentence that happens to end in ':' and contain "reply"/"here".
+		if first := strings.TrimSpace(s[:idx]); len(first) < 40 && preambleLine.MatchString(first) {
 			s = strings.TrimSpace(s[idx+1:])
 		}
 	}
-	if len(s) > draftMaxLen {
-		s = strings.TrimSpace(s[:draftMaxLen])
+	if r := []rune(s); len(r) > draftMaxRunes {
+		s = strings.TrimSpace(string(r[:draftMaxRunes]))
 	}
 	return s
 }

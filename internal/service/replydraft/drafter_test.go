@@ -5,6 +5,7 @@ package replydraft
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 )
@@ -67,10 +68,27 @@ func TestCleanDraft(t *testing.T) {
 		"Reply draft:\nThanks for reaching out.": "Thanks for reaching out.",
 		"No preamble here.":                      "No preamble here.",
 		"Title: keep this line":                  "Title: keep this line",
+		// A real first sentence that ends in ':' and contains here/reply must
+		// NOT be stripped (regression for the over-broad substring match).
+		"We're really sorry you ran into this here:\nPlease try again.": "We're really sorry you ran into this here:\nPlease try again.",
+		"Could you clarify the reply:\nmore detail":                     "Could you clarify the reply:\nmore detail",
 	}
 	for in, want := range cases {
 		if got := cleanDraft(in); got != want {
 			t.Errorf("cleanDraft(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestCleanDraft_RuneTruncationNoCorruption(t *testing.T) {
+	// Over-long CJK input must truncate by rune, never splitting a multi-byte
+	// character into an invalid byte sequence.
+	long := strings.Repeat("你", draftMaxRunes+50)
+	got := cleanDraft(long)
+	if !utf8.ValidString(got) {
+		t.Fatal("truncated draft is not valid UTF-8")
+	}
+	if n := utf8.RuneCountInString(got); n != draftMaxRunes {
+		t.Fatalf("rune count = %d, want %d", n, draftMaxRunes)
 	}
 }
