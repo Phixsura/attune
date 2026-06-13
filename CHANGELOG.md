@@ -23,7 +23,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   with `purpose='reply_draft'` through the existing audit-wrapping client (no
   schema change). Console shows the draft below the raw content with Copy and a
   synchronous Regenerate
-  (`POST /fb/v1/console/feedback/{id}/reply-draft/regenerate`). The draft is
+  (`POST /fb/v1/console/feedback/{id}/reply-draft/regenerate`), which is
+  tenant-scoped and guarded (ownership / opt-in / enriched) and stays reachable
+  for an enabled-but-empty row via a Generate entry point. The draft is
   operator-facing only and is never auto-sent. Migration 026 adds the feedback
   and tenant columns plus the `reply_draft_task` table; new metrics
   `attune_reply_draft_generated_total`, `attune_reply_draft_errors_total`,

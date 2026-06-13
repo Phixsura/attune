@@ -45,7 +45,9 @@ func NewDraftTaskRepo(pool *pgxpool.Pool) *DraftTaskRepo {
 // CreateTaskTx enqueues a draft task inside the enrich tx, but only when the
 // tenant opted in AND classification confidence clears the per-tenant
 // threshold. A nil confidence is admitted only when the threshold is 0 (no
-// self-rating → don't spend tokens once a gate is set).
+// self-rating → don't spend tokens once a gate is set). Triage fast-path rows
+// carry a nil confidence, so a tenant with min_confidence>0 won't auto-generate
+// for them — operators reach those via the Console Generate/Regenerate entry.
 func (r *DraftTaskRepo) CreateTaskTx(ctx context.Context, tx pgx.Tx, feedbackID int64, tenantID string, confidence *float64, traceID string) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO reply_draft_task (feedback_id, tenant_id, status, inbound_trace_id)
