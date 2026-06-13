@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #26 |
-| **Status** | Accepted |
+| **Status** | Implemented |
 | **Started** | 2026-06-13 CST |
 | **Related** | #25 (embedding outbox/worker paradigm reused), #24 (LLM confidence — gating signal — and `llm_audit` cost table), #10 (per-tenant prompt template, closed), #109 (managed LLM routing) |
 
