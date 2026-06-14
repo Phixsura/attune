@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Manual feedback tags (#28).** Per-tenant tag registry with colors,
+  descriptions, exclusive scopes (at most one tag per scope per feedback row),
+  usage tracking, and archival. Tags can be assigned/removed on individual
+  feedback rows or in batch (up to 100 rows × 20 ops). The feedback list
+  supports `?tag=<uuid>` filtering, and both list and detail endpoints hydrate
+  assigned tags. Console UI: Settings → 标签 for CRUD management; feedback
+  detail sheet for add/remove via dropdown. Proto contract
+  (`FeedbackTagService`), migration 029 (`tenant_feedback_tags` +
+  `feedback_tag_assignments`), integration tests, and zh-CN i18n included.
+
 - **Daily digest roll-up with LLM-labeled top themes (#27).** A new per-tenant
   scheduled worker (`internal/service/digest`) delivers one morning summary of
   yesterday's enriched feedback instead of per-row noise. At the tenant's local
