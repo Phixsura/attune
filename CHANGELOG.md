@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Customizable feedback workflow status (#29).** Per-tenant workflow state
+  machine with three fixed categories (open / active / closed), custom states
+  within each category, and a directed-graph transition edge table enforcing
+  allowed moves. Features: single and batch state transitions with 409 on
+  invalid moves; field-level audit log (`feedback_audit_log`) recording every
+  state change with optional comment; seed-defaults endpoint for one-click
+  setup; workflow settings page in Console (Settings → 工作流) with state CRUD,
+  color picker, category selector, and interactive transition matrix editor;
+  workflow state badge on feedback list rows; state filter in the feedback
+  filter bar; transition dropdown + audit timeline in feedback detail sheet;
+  batch transition in the selection action bar. Migration 030
+  (`tenant_workflow_states`, `tenant_workflow_transitions`,
+  `feedback_audit_log`, `ALTER user_feedback`), proto contract
+  (`WorkflowService` with 10 RPCs), integration tests, Prometheus metrics
+  (`attune_workflow_transitions_total`, `attune_workflow_batch_size`), and
+  zh-CN i18n included.
+
 - **Manual feedback tags (#28).** Per-tenant tag registry with colors,
   descriptions, exclusive scopes (at most one tag per scope per feedback row),
   usage tracking, and archival. Tags can be assigned/removed on individual

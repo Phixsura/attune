@@ -3,6 +3,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import {
   Bell,
   Bot,
+  GitBranch,
   KeyRound,
   Loader2,
   Mailbox,
@@ -29,6 +30,7 @@ import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
 import { TagsPage } from '@/features/tags/components/tags-page'
+import { WorkflowSettingsPage } from '@/features/workflow/components/workflow-settings-page'
 import type { Dimension } from '@/proto/attune/v1/common'
 
 type SettingsSection =
@@ -39,6 +41,7 @@ type SettingsSection =
   | 'digest_subscription'
   | 'api_keys'
   | 'tags'
+  | 'workflow'
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'classification',
@@ -48,6 +51,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'digest_subscription',
   'api_keys',
   'tags',
+  'workflow',
 ]
 
 export const Route = createFileRoute('/_authed/settings')({
@@ -292,6 +296,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
       {section === 'digest_subscription' ? <DigestSubscriptionPage /> : null}
       {section === 'api_keys' ? <ApiKeysPage /> : null}
       {section === 'tags' ? <TagsPage /> : null}
+      {section === 'workflow' ? <WorkflowSettingsPage /> : null}
     </section>
   )
 }
@@ -346,6 +351,12 @@ function SettingsSidebar({
       icon: Tags,
       title: t('settings.areas.tags.title'),
       body: t('settings.areas.tags.body'),
+    },
+    {
+      section: 'workflow',
+      icon: GitBranch,
+      title: t('settings.areas.workflow.title'),
+      body: t('settings.areas.workflow.body'),
     },
   ] satisfies Array<{
     body: string
