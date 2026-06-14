@@ -211,8 +211,11 @@ func buildConsoleRouter(
 	workflowHandler := console.NewWorkflowHandler(wfStateRepo, wfSvc)
 
 	return console.NewRouter(
-		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback, usage,
-		enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
+		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback,
+		nil, // feedbackBatch - TODO: wire service.feedbackbatch.Service
+		nil, // feedbackSearch - TODO: wire service.semanticsearch.Service
+		nil, // feedbackJob - TODO: wire service.feedbackbatch.Service
+		usage, enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
 		tagHandler, tagAssignmentHandler, workflowHandler, adminRepo,
 	).Mount(), nil
 }
