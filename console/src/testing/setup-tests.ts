@@ -36,12 +36,14 @@ beforeEach(() => {
   // jsdom doesn't implement these APIs but Radix Dialog/Select rely on
   // them. Shim once per test so a global mutated by a prior test
   // doesn't leak across files.
-  if (!('ResizeObserver' in window)) {
-    vi.stubGlobal(
-      'ResizeObserver',
-      vi.fn(() => ({ observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() })),
-    )
-  }
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe = vi.fn()
+      unobserve = vi.fn()
+      disconnect = vi.fn()
+    },
+  )
   if (!window.matchMedia) {
     vi.stubGlobal(
       'matchMedia',

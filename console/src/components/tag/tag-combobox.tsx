@@ -1,5 +1,5 @@
 import { Plus, Search } from 'lucide-react'
-import { type ReactNode, useRef, useState } from 'react'
+import { type ReactNode, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -37,7 +37,9 @@ export function TagCombobox({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
+  const listId = useId()
 
   const trimmed = query.trim().toLowerCase()
   const filtered = trimmed
@@ -46,9 +48,12 @@ export function TagCombobox({
   const exactMatch = availableTags.some((tag) => tag.name.toLowerCase() === trimmed)
   const showCreate = onCreate && trimmed.length > 0 && !exactMatch
 
+  const optionCount = filtered.length + (showCreate ? 1 : 0)
+
   const handleSelect = (tagId: string) => {
     onSelect(tagId)
     setQuery('')
+    setActiveIndex(-1)
     setOpen(false)
   }
 
@@ -56,15 +61,68 @@ export function TagCombobox({
     if (!onCreate || !trimmed) return
     onCreate(query.trim())
     setQuery('')
+    setActiveIndex(-1)
     setOpen(false)
   }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowDown': {
+        e.preventDefault()
+        setActiveIndex((i) => (i + 1) % optionCount)
+        break
+      }
+      case 'ArrowUp': {
+        e.preventDefault()
+        setActiveIndex((i) => (i - 1 + optionCount) % optionCount)
+        break
+      }
+      case 'Home': {
+        e.preventDefault()
+        setActiveIndex(0)
+        break
+      }
+      case 'End': {
+        e.preventDefault()
+        setActiveIndex(optionCount - 1)
+        break
+      }
+      case 'Enter': {
+        e.preventDefault()
+        if (activeIndex >= 0 && activeIndex < filtered.length) {
+          handleSelect(filtered[activeIndex].id)
+        } else if (activeIndex === filtered.length && showCreate) {
+          handleCreate()
+        } else if (filtered.length === 1) {
+          handleSelect(filtered[0].id)
+        } else if (showCreate) {
+          handleCreate()
+        }
+        break
+      }
+      case 'Escape': {
+        setOpen(false)
+        break
+      }
+    }
+  }
+
+  const activeDescendant =
+    activeIndex >= 0 && activeIndex < filtered.length
+      ? `${listId}-opt-${filtered[activeIndex].id}`
+      : activeIndex === filtered.length && showCreate
+        ? `${listId}-create`
+        : undefined
 
   return (
     <Popover
       open={open}
       onOpenChange={(v) => {
         setOpen(v)
-        if (!v) setQuery('')
+        if (!v) {
+          setQuery('')
+          setActiveIndex(-1)
+        }
       }}
     >
       <PopoverTrigger asChild disabled={disabled}>
@@ -88,25 +146,30 @@ export function TagCombobox({
           <Input
             ref={inputRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                if (filtered.length === 1) handleSelect(filtered[0].id)
-                else if (showCreate) handleCreate()
-              }
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setActiveIndex(-1)
             }}
+            onKeyDown={handleKeyDown}
             placeholder={t('tags.combobox.search_placeholder')}
             className="h-9 border-0 shadow-none focus-visible:ring-0"
+            role="combobox"
+            aria-expanded={open}
+            aria-controls={listId}
+            aria-activedescendant={activeDescendant}
+            aria-autocomplete="list"
           />
         </div>
-        <div className="max-h-48 overflow-y-auto p-1">
+        <div id={listId} role="listbox" className="max-h-48 overflow-y-auto p-1">
           {filtered.length > 0 ? (
-            filtered.map((tag) => (
+            filtered.map((tag, i) => (
               <button
                 key={tag.id}
+                id={`${listId}-opt-${tag.id}`}
                 type="button"
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground"
+                role="option"
+                aria-selected={i === activeIndex}
+                className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground ${i === activeIndex ? 'bg-accent text-accent-foreground' : ''}`}
                 onClick={() => handleSelect(tag.id)}
               >
                 <span
@@ -128,8 +191,11 @@ export function TagCombobox({
           ) : null}
           {showCreate ? (
             <button
+              id={`${listId}-create`}
               type="button"
-              className="flex w-full items-center gap-2 rounded-sm border-t px-2 py-1.5 text-sm text-primary outline-hidden hover:bg-accent"
+              role="option"
+              aria-selected={activeIndex === filtered.length}
+              className={`flex w-full items-center gap-2 rounded-sm border-t px-2 py-1.5 text-sm text-primary outline-hidden hover:bg-accent ${activeIndex === filtered.length ? 'bg-accent' : ''}`}
               onClick={handleCreate}
             >
               <Plus className="h-3.5 w-3.5" />
