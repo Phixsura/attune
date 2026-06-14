@@ -54,10 +54,12 @@ import (
 	"github.com/Phixsura/attune/internal/service/llmrouter"
 	"github.com/Phixsura/attune/internal/service/outbox"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
+	"github.com/Phixsura/attune/internal/worker/batchjob"
 
 	digestrunrepo "github.com/Phixsura/attune/internal/repo/digestrun"
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
+	feedbackjobrepo "github.com/Phixsura/attune/internal/repo/feedbackjob"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 )
 
@@ -155,6 +157,15 @@ func runServer() error {
 	// rendered roll-up to the tenant's raw-webhook digest target via the shared
 	// notify.Transport, with digest_runs as the exactly-once / retry ledger.
 	startDigestWorker(ctx, pool, llm)
+
+	// Batch job worker processes async batch operations (#30).
+	batchJobWorker := batchjob.New(
+		feedbackjobrepo.New(pool),
+		feedbackRepo,
+		batchjob.Config{},
+	)
+	batchJobWorker.Start(ctx)
+	defer batchJobWorker.Stop()
 
 	ingestHandler := handlers.NewIngestHandler(ingestor)
 
