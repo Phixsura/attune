@@ -7,7 +7,7 @@ export function useRemoveFeedbackTag(feedbackId: string) {
     mutationFn: (tagId: string) =>
       api(`/fb/v1/console/feedback/${feedbackId}/tags/${tagId}`, { method: 'DELETE' }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['console', 'feedback', feedbackId] })
+      void qc.invalidateQueries({ queryKey: ['console', 'feedback'] })
       void qc.invalidateQueries({ queryKey: ['console', 'tags'] })
     },
   })

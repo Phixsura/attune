@@ -11,7 +11,7 @@ export function useAddFeedbackTag(feedbackId: string) {
         body: { feedbackId, ...req },
       }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['console', 'feedback', feedbackId] })
+      void qc.invalidateQueries({ queryKey: ['console', 'feedback'] })
       void qc.invalidateQueries({ queryKey: ['console', 'tags'] })
     },
   })

@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   (`FeedbackTagService`), migration 029 (`tenant_feedback_tags` +
   `feedback_tag_assignments`), integration tests, and zh-CN i18n included.
 
+### Fixed
+
+- **Tag add/remove did not refresh feedback detail sheet.** The query
+  invalidation key in `useAddFeedbackTag` and `useRemoveFeedbackTag` included
+  a `feedbackId` segment that prevented React Query prefix-matching from
+  reaching the detail query (`['console', 'feedback', 'detail', id]`).
+  Broadened both to `['console', 'feedback']` so all feedback queries refresh.
+
 - **Daily digest roll-up with LLM-labeled top themes (#27).** A new per-tenant
   scheduled worker (`internal/service/digest`) delivers one morning summary of
   yesterday's enriched feedback instead of per-row noise. At the tenant's local
