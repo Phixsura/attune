@@ -394,19 +394,13 @@ func (s *service) getOrGenerateEmbedding(ctx context.Context, tenantID, text str
 
 	// Try cache first.
 	if s.cache != nil {
-		emb, found, err := s.cache.Get(ctx, tenantID, queryHash)
+		emb, model, found, err := s.cache.Get(ctx, tenantID, queryHash)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] cache get error,tenant_id:%s,err:%+v", where, tenantID, err.Error())
 			// Continue without cache.
-		} else if found && len(emb) == EmbeddingDims {
-			// Cache hit - we need to return the model too, but cache doesn't store it.
-			// For now, get stats to determine model (this is a limitation).
-			stats, err := s.feedbackStore.GetEmbeddingStats(ctx, tenantID)
-			if err == nil && stats.EmbeddingModel != "" {
-				metrics.EmbeddingCacheHits.WithLabelValues(tenantID, "hit").Inc()
-				return emb, stats.EmbeddingModel, nil
-			}
-			// Fall through to regenerate if we can't determine the model.
+		} else if found && len(emb) == EmbeddingDims && model != "" {
+			metrics.EmbeddingCacheHits.WithLabelValues(tenantID, "hit").Inc()
+			return emb, model, nil
 		}
 	}
 
@@ -436,7 +430,7 @@ func (s *service) getOrGenerateEmbedding(ctx context.Context, tenantID, text str
 
 	// Cache the embedding.
 	if s.cache != nil {
-		if err := s.cache.Set(ctx, tenantID, queryHash, embedding, QueryCacheTTL); err != nil {
+		if err := s.cache.Set(ctx, tenantID, queryHash, embedding, model, QueryCacheTTL); err != nil {
 			logext.Warnf(ctx, "[%s] cache set error,tenant_id:%s,err:%+v", where, tenantID, err.Error())
 			// Continue without caching.
 		}

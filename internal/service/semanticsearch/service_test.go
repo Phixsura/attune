@@ -311,7 +311,7 @@ func TestMemoryCache_Basic(t *testing.T) {
 	ctx := context.Background()
 
 	// Initially empty.
-	_, found, err := cache.Get(ctx, "tenant1", "hash1")
+	_, _, found, err := cache.Get(ctx, "tenant1", "hash1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -321,13 +321,14 @@ func TestMemoryCache_Basic(t *testing.T) {
 
 	// Set a value.
 	testEmb := []float32{0.1, 0.2, 0.3}
-	err = cache.Set(ctx, "tenant1", "hash1", testEmb, time.Hour)
+	testModel := "text-embedding-3-small"
+	err = cache.Set(ctx, "tenant1", "hash1", testEmb, testModel, time.Hour)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Should find it now.
-	emb, found, err := cache.Get(ctx, "tenant1", "hash1")
+	emb, model, found, err := cache.Get(ctx, "tenant1", "hash1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -337,6 +338,9 @@ func TestMemoryCache_Basic(t *testing.T) {
 	if len(emb) != 3 {
 		t.Errorf("expected 3 elements, got %d", len(emb))
 	}
+	if model != testModel {
+		t.Errorf("expected model %q, got %q", testModel, model)
+	}
 }
 
 func TestMemoryCache_Expiration(t *testing.T) {
@@ -345,13 +349,13 @@ func TestMemoryCache_Expiration(t *testing.T) {
 
 	// Set with very short TTL.
 	testEmb := []float32{0.1, 0.2, 0.3}
-	err := cache.Set(ctx, "tenant1", "hash1", testEmb, -time.Second) // Already expired
+	err := cache.Set(ctx, "tenant1", "hash1", testEmb, "text-embedding-3-small", -time.Second) // Already expired
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Should not find expired entry.
-	_, found, err := cache.Get(ctx, "tenant1", "hash1")
+	_, _, found, err := cache.Get(ctx, "tenant1", "hash1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

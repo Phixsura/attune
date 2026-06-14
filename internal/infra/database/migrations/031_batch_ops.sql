@@ -105,13 +105,16 @@ CREATE INDEX IF NOT EXISTS idx_batch_jobs_heartbeat
 
 -- ─── 4. query_embedding_cache for semantic search ─────────────────
 CREATE TABLE IF NOT EXISTS query_embedding_cache (
-    cache_key    TEXT PRIMARY KEY,
+    tenant_id    TEXT NOT NULL,
+    query_hash   TEXT NOT NULL,
     embedding    vector(256) NOT NULL,
     model        TEXT NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at   TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '5 minutes'
+    expires_at   TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (tenant_id, query_hash)
 );
 
 -- TTL cleanup index.
-CREATE INDEX IF NOT EXISTS idx_query_embed_cache_expires
+CREATE INDEX IF NOT EXISTS idx_query_embedding_cache_expires
     ON query_embedding_cache (expires_at);

@@ -28,48 +28,49 @@ func NewPGCache(pool *pgxpool.Pool) EmbeddingCache {
 }
 
 // Get retrieves a cached embedding by query hash.
-func (c *pgCache) Get(ctx context.Context, tenantID, queryHash string) ([]float32, bool, error) {
+func (c *pgCache) Get(ctx context.Context, tenantID, queryHash string) ([]float32, string, bool, error) {
 	var embStr *string
+	var model string
 	err := c.pool.QueryRow(
 		ctx, `
-		SELECT embedding::text
+		SELECT embedding::text, model
 		FROM query_embedding_cache
 		WHERE tenant_id = $1 AND query_hash = $2 AND expires_at > NOW()`,
 		tenantID, queryHash,
-	).Scan(&embStr) // ptrext:allow scan-target
+	).Scan(&embStr, &model) // ptrext:allow scan-target
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, false, nil
+		return nil, "", false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("cache get: %w", err)
+		return nil, "", false, fmt.Errorf("cache get: %w", err)
 	}
 
 	embStrVal := ptrext.Indirect(embStr)
 	if embStrVal == "" {
-		return nil, false, nil
+		return nil, "", false, nil
 	}
 
 	embedding, err := parseVecString(embStrVal)
 	if err != nil {
-		return nil, false, fmt.Errorf("parse cached embedding: %w", err)
+		return nil, "", false, fmt.Errorf("parse cached embedding: %w", err)
 	}
 
-	return embedding, true, nil
+	return embedding, model, true, nil
 }
 
 // Set stores an embedding with TTL.
-func (c *pgCache) Set(ctx context.Context, tenantID, queryHash string, embedding []float32, ttl time.Duration) error {
+func (c *pgCache) Set(ctx context.Context, tenantID, queryHash string, embedding []float32, model string, ttl time.Duration) error {
 	embStr := vecToString(embedding)
 	expiresAt := time.Now().Add(ttl)
 
 	_, err := c.pool.Exec(
 		ctx, `
-		INSERT INTO query_embedding_cache (tenant_id, query_hash, embedding, expires_at)
-		VALUES ($1, $2, $3::vector, $4)
+		INSERT INTO query_embedding_cache (tenant_id, query_hash, embedding, model, expires_at)
+		VALUES ($1, $2, $3::vector, $4, $5)
 		ON CONFLICT (tenant_id, query_hash)
-		DO UPDATE SET embedding = EXCLUDED.embedding, expires_at = EXCLUDED.expires_at`,
-		tenantID, queryHash, embStr, expiresAt,
+		DO UPDATE SET embedding = EXCLUDED.embedding, model = EXCLUDED.model, expires_at = EXCLUDED.expires_at`,
+		tenantID, queryHash, embStr, model, expiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("cache set: %w", err)
@@ -127,6 +128,7 @@ type memoryCache struct {
 
 type memoryCacheEntry struct {
 	embedding []float32
+	model     string
 	expiresAt time.Time
 }
 
@@ -137,23 +139,24 @@ func NewMemoryCache() EmbeddingCache {
 	})
 }
 
-func (c *memoryCache) Get(ctx context.Context, tenantID, queryHash string) ([]float32, bool, error) {
+func (c *memoryCache) Get(ctx context.Context, tenantID, queryHash string) ([]float32, string, bool, error) {
 	key := tenantID + ":" + queryHash
 	entry, ok := c.entries[key]
 	if !ok {
-		return nil, false, nil
+		return nil, "", false, nil
 	}
 	if time.Now().After(entry.expiresAt) {
 		delete(c.entries, key)
-		return nil, false, nil
+		return nil, "", false, nil
 	}
-	return entry.embedding, true, nil
+	return entry.embedding, entry.model, true, nil
 }
 
-func (c *memoryCache) Set(ctx context.Context, tenantID, queryHash string, embedding []float32, ttl time.Duration) error {
+func (c *memoryCache) Set(ctx context.Context, tenantID, queryHash string, embedding []float32, model string, ttl time.Duration) error {
 	key := tenantID + ":" + queryHash
 	c.entries[key] = memoryCacheEntry{
 		embedding: embedding,
+		model:     model,
 		expiresAt: time.Now().Add(ttl),
 	}
 	return nil

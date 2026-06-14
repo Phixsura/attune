@@ -67,8 +67,8 @@ type Service interface {
 
 // EmbeddingCache provides caching for query embeddings.
 type EmbeddingCache interface {
-	// Get retrieves a cached embedding by query hash.
-	Get(ctx context.Context, tenantID, queryHash string) ([]float32, bool, error)
-	// Set stores an embedding with TTL.
-	Set(ctx context.Context, tenantID, queryHash string, embedding []float32, ttl time.Duration) error
+	// Get retrieves a cached embedding by query hash, returning the embedding, model, and found flag.
+	Get(ctx context.Context, tenantID, queryHash string) (embedding []float32, model string, found bool, err error)
+	// Set stores an embedding with the model it was generated from, with TTL.
+	Set(ctx context.Context, tenantID, queryHash string, embedding []float32, model string, ttl time.Duration) error
 }
