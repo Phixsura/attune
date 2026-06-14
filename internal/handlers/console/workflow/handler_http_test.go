@@ -294,6 +294,156 @@ func TestListStates_HTTP(t *testing.T) {
 	require.Len(t, states, 2)
 }
 
+func TestUpdateState_HTTP(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+
+	t.Run("200 OK", func(t *testing.T) {
+		h := NewHandler(&fakeStateStore{
+			states: []workflowstate.WorkflowState{
+				{ID: "s-1", TenantID: "tenant-1", Name: "Open", Color: "#3b82f6", Category: "open", CreatedAt: now, UpdatedAt: now},
+			},
+		}, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.UpdateState",
+			dispatcher.JSON(func() *attunev1.UpdateStateRequest { return ptrext.Of(attunev1.UpdateStateRequest{}) }),
+			h.UpdateState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateStateRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/s-1",
+			`{"id":"s-1","name":"Renamed","color":"#ef4444","position":2,"isDefault":true}`))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		state := body["state"].(map[string]any)
+		require.Equal(t, "Renamed", state["name"])
+	})
+
+	t.Run("404 not found", func(t *testing.T) {
+		h := NewHandler(&fakeStateStore{}, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.UpdateState",
+			dispatcher.JSON(func() *attunev1.UpdateStateRequest { return ptrext.Of(attunev1.UpdateStateRequest{}) }),
+			h.UpdateState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateStateRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/missing",
+			`{"id":"missing","name":"X"}`))
+
+		require.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("409 name conflict on update", func(t *testing.T) {
+		h := NewHandler(&fakeStateStore{
+			states:    []workflowstate.WorkflowState{{ID: "s-1", TenantID: "tenant-1", Name: "Open", Category: "open", CreatedAt: now, UpdatedAt: now}},
+			updateErr: workflowstate.ErrNameConflict,
+		}, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.UpdateState",
+			dispatcher.JSON(func() *attunev1.UpdateStateRequest { return ptrext.Of(attunev1.UpdateStateRequest{}) }),
+			h.UpdateState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateStateRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/s-1",
+			`{"id":"s-1","name":"Dup"}`))
+
+		require.Equal(t, http.StatusConflict, w.Code)
+	})
+}
+
+func TestListTransitions_HTTP(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	h := NewHandler(&fakeStateStore{
+		transitions: []workflowstate.Transition{
+			{ID: "t-1", TenantID: "tenant-1", FromStateID: "s-1", ToStateID: "s-2", CreatedAt: now},
+		},
+	}, &fakeWorkflowService{})
+
+	handler := dispatcher.Bind(
+		"console.WorkflowHandler.ListTransitions",
+		dispatcher.Empty(func() *attunev1.ListTransitionsRequest { return ptrext.Of(attunev1.ListTransitionsRequest{}) }),
+		h.ListTransitions,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListTransitionsRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+
+	w := httptest.NewRecorder()
+	handler(w, dispatchtest.Request(http.MethodGet, "/workflow/transitions", ""))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body, err := dispatchtest.DecodeJSON(w.Body)
+	require.NoError(t, err)
+	transitions := body["transitions"].([]any)
+	require.Len(t, transitions, 1)
+}
+
+func TestReplaceTransitions_HTTP(t *testing.T) {
+	t.Parallel()
+
+	t.Run("200 OK", func(t *testing.T) {
+		now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+		h := NewHandler(&fakeStateStore{
+			transitions: []workflowstate.Transition{
+				{ID: "t-new", TenantID: "tenant-1", FromStateID: "s-1", ToStateID: "s-2", CreatedAt: now},
+			},
+		}, &fakeWorkflowService{})
+
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.ReplaceTransitions",
+			dispatcher.JSON(func() *attunev1.ReplaceTransitionsRequest {
+				return ptrext.Of(attunev1.ReplaceTransitionsRequest{})
+			}),
+			h.ReplaceTransitions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ReplaceTransitionsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/transitions",
+			`{"transitions":[{"fromStateId":"s-1","toStateId":"s-2"}]}`))
+
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("500 replace error", func(t *testing.T) {
+		h := NewHandler(&fakeStateStore{replaceErr: errors.New("replace fail")}, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.ReplaceTransitions",
+			dispatcher.JSON(func() *attunev1.ReplaceTransitionsRequest {
+				return ptrext.Of(attunev1.ReplaceTransitionsRequest{})
+			}),
+			h.ReplaceTransitions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ReplaceTransitionsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/transitions",
+			`{"transitions":[{"fromStateId":"s-1","toStateId":"s-2"}]}`))
+
+		require.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
 func TestSeedDefaults_HTTP(t *testing.T) {
 	t.Parallel()
 

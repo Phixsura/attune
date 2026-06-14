@@ -33,4 +33,22 @@ func TestBindListRequestLimitBounds(t *testing.T) {
 		require.NoError(t, BindListRequest(r, req))
 		require.Nil(t, req.Limit)
 	})
+
+	t.Run("workflow_state filter", func(t *testing.T) {
+		t.Parallel()
+		req := ptrext.Of(attunev1.ListFeedbackRequest{})
+		r := httptest.NewRequest(http.MethodGet, "/?workflow_state=s-1", nil)
+
+		require.NoError(t, BindListRequest(r, req))
+		require.Equal(t, "s-1", req.GetWorkflowStateId())
+	})
+
+	t.Run("workflow_category filter", func(t *testing.T) {
+		t.Parallel()
+		req := ptrext.Of(attunev1.ListFeedbackRequest{})
+		r := httptest.NewRequest(http.MethodGet, "/?workflow_category=open", nil)
+
+		require.NoError(t, BindListRequest(r, req))
+		require.Equal(t, "open", req.GetWorkflowCategory())
+	})
 }

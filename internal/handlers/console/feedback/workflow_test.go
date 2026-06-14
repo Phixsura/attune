@@ -4,6 +4,7 @@ package feedback
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/service/workflow"
@@ -244,4 +246,207 @@ func TestListAudit_HTTP(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 	})
+}
+
+// ---------------------------------------------------------------------------
+// fakeWorkflowStateReader — mock for enrichment tests
+// ---------------------------------------------------------------------------
+
+type fakeWorkflowStateReader struct {
+	states      []workflowstate.WorkflowState
+	transitions []workflowstate.Transition
+	allowedNext []workflowstate.WorkflowState
+	listErr     error
+	transErr    error
+	allowedErr  error
+}
+
+func (f *fakeWorkflowStateReader) List(_ context.Context, _ string, _ bool) ([]workflowstate.WorkflowState, error) {
+	return f.states, f.listErr
+}
+
+func (f *fakeWorkflowStateReader) ListTransitions(_ context.Context, _ string) ([]workflowstate.Transition, error) {
+	return f.transitions, f.transErr
+}
+
+func (f *fakeWorkflowStateReader) AllowedNext(_ context.Context, _, _ string) ([]workflowstate.WorkflowState, error) {
+	return f.allowedNext, f.allowedErr
+}
+
+func makeRC() *dispatcher.RequestContext[*session.AuthCtx] {
+	return ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth: ptrext.Of(session.AuthCtx{
+			TenantID: dispatchtest.TenantID,
+			UserID:   dispatchtest.UserID,
+		}),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// enrichItemsWithWorkflowState tests
+// ---------------------------------------------------------------------------
+
+func TestEnrichItems_HappyPath(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	reader := &fakeWorkflowStateReader{
+		states: []workflowstate.WorkflowState{
+			{ID: "s-1", Name: "Open", Color: "#3b82f6", Category: "open", CreatedAt: now, UpdatedAt: now},
+			{ID: "s-2", Name: "Done", Color: "#10b981", Category: "closed", CreatedAt: now, UpdatedAt: now},
+		},
+		transitions: []workflowstate.Transition{
+			{FromStateID: "s-1", ToStateID: "s-2"},
+		},
+	}
+	h := &FeedbackHandler{}
+	h.SetWorkflowStates(reader)
+
+	rows := []feedback.ConsoleListRow{
+		{ID: 1, WorkflowStateID: ptrext.Of("s-1")},
+		{ID: 2, WorkflowStateID: nil},
+	}
+	items := []*attunev1.Feedback{{}, {}}
+
+	h.enrichItemsWithWorkflowState(makeRC(), "test", "t-1", rows, items)
+
+	require.NotNil(t, items[0].WorkflowState)
+	require.Equal(t, "Open", items[0].WorkflowState.GetName())
+	require.Len(t, items[0].AllowedNextStates, 1)
+	require.Equal(t, "Done", items[0].AllowedNextStates[0].GetName())
+	require.Nil(t, items[1].WorkflowState)
+}
+
+func TestEnrichItems_NilReader(t *testing.T) {
+	t.Parallel()
+	h := &FeedbackHandler{}
+	items := []*attunev1.Feedback{{}}
+	h.enrichItemsWithWorkflowState(makeRC(), "test", "t-1",
+		[]feedback.ConsoleListRow{{ID: 1, WorkflowStateID: ptrext.Of("s-1")}}, items)
+	require.Nil(t, items[0].WorkflowState)
+}
+
+func TestEnrichItems_EmptyRows(t *testing.T) {
+	t.Parallel()
+	h := &FeedbackHandler{}
+	h.SetWorkflowStates(&fakeWorkflowStateReader{})
+	h.enrichItemsWithWorkflowState(makeRC(), "test", "t-1", nil, nil)
+}
+
+func TestEnrichItems_NoWorkflowStateIDs(t *testing.T) {
+	t.Parallel()
+	reader := &fakeWorkflowStateReader{}
+	h := &FeedbackHandler{}
+	h.SetWorkflowStates(reader)
+
+	rows := []feedback.ConsoleListRow{{ID: 1, WorkflowStateID: nil}}
+	items := []*attunev1.Feedback{{}}
+	h.enrichItemsWithWorkflowState(makeRC(), "test", "t-1", rows, items)
+	require.Nil(t, items[0].WorkflowState)
+}
+
+func TestEnrichItems_ListError(t *testing.T) {
+	t.Parallel()
+	reader := &fakeWorkflowStateReader{listErr: errors.New("db error")}
+	h := &FeedbackHandler{}
+	h.SetWorkflowStates(reader)
+
+	rows := []feedback.ConsoleListRow{{ID: 1, WorkflowStateID: ptrext.Of("s-1")}}
+	items := []*attunev1.Feedback{{}}
+	h.enrichItemsWithWorkflowState(makeRC(), "test", "t-1", rows, items)
+	require.Nil(t, items[0].WorkflowState)
+}
+
+func TestEnrichItems_TransitionsError(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	reader := &fakeWorkflowStateReader{
+		states: []workflowstate.WorkflowState{
+			{ID: "s-1", Name: "Open", Color: "#3b82f6", Category: "open", CreatedAt: now, UpdatedAt: now},
+		},
+		transErr: errors.New("transitions fail"),
+	}
+	h := &FeedbackHandler{}
+	h.SetWorkflowStates(reader)
+
+	rows := []feedback.ConsoleListRow{{ID: 1, WorkflowStateID: ptrext.Of("s-1")}}
+	items := []*attunev1.Feedback{{}}
+	h.enrichItemsWithWorkflowState(makeRC(), "test", "t-1", rows, items)
+	require.Nil(t, items[0].WorkflowState)
+}
+
+// ---------------------------------------------------------------------------
+// enrichDetailWithWorkflowState tests
+// ---------------------------------------------------------------------------
+
+func TestEnrichDetail_HappyPath(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	reader := &fakeWorkflowStateReader{
+		states: []workflowstate.WorkflowState{
+			{ID: "s-1", Name: "Open", Color: "#3b82f6", Category: "open", CreatedAt: now, UpdatedAt: now},
+		},
+		allowedNext: []workflowstate.WorkflowState{
+			{ID: "s-2", Name: "Done", Color: "#10b981", Category: "closed", CreatedAt: now, UpdatedAt: now},
+		},
+	}
+	h := &FeedbackHandler{}
+	h.SetWorkflowStates(reader)
+
+	detail := &attunev1.FeedbackDetail{}
+	h.enrichDetailWithWorkflowState(makeRC(), "test", "t-1", ptrext.Of("s-1"), detail)
+
+	require.NotNil(t, detail.WorkflowState)
+	require.Equal(t, "Open", detail.WorkflowState.GetName())
+	require.Len(t, detail.AllowedNextStates, 1)
+	require.Equal(t, "Done", detail.AllowedNextStates[0].GetName())
+}
+
+func TestEnrichDetail_NilStateID(t *testing.T) {
+	t.Parallel()
+	h := &FeedbackHandler{}
+	h.SetWorkflowStates(&fakeWorkflowStateReader{})
+	detail := &attunev1.FeedbackDetail{}
+	h.enrichDetailWithWorkflowState(makeRC(), "test", "t-1", nil, detail)
+	require.Nil(t, detail.WorkflowState)
+}
+
+func TestEnrichDetail_NilReader(t *testing.T) {
+	t.Parallel()
+	h := &FeedbackHandler{}
+	detail := &attunev1.FeedbackDetail{}
+	h.enrichDetailWithWorkflowState(makeRC(), "test", "t-1", ptrext.Of("s-1"), detail)
+	require.Nil(t, detail.WorkflowState)
+}
+
+func TestEnrichDetail_AllowedNextError(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	reader := &fakeWorkflowStateReader{
+		states: []workflowstate.WorkflowState{
+			{ID: "s-1", Name: "Open", Color: "#3b82f6", Category: "open", CreatedAt: now, UpdatedAt: now},
+		},
+		allowedErr: errors.New("allowed fail"),
+	}
+	h := &FeedbackHandler{}
+	h.SetWorkflowStates(reader)
+
+	detail := &attunev1.FeedbackDetail{}
+	h.enrichDetailWithWorkflowState(makeRC(), "test", "t-1", ptrext.Of("s-1"), detail)
+	require.NotNil(t, detail.WorkflowState)
+	require.Empty(t, detail.AllowedNextStates)
+}
+
+func TestEnrichDetail_ListError(t *testing.T) {
+	t.Parallel()
+	reader := &fakeWorkflowStateReader{
+		allowedNext: []workflowstate.WorkflowState{},
+		listErr:     errors.New("list fail"),
+	}
+	h := &FeedbackHandler{}
+	h.SetWorkflowStates(reader)
+
+	detail := &attunev1.FeedbackDetail{}
+	h.enrichDetailWithWorkflowState(makeRC(), "test", "t-1", ptrext.Of("s-1"), detail)
+	require.Nil(t, detail.WorkflowState)
 }
