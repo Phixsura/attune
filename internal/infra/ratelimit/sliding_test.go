@@ -173,6 +173,166 @@ func TestMemorySlidingLimiter_ZeroLimitBypass(t *testing.T) {
 	}
 }
 
+func TestMemorySlidingLimiter_Cleanup(t *testing.T) {
+	// Use controllable time.
+	now := time.Now()
+	m := ptrext.Of(MemorySlidingLimiter{
+		nowFunc: func() time.Time { return now },
+	})
+	ctx := context.Background()
+
+	// Create activity for multiple keys.
+	for i := 0; i < 3; i++ {
+		_, _, _ = m.Allow(ctx, "tenant-1", 10, time.Minute)
+	}
+	for i := 0; i < 2; i++ {
+		_, _, _ = m.Allow(ctx, "tenant-2", 10, 2*time.Minute)
+	}
+	_, _, _ = m.Allow(ctx, "tenant-3", 10, 30*time.Second)
+
+	// Verify all keys exist.
+	if got := m.KeyCount(); got != 3 {
+		t.Fatalf("KeyCount before cleanup = %d, want 3", got)
+	}
+
+	// Advance time past the largest window (2 minutes).
+	now = now.Add(3 * time.Minute)
+
+	// Run cleanup.
+	m.cleanup()
+
+	// All keys should be removed since their timestamps are older than maxWindow.
+	if got := m.KeyCount(); got != 0 {
+		t.Fatalf("KeyCount after cleanup = %d, want 0", got)
+	}
+}
+
+func TestMemorySlidingLimiter_CleanupKeepsActiveKeys(t *testing.T) {
+	// Use controllable time.
+	now := time.Now()
+	m := ptrext.Of(MemorySlidingLimiter{
+		nowFunc: func() time.Time { return now },
+	})
+	ctx := context.Background()
+
+	// Create activity for two keys at t=0.
+	_, _, _ = m.Allow(ctx, "old-tenant", 10, time.Minute)
+	_, _, _ = m.Allow(ctx, "new-tenant", 10, time.Minute)
+
+	// Advance time 30 seconds.
+	now = now.Add(30 * time.Second)
+
+	// Add fresh activity to new-tenant.
+	_, _, _ = m.Allow(ctx, "new-tenant", 10, time.Minute)
+
+	// Advance past the 1-minute window for the original timestamps.
+	now = now.Add(40 * time.Second) // Total: 70 seconds from start.
+
+	// Run cleanup.
+	m.cleanup()
+
+	// old-tenant should be removed, new-tenant should remain (has recent activity).
+	if got := m.KeyCount(); got != 1 {
+		t.Fatalf("KeyCount after cleanup = %d, want 1", got)
+	}
+
+	// Verify new-tenant still works.
+	allowed, _, _ := m.Allow(ctx, "new-tenant", 10, time.Minute)
+	if !allowed {
+		t.Fatal("new-tenant should still be allowed")
+	}
+}
+
+func TestMemorySlidingLimiter_CleanupNoActivity(t *testing.T) {
+	m := NewMemorySlidingLimiter()
+
+	// Cleanup with no prior Allow calls should not panic.
+	m.cleanup()
+
+	if got := m.KeyCount(); got != 0 {
+		t.Fatalf("KeyCount = %d, want 0", got)
+	}
+}
+
+func TestMemorySlidingLimiter_StartCleanup(t *testing.T) {
+	// Use controllable time.
+	now := time.Now()
+	m := ptrext.Of(MemorySlidingLimiter{
+		nowFunc: func() time.Time { return now },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Add some keys.
+	_, _, _ = m.Allow(ctx, "tenant-1", 10, 50*time.Millisecond)
+	_, _, _ = m.Allow(ctx, "tenant-2", 10, 50*time.Millisecond)
+
+	if got := m.KeyCount(); got != 2 {
+		t.Fatalf("KeyCount before cleanup = %d, want 2", got)
+	}
+
+	// Advance past the window.
+	now = now.Add(100 * time.Millisecond)
+
+	// Start cleanup with a short interval.
+	m.StartCleanup(ctx, 10*time.Millisecond)
+
+	// Wait for cleanup to run.
+	time.Sleep(50 * time.Millisecond)
+
+	// Keys should be cleaned up.
+	if got := m.KeyCount(); got != 0 {
+		t.Fatalf("KeyCount after cleanup = %d, want 0", got)
+	}
+}
+
+func TestMemorySlidingLimiter_StartCleanupCancellation(t *testing.T) {
+	m := NewMemorySlidingLimiter()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Add a key.
+	_, _, _ = m.Allow(ctx, "tenant-1", 10, time.Hour)
+
+	// Start cleanup.
+	m.StartCleanup(ctx, 10*time.Millisecond)
+
+	// Cancel immediately.
+	cancel()
+
+	// Give it time to potentially run.
+	time.Sleep(30 * time.Millisecond)
+
+	// Key should still exist (cleanup goroutine exited).
+	if got := m.KeyCount(); got != 1 {
+		t.Fatalf("KeyCount = %d, want 1 (key should remain after cancel)", got)
+	}
+}
+
+func TestMemorySlidingLimiter_KeyCount(t *testing.T) {
+	m := NewMemorySlidingLimiter()
+	ctx := context.Background()
+
+	if got := m.KeyCount(); got != 0 {
+		t.Fatalf("initial KeyCount = %d, want 0", got)
+	}
+
+	_, _, _ = m.Allow(ctx, "tenant-1", 10, time.Minute)
+	if got := m.KeyCount(); got != 1 {
+		t.Fatalf("KeyCount after 1 key = %d, want 1", got)
+	}
+
+	_, _, _ = m.Allow(ctx, "tenant-2", 10, time.Minute)
+	if got := m.KeyCount(); got != 2 {
+		t.Fatalf("KeyCount after 2 keys = %d, want 2", got)
+	}
+
+	// Same key should not increase count.
+	_, _, _ = m.Allow(ctx, "tenant-1", 10, time.Minute)
+	if got := m.KeyCount(); got != 2 {
+		t.Fatalf("KeyCount after same key = %d, want 2", got)
+	}
+}
+
 func TestMemoryConcurrencyLimiter_AcquireAndRelease(t *testing.T) {
 	m := NewMemoryConcurrencyLimiter()
 	ctx := context.Background()
