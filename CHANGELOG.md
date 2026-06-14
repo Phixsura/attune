@@ -15,9 +15,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   feedback rows or in batch (up to 100 rows × 20 ops). The feedback list
   supports `?tag=<uuid>` filtering, and both list and detail endpoints hydrate
   assigned tags. Console UI: Settings → 标签 for CRUD management; feedback
-  detail sheet for add/remove via dropdown. Proto contract
-  (`FeedbackTagService`), migration 029 (`tenant_feedback_tags` +
-  `feedback_tag_assignments`), integration tests, and zh-CN i18n included.
+  detail sheet for add/remove via dropdown; **improved UX**: tags visible in
+  list rows (below title), tag filter in the filter bar, Combobox with search
+  + inline creation, checkbox multi-select with floating batch action bar,
+  rich tooltip on tag badges (description, exclusive scope, usage count).
+  Proto contract (`FeedbackTagService`), migration 029 (`tenant_feedback_tags`
+  + `feedback_tag_assignments`), integration tests, and zh-CN i18n included.
 
 ### Fixed
 

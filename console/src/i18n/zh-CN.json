@@ -527,7 +527,14 @@
     "subtitle": "你产品里来自用户的所有反馈。AI 自动分类。维度由你在「分类设置」自定义。",
     "filter": {
       "all": "所有 {{dim}}",
+      "all_tags": "所有标签",
       "search_placeholder": "搜索内容或标题..."
+    },
+    "batch": {
+      "selected": "已选 {{count}} 条",
+      "add_tag": "添加标签",
+      "remove_tag": "移除标签",
+      "success": "已更新 {{count}} 条反馈"
     },
     "status": {
       "pending": "待处理",
@@ -542,7 +549,9 @@
       "confidence": "置信度",
       "language": "原文语言",
       "user": "用户",
-      "time": "时间"
+      "time": "时间",
+      "select_all": "全选",
+      "select_row": "选择 {{title}}"
     },
     "confidence": {
       "none": "暂无置信度",
@@ -709,6 +718,16 @@
       "title": "标签",
       "add": "添加",
       "empty": "暂无标签"
+    },
+    "combobox": {
+      "search_placeholder": "搜索标签…",
+      "no_results": "无匹配标签",
+      "create": "创建「{{name}}」"
+    },
+    "tooltip": {
+      "scope": "互斥组",
+      "usage": "使用次数",
+      "usage_count": "{{count}} 条反馈"
     }
   }
 }

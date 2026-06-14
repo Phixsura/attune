@@ -21,6 +21,7 @@ export interface FeedbackListFilters {
   attrs: AttrFilterEntry[]
   q?: string
   urgent?: boolean
+  tag?: string
 }
 
 // Infinite query for cursor pagination. Each `attrs` entry becomes a
@@ -35,6 +36,7 @@ export const feedbackListInfiniteQuery = (filters: FeedbackListFilters) =>
         if (dim && value) params.append(dim, value)
       }
       if (filters.q) params.set('q', filters.q)
+      if (filters.tag) params.set('tag', filters.tag)
       if (filters.urgent != null) params.set('urgent', String(filters.urgent))
       if (pageParam) params.set('cursor', pageParam)
       const qs = params.toString()
