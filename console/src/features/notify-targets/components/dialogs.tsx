@@ -85,6 +85,7 @@ export function CreateNotifyDialog({
               <Label htmlFor="nt-url">{t('notify_targets.create_dialog.url_field')}</Label>
               <Input
                 id="nt-url"
+                data-testid="create-notify-url"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://…"
@@ -154,7 +155,11 @@ export function CreateNotifyDialog({
             >
               {t('common.cancel')}
             </Button>
-            <Button type="submit" disabled={pending || !url.trim()}>
+            <Button
+              type="submit"
+              disabled={pending || !url.trim()}
+              data-testid="create-notify-submit"
+            >
               {pending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
               {t('common.create')}
             </Button>
@@ -191,7 +196,12 @@ export function DeleteNotifyDialog({
           <Button variant="ghost" onClick={onCancel} disabled={pending}>
             {t('common.cancel')}
           </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={pending}>
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={pending}
+            data-testid="delete-notify-confirm"
+          >
             {pending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
             {t('notify_targets.delete_button')}
           </Button>
