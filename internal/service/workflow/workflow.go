@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -66,13 +65,18 @@ type BatchResult struct {
 	Failed    []BatchItemFailure
 }
 
+type TxBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
+}
+
 type Service struct {
 	states StateStore
 	audits AuditWriter
-	pool   *pgxpool.Pool
+	pool   TxBeginner
 }
 
-func NewService(states StateStore, audits AuditWriter, pool *pgxpool.Pool) *Service {
+func NewService(states StateStore, audits AuditWriter, pool TxBeginner) *Service {
 	return ptrext.Of(Service{states: states, audits: audits, pool: pool})
 }
 

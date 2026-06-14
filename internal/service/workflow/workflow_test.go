@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedbackaudit"
@@ -164,6 +165,53 @@ func (f *fakeAuditWriter) WriteTx(_ context.Context, _ pgx.Tx, e feedbackaudit.E
 
 func (f *fakeAuditWriter) List(_ context.Context, _ string, _ int64, _ string, _ int) ([]feedbackaudit.Entry, string, error) {
 	return f.entries, "", nil
+}
+
+// ---------------------------------------------------------------------------
+// fakeTx / fakeTxBeginner — mock pgx.Tx and TxBeginner for unit testing
+// ---------------------------------------------------------------------------
+
+type fakeTx struct {
+	commitErr error
+}
+
+func (f *fakeTx) Begin(ctx context.Context) (pgx.Tx, error)                  { return f, nil }
+func (f *fakeTx) Commit(_ context.Context) error                             { return f.commitErr }
+func (f *fakeTx) Rollback(_ context.Context) error                           { return nil }
+func (f *fakeTx) Conn() *pgx.Conn                                            { return nil }
+func (f *fakeTx) LargeObjects() pgx.LargeObjects                             { return pgx.LargeObjects{} }
+func (f *fakeTx) SendBatch(_ context.Context, _ *pgx.Batch) pgx.BatchResults { return nil }
+func (f *fakeTx) CopyFrom(_ context.Context, _ pgx.Identifier, _ []string, _ pgx.CopyFromSource) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeTx) Prepare(_ context.Context, _, _ string) (*pgconn.StatementDescription, error) {
+	return nil, nil
+}
+
+func (f *fakeTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+func (f *fakeTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return nil, nil }
+func (f *fakeTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row        { return nil }
+
+type fakeTxBeginner struct {
+	tx       *fakeTx
+	beginErr error
+}
+
+func (f *fakeTxBeginner) Begin(_ context.Context) (pgx.Tx, error) {
+	if f.beginErr != nil {
+		return nil, f.beginErr
+	}
+	return f.tx, nil
+}
+
+func (f *fakeTxBeginner) BeginTx(_ context.Context, _ pgx.TxOptions) (pgx.Tx, error) {
+	if f.beginErr != nil {
+		return nil, f.beginErr
+	}
+	return f.tx, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -529,5 +577,311 @@ func TestSentinelErrors(t *testing.T) {
 				t.Fatalf("Error() = %q, want %q", tc.err.Error(), tc.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Transition – full transaction path tests (with fakeTxBeginner)
+// ---------------------------------------------------------------------------
+
+func TestTransition_Success(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-from"] = makeState("s-from", "Triage", "open", true)
+	store.states["s-to"] = makeState("s-to", "In Progress", "active", false)
+	store.currentID = ptrext.Of("s-from")
+	store.checkResult = true
+	audits := &fakeAuditWriter{}
+	tx := &fakeTx{}
+	pool := &fakeTxBeginner{tx: tx}
+
+	svc := NewService(store, audits, pool)
+	result, err := svc.Transition(context.Background(), "t-1", 42, "s-to", "admin", "moving forward")
+	if err != nil {
+		t.Fatalf("Transition: %v", err)
+	}
+	if result.FeedbackID != 42 {
+		t.Fatalf("FeedbackID = %d, want 42", result.FeedbackID)
+	}
+	if result.FromState.ID != "s-from" {
+		t.Fatalf("FromState.ID = %q, want s-from", result.FromState.ID)
+	}
+	if result.ToState.ID != "s-to" {
+		t.Fatalf("ToState.ID = %q, want s-to", result.ToState.ID)
+	}
+	if len(audits.entries) != 1 {
+		t.Fatalf("audit entries = %d, want 1", len(audits.entries))
+	}
+	e := audits.entries[0]
+	if e.FeedbackID != 42 || e.ChangedBy != "admin" || e.Comment != "moving forward" {
+		t.Fatalf("audit entry = %+v", e)
+	}
+}
+
+func TestTransition_BeginError(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	pool := &fakeTxBeginner{beginErr: errors.New("pool exhausted")}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	_, err := svc.Transition(context.Background(), "t-1", 1, "s-to", "u", "")
+	if err == nil {
+		t.Fatal("expected error from Begin")
+	}
+	if !errors.Is(err, pool.beginErr) {
+		t.Fatalf("err = %v, want pool exhausted (wrapped)", err)
+	}
+}
+
+func TestTransition_CurrentStateNil(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	store.currentID = nil
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	_, err := svc.Transition(context.Background(), "t-1", 1, "s-to", "u", "")
+	if !errors.Is(err, ErrNoWorkflowState) {
+		t.Fatalf("err = %v, want ErrNoWorkflowState", err)
+	}
+}
+
+func TestTransition_CurrentStateNotFound(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	store.currentErr = workflowstate.ErrNotFound
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	_, err := svc.Transition(context.Background(), "t-1", 1, "s-to", "u", "")
+	if !errors.Is(err, ErrStateNotFound) {
+		t.Fatalf("err = %v, want ErrStateNotFound", err)
+	}
+}
+
+func TestTransition_CurrentStateError(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	store.currentErr = errors.New("lock timeout")
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	_, err := svc.Transition(context.Background(), "t-1", 1, "s-to", "u", "")
+	if err == nil || err.Error() != "lock timeout" {
+		t.Fatalf("err = %v, want lock timeout", err)
+	}
+}
+
+func TestTransition_FromStateLookupFails(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	store.currentID = ptrext.Of("nonexistent")
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	_, err := svc.Transition(context.Background(), "t-1", 1, "s-to", "u", "")
+	if !errors.Is(err, workflowstate.ErrNotFound) {
+		t.Fatalf("err = %v, want workflowstate.ErrNotFound (from state missing)", err)
+	}
+}
+
+func TestTransition_NotAllowed(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-from"] = makeState("s-from", "Triage", "open", true)
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	store.currentID = ptrext.Of("s-from")
+	store.checkResult = false
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	_, err := svc.Transition(context.Background(), "t-1", 1, "s-to", "u", "")
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("err = %v, want ErrInvalidTransition", err)
+	}
+}
+
+func TestTransition_CheckTransitionTxError(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-from"] = makeState("s-from", "Triage", "open", true)
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	store.currentID = ptrext.Of("s-from")
+	store.checkTxErr = errors.New("check failed")
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	_, err := svc.Transition(context.Background(), "t-1", 1, "s-to", "u", "")
+	if err == nil || err.Error() != "check failed" {
+		t.Fatalf("err = %v, want check failed", err)
+	}
+}
+
+func TestTransition_SetFeedbackStateError(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-from"] = makeState("s-from", "Triage", "open", true)
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	store.currentID = ptrext.Of("s-from")
+	store.checkResult = true
+	store.setFBStateErr = errors.New("set state failed")
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	_, err := svc.Transition(context.Background(), "t-1", 1, "s-to", "u", "")
+	if err == nil || err.Error() != "set state failed" {
+		t.Fatalf("err = %v, want set state failed", err)
+	}
+}
+
+func TestTransition_AuditWriteError(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-from"] = makeState("s-from", "Triage", "open", true)
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	store.currentID = ptrext.Of("s-from")
+	store.checkResult = true
+	audits := &fakeAuditWriter{err: errors.New("audit write failed")}
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, audits, pool)
+	_, err := svc.Transition(context.Background(), "t-1", 1, "s-to", "u", "")
+	if err == nil || err.Error() != "audit write failed" {
+		t.Fatalf("err = %v, want audit write failed", err)
+	}
+}
+
+func TestTransition_CommitError(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-from"] = makeState("s-from", "Triage", "open", true)
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	store.currentID = ptrext.Of("s-from")
+	store.checkResult = true
+	tx := &fakeTx{commitErr: errors.New("commit failed")}
+	pool := &fakeTxBeginner{tx: tx}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	_, err := svc.Transition(context.Background(), "t-1", 1, "s-to", "u", "")
+	if err == nil {
+		t.Fatal("expected commit error")
+	}
+	if !errors.Is(err, tx.commitErr) {
+		t.Fatalf("err = %v, want commit failed (wrapped)", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BatchTransition – full path with mock pool
+// ---------------------------------------------------------------------------
+
+func TestBatchTransition_MixedResults(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.states["s-from"] = makeState("s-from", "Triage", "open", true)
+	store.states["s-to"] = makeState("s-to", "Done", "closed", false)
+	store.currentID = ptrext.Of("s-from")
+	store.checkResult = true
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	result, err := svc.BatchTransition(context.Background(), "t-1",
+		[]int64{1, 2}, "s-to", "admin", "batch")
+	if err != nil {
+		t.Fatalf("BatchTransition: %v", err)
+	}
+	if result.Succeeded != 2 {
+		t.Fatalf("succeeded = %d, want 2", result.Succeeded)
+	}
+	if len(result.Failed) != 0 {
+		t.Fatalf("failed = %d, want 0", len(result.Failed))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SeedDefaults tests (with fakeTxBeginner)
+// ---------------------------------------------------------------------------
+
+func TestSeedDefaults_Success(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	tx := &fakeTx{}
+	pool := &fakeTxBeginner{tx: tx}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	err := svc.SeedDefaults(context.Background(), "t-1")
+	if err != nil {
+		t.Fatalf("SeedDefaults: %v", err)
+	}
+	if len(store.upsertIDs) != 5 {
+		t.Fatalf("upserted states = %d, want 5", len(store.upsertIDs))
+	}
+}
+
+func TestSeedDefaults_BeginTxError(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	pool := &fakeTxBeginner{beginErr: errors.New("serializable failed")}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	err := svc.SeedDefaults(context.Background(), "t-1")
+	if err == nil {
+		t.Fatal("expected begin error")
+	}
+	if !errors.Is(err, pool.beginErr) {
+		t.Fatalf("err = %v, want serializable failed (wrapped)", err)
+	}
+}
+
+func TestSeedDefaults_UpsertError(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.upsertErr = errors.New("upsert boom")
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	err := svc.SeedDefaults(context.Background(), "t-1")
+	if err == nil {
+		t.Fatal("expected upsert error")
+	}
+	if !errors.Is(err, store.upsertErr) {
+		t.Fatalf("err = %v, want upsert boom (wrapped)", err)
+	}
+}
+
+func TestSeedDefaults_InsertTransitionError(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	store.insertTrErr = errors.New("transition insert fail")
+	pool := &fakeTxBeginner{tx: &fakeTx{}}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	err := svc.SeedDefaults(context.Background(), "t-1")
+	if err == nil {
+		t.Fatal("expected insert transition error")
+	}
+	if !errors.Is(err, store.insertTrErr) {
+		t.Fatalf("err = %v, want transition insert fail (wrapped)", err)
+	}
+}
+
+func TestSeedDefaults_CommitError(t *testing.T) {
+	t.Parallel()
+	store := newFakeStateStore()
+	tx := &fakeTx{commitErr: errors.New("commit seed failed")}
+	pool := &fakeTxBeginner{tx: tx}
+
+	svc := NewService(store, &fakeAuditWriter{}, pool)
+	err := svc.SeedDefaults(context.Background(), "t-1")
+	if err == nil {
+		t.Fatal("expected commit error")
+	}
+	if !errors.Is(err, tx.commitErr) {
+		t.Fatalf("err = %v, want commit seed failed (wrapped)", err)
 	}
 }
