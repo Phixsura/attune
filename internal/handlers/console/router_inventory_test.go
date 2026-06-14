@@ -20,6 +20,8 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
+	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
+	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
 )
 
@@ -42,6 +44,8 @@ func TestRouterInventory(t *testing.T) {
 		enrichConfig:       &enrichconfig.Handler{},
 		guardPolicies:      &consoleguardpolicy.Handler{},
 		inbound:            &consoleinbound.Handler{},
+		tags:               &consoletag.Handler{},
+		tagAssignments:     &consoletagassignment.Handler{},
 	}).Mount()
 
 	got := make(map[string]bool)
@@ -90,6 +94,13 @@ func TestRouterInventory(t *testing.T) {
 		"POST /inbound/sources/{id}/rotate-secret",
 		"POST /inbound/sources/{id}/pause",
 		"POST /inbound/sources/{id}/resume",
+		"GET /tags/",
+		"POST /tags/",
+		"PATCH /tags/{id}",
+		"DELETE /tags/{id}",
+		"POST /feedback/{id}/tags",
+		"DELETE /feedback/{id}/tags/{tag_id}",
+		"POST /feedback/batch/tags",
 	}
 
 	for _, route := range expected {

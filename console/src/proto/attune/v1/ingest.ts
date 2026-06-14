@@ -5,6 +5,7 @@
 // source: attune/v1/ingest.proto
 
 /* eslint-disable */
+import { type Tag } from "./tag";
 
 export const protobufPackage = "attune.v1";
 
@@ -84,6 +85,7 @@ export interface Feedback {
     | undefined;
   /** model self-rated review signal [0,1] */
   classificationConfidence?: number | undefined;
+  tags: Tag[];
 }
 
 /** FeedbackDetail is the single-row view: the list fields plus extras (flat). */
@@ -146,6 +148,7 @@ export interface FeedbackDetail {
     | undefined;
   /** tenant opt-in; lets the UI tell off / on-but-empty / has-draft apart */
   replyDraftEnabled: boolean;
+  tags: Tag[];
 }
 
 export interface Attachment {
@@ -180,6 +183,7 @@ export interface ListFeedbackRequest {
     | undefined;
   /** full-text query */
   q?: string | undefined;
+  tagId?: string | undefined;
 }
 
 export interface ListFeedbackResponse {

@@ -6,6 +6,8 @@ import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/struct.proto";
 
+import "attune/v1/tag.proto";
+
 // FeedbackService is attune's feedback API. Today it exposes Ingest
 // (POST /v1/feedback/ingest, public, API-key auth); the console feedback reads
 // (list / stats / detail) join it as the migration proceeds.
@@ -98,6 +100,7 @@ message Feedback {
   optional string enriched_display_title = 13;     // tenant-locale console title
   optional string enriched_display_locale = 14;  // tenant locale used for display
   optional double classification_confidence = 15;  // model self-rated review signal [0,1]
+  repeated Tag tags = 16;
 }
 
 // FeedbackDetail is the single-row view: the list fields plus extras (flat).
@@ -129,6 +132,7 @@ message FeedbackDetail {
   optional string reply_draft = 22;                 // operator-facing LLM draft (#26); never auto-sent
   optional string reply_draft_generated_at = 23;    // RFC3339; when the draft was last generated
   bool reply_draft_enabled = 24;                    // tenant opt-in; lets the UI tell off / on-but-empty / has-draft apart
+  repeated Tag tags = 25;
 }
 
 message Attachment {
@@ -155,6 +159,7 @@ message ListFeedbackRequest {
   // nil = no filter; true = only urgent; false = only non-urgent.
   optional bool urgent = 4;
   optional string q = 5;  // full-text query
+  optional string tag_id = 6;
 }
 
 message ListFeedbackResponse {

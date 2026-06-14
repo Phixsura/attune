@@ -316,6 +316,10 @@
       "api_keys": {
         "title": "API key",
         "body": "租户 API key、前缀、状态与撤销。"
+      },
+      "tags": {
+        "title": "标签",
+        "body": "反馈手动标签、颜色、互斥组与归档。"
       }
     },
     "prompt_title": "分类提示词",
@@ -523,7 +527,14 @@
     "subtitle": "你产品里来自用户的所有反馈。AI 自动分类。维度由你在「分类设置」自定义。",
     "filter": {
       "all": "所有 {{dim}}",
+      "all_tags": "所有标签",
       "search_placeholder": "搜索内容或标题..."
+    },
+    "batch": {
+      "selected": "已选 {{count}} 条",
+      "add_tag": "添加标签",
+      "remove_tag": "移除标签",
+      "success": "已更新 {{count}} 条反馈"
     },
     "status": {
       "pending": "待处理",
@@ -538,7 +549,9 @@
       "confidence": "置信度",
       "language": "原文语言",
       "user": "用户",
-      "time": "时间"
+      "time": "时间",
+      "select_all": "全选",
+      "select_row": "选择 {{title}}"
     },
     "confidence": {
       "none": "暂无置信度",
@@ -665,5 +678,56 @@
     },
     "empty_title": "还没有 LLM 调用",
     "empty_body": "反馈进入 AI 分类后，这里会按模型和时间显示 token 与成本。"
+  },
+  "tags": {
+    "title": "标签管理",
+    "subtitle": "创建和管理可分配到反馈的手动标签。",
+    "create_button": "新建标签",
+    "created": "标签已创建",
+    "archived": "标签已归档",
+    "archive_confirm": "确定要归档标签「{{name}}」吗？归档后该标签不会出现在新的分配中。",
+    "edit_label": "编辑",
+    "archive_label": "归档",
+    "remove_label": "移除标签 {{name}}",
+    "empty": {
+      "title": "还没有标签",
+      "body": "创建标签后，可以在反馈详情中为反馈打上标签。"
+    },
+    "table": {
+      "name": "名称",
+      "scope": "互斥组",
+      "usage": "使用次数"
+    },
+    "form": {
+      "name": "名称",
+      "color": "颜色",
+      "description": "描述",
+      "exclusive_scope": "互斥组",
+      "exclusive_scope_placeholder": "如 priority、status",
+      "exclusive_scope_help": "同一互斥组的标签在同一条反馈上只能有一个生效。"
+    },
+    "create_dialog": {
+      "title": "新建标签",
+      "description": "标签可以在反馈详情中手动分配。"
+    },
+    "edit_dialog": {
+      "title": "编辑标签",
+      "description": "修改标签的名称、颜色或互斥组。"
+    },
+    "feedback_section": {
+      "title": "标签",
+      "add": "添加",
+      "empty": "暂无标签"
+    },
+    "combobox": {
+      "search_placeholder": "搜索标签…",
+      "no_results": "无匹配标签",
+      "create": "创建「{{name}}」"
+    },
+    "tooltip": {
+      "scope": "互斥组",
+      "usage": "使用次数",
+      "usage_count": "{{count}} 条反馈"
+    }
   }
 }

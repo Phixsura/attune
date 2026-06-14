@@ -87,6 +87,17 @@ func (h *FeedbackHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 	if row.ReplyDraftGeneratedAt != nil {
 		detail.ReplyDraftGeneratedAt = ptrext.Of(row.ReplyDraftGeneratedAt.UTC().Format(time.RFC3339))
 	}
+	if h.tagAssignments != nil {
+		tags, err := h.tagAssignments.ListByFeedback(ctx, auth.TenantID, id)
+		if err != nil {
+			logext.Warnf(ctx, "[%s] tag load failed,tenant_id:%s,id:%d,err:%+v",
+				where, auth.TenantID, id, err.Error())
+		} else {
+			for _, info := range tags {
+				detail.Tags = append(detail.Tags, tagInfoToProto(info))
+			}
+		}
+	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%d", where, auth.TenantID, id)
 	return dispatcher.OK(detail)
 }

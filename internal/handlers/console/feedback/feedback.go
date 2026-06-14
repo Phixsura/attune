@@ -12,8 +12,14 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
+
+type tagAssignmentReader interface {
+	ListByFeedback(ctx context.Context, tenantID string, feedbackID int64) ([]feedbacktagassignment.TagInfo, error)
+	ListByFeedbackBatch(ctx context.Context, tenantID string, feedbackIDs []int64) (map[int64][]feedbacktagassignment.TagInfo, error)
+}
 
 // FeedbackHandler serves /fb/v1/console/feedback. All queries scope to the
 // session's tenant via FromContext — never taking tenant_id from query params.
@@ -23,10 +29,11 @@ import (
 // into the per-dim AttrFilter shape the repo's JSONB containment
 // queries expect.
 type FeedbackHandler struct {
-	repo         feedbackRepo
-	tenants      tenantConfigRepo
-	drafter      Drafter            // optional reply-draft generator; nil disables Regenerate
-	regenLimiter *ratelimit.Limiter // optional per-tenant rate limit on Regenerate; nil disables
+	repo           feedbackRepo
+	tenants        tenantConfigRepo
+	drafter        Drafter            // optional reply-draft generator; nil disables Regenerate
+	regenLimiter   *ratelimit.Limiter // optional per-tenant rate limit on Regenerate; nil disables
+	tagAssignments tagAssignmentReader
 }
 
 // Drafter regenerates a reply draft synchronously, sharing the worker's
@@ -47,6 +54,10 @@ func (h *FeedbackHandler) SetDrafter(d Drafter) { h.drafter = d }
 // a tenant's total regenerations so a script can't spread unbounded LLM spend
 // across many owned rows. nil leaves Regenerate unlimited.
 func (h *FeedbackHandler) SetRegenLimiter(l *ratelimit.Limiter) { h.regenLimiter = l }
+
+// SetTagAssignments wires the tag assignment reader used by List/Get to
+// hydrate per-feedback tags. nil leaves tags empty.
+func (h *FeedbackHandler) SetTagAssignments(r tagAssignmentReader) { h.tagAssignments = r }
 
 type feedbackRepo interface {
 	ListForConsole(ctx context.Context, tenantID string, opts feedback.ConsoleListOpts) ([]feedback.ConsoleListRow, error)
@@ -143,6 +154,21 @@ func extractAttrFilters(q map[string][]string, dims []domain.Dimension) []feedba
 		}
 	}
 	return out
+}
+
+func tagInfoToProto(info feedbacktagassignment.TagInfo) *attunev1.Tag {
+	return ptrext.Of(attunev1.Tag{
+		Id:             info.TagID.String(),
+		Name:           info.Name,
+		Color:          info.Color,
+		Description:    info.Description,
+		ExclusiveScope: info.ExclusiveScope,
+		UsageCount:     int32(info.UsageCount),
+		Archived:       info.Archived,
+		CreatedBy:      info.CreatedBy,
+		CreatedAt:      info.TagCreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:      info.TagUpdatedAt.UTC().Format(time.RFC3339),
+	})
 }
 
 func attrFiltersFromProto(filters []*attunev1.AttrFilter, dims []domain.Dimension) []feedback.AttrFilter {

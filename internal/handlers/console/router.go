@@ -30,6 +30,8 @@ import (
 	consolellmconfig "github.com/Phixsura/attune/internal/handlers/console/llmconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
+	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
+	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -62,6 +64,8 @@ var (
 	NewLLMConfigHandler          = consolellmconfig.NewHandler
 	NewClustersHandler           = clusters.NewClustersHandler
 	NewDigestSubscriptionHandler = digestsubscription.NewHandler
+	NewTagHandler                = consoletag.NewHandler
+	NewTagAssignmentHandler      = consoletagassignment.NewHandler
 	BootstrapAdmin               = auth.BootstrapAdmin
 )
 
@@ -125,6 +129,8 @@ type Router struct {
 	llmConfig          *consolellmconfig.Handler
 	clusters           *clusters.ClustersHandler
 	digestSubscription *digestsubscription.Handler
+	tags               *consoletag.Handler
+	tagAssignments     *consoletagassignment.Handler
 	admins             adminReader
 }
 
@@ -147,6 +153,8 @@ func NewRouter(
 	llmConfig *consolellmconfig.Handler,
 	clustersH *clusters.ClustersHandler,
 	digestSubscription *digestsubscription.Handler,
+	tags *consoletag.Handler,
+	tagAssignments *consoletagassignment.Handler,
 	admins adminReader,
 ) *Router {
 	return ptrext.Of(Router{
@@ -164,6 +172,8 @@ func NewRouter(
 		llmConfig:          llmConfig,
 		clusters:           clustersH,
 		digestSubscription: digestSubscription,
+		tags:               tags,
+		tagAssignments:     tagAssignments,
 		admins:             admins,
 	})
 }
@@ -255,6 +265,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountInbound(m)
 	r.mountLLMConfig(m)
 	r.mountClusters(m)
+	r.mountTags(m)
 }
 
 func (r *Router) mountLLMConfig(m chi.Router) {
@@ -594,7 +605,7 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		// /stats must come BEFORE /{id}; source order keeps the intent clear.
+		// /stats and /batch/tags must come BEFORE /{id}; source order keeps the intent clear.
 		f.Get("/stats", dispatcher.Bind(
 			"console.FeedbackHandler.Stats",
 			dispatcher.Empty(func() *attunev1.GetFeedbackStatsRequest { return ptrext.Of(attunev1.GetFeedbackStatsRequest{}) }),
@@ -603,6 +614,18 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		if r.tagAssignments != nil {
+			f.Post("/batch/tags", dispatcher.Bind(
+				"console.TagAssignmentHandler.BatchUpdate",
+				dispatcher.JSON(func() *attunev1.BatchUpdateFeedbackTagsRequest {
+					return ptrext.Of(attunev1.BatchUpdateFeedbackTagsRequest{})
+				}),
+				r.tagAssignments.BatchUpdate,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchUpdateFeedbackTagsRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+		}
 		f.Get("/{id}", dispatcher.Bind(
 			"console.FeedbackHandler.Get",
 			dispatcher.Path(
@@ -629,6 +652,38 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		if r.tagAssignments != nil {
+			f.Post("/{id}/tags", dispatcher.Bind(
+				"console.TagAssignmentHandler.Add",
+				dispatcher.Combine(
+					func() *attunev1.AddFeedbackTagRequest { return ptrext.Of(attunev1.AddFeedbackTagRequest{}) },
+					dispatcher.JSONBody[*attunev1.AddFeedbackTagRequest],
+					dispatcher.ParamInt64("id", func(req *attunev1.AddFeedbackTagRequest, id int64) {
+						req.FeedbackId = id
+					}, "id must be an integer"),
+				),
+				r.tagAssignments.Add,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.AddFeedbackTagRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+			f.Delete("/{id}/tags/{tag_id}", dispatcher.Bind(
+				"console.TagAssignmentHandler.Remove",
+				dispatcher.Path(
+					func() *attunev1.RemoveFeedbackTagRequest { return ptrext.Of(attunev1.RemoveFeedbackTagRequest{}) },
+					dispatcher.ParamInt64("id", func(req *attunev1.RemoveFeedbackTagRequest, id int64) {
+						req.FeedbackId = id
+					}, "id must be an integer"),
+					dispatcher.Param("tag_id", func(req *attunev1.RemoveFeedbackTagRequest, id string) {
+						req.TagId = id
+					}),
+				),
+				r.tagAssignments.Remove,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RemoveFeedbackTagRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+		}
 	})
 }
 
@@ -855,6 +910,65 @@ func (r *Router) mountClusters(m chi.Router) {
 			),
 			r.clusters.GetMembers,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetClusterMembersRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+}
+
+func (r *Router) mountTags(m chi.Router) {
+	if r.tags == nil {
+		return
+	}
+	m.Route("/tags", func(t chi.Router) {
+		t.Get("/", dispatcher.Bind(
+			"console.TagHandler.List",
+			dispatcher.Query(
+				func() *attunev1.ListTagsRequest { return ptrext.Of(attunev1.ListTagsRequest{}) },
+				func(r *http.Request, req *attunev1.ListTagsRequest) error {
+					if v := r.URL.Query().Get("include_archived"); v == "true" || v == "1" {
+						req.IncludeArchived = true
+					}
+					return nil
+				},
+			),
+			r.tags.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListTagsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		t.Post("/", dispatcher.Bind(
+			"console.TagHandler.Create",
+			dispatcher.JSON(func() *attunev1.CreateTagRequest { return ptrext.Of(attunev1.CreateTagRequest{}) }),
+			r.tags.Create,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateTagRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		t.Patch("/{id}", dispatcher.Bind(
+			"console.TagHandler.Update",
+			dispatcher.Combine(
+				func() *attunev1.UpdateTagRequest { return ptrext.Of(attunev1.UpdateTagRequest{}) },
+				dispatcher.JSONBody[*attunev1.UpdateTagRequest],
+				dispatcher.Param("id", func(req *attunev1.UpdateTagRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.tags.Update,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateTagRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		t.Delete("/{id}", dispatcher.Bind(
+			"console.TagHandler.Archive",
+			dispatcher.Path(
+				func() *attunev1.ArchiveTagRequest { return ptrext.Of(attunev1.ArchiveTagRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.ArchiveTagRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.tags.Archive,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ArchiveTagRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))

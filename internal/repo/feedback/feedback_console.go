@@ -38,6 +38,7 @@ type ConsoleListOpts struct {
 	Q      string       // ILIKE on content + native/display titles
 	Cursor int64        // last id seen; 0 = first page
 	Limit  int
+	TagID  *string // UUID string; nil = no filter
 }
 
 // ConsoleListRow is the projection sent to the console list view.
@@ -97,6 +98,9 @@ func (r *FeedbackRepo) ListForConsole(
 		where += " AND (content ILIKE " + p +
 			" OR enriched_title ILIKE " + p +
 			" OR enriched_display_title ILIKE " + p + ")"
+	}
+	if opts.TagID != nil {
+		where += " AND EXISTS (SELECT 1 FROM feedback_tag_assignments fta WHERE fta.feedback_id = id AND fta.tag_id = " + addArg(ptrext.Indirect(opts.TagID)) + "::uuid)"
 	}
 	query := `
 			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,

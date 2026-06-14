@@ -309,6 +309,10 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: tagId
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -316,6 +320,30 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ListFeedbackResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/batch/tags:
+        post:
+            tags:
+                - FeedbackTagService
+            operationId: FeedbackTagService_BatchUpdateFeedbackTags
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/BatchUpdateFeedbackTagsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/BatchUpdateFeedbackTagsResponse'
                 default:
                     description: Default error response
                     content:
@@ -335,6 +363,65 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/GetFeedbackStatsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/{feedbackId}/tags:
+        post:
+            tags:
+                - FeedbackTagService
+            operationId: FeedbackTagService_AddFeedbackTag
+            parameters:
+                - name: feedbackId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AddFeedbackTagRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/AddFeedbackTagResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/{feedbackId}/tags/{tagId}:
+        delete:
+            tags:
+                - FeedbackTagService
+            operationId: FeedbackTagService_RemoveFeedbackTag
+            parameters:
+                - name: feedbackId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: tagId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RemoveFeedbackTagResponse'
                 default:
                     description: Default error response
                     content:
@@ -1350,6 +1437,105 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/tags:
+        get:
+            tags:
+                - FeedbackTagService
+            operationId: FeedbackTagService_ListTags
+            parameters:
+                - name: includeArchived
+                  in: query
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListTagsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - FeedbackTagService
+            operationId: FeedbackTagService_CreateTag
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateTagRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Tag'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/tags/{id}:
+        delete:
+            tags:
+                - FeedbackTagService
+            operationId: FeedbackTagService_ArchiveTag
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ArchiveTagResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        patch:
+            tags:
+                - FeedbackTagService
+            operationId: FeedbackTagService_UpdateTag
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateTagRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Tag'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/usage:
         get:
             tags:
@@ -1405,6 +1591,22 @@ paths:
                                 $ref: '#/components/schemas/Status'
 components:
     schemas:
+        AddFeedbackTagRequest:
+            type: object
+            properties:
+                feedbackId:
+                    type: string
+                tagId:
+                    type: string
+                tagName:
+                    type: string
+                tagColor:
+                    type: string
+        AddFeedbackTagResponse:
+            type: object
+            properties:
+                tag:
+                    $ref: '#/components/schemas/Tag'
         ApiKey:
             type: object
             properties:
@@ -1422,6 +1624,9 @@ components:
                     type: string
                 revokedAt:
                     type: string
+        ArchiveTagResponse:
+            type: object
+            properties: {}
         Attachment:
             type: object
             properties:
@@ -1431,6 +1636,27 @@ components:
                     type: string
                 size:
                     type: string
+        BatchUpdateFeedbackTagsRequest:
+            type: object
+            properties:
+                feedbackIds:
+                    type: array
+                    items:
+                        type: string
+                addTagIds:
+                    type: array
+                    items:
+                        type: string
+                removeTagIds:
+                    type: array
+                    items:
+                        type: string
+        BatchUpdateFeedbackTagsResponse:
+            type: object
+            properties:
+                affected:
+                    type: integer
+                    format: int32
         ChangePasswordRequest:
             required:
                 - currentPassword
@@ -1579,6 +1805,17 @@ components:
                     format: int32
                 disabled:
                     type: boolean
+        CreateTagRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                color:
+                    type: string
+                description:
+                    type: string
+                exclusiveScope:
+                    type: string
         DeleteApiKeyResponse:
             type: object
             properties: {}
@@ -1809,6 +2046,10 @@ components:
                 classificationConfidence:
                     type: number
                     format: double
+                tags:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Tag'
             description: |-
                 Feedback is a console feedback list row. Post-E3 (metadata-driven
                  Dimensions): the per-row classification lives in `enriched_attrs`, a
@@ -1873,6 +2114,10 @@ components:
                     type: string
                 replyDraftEnabled:
                     type: boolean
+                tags:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Tag'
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         GetClusterMembersResponse:
             type: object
@@ -2307,6 +2552,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/NotifyTarget'
+        ListTagsResponse:
+            type: object
+            properties:
+                tags:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Tag'
         LoginRequest:
             required:
                 - email
@@ -2390,6 +2642,9 @@ components:
                     type: string
                 replyDraftGeneratedAt:
                     type: string
+        RemoveFeedbackTagResponse:
+            type: object
+            properties: {}
         RendererSpec:
             type: object
             properties:
@@ -2484,6 +2739,30 @@ components:
                         $ref: '#/components/schemas/GoogleProtobufAny'
                     description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
             description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
+        Tag:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                color:
+                    type: string
+                description:
+                    type: string
+                exclusiveScope:
+                    type: string
+                usageCount:
+                    type: integer
+                    format: int32
+                archived:
+                    type: boolean
+                createdBy:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
         Taxonomy:
             type: object
             properties:
@@ -2660,6 +2939,19 @@ components:
                     format: int32
                 disabled:
                     type: boolean
+        UpdateTagRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                color:
+                    type: string
+                description:
+                    type: string
+                exclusiveScope:
+                    type: string
         UpsertDigestSubscriptionRequest:
             required:
                 - frequency
@@ -2781,6 +3073,7 @@ tags:
          We do NOT generate server stubs — chi routing stays. The google.api.http
          annotation exists only so protoc-gen-openapi emits the REST path + operation
          into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
+    - name: FeedbackTagService
     - name: GuardPolicyService
       description: |-
         GuardPolicyService manages tenant-scoped guard policies and effective-policy

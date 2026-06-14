@@ -45,6 +45,7 @@ const itemFixture = {
   createdAt: '2026-06-07T08:30:00Z',
   type: 'bug',
   enrichmentStatus: 'done',
+  tags: [],
 }
 
 const detailFixture = {
@@ -91,6 +92,10 @@ describe('_authed.feedback route — user flow smoke', () => {
       ),
       http.get('/fb/v1/console/feedback/:id', ({ params }) =>
         HttpResponse.json({ ...detailFixture, id: params.id }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
       ),
     )
 
@@ -156,6 +161,10 @@ describe('_authed.feedback route — user flow smoke', () => {
           dims: [],
           urgentCount: '0',
         }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
       ),
     )
     const FeedbackPage = FeedbackRoute.options.component as React.ComponentType & {

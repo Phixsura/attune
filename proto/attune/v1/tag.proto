@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+service FeedbackTagService {
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/tags"};
+  }
+  rpc CreateTag(CreateTagRequest) returns (Tag) {
+    option (google.api.http) = {post: "/fb/v1/console/tags" body: "*"};
+  }
+  rpc UpdateTag(UpdateTagRequest) returns (Tag) {
+    option (google.api.http) = {patch: "/fb/v1/console/tags/{id}" body: "*"};
+  }
+  rpc ArchiveTag(ArchiveTagRequest) returns (ArchiveTagResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/tags/{id}"};
+  }
+  rpc AddFeedbackTag(AddFeedbackTagRequest) returns (AddFeedbackTagResponse) {
+    option (google.api.http) = {post: "/fb/v1/console/feedback/{feedback_id}/tags" body: "*"};
+  }
+  rpc RemoveFeedbackTag(RemoveFeedbackTagRequest) returns (RemoveFeedbackTagResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/feedback/{feedback_id}/tags/{tag_id}"};
+  }
+  rpc BatchUpdateFeedbackTags(BatchUpdateFeedbackTagsRequest) returns (BatchUpdateFeedbackTagsResponse) {
+    option (google.api.http) = {post: "/fb/v1/console/feedback/batch/tags" body: "*"};
+  }
+}
+
+message Tag {
+  string id = 1;
+  string name = 2;
+  string color = 3;
+  string description = 4;
+  optional string exclusive_scope = 5;
+  int32 usage_count = 6;
+  bool archived = 7;
+  string created_by = 8;
+  string created_at = 9;
+  string updated_at = 10;
+}
+
+message ListTagsRequest {
+  bool include_archived = 1;
+}
+message ListTagsResponse {
+  repeated Tag tags = 1;
+}
+
+message CreateTagRequest {
+  string name = 1;
+  optional string color = 2;
+  optional string description = 3;
+  optional string exclusive_scope = 4;
+}
+
+message UpdateTagRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string color = 3;
+  optional string description = 4;
+  optional string exclusive_scope = 5;
+}
+
+message ArchiveTagRequest {
+  string id = 1;
+}
+message ArchiveTagResponse {}
+
+message AddFeedbackTagRequest {
+  int64 feedback_id = 1;
+  optional string tag_id = 2;
+  optional string tag_name = 3;
+  optional string tag_color = 4;
+}
+message AddFeedbackTagResponse {
+  Tag tag = 1;
+}
+
+message RemoveFeedbackTagRequest {
+  int64 feedback_id = 1;
+  string tag_id = 2;
+}
+message RemoveFeedbackTagResponse {}
+
+message BatchUpdateFeedbackTagsRequest {
+  repeated int64 feedback_ids = 1;
+  repeated string add_tag_ids = 2;
+  repeated string remove_tag_ids = 3;
+}
+message BatchUpdateFeedbackTagsResponse {
+  int32 affected = 1;
+}

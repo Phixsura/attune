@@ -10,6 +10,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Sparkles,
+  Tags,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -27,6 +28,7 @@ import { NotifyTargetsPage } from '@/features/notify-targets/components/notify-t
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
+import { TagsPage } from '@/features/tags/components/tags-page'
 import type { Dimension } from '@/proto/attune/v1/common'
 
 type SettingsSection =
@@ -36,6 +38,7 @@ type SettingsSection =
   | 'notify_targets'
   | 'digest_subscription'
   | 'api_keys'
+  | 'tags'
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'classification',
@@ -44,6 +47,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'notify_targets',
   'digest_subscription',
   'api_keys',
+  'tags',
 ]
 
 export const Route = createFileRoute('/_authed/settings')({
@@ -287,6 +291,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
       {section === 'notify_targets' ? <NotifyTargetsPage /> : null}
       {section === 'digest_subscription' ? <DigestSubscriptionPage /> : null}
       {section === 'api_keys' ? <ApiKeysPage /> : null}
+      {section === 'tags' ? <TagsPage /> : null}
     </section>
   )
 }
@@ -335,6 +340,12 @@ function SettingsSidebar({
       icon: KeyRound,
       title: t('settings.areas.api_keys.title'),
       body: t('settings.areas.api_keys.body'),
+    },
+    {
+      section: 'tags',
+      icon: Tags,
+      title: t('settings.areas.tags.title'),
+      body: t('settings.areas.tags.body'),
     },
   ] satisfies Array<{
     body: string

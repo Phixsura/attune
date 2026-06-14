@@ -22,6 +22,8 @@ import (
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	feedbacktagrepo "github.com/Phixsura/attune/internal/repo/feedbacktag"
+	feedbacktagassignmentrepo "github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	guardpolicyrepo "github.com/Phixsura/attune/internal/repo/guardpolicy"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
@@ -192,9 +194,15 @@ func buildConsoleRouter(
 	)
 	clustersHandler := console.NewClustersHandler(embeddingrepo.NewTaskRepo(pool))
 	digestSub := console.NewDigestSubscriptionHandler(digestsubrepo.New(pool), tenantRepo)
+	tagRepo := feedbacktagrepo.New(pool)
+	tagAssignmentRepo := feedbacktagassignmentrepo.New(pool)
+	feedback.SetTagAssignments(tagAssignmentRepo)
+	tagHandler := console.NewTagHandler(tagRepo)
+	tagAssignmentHandler := console.NewTagAssignmentHandler(tagRepo, tagAssignmentRepo)
 
 	return console.NewRouter(
 		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback, usage,
-		enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub, adminRepo,
+		enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
+		tagHandler, tagAssignmentHandler, adminRepo,
 	).Mount(), nil
 }
