@@ -370,6 +370,82 @@ func TestPG_TopValuesByDim_SingleAndMulti(t *testing.T) {
 	}
 }
 
+func TestPG_Insert_AutoAssignsDefaultWorkflowState(t *testing.T) {
+	pool := testdb.NewPool(t)
+	ctx := context.Background()
+
+	var tenantID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO tenants (slug, name) VALUES ('wf-auto','WF Auto Co')
+		ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+		RETURNING id`).Scan(&tenantID)
+	if err != nil {
+		t.Fatalf("insert tenant: %v", err)
+	}
+
+	var defaultStateID string
+	err = pool.QueryRow(ctx, `
+		INSERT INTO tenant_workflow_states (tenant_id, name, color, category, position, is_default)
+		VALUES ($1, 'New', '#3b82f6', 'open', 0, true)
+		RETURNING id::text`, tenantID).Scan(&defaultStateID)
+	if err != nil {
+		t.Fatalf("insert default workflow state: %v", err)
+	}
+
+	repo := feedback.NewFeedback(pool)
+	id, err := repo.Insert(ctx, tenantID, "u1", domain.IngestInput{
+		Content: "auto-assign test",
+		Source:  "api",
+	})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	var wsID *string // ptrext:allow scan-target
+	if err := pool.QueryRow(ctx,
+		"SELECT workflow_state_id::text FROM user_feedback WHERE id = $1", id).Scan(&wsID); err != nil { // ptrext:allow scan-target
+		t.Fatalf("read workflow_state_id: %v", err)
+	}
+	if wsID == nil {
+		t.Fatal("workflow_state_id should be set to the default state, got NULL")
+	}
+	if *wsID != defaultStateID {
+		t.Errorf("workflow_state_id = %q, want %q", *wsID, defaultStateID)
+	}
+}
+
+func TestPG_Insert_NullWorkflowStateWhenNoDefault(t *testing.T) {
+	pool := testdb.NewPool(t)
+	ctx := context.Background()
+
+	var tenantID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO tenants (slug, name) VALUES ('wf-none','WF None Co')
+		ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+		RETURNING id`).Scan(&tenantID)
+	if err != nil {
+		t.Fatalf("insert tenant: %v", err)
+	}
+
+	repo := feedback.NewFeedback(pool)
+	id, err := repo.Insert(ctx, tenantID, "u1", domain.IngestInput{
+		Content: "no default test",
+		Source:  "api",
+	})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	var wsID *string // ptrext:allow scan-target
+	if err := pool.QueryRow(ctx,
+		"SELECT workflow_state_id::text FROM user_feedback WHERE id = $1", id).Scan(&wsID); err != nil { // ptrext:allow scan-target
+		t.Fatalf("read workflow_state_id: %v", err)
+	}
+	if wsID != nil {
+		t.Errorf("workflow_state_id should be NULL when no default exists, got %q", *wsID)
+	}
+}
+
 func TestPG_UrgentCount(t *testing.T) {
 	pool := testdb.NewPool(t)
 	tenantID, id1 := seedTenantAndRow(t, pool, "u1")

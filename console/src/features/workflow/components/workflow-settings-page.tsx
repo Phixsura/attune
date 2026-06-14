@@ -58,7 +58,7 @@ export function WorkflowSettingsPage() {
         onSuccess: () => toast.success(t('workflow.seeded')),
       })
     }
-  }, [statesQ.isSuccess, items.length, seedDefaults, t])
+  }, [statesQ.isSuccess, items.length, seedDefaults.isPending, seedDefaults.mutate, t])
   const transitions = transitionsQ.data ?? []
   const active = items.filter((s) => !s.archived)
 
