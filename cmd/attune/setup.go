@@ -196,6 +196,7 @@ func buildConsoleRouter(
 	digestSub := console.NewDigestSubscriptionHandler(digestsubrepo.New(pool), tenantRepo)
 	tagRepo := feedbacktagrepo.New(pool)
 	tagAssignmentRepo := feedbacktagassignmentrepo.New(pool)
+	feedback.SetTagAssignments(tagAssignmentRepo)
 	tagHandler := console.NewTagHandler(tagRepo)
 	tagAssignmentHandler := console.NewTagAssignmentHandler(tagRepo, tagAssignmentRepo)
 

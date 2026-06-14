@@ -17,6 +17,7 @@ var listFeedbackReservedQuery = map[string]struct{}{
 	"limit":  {},
 	"q":      {},
 	"urgent": {},
+	"tag":    {},
 }
 
 func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
@@ -34,6 +35,9 @@ func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
 	}
 	if v := q.Get("urgent"); v != "" {
 		req.Urgent = ptrext.Of(v == "true" || v == "1")
+	}
+	if v := q.Get("tag"); v != "" {
+		req.TagId = ptrext.Of(v)
 	}
 	for k, vs := range q {
 		if _, ok := listFeedbackReservedQuery[k]; ok {
@@ -80,6 +84,9 @@ func (h *FeedbackHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx],
 	if req.Urgent != nil {
 		opts.Urgent = req.Urgent
 	}
+	if req.TagId != nil {
+		opts.TagID = req.TagId
+	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,attrs_n:%d,limit:%d,cursor:%d",
 		where, auth.TenantID, len(opts.Attrs), opts.Limit, opts.Cursor)
 
@@ -92,6 +99,23 @@ func (h *FeedbackHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx],
 	items := make([]*attunev1.Feedback, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toProtoFeedback(row))
+	}
+	if h.tagAssignments != nil && len(rows) > 0 {
+		ids := make([]int64, len(rows))
+		for i, row := range rows {
+			ids[i] = row.ID
+		}
+		tagMap, err := h.tagAssignments.ListByFeedbackBatch(ctx, ids)
+		if err != nil {
+			logext.Warnf(ctx, "[%s] tag batch load failed,tenant_id:%s,err:%+v",
+				where, auth.TenantID, err.Error())
+		} else {
+			for _, item := range items {
+				for _, info := range tagMap[item.GetId()] {
+					item.Tags = append(item.Tags, tagInfoToProto(info))
+				}
+			}
+		}
 	}
 	resp := ptrext.Of(attunev1.ListFeedbackResponse{Items: items})
 	if opts.Limit > 0 && len(rows) == opts.Limit {
