@@ -150,21 +150,7 @@ func runServer() error {
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
 
-	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
-	startReplyDraftWorker(ctx, pool, enricher, llm)
-
-	// Daily digest scheduler + worker (#27). Channel-agnostic: it delivers a
-	// rendered roll-up to the tenant's raw-webhook digest target via the shared
-	// notify.Transport, with digest_runs as the exactly-once / retry ledger.
-	startDigestWorker(ctx, pool, llm)
-
-	// Batch job worker processes async batch operations (#30).
-	batchJobWorker := batchjob.New(
-		feedbackjobrepo.New(pool),
-		feedbackRepo,
-		batchjob.Config{},
-	)
-	batchJobWorker.Start(ctx)
+	batchJobWorker := startBackgroundWorkers(ctx, pool, enricher, rawLLM, llm, feedbackRepo)
 	defer batchJobWorker.Stop()
 
 	ingestHandler := handlers.NewIngestHandler(ingestor)
@@ -259,6 +245,29 @@ func startReplyDraftWorker(ctx context.Context, pool *pgxpool.Pool, enricher *en
 	go runQueueDepthRefresher(ctx, "reply_draft", repo.QueueDepthByTenant, func(d map[string]int64) {
 		metrics.RefreshQueueDepth(metrics.ReplyDraftQueueDepth, d)
 	})
+}
+
+// startBackgroundWorkers starts all background workers and returns the batch
+// job worker (caller must defer Stop).
+func startBackgroundWorkers(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	enricher *enrich.Enricher,
+	rawLLM *llmrouter.Router,
+	llm llmclient.LLMClient,
+	feedbackRepo *feedback.FeedbackRepo,
+) *batchjob.Worker {
+	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
+	startReplyDraftWorker(ctx, pool, enricher, llm)
+	startDigestWorker(ctx, pool, llm)
+
+	worker := batchjob.New(
+		feedbackjobrepo.New(pool),
+		feedbackRepo,
+		batchjob.Config{},
+	)
+	worker.Start(ctx)
+	return worker
 }
 
 // startDigestWorker wires the daily digest scheduler + worker (#27). llm is the

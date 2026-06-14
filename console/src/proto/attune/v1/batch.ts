@@ -5,9 +5,37 @@
 // source: attune/v1/batch.proto
 
 /* eslint-disable */
-import { type FeedbackFilter } from "./common";
+import { type AttrFilter } from "./ingest";
 
 export const protobufPackage = "attune.v1";
+
+/**
+ * FeedbackFilter is the shared filter criteria used by list and batch
+ * operations. It mirrors the query parameters of ListFeedbackRequest
+ * so batch operations can select rows by the same criteria.
+ */
+export interface FeedbackFilter {
+  /** Per-dim filters, AND-composed via JSONB containment. */
+  attrs: AttrFilter[];
+  /** nil = no filter; true = only urgent; false = only non-urgent. */
+  urgent?:
+    | boolean
+    | undefined;
+  /** Full-text query. */
+  q?:
+    | string
+    | undefined;
+  /** Filter by tag ID. */
+  tagId?:
+    | string
+    | undefined;
+  /** Filter by workflow state ID. */
+  workflowStateId?:
+    | string
+    | undefined;
+  /** Filter by workflow category (open/resolved). */
+  workflowCategory?: string | undefined;
+}
 
 /**
  * BatchFeedbackRequest is the envelope for all batch operations.

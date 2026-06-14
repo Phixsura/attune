@@ -174,30 +174,3 @@ message Dimension {
   RendererSpec renderer = 10;
 }
 
-// AttrFilter is one per-dim filter in a console list query. The
-// `dim` is a Dimension.Name; `value` is a stable Taxonomy.Value;
-// `multi` says whether the dim is multi-kind (needed because the
-// SQL containment shape differs).
-message AttrFilter {
-  string dim = 1;
-  string value = 2;
-  bool multi = 3;
-}
-
-// FeedbackFilter is the shared filter criteria used by list and batch
-// operations. It mirrors the query parameters of ListFeedbackRequest
-// so batch operations can select rows by the same criteria.
-message FeedbackFilter {
-  // Per-dim filters, AND-composed via JSONB containment.
-  repeated AttrFilter attrs = 1;
-  // nil = no filter; true = only urgent; false = only non-urgent.
-  optional bool urgent = 2;
-  // Full-text query.
-  optional string q = 3;
-  // Filter by tag ID.
-  optional string tag_id = 4;
-  // Filter by workflow state ID.
-  optional string workflow_state_id = 5;
-  // Filter by workflow category (open/resolved).
-  optional string workflow_category = 6;
-}

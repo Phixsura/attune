@@ -660,30 +660,7 @@ func (r *Router) mountFeedback(m chi.Router) {
 				}),
 			))
 		}
-		if r.feedbackBatch != nil {
-			f.Post("/batch", dispatcher.Bind(
-				"console.BatchHandler.Execute",
-				dispatcher.JSON(func() *attunev1.BatchFeedbackRequest {
-					return ptrext.Of(attunev1.BatchFeedbackRequest{})
-				}),
-				r.feedbackBatch.Execute,
-				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchFeedbackRequest) (*session.AuthCtx, error) {
-					return session.FromContext(r.Context()), nil
-				}),
-			))
-		}
-		if r.feedbackSearch != nil {
-			f.Post("/search", dispatcher.Bind(
-				"console.SearchHandler.Search",
-				dispatcher.JSON(func() *attunev1.SemanticSearchRequest {
-					return ptrext.Of(attunev1.SemanticSearchRequest{})
-				}),
-				r.feedbackSearch.Search,
-				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SemanticSearchRequest) (*session.AuthCtx, error) {
-					return session.FromContext(r.Context()), nil
-				}),
-			))
-		}
+		r.mountFeedbackBatchRoutes(f)
 		f.Get("/{id}", dispatcher.Bind(
 			"console.FeedbackHandler.Get",
 			dispatcher.Path(
@@ -786,6 +763,33 @@ func (r *Router) mountFeedback(m chi.Router) {
 			}),
 		))
 	})
+}
+
+func (r *Router) mountFeedbackBatchRoutes(f chi.Router) {
+	if r.feedbackBatch != nil {
+		f.Post("/batch", dispatcher.Bind(
+			"console.BatchHandler.Execute",
+			dispatcher.JSON(func() *attunev1.BatchFeedbackRequest {
+				return ptrext.Of(attunev1.BatchFeedbackRequest{})
+			}),
+			r.feedbackBatch.Execute,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchFeedbackRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	}
+	if r.feedbackSearch != nil {
+		f.Post("/search", dispatcher.Bind(
+			"console.SearchHandler.Search",
+			dispatcher.JSON(func() *attunev1.SemanticSearchRequest {
+				return ptrext.Of(attunev1.SemanticSearchRequest{})
+			}),
+			r.feedbackSearch.Search,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SemanticSearchRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	}
 }
 
 func (r *Router) mountEnrichConfig(m chi.Router) {

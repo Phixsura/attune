@@ -6,7 +6,6 @@ import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/struct.proto";
 
-import "attune/v1/common.proto";
 import "attune/v1/tag.proto";
 import "attune/v1/workflow.proto";
 
@@ -145,6 +144,16 @@ message Attachment {
   string url = 1;
   optional string mime = 2;
   optional int64 size = 3;
+}
+
+// AttrFilter is one per-dim filter in a console list query. The
+// `dim` is a Dimension.Name; `value` is a stable Taxonomy.Value;
+// `multi` says whether the dim is multi-kind (needed because the
+// SQL containment shape differs).
+message AttrFilter {
+  string dim = 1;
+  string value = 2;
+  bool multi = 3;
 }
 
 message ListFeedbackRequest {

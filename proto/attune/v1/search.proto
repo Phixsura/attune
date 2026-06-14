@@ -4,7 +4,7 @@ package attune.v1;
 
 import "google/api/annotations.proto";
 
-import "attune/v1/common.proto";
+import "attune/v1/batch.proto";
 import "attune/v1/ingest.proto";
 
 // SearchService provides semantic search over feedback (#30).

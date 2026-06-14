@@ -5,7 +5,6 @@
 // source: attune/v1/ingest.proto
 
 /* eslint-disable */
-import { type AttrFilter } from "./common";
 import { type Tag } from "./tag";
 import { type WorkflowState } from "./workflow";
 
@@ -161,6 +160,18 @@ export interface Attachment {
   url: string;
   mime?: string | undefined;
   size?: string | undefined;
+}
+
+/**
+ * AttrFilter is one per-dim filter in a console list query. The
+ * `dim` is a Dimension.Name; `value` is a stable Taxonomy.Value;
+ * `multi` says whether the dim is multi-kind (needed because the
+ * SQL containment shape differs).
+ */
+export interface AttrFilter {
+  dim: string;
+  value: string;
+  multi: boolean;
 }
 
 export interface ListFeedbackRequest {

@@ -4,7 +4,25 @@ package attune.v1;
 
 import "google/api/annotations.proto";
 
-import "attune/v1/common.proto";
+import "attune/v1/ingest.proto";
+
+// FeedbackFilter is the shared filter criteria used by list and batch
+// operations. It mirrors the query parameters of ListFeedbackRequest
+// so batch operations can select rows by the same criteria.
+message FeedbackFilter {
+  // Per-dim filters, AND-composed via JSONB containment.
+  repeated AttrFilter attrs = 1;
+  // nil = no filter; true = only urgent; false = only non-urgent.
+  optional bool urgent = 2;
+  // Full-text query.
+  optional string q = 3;
+  // Filter by tag ID.
+  optional string tag_id = 4;
+  // Filter by workflow state ID.
+  optional string workflow_state_id = 5;
+  // Filter by workflow category (open/resolved).
+  optional string workflow_category = 6;
+}
 
 // BatchService provides batch operations on feedback rows (#30).
 // Operations can target rows by explicit IDs or by filter query.

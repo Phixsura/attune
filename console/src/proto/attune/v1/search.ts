@@ -5,7 +5,7 @@
 // source: attune/v1/search.proto
 
 /* eslint-disable */
-import { type FeedbackFilter } from "./common";
+import { type FeedbackFilter } from "./batch";
 import { type Feedback } from "./ingest";
 
 export const protobufPackage = "attune.v1";

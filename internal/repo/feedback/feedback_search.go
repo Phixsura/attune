@@ -61,6 +61,26 @@ type SearchFeedback struct {
 	ClusterLabel         *string
 }
 
+// normalizeSearchParams returns normalized limit, minSim, efSearch.
+func normalizeSearchParams(params *SemanticSearchParams) (limit int, minSim float64, efSearch int) {
+	limit = params.Limit
+	if limit <= 0 {
+		limit = DefaultSearchLimit
+	}
+	if limit > MaxSearchLimit {
+		limit = MaxSearchLimit
+	}
+	minSim = params.MinSimilarity
+	if minSim <= 0 {
+		minSim = DefaultMinSimilarity
+	}
+	efSearch = params.EfSearch
+	if efSearch <= 0 {
+		efSearch = DefaultEfSearch
+	}
+	return limit, minSim, efSearch
+}
+
 // SemanticSearch performs vector similarity search using pgvector's HNSW index.
 // Requires embeddings to be present and model to match the query embedding model.
 func (r *FeedbackRepo) SemanticSearch(
@@ -80,22 +100,7 @@ func (r *FeedbackRepo) SemanticSearch(
 		return nil, fmt.Errorf("%s: embedding_model required", where)
 	}
 
-	// Normalize params.
-	limit := params.Limit
-	if limit <= 0 {
-		limit = DefaultSearchLimit
-	}
-	if limit > MaxSearchLimit {
-		limit = MaxSearchLimit
-	}
-	minSim := params.MinSimilarity
-	if minSim <= 0 {
-		minSim = DefaultMinSimilarity
-	}
-	efSearch := params.EfSearch
-	if efSearch <= 0 {
-		efSearch = DefaultEfSearch
-	}
+	limit, minSim, efSearch := normalizeSearchParams(params)
 
 	// Build query with filters.
 	qb := newQueryBuilder(params.TenantID)
