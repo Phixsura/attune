@@ -33,6 +33,7 @@ import (
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
+	consoleworkflow "github.com/Phixsura/attune/internal/handlers/console/workflow"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -66,6 +67,7 @@ var (
 	NewDigestSubscriptionHandler = digestsubscription.NewHandler
 	NewTagHandler                = consoletag.NewHandler
 	NewTagAssignmentHandler      = consoletagassignment.NewHandler
+	NewWorkflowHandler           = consoleworkflow.NewHandler
 	BootstrapAdmin               = auth.BootstrapAdmin
 )
 
@@ -131,6 +133,7 @@ type Router struct {
 	digestSubscription *digestsubscription.Handler
 	tags               *consoletag.Handler
 	tagAssignments     *consoletagassignment.Handler
+	workflow           *consoleworkflow.Handler
 	admins             adminReader
 }
 
@@ -155,6 +158,7 @@ func NewRouter(
 	digestSubscription *digestsubscription.Handler,
 	tags *consoletag.Handler,
 	tagAssignments *consoletagassignment.Handler,
+	workflow *consoleworkflow.Handler,
 	admins adminReader,
 ) *Router {
 	return ptrext.Of(Router{
@@ -174,6 +178,7 @@ func NewRouter(
 		digestSubscription: digestSubscription,
 		tags:               tags,
 		tagAssignments:     tagAssignments,
+		workflow:           workflow,
 		admins:             admins,
 	})
 }
@@ -266,6 +271,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountLLMConfig(m)
 	r.mountClusters(m)
 	r.mountTags(m)
+	r.mountWorkflow(m)
 }
 
 func (r *Router) mountLLMConfig(m chi.Router) {
@@ -969,6 +975,92 @@ func (r *Router) mountTags(m chi.Router) {
 			),
 			r.tags.Archive,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ArchiveTagRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+}
+
+func (r *Router) mountWorkflow(m chi.Router) {
+	if r.workflow == nil {
+		return
+	}
+	m.Route("/workflow", func(w chi.Router) {
+		w.Use(r.requireAdmin)
+		w.Get("/states", dispatcher.Bind(
+			"console.WorkflowHandler.ListStates",
+			dispatcher.Query(
+				func() *attunev1.ListStatesRequest { return ptrext.Of(attunev1.ListStatesRequest{}) },
+				func(r *http.Request, req *attunev1.ListStatesRequest) error {
+					if v := r.URL.Query().Get("include_archived"); v == "true" || v == "1" {
+						req.IncludeArchived = true
+					}
+					return nil
+				},
+			),
+			r.workflow.ListStates,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListStatesRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		w.Post("/states", dispatcher.Bind(
+			"console.WorkflowHandler.CreateState",
+			dispatcher.JSON(func() *attunev1.CreateStateRequest { return ptrext.Of(attunev1.CreateStateRequest{}) }),
+			r.workflow.CreateState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateStateRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		w.Patch("/states/{id}", dispatcher.Bind(
+			"console.WorkflowHandler.UpdateState",
+			dispatcher.Combine(
+				func() *attunev1.UpdateStateRequest { return ptrext.Of(attunev1.UpdateStateRequest{}) },
+				dispatcher.JSONBody[*attunev1.UpdateStateRequest],
+				dispatcher.Param("id", func(req *attunev1.UpdateStateRequest, id string) { req.Id = id }),
+			),
+			r.workflow.UpdateState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateStateRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		w.Delete("/states/{id}", dispatcher.Bind(
+			"console.WorkflowHandler.ArchiveState",
+			dispatcher.Path(
+				func() *attunev1.ArchiveStateRequest { return ptrext.Of(attunev1.ArchiveStateRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.ArchiveStateRequest, id string) { req.Id = id }),
+			),
+			r.workflow.ArchiveState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ArchiveStateRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		w.Get("/transitions", dispatcher.Bind(
+			"console.WorkflowHandler.ListTransitions",
+			dispatcher.Empty(func() *attunev1.ListTransitionsRequest {
+				return ptrext.Of(attunev1.ListTransitionsRequest{})
+			}),
+			r.workflow.ListTransitions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListTransitionsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		w.Put("/transitions", dispatcher.Bind(
+			"console.WorkflowHandler.ReplaceTransitions",
+			dispatcher.JSON(func() *attunev1.ReplaceTransitionsRequest {
+				return ptrext.Of(attunev1.ReplaceTransitionsRequest{})
+			}),
+			r.workflow.ReplaceTransitions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ReplaceTransitionsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		w.Post("/seed", dispatcher.Bind(
+			"console.WorkflowHandler.SeedDefaults",
+			dispatcher.Empty(func() *attunev1.SeedDefaultsRequest {
+				return ptrext.Of(attunev1.SeedDefaultsRequest{})
+			}),
+			r.workflow.SeedDefaults,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SeedDefaultsRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))

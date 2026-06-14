@@ -22,6 +22,7 @@ import (
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	feedbackauditrepo "github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	feedbacktagrepo "github.com/Phixsura/attune/internal/repo/feedbacktag"
 	feedbacktagassignmentrepo "github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	guardpolicyrepo "github.com/Phixsura/attune/internal/repo/guardpolicy"
@@ -32,11 +33,13 @@ import (
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 	"github.com/Phixsura/attune/internal/repo/tenant"
+	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
+	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
 )
 
 // syncCustomWebhooks upserts every entry in cfg.CustomWebhooks into
@@ -199,10 +202,14 @@ func buildConsoleRouter(
 	feedback.SetTagAssignments(tagAssignmentRepo)
 	tagHandler := console.NewTagHandler(tagRepo)
 	tagAssignmentHandler := console.NewTagAssignmentHandler(tagRepo, tagAssignmentRepo)
+	wfStateRepo := workflowstaterepo.New(pool)
+	wfAuditRepo := feedbackauditrepo.New(pool)
+	wfSvc := workflowsvc.NewService(wfStateRepo, wfAuditRepo, pool)
+	workflowHandler := console.NewWorkflowHandler(wfStateRepo, wfSvc)
 
 	return console.NewRouter(
 		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback, usage,
 		enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
-		tagHandler, tagAssignmentHandler, adminRepo,
+		tagHandler, tagAssignmentHandler, workflowHandler, adminRepo,
 	).Mount(), nil
 }
