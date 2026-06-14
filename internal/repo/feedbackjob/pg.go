@@ -26,7 +26,7 @@ func New(pool *pgxpool.Pool) *Repo {
 }
 
 const selectCols = `id, tenant_id, status, request, total, progress,
-	result, error, created_by, created_at, started_at, completed_at,
+	result, COALESCE(error, ''), created_by, created_at, started_at, completed_at,
 	claimed_at, last_heartbeat`
 
 func scanJob(row pgx.Row) (*Job, error) {

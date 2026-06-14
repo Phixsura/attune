@@ -46,6 +46,20 @@ func TestRegisteredMetricsMatchDocumentedReference(t *testing.T) {
 		"attune_digest_duration_seconds":         true,
 		"attune_workflow_transitions_total":      true,
 		"attune_workflow_batch_size":             true,
+		// Batch operations (#30).
+		"attune_batch_jobs_claimed_total":         true,
+		"attune_batch_jobs_completed_total":       true,
+		"attune_batch_job_duration_seconds":       true,
+		"attune_batch_jobs_recovered_total":       true,
+		"attune_batch_operations_total":           true,
+		"attune_batch_operation_items_total":      true,
+		"attune_batch_operation_duration_seconds": true,
+		"attune_idempotency_key_usage_total":      true,
+		// Semantic search (#30).
+		"attune_search_queries_total":          true,
+		"attune_search_query_duration_seconds": true,
+		"attune_search_results_count":          true,
+		"attune_embedding_cache_hits_total":    true,
 	}
 
 	got := registeredMetricNames(t)

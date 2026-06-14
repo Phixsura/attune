@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -58,10 +60,14 @@ func New(
 // Search performs semantic search with keyword fallback.
 func (s *service) Search(ctx context.Context, req *SearchRequest) (*SearchResponse, error) {
 	const where = "semanticsearch.Service.Search"
+	start := time.Now()
 
 	if req == nil || req.Query == "" {
 		return nil, ErrEmptyQuery
 	}
+
+	logext.Infof(ctx, "[%s] semantic search started,tenant_id:%s,query_length:%d,limit:%d,has_filter:%v",
+		where, req.TenantID, len(req.Query), req.Limit, req.Filter != nil)
 
 	// Check rate limit.
 	if s.rateLimiter != nil {
@@ -84,7 +90,7 @@ func (s *service) Search(ctx context.Context, req *SearchRequest) (*SearchRespon
 	if err != nil {
 		logext.Warnf(ctx, "[%s] check embeddings failed,tenant_id:%s,err:%+v", where, req.TenantID, err.Error())
 		// Fall back to keyword search on error.
-		return s.keywordOnlySearch(ctx, req)
+		return s.keywordOnlySearchWithMetrics(ctx, req, start)
 	}
 
 	// Get embedding stats for metadata.
@@ -97,7 +103,7 @@ func (s *service) Search(ctx context.Context, req *SearchRequest) (*SearchRespon
 	// If no embeddings, use keyword search.
 	if !hasEmbeddings || stats.EmbeddingModel == "" {
 		logext.Infof(ctx, "[%s] no embeddings available,tenant_id:%s", where, req.TenantID)
-		return s.keywordOnlySearch(ctx, req)
+		return s.keywordOnlySearchWithMetrics(ctx, req, start)
 	}
 
 	// Generate query embedding.
@@ -105,7 +111,7 @@ func (s *service) Search(ctx context.Context, req *SearchRequest) (*SearchRespon
 	if err != nil {
 		logext.Warnf(ctx, "[%s] embedding generation failed,tenant_id:%s,err:%+v", where, req.TenantID, err.Error())
 		// Fall back to keyword search.
-		return s.keywordOnlySearch(ctx, req)
+		return s.keywordOnlySearchWithMetrics(ctx, req, start)
 	}
 
 	// Check model compatibility.
@@ -113,11 +119,11 @@ func (s *service) Search(ctx context.Context, req *SearchRequest) (*SearchRespon
 		logext.Warnf(ctx, "[%s] model mismatch,query_model:%s,stored_model:%s,tenant_id:%s",
 			where, model, stats.EmbeddingModel, req.TenantID)
 		// Fall back to keyword search if models don't match.
-		return s.keywordOnlySearch(ctx, req)
+		return s.keywordOnlySearchWithMetrics(ctx, req, start)
 	}
 
 	// Perform hybrid search.
-	return s.hybridSearch(ctx, req, embedding, model, int(stats.EmbeddedCount))
+	return s.hybridSearchWithMetrics(ctx, req, embedding, model, int(stats.EmbeddedCount), start)
 }
 
 // GetEmbedding generates an embedding for text.
@@ -194,6 +200,27 @@ func (s *service) keywordOnlySearch(ctx context.Context, req *SearchRequest) (*S
 	}), nil
 }
 
+// keywordOnlySearchWithMetrics performs keyword-only search and records metrics.
+func (s *service) keywordOnlySearchWithMetrics(ctx context.Context, req *SearchRequest, start time.Time) (*SearchResponse, error) {
+	const where = "semanticsearch.Service.keywordOnlySearchWithMetrics"
+
+	resp, err := s.keywordOnlySearch(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	elapsed := time.Since(start)
+	logext.Infof(ctx, "[%s] semantic search completed,tenant_id:%s,result_count:%d,used_keyword_fallback:true,duration_ms:%d",
+		where, req.TenantID, len(resp.Hits), elapsed.Milliseconds())
+
+	// Record metrics.
+	metrics.SearchQueriesTotal.WithLabelValues(req.TenantID, "keyword_fallback").Inc()
+	metrics.SearchQueryDuration.WithLabelValues(req.TenantID, "keyword_fallback").Observe(elapsed.Seconds())
+	metrics.SearchResultsCount.WithLabelValues(req.TenantID).Observe(float64(len(resp.Hits)))
+
+	return resp, nil
+}
+
 // hybridSearch performs combined semantic and keyword search.
 func (s *service) hybridSearch(
 	ctx context.Context,
@@ -244,6 +271,48 @@ func (s *service) hybridSearch(
 		TotalWithEmbeddings: totalWithEmbeddings,
 		UsedKeywordFallback: usedFallback,
 	}), nil
+}
+
+// hybridSearchWithMetrics performs hybrid search and records metrics.
+func (s *service) hybridSearchWithMetrics(
+	ctx context.Context,
+	req *SearchRequest,
+	embedding []float32,
+	model string,
+	totalWithEmbeddings int,
+	start time.Time,
+) (*SearchResponse, error) {
+	const where = "semanticsearch.Service.hybridSearchWithMetrics"
+
+	resp, err := s.hybridSearch(ctx, req, embedding, model, totalWithEmbeddings)
+	if err != nil {
+		return nil, err
+	}
+
+	elapsed := time.Since(start)
+	logext.Infof(ctx, "[%s] semantic search completed,tenant_id:%s,result_count:%d,used_keyword_fallback:%v,duration_ms:%d",
+		where, req.TenantID, len(resp.Hits), resp.UsedKeywordFallback, elapsed.Milliseconds())
+
+	// Determine search type for metrics.
+	searchType := "semantic"
+	if resp.UsedKeywordFallback {
+		searchType = "keyword_fallback"
+	} else {
+		// Check if any results are hybrid (have both semantic and keyword scores).
+		for _, hit := range resp.Hits {
+			if hit.MatchType == "hybrid" {
+				searchType = "hybrid"
+				break
+			}
+		}
+	}
+
+	// Record metrics.
+	metrics.SearchQueriesTotal.WithLabelValues(req.TenantID, searchType).Inc()
+	metrics.SearchQueryDuration.WithLabelValues(req.TenantID, searchType).Observe(elapsed.Seconds())
+	metrics.SearchResultsCount.WithLabelValues(req.TenantID).Observe(float64(len(resp.Hits)))
+
+	return resp, nil
 }
 
 // mergeResults combines semantic and keyword results with deduplication.
@@ -334,13 +403,16 @@ func (s *service) getOrGenerateEmbedding(ctx context.Context, tenantID, text str
 			// For now, get stats to determine model (this is a limitation).
 			stats, err := s.feedbackStore.GetEmbeddingStats(ctx, tenantID)
 			if err == nil && stats.EmbeddingModel != "" {
+				metrics.EmbeddingCacheHits.WithLabelValues(tenantID, "hit").Inc()
 				return emb, stats.EmbeddingModel, nil
 			}
 			// Fall through to regenerate if we can't determine the model.
 		}
 	}
 
-	// Generate embedding via LLM router.
+	// Cache miss - generate embedding via LLM router.
+	metrics.EmbeddingCacheHits.WithLabelValues(tenantID, "miss").Inc()
+
 	if s.router == nil {
 		return nil, "", fmt.Errorf("llm router not configured")
 	}

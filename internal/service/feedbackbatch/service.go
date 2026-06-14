@@ -12,6 +12,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -50,15 +51,22 @@ func New(
 // Execute runs a batch operation, returning sync result or async job ID.
 func (s *service) Execute(ctx context.Context, req *BatchRequest) (*BatchResponse, error) {
 	const where = "service.feedbackbatch.Execute"
+	start := time.Now()
+	opType := operationType(req.Operation)
+
+	logext.Infof(ctx, "[%s] batch operation started,tenant_id:%s,operation:%s,item_count:%d,has_filter:%v,dry_run:%v",
+		where, req.TenantID, opType, len(req.FeedbackIDs), req.Filter != nil, req.DryRun)
 
 	// Validate request.
 	if err := s.validateRequest(req); err != nil {
+		metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "error").Inc()
 		return nil, err
 	}
 
 	// Check rate limit based on operation type.
 	if err := s.checkRateLimit(ctx, req); err != nil {
 		logext.Warnf(ctx, "[%s] rate limited,tenant_id:%s", where, req.TenantID)
+		metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "rate_limited").Inc()
 		return nil, err
 	}
 
@@ -78,6 +86,7 @@ func (s *service) Execute(ctx context.Context, req *BatchRequest) (*BatchRespons
 	ids, err := s.resolveTargetIDs(ctx, req)
 	if err != nil {
 		s.failIdempotencyKey(ctx, req)
+		metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "error").Inc()
 		return nil, err
 	}
 
@@ -97,10 +106,27 @@ func (s *service) Execute(ctx context.Context, req *BatchRequest) (*BatchRespons
 
 	// Decide sync vs async based on size.
 	if len(ids) > SyncThreshold {
-		return s.executeAsync(ctx, req, ids, totalMatched)
+		return s.executeAsync(ctx, req, ids, totalMatched, start, opType)
 	}
 
-	return s.executeSync(ctx, req, ids, totalMatched)
+	return s.executeSync(ctx, req, ids, totalMatched, start, opType)
+}
+
+// operationType extracts the operation type string for metrics/logging.
+func operationType(op *attunev1.BatchOperation) string {
+	if op == nil {
+		return "unknown"
+	}
+	switch op.GetOp().(type) { // ptrext:allow type-switch
+	case *attunev1.BatchOperation_Tag: // ptrext:allow type-switch
+		return "tag"
+	case *attunev1.BatchOperation_Workflow: // ptrext:allow type-switch
+		return "workflow"
+	case *attunev1.BatchOperation_Delete: // ptrext:allow type-switch
+		return "delete"
+	default:
+		return "unknown"
+	}
 }
 
 // validateRequest checks that the request has valid structure.
@@ -170,10 +196,12 @@ func (s *service) handleIdempotency(ctx context.Context, req *BatchRequest) (*Ba
 
 	key, acquired, err := s.idempotencyRepo.Acquire(ctx, req.TenantID, req.IdempotencyKey, requestHash, 0)
 	if errors.Is(err, idempotency.ErrHashMismatch) {
+		metrics.IdempotencyKeyUsage.WithLabelValues(req.TenantID, "conflict").Inc()
 		return nil, false, ErrIdempotencyConflict
 	}
 	if errors.Is(err, idempotency.ErrExpired) {
 		// Treat expired as if not found - allow new request.
+		metrics.IdempotencyKeyUsage.WithLabelValues(req.TenantID, "new").Inc()
 		return nil, false, nil
 	}
 	if err != nil {
@@ -182,11 +210,13 @@ func (s *service) handleIdempotency(ctx context.Context, req *BatchRequest) (*Ba
 
 	if acquired {
 		// We got the key, proceed with execution.
+		metrics.IdempotencyKeyUsage.WithLabelValues(req.TenantID, "new").Inc()
 		return nil, false, nil
 	}
 
 	// Key exists and not acquired - check status.
 	if key.Status == idempotency.StatusPending {
+		metrics.IdempotencyKeyUsage.WithLabelValues(req.TenantID, "in_progress").Inc()
 		return nil, false, ErrRequestInProgress
 	}
 
@@ -200,6 +230,7 @@ func (s *service) handleIdempotency(ctx context.Context, req *BatchRequest) (*Ba
 			return nil, false, nil
 		}
 		resp.FromCache = true
+		metrics.IdempotencyKeyUsage.WithLabelValues(req.TenantID, "cache_hit").Inc()
 		return ptrext.Of(resp), true, nil
 	}
 
@@ -333,7 +364,7 @@ func (s *service) protoFilterToRepoFilter(pf *attunev1.FeedbackFilter) *feedback
 }
 
 // executeSync runs the batch operation synchronously.
-func (s *service) executeSync(ctx context.Context, req *BatchRequest, ids []int64, totalMatched int) (*BatchResponse, error) {
+func (s *service) executeSync(ctx context.Context, req *BatchRequest, ids []int64, totalMatched int, start time.Time, opType string) (*BatchResponse, error) {
 	const where = "service.feedbackbatch.executeSync"
 
 	logext.Infof(ctx, "[%s] start sync execution,tenant_id:%s,count:%d", where, req.TenantID, len(ids))
@@ -341,6 +372,8 @@ func (s *service) executeSync(ctx context.Context, req *BatchRequest, ids []int6
 	result, err := s.executeOperation(ctx, req, ids)
 	if err != nil {
 		s.failIdempotencyKey(ctx, req)
+		metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "error").Inc()
+		metrics.BatchOperationDuration.WithLabelValues(req.TenantID, opType, "sync").Observe(time.Since(start).Seconds())
 		return nil, err
 	}
 
@@ -356,24 +389,34 @@ func (s *service) executeSync(ctx context.Context, req *BatchRequest, ids []int6
 		s.completeIdempotencyKey(ctx, req, resp)
 	}
 
-	logext.Infof(ctx, "[%s] sync execution complete,tenant_id:%s,succeeded:%d,skipped:%d,failed:%d",
-		where, req.TenantID, resp.Succeeded, resp.Skipped, len(resp.Failed))
+	elapsed := time.Since(start)
+	logext.Infof(ctx, "[%s] sync execution complete,tenant_id:%s,succeeded:%d,skipped:%d,failed:%d,duration_ms:%d",
+		where, req.TenantID, resp.Succeeded, resp.Skipped, len(resp.Failed), elapsed.Milliseconds())
+
+	// Record metrics.
+	metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "success").Inc()
+	metrics.BatchOperationDuration.WithLabelValues(req.TenantID, opType, "sync").Observe(elapsed.Seconds())
+	metrics.BatchOperationItemsTotal.WithLabelValues(req.TenantID, opType, "succeeded").Add(float64(result.Succeeded))
+	metrics.BatchOperationItemsTotal.WithLabelValues(req.TenantID, opType, "skipped").Add(float64(result.Skipped))
+	metrics.BatchOperationItemsTotal.WithLabelValues(req.TenantID, opType, "failed").Add(float64(len(result.Failed)))
 
 	return resp, nil
 }
 
 // executeAsync creates an async job for large batches.
-func (s *service) executeAsync(ctx context.Context, req *BatchRequest, ids []int64, totalMatched int) (*BatchResponse, error) {
+func (s *service) executeAsync(ctx context.Context, req *BatchRequest, ids []int64, totalMatched int, start time.Time, opType string) (*BatchResponse, error) {
 	const where = "service.feedbackbatch.executeAsync"
 
 	// Check concurrent job limit.
 	if s.concurrency != nil {
 		release, acquired, err := s.concurrency.Acquire(ctx, fmt.Sprintf("jobs:%s", req.TenantID), MaxConcurrentJobs)
 		if err != nil {
+			metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "error").Inc()
 			return nil, fmt.Errorf("concurrency check: %w", err)
 		}
 		if !acquired {
 			s.failIdempotencyKey(ctx, req)
+			metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "rate_limited").Inc()
 			return nil, ErrConcurrentJobLimit
 		}
 		// Note: we release immediately since the job hasn't started yet.
@@ -386,6 +429,7 @@ func (s *service) executeAsync(ctx context.Context, req *BatchRequest, ids []int
 	opBytes, err := protojson.Marshal(req.Operation)
 	if err != nil {
 		s.failIdempotencyKey(ctx, req)
+		metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "error").Inc()
 		return nil, fmt.Errorf("marshal operation: %w", err)
 	}
 
@@ -401,6 +445,7 @@ func (s *service) executeAsync(ctx context.Context, req *BatchRequest, ids []int
 	requestBytes, err := json.Marshal(jobRequest)
 	if err != nil {
 		s.failIdempotencyKey(ctx, req)
+		metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "error").Inc()
 		return nil, fmt.Errorf("marshal job request: %w", err)
 	}
 
@@ -409,6 +454,7 @@ func (s *service) executeAsync(ctx context.Context, req *BatchRequest, ids []int
 	if err != nil {
 		s.failIdempotencyKey(ctx, req)
 		logext.Errorf(ctx, "[%s] create job failed,tenant_id:%s,err:%+v", where, req.TenantID, err.Error())
+		metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "error").Inc()
 		return nil, fmt.Errorf("create job: %w", err)
 	}
 
@@ -423,7 +469,14 @@ func (s *service) executeAsync(ctx context.Context, req *BatchRequest, ids []int
 		s.completeIdempotencyKey(ctx, req, resp)
 	}
 
-	logext.Infof(ctx, "[%s] async job created,tenant_id:%s,job_id:%s,total:%d", where, req.TenantID, job.ID, len(ids))
+	elapsed := time.Since(start)
+	logext.Infof(ctx, "[%s] async job created,tenant_id:%s,job_id:%s,total:%d,duration_ms:%d",
+		where, req.TenantID, job.ID, len(ids), elapsed.Milliseconds())
+
+	// Record metrics - async job creation is success; actual processing metrics
+	// are recorded by the job worker.
+	metrics.BatchOperationsTotal.WithLabelValues(req.TenantID, opType, "success").Inc()
+	metrics.BatchOperationDuration.WithLabelValues(req.TenantID, opType, "async").Observe(elapsed.Seconds())
 
 	return resp, nil
 }
