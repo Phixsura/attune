@@ -109,8 +109,8 @@ func (r *Repo) List(ctx context.Context, tenantID string, feedbackID int64, curs
 
 	var nextCursor string
 	if len(out) > limit {
-		nextCursor = strconv.FormatInt(out[limit].ID, 10)
 		out = out[:limit]
+		nextCursor = strconv.FormatInt(out[limit-1].ID, 10)
 	}
 	return out, nextCursor, nil
 }

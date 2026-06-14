@@ -83,7 +83,7 @@ func TestPG_StateCRUD(t *testing.T) {
 		_, err := repo.Create(ctx, workflowstate.WorkflowState{
 			TenantID: tenantID,
 			Name:     "Open",
-			Color:    "#000",
+			Color:    "#000000",
 			Category: "open",
 		})
 		if !errors.Is(err, workflowstate.ErrNameConflict) {

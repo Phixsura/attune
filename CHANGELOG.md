@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Audit log cursor pagination skipped one record (#29).** The keyset cursor
+  used the overflow row's ID (`out[limit]`) instead of the last returned row's
+  ID (`out[limit-1]`), causing `id < cursor` to skip one entry on the next page.
+
 - **Workflow allowed-next-states query returned empty due to column ambiguity
   (#29).** The `AllowedNext` SQL joined `tenant_workflow_states` with
   `tenant_workflow_transitions` but used unqualified column names (`id`,
