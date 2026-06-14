@@ -51,6 +51,7 @@ export function SelectionActionBar({
       <button
         type="button"
         onClick={onCancel}
+        aria-label={t('common.cancel')}
         className="ml-auto rounded-full p-1 text-primary-foreground/70 transition-colors hover:text-primary-foreground"
       >
         <X className="h-4 w-4" />

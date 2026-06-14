@@ -95,7 +95,7 @@ describe('_authed.feedback route — user flow smoke', () => {
       ),
       http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
       http.get('/fb/v1/console/clusters', () =>
-        HttpResponse.json({ clusters: [], generatedAt: '' }),
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
       ),
     )
 
@@ -164,7 +164,7 @@ describe('_authed.feedback route — user flow smoke', () => {
       ),
       http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
       http.get('/fb/v1/console/clusters', () =>
-        HttpResponse.json({ clusters: [], generatedAt: '' }),
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
       ),
     )
     const FeedbackPage = FeedbackRoute.options.component as React.ComponentType & {
