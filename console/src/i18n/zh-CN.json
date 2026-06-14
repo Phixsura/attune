@@ -537,6 +537,18 @@
       "all_states": "所有状态",
       "search_placeholder": "搜索内容或标题..."
     },
+    "search": {
+      "placeholder": "搜索反馈内容...",
+      "semantic": "语义搜索",
+      "no_results": "未找到匹配的反馈",
+      "keyword_fallback": "使用关键词搜索",
+      "match_type": {
+        "semantic": "语义匹配",
+        "keyword": "关键词匹配",
+        "hybrid": "混合匹配"
+      }
+    },
+    "untitled": "无标题",
     "batch": {
       "selected": "已选 {{count}} 条",
       "select_all_matching": "全选符合条件的 {{count}} 条",
@@ -558,6 +570,14 @@
       "confirm_delete_title": "批量删除反馈",
       "confirm_delete_description": "将删除 {{count}} 条反馈。",
       "count_mismatch_warning": "注意：服务端匹配到 {{actual}} 条，与预期的 {{expected}} 条不符。请重新确认筛选条件。"
+    },
+    "job": {
+      "status_queued": "排队中",
+      "status_running": "处理中",
+      "status_completed": "已完成",
+      "status_failed": "失败",
+      "status_cancelled": "已取消",
+      "progress": "{{progress}} / {{total}} ({{percentage}}%)"
     },
     "status": {
       "pending": "待处理",
@@ -581,6 +601,15 @@
       "low": "低置信度",
       "medium": "中置信度",
       "high": "高置信度"
+    },
+    "similarity": {
+      "high": "高度相似",
+      "medium": "中等相似",
+      "low": "低相似度",
+      "very_low": "很低相似度",
+      "semantic_match": "语义匹配",
+      "keyword_match": "关键词匹配",
+      "hybrid_match": "混合匹配"
     },
     "language": {
       "zh": "中文",
