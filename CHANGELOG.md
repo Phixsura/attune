@@ -7,7 +7,40 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Security
+
+- **Constant-time hash comparison in idempotency repo (#30).** Replaced
+  `bytes.Equal()` with `crypto/subtle.ConstantTimeCompare()` for comparing
+  request hashes, eliminating a theoretical timing attack vector.
+
 ### Added
+
+- **Cursor pagination for job list endpoint (#30).** `GET /fb/v1/console/jobs`
+  now supports cursor-based pagination via `cursor` query parameter and returns
+  `next_cursor` in the response. Consistent with other list APIs.
+
+- **Batch operations for feedback (#30).** Operators can now apply bulk changes
+  to feedback rows via `POST /fb/v1/console/feedback/batch`. Supports tag
+  add/remove, workflow state transitions, and soft/hard delete. Selection modes:
+  explicit ID list (max 100) or filter-based query. Safety features: idempotency
+  key for safe retries, dry run mode for previewing affected items, optimistic
+  locking via `if_unmodified_since` header. Large batches (>100 items) execute
+  asynchronously with job tracking (`GET/POST /fb/v1/console/jobs`). Background
+  worker with heartbeat, stuck job recovery, and real-time progress updates.
+  Rate limiting: 30/min for tag/workflow ops, 10/min for delete ops.
+
+- **Semantic search for feedback (#30).** New `POST /fb/v1/console/feedback/search`
+  endpoint enables natural-language search across feedback content. Hybrid search
+  combines semantic similarity (pgvector embeddings) with keyword fallback for
+  optimal results. Query embedding cache improves performance for repeated
+  searches. Configurable similarity thresholds and semantic/keyword weights.
+  Rate limit: 60/min.
+
+- **Console UI enhancements for batch and search (#30).** Enhanced
+  `SelectionActionBar` with delete action, loading states, and batch confirmation
+  dialogs. Job progress component displays real-time execution status.
+  Semantic search bar with results display and similarity indicators shows
+  how closely each result matches the query.
 
 - **Customizable feedback workflow status (#29).** Per-tenant workflow state
   machine with three fixed categories (open / active / closed), custom states
@@ -30,6 +63,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   zh-CN i18n included.
 
 ### Fixed
+
+- **Rate limiter memory cleanup (#30).** Added `StartCleanup()` to
+  `MemorySlidingLimiter` to periodically evict keys with no recent activity,
+  preventing unbounded memory growth from abandoned rate limit keys.
 
 - **Audit log cursor pagination skipped one record (#29).** The keyset cursor
   used the overflow row's ID (`out[limit]`) instead of the last returned row's
@@ -319,6 +356,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
  gate CI against regressions.
 
 ### Changed
+
+- **Migration 031 adds batch infrastructure columns and tables (#30).**
+  `user_feedback` gains `updated_at` (trigger-maintained) and `deleted_at`
+  (soft delete support). New tables: `idempotency_keys` for batch retry safety,
+  `batch_jobs` for async job execution tracking.
 
 - **All LLM provider HTTP clients now set a request timeout.** The chat backends
   (OpenAI-compatible, Anthropic, Gemini, OpenAI-Responses) previously had no

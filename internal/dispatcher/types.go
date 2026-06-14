@@ -36,6 +36,12 @@ func (c *RequestContext[Auth]) SetCookie(cookie *http.Cookie) {
 	http.SetCookie(c.response, cookie)
 }
 
+// SetHeader allows handlers to attach header side-effects while keeping
+// response body/status writing owned by dispatcher.
+func (c *RequestContext[Auth]) SetHeader(key, value string) {
+	c.response.Header().Set(key, value)
+}
+
 // Result carries the successful response payload and HTTP status.
 type Result[Resp proto.Message] struct {
 	Status int

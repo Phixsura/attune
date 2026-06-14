@@ -7,7 +7,9 @@
     "save": "保存",
     "cancel": "取消",
     "delete": "删除",
+    "deleting": "删除中…",
     "confirm": "确认",
+    "processing": "处理中…",
     "back": "返回",
     "edit": "编辑",
     "create": "新建",
@@ -18,7 +20,8 @@
     "copied": "已复制",
     "close": "关闭",
     "never": "从未",
-    "error": "出错了"
+    "error": "出错了",
+    "dismiss": "关闭"
   },
   "auth": {
     "email_label": "邮箱",
@@ -535,13 +538,56 @@
       "all_states": "所有状态",
       "search_placeholder": "搜索内容或标题..."
     },
+    "search": {
+      "placeholder": "搜索反馈内容...",
+      "semantic": "语义搜索",
+      "no_results": "未找到匹配的反馈",
+      "keyword_fallback": "使用关键词搜索",
+      "match_type": {
+        "semantic": "语义匹配",
+        "keyword": "关键词匹配",
+        "hybrid": "混合匹配"
+      }
+    },
+    "untitled": "无标题",
     "batch": {
       "selected": "已选 {{count}} 条",
+      "select_all_matching": "全选符合条件的 {{count}} 条",
       "add_tag": "添加标签",
       "remove_tag": "移除标签",
       "transition": "流转状态",
+      "delete": "删除",
       "success": "已更新 {{count}} 条反馈",
-      "transition_success": "已流转 {{count}} 条反馈"
+      "transition_success": "已流转 {{count}} 条反馈",
+      "delete_success": "已删除 {{count}} 条反馈",
+      "delete_title": "删除反馈",
+      "delete_description": "确定要删除这 {{count}} 条反馈吗？此操作可撤销。",
+      "delete_permanent_title": "永久删除反馈",
+      "delete_permanent_description": "确定要永久删除这 {{count}} 条反馈吗？此操作不可撤销。",
+      "confirm_tag_title": "批量修改标签",
+      "confirm_tag_description": "将对 {{count}} 条反馈执行标签操作。",
+      "confirm_workflow_title": "批量流转状态",
+      "confirm_workflow_description": "将对 {{count}} 条反馈执行状态流转。",
+      "confirm_delete_title": "批量删除反馈",
+      "confirm_delete_description": "将删除 {{count}} 条反馈。",
+      "count_mismatch_warning": "注意：服务端匹配到 {{actual}} 条，与预期的 {{expected}} 条不符。请重新确认筛选条件。",
+      "result_success": "批量操作成功",
+      "result_failed": "批量操作失败",
+      "result_partial": "批量操作部分成功",
+      "result_succeeded": "成功 {{count}} 条",
+      "result_skipped": "跳过 {{count}} 条",
+      "result_failed_count": "失败 {{count}} 条",
+      "show_failures": "查看失败详情",
+      "more_failures": "还有 {{count}} 条失败…",
+      "retry_failed": "重试失败项"
+    },
+    "job": {
+      "status_queued": "排队中",
+      "status_running": "处理中",
+      "status_completed": "已完成",
+      "status_failed": "失败",
+      "status_cancelled": "已取消",
+      "progress": "{{progress}} / {{total}} ({{percentage}}%)"
     },
     "status": {
       "pending": "待处理",
@@ -565,6 +611,15 @@
       "low": "低置信度",
       "medium": "中置信度",
       "high": "高置信度"
+    },
+    "similarity": {
+      "high": "高度相似",
+      "medium": "中等相似",
+      "low": "低相似度",
+      "very_low": "很低相似度",
+      "semantic_match": "语义匹配",
+      "keyword_match": "关键词匹配",
+      "hybrid_match": "混合匹配"
     },
     "language": {
       "zh": "中文",

@@ -55,6 +55,18 @@ exposition plus the portable assets in this directory.
 | `attune_digest_duration_seconds` | histogram | `tenant` | end-to-end digest aggregation + delivery latency per run (#27) |
 | `attune_workflow_transitions_total` | counter | `tenant`, `result` | workflow state transitions by outcome — `success` / `invalid` / `error` (#29) |
 | `attune_workflow_batch_size` | histogram | — | number of feedback items per batch-transition call (#29) |
+| `attune_batch_jobs_claimed_total` | counter | `tenant` | async batch jobs claimed by workers (#30) |
+| `attune_batch_jobs_completed_total` | counter | `tenant`, `status` | async batch jobs completed by outcome (#30) |
+| `attune_batch_job_duration_seconds` | histogram | `tenant` | async batch job processing latency (#30) |
+| `attune_batch_jobs_recovered_total` | counter | — | stuck batch jobs recovered and requeued (#30) |
+| `attune_batch_operations_total` | counter | `tenant`, `operation`, `status` | batch operations by type and outcome (#30) |
+| `attune_batch_operation_items_total` | counter | `tenant`, `operation`, `result` | items processed in batch operations (#30) |
+| `attune_batch_operation_duration_seconds` | histogram | `tenant`, `operation`, `mode` | batch operation latency by mode (#30) |
+| `attune_idempotency_key_usage_total` | counter | `tenant`, `outcome` | idempotency key usage by outcome (#30) |
+| `attune_search_queries_total` | counter | `tenant`, `type` | search queries by type (#30) |
+| `attune_search_query_duration_seconds` | histogram | `tenant`, `type` | search query latency by type (#30) |
+| `attune_search_results_count` | histogram | `tenant` | number of search results returned (#30) |
+| `attune_embedding_cache_hits_total` | counter | `tenant`, `result` | embedding cache hits vs misses (#30) |
 
 Label values:
 
@@ -77,6 +89,14 @@ Label values:
 - LLM `model` — configured model id; keep private gateway aliases bounded.
 - embed `cluster_type` — `new` · `existing`.
 - embed `error_type` — `embed_api` · `find_similar` · `update_embedding`.
+- batch `operation` — `tag` · `workflow` · `delete`.
+- batch `status` — `success` · `error` · `rate_limited`.
+- batch `result` — `succeeded` · `skipped` · `failed`.
+- batch `mode` — `sync` · `async`.
+- batch job `status` — `completed` · `failed`.
+- idempotency `outcome` — `new` · `cache_hit` · `conflict` · `in_progress` · `failed`.
+- search `type` — `semantic` · `keyword_fallback` · `hybrid`.
+- embedding cache `result` — `hit` · `miss`.
 
 The registered set is drift-guarded by `internal/infra/metrics/metrics_test.go` —
 it must match this table.

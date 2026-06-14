@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+import "attune/v1/batch.proto";
+import "attune/v1/ingest.proto";
+
+// SearchService provides semantic search over feedback (#30).
+// Uses pgvector embeddings when available, falls back to keyword search.
+service SearchService {
+  rpc SemanticSearch(SemanticSearchRequest) returns (SemanticSearchResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/search"
+      body: "*"
+    };
+  }
+}
+
+// SemanticSearchRequest is the query envelope for semantic search.
+message SemanticSearchRequest {
+  // The natural language query string.
+  string q = 1;
+
+  // Maximum results to return (default: 20, max: 100).
+  optional int32 limit = 2;
+
+  // Minimum similarity threshold (0.0-1.0). Results below this are excluded.
+  optional float min_similarity = 3;
+
+  // Additional filters to apply on top of semantic ranking.
+  optional FeedbackFilter filter = 4;
+
+  // Weight for semantic (embedding) similarity (0.0-1.0, default: 0.7).
+  optional float semantic_weight = 5;
+
+  // Weight for keyword (full-text) similarity (0.0-1.0, default: 0.3).
+  optional float keyword_weight = 6;
+}
+
+// SemanticSearchResponse contains the ranked search results.
+message SemanticSearchResponse {
+  // Ranked results ordered by combined similarity score.
+  repeated SemanticSearchHit hits = 1;
+
+  // The embedding model used for this search.
+  string embedding_model = 2;
+
+  // Count of feedback rows that have embeddings in this tenant.
+  int32 total_with_embeddings = 3;
+
+  // True if semantic search was unavailable and results are keyword-only.
+  bool used_keyword_fallback = 4;
+}
+
+// SemanticSearchHit is a single search result with ranking metadata.
+message SemanticSearchHit {
+  // The feedback row.
+  Feedback feedback = 1;
+
+  // Semantic (embedding) similarity score (0.0-1.0).
+  float similarity = 2;
+
+  // Keyword (full-text) relevance score (0.0-1.0).
+  float keyword_score = 3;
+
+  // How this result was matched: "semantic", "keyword", or "hybrid".
+  string match_type = 4;
+}

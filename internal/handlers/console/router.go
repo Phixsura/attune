@@ -25,6 +25,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
+	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
 	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
@@ -59,6 +60,9 @@ var (
 	NewAPIKeysHandler            = apikey.NewAPIKeysHandler
 	NewNotifyTargetsHandler      = notifytarget.NewNotifyTargetsHandler
 	NewFeedbackHandler           = feedback.NewFeedbackHandler
+	NewBatchHandler              = feedback.NewBatchHandler
+	NewSearchHandler             = feedback.NewSearchHandler
+	NewFeedbackJobHandler        = feedbackjob.NewHandler
 	NewUsageHandler              = usage.NewUsageHandler
 	NewEnrichConfigHandler       = enrichconfig.NewHandler
 	NewGuardPolicyHandler        = consoleguardpolicy.NewHandler
@@ -93,6 +97,7 @@ var (
 //	 POST /notify-targets/{id}/test -> dispatcher.Bind(notifytarget.Handler.Test)
 //	 GET /feedback -> dispatcher.Bind(feedback.Handler.List)
 //	 GET /feedback/stats -> dispatcher.Bind(feedback.Handler.Stats)
+//	 POST /feedback/search -> dispatcher.Bind(feedback.SearchHandler.Search)
 //	 GET /feedback/{id} -> dispatcher.Bind(feedback.Handler.Get)
 //	 GET /usage -> dispatcher.Bind(usage.Handler.Get)
 //	 GET /llm-usage -> dispatcher.Bind(usage.Handler.GetLLMUsage)
@@ -125,6 +130,9 @@ type Router struct {
 	apiKeys            *apikey.APIKeysHandler
 	notifyTargets      *notifytarget.NotifyTargetsHandler
 	feedback           *feedback.FeedbackHandler
+	feedbackBatch      *feedback.BatchHandler
+	feedbackSearch     *feedback.SearchHandler
+	feedbackJob        *feedbackjob.Handler
 	usage              *usage.UsageHandler
 	enrichConfig       *enrichconfig.Handler
 	guardPolicies      *consoleguardpolicy.Handler
@@ -150,6 +158,9 @@ func NewRouter(
 	apiKeys *apikey.APIKeysHandler,
 	notifyTargets *notifytarget.NotifyTargetsHandler,
 	feedback *feedback.FeedbackHandler,
+	feedbackBatch *feedback.BatchHandler,
+	feedbackSearch *feedback.SearchHandler,
+	feedbackJob *feedbackjob.Handler,
 	usage *usage.UsageHandler,
 	enrichConfig *enrichconfig.Handler,
 	guardPolicies *consoleguardpolicy.Handler,
@@ -170,6 +181,9 @@ func NewRouter(
 		apiKeys:            apiKeys,
 		notifyTargets:      notifyTargets,
 		feedback:           feedback,
+		feedbackBatch:      feedbackBatch,
+		feedbackSearch:     feedbackSearch,
+		feedbackJob:        feedbackJob,
 		usage:              usage,
 		enrichConfig:       enrichConfig,
 		guardPolicies:      guardPolicies,
@@ -269,6 +283,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountEnrichConfig(m)
 	r.mountGuardPolicies(m)
 	r.mountInbound(m)
+	r.mountJobs(m)
 	r.mountLLMConfig(m)
 	r.mountClusters(m)
 	r.mountTags(m)
@@ -645,6 +660,7 @@ func (r *Router) mountFeedback(m chi.Router) {
 				}),
 			))
 		}
+		r.mountFeedbackBatchRoutes(f)
 		f.Get("/{id}", dispatcher.Bind(
 			"console.FeedbackHandler.Get",
 			dispatcher.Path(
@@ -747,6 +763,33 @@ func (r *Router) mountFeedback(m chi.Router) {
 			}),
 		))
 	})
+}
+
+func (r *Router) mountFeedbackBatchRoutes(f chi.Router) {
+	if r.feedbackBatch != nil {
+		f.Post("/batch", dispatcher.Bind(
+			"console.BatchHandler.Execute",
+			dispatcher.JSON(func() *attunev1.BatchFeedbackRequest {
+				return ptrext.Of(attunev1.BatchFeedbackRequest{})
+			}),
+			r.feedbackBatch.Execute,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchFeedbackRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	}
+	if r.feedbackSearch != nil {
+		f.Post("/search", dispatcher.Bind(
+			"console.SearchHandler.Search",
+			dispatcher.JSON(func() *attunev1.SemanticSearchRequest {
+				return ptrext.Of(attunev1.SemanticSearchRequest{})
+			}),
+			r.feedbackSearch.Search,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SemanticSearchRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	}
 }
 
 func (r *Router) mountEnrichConfig(m chi.Router) {
@@ -1031,6 +1074,51 @@ func (r *Router) mountTags(m chi.Router) {
 			),
 			r.tags.Archive,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ArchiveTagRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+}
+
+func (r *Router) mountJobs(m chi.Router) {
+	if r.feedbackJob == nil {
+		return
+	}
+	m.Route("/jobs", func(j chi.Router) {
+		j.Get("/", dispatcher.Bind(
+			"console.feedbackjob.Handler.List",
+			dispatcher.Query(
+				func() *attunev1.ListJobsRequest { return ptrext.Of(attunev1.ListJobsRequest{}) },
+				feedbackjob.BindListRequest,
+			),
+			r.feedbackJob.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListJobsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		j.Get("/{job_id}", dispatcher.Bind(
+			"console.feedbackjob.Handler.GetStatus",
+			dispatcher.Path(
+				func() *attunev1.GetJobStatusRequest { return ptrext.Of(attunev1.GetJobStatusRequest{}) },
+				dispatcher.Param("job_id", func(req *attunev1.GetJobStatusRequest, id string) {
+					req.JobId = id
+				}),
+			),
+			r.feedbackJob.GetStatus,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetJobStatusRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		j.Post("/{job_id}/cancel", dispatcher.Bind(
+			"console.feedbackjob.Handler.Cancel",
+			dispatcher.Path(
+				func() *attunev1.CancelJobRequest { return ptrext.Of(attunev1.CancelJobRequest{}) },
+				dispatcher.Param("job_id", func(req *attunev1.CancelJobRequest, id string) {
+					req.JobId = id
+				}),
+			),
+			r.feedbackJob.Cancel,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CancelJobRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))

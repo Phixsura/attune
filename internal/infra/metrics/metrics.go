@@ -320,6 +320,124 @@ var WorkflowBatchSize = prometheus.NewHistogram(
 	},
 )
 
+// BatchJobsClaimed counts async batch jobs claimed by workers.
+var BatchJobsClaimed = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_batch_jobs_claimed_total",
+		Help: "Async batch jobs claimed by workers.",
+	},
+	[]string{"tenant"},
+)
+
+// BatchJobsCompleted counts async batch jobs completed by status.
+// status ∈ {completed, failed}.
+var BatchJobsCompleted = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_batch_jobs_completed_total",
+		Help: "Async batch jobs completed by outcome.",
+	},
+	[]string{"tenant", "status"},
+)
+
+// BatchJobDuration tracks async batch job processing time.
+var BatchJobDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_batch_job_duration_seconds",
+		Help:    "Async batch job processing latency.",
+		Buckets: prometheus.ExponentialBuckets(1, 2, 10), // 1s..512s
+	},
+	[]string{"tenant"},
+)
+
+// BatchJobsRecovered counts stuck jobs recovered by the recovery process.
+var BatchJobsRecovered = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "attune_batch_jobs_recovered_total",
+		Help: "Stuck batch jobs recovered and requeued.",
+	},
+)
+
+// BatchOperationsTotal counts batch operations by type and status.
+// operation ∈ {tag, workflow, delete}; status ∈ {success, error, rate_limited}.
+var BatchOperationsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_batch_operations_total",
+		Help: "Total batch operations by type and status.",
+	},
+	[]string{"tenant", "operation", "status"},
+)
+
+// BatchOperationItemsTotal counts items processed in batch operations.
+// result ∈ {succeeded, skipped, failed}.
+var BatchOperationItemsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_batch_operation_items_total",
+		Help: "Total items processed in batch operations.",
+	},
+	[]string{"tenant", "operation", "result"},
+)
+
+// BatchOperationDuration tracks batch operation latency.
+// mode ∈ {sync, async}.
+var BatchOperationDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_batch_operation_duration_seconds",
+		Help:    "Batch operation duration in seconds.",
+		Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
+	},
+	[]string{"tenant", "operation", "mode"},
+)
+
+// IdempotencyKeyUsage counts idempotency key outcomes.
+// outcome ∈ {new, cache_hit, conflict, in_progress, failed}.
+var IdempotencyKeyUsage = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_idempotency_key_usage_total",
+		Help: "Idempotency key usage by outcome.",
+	},
+	[]string{"tenant", "outcome"},
+)
+
+// SearchQueriesTotal counts search queries by type.
+// type ∈ {semantic, keyword_fallback, hybrid}.
+var SearchQueriesTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_search_queries_total",
+		Help: "Total search queries by type.",
+	},
+	[]string{"tenant", "type"},
+)
+
+// SearchQueryDuration tracks search query latency.
+var SearchQueryDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_search_query_duration_seconds",
+		Help:    "Search query duration in seconds.",
+		Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
+	},
+	[]string{"tenant", "type"},
+)
+
+// SearchResultsCount tracks the number of search results returned.
+var SearchResultsCount = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_search_results_count",
+		Help:    "Number of search results returned.",
+		Buckets: []float64{0, 1, 5, 10, 20, 50, 100},
+	},
+	[]string{"tenant"},
+)
+
+// EmbeddingCacheHits counts embedding cache hits and misses.
+// result ∈ {hit, miss}.
+var EmbeddingCacheHits = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_embedding_cache_hits_total",
+		Help: "Embedding cache hits vs misses.",
+	},
+	[]string{"tenant", "result"},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -364,6 +482,18 @@ var allMetrics = []prometheus.Collector{
 	DigestDuration,
 	WorkflowTransitionsTotal,
 	WorkflowBatchSize,
+	BatchJobsClaimed,
+	BatchJobsCompleted,
+	BatchJobDuration,
+	BatchJobsRecovered,
+	BatchOperationsTotal,
+	BatchOperationItemsTotal,
+	BatchOperationDuration,
+	IdempotencyKeyUsage,
+	SearchQueriesTotal,
+	SearchQueryDuration,
+	SearchResultsCount,
+	EmbeddingCacheHits,
 }
 
 func init() {

@@ -334,6 +334,30 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/batch:
+        post:
+            tags:
+                - BatchService
+            operationId: BatchService_BatchFeedback
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/BatchFeedbackRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/BatchFeedbackResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/batch/tags:
         post:
             tags:
@@ -352,6 +376,30 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/BatchUpdateFeedbackTagsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/search:
+        post:
+            tags:
+                - SearchService
+            operationId: SearchService_SemanticSearch
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SemanticSearchRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SemanticSearchResponse'
                 default:
                     description: Default error response
                     content:
@@ -966,6 +1014,95 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/LoginResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/jobs:
+        get:
+            tags:
+                - JobService
+            operationId: JobService_ListJobs
+            parameters:
+                - name: status
+                  in: query
+                  description: 'Filter by status (optional). Values: queued, running, completed, failed, cancelled.'
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  description: 'Maximum jobs to return (default: 20, max: 100).'
+                  schema:
+                    type: integer
+                    format: int32
+                - name: cursor
+                  in: query
+                  description: Pagination cursor from previous response (job ID).
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListJobsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/jobs/{jobId}:
+        get:
+            tags:
+                - JobService
+            operationId: JobService_GetJobStatus
+            parameters:
+                - name: jobId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/JobStatusResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/jobs/{jobId}/cancel:
+        post:
+            tags:
+                - JobService
+            operationId: JobService_CancelJob
+            parameters:
+                - name: jobId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CancelJobRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CancelJobResponse'
                 default:
                     description: Default error response
                     content:
@@ -1898,6 +2035,20 @@ components:
                     type: string
                 size:
                     type: string
+        AttrFilter:
+            type: object
+            properties:
+                dim:
+                    type: string
+                value:
+                    type: string
+                multi:
+                    type: boolean
+            description: |-
+                AttrFilter is one per-dim filter in a console list query. The
+                 `dim` is a Dimension.Name; `value` is a stable Taxonomy.Value;
+                 `multi` says whether the dim is multi-kind (needed because the
+                 SQL containment shape differs).
         AuditEntry:
             type: object
             properties:
@@ -1919,6 +2070,125 @@ components:
                     type: string
                 createdAt:
                     type: string
+        BatchDeleteOp:
+            type: object
+            properties:
+                hard:
+                    type: boolean
+                    description: If true, permanently delete rows. If false (default), soft-delete.
+            description: BatchDeleteOp soft-deletes or hard-deletes selected rows.
+        BatchFeedbackRequest:
+            type: object
+            properties:
+                feedbackIds:
+                    type: array
+                    items:
+                        type: string
+                    description: Explicit row IDs to operate on (mutually exclusive with query).
+                query:
+                    allOf:
+                        - $ref: '#/components/schemas/FeedbackFilter'
+                    description: Filter query to select rows (mutually exclusive with feedback_ids).
+                maxAffected:
+                    type: integer
+                    description: |-
+                        Safety cap: refuse if query matches more than this many rows.
+                         Required when using query-based selection.
+                    format: int32
+                confirmCount:
+                    type: integer
+                    description: |-
+                        Confirmation count: proceed only if matched count equals this.
+                         Prevents TOCTOU races between preview and execute.
+                    format: int32
+                dryRun:
+                    type: boolean
+                    description: If true, return what would happen without making changes.
+                operation:
+                    allOf:
+                        - $ref: '#/components/schemas/BatchOperation'
+                    description: The operation to perform.
+                idempotencyKey:
+                    type: string
+                    description: |-
+                        Client-generated idempotency key for safe retries.
+                         Same key + same params = return cached result.
+                         Same key + different params = IDEMPOTENCY_CONFLICT error.
+                ifUnmodifiedSince:
+                    type: string
+                    description: |-
+                        Optimistic concurrency: reject if any row was modified since this timestamp.
+                         Format: RFC3339.
+            description: |-
+                BatchFeedbackRequest is the envelope for all batch operations.
+                 Either feedback_ids or query must be provided to select rows.
+        BatchFeedbackResponse:
+            type: object
+            properties:
+                totalMatched:
+                    type: integer
+                    description: Total rows matched by the selection criteria.
+                    format: int32
+                succeeded:
+                    type: integer
+                    description: Number of rows successfully updated.
+                    format: int32
+                skipped:
+                    type: integer
+                    description: Number of rows skipped (already in target state, etc.).
+                    format: int32
+                failed:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/BatchItemFailure'
+                    description: Per-row failures with error details.
+                jobId:
+                    type: string
+                    description: For async operations, the job ID to poll for status.
+                jobStatusUrl:
+                    type: string
+                    description: URL to poll for job status (convenience for clients).
+            description: BatchFeedbackResponse reports the outcome of a batch operation.
+        BatchItemFailure:
+            type: object
+            properties:
+                feedbackId:
+                    type: string
+                    description: The feedback row that failed.
+                code:
+                    type: string
+                    description: Machine-readable error code (ErrorCode enum name).
+                message:
+                    type: string
+                    description: Human-readable error message.
+                currentUpdatedAt:
+                    type: string
+                    description: 'For optimistic concurrency failures: the row''s current updated_at.'
+            description: BatchItemFailure describes why a single row failed in a batch operation.
+        BatchOperation:
+            type: object
+            properties:
+                tag:
+                    $ref: '#/components/schemas/BatchTagOp'
+                workflow:
+                    $ref: '#/components/schemas/BatchWorkflowOp'
+                delete:
+                    $ref: '#/components/schemas/BatchDeleteOp'
+            description: BatchOperation is the discriminated union of supported batch operations.
+        BatchTagOp:
+            type: object
+            properties:
+                addTagIds:
+                    type: array
+                    items:
+                        type: string
+                    description: Tag IDs to add to all selected rows.
+                removeTagIds:
+                    type: array
+                    items:
+                        type: string
+                    description: Tag IDs to remove from all selected rows.
+            description: BatchTagOp adds and/or removes tags from selected rows.
         BatchTransitionFailure:
             type: object
             properties:
@@ -1970,6 +2240,40 @@ components:
                 affected:
                     type: integer
                     format: int32
+        BatchWorkflowOp:
+            type: object
+            properties:
+                toStateId:
+                    type: string
+                    description: Target workflow state ID.
+                comment:
+                    type: string
+                    description: Optional audit comment for the transition.
+            description: BatchWorkflowOp transitions selected rows to a new workflow state.
+        CancelJobRequest:
+            type: object
+            properties:
+                jobId:
+                    type: string
+            description: CancelJobRequest cancels a running or queued job.
+        CancelJobResponse:
+            type: object
+            properties:
+                status:
+                    enum:
+                        - JOB_STATUS_UNSPECIFIED
+                        - JOB_STATUS_QUEUED
+                        - JOB_STATUS_RUNNING
+                        - JOB_STATUS_COMPLETED
+                        - JOB_STATUS_FAILED
+                        - JOB_STATUS_CANCELLED
+                    type: string
+                    description: The status after cancellation attempt.
+                    format: enum
+                message:
+                    type: string
+                    description: Human-readable result message.
+            description: CancelJobResponse confirms cancellation.
         ChangePasswordRequest:
             required:
                 - currentPassword
@@ -2461,6 +2765,33 @@ components:
                     items:
                         $ref: '#/components/schemas/WorkflowState'
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
+        FeedbackFilter:
+            type: object
+            properties:
+                attrs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/AttrFilter'
+                    description: Per-dim filters, AND-composed via JSONB containment.
+                urgent:
+                    type: boolean
+                    description: nil = no filter; true = only urgent; false = only non-urgent.
+                q:
+                    type: string
+                    description: Full-text query.
+                tagId:
+                    type: string
+                    description: Filter by tag ID.
+                workflowStateId:
+                    type: string
+                    description: Filter by workflow state ID.
+                workflowCategory:
+                    type: string
+                    description: Filter by workflow category (open/resolved).
+            description: |-
+                FeedbackFilter is the shared filter criteria used by list and batch
+                 operations. It mirrors the query parameters of ListFeedbackRequest
+                 so batch operations can select rows by the same criteria.
         GetClusterMembersResponse:
             type: object
             properties:
@@ -2705,6 +3036,55 @@ components:
                     type: string
                     description: Enrichment lifecycle state at ingest time (always "pending" here).
             description: IngestResponse is returned on 200.
+        JobStatusResponse:
+            type: object
+            properties:
+                jobId:
+                    type: string
+                    description: Unique job identifier.
+                status:
+                    enum:
+                        - JOB_STATUS_UNSPECIFIED
+                        - JOB_STATUS_QUEUED
+                        - JOB_STATUS_RUNNING
+                        - JOB_STATUS_COMPLETED
+                        - JOB_STATUS_FAILED
+                        - JOB_STATUS_CANCELLED
+                    type: string
+                    description: Current job status.
+                    format: enum
+                total:
+                    type: integer
+                    description: Total items to process.
+                    format: int32
+                progress:
+                    type: integer
+                    description: Items processed so far.
+                    format: int32
+                result:
+                    allOf:
+                        - $ref: '#/components/schemas/BatchFeedbackResponse'
+                    description: Final result (populated when status = COMPLETED).
+                error:
+                    type: string
+                    description: Error message (populated when status = FAILED).
+                createdAt:
+                    type: string
+                    description: When the job was created (RFC3339).
+                startedAt:
+                    type: string
+                    description: When processing started (RFC3339, absent if still queued).
+                completedAt:
+                    type: string
+                    description: When the job finished (RFC3339, absent if still running).
+                updatedAt:
+                    type: string
+                    description: When the job status was last updated (RFC3339).
+                retryAfterSeconds:
+                    type: integer
+                    description: Suggested poll interval in seconds (for long-running jobs).
+                    format: int32
+            description: JobStatusResponse is the full job status with progress and result.
         LLMChannel:
             type: object
             properties:
@@ -2868,6 +3248,17 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/InboundSource'
+        ListJobsResponse:
+            type: object
+            properties:
+                jobs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/JobStatusResponse'
+                nextCursor:
+                    type: string
+                    description: Cursor for the next page; absent when no more pages.
+            description: ListJobsResponse contains the list of jobs.
         ListLLMChannelAbilitiesResponse:
             type: object
             properties:
@@ -3093,6 +3484,71 @@ components:
         SeedDefaultsResponse:
             type: object
             properties: {}
+        SemanticSearchHit:
+            type: object
+            properties:
+                feedback:
+                    allOf:
+                        - $ref: '#/components/schemas/Feedback'
+                    description: The feedback row.
+                similarity:
+                    type: number
+                    description: Semantic (embedding) similarity score (0.0-1.0).
+                    format: float
+                keywordScore:
+                    type: number
+                    description: Keyword (full-text) relevance score (0.0-1.0).
+                    format: float
+                matchType:
+                    type: string
+                    description: 'How this result was matched: "semantic", "keyword", or "hybrid".'
+            description: SemanticSearchHit is a single search result with ranking metadata.
+        SemanticSearchRequest:
+            type: object
+            properties:
+                q:
+                    type: string
+                    description: The natural language query string.
+                limit:
+                    type: integer
+                    description: 'Maximum results to return (default: 20, max: 100).'
+                    format: int32
+                minSimilarity:
+                    type: number
+                    description: Minimum similarity threshold (0.0-1.0). Results below this are excluded.
+                    format: float
+                filter:
+                    allOf:
+                        - $ref: '#/components/schemas/FeedbackFilter'
+                    description: Additional filters to apply on top of semantic ranking.
+                semanticWeight:
+                    type: number
+                    description: 'Weight for semantic (embedding) similarity (0.0-1.0, default: 0.7).'
+                    format: float
+                keywordWeight:
+                    type: number
+                    description: 'Weight for keyword (full-text) similarity (0.0-1.0, default: 0.3).'
+                    format: float
+            description: SemanticSearchRequest is the query envelope for semantic search.
+        SemanticSearchResponse:
+            type: object
+            properties:
+                hits:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SemanticSearchHit'
+                    description: Ranked results ordered by combined similarity score.
+                embeddingModel:
+                    type: string
+                    description: The embedding model used for this search.
+                totalWithEmbeddings:
+                    type: integer
+                    description: Count of feedback rows that have embeddings in this tenant.
+                    format: int32
+                usedKeywordFallback:
+                    type: boolean
+                    description: True if semantic search was unavailable and results are keyword-only.
+            description: SemanticSearchResponse contains the ranked search results.
         SessionUser:
             type: object
             properties:
@@ -3512,6 +3968,10 @@ components:
 tags:
     - name: ApiKeyService
       description: ApiKeyService manages a tenant's external ingest API keys (console).
+    - name: BatchService
+      description: |-
+        BatchService provides batch operations on feedback rows (#30).
+         Operations can target rows by explicit IDs or by filter query.
     - name: ClustersService
       description: ClustersService provides semantic cluster views for the console (#25).
     - name: DigestSubscriptionService
@@ -3546,10 +4006,16 @@ tags:
          channel-agnostic inbound framework). Sources back the webhook and
          email IMAP adapters; future channels (RSS, scrape, MQ, …) hang off
          the same shape.
+    - name: JobService
+      description: JobService provides status tracking for async batch operations (#30).
     - name: LLMConfigService
       description: LLMConfigService manages DB-backed provider channels and routes.
     - name: NotifyTargetService
       description: NotifyTargetService manages a tenant's outbound notification destinations.
+    - name: SearchService
+      description: |-
+        SearchService provides semantic search over feedback (#30).
+         Uses pgvector embeddings when available, falls back to keyword search.
     - name: SessionService
       description: SessionService backs the console session (login, current tenant + user, logout).
     - name: UsageService

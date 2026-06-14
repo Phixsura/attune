@@ -3,6 +3,7 @@ import { type RenderOptions, type RenderResult, render } from '@testing-library/
 import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
 import { I18nextProvider } from 'react-i18next'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import i18n from '@/i18n'
 
 // renderWithProviders wraps the unit under test with the providers it
@@ -28,7 +29,9 @@ export function renderWithProviders(
     ...render(ui, {
       wrapper: ({ children }) => (
         <I18nextProvider i18n={i18n}>
-          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+          <QueryClientProvider client={queryClient}>
+            <TooltipProvider>{children}</TooltipProvider>
+          </QueryClientProvider>
         </I18nextProvider>
       ),
       ...opts?.renderOptions,

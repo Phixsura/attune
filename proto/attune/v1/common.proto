@@ -74,6 +74,13 @@ enum ErrorCode {
   INVALID_TRANSITION       = 44;
   WORKFLOW_STATE_NOT_FOUND = 45;
   NO_WORKFLOW_STATE        = 46;
+
+  // batch operations (#30)
+  FEATURE_DISABLED      = 47;  // Tenant-level feature not enabled
+  IDEMPOTENCY_CONFLICT  = 48;  // Same idempotency key with different params
+  REQUEST_IN_PROGRESS   = 49;  // Idempotency key is being processed
+  JOB_NOT_FOUND         = 50;  // Async job ID not found
+  JOB_ALREADY_CANCELLED = 51;  // Job was already cancelled
 }
 
 // ErrorResponse is the JSON body returned on any 4xx/5xx across attune's HTTP
@@ -166,3 +173,4 @@ message Dimension {
   // Optional generic presentation metadata.
   RendererSpec renderer = 10;
 }
+
