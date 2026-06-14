@@ -20,7 +20,8 @@
     "copied": "已复制",
     "close": "关闭",
     "never": "从未",
-    "error": "出错了"
+    "error": "出错了",
+    "dismiss": "关闭"
   },
   "auth": {
     "email_label": "邮箱",
@@ -569,7 +570,16 @@
       "confirm_workflow_description": "将对 {{count}} 条反馈执行状态流转。",
       "confirm_delete_title": "批量删除反馈",
       "confirm_delete_description": "将删除 {{count}} 条反馈。",
-      "count_mismatch_warning": "注意：服务端匹配到 {{actual}} 条，与预期的 {{expected}} 条不符。请重新确认筛选条件。"
+      "count_mismatch_warning": "注意：服务端匹配到 {{actual}} 条，与预期的 {{expected}} 条不符。请重新确认筛选条件。",
+      "result_success": "批量操作成功",
+      "result_failed": "批量操作失败",
+      "result_partial": "批量操作部分成功",
+      "result_succeeded": "成功 {{count}} 条",
+      "result_skipped": "跳过 {{count}} 条",
+      "result_failed_count": "失败 {{count}} 条",
+      "show_failures": "查看失败详情",
+      "more_failures": "还有 {{count}} 条失败…",
+      "retry_failed": "重试失败项"
     },
     "job": {
       "status_queued": "排队中",
