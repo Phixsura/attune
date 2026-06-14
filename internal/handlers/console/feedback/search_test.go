@@ -1,14 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
+// ptrext:file-allow test fixtures build proto-request pointers
 
 package feedback
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	repofeedback "github.com/Phixsura/attune/internal/repo/feedback"
@@ -193,4 +201,260 @@ func TestSearchFeedbackToProto_EmptyStrings(t *testing.T) {
 	require.NotNil(t, result)
 	assert.Equal(t, int64(1), result.GetId())
 	assert.Nil(t, result.EnrichedTitle) // empty string becomes nil
+}
+
+// fakeSearchService implements searchService for testing.
+type fakeSearchService struct {
+	resp *semanticsearch.SearchResponse
+	err  error
+}
+
+func (f *fakeSearchService) Search(_ context.Context, _ *semanticsearch.SearchRequest) (*semanticsearch.SearchResponse, error) {
+	return f.resp, f.err
+}
+
+func (f *fakeSearchService) GetEmbedding(_ context.Context, _, _ string) ([]float32, string, error) {
+	return nil, "", nil
+}
+
+func newSearchHandler(svc searchService) http.HandlerFunc {
+	h := &SearchHandler{service: svc}
+	return dispatcher.Bind(
+		"console.SearchHandler.Search",
+		dispatcher.JSON(func() *attunev1.SemanticSearchRequest {
+			return ptrext.Of(attunev1.SemanticSearchRequest{})
+		}),
+		h.Search,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SemanticSearchRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+}
+
+func TestSearchHandler_Search(t *testing.T) {
+	t.Parallel()
+
+	t.Run("200 OK with semantic search hits", func(t *testing.T) {
+		now := time.Now()
+		handler := newSearchHandler(&fakeSearchService{
+			resp: &semanticsearch.SearchResponse{
+				Hits: []*semanticsearch.SearchHit{
+					{
+						Feedback: ptrext.Of(repofeedback.SearchFeedback{
+							ID:               1,
+							Content:          "login button not working",
+							Source:           "widget",
+							EnrichedTitle:    "Login Issue",
+							IsUrgent:         true,
+							EnrichmentStatus: "done",
+							CreatedAt:        now,
+						}),
+						Similarity:   0.92,
+						KeywordScore: 0.3,
+						MatchType:    "hybrid",
+					},
+					{
+						Feedback: ptrext.Of(repofeedback.SearchFeedback{
+							ID:               2,
+							Content:          "authentication fails",
+							Source:           "api",
+							EnrichedTitle:    "Auth Failure",
+							IsUrgent:         false,
+							EnrichmentStatus: "done",
+							CreatedAt:        now,
+						}),
+						Similarity:   0.85,
+						KeywordScore: 0.2,
+						MatchType:    "semantic",
+					},
+				},
+				EmbeddingModel:      "text-embedding-3-small",
+				TotalWithEmbeddings: 150,
+				UsedKeywordFallback: false,
+			},
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":"login problem"}`))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+
+		hits, ok := body["hits"].([]any)
+		require.True(t, ok)
+		require.Len(t, hits, 2)
+
+		assert.Equal(t, "text-embedding-3-small", body["embeddingModel"])
+		assert.Equal(t, float64(150), body["totalWithEmbeddings"])
+		assert.Equal(t, false, body["usedKeywordFallback"])
+	})
+
+	t.Run("200 OK with keyword fallback", func(t *testing.T) {
+		now := time.Now()
+		handler := newSearchHandler(&fakeSearchService{
+			resp: &semanticsearch.SearchResponse{
+				Hits: []*semanticsearch.SearchHit{
+					{
+						Feedback: ptrext.Of(repofeedback.SearchFeedback{
+							ID:               5,
+							Content:          "payment processing delay",
+							Source:           "email",
+							EnrichedTitle:    "Payment Delay",
+							EnrichmentStatus: "done",
+							CreatedAt:        now,
+						}),
+						Similarity:   0.0,
+						KeywordScore: 0.9,
+						MatchType:    "keyword",
+					},
+				},
+				EmbeddingModel:      "",
+				TotalWithEmbeddings: 0,
+				UsedKeywordFallback: true,
+			},
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":"payment delay"}`))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+
+		assert.Equal(t, true, body["usedKeywordFallback"])
+
+		hits, ok := body["hits"].([]any)
+		require.True(t, ok)
+		require.Len(t, hits, 1)
+
+		hit := hits[0].(map[string]any)
+		assert.Equal(t, "keyword", hit["matchType"])
+	})
+
+	t.Run("400 Bad Request for empty query", func(t *testing.T) {
+		handler := newSearchHandler(&fakeSearchService{})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":""}`))
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		assert.Contains(t, body["message"], "query")
+	})
+
+	t.Run("400 Bad Request for missing query", func(t *testing.T) {
+		handler := newSearchHandler(&fakeSearchService{})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{}`))
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 Bad Request for limit exceeding max", func(t *testing.T) {
+		handler := newSearchHandler(&fakeSearchService{})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":"test","limit":150}`))
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		assert.Contains(t, body["message"], "limit")
+	})
+
+	t.Run("429 Too Many Requests rate limit", func(t *testing.T) {
+		handler := newSearchHandler(&fakeSearchService{
+			err: semanticsearch.ErrRateLimited,
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":"test query"}`))
+
+		require.Equal(t, http.StatusTooManyRequests, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		assert.Contains(t, body["message"], "rate limit")
+	})
+
+	t.Run("400 Bad Request for service empty query error", func(t *testing.T) {
+		handler := newSearchHandler(&fakeSearchService{
+			err: semanticsearch.ErrEmptyQuery,
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":"  "}`)) // whitespace-only may pass handler validation but fail service
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 Internal Server Error", func(t *testing.T) {
+		handler := newSearchHandler(&fakeSearchService{
+			err: errors.New("database connection failed"),
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":"test query"}`))
+
+		require.Equal(t, http.StatusInternalServerError, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		assert.Contains(t, body["message"], "search failed")
+	})
+
+	t.Run("200 OK with filter options", func(t *testing.T) {
+		handler := newSearchHandler(&fakeSearchService{
+			resp: &semanticsearch.SearchResponse{
+				Hits:                []*semanticsearch.SearchHit{},
+				EmbeddingModel:      "text-embedding-3-small",
+				TotalWithEmbeddings: 50,
+				UsedKeywordFallback: false,
+			},
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":"test","limit":10,"min_similarity":0.7,"filter":{"urgent":true}}`))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+
+		hits, ok := body["hits"].([]any)
+		require.True(t, ok)
+		assert.Empty(t, hits)
+	})
+
+	t.Run("200 OK empty results", func(t *testing.T) {
+		handler := newSearchHandler(&fakeSearchService{
+			resp: &semanticsearch.SearchResponse{
+				Hits:                []*semanticsearch.SearchHit{},
+				EmbeddingModel:      "text-embedding-3-small",
+				TotalWithEmbeddings: 100,
+				UsedKeywordFallback: false,
+			},
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":"xyznonexistent123"}`))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+
+		hits, ok := body["hits"].([]any)
+		require.True(t, ok)
+		assert.Empty(t, hits)
+	})
 }
