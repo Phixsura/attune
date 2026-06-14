@@ -153,7 +153,7 @@ func TestPG_JobList(t *testing.T) {
 	}
 
 	// List all.
-	jobs, err := e.jobs.List(e.ctx, e.tenantID, nil, 100)
+	jobs, _, err := e.jobs.List(e.ctx, e.tenantID, nil, 100, "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestPG_JobListByStatus(t *testing.T) {
 
 	// List only completed.
 	status := feedbackjob.StatusCompleted
-	jobs, err := e.jobs.List(e.ctx, e.tenantID, ptrext.Of(status), 100)
+	jobs, _, err := e.jobs.List(e.ctx, e.tenantID, ptrext.Of(status), 100, "")
 	if err != nil {
 		t.Fatalf("List completed: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestPG_JobListByStatus(t *testing.T) {
 
 	// List only queued.
 	status = feedbackjob.StatusQueued
-	jobs, err = e.jobs.List(e.ctx, e.tenantID, ptrext.Of(status), 100)
+	jobs, _, err = e.jobs.List(e.ctx, e.tenantID, ptrext.Of(status), 100, "")
 	if err != nil {
 		t.Fatalf("List queued: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestPG_JobListLimit(t *testing.T) {
 	}
 
 	// List with limit 2.
-	jobs, err := e.jobs.List(e.ctx, e.tenantID, nil, 2)
+	jobs, _, err := e.jobs.List(e.ctx, e.tenantID, nil, 2, "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

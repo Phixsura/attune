@@ -363,6 +363,9 @@ func newConsoleRouter(
 		nil,
 		nil,
 		nil,
+		nil, // batchHandler
+		nil, // searchHandler
+		nil, // jobHandler
 		nil,
 		nil,
 		nil,
