@@ -53,7 +53,7 @@ func (h *Handler) List(
 	}
 	items := make([]*attunev1.Tag, 0, len(tags))
 	for _, t := range tags {
-		items = append(items, toProto(t))
+		items = append(items, ToProto(t))
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.ListTagsResponse{Tags: items}))
 }
@@ -70,7 +70,10 @@ func (h *Handler) Create(
 	}
 	color := normalizeColor(req.Color)
 	if color == "" {
-		all, _ := h.repo.List(ctx, auth.TenantID, true)
+		all, listErr := h.repo.List(ctx, auth.TenantID, true)
+		if listErr != nil {
+			logext.Warnf(ctx, "[%s] palette fallback: list failed,tenant_id:%s,err:%+v", where, auth.TenantID, listErr.Error())
+		}
 		color = defaultPalette[len(all)%len(defaultPalette)]
 	}
 	desc := strings.TrimSpace(req.GetDescription())
@@ -107,7 +110,7 @@ func (h *Handler) Create(
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to create tag")
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,tag_id:%s,name:%s", where, auth.TenantID, created.ID, created.Name)
-	return dispatcher.OK(toProto(ptrext.Indirect(created)))
+	return dispatcher.OK(ToProto(ptrext.Indirect(created)))
 }
 
 func (h *Handler) Update(
@@ -169,7 +172,7 @@ func (h *Handler) Update(
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to update tag")
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,tag_id:%s", where, auth.TenantID, tagID)
-	return dispatcher.OK(toProto(ptrext.Indirect(updated)))
+	return dispatcher.OK(ToProto(ptrext.Indirect(updated)))
 }
 
 func (h *Handler) Archive(
@@ -196,7 +199,7 @@ func (h *Handler) Archive(
 	return dispatcher.OK(ptrext.Of(attunev1.ArchiveTagResponse{}))
 }
 
-func toProto(t feedbacktag.Tag) *attunev1.Tag {
+func ToProto(t feedbacktag.Tag) *attunev1.Tag {
 	p := ptrext.Of(attunev1.Tag{
 		Id:          t.ID.String(),
 		Name:        t.Name,

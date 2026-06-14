@@ -925,7 +925,12 @@ func (r *Router) mountTags(m chi.Router) {
 			"console.TagHandler.List",
 			dispatcher.Query(
 				func() *attunev1.ListTagsRequest { return ptrext.Of(attunev1.ListTagsRequest{}) },
-				func(_ *http.Request, _ *attunev1.ListTagsRequest) error { return nil },
+				func(r *http.Request, req *attunev1.ListTagsRequest) error {
+					if v := r.URL.Query().Get("include_archived"); v == "true" || v == "1" {
+						req.IncludeArchived = true
+					}
+					return nil
+				},
 			),
 			r.tags.List,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListTagsRequest) (*session.AuthCtx, error) {

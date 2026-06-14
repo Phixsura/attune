@@ -7,12 +7,12 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	taghandler "github.com/Phixsura/attune/internal/handlers/console/tag"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -23,14 +23,14 @@ type tagRepo interface {
 	GetByID(ctx context.Context, tenantID string, tagID uuid.UUID) (*feedbacktag.Tag, error)
 	GetByName(ctx context.Context, tenantID, name string) (*feedbacktag.Tag, error)
 	Create(ctx context.Context, t feedbacktag.Tag) (*feedbacktag.Tag, error)
-	IncrementUsage(ctx context.Context, tagID uuid.UUID) error
-	DecrementUsage(ctx context.Context, tagID uuid.UUID) error
+	IncrementUsage(ctx context.Context, tenantID string, tagID uuid.UUID) error
+	DecrementUsage(ctx context.Context, tenantID string, tagID uuid.UUID) error
 }
 
 type assignmentRepo interface {
-	Add(ctx context.Context, feedbackID int64, tagID uuid.UUID, createdBy string) (bool, error)
-	Remove(ctx context.Context, feedbackID int64, tagID uuid.UUID) (bool, error)
-	RemoveByScopeExcluding(ctx context.Context, feedbackID int64, scope string, excludeTagID uuid.UUID) ([]uuid.UUID, error)
+	Add(ctx context.Context, tenantID string, feedbackID int64, tagID uuid.UUID, createdBy string) (bool, error)
+	Remove(ctx context.Context, tenantID string, feedbackID int64, tagID uuid.UUID) (bool, error)
+	RemoveByScopeExcluding(ctx context.Context, tenantID string, feedbackID int64, scope string, excludeTagID uuid.UUID) ([]uuid.UUID, error)
 }
 
 type Handler struct {
@@ -56,33 +56,18 @@ func (h *Handler) Add(
 			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	}
 
-	if tag.ExclusiveScope != nil {
-		removed, scopeErr := h.assignments.RemoveByScopeExcluding(ctx, feedbackID, ptrext.Indirect(tag.ExclusiveScope), tag.ID)
-		if scopeErr != nil {
-			logext.Errorf(ctx, "[%s] scope cleanup failed,tenant_id:%s,err:%+v", where, auth.TenantID, scopeErr.Error())
-			return dispatcher.Fail[*attunev1.AddFeedbackTagResponse](
-				http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to enforce exclusive scope")
-		}
-		for _, rid := range removed {
-			_ = h.tags.DecrementUsage(ctx, rid)
-		}
-	}
-
-	inserted, err := h.assignments.Add(ctx, feedbackID, tag.ID, auth.UserID)
+	inserted, err := h.addWithScope(ctx, auth.TenantID, feedbackID, tag, auth.UserID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] add failed,tenant_id:%s,feedback_id:%d,tag_id:%s,err:%+v",
 			where, auth.TenantID, feedbackID, tag.ID, err.Error())
 		return dispatcher.Fail[*attunev1.AddFeedbackTagResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to add tag")
 	}
-	if inserted {
-		_ = h.tags.IncrementUsage(ctx, tag.ID)
-	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d,tag_id:%s,inserted:%t",
 		where, auth.TenantID, feedbackID, tag.ID, inserted)
 	return dispatcher.OK(ptrext.Of(attunev1.AddFeedbackTagResponse{
-		Tag: toProto(ptrext.Indirect(tag)),
+		Tag: taghandler.ToProto(ptrext.Indirect(tag)),
 	}))
 }
 
@@ -96,14 +81,14 @@ func (h *Handler) Remove(
 		return dispatcher.Fail[*attunev1.RemoveFeedbackTagResponse](
 			http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid tag id")
 	}
-	removed, err := h.assignments.Remove(ctx, req.GetFeedbackId(), tagID)
+	removed, err := h.assignments.Remove(ctx, auth.TenantID, req.GetFeedbackId(), tagID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] remove failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.RemoveFeedbackTagResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to remove tag")
 	}
 	if removed {
-		_ = h.tags.DecrementUsage(ctx, tagID)
+		_ = h.tags.DecrementUsage(ctx, auth.TenantID, tagID)
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d,tag_id:%s",
 		where, auth.TenantID, req.GetFeedbackId(), tagID)
@@ -124,43 +109,84 @@ func (h *Handler) BatchUpdate(
 			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "max 20 tag operations per batch")
 	}
 
+	addTags := make([]*feedbacktag.Tag, 0, len(req.GetAddTagIds()))
+	for _, raw := range req.GetAddTagIds() {
+		tagID, parseErr := uuid.Parse(raw)
+		if parseErr != nil {
+			return dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
+				http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid add tag id: "+raw)
+		}
+		tag, getErr := h.tags.GetByID(ctx, auth.TenantID, tagID)
+		if getErr != nil {
+			return dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
+				http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "add tag not found: "+raw)
+		}
+		addTags = append(addTags, tag)
+	}
+	rmIDs := make([]uuid.UUID, 0, len(req.GetRemoveTagIds()))
+	for _, raw := range req.GetRemoveTagIds() {
+		tagID, parseErr := uuid.Parse(raw)
+		if parseErr != nil {
+			return dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
+				http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid remove tag id: "+raw)
+		}
+		if _, getErr := h.tags.GetByID(ctx, auth.TenantID, tagID); getErr != nil {
+			return dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
+				http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "remove tag not found: "+raw)
+		}
+		rmIDs = append(rmIDs, tagID)
+	}
+
 	var affected int32
 	for _, fbID := range req.GetFeedbackIds() {
-		for _, addID := range req.GetAddTagIds() {
-			tagID, parseErr := uuid.Parse(addID)
-			if parseErr != nil {
-				continue
-			}
-			inserted, addErr := h.assignments.Add(ctx, fbID, tagID, auth.UserID)
+		for _, tag := range addTags {
+			inserted, addErr := h.addWithScope(ctx, auth.TenantID, fbID, tag, auth.UserID)
 			if addErr != nil {
 				logext.Warnf(ctx, "[%s] batch add skipped,feedback_id:%d,tag_id:%s,err:%+v",
-					where, fbID, addID, addErr.Error())
+					where, fbID, tag.ID, addErr.Error())
 				continue
 			}
 			if inserted {
-				_ = h.tags.IncrementUsage(ctx, tagID)
 				affected++
 			}
 		}
-		for _, rmID := range req.GetRemoveTagIds() {
-			tagID, parseErr := uuid.Parse(rmID)
-			if parseErr != nil {
-				continue
-			}
-			removed, rmErr := h.assignments.Remove(ctx, fbID, tagID)
+		for _, tagID := range rmIDs {
+			removed, rmErr := h.assignments.Remove(ctx, auth.TenantID, fbID, tagID)
 			if rmErr != nil {
 				logext.Warnf(ctx, "[%s] batch remove skipped,feedback_id:%d,tag_id:%s,err:%+v",
-					where, fbID, rmID, rmErr.Error())
+					where, fbID, tagID, rmErr.Error())
 				continue
 			}
 			if removed {
-				_ = h.tags.DecrementUsage(ctx, tagID)
+				_ = h.tags.DecrementUsage(ctx, auth.TenantID, tagID)
 				affected++
 			}
 		}
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,affected:%d", where, auth.TenantID, affected)
 	return dispatcher.OK(ptrext.Of(attunev1.BatchUpdateFeedbackTagsResponse{Affected: affected}))
+}
+
+func (h *Handler) addWithScope(
+	ctx context.Context, tenantID string, feedbackID int64, tag *feedbacktag.Tag, userID string,
+) (bool, error) {
+	if tag.ExclusiveScope != nil {
+		removed, scopeErr := h.assignments.RemoveByScopeExcluding(ctx, tenantID, feedbackID, ptrext.Indirect(tag.ExclusiveScope), tag.ID)
+		if scopeErr != nil {
+			return false, scopeErr
+		}
+		for _, rid := range removed {
+			_ = h.tags.DecrementUsage(ctx, tenantID, rid)
+		}
+	}
+	inserted, err := h.assignments.Add(ctx, tenantID, feedbackID, tag.ID, userID)
+	if err != nil {
+		return false, err
+	}
+	if inserted {
+		_ = h.tags.IncrementUsage(ctx, tenantID, tag.ID)
+	}
+	return inserted, nil
 }
 
 func (h *Handler) resolveTag(
@@ -198,22 +224,4 @@ func (h *Handler) resolveTag(
 		return nil, err
 	}
 	return created, nil
-}
-
-func toProto(t feedbacktag.Tag) *attunev1.Tag {
-	p := ptrext.Of(attunev1.Tag{
-		Id:          t.ID.String(),
-		Name:        t.Name,
-		Color:       t.Color,
-		Description: t.Description,
-		UsageCount:  int32(t.UsageCount),
-		Archived:    t.ArchivedAt != nil,
-		CreatedBy:   t.CreatedBy,
-		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:   t.UpdatedAt.UTC().Format(time.RFC3339),
-	})
-	if t.ExclusiveScope != nil {
-		p.ExclusiveScope = t.ExclusiveScope
-	}
-	return p
 }

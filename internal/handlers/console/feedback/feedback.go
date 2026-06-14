@@ -17,8 +17,8 @@ import (
 )
 
 type tagAssignmentReader interface {
-	ListByFeedback(ctx context.Context, feedbackID int64) ([]feedbacktagassignment.TagInfo, error)
-	ListByFeedbackBatch(ctx context.Context, feedbackIDs []int64) (map[int64][]feedbacktagassignment.TagInfo, error)
+	ListByFeedback(ctx context.Context, tenantID string, feedbackID int64) ([]feedbacktagassignment.TagInfo, error)
+	ListByFeedbackBatch(ctx context.Context, tenantID string, feedbackIDs []int64) (map[int64][]feedbacktagassignment.TagInfo, error)
 }
 
 // FeedbackHandler serves /fb/v1/console/feedback. All queries scope to the

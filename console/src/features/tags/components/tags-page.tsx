@@ -7,6 +7,14 @@ import { EmptyState } from '@/components/empty-state'
 import { TagBadge } from '@/components/tag/tag-badge'
 import { Button } from '@/components/ui/button'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Table,
   TableBody,
   TableCell,
@@ -29,6 +37,7 @@ export function TagsPage() {
 
   const [createOpen, setCreateOpen] = useState(false)
   const [editTag, setEditTag] = useState<Tag | undefined>()
+  const [archiveTarget, setArchiveTarget] = useState<Tag | undefined>()
 
   const handleCreate = (data: {
     name: string
@@ -78,9 +87,13 @@ export function TagsPage() {
     )
   }
 
-  const handleArchive = (tag: Tag) => {
-    archiveTag.mutate(tag.id, {
-      onSuccess: () => toast.success(t('tags.archived')),
+  const handleArchiveConfirm = () => {
+    if (!archiveTarget) return
+    archiveTag.mutate(archiveTarget.id, {
+      onSuccess: () => {
+        setArchiveTarget(undefined)
+        toast.success(t('tags.archived'))
+      },
       onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
     })
   }
@@ -131,6 +144,7 @@ export function TagsPage() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7"
+                      aria-label={t('tags.edit_label')}
                       onClick={() => setEditTag(tag)}
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -139,7 +153,8 @@ export function TagsPage() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleArchive(tag)}
+                      aria-label={t('tags.archive_label')}
+                      onClick={() => setArchiveTarget(tag)}
                     >
                       <Archive className="h-3.5 w-3.5" />
                     </Button>
@@ -167,6 +182,30 @@ export function TagsPage() {
         }}
         onSubmit={handleUpdate}
       />
+
+      <Dialog
+        open={!!archiveTarget}
+        onOpenChange={(v) => {
+          if (!v) setArchiveTarget(undefined)
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t('tags.archive_label')}</DialogTitle>
+            <DialogDescription>
+              {t('tags.archive_confirm', { name: archiveTarget?.name })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArchiveTarget(undefined)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="destructive" onClick={handleArchiveConfirm}>
+              {t('common.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }

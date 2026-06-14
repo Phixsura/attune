@@ -88,7 +88,7 @@ func (h *FeedbackHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 		detail.ReplyDraftGeneratedAt = ptrext.Of(row.ReplyDraftGeneratedAt.UTC().Format(time.RFC3339))
 	}
 	if h.tagAssignments != nil {
-		tags, err := h.tagAssignments.ListByFeedback(ctx, id)
+		tags, err := h.tagAssignments.ListByFeedback(ctx, auth.TenantID, id)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] tag load failed,tenant_id:%s,id:%d,err:%+v",
 				where, auth.TenantID, id, err.Error())

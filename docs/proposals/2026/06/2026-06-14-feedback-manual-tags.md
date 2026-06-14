@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #28 |
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Started** | 2026-06-14 CST |
 | **Related** | #19 (proto IDL contract — tag endpoints follow the same proto-first flow), #114 (embedding clustering — `enriched_attrs` is the AI-generated counterpart; manual tags live separately), `2026-06-07-flat-labels.md` (metadata-driven Dimensions model — the existing AI classification layer this feature complements) |
 

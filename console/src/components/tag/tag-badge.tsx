@@ -1,4 +1,5 @@
 import { X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
 export function TagBadge({
@@ -12,6 +13,7 @@ export function TagBadge({
   onRemove?: () => void
   className?: string
 }) {
+  const { t } = useTranslation()
   return (
     <span
       className={cn(
@@ -28,6 +30,7 @@ export function TagBadge({
       {onRemove ? (
         <button
           type="button"
+          aria-label={t('tags.remove_label', { name })}
           className="ml-0.5 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           onClick={(e) => {
             e.stopPropagation()

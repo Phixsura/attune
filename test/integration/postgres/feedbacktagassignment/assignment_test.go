@@ -70,7 +70,7 @@ func TestPG_AssignmentAddRemove(t *testing.T) {
 	tag := e.createTag(t, "bug")
 	fbID := e.insertFeedback(t, "crash on login")
 
-	inserted, err := e.assignments.Add(e.ctx, fbID, tag.ID, "user-1")
+	inserted, err := e.assignments.Add(e.ctx, e.tenantID, fbID, tag.ID, "user-1")
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestPG_AssignmentAddRemove(t *testing.T) {
 		t.Fatal("Add: expected inserted=true")
 	}
 
-	dup, err := e.assignments.Add(e.ctx, fbID, tag.ID, "user-1")
+	dup, err := e.assignments.Add(e.ctx, e.tenantID, fbID, tag.ID, "user-1")
 	if err != nil {
 		t.Fatalf("Add duplicate: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestPG_AssignmentAddRemove(t *testing.T) {
 		t.Fatal("duplicate Add should return inserted=false")
 	}
 
-	tags, err := e.assignments.ListByFeedback(e.ctx, fbID)
+	tags, err := e.assignments.ListByFeedback(e.ctx, e.tenantID, fbID)
 	if err != nil {
 		t.Fatalf("ListByFeedback: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestPG_AssignmentAddRemove(t *testing.T) {
 		t.Fatalf("unexpected tags: %+v", tags)
 	}
 
-	removed, err := e.assignments.Remove(e.ctx, fbID, tag.ID)
+	removed, err := e.assignments.Remove(e.ctx, e.tenantID, fbID, tag.ID)
 	if err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestPG_AssignmentAddRemove(t *testing.T) {
 		t.Fatal("Remove: expected removed=true")
 	}
 
-	removed2, err := e.assignments.Remove(e.ctx, fbID, tag.ID)
+	removed2, err := e.assignments.Remove(e.ctx, e.tenantID, fbID, tag.ID)
 	if err != nil {
 		t.Fatalf("Remove again: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestPG_AssignmentAddRemove(t *testing.T) {
 		t.Fatal("second Remove should return removed=false")
 	}
 
-	tags, err = e.assignments.ListByFeedback(e.ctx, fbID)
+	tags, err = e.assignments.ListByFeedback(e.ctx, e.tenantID, fbID)
 	if err != nil {
 		t.Fatalf("ListByFeedback after remove: %v", err)
 	}
@@ -141,15 +141,15 @@ func TestPG_RemoveByScopeExcluding(t *testing.T) {
 		t.Fatalf("update lo scope: %v", err)
 	}
 
-	if _, err := e.assignments.Add(e.ctx, fbID, hi.ID, "u1"); err != nil {
+	if _, err := e.assignments.Add(e.ctx, e.tenantID, fbID, hi.ID, "u1"); err != nil {
 		t.Fatalf("Add hi: %v", err)
 	}
-	if _, err := e.assignments.Add(e.ctx, fbID, lo.ID, "u1"); err != nil {
+	if _, err := e.assignments.Add(e.ctx, e.tenantID, fbID, lo.ID, "u1"); err != nil {
 		t.Fatalf("Add lo: %v", err)
 	}
 
 	// keep lo, remove others in "priority" scope
-	removed, err := e.assignments.RemoveByScopeExcluding(e.ctx, fbID, "priority", lo.ID)
+	removed, err := e.assignments.RemoveByScopeExcluding(e.ctx, e.tenantID, fbID, "priority", lo.ID)
 	if err != nil {
 		t.Fatalf("RemoveByScopeExcluding: %v", err)
 	}
@@ -157,7 +157,10 @@ func TestPG_RemoveByScopeExcluding(t *testing.T) {
 		t.Fatalf("expected [%s] removed, got %v", hi.ID, removed)
 	}
 
-	tags, _ := e.assignments.ListByFeedback(e.ctx, fbID)
+	tags, err := e.assignments.ListByFeedback(e.ctx, e.tenantID, fbID)
+	if err != nil {
+		t.Fatalf("ListByFeedback after scope cleanup: %v", err)
+	}
 	if len(tags) != 1 || tags[0].TagID != lo.ID {
 		t.Fatalf("expected only lo tag remaining, got %+v", tags)
 	}
@@ -170,17 +173,17 @@ func TestPG_ListByFeedbackBatch(t *testing.T) {
 	fb1 := e.insertFeedback(t, "feedback one")
 	fb2 := e.insertFeedback(t, "feedback two")
 
-	if _, err := e.assignments.Add(e.ctx, fb1, tag1.ID, "u1"); err != nil {
+	if _, err := e.assignments.Add(e.ctx, e.tenantID, fb1, tag1.ID, "u1"); err != nil {
 		t.Fatalf("Add fb1/tag1: %v", err)
 	}
-	if _, err := e.assignments.Add(e.ctx, fb2, tag1.ID, "u1"); err != nil {
+	if _, err := e.assignments.Add(e.ctx, e.tenantID, fb2, tag1.ID, "u1"); err != nil {
 		t.Fatalf("Add fb2/tag1: %v", err)
 	}
-	if _, err := e.assignments.Add(e.ctx, fb2, tag2.ID, "u1"); err != nil {
+	if _, err := e.assignments.Add(e.ctx, e.tenantID, fb2, tag2.ID, "u1"); err != nil {
 		t.Fatalf("Add fb2/tag2: %v", err)
 	}
 
-	m, err := e.assignments.ListByFeedbackBatch(e.ctx, []int64{fb1, fb2})
+	m, err := e.assignments.ListByFeedbackBatch(e.ctx, e.tenantID, []int64{fb1, fb2})
 	if err != nil {
 		t.Fatalf("ListByFeedbackBatch: %v", err)
 	}

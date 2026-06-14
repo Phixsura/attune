@@ -159,19 +159,20 @@ func (r *Repo) GetByName(ctx context.Context, tenantID, name string) (*Tag, erro
 	return ptrext.Of(t), nil
 }
 
-func (r *Repo) IncrementUsage(ctx context.Context, tagID uuid.UUID) error {
+func (r *Repo) IncrementUsage(ctx context.Context, tenantID string, tagID uuid.UUID) error {
 	_, err := r.pool.Exec(ctx,
-		"UPDATE tenant_feedback_tags SET usage_count = usage_count + 1 WHERE id = $1", tagID)
+		"UPDATE tenant_feedback_tags SET usage_count = usage_count + 1 WHERE id = $1 AND tenant_id = $2",
+		tagID, tenantID)
 	if err != nil {
 		return fmt.Errorf("increment usage: %w", err)
 	}
 	return nil
 }
 
-func (r *Repo) DecrementUsage(ctx context.Context, tagID uuid.UUID) error {
+func (r *Repo) DecrementUsage(ctx context.Context, tenantID string, tagID uuid.UUID) error {
 	_, err := r.pool.Exec(ctx,
-		"UPDATE tenant_feedback_tags SET usage_count = GREATEST(usage_count - 1, 0) WHERE id = $1",
-		tagID)
+		"UPDATE tenant_feedback_tags SET usage_count = GREATEST(usage_count - 1, 0) WHERE id = $1 AND tenant_id = $2",
+		tagID, tenantID)
 	if err != nil {
 		return fmt.Errorf("decrement usage: %w", err)
 	}

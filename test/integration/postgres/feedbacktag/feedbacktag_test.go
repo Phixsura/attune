@@ -147,21 +147,27 @@ func TestPG_TagUsageCount(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := repo.IncrementUsage(ctx, tag.ID); err != nil {
+	if err := repo.IncrementUsage(ctx, tenantID, tag.ID); err != nil {
 		t.Fatalf("IncrementUsage: %v", err)
 	}
-	if err := repo.IncrementUsage(ctx, tag.ID); err != nil {
+	if err := repo.IncrementUsage(ctx, tenantID, tag.ID); err != nil {
 		t.Fatalf("IncrementUsage 2: %v", err)
 	}
-	got, _ := repo.GetByID(ctx, tenantID, tag.ID)
+	got, err := repo.GetByID(ctx, tenantID, tag.ID)
+	if err != nil {
+		t.Fatalf("GetByID after increment: %v", err)
+	}
 	if got.UsageCount != 2 {
 		t.Fatalf("usage_count = %d want 2", got.UsageCount)
 	}
 
-	if err := repo.DecrementUsage(ctx, tag.ID); err != nil {
+	if err := repo.DecrementUsage(ctx, tenantID, tag.ID); err != nil {
 		t.Fatalf("DecrementUsage: %v", err)
 	}
-	got, _ = repo.GetByID(ctx, tenantID, tag.ID)
+	got, err = repo.GetByID(ctx, tenantID, tag.ID)
+	if err != nil {
+		t.Fatalf("GetByID after decrement: %v", err)
+	}
 	if got.UsageCount != 1 {
 		t.Fatalf("usage_count = %d want 1", got.UsageCount)
 	}

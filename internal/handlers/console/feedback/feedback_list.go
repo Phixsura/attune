@@ -105,7 +105,7 @@ func (h *FeedbackHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx],
 		for i, row := range rows {
 			ids[i] = row.ID
 		}
-		tagMap, err := h.tagAssignments.ListByFeedbackBatch(ctx, ids)
+		tagMap, err := h.tagAssignments.ListByFeedbackBatch(ctx, auth.TenantID, ids)
 		if err != nil {
 			logext.Warnf(ctx, "[%s] tag batch load failed,tenant_id:%s,err:%+v",
 				where, auth.TenantID, err.Error())

@@ -676,6 +676,10 @@
     "create_button": "新建标签",
     "created": "标签已创建",
     "archived": "标签已归档",
+    "archive_confirm": "确定要归档标签「{{name}}」吗？归档后该标签不会出现在新的分配中。",
+    "edit_label": "编辑",
+    "archive_label": "归档",
+    "remove_label": "移除标签 {{name}}",
     "empty": {
       "title": "还没有标签",
       "body": "创建标签后，可以在反馈详情中为反馈打上标签。"

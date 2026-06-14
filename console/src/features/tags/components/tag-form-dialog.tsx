@@ -106,6 +106,7 @@ export function TagFormDialog({
                   <button
                     key={c}
                     type="button"
+                    aria-label={c}
                     className={`size-6 rounded-full border-2 transition-transform ${
                       color === c
                         ? 'scale-110 border-foreground'
