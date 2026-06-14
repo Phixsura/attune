@@ -31,6 +31,7 @@ import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet
 import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
 import { LanguageBadge } from '@/features/feedback/components/language-badge'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
+import { tagsQuery } from '@/features/tags/api/list-tags'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Dimension } from '@/proto/attune/v1/common'
 
@@ -59,6 +60,7 @@ function FeedbackPage() {
   const items = list.data?.pages.flatMap((p) => p.items) ?? []
   const total = items.length
   const stats = useQuery(feedbackStatsQuery())
+  const allTags = useQuery(tagsQuery())
 
   return (
     <div>
@@ -129,6 +131,7 @@ function FeedbackPage() {
       <FeedbackDetailSheet
         id={detailId}
         dims={dims}
+        availableTags={allTags.data ?? []}
         onOpenChange={(v) => !v && setDetailId(null)}
       />
     </div>

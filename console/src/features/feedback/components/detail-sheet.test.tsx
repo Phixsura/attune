@@ -36,7 +36,9 @@ describe('FeedbackDetailSheet', () => {
   })
 
   it('id=null renders nothing (sheet closed)', () => {
-    renderWithProviders(<FeedbackDetailSheet id={null} dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id={null} dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     // No urgent dot, no title rendered.
     expect(screen.queryByText(/payment failed/i)).toBeNull()
   })
@@ -66,7 +68,9 @@ describe('FeedbackDetailSheet', () => {
         }),
       ),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-1" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-1" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     // Title, raw content, AI rationale all appear once the query resolves.
     await waitFor(() => expect(screen.getByText('支付失败')).toBeInTheDocument())
     expect(screen.getByText(/payment failed at checkout/i)).toBeInTheDocument()
@@ -100,7 +104,9 @@ describe('FeedbackDetailSheet', () => {
         }),
       ),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-2" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-2" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText('展示侧：支付流程受阻')).toBeInTheDocument())
     expect(screen.queryByText('原语言解读')).toBeNull()
     expect(screen.queryByText('原文侧：支付流程受阻')).toBeNull()
@@ -114,7 +120,9 @@ describe('FeedbackDetailSheet', () => {
         ),
       ),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-3" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-3" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText(/Sorry to hear that/i)).toBeInTheDocument())
     expect(screen.getByText('回复草稿')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /复制/ })).toBeInTheDocument()
@@ -135,7 +143,9 @@ describe('FeedbackDetailSheet', () => {
         })
       }),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-4" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-4" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText('old draft')).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /重新生成/ }))
     // 'new draft' must come from the GET refetch (which now returns it),
@@ -150,7 +160,9 @@ describe('FeedbackDetailSheet', () => {
         HttpResponse.json(draftRow('f-6', { replyDraft: '' })),
       ),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-6" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-6" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText('回复草稿')).toBeInTheDocument())
     expect(screen.getByText('暂无草稿')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /生成草稿/ })).toBeInTheDocument()
@@ -163,7 +175,9 @@ describe('FeedbackDetailSheet', () => {
         HttpResponse.json(draftRow('f-7', { replyDraftEnabled: false, replyDraft: '' })),
       ),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-7" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-7" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText('原始内容')).toBeInTheDocument())
     expect(screen.queryByText('回复草稿')).toBeNull()
   })
@@ -178,7 +192,9 @@ describe('FeedbackDetailSheet', () => {
         HttpResponse.json(draftRow('f-8', { replyDraft: 'a draft to copy' })),
       ),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-8" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-8" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText('a draft to copy')).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /复制/ }))
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('草稿已复制到剪贴板'))
@@ -193,7 +209,9 @@ describe('FeedbackDetailSheet', () => {
         HttpResponse.json({ code: 'BAD_GATEWAY', message: 'failed' }, { status: 502 }),
       ),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-9" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-9" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText('old')).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /重新生成/ }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('重新生成失败'))
@@ -209,7 +227,9 @@ describe('FeedbackDetailSheet', () => {
         return HttpResponse.json({ replyDraft: 'unused', replyDraftGeneratedAt: '' })
       }),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-10" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-10" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText('old draft')).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /重新生成/ }))
     // Pending: the draft body becomes a skeleton and both buttons disable.
@@ -227,7 +247,9 @@ describe('FeedbackDetailSheet', () => {
         HttpResponse.json(draftRow('f-11', { replyDraft: 'copy me' })),
       ),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-11" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-11" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText('copy me')).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /复制/ }))
     await waitFor(() => expect(screen.getByRole('button', { name: /已复制/ })).toBeInTheDocument())
@@ -244,7 +266,9 @@ describe('FeedbackDetailSheet', () => {
         ),
       ),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-12" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-12" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText('drafted')).toBeInTheDocument())
     expect(screen.getByText(/生成于/)).toBeInTheDocument()
   })
@@ -258,7 +282,9 @@ describe('FeedbackDetailSheet', () => {
         HttpResponse.json({ code: 'RATE_LIMITED', message: 'cooldown' }, { status: 429 }),
       ),
     )
-    renderWithProviders(<FeedbackDetailSheet id="f-13" dims={dims} onOpenChange={vi.fn()} />)
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-13" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
     await waitFor(() => expect(screen.getByText('old')).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /重新生成/ }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('操作过于频繁，请稍候再试'))

@@ -21,10 +21,12 @@ import {
 } from '@/features/feedback/api/get-feedback-detail'
 import { useRegenerateReplyDraft } from '@/features/feedback/api/regenerate-reply-draft'
 import { ConfidenceIndicator } from '@/features/feedback/components/confidence-indicator'
+import { FeedbackTagSection } from '@/features/feedback/components/feedback-tags'
 import { LanguageBadge, languagesDiffer } from '@/features/feedback/components/language-badge'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import { cn } from '@/lib/utils'
 import type { Dimension } from '@/proto/attune/v1/common'
+import type { Tag } from '@/proto/attune/v1/tag'
 
 // `dims` is supplied by the parent route so this component does not
 // cross feature boundaries (the dim set is owned by the settings
@@ -34,10 +36,12 @@ import type { Dimension } from '@/proto/attune/v1/common'
 export function FeedbackDetailSheet({
   id,
   dims,
+  availableTags,
   onOpenChange,
 }: {
   id: string | null
   dims: Dimension[]
+  availableTags: Tag[]
   onOpenChange: (v: boolean) => void
 }) {
   const { t } = useTranslation()
@@ -91,14 +95,24 @@ export function FeedbackDetailSheet({
               {t('app.loading')}
             </div>
           )}
-          {detail.data && <DetailBody data={detail.data} dims={dims} />}
+          {detail.data && (
+            <DetailBody data={detail.data} dims={dims} availableTags={availableTags} />
+          )}
         </div>
       </SheetContent>
     </Sheet>
   )
 }
 
-function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] }) {
+function DetailBody({
+  data,
+  dims,
+  availableTags,
+}: {
+  data: FeedbackDetail
+  dims: Dimension[]
+  availableTags: Tag[]
+}) {
   const { t } = useTranslation()
   const displayOf = useDisplayName()
   const attrs = (data.enrichedAttrs ?? {}) as Record<string, unknown>
@@ -162,6 +176,12 @@ function DetailBody({ data, dims }: { data: FeedbackDetail; dims: Dimension[] })
           </dl>
         </Section>
       )}
+
+      <FeedbackTagSection
+        feedbackId={String(data.id)}
+        tags={data.tags ?? []}
+        availableTags={availableTags}
+      />
 
       <Section label={t('feedback.detail.source')}>
         <p className="font-mono text-xs text-muted-foreground">
