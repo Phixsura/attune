@@ -289,6 +289,40 @@ docker compose run --rm attune embed status --tenant acme
 
 ---
 
+## Daily Digest
+
+Instead of a webhook per enriched row, a tenant can receive one **daily roll-up**
+of yesterday's feedback with LLM-labeled top themes (#27).
+
+### Set up the delivery target
+
+The digest is delivered to the tenant's **`raw-webhook` notify target whose
+`audience` is `digest`** — a routing filter that keeps the digest target out of
+per-event traffic. Create it in Console (Settings → 通知目标) or via the API with
+`audience = digest`; the digest worker addresses it by
+`(tenant, raw-webhook, digest)`.
+
+### Configure the schedule
+
+In Console (Settings → 日报摘要) or via `PUT /fb/v1/console/digest-subscription`,
+set `enabled`, `frequency` (`daily` / `weekly` + `byweekday`), the tenant-local
+`send_hour`, the `llm_min_feedback` theme threshold, and `send_on_empty`. The
+worker fires at most once per tenant per local day (timezone- and DST-aware),
+aggregates yesterday's enriched feedback, and POSTs the rendered digest to the
+target above. Themes reuse the embedding clusters when clustering is enabled;
+otherwise a single LLM call names them. Volume tiers the output: 0 rows skip
+(unless `send_on_empty`), 1–5 send a themeless list, and `≥ llm_min_feedback`
+send LLM-named themes.
+
+### Metrics
+
+| Metric | Description |
+|---|---|
+| `attune_digest_runs_total` | Digest runs by outcome (`sent` / `skipped_empty` / `failed`) |
+| `attune_digest_duration_seconds` | Digest aggregation + delivery latency histogram |
+
+---
+
 ## Optional monitoring
 
 Layer Prometheus + Grafana on top to see attune's metrics with zero manual

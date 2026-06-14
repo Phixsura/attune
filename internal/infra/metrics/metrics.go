@@ -281,6 +281,26 @@ var ReplyDraftQueueDepth = prometheus.NewGaugeVec(
 	[]string{"tenant"},
 )
 
+// DigestRunsTotal counts daily digest runs by outcome (#27).
+// status ∈ {sent, skipped_empty, failed}.
+var DigestRunsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_digest_runs_total",
+		Help: "Daily digest runs by outcome (sent / skipped_empty / failed).",
+	},
+	[]string{"tenant", "status"},
+)
+
+// DigestDuration tracks end-to-end digest aggregation + delivery latency per run.
+var DigestDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_digest_duration_seconds",
+		Help:    "End-to-end digest aggregation and delivery latency per run.",
+		Buckets: prometheus.ExponentialBuckets(0.25, 2, 9),
+	},
+	[]string{"tenant"},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -321,6 +341,8 @@ var allMetrics = []prometheus.Collector{
 	ReplyDraftErrors,
 	ReplyDraftDuration,
 	ReplyDraftQueueDepth,
+	DigestRunsTotal,
+	DigestDuration,
 }
 
 func init() {

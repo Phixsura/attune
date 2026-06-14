@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+// DigestSubscriptionService manages a tenant's daily digest configuration (#27).
+// v1 is a per-tenant singleton resource: one subscription per tenant, so the
+// endpoints are get / upsert / delete with no id path param.
+service DigestSubscriptionService {
+  // GET /fb/v1/console/digest-subscription
+  rpc GetDigestSubscription(GetDigestSubscriptionRequest) returns (DigestSubscription) {
+    option (google.api.http) = {get: "/fb/v1/console/digest-subscription"};
+  }
+  // PUT /fb/v1/console/digest-subscription (create or replace)
+  rpc UpsertDigestSubscription(UpsertDigestSubscriptionRequest) returns (DigestSubscription) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/digest-subscription"
+      body: "*"
+    };
+  }
+  // DELETE /fb/v1/console/digest-subscription (204)
+  rpc DeleteDigestSubscription(DeleteDigestSubscriptionRequest) returns (DeleteDigestSubscriptionResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/digest-subscription"};
+  }
+}
+
+// DigestSubscription is a tenant's daily digest config. Delivery is to the
+// tenant's raw-webhook notify target whose audience='digest'.
+message DigestSubscription {
+  bool enabled = 1;
+  string frequency = 2;             // daily | weekly
+  int32 send_hour = 3;              // tenant-local hour 0..23
+  optional int32 byweekday = 4;     // 0=Sun .. 6=Sat, used when frequency=weekly
+  optional string timezone = 5;     // IANA override; empty => tenant default
+  int32 llm_min_feedback = 6;       // >= this many enriched rows => LLM themes
+  bool send_on_empty = 7;
+  optional string theme_prompt = 8; // optional LLM naming override
+  optional string next_run_at = 9;  // RFC3339, read-only (scheduler cursor)
+  optional string last_run_at = 10; // RFC3339, read-only
+  string created_at = 11;           // RFC3339
+  string updated_at = 12;           // RFC3339
+}
+
+message GetDigestSubscriptionRequest {}
+
+message UpsertDigestSubscriptionRequest {
+  bool enabled = 1;
+  string frequency = 2 [(google.api.field_behavior) = REQUIRED];
+  int32 send_hour = 3;
+  optional int32 byweekday = 4;
+  optional string timezone = 5;
+  int32 llm_min_feedback = 6;
+  bool send_on_empty = 7;
+  optional string theme_prompt = 8;
+}
+
+message DeleteDigestSubscriptionRequest {}
+
+message DeleteDigestSubscriptionResponse {}

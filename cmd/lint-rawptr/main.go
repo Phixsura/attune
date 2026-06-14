@@ -66,6 +66,13 @@ var outParamMethods = map[string]struct{}{
 	"As":          {}, // errors.As(err, &target)
 	"ConvertFrom": {}, // database/sql converters
 
+	// fmt.Fprint* — the &strings.Builder / &bytes.Buffer is the write target;
+	// wrapping it with ptrext.Of would write into a copy. staticcheck QF1012
+	// also prefers Fprintf over WriteString(Sprintf(…)).
+	"Fprint":   {},
+	"Fprintf":  {},
+	"Fprintln": {},
+
 	// flag.*Var
 	"Var":         {},
 	"BoolVar":     {},

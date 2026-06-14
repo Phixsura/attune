@@ -88,7 +88,7 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 	switch req.Audience {
 	case "":
 		req.Audience = notifytarget.AudienceAll
-	case notifytarget.AudiencePool, notifytarget.AudienceRadar, notifytarget.AudienceAll:
+	case notifytarget.AudiencePool, notifytarget.AudienceRadar, notifytarget.AudienceAll, notifytarget.AudienceDigest:
 	default:
 		return errors.New("audience value is not allowed")
 	}

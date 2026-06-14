@@ -12,6 +12,13 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import type { NotifyTargetCreate } from '@/features/notify-targets/api/create-notify-target'
 import type { NotifyTarget } from '@/features/notify-targets/api/list-notify-targets'
 
@@ -34,11 +41,13 @@ export function CreateNotifyDialog({
   const [url, setUrl] = useState('')
   const [secret, setSecret] = useState('')
   const [timeout, setTimeoutSec] = useState(10)
+  const [audience, setAudience] = useState<'pool' | 'radar' | 'all' | 'digest'>('all')
 
   const reset = () => {
     setUrl('')
     setSecret('')
     setTimeoutSec(10)
+    setAudience('all')
   }
 
   return (
@@ -59,7 +68,7 @@ export function CreateNotifyDialog({
             const body: NotifyTargetCreate = {
               destinationType: FIXED_DEST_TYPE,
               url: url.trim(),
-              audience: 'all',
+              audience,
               timeoutSeconds: timeout,
               disabled: false,
             }
@@ -76,6 +85,7 @@ export function CreateNotifyDialog({
               <Label htmlFor="nt-url">{t('notify_targets.create_dialog.url_field')}</Label>
               <Input
                 id="nt-url"
+                data-testid="create-notify-url"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://…"
@@ -113,6 +123,27 @@ export function CreateNotifyDialog({
                 disabled={pending}
               />
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="nt-audience">
+                {t('notify_targets.create_dialog.audience_field')}
+              </Label>
+              <Select
+                value={audience}
+                onValueChange={(v) => setAudience(v as 'pool' | 'radar' | 'all' | 'digest')}
+                disabled={pending}
+              >
+                <SelectTrigger id="nt-audience">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">all</SelectItem>
+                  <SelectItem value="pool">pool</SelectItem>
+                  <SelectItem value="radar">radar</SelectItem>
+                  <SelectItem value="digest">digest</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <DialogFooter>
@@ -124,7 +155,11 @@ export function CreateNotifyDialog({
             >
               {t('common.cancel')}
             </Button>
-            <Button type="submit" disabled={pending || !url.trim()}>
+            <Button
+              type="submit"
+              disabled={pending || !url.trim()}
+              data-testid="create-notify-submit"
+            >
               {pending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
               {t('common.create')}
             </Button>
@@ -161,7 +196,12 @@ export function DeleteNotifyDialog({
           <Button variant="ghost" onClick={onCancel} disabled={pending}>
             {t('common.cancel')}
           </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={pending}>
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={pending}
+            data-testid="delete-notify-confirm"
+          >
             {pending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
             {t('notify_targets.delete_button')}
           </Button>

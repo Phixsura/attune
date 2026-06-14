@@ -47,6 +47,12 @@ const (
 	AudiencePool  = "pool"  // every enriched row
 	AudienceRadar = "radar" // P0 / P1 only
 	AudienceAll   = "all"   // attune routes both PushPool + PushRadar here
+	// AudienceDigest marks a raw-webhook target as the destination for the
+	// daily digest (#27). It is a routing FILTER only — the per-event path
+	// (service/enrich.selectOutboxTargets) has no case for it, so a digest
+	// target receives no per-row traffic; the digest worker addresses it
+	// directly via GetByTenantAudience(tenant, raw-webhook, digest).
+	AudienceDigest = "digest"
 )
 
 // NotifyTarget is one wired destination row.

@@ -19,6 +19,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	guardpolicyrepo "github.com/Phixsura/attune/internal/repo/guardpolicy"
@@ -190,9 +191,10 @@ func buildConsoleRouter(
 		llmconfigsvc.NewService(llmconfigrepo.New(pool), secrets),
 	)
 	clustersHandler := console.NewClustersHandler(embeddingrepo.NewTaskRepo(pool))
+	digestSub := console.NewDigestSubscriptionHandler(digestsubrepo.New(pool), tenantRepo)
 
 	return console.NewRouter(
 		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback, usage,
-		enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, adminRepo,
+		enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub, adminRepo,
 	).Mount(), nil
 }
