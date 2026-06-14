@@ -301,6 +301,25 @@ var DigestDuration = prometheus.NewHistogramVec(
 	[]string{"tenant"},
 )
 
+// WorkflowTransitionsTotal counts workflow state transitions by outcome.
+// result ∈ {success, invalid, error}.
+var WorkflowTransitionsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_workflow_transitions_total",
+		Help: "Workflow state transitions by tenant and result.",
+	},
+	[]string{"tenant", "result"},
+)
+
+// WorkflowBatchSize tracks batch-transition request sizes.
+var WorkflowBatchSize = prometheus.NewHistogram(
+	prometheus.HistogramOpts{
+		Name:    "attune_workflow_batch_size",
+		Help:    "Number of feedback items per batch-transition request.",
+		Buckets: []float64{1, 5, 10, 25, 50, 100},
+	},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -343,6 +362,8 @@ var allMetrics = []prometheus.Collector{
 	ReplyDraftQueueDepth,
 	DigestRunsTotal,
 	DigestDuration,
+	WorkflowTransitionsTotal,
+	WorkflowBatchSize,
 }
 
 func init() {
