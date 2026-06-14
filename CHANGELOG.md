@@ -19,7 +19,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   color picker, category selector, and interactive transition matrix editor;
   workflow state badge on feedback list rows; state filter in the feedback
   filter bar; transition dropdown + audit timeline in feedback detail sheet;
-  batch transition in the selection action bar. Migration 030
+  batch transition in the selection action bar; auto-seed on first visit
+  (empty state list triggers `SeedDefaults` automatically); new feedback
+  automatically assigned the tenant's default workflow state on ingest
+  (SQL subquery, no extra round-trip). Migration 030
   (`tenant_workflow_states`, `tenant_workflow_transitions`,
   `feedback_audit_log`, `ALTER user_feedback`), proto contract
   (`WorkflowService` with 10 RPCs), integration tests, Prometheus metrics

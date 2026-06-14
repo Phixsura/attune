@@ -58,10 +58,11 @@ func (r *FeedbackRepo) Insert(ctx context.Context, tenantID, userID string, in d
 	err := r.pool.QueryRow(
 		ctx, `
 		INSERT INTO user_feedback
-		 (user_id, tenant_id, type, content, page_url, attachments, source, source_meta, inbound_source_id)
+		 (user_id, tenant_id, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id)
 		VALUES
 		 ($1, $2, 'other', $3, $4, '[]'::jsonb, $5, $6,
-		  (SELECT id FROM inbound_sources WHERE id = $7 AND tenant_id = $2 AND channel = $5))
+		  (SELECT id FROM inbound_sources WHERE id = $7 AND tenant_id = $2 AND channel = $5),
+		  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1))
 		RETURNING id`,
 		userID, tenantID, in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
 	).Scan(&id)

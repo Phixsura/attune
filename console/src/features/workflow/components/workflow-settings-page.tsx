@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Archive, Pencil, Plus, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { Archive, Pencil, Plus } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
@@ -47,8 +47,18 @@ export function WorkflowSettingsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editState, setEditState] = useState<WorkflowState | undefined>()
   const [archiveTarget, setArchiveTarget] = useState<WorkflowState | undefined>()
+  const autoSeeded = useRef(false)
 
   const items = statesQ.data ?? []
+
+  useEffect(() => {
+    if (statesQ.isSuccess && items.length === 0 && !autoSeeded.current && !seedDefaults.isPending) {
+      autoSeeded.current = true
+      seedDefaults.mutate(undefined, {
+        onSuccess: () => toast.success(t('workflow.seeded')),
+      })
+    }
+  }, [statesQ.isSuccess, items.length, seedDefaults, t])
   const transitions = transitionsQ.data ?? []
   const active = items.filter((s) => !s.archived)
 
@@ -100,13 +110,6 @@ export function WorkflowSettingsPage() {
     )
   }
 
-  const handleSeed = () => {
-    seedDefaults.mutate(undefined, {
-      onSuccess: () => toast.success(t('workflow.seeded')),
-      onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
-    })
-  }
-
   return (
     <section className="min-w-0 space-y-6">
       <div className="flex items-center justify-between">
@@ -114,23 +117,10 @@ export function WorkflowSettingsPage() {
           <h2 className="text-lg font-semibold tracking-tight">{t('workflow.title')}</h2>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{t('workflow.subtitle')}</p>
         </div>
-        <div className="flex gap-2">
-          {items.length === 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSeed}
-              disabled={seedDefaults.isPending}
-            >
-              <Sparkles className="mr-2 h-4 w-4" />
-              {t('workflow.seed_button')}
-            </Button>
-          )}
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            {t('workflow.create_button')}
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          {t('workflow.create_button')}
+        </Button>
       </div>
 
       {items.length === 0 ? (
