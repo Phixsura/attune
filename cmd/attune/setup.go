@@ -205,6 +205,7 @@ func buildConsoleRouter(
 	wfSvc := workflowsvc.NewService(wfStateRepo, wfAuditRepo, pool)
 	feedback.SetWorkflow(wfSvc)
 	feedback.SetAuditReader(wfAuditRepo)
+	feedback.SetWorkflowStates(wfStateRepo)
 	tagHandler := console.NewTagHandler(tagRepo)
 	tagAssignmentHandler := console.NewTagAssignmentHandler(tagRepo, tagAssignmentRepo)
 	workflowHandler := console.NewWorkflowHandler(wfStateRepo, wfSvc)

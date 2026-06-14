@@ -10,6 +10,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/service/workflow"
 )
@@ -36,7 +37,8 @@ func (h *FeedbackHandler) TransitionState(
 
 	if h.workflow == nil {
 		return dispatcher.Fail[*attunev1.TransitionFeedbackResponse](
-			http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "workflow not configured")
+			http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "workflow not configured",
+		)
 	}
 
 	result, err := h.workflow.Transition(ctx, auth.TenantID, req.GetFeedbackId(),
@@ -45,18 +47,22 @@ func (h *FeedbackHandler) TransitionState(
 		switch {
 		case errors.Is(err, workflow.ErrInvalidTransition):
 			return dispatcher.Fail[*attunev1.TransitionFeedbackResponse](
-				http.StatusConflict, attunev1.ErrorCode_INVALID_TRANSITION, "transition not allowed")
+				http.StatusConflict, attunev1.ErrorCode_INVALID_TRANSITION, "transition not allowed",
+			)
 		case errors.Is(err, workflow.ErrStateNotFound):
 			return dispatcher.Fail[*attunev1.TransitionFeedbackResponse](
-				http.StatusNotFound, attunev1.ErrorCode_WORKFLOW_STATE_NOT_FOUND, "state not found")
+				http.StatusNotFound, attunev1.ErrorCode_WORKFLOW_STATE_NOT_FOUND, "state not found",
+			)
 		case errors.Is(err, workflow.ErrNoWorkflowState):
 			return dispatcher.Fail[*attunev1.TransitionFeedbackResponse](
-				http.StatusConflict, attunev1.ErrorCode_NO_WORKFLOW_STATE, "feedback has no workflow state")
+				http.StatusConflict, attunev1.ErrorCode_NO_WORKFLOW_STATE, "feedback has no workflow state",
+			)
 		default:
 			logext.Errorf(ctx, "[%s] transition failed,feedback_id:%d,err:%+v",
 				where, req.GetFeedbackId(), err.Error())
 			return dispatcher.Fail[*attunev1.TransitionFeedbackResponse](
-				http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "transition failed")
+				http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "transition failed",
+			)
 		}
 	}
 
@@ -82,16 +88,19 @@ func (h *FeedbackHandler) BatchTransitionState(
 
 	if h.workflow == nil {
 		return dispatcher.Fail[*attunev1.BatchTransitionFeedbackResponse](
-			http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "workflow not configured")
+			http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "workflow not configured",
+		)
 	}
 
 	if len(req.GetFeedbackIds()) == 0 {
 		return dispatcher.Fail[*attunev1.BatchTransitionFeedbackResponse](
-			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "feedback_ids required")
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "feedback_ids required",
+		)
 	}
 	if len(req.GetFeedbackIds()) > 100 {
 		return dispatcher.Fail[*attunev1.BatchTransitionFeedbackResponse](
-			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "max 100 feedback_ids per batch")
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "max 100 feedback_ids per batch",
+		)
 	}
 
 	result, err := h.workflow.BatchTransition(ctx, auth.TenantID, req.GetFeedbackIds(),
@@ -99,7 +108,8 @@ func (h *FeedbackHandler) BatchTransitionState(
 	if err != nil {
 		logext.Errorf(ctx, "[%s] batch failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.BatchTransitionFeedbackResponse](
-			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "batch transition failed")
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "batch transition failed",
+		)
 	}
 
 	failures := make([]*attunev1.BatchTransitionFailure, len(result.Failed))
@@ -136,7 +146,8 @@ func (h *FeedbackHandler) ListAudit(
 		logext.Errorf(ctx, "[%s] list failed,feedback_id:%d,err:%+v",
 			where, req.GetFeedbackId(), err.Error())
 		return dispatcher.Fail[*attunev1.ListAuditResponse](
-			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to list audit")
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to list audit",
+		)
 	}
 
 	out := make([]*attunev1.AuditEntry, len(entries))
@@ -162,4 +173,91 @@ func (h *FeedbackHandler) ListAudit(
 		Entries:    out,
 		NextCursor: cursor,
 	}))
+}
+
+func (h *FeedbackHandler) enrichItemsWithWorkflowState(
+	ctx *dispatcher.RequestContext[*session.AuthCtx], where, tenantID string,
+	rows []feedback.ConsoleListRow, items []*attunev1.Feedback,
+) {
+	if h.workflowStates == nil || len(rows) == 0 {
+		return
+	}
+	hasAny := false
+	for _, row := range rows {
+		if row.WorkflowStateID != nil {
+			hasAny = true
+			break
+		}
+	}
+	if !hasAny {
+		return
+	}
+
+	states, err := h.workflowStates.List(ctx, tenantID, false)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] workflow state load failed,tenant_id:%s,err:%+v",
+			where, tenantID, err.Error())
+		return
+	}
+	stateMap := make(map[string]workflowstate.WorkflowState, len(states))
+	for _, s := range states {
+		stateMap[s.ID] = s
+	}
+
+	transitions, err := h.workflowStates.ListTransitions(ctx, tenantID)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] workflow transitions load failed,tenant_id:%s,err:%+v",
+			where, tenantID, err.Error())
+		return
+	}
+	adjacency := make(map[string][]string)
+	for _, t := range transitions {
+		adjacency[t.FromStateID] = append(adjacency[t.FromStateID], t.ToStateID)
+	}
+
+	for i, row := range rows {
+		if row.WorkflowStateID == nil {
+			continue
+		}
+		stateID := ptrext.Indirect(row.WorkflowStateID)
+		if s, ok := stateMap[stateID]; ok {
+			items[i].WorkflowState = workflowStateToProto(s)
+		}
+		for _, nid := range adjacency[stateID] {
+			if ns, ok := stateMap[nid]; ok {
+				items[i].AllowedNextStates = append(items[i].AllowedNextStates, workflowStateToProto(ns))
+			}
+		}
+	}
+}
+
+func (h *FeedbackHandler) enrichDetailWithWorkflowState(
+	ctx *dispatcher.RequestContext[*session.AuthCtx], where, tenantID string,
+	stateID *string, detail *attunev1.FeedbackDetail,
+) {
+	if h.workflowStates == nil || stateID == nil {
+		return
+	}
+	sid := ptrext.Indirect(stateID)
+	allowed, err := h.workflowStates.AllowedNext(ctx, tenantID, sid)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] allowed-next load failed,tenant_id:%s,state_id:%s,err:%+v",
+			where, tenantID, sid, err.Error())
+	}
+
+	states, err := h.workflowStates.List(ctx, tenantID, false)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] workflow state load failed,tenant_id:%s,err:%+v",
+			where, tenantID, err.Error())
+		return
+	}
+	for _, s := range states {
+		if s.ID == sid {
+			detail.WorkflowState = workflowStateToProto(s)
+			break
+		}
+	}
+	for _, ns := range allowed {
+		detail.AllowedNextStates = append(detail.AllowedNextStates, workflowStateToProto(ns))
+	}
 }
