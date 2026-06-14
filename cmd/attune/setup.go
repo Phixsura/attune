@@ -200,11 +200,13 @@ func buildConsoleRouter(
 	tagRepo := feedbacktagrepo.New(pool)
 	tagAssignmentRepo := feedbacktagassignmentrepo.New(pool)
 	feedback.SetTagAssignments(tagAssignmentRepo)
-	tagHandler := console.NewTagHandler(tagRepo)
-	tagAssignmentHandler := console.NewTagAssignmentHandler(tagRepo, tagAssignmentRepo)
 	wfStateRepo := workflowstaterepo.New(pool)
 	wfAuditRepo := feedbackauditrepo.New(pool)
 	wfSvc := workflowsvc.NewService(wfStateRepo, wfAuditRepo, pool)
+	feedback.SetWorkflow(wfSvc)
+	feedback.SetAuditReader(wfAuditRepo)
+	tagHandler := console.NewTagHandler(tagRepo)
+	tagAssignmentHandler := console.NewTagAssignmentHandler(tagRepo, tagAssignmentRepo)
 	workflowHandler := console.NewWorkflowHandler(wfStateRepo, wfSvc)
 
 	return console.NewRouter(

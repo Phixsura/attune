@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -632,6 +633,18 @@ func (r *Router) mountFeedback(m chi.Router) {
 				}),
 			))
 		}
+		if r.feedback != nil {
+			f.Post("/transition/batch", dispatcher.Bind(
+				"console.FeedbackHandler.BatchTransitionState",
+				dispatcher.JSON(func() *attunev1.BatchTransitionFeedbackRequest {
+					return ptrext.Of(attunev1.BatchTransitionFeedbackRequest{})
+				}),
+				r.feedback.BatchTransitionState,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchTransitionFeedbackRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+		}
 		f.Get("/{id}", dispatcher.Bind(
 			"console.FeedbackHandler.Get",
 			dispatcher.Path(
@@ -690,6 +703,49 @@ func (r *Router) mountFeedback(m chi.Router) {
 				}),
 			))
 		}
+		f.Post("/{id}/transition", dispatcher.Bind(
+			"console.FeedbackHandler.TransitionState",
+			dispatcher.Combine(
+				func() *attunev1.TransitionFeedbackRequest {
+					return ptrext.Of(attunev1.TransitionFeedbackRequest{})
+				},
+				dispatcher.JSONBody[*attunev1.TransitionFeedbackRequest],
+				dispatcher.ParamInt64("id", func(req *attunev1.TransitionFeedbackRequest, id int64) {
+					req.FeedbackId = id
+				}, "id must be an integer"),
+			),
+			r.feedback.TransitionState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TransitionFeedbackRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		f.Get("/{id}/audit", dispatcher.Bind(
+			"console.FeedbackHandler.ListAudit",
+			dispatcher.Combine(
+				func() *attunev1.ListAuditRequest { return ptrext.Of(attunev1.ListAuditRequest{}) },
+				dispatcher.ParamInt64("id", func(req *attunev1.ListAuditRequest, id int64) {
+					req.FeedbackId = id
+				}, "id must be an integer"),
+				func(r *http.Request, req *attunev1.ListAuditRequest) error {
+					q := r.URL.Query()
+					if c := q.Get("cursor"); c != "" {
+						req.Cursor = ptrext.Of(c)
+					}
+					if l := q.Get("limit"); l != "" {
+						v, err := strconv.ParseInt(l, 10, 32)
+						if err != nil {
+							return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "limit must be an integer")
+						}
+						req.Limit = ptrext.Of(int32(v))
+					}
+					return nil
+				},
+			),
+			r.feedback.ListAudit,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListAuditRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 	})
 }
 
