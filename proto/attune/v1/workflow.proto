@@ -1,0 +1,186 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+service WorkflowService {
+  rpc ListStates(ListStatesRequest) returns (ListStatesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/workflow/states"};
+  }
+  rpc CreateState(CreateStateRequest) returns (CreateStateResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/workflow/states"
+      body: "*"
+    };
+  }
+  rpc UpdateState(UpdateStateRequest) returns (UpdateStateResponse) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/workflow/states/{id}"
+      body: "*"
+    };
+  }
+  rpc ArchiveState(ArchiveStateRequest) returns (ArchiveStateResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/workflow/states/{id}"};
+  }
+  rpc ListTransitions(ListTransitionsRequest) returns (ListTransitionsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/workflow/transitions"};
+  }
+  rpc ReplaceTransitions(ReplaceTransitionsRequest) returns (ReplaceTransitionsResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/workflow/transitions"
+      body: "*"
+    };
+  }
+  rpc SeedDefaults(SeedDefaultsRequest) returns (SeedDefaultsResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/workflow/seed"
+      body: "*"
+    };
+  }
+  rpc TransitionFeedback(TransitionFeedbackRequest) returns (TransitionFeedbackResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/{feedback_id}/transition"
+      body: "*"
+    };
+  }
+  rpc BatchTransitionFeedback(BatchTransitionFeedbackRequest) returns (BatchTransitionFeedbackResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/transition/batch"
+      body: "*"
+    };
+  }
+  rpc ListAudit(ListAuditRequest) returns (ListAuditResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/{feedback_id}/audit"};
+  }
+}
+
+message WorkflowState {
+  string id         = 1;
+  string name       = 2;
+  string color      = 3;
+  string category   = 4;
+  int32  position   = 5;
+  bool   is_default = 6;
+  bool   archived   = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message WorkflowTransition {
+  string id            = 1;
+  string from_state_id = 2;
+  string to_state_id   = 3;
+}
+
+message ListStatesRequest {
+  bool include_archived = 1;
+}
+
+message ListStatesResponse {
+  repeated WorkflowState states = 1;
+}
+
+message CreateStateRequest {
+  string name     = 1;
+  string color    = 2;
+  string category = 3;
+  int32  position = 4;
+}
+
+message CreateStateResponse {
+  WorkflowState state = 1;
+}
+
+message UpdateStateRequest {
+  string          id         = 1;
+  optional string name       = 2;
+  optional string color      = 3;
+  optional int32  position   = 4;
+  optional bool   is_default = 5;
+}
+
+message UpdateStateResponse {
+  WorkflowState state = 1;
+}
+
+message ArchiveStateRequest {
+  string id = 1;
+}
+
+message ArchiveStateResponse {}
+
+message ListTransitionsRequest {}
+
+message ListTransitionsResponse {
+  repeated WorkflowTransition transitions = 1;
+}
+
+message ReplaceTransitionsRequest {
+  repeated WorkflowTransitionEdge transitions = 1;
+}
+
+message WorkflowTransitionEdge {
+  string from_state_id = 1;
+  string to_state_id   = 2;
+}
+
+message ReplaceTransitionsResponse {
+  repeated WorkflowTransition transitions = 1;
+}
+
+message TransitionFeedbackRequest {
+  int64  feedback_id = 1;
+  string to_state_id = 2;
+  string comment     = 3;
+}
+
+message TransitionFeedbackResponse {
+  int64         feedback_id = 1;
+  WorkflowState from_state  = 2;
+  WorkflowState to_state    = 3;
+}
+
+message BatchTransitionFeedbackRequest {
+  repeated int64 feedback_ids = 1;
+  string         to_state_id  = 2;
+  string         comment      = 3;
+}
+
+message BatchTransitionFailure {
+  int64  feedback_id = 1;
+  string code        = 2;
+  string message     = 3;
+}
+
+message BatchTransitionFeedbackResponse {
+  int32                           succeeded = 1;
+  repeated BatchTransitionFailure failed    = 2;
+}
+
+message AuditEntry {
+  int64  id          = 1;
+  int64  feedback_id = 2;
+  string entity_type = 3;
+  string field_name  = 4;
+  string old_value   = 5;
+  string new_value   = 6;
+  string comment     = 7;
+  string changed_by  = 8;
+  string created_at  = 9;
+}
+
+message ListAuditRequest {
+  int64           feedback_id = 1;
+  optional string cursor      = 2;
+  optional int32  limit       = 3;
+}
+
+message ListAuditResponse {
+  repeated AuditEntry entries     = 1;
+  optional string     next_cursor = 2;
+}
+
+message SeedDefaultsRequest {}
+
+message SeedDefaultsResponse {}
