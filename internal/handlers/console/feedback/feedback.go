@@ -39,7 +39,7 @@ type workflowTransitioner interface {
 }
 
 type auditReader interface {
-	List(ctx context.Context, feedbackID int64, cursor string, limit int) ([]feedbackaudit.Entry, string, error)
+	List(ctx context.Context, tenantID string, feedbackID int64, cursor string, limit int) ([]feedbackaudit.Entry, string, error)
 }
 
 type workflowStateReader interface {

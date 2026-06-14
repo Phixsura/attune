@@ -41,6 +41,8 @@ import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { tagsQuery } from '@/features/tags/api/list-tags'
 import { workflowStatesQuery } from '@/features/workflow/api/list-states'
 import { useBatchTransitionFeedback } from '@/features/workflow/api/transition-feedback'
+import { AuditTimeline } from '@/features/workflow/components/audit-timeline'
+import { WorkflowTransitionSelect } from '@/features/workflow/components/workflow-transition-select'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Dimension } from '@/proto/attune/v1/common'
 import type { Tag } from '@/proto/attune/v1/tag'
@@ -239,6 +241,14 @@ function FeedbackPage() {
         dims={dims}
         availableTags={allTags.data ?? []}
         onOpenChange={(v) => !v && setDetailId(null)}
+        renderWorkflowTransition={(data) => (
+          <WorkflowTransitionSelect
+            feedbackId={String(data.id)}
+            currentState={data.workflowState}
+            allowedNext={data.allowedNextStates ?? []}
+          />
+        )}
+        renderAuditLog={(data) => <AuditTimeline feedbackId={Number(data.id)} />}
       />
     </div>
   )

@@ -56,9 +56,10 @@ func TestPG_StateCRUD(t *testing.T) {
 
 	t.Run("Update", func(t *testing.T) {
 		updated, err := repo.Update(ctx, workflowstate.WorkflowState{
-			ID:    created.ID,
-			Name:  "Open",
-			Color: "#22c55e",
+			ID:       created.ID,
+			TenantID: tenantID,
+			Name:     "Open",
+			Color:    "#22c55e",
 		})
 		if err != nil {
 			t.Fatalf("Update: %v", err)

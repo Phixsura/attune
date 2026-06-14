@@ -25,7 +25,6 @@ var (
 
 type StateStore interface {
 	List(ctx context.Context, tenantID string, includeArchived bool) ([]workflowstate.WorkflowState, error)
-	Get(ctx context.Context, id string) (*workflowstate.WorkflowState, error)
 	GetByTenantAndID(ctx context.Context, tenantID, id string) (*workflowstate.WorkflowState, error)
 	Create(ctx context.Context, s workflowstate.WorkflowState) (*workflowstate.WorkflowState, error)
 	Update(ctx context.Context, s workflowstate.WorkflowState) (*workflowstate.WorkflowState, error)
@@ -34,18 +33,20 @@ type StateStore interface {
 	CountActiveFeedback(ctx context.Context, tenantID, stateID string) (int64, error)
 	CountActiveDefaults(ctx context.Context, tenantID string) (int64, error)
 	CheckTransition(ctx context.Context, tenantID, fromID, toID string) (bool, error)
+	CheckTransitionTx(ctx context.Context, tx pgx.Tx, tenantID, fromID, toID string) (bool, error)
 	AllowedNext(ctx context.Context, tenantID, fromID string) ([]workflowstate.WorkflowState, error)
 	ListTransitions(ctx context.Context, tenantID string) ([]workflowstate.Transition, error)
 	ReplaceTransitions(ctx context.Context, tenantID string, edges []workflowstate.TransitionEdge) ([]workflowstate.Transition, error)
 	UpsertStateReturningID(ctx context.Context, tx pgx.Tx, s workflowstate.WorkflowState) (string, error)
 	InsertTransitionIgnoreConflict(ctx context.Context, tx pgx.Tx, tenantID, fromID, toID string) error
-	GetCurrentStateForUpdate(ctx context.Context, tx pgx.Tx, feedbackID int64) (*string, error)
+	GetCurrentStateForUpdate(ctx context.Context, tx pgx.Tx, tenantID string, feedbackID int64) (*string, error)
+	ArchiveWithTransitions(ctx context.Context, tenantID, stateID string) error
 	SetFeedbackState(ctx context.Context, tx pgx.Tx, feedbackID int64, stateID string) error
 }
 
 type AuditWriter interface {
 	WriteTx(ctx context.Context, tx pgx.Tx, e feedbackaudit.Entry) error
-	List(ctx context.Context, feedbackID int64, cursor string, limit int) ([]feedbackaudit.Entry, string, error)
+	List(ctx context.Context, tenantID string, feedbackID int64, cursor string, limit int) ([]feedbackaudit.Entry, string, error)
 }
 
 type TransitionResult struct {
@@ -95,7 +96,7 @@ func (s *Service) Transition(ctx context.Context, tenantID string, feedbackID in
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	currentID, err := s.states.GetCurrentStateForUpdate(ctx, tx, feedbackID)
+	currentID, err := s.states.GetCurrentStateForUpdate(ctx, tx, tenantID, feedbackID)
 	if err != nil {
 		if errors.Is(err, workflowstate.ErrNotFound) {
 			return nil, ErrStateNotFound
@@ -108,12 +109,12 @@ func (s *Service) Transition(ctx context.Context, tenantID string, feedbackID in
 		return nil, ErrNoWorkflowState
 	}
 
-	fromState, err := s.states.Get(ctx, ptrext.Indirect(currentID))
+	fromState, err := s.states.GetByTenantAndID(ctx, tenantID, ptrext.Indirect(currentID))
 	if err != nil {
 		return nil, err
 	}
 
-	allowed, err := s.states.CheckTransition(ctx, tenantID, fromState.ID, toStateID)
+	allowed, err := s.states.CheckTransitionTx(ctx, tx, tenantID, fromState.ID, toStateID)
 	if err != nil {
 		return nil, err
 	}
@@ -221,11 +222,7 @@ func (s *Service) ArchiveState(ctx context.Context, tenantID, stateID string) er
 		}
 	}
 
-	if err := s.states.DeleteTransitionsForState(ctx, tenantID, stateID); err != nil {
-		return err
-	}
-
-	return s.states.Archive(ctx, tenantID, stateID)
+	return s.states.ArchiveWithTransitions(ctx, tenantID, stateID)
 }
 
 type seedState struct {

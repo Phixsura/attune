@@ -8,7 +8,7 @@ export function useUpdateState() {
   return useMutation({
     mutationFn: (req: UpdateStateRequest) =>
       api<UpdateStateResponse>(`/fb/v1/console/workflow/states/${req.id}`, {
-        method: 'PUT',
+        method: 'PATCH',
         body: req,
       }),
     onSuccess: () => {

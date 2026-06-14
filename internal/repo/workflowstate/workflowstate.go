@@ -57,6 +57,9 @@ func New(pool *pgxpool.Pool) *Repo {
 const selectStateCols = `id, tenant_id, name, color, category, position,
 	is_default, created_at, updated_at, archived_at`
 
+const selectStateColsQualified = `s.id, s.tenant_id, s.name, s.color, s.category, s.position,
+	s.is_default, s.created_at, s.updated_at, s.archived_at`
+
 func scanState(row pgx.Row) (WorkflowState, error) {
 	var s WorkflowState
 	// ptrext:allow scan-target
@@ -147,9 +150,9 @@ func (r *Repo) Update(ctx context.Context, s WorkflowState) (*WorkflowState, err
 	row := r.pool.QueryRow(ctx, `
 		UPDATE tenant_workflow_states
 		SET name = $2, color = $3, position = $4, is_default = $5, updated_at = NOW()
-		WHERE id = $1 AND archived_at IS NULL
+		WHERE id = $1 AND tenant_id = $6 AND archived_at IS NULL
 		RETURNING `+selectStateCols,
-		s.ID, s.Name, s.Color, s.Position, s.IsDefault)
+		s.ID, s.Name, s.Color, s.Position, s.IsDefault, s.TenantID)
 	updated, err := scanState(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -227,9 +230,52 @@ func (r *Repo) CheckTransition(ctx context.Context, tenantID, fromID, toID strin
 	return exists, nil
 }
 
+func (r *Repo) CheckTransitionTx(ctx context.Context, tx pgx.Tx, tenantID, fromID, toID string) (bool, error) {
+	var exists bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM tenant_workflow_transitions wt
+			JOIN tenant_workflow_states fs ON fs.id = wt.from_state_id
+			JOIN tenant_workflow_states ts ON ts.id = wt.to_state_id
+			WHERE wt.tenant_id = $1 AND wt.from_state_id = $2::uuid AND wt.to_state_id = $3::uuid
+			  AND fs.archived_at IS NULL AND ts.archived_at IS NULL
+		)`, tenantID, fromID, toID).Scan(&exists) // ptrext:allow scan-target
+	if err != nil {
+		return false, fmt.Errorf("check transition tx: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *Repo) ArchiveWithTransitions(ctx context.Context, tenantID, stateID string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM tenant_workflow_transitions
+		WHERE tenant_id = $1 AND (from_state_id = $2 OR to_state_id = $2)`,
+		tenantID, stateID); err != nil {
+		return fmt.Errorf("delete transitions for state: %w", err)
+	}
+
+	ct, err := tx.Exec(ctx, `
+		UPDATE tenant_workflow_states SET archived_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND archived_at IS NULL`, stateID, tenantID)
+	if err != nil {
+		return fmt.Errorf("archive workflow state: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return tx.Commit(ctx)
+}
+
 func (r *Repo) AllowedNext(ctx context.Context, tenantID, fromID string) ([]WorkflowState, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT `+selectStateCols+` FROM tenant_workflow_states s
+		SELECT `+selectStateColsQualified+` FROM tenant_workflow_states s
 		JOIN tenant_workflow_transitions wt ON wt.to_state_id = s.id
 		WHERE wt.tenant_id = $1 AND wt.from_state_id = $2::uuid
 		  AND s.archived_at IS NULL
@@ -330,11 +376,11 @@ func (r *Repo) InsertTransitionIgnoreConflict(ctx context.Context, tx pgx.Tx, te
 	return nil
 }
 
-func (r *Repo) GetCurrentStateForUpdate(ctx context.Context, tx pgx.Tx, feedbackID int64) (*string, error) {
+func (r *Repo) GetCurrentStateForUpdate(ctx context.Context, tx pgx.Tx, tenantID string, feedbackID int64) (*string, error) {
 	var stateID *string
 	err := tx.QueryRow(ctx,
-		"SELECT workflow_state_id FROM user_feedback WHERE id = $1 FOR UPDATE",
-		feedbackID).Scan(&stateID) // ptrext:allow scan-target
+		"SELECT workflow_state_id FROM user_feedback WHERE id = $1 AND tenant_id = $2 FOR UPDATE",
+		feedbackID, tenantID).Scan(&stateID) // ptrext:allow scan-target
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

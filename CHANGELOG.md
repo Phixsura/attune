@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   (`attune_workflow_transitions_total`, `attune_workflow_batch_size`), and
   zh-CN i18n included.
 
+### Fixed
+
+- **Workflow allowed-next-states query returned empty due to column ambiguity
+  (#29).** The `AllowedNext` SQL joined `tenant_workflow_states` with
+  `tenant_workflow_transitions` but used unqualified column names (`id`,
+  `tenant_id`, `created_at`), causing PostgreSQL `42702 ambiguous column`
+  errors silently swallowed by the handler. Added table-qualified column
+  constant `selectStateColsQualified` and used it in the JOIN query.
+
 - **Manual feedback tags (#28).** Per-tenant tag registry with colors,
   descriptions, exclusive scopes (at most one tag per scope per feedback row),
   usage tracking, and archival. Tags can be assigned/removed on individual

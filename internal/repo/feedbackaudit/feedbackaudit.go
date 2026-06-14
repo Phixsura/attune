@@ -67,12 +67,12 @@ func (r *Repo) Write(ctx context.Context, e Entry) error {
 const selectCols = `id, tenant_id, feedback_id, entity_type, field_name,
 	old_value, new_value, comment, changed_by, created_at`
 
-func (r *Repo) List(ctx context.Context, feedbackID int64, cursor string, limit int) ([]Entry, string, error) {
+func (r *Repo) List(ctx context.Context, tenantID string, feedbackID int64, cursor string, limit int) ([]Entry, string, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	args := []any{feedbackID}
-	where := "WHERE feedback_id = $1"
+	args := []any{tenantID, feedbackID}
+	where := "WHERE tenant_id = $1 AND feedback_id = $2"
 	if cursor != "" {
 		cursorID, err := strconv.ParseInt(cursor, 10, 64)
 		if err != nil {

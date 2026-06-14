@@ -65,6 +65,57 @@ type ConsoleListRow struct {
 	WorkflowStateID          *string
 }
 
+type queryBuilder struct {
+	args  []any
+	where string
+}
+
+func newQueryBuilder(tenantID string) *queryBuilder {
+	return ptrext.Of(queryBuilder{args: []any{tenantID}, where: "WHERE tenant_id = $1"})
+}
+
+func (qb *queryBuilder) addArg(v any) string {
+	qb.args = append(qb.args, v)
+	return fmt.Sprintf("$%d", len(qb.args))
+}
+
+func (qb *queryBuilder) and(clause string) { qb.where += " AND " + clause }
+
+func (qb *queryBuilder) applyFilters(opts ConsoleListOpts) error {
+	if opts.Cursor > 0 {
+		qb.and("id < " + qb.addArg(opts.Cursor))
+	}
+	for _, f := range opts.Attrs {
+		if f.Dim == "" || f.Value == "" {
+			continue
+		}
+		clause, err := containmentClause(f)
+		if err != nil {
+			return err
+		}
+		qb.and("enriched_attrs @> " + qb.addArg(clause) + "::jsonb")
+	}
+	if opts.Urgent != nil {
+		qb.and("is_urgent = " + qb.addArg(ptrext.Indirect(opts.Urgent)))
+	}
+	if opts.Q != "" {
+		p := qb.addArg("%" + opts.Q + "%")
+		qb.and("(content ILIKE " + p +
+			" OR enriched_title ILIKE " + p +
+			" OR enriched_display_title ILIKE " + p + ")")
+	}
+	if opts.TagID != nil {
+		qb.and("EXISTS (SELECT 1 FROM feedback_tag_assignments fta WHERE fta.feedback_id = id AND fta.tag_id = " + qb.addArg(ptrext.Indirect(opts.TagID)) + "::uuid)")
+	}
+	if opts.WorkflowStateID != nil {
+		qb.and("workflow_state_id = " + qb.addArg(ptrext.Indirect(opts.WorkflowStateID)) + "::uuid")
+	}
+	if opts.WorkflowCategory != nil {
+		qb.and("workflow_state_id IN (SELECT id FROM tenant_workflow_states WHERE tenant_id = $1 AND category = " + qb.addArg(ptrext.Indirect(opts.WorkflowCategory)) + ")")
+	}
+	return nil
+}
+
 // ListForConsole returns one page newest-first, scoped to tenant. Uses
 // the idx_user_feedback_tenant_created index for the ORDER BY and the
 // jsonb_path_ops GIN index for any AttrFilter containment.
@@ -74,42 +125,9 @@ func (r *FeedbackRepo) ListForConsole(
 	if opts.Limit <= 0 || opts.Limit > 100 {
 		opts.Limit = 50
 	}
-	args := []any{tenantID}
-	where := "WHERE tenant_id = $1"
-	addArg := func(v any) string {
-		args = append(args, v)
-		return fmt.Sprintf("$%d", len(args))
-	}
-	if opts.Cursor > 0 {
-		where += " AND id < " + addArg(opts.Cursor)
-	}
-	for _, f := range opts.Attrs {
-		if f.Dim == "" || f.Value == "" {
-			continue
-		}
-		clause, err := containmentClause(f)
-		if err != nil {
-			return nil, err
-		}
-		where += " AND enriched_attrs @> " + addArg(clause) + "::jsonb"
-	}
-	if opts.Urgent != nil {
-		where += " AND is_urgent = " + addArg(ptrext.Indirect(opts.Urgent))
-	}
-	if opts.Q != "" {
-		p := addArg("%" + opts.Q + "%")
-		where += " AND (content ILIKE " + p +
-			" OR enriched_title ILIKE " + p +
-			" OR enriched_display_title ILIKE " + p + ")"
-	}
-	if opts.TagID != nil {
-		where += " AND EXISTS (SELECT 1 FROM feedback_tag_assignments fta WHERE fta.feedback_id = id AND fta.tag_id = " + addArg(ptrext.Indirect(opts.TagID)) + "::uuid)"
-	}
-	if opts.WorkflowStateID != nil {
-		where += " AND workflow_state_id = " + addArg(ptrext.Indirect(opts.WorkflowStateID)) + "::uuid"
-	}
-	if opts.WorkflowCategory != nil {
-		where += " AND workflow_state_id IN (SELECT id FROM tenant_workflow_states WHERE tenant_id = $1 AND category = " + addArg(ptrext.Indirect(opts.WorkflowCategory)) + ")"
+	qb := newQueryBuilder(tenantID)
+	if err := qb.applyFilters(opts); err != nil {
+		return nil, err
 	}
 	query := `
 			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
@@ -123,10 +141,10 @@ func (r *FeedbackRepo) ListForConsole(
 		 created_at,
 		 workflow_state_id
 		 FROM user_feedback
-		 ` + where + `
+		 ` + qb.where + `
 		 ORDER BY id DESC
-		 LIMIT ` + addArg(opts.Limit)
-	rows, err := r.pool.Query(ctx, query, args...)
+		 LIMIT ` + qb.addArg(opts.Limit)
+	rows, err := r.pool.Query(ctx, query, qb.args...)
 	if err != nil {
 		const where = "repo.FeedbackRepo.ListForConsole"
 		logext.Errorf(ctx, "[%s] query failed,tenant_id:%s,err:%+v",

@@ -23,8 +23,6 @@ import { useRegenerateReplyDraft } from '@/features/feedback/api/regenerate-repl
 import { ConfidenceIndicator } from '@/features/feedback/components/confidence-indicator'
 import { FeedbackTagSection } from '@/features/feedback/components/feedback-tags'
 import { LanguageBadge, languagesDiffer } from '@/features/feedback/components/language-badge'
-import { AuditTimeline } from '@/features/workflow/components/audit-timeline'
-import { WorkflowTransitionSelect } from '@/features/workflow/components/workflow-transition-select'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import { cn } from '@/lib/utils'
 import type { Dimension } from '@/proto/attune/v1/common'
@@ -40,11 +38,15 @@ export function FeedbackDetailSheet({
   dims,
   availableTags,
   onOpenChange,
+  renderWorkflowTransition,
+  renderAuditLog,
 }: {
   id: string | null
   dims: Dimension[]
   availableTags: Tag[]
   onOpenChange: (v: boolean) => void
+  renderWorkflowTransition?: (data: FeedbackDetail) => React.ReactNode
+  renderAuditLog?: (data: FeedbackDetail) => React.ReactNode
 }) {
   const { t } = useTranslation()
   const open = id !== null
@@ -98,7 +100,13 @@ export function FeedbackDetailSheet({
             </div>
           )}
           {detail.data && (
-            <DetailBody data={detail.data} dims={dims} availableTags={availableTags} />
+            <DetailBody
+              data={detail.data}
+              dims={dims}
+              availableTags={availableTags}
+              renderWorkflowTransition={renderWorkflowTransition}
+              renderAuditLog={renderAuditLog}
+            />
           )}
         </div>
       </SheetContent>
@@ -110,10 +118,14 @@ function DetailBody({
   data,
   dims,
   availableTags,
+  renderWorkflowTransition,
+  renderAuditLog,
 }: {
   data: FeedbackDetail
   dims: Dimension[]
   availableTags: Tag[]
+  renderWorkflowTransition?: (data: FeedbackDetail) => React.ReactNode
+  renderAuditLog?: (data: FeedbackDetail) => React.ReactNode
 }) {
   const { t } = useTranslation()
   const displayOf = useDisplayName()
@@ -185,17 +197,15 @@ function DetailBody({
         availableTags={availableTags}
       />
 
-      <Section label={t('feedback.detail.workflow_state')}>
-        <WorkflowTransitionSelect
-          feedbackId={String(data.id)}
-          currentState={data.workflowState}
-          allowedNext={data.allowedNextStates ?? []}
-        />
-      </Section>
+      {renderWorkflowTransition && (
+        <Section label={t('feedback.detail.workflow_state')}>
+          {renderWorkflowTransition(data)}
+        </Section>
+      )}
 
-      <Section label={t('feedback.detail.audit_log')}>
-        <AuditTimeline feedbackId={Number(data.id)} />
-      </Section>
+      {renderAuditLog && (
+        <Section label={t('feedback.detail.audit_log')}>{renderAuditLog(data)}</Section>
+      )}
 
       <Section label={t('feedback.detail.source')}>
         <p className="font-mono text-xs text-muted-foreground">

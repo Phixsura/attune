@@ -141,7 +141,8 @@ func (h *FeedbackHandler) ListAudit(
 		limit = 50
 	}
 
-	entries, nextCursor, err := h.auditReader.List(ctx, req.GetFeedbackId(), req.GetCursor(), limit)
+	auth := ctx.Auth
+	entries, nextCursor, err := h.auditReader.List(ctx, auth.TenantID, req.GetFeedbackId(), req.GetCursor(), limit)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] list failed,feedback_id:%d,err:%+v",
 			where, req.GetFeedbackId(), err.Error())

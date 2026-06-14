@@ -6,8 +6,7 @@ import { workflowTransitionsQueryKey } from './list-transitions'
 export function useArchiveState() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) =>
-      api(`/fb/v1/console/workflow/states/${id}/archive`, { method: 'POST' }),
+    mutationFn: (id: string) => api(`/fb/v1/console/workflow/states/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: workflowStatesQueryKey })
       void qc.invalidateQueries({ queryKey: workflowTransitionsQueryKey })

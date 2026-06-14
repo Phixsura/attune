@@ -55,7 +55,7 @@ func TestPG_WriteAndList(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	entries, nextCursor, err := repo.List(ctx, feedbackID, "", 50)
+	entries, nextCursor, err := repo.List(ctx, tenantID, feedbackID, "", 50)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestPG_Pagination(t *testing.T) {
 		}
 	}
 
-	page1, cursor1, err := repo.List(ctx, feedbackID, "", 3)
+	page1, cursor1, err := repo.List(ctx, tenantID, feedbackID, "", 3)
 	if err != nil {
 		t.Fatalf("List page1: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestPG_Pagination(t *testing.T) {
 		t.Fatal("expected cursor after page1")
 	}
 
-	page2, cursor2, err := repo.List(ctx, feedbackID, cursor1, 3)
+	page2, cursor2, err := repo.List(ctx, tenantID, feedbackID, cursor1, 3)
 	if err != nil {
 		t.Fatalf("List page2: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestPG_WriteTx(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	entries, _, err := repo.List(ctx, feedbackID, "", 50)
+	entries, _, err := repo.List(ctx, tenantID, feedbackID, "", 50)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

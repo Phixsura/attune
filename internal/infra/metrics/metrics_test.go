@@ -44,6 +44,8 @@ func TestRegisteredMetricsMatchDocumentedReference(t *testing.T) {
 		"attune_reply_draft_queue_depth":         true,
 		"attune_digest_runs_total":               true,
 		"attune_digest_duration_seconds":         true,
+		"attune_workflow_transitions_total":      true,
+		"attune_workflow_batch_size":             true,
 	}
 
 	got := registeredMetricNames(t)

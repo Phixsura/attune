@@ -23,6 +23,7 @@ import (
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
+	consoleworkflow "github.com/Phixsura/attune/internal/handlers/console/workflow"
 )
 
 func TestRouterInventory(t *testing.T) {
@@ -46,6 +47,7 @@ func TestRouterInventory(t *testing.T) {
 		inbound:            &consoleinbound.Handler{},
 		tags:               &consoletag.Handler{},
 		tagAssignments:     &consoletagassignment.Handler{},
+		workflow:           &consoleworkflow.Handler{},
 	}).Mount()
 
 	got := make(map[string]bool)
@@ -101,6 +103,16 @@ func TestRouterInventory(t *testing.T) {
 		"POST /feedback/{id}/tags",
 		"DELETE /feedback/{id}/tags/{tag_id}",
 		"POST /feedback/batch/tags",
+		"POST /feedback/{id}/transition",
+		"POST /feedback/transition/batch",
+		"GET /feedback/{id}/audit",
+		"GET /workflow/states",
+		"POST /workflow/states",
+		"PATCH /workflow/states/{id}",
+		"DELETE /workflow/states/{id}",
+		"GET /workflow/transitions",
+		"PUT /workflow/transitions",
+		"POST /workflow/seed",
 	}
 
 	for _, route := range expected {
