@@ -78,6 +78,7 @@ func (h *SearchHandler) Search(
 	if err != nil {
 		if errors.Is(err, semanticsearch.ErrRateLimited) {
 			logext.Infof(ctx, "[%s] rate limited,tenant_id:%s", where, auth.TenantID)
+			ctx.SetHeader("Retry-After", "60")
 			return dispatcher.Fail[*attunev1.SemanticSearchResponse](
 				http.StatusTooManyRequests,
 				attunev1.ErrorCode_RATE_LIMITED,

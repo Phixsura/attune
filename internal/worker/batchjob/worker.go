@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/pkg/batchconv"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -274,7 +275,7 @@ func (w *Worker) executeJob(ctx context.Context, job *feedbackjob.Job) (*jobResu
 		result.Succeeded += chunkResult.Succeeded
 		result.Skipped += chunkResult.Skipped
 		for _, f := range chunkResult.Failed {
-			result.Failed = append(result.Failed, repoFailureToProto(f))
+			result.Failed = append(result.Failed, batchconv.ItemFailureToProto(f))
 		}
 
 		processed += len(chunk)
@@ -370,18 +371,4 @@ func (w *Worker) recoverStuckJobs(ctx context.Context) {
 			}
 		}
 	}
-}
-
-// repoFailureToProto converts a repo failure to proto format.
-func repoFailureToProto(f feedback.ItemFailure) *attunev1.BatchItemFailure {
-	pf := ptrext.Of(attunev1.BatchItemFailure{
-		FeedbackId: f.FeedbackID,
-		Code:       f.Code,
-		Message:    f.Message,
-	})
-	if f.UpdatedAt != nil {
-		ts := f.UpdatedAt.Format(time.RFC3339)
-		pf.CurrentUpdatedAt = ptrext.Of(ts)
-	}
-	return pf
 }

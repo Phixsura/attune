@@ -128,12 +128,7 @@ func (h *BatchHandler) handleServiceError(
 	switch {
 	case errors.Is(err, feedbackbatch.ErrRateLimited):
 		logext.Warnf(ctx, "[%s] rate limited,tenant_id:%s", where, tenantID)
-		// Set Retry-After header.
-		ctx.SetCookie(ptrext.Of(http.Cookie{
-			Name:   "X-Retry-After",
-			Value:  "60",
-			MaxAge: 60,
-		}))
+		ctx.SetHeader("Retry-After", "60")
 		return dispatcher.Fail[*attunev1.BatchFeedbackResponse](
 			http.StatusTooManyRequests, attunev1.ErrorCode_RATE_LIMITED, "rate limit exceeded, retry after 60 seconds")
 

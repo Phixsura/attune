@@ -33,8 +33,8 @@ func (f *fakeBatchService) GetJobStatus(_ context.Context, _, _ string) (*attune
 	return nil, nil
 }
 
-func (f *fakeBatchService) ListJobs(_ context.Context, _ string, _ *string, _ int) ([]*attunev1.JobStatusResponse, error) {
-	return nil, nil
+func (f *fakeBatchService) ListJobs(_ context.Context, _ string, _ *string, _ int, _ string) ([]*attunev1.JobStatusResponse, string, error) {
+	return nil, "", nil
 }
 
 func (f *fakeBatchService) CancelJob(_ context.Context, _, _ string) (*attunev1.CancelJobResponse, error) {
