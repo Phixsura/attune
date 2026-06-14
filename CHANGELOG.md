@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Security
+
+- **Constant-time hash comparison in idempotency repo (#30).** Replaced
+  `bytes.Equal()` with `crypto/subtle.ConstantTimeCompare()` for comparing
+  request hashes, eliminating a theoretical timing attack vector.
+
 ### Added
 
 - **Batch operations for feedback (#30).** Operators can now apply bulk changes

@@ -3,8 +3,8 @@
 package idempotency
 
 import (
-	"bytes"
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -79,8 +79,8 @@ func (r *Repo) Acquire(ctx context.Context, tenantID, key string, requestHash []
 		return nil, false, ErrExpired
 	}
 
-	// Check if request hash matches.
-	if !bytes.Equal(existing.RequestHash, requestHash) {
+	// Check if request hash matches (constant-time to avoid timing attacks).
+	if subtle.ConstantTimeCompare(existing.RequestHash, requestHash) != 1 {
 		return nil, false, ErrHashMismatch
 	}
 
