@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/handlers/console"
+	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
@@ -23,9 +24,11 @@ import (
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	feedbackauditrepo "github.com/Phixsura/attune/internal/repo/feedbackaudit"
+	feedbackjobrepo "github.com/Phixsura/attune/internal/repo/feedbackjob"
 	feedbacktagrepo "github.com/Phixsura/attune/internal/repo/feedbacktag"
 	feedbacktagassignmentrepo "github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	guardpolicyrepo "github.com/Phixsura/attune/internal/repo/guardpolicy"
+	idempotencyrepo "github.com/Phixsura/attune/internal/repo/idempotency"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
 	llmconfigrepo "github.com/Phixsura/attune/internal/repo/llmconfig"
@@ -36,9 +39,12 @@ import (
 	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	"github.com/Phixsura/attune/internal/service/enrich"
+	"github.com/Phixsura/attune/internal/service/feedbackbatch"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
+	"github.com/Phixsura/attune/internal/service/llmrouter"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
+	"github.com/Phixsura/attune/internal/service/semanticsearch"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
 )
 
@@ -210,11 +216,30 @@ func buildConsoleRouter(
 	tagAssignmentHandler := console.NewTagAssignmentHandler(tagRepo, tagAssignmentRepo)
 	workflowHandler := console.NewWorkflowHandler(wfStateRepo, wfSvc)
 
+	// Batch operations service dependencies.
+	idempotencyRepo := idempotencyrepo.New(pool)
+	jobRepo := feedbackjobrepo.New(pool)
+	batchRateLimiter := ratelimit.NewMemorySlidingLimiter()
+	batchConcurrency := ratelimit.NewMemoryConcurrencyLimiter()
+	batchSvc := feedbackbatch.New(feedbackRepo, idempotencyRepo, jobRepo, batchRateLimiter, batchConcurrency)
+	batchHandler := console.NewBatchHandler(batchSvc)
+
+	// Semantic search service dependencies.
+	llmConfigRepo := llmconfigrepo.New(pool)
+	searchRouter := llmrouter.New(llmConfigRepo, secrets)
+	searchRateLimiter := ratelimit.NewMemorySlidingLimiter()
+	searchCache := semanticsearch.NewPGCache(pool)
+	searchSvc := semanticsearch.New(feedbackRepo, searchRouter, searchRateLimiter, searchCache)
+	searchHandler := console.NewSearchHandler(searchSvc)
+
+	// Job handler uses batch service (implements jobService interface).
+	jobHandler := feedbackjob.NewHandler(batchSvc)
+
 	return console.NewRouter(
 		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback,
-		nil, // feedbackBatch - TODO: wire service.feedbackbatch.Service
-		nil, // feedbackSearch - TODO: wire service.semanticsearch.Service
-		nil, // feedbackJob - TODO: wire service.feedbackbatch.Service
+		batchHandler,
+		searchHandler,
+		jobHandler,
 		usage, enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
 		tagHandler, tagAssignmentHandler, workflowHandler, adminRepo,
 	).Mount(), nil
