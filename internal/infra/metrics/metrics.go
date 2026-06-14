@@ -320,6 +320,43 @@ var WorkflowBatchSize = prometheus.NewHistogram(
 	},
 )
 
+// BatchJobsClaimed counts async batch jobs claimed by workers.
+var BatchJobsClaimed = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_batch_jobs_claimed_total",
+		Help: "Async batch jobs claimed by workers.",
+	},
+	[]string{"tenant"},
+)
+
+// BatchJobsCompleted counts async batch jobs completed by status.
+// status ∈ {completed, failed}.
+var BatchJobsCompleted = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_batch_jobs_completed_total",
+		Help: "Async batch jobs completed by outcome.",
+	},
+	[]string{"tenant", "status"},
+)
+
+// BatchJobDuration tracks async batch job processing time.
+var BatchJobDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_batch_job_duration_seconds",
+		Help:    "Async batch job processing latency.",
+		Buckets: prometheus.ExponentialBuckets(1, 2, 10), // 1s..512s
+	},
+	[]string{"tenant"},
+)
+
+// BatchJobsRecovered counts stuck jobs recovered by the recovery process.
+var BatchJobsRecovered = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "attune_batch_jobs_recovered_total",
+		Help: "Stuck batch jobs recovered and requeued.",
+	},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -364,6 +401,10 @@ var allMetrics = []prometheus.Collector{
 	DigestDuration,
 	WorkflowTransitionsTotal,
 	WorkflowBatchSize,
+	BatchJobsClaimed,
+	BatchJobsCompleted,
+	BatchJobDuration,
+	BatchJobsRecovered,
 }
 
 func init() {

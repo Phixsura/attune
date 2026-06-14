@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -380,12 +382,19 @@ func (s *service) executeAsync(ctx context.Context, req *BatchRequest, ids []int
 	}
 
 	// Prepare job request payload.
+	// Use protojson for the operation to properly serialize the oneof field.
+	opBytes, err := protojson.Marshal(req.Operation)
+	if err != nil {
+		s.failIdempotencyKey(ctx, req)
+		return nil, fmt.Errorf("marshal operation: %w", err)
+	}
+
 	jobRequest := struct {
-		Operation         *attunev1.BatchOperation `json:"operation"`
-		FeedbackIDs       []int64                  `json:"feedback_ids"`
-		IfUnmodifiedSince *time.Time               `json:"if_unmodified_since,omitempty"`
+		Operation         json.RawMessage `json:"operation"`
+		FeedbackIDs       []int64         `json:"feedback_ids"`
+		IfUnmodifiedSince *time.Time      `json:"if_unmodified_since,omitempty"`
 	}{
-		Operation:         req.Operation,
+		Operation:         opBytes,
 		FeedbackIDs:       ids,
 		IfUnmodifiedSince: req.IfUnmodifiedSince,
 	}
