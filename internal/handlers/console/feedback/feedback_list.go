@@ -13,11 +13,13 @@ import (
 )
 
 var listFeedbackReservedQuery = map[string]struct{}{
-	"cursor": {},
-	"limit":  {},
-	"q":      {},
-	"urgent": {},
-	"tag":    {},
+	"cursor":            {},
+	"limit":             {},
+	"q":                 {},
+	"urgent":            {},
+	"tag":               {},
+	"workflow_state":    {},
+	"workflow_category": {},
 }
 
 func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
@@ -38,6 +40,12 @@ func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
 	}
 	if v := q.Get("tag"); v != "" {
 		req.TagId = ptrext.Of(v)
+	}
+	if v := q.Get("workflow_state"); v != "" {
+		req.WorkflowStateId = ptrext.Of(v)
+	}
+	if v := q.Get("workflow_category"); v != "" {
+		req.WorkflowCategory = ptrext.Of(v)
 	}
 	for k, vs := range q {
 		if _, ok := listFeedbackReservedQuery[k]; ok {
@@ -87,6 +95,12 @@ func (h *FeedbackHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx],
 	if req.TagId != nil {
 		opts.TagID = req.TagId
 	}
+	if req.WorkflowStateId != nil {
+		opts.WorkflowStateID = req.WorkflowStateId
+	}
+	if req.WorkflowCategory != nil {
+		opts.WorkflowCategory = req.WorkflowCategory
+	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,attrs_n:%d,limit:%d,cursor:%d",
 		where, auth.TenantID, len(opts.Attrs), opts.Limit, opts.Cursor)
 
@@ -101,6 +115,7 @@ func (h *FeedbackHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx],
 		items = append(items, toProtoFeedback(row))
 	}
 	h.enrichItemsWithTags(ctx, where, auth.TenantID, rows, items)
+	h.enrichItemsWithWorkflowState(ctx, where, auth.TenantID, rows, items)
 	resp := ptrext.Of(attunev1.ListFeedbackResponse{Items: items})
 	if opts.Limit > 0 && len(rows) == opts.Limit {
 		resp.NextCursor = ptrext.Of(strconv.FormatInt(rows[len(rows)-1].ID, 10))

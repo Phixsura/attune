@@ -320,6 +320,10 @@
       "tags": {
         "title": "标签",
         "body": "反馈手动标签、颜色、互斥组与归档。"
+      },
+      "workflow": {
+        "title": "工作流",
+        "body": "反馈处理阶段、状态流转规则与审计。"
       }
     },
     "prompt_title": "分类提示词",
@@ -528,13 +532,16 @@
     "filter": {
       "all": "所有 {{dim}}",
       "all_tags": "所有标签",
+      "all_states": "所有状态",
       "search_placeholder": "搜索内容或标题..."
     },
     "batch": {
       "selected": "已选 {{count}} 条",
       "add_tag": "添加标签",
       "remove_tag": "移除标签",
-      "success": "已更新 {{count}} 条反馈"
+      "transition": "流转状态",
+      "success": "已更新 {{count}} 条反馈",
+      "transition_success": "已流转 {{count}} 条反馈"
     },
     "status": {
       "pending": "待处理",
@@ -590,7 +597,9 @@
       "reply_draft_generate": "生成草稿",
       "reply_draft_generated_at": "生成于 {{ago}}",
       "reply_draft_failed": "重新生成失败",
-      "reply_draft_cooldown": "操作过于频繁，请稍候再试"
+      "reply_draft_cooldown": "操作过于频繁，请稍候再试",
+      "workflow_state": "工作流状态",
+      "audit_log": "操作日志"
     },
     "empty_title": "还没有反馈",
     "empty_body": "把 API key 接到你的产品里。新反馈到了 1 分钟内会出现在这里，配置好的 webhook 目标也会同步。",
@@ -728,6 +737,60 @@
       "scope": "互斥组",
       "usage": "使用次数",
       "usage_count": "{{count}} 条反馈"
+    }
+  },
+  "workflow": {
+    "title": "工作流状态",
+    "subtitle": "自定义反馈的处理阶段。每个状态属于「开放」「活跃」「关闭」三类中的一种。",
+    "states_title": "状态列表",
+    "states_subtitle": "拖拽排序、编辑颜色或归档不再使用的状态。",
+    "transitions_title": "流转规则",
+    "transitions_subtitle": "勾选允许的状态间转换。未勾选的转换将被拒绝。",
+    "categories": {
+      "open": "开放",
+      "active": "活跃",
+      "closed": "关闭"
+    },
+    "table": {
+      "name": "名称",
+      "category": "分类",
+      "default": "默认"
+    },
+    "create_button": "新建状态",
+    "seed_button": "生成默认",
+    "edit_label": "编辑状态",
+    "archive_label": "归档状态",
+    "archive_confirm": "确定归档「{{name}}」？归档后不可恢复，已有反馈的状态不受影响。",
+    "created": "状态已创建",
+    "archived": "状态已归档",
+    "seeded": "已生成默认工作流",
+    "transitions_saved": "流转规则已保存",
+    "empty": {
+      "title": "尚未配置工作流",
+      "body": "点击「生成默认」一键创建常用工作流，或手动新建状态。"
+    },
+    "state_dialog": {
+      "create_title": "新建状态",
+      "create_description": "为反馈工作流添加一个新的处理阶段。",
+      "edit_title": "编辑状态",
+      "edit_description": "修改状态的名称或颜色。",
+      "name": "名称",
+      "color": "颜色",
+      "category": "分类",
+      "category_locked": "创建后分类不可更改。"
+    },
+    "matrix": {
+      "from_to": "从 \\ 到",
+      "save": "保存规则"
+    },
+    "current_state": "当前状态",
+    "transition_placeholder": "流转到…",
+    "transition_comment": "备注（可选）",
+    "transition_button": "流转",
+    "transition_success": "状态已流转",
+    "no_states": "尚未配置工作流状态",
+    "audit": {
+      "empty": "暂无操作记录"
     }
   }
 }

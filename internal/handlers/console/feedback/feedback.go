@@ -12,8 +12,11 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	"github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	"github.com/Phixsura/attune/internal/repo/tenant"
+	"github.com/Phixsura/attune/internal/repo/workflowstate"
+	"github.com/Phixsura/attune/internal/service/workflow"
 )
 
 type tagAssignmentReader interface {
@@ -28,12 +31,32 @@ type tagAssignmentReader interface {
 // stable wire query (`?type=bug&severity=critical&labels=payment`)
 // into the per-dim AttrFilter shape the repo's JSONB containment
 // queries expect.
+type workflowTransitioner interface {
+	Transition(ctx context.Context, tenantID string, feedbackID int64,
+		toStateID string, byUser string, comment string) (*workflow.TransitionResult, error)
+	BatchTransition(ctx context.Context, tenantID string, feedbackIDs []int64,
+		toStateID string, byUser string, comment string) (*workflow.BatchResult, error)
+}
+
+type auditReader interface {
+	List(ctx context.Context, tenantID string, feedbackID int64, cursor string, limit int) ([]feedbackaudit.Entry, string, error)
+}
+
+type workflowStateReader interface {
+	List(ctx context.Context, tenantID string, includeArchived bool) ([]workflowstate.WorkflowState, error)
+	ListTransitions(ctx context.Context, tenantID string) ([]workflowstate.Transition, error)
+	AllowedNext(ctx context.Context, tenantID, fromID string) ([]workflowstate.WorkflowState, error)
+}
+
 type FeedbackHandler struct {
 	repo           feedbackRepo
 	tenants        tenantConfigRepo
 	drafter        Drafter            // optional reply-draft generator; nil disables Regenerate
 	regenLimiter   *ratelimit.Limiter // optional per-tenant rate limit on Regenerate; nil disables
 	tagAssignments tagAssignmentReader
+	workflow       workflowTransitioner
+	auditReader    auditReader
+	workflowStates workflowStateReader
 }
 
 // Drafter regenerates a reply draft synchronously, sharing the worker's
@@ -58,6 +81,15 @@ func (h *FeedbackHandler) SetRegenLimiter(l *ratelimit.Limiter) { h.regenLimiter
 // SetTagAssignments wires the tag assignment reader used by List/Get to
 // hydrate per-feedback tags. nil leaves tags empty.
 func (h *FeedbackHandler) SetTagAssignments(r tagAssignmentReader) { h.tagAssignments = r }
+
+// SetWorkflow wires the workflow transition service. nil disables transition endpoints.
+func (h *FeedbackHandler) SetWorkflow(w workflowTransitioner) { h.workflow = w }
+
+// SetAuditReader wires the audit log reader. nil returns empty audit lists.
+func (h *FeedbackHandler) SetAuditReader(r auditReader) { h.auditReader = r }
+
+// SetWorkflowStates wires the state reader for hydrating workflow state on list/detail.
+func (h *FeedbackHandler) SetWorkflowStates(r workflowStateReader) { h.workflowStates = r }
 
 type feedbackRepo interface {
 	ListForConsole(ctx context.Context, tenantID string, opts feedback.ConsoleListOpts) ([]feedback.ConsoleListRow, error)

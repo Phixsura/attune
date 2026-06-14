@@ -98,6 +98,7 @@ func (h *FeedbackHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 			}
 		}
 	}
+	h.enrichDetailWithWorkflowState(ctx, where, auth.TenantID, row.WorkflowStateID, detail)
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%d", where, auth.TenantID, id)
 	return dispatcher.OK(detail)
 }

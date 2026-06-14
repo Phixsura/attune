@@ -313,6 +313,14 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: workflowStateId
+                  in: query
+                  schema:
+                    type: string
+                - name: workflowCategory
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -363,6 +371,63 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/GetFeedbackStatsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/transition/batch:
+        post:
+            tags:
+                - WorkflowService
+            operationId: WorkflowService_BatchTransitionFeedback
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/BatchTransitionFeedbackRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/BatchTransitionFeedbackResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/{feedbackId}/audit:
+        get:
+            tags:
+                - WorkflowService
+            operationId: WorkflowService_ListAudit
+            parameters:
+                - name: feedbackId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListAuditResponse'
                 default:
                     description: Default error response
                     content:
@@ -422,6 +487,36 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/RemoveFeedbackTagResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/{feedbackId}/transition:
+        post:
+            tags:
+                - WorkflowService
+            operationId: WorkflowService_TransitionFeedback
+            parameters:
+                - name: feedbackId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TransitionFeedbackRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TransitionFeedbackResponse'
                 default:
                     description: Default error response
                     content:
@@ -1565,6 +1660,170 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/workflow/seed:
+        post:
+            tags:
+                - WorkflowService
+            operationId: WorkflowService_SeedDefaults
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SeedDefaultsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SeedDefaultsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/workflow/states:
+        get:
+            tags:
+                - WorkflowService
+            operationId: WorkflowService_ListStates
+            parameters:
+                - name: includeArchived
+                  in: query
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListStatesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - WorkflowService
+            operationId: WorkflowService_CreateState
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateStateRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateStateResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/workflow/states/{id}:
+        delete:
+            tags:
+                - WorkflowService
+            operationId: WorkflowService_ArchiveState
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ArchiveStateResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        patch:
+            tags:
+                - WorkflowService
+            operationId: WorkflowService_UpdateState
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateStateRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateStateResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/workflow/transitions:
+        get:
+            tags:
+                - WorkflowService
+            operationId: WorkflowService_ListTransitions
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListTransitionsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        put:
+            tags:
+                - WorkflowService
+            operationId: WorkflowService_ReplaceTransitions
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ReplaceTransitionsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplaceTransitionsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /v1/feedback/ingest:
         post:
             tags:
@@ -1624,6 +1883,9 @@ components:
                     type: string
                 revokedAt:
                     type: string
+        ArchiveStateResponse:
+            type: object
+            properties: {}
         ArchiveTagResponse:
             type: object
             properties: {}
@@ -1636,6 +1898,57 @@ components:
                     type: string
                 size:
                     type: string
+        AuditEntry:
+            type: object
+            properties:
+                id:
+                    type: string
+                feedbackId:
+                    type: string
+                entityType:
+                    type: string
+                fieldName:
+                    type: string
+                oldValue:
+                    type: string
+                newValue:
+                    type: string
+                comment:
+                    type: string
+                changedBy:
+                    type: string
+                createdAt:
+                    type: string
+        BatchTransitionFailure:
+            type: object
+            properties:
+                feedbackId:
+                    type: string
+                code:
+                    type: string
+                message:
+                    type: string
+        BatchTransitionFeedbackRequest:
+            type: object
+            properties:
+                feedbackIds:
+                    type: array
+                    items:
+                        type: string
+                toStateId:
+                    type: string
+                comment:
+                    type: string
+        BatchTransitionFeedbackResponse:
+            type: object
+            properties:
+                succeeded:
+                    type: integer
+                    format: int32
+                failed:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/BatchTransitionFailure'
         BatchUpdateFeedbackTagsRequest:
             type: object
             properties:
@@ -1805,6 +2118,23 @@ components:
                     format: int32
                 disabled:
                     type: boolean
+        CreateStateRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                color:
+                    type: string
+                category:
+                    type: string
+                position:
+                    type: integer
+                    format: int32
+        CreateStateResponse:
+            type: object
+            properties:
+                state:
+                    $ref: '#/components/schemas/WorkflowState'
         CreateTagRequest:
             type: object
             properties:
@@ -2050,6 +2380,12 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/Tag'
+                workflowState:
+                    $ref: '#/components/schemas/WorkflowState'
+                allowedNextStates:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/WorkflowState'
             description: |-
                 Feedback is a console feedback list row. Post-E3 (metadata-driven
                  Dimensions): the per-row classification lives in `enriched_attrs`, a
@@ -2118,6 +2454,12 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/Tag'
+                workflowState:
+                    $ref: '#/components/schemas/WorkflowState'
+                allowedNextStates:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/WorkflowState'
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         GetClusterMembersResponse:
             type: object
@@ -2480,6 +2822,15 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ApiKey'
+        ListAuditResponse:
+            type: object
+            properties:
+                entries:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/AuditEntry'
+                nextCursor:
+                    type: string
         ListClustersResponse:
             type: object
             properties:
@@ -2552,6 +2903,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/NotifyTarget'
+        ListStatesResponse:
+            type: object
+            properties:
+                states:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/WorkflowState'
         ListTagsResponse:
             type: object
             properties:
@@ -2559,6 +2917,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/Tag'
+        ListTransitionsResponse:
+            type: object
+            properties:
+                transitions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/WorkflowTransition'
         LoginRequest:
             required:
                 - email
@@ -2669,6 +3034,20 @@ components:
                     type: string
                     description: Generic visual tone key, e.g. "success" / "warning" / "danger".
             description: RendererValue configures one taxonomy value under a RendererSpec.
+        ReplaceTransitionsRequest:
+            type: object
+            properties:
+                transitions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/WorkflowTransitionEdge'
+        ReplaceTransitionsResponse:
+            type: object
+            properties:
+                transitions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/WorkflowTransition'
         ResolveGuardPolicyRequest:
             type: object
             properties:
@@ -2708,6 +3087,12 @@ components:
                     type: string
                 nextEligibleAt:
                     type: string
+        SeedDefaultsRequest:
+            type: object
+            properties: {}
+        SeedDefaultsResponse:
+            type: object
+            properties: {}
         SessionUser:
             type: object
             properties:
@@ -2864,6 +3249,24 @@ components:
                     format: int32
                 latencyMs:
                     type: string
+        TransitionFeedbackRequest:
+            type: object
+            properties:
+                feedbackId:
+                    type: string
+                toStateId:
+                    type: string
+                comment:
+                    type: string
+        TransitionFeedbackResponse:
+            type: object
+            properties:
+                feedbackId:
+                    type: string
+                fromState:
+                    $ref: '#/components/schemas/WorkflowState'
+                toState:
+                    $ref: '#/components/schemas/WorkflowState'
         UpdateEnrichConfigRequest:
             type: object
             properties:
@@ -2939,6 +3342,25 @@ components:
                     format: int32
                 disabled:
                     type: boolean
+        UpdateStateRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                color:
+                    type: string
+                position:
+                    type: integer
+                    format: int32
+                isDefault:
+                    type: boolean
+        UpdateStateResponse:
+            type: object
+            properties:
+                state:
+                    $ref: '#/components/schemas/WorkflowState'
         UpdateTagRequest:
             type: object
             properties:
@@ -3049,6 +3471,44 @@ components:
                  is lowercase-hex-encoded; signature is HMAC-SHA256(secret_raw_bytes,
                  "<X-Attune-Timestamp>.<body>") (spec §Webhook adapter). The
                  signature header is hex-encoded (e.g. "sha256=ab12…").
+        WorkflowState:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                color:
+                    type: string
+                category:
+                    type: string
+                position:
+                    type: integer
+                    format: int32
+                isDefault:
+                    type: boolean
+                archived:
+                    type: boolean
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        WorkflowTransition:
+            type: object
+            properties:
+                id:
+                    type: string
+                fromStateId:
+                    type: string
+                toStateId:
+                    type: string
+        WorkflowTransitionEdge:
+            type: object
+            properties:
+                fromStateId:
+                    type: string
+                toStateId:
+                    type: string
 tags:
     - name: ApiKeyService
       description: ApiKeyService manages a tenant's external ingest API keys (console).
@@ -3094,3 +3554,4 @@ tags:
       description: SessionService backs the console session (login, current tenant + user, logout).
     - name: UsageService
       description: UsageService serves the console usage dashboard.
+    - name: WorkflowService

@@ -69,6 +69,11 @@ enum ErrorCode {
   RENDERER_KIND_INVALID   = 41;
   RENDERER_VALUE_INVALID  = 42;
   RENDERER_TARGET_INVALID = 43;
+
+  // workflow status (#29)
+  INVALID_TRANSITION       = 44;
+  WORKFLOW_STATE_NOT_FOUND = 45;
+  NO_WORKFLOW_STATE        = 46;
 }
 
 // ErrorResponse is the JSON body returned on any 4xx/5xx across attune's HTTP

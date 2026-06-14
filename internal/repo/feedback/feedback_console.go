@@ -33,12 +33,14 @@ type AttrFilter struct {
 // ConsoleListOpts is the filter set the console UI sends. Each field
 // is optional; empty means no filter. Limit is bounded by the handler.
 type ConsoleListOpts struct {
-	Attrs  []AttrFilter // per-dim filters, AND-composed via JSONB containment
-	Urgent *bool        // nil = no filter; true = is_urgent only; false = not urgent only
-	Q      string       // ILIKE on content + native/display titles
-	Cursor int64        // last id seen; 0 = first page
-	Limit  int
-	TagID  *string // UUID string; nil = no filter
+	Attrs            []AttrFilter // per-dim filters, AND-composed via JSONB containment
+	Urgent           *bool        // nil = no filter; true = is_urgent only; false = not urgent only
+	Q                string       // ILIKE on content + native/display titles
+	Cursor           int64        // last id seen; 0 = first page
+	Limit            int
+	TagID            *string // UUID string; nil = no filter
+	WorkflowStateID  *string // UUID string; nil = no filter
+	WorkflowCategory *string // "open"/"active"/"closed"; nil = no filter
 }
 
 // ConsoleListRow is the projection sent to the console list view.
@@ -60,6 +62,58 @@ type ConsoleListRow struct {
 	ClassificationConfidence *float64
 	EnrichmentStatus         string
 	CreatedAt                time.Time
+	WorkflowStateID          *string
+}
+
+type queryBuilder struct {
+	args  []any
+	where string
+}
+
+func newQueryBuilder(tenantID string) *queryBuilder {
+	return ptrext.Of(queryBuilder{args: []any{tenantID}, where: "WHERE tenant_id = $1"})
+}
+
+func (qb *queryBuilder) addArg(v any) string {
+	qb.args = append(qb.args, v)
+	return fmt.Sprintf("$%d", len(qb.args))
+}
+
+func (qb *queryBuilder) and(clause string) { qb.where += " AND " + clause }
+
+func (qb *queryBuilder) applyFilters(opts ConsoleListOpts) error {
+	if opts.Cursor > 0 {
+		qb.and("id < " + qb.addArg(opts.Cursor))
+	}
+	for _, f := range opts.Attrs {
+		if f.Dim == "" || f.Value == "" {
+			continue
+		}
+		clause, err := containmentClause(f)
+		if err != nil {
+			return err
+		}
+		qb.and("enriched_attrs @> " + qb.addArg(clause) + "::jsonb")
+	}
+	if opts.Urgent != nil {
+		qb.and("is_urgent = " + qb.addArg(ptrext.Indirect(opts.Urgent)))
+	}
+	if opts.Q != "" {
+		p := qb.addArg("%" + opts.Q + "%")
+		qb.and("(content ILIKE " + p +
+			" OR enriched_title ILIKE " + p +
+			" OR enriched_display_title ILIKE " + p + ")")
+	}
+	if opts.TagID != nil {
+		qb.and("EXISTS (SELECT 1 FROM feedback_tag_assignments fta WHERE fta.feedback_id = id AND fta.tag_id = " + qb.addArg(ptrext.Indirect(opts.TagID)) + "::uuid)")
+	}
+	if opts.WorkflowStateID != nil {
+		qb.and("workflow_state_id = " + qb.addArg(ptrext.Indirect(opts.WorkflowStateID)) + "::uuid")
+	}
+	if opts.WorkflowCategory != nil {
+		qb.and("workflow_state_id IN (SELECT id FROM tenant_workflow_states WHERE tenant_id = $1 AND category = " + qb.addArg(ptrext.Indirect(opts.WorkflowCategory)) + ")")
+	}
+	return nil
 }
 
 // ListForConsole returns one page newest-first, scoped to tenant. Uses
@@ -71,36 +125,9 @@ func (r *FeedbackRepo) ListForConsole(
 	if opts.Limit <= 0 || opts.Limit > 100 {
 		opts.Limit = 50
 	}
-	args := []any{tenantID}
-	where := "WHERE tenant_id = $1"
-	addArg := func(v any) string {
-		args = append(args, v)
-		return fmt.Sprintf("$%d", len(args))
-	}
-	if opts.Cursor > 0 {
-		where += " AND id < " + addArg(opts.Cursor)
-	}
-	for _, f := range opts.Attrs {
-		if f.Dim == "" || f.Value == "" {
-			continue
-		}
-		clause, err := containmentClause(f)
-		if err != nil {
-			return nil, err
-		}
-		where += " AND enriched_attrs @> " + addArg(clause) + "::jsonb"
-	}
-	if opts.Urgent != nil {
-		where += " AND is_urgent = " + addArg(ptrext.Indirect(opts.Urgent))
-	}
-	if opts.Q != "" {
-		p := addArg("%" + opts.Q + "%")
-		where += " AND (content ILIKE " + p +
-			" OR enriched_title ILIKE " + p +
-			" OR enriched_display_title ILIKE " + p + ")"
-	}
-	if opts.TagID != nil {
-		where += " AND EXISTS (SELECT 1 FROM feedback_tag_assignments fta WHERE fta.feedback_id = id AND fta.tag_id = " + addArg(ptrext.Indirect(opts.TagID)) + "::uuid)"
+	qb := newQueryBuilder(tenantID)
+	if err := qb.applyFilters(opts); err != nil {
+		return nil, err
 	}
 	query := `
 			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
@@ -111,12 +138,13 @@ func (r *FeedbackRepo) ListForConsole(
 		 is_urgent,
 		 classification_confidence,
 		 enrichment_status,
-		 created_at
+		 created_at,
+		 workflow_state_id
 		 FROM user_feedback
-		 ` + where + `
+		 ` + qb.where + `
 		 ORDER BY id DESC
-		 LIMIT ` + addArg(opts.Limit)
-	rows, err := r.pool.Query(ctx, query, args...)
+		 LIMIT ` + qb.addArg(opts.Limit)
+	rows, err := r.pool.Query(ctx, query, qb.args...)
 	if err != nil {
 		const where = "repo.FeedbackRepo.ListForConsole"
 		logext.Errorf(ctx, "[%s] query failed,tenant_id:%s,err:%+v",
@@ -128,15 +156,20 @@ func (r *FeedbackRepo) ListForConsole(
 	for rows.Next() {
 		var row ConsoleListRow
 		var confidence sql.NullFloat64
+		var wsID sql.NullString // ptrext:allow scan-target
 		if err := rows.Scan(
-			&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.Language, &row.PageURL,
-			&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale,
-			&row.EnrichedAttrs, &row.IsUrgent, &confidence,
-			&row.EnrichmentStatus, &row.CreatedAt,
+			&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.Language, &row.PageURL, // ptrext:allow scan-target
+			&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale, // ptrext:allow scan-target
+			&row.EnrichedAttrs, &row.IsUrgent, &confidence, // ptrext:allow scan-target
+			&row.EnrichmentStatus, &row.CreatedAt, // ptrext:allow scan-target
+			&wsID, // ptrext:allow scan-target
 		); err != nil {
 			return nil, fmt.Errorf("scan feedback row: %w", err)
 		}
 		row.ClassificationConfidence = nullFloatPtr(confidence)
+		if wsID.Valid {
+			row.WorkflowStateID = ptrext.Of(wsID.String)
+		}
 		out = append(out, row)
 	}
 	return out, rows.Err()
@@ -179,6 +212,7 @@ func (r *FeedbackRepo) GetForConsole(
 ) (*ConsoleDetailRow, error) {
 	var row ConsoleDetailRow
 	var confidence sql.NullFloat64
+	var wsID sql.NullString // ptrext:allow scan-target
 	err := r.pool.QueryRow(
 		ctx, `
 			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
@@ -196,19 +230,21 @@ func (r *FeedbackRepo) GetForConsole(
 		 COALESCE(enriched_display_rationale, ''),
 		 COALESCE(reply_draft, ''),
 		 reply_draft_generated_at,
-		 COALESCE((SELECT reply_draft_enabled FROM tenants WHERE id = $2), FALSE)
+		 COALESCE((SELECT reply_draft_enabled FROM tenants WHERE id = $2), FALSE),
+		 workflow_state_id
 		 FROM user_feedback
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
 	).Scan(
-		&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.Language, &row.PageURL,
-		&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale,
-		&row.EnrichedAttrs, &row.IsUrgent, &confidence,
-		&row.EnrichmentStatus, &row.CreatedAt,
-		&row.SourceMeta, &row.Attachments,
-		&row.EnrichmentError, &row.EnrichedAt,
-		&row.EnrichedRationale, &row.EnrichedDisplayRationale,
-		&row.ReplyDraft, &row.ReplyDraftGeneratedAt, &row.ReplyDraftEnabled,
+		&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.Language, &row.PageURL, // ptrext:allow scan-target
+		&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale, // ptrext:allow scan-target
+		&row.EnrichedAttrs, &row.IsUrgent, &confidence, // ptrext:allow scan-target
+		&row.EnrichmentStatus, &row.CreatedAt, // ptrext:allow scan-target
+		&row.SourceMeta, &row.Attachments, // ptrext:allow scan-target
+		&row.EnrichmentError, &row.EnrichedAt, // ptrext:allow scan-target
+		&row.EnrichedRationale, &row.EnrichedDisplayRationale, // ptrext:allow scan-target
+		&row.ReplyDraft, &row.ReplyDraftGeneratedAt, &row.ReplyDraftEnabled, // ptrext:allow scan-target
+		&wsID, // ptrext:allow scan-target
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrFeedbackNotFound
@@ -220,6 +256,9 @@ func (r *FeedbackRepo) GetForConsole(
 		return nil, fmt.Errorf("get feedback for console: %w", err)
 	}
 	row.ClassificationConfidence = nullFloatPtr(confidence)
+	if wsID.Valid {
+		row.WorkflowStateID = ptrext.Of(wsID.String)
+	}
 	return ptrext.Of(row), nil
 }
 

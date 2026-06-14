@@ -372,6 +372,7 @@ func newConsoleRouter(
 		nil, // digestSubscription
 		nil, // tags
 		nil, // tagAssignments
+		nil, // workflow
 		fakeAdminReader{},
 	)
 	return router.Mount(), signer

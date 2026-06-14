@@ -6,6 +6,7 @@
 
 /* eslint-disable */
 import { type Tag } from "./tag";
+import { type WorkflowState } from "./workflow";
 
 export const protobufPackage = "attune.v1";
 
@@ -86,6 +87,8 @@ export interface Feedback {
   /** model self-rated review signal [0,1] */
   classificationConfidence?: number | undefined;
   tags: Tag[];
+  workflowState?: WorkflowState | undefined;
+  allowedNextStates: WorkflowState[];
 }
 
 /** FeedbackDetail is the single-row view: the list fields plus extras (flat). */
@@ -149,6 +152,8 @@ export interface FeedbackDetail {
   /** tenant opt-in; lets the UI tell off / on-but-empty / has-draft apart */
   replyDraftEnabled: boolean;
   tags: Tag[];
+  workflowState?: WorkflowState | undefined;
+  allowedNextStates: WorkflowState[];
 }
 
 export interface Attachment {
@@ -184,6 +189,8 @@ export interface ListFeedbackRequest {
   /** full-text query */
   q?: string | undefined;
   tagId?: string | undefined;
+  workflowStateId?: string | undefined;
+  workflowCategory?: string | undefined;
 }
 
 export interface ListFeedbackResponse {

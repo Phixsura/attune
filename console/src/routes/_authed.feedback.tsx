@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { WorkflowStateBadge } from '@/components/workflow/workflow-state-badge'
 import { useBatchUpdateTags } from '@/features/feedback/api/batch-update-tags'
 import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
 import {
@@ -38,6 +39,10 @@ import { SelectionActionBar } from '@/features/feedback/components/selection-act
 import { useRowSelection } from '@/features/feedback/hooks/use-row-selection'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { tagsQuery } from '@/features/tags/api/list-tags'
+import { workflowStatesQuery } from '@/features/workflow/api/list-states'
+import { useBatchTransitionFeedback } from '@/features/workflow/api/transition-feedback'
+import { AuditTimeline } from '@/features/workflow/components/audit-timeline'
+import { WorkflowTransitionSelect } from '@/features/workflow/components/workflow-transition-select'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Dimension } from '@/proto/attune/v1/common'
 import type { Tag } from '@/proto/attune/v1/tag'
@@ -53,6 +58,7 @@ function FeedbackPage() {
 
   const [attrFilters, setAttrFilters] = useState<Record<string, string>>({})
   const [tagFilter, setTagFilter] = useState<string>('')
+  const [workflowFilter, setWorkflowFilter] = useState<string>('')
   const [qInput, setQInput] = useState('')
   const qDeferred = useDeferredValue(qInput)
   const [detailId, setDetailId] = useState<string | null>(null)
@@ -61,8 +67,13 @@ function FeedbackPage() {
     const attrs: AttrFilterEntry[] = Object.entries(attrFilters)
       .filter(([, v]) => v && v !== '__all')
       .map(([dim, value]) => ({ dim, value }))
-    return { attrs, q: qDeferred.trim(), tag: tagFilter || undefined }
-  }, [attrFilters, qDeferred, tagFilter])
+    return {
+      attrs,
+      q: qDeferred.trim(),
+      tag: tagFilter || undefined,
+      workflowState: workflowFilter || undefined,
+    }
+  }, [attrFilters, qDeferred, tagFilter, workflowFilter])
 
   const list = useInfiniteQuery(feedbackListInfiniteQuery(filters))
   const items = list.data?.pages.flatMap((p) => p.items) ?? []
@@ -70,11 +81,14 @@ function FeedbackPage() {
   const stats = useQuery(feedbackStatsQuery())
   const allTags = useQuery(tagsQuery())
   const tagList = allTags.data ?? []
+  const allStates = useQuery(workflowStatesQuery())
+  const stateList = allStates.data ?? []
 
   const itemIds = useMemo(() => items.map((i) => i.id), [items])
   const { selected, toggle, toggleAll, clear, isAllSelected } = useRowSelection(itemIds)
 
   const batchUpdate = useBatchUpdateTags()
+  const batchTransition = useBatchTransitionFeedback()
 
   const removableTags = useMemo(() => {
     const selectedItems = items.filter((i) => selected.has(i.id))
@@ -113,6 +127,19 @@ function FeedbackPage() {
     )
   }
 
+  const handleBatchTransition = (toStateId: string) => {
+    batchTransition.mutate(
+      { feedbackIds: Array.from(selected), toStateId, comment: '' },
+      {
+        onSuccess: (res) => {
+          toast.success(t('feedback.batch.transition_success', { count: res.succeeded }))
+          clear()
+        },
+        onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+      },
+    )
+  }
+
   return (
     <div>
       <div>
@@ -142,10 +169,13 @@ function FeedbackPage() {
         dims={dims}
         attrFilters={attrFilters}
         tagFilter={tagFilter}
+        workflowFilter={workflowFilter}
         tags={tagList}
+        workflowStates={stateList}
         q={qInput}
         onAttrChange={(dim, value) => setAttrFilters((m) => ({ ...m, [dim]: value }))}
         onTagChange={setTagFilter}
+        onWorkflowChange={setWorkflowFilter}
         onQ={setQInput}
       />
 
@@ -161,8 +191,10 @@ function FeedbackPage() {
                 count={selected.size}
                 availableTags={tagList}
                 removableTags={removableTags}
+                workflowStates={stateList}
                 onBatchAdd={handleBatchAdd}
                 onBatchRemove={handleBatchRemove}
+                onBatchTransition={handleBatchTransition}
                 onCancel={clear}
               />
             </div>
@@ -209,6 +241,14 @@ function FeedbackPage() {
         dims={dims}
         availableTags={allTags.data ?? []}
         onOpenChange={(v) => !v && setDetailId(null)}
+        renderWorkflowTransition={(data) => (
+          <WorkflowTransitionSelect
+            feedbackId={String(data.id)}
+            currentState={data.workflowState}
+            allowedNext={data.allowedNextStates ?? []}
+          />
+        )}
+        renderAuditLog={(data) => <AuditTimeline feedbackId={Number(data.id)} />}
       />
     </div>
   )
@@ -218,24 +258,31 @@ function FilterBar({
   dims,
   attrFilters,
   tagFilter,
+  workflowFilter,
   tags,
+  workflowStates,
   q,
   onAttrChange,
   onTagChange,
+  onWorkflowChange,
   onQ,
 }: {
   dims: Dimension[]
   attrFilters: Record<string, string>
   tagFilter: string
+  workflowFilter: string
   tags: Tag[]
+  workflowStates: import('@/proto/attune/v1/workflow').WorkflowState[]
   q: string
   onAttrChange: (dim: string, value: string) => void
   onTagChange: (tagId: string) => void
+  onWorkflowChange: (stateId: string) => void
   onQ: (v: string) => void
 }) {
   const { t } = useTranslation()
   const displayOf = useDisplayName()
   const activeTags = tags.filter((tag) => !tag.archived)
+  const activeStates = workflowStates.filter((s) => !s.archived)
 
   return (
     <div className="mt-6 flex flex-wrap items-center gap-2">
@@ -279,6 +326,30 @@ function FilterBar({
                   style={{ backgroundColor: tag.color }}
                 />
                 {tag.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      {activeStates.length > 0 && (
+        <Select
+          value={workflowFilter || '__all'}
+          onValueChange={(v) => onWorkflowChange(v === '__all' ? '' : v)}
+        >
+          <SelectTrigger className="min-w-[10rem] max-w-[14rem] flex-1 sm:flex-none">
+            <SelectValue placeholder={t('feedback.filter.all_states')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">{t('feedback.filter.all_states')}</SelectItem>
+            {activeStates.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                <span className="flex items-center gap-2">
+                  <span
+                    className="inline-block size-2 rounded-full"
+                    style={{ backgroundColor: s.color }}
+                  />
+                  {s.name}
+                </span>
               </SelectItem>
             ))}
           </SelectContent>
@@ -362,8 +433,15 @@ function FeedbackTable({
                   <span className="truncate">{title}</span>
                 </div>
                 <div className="truncate text-xs text-muted-foreground">{f.content}</div>
-                {f.tags.length > 0 && (
+                {(f.tags.length > 0 || f.workflowState) && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
+                    {f.workflowState && (
+                      <WorkflowStateBadge
+                        name={f.workflowState.name}
+                        color={f.workflowState.color}
+                        category={f.workflowState.category}
+                      />
+                    )}
                     {f.tags.map((tag) => (
                       <TagBadgeTooltip key={tag.id} tag={tagLookup.get(tag.id) ?? tag} />
                     ))}

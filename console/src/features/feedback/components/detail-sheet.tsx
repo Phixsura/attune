@@ -38,11 +38,15 @@ export function FeedbackDetailSheet({
   dims,
   availableTags,
   onOpenChange,
+  renderWorkflowTransition,
+  renderAuditLog,
 }: {
   id: string | null
   dims: Dimension[]
   availableTags: Tag[]
   onOpenChange: (v: boolean) => void
+  renderWorkflowTransition?: (data: FeedbackDetail) => React.ReactNode
+  renderAuditLog?: (data: FeedbackDetail) => React.ReactNode
 }) {
   const { t } = useTranslation()
   const open = id !== null
@@ -96,7 +100,13 @@ export function FeedbackDetailSheet({
             </div>
           )}
           {detail.data && (
-            <DetailBody data={detail.data} dims={dims} availableTags={availableTags} />
+            <DetailBody
+              data={detail.data}
+              dims={dims}
+              availableTags={availableTags}
+              renderWorkflowTransition={renderWorkflowTransition}
+              renderAuditLog={renderAuditLog}
+            />
           )}
         </div>
       </SheetContent>
@@ -108,10 +118,14 @@ function DetailBody({
   data,
   dims,
   availableTags,
+  renderWorkflowTransition,
+  renderAuditLog,
 }: {
   data: FeedbackDetail
   dims: Dimension[]
   availableTags: Tag[]
+  renderWorkflowTransition?: (data: FeedbackDetail) => React.ReactNode
+  renderAuditLog?: (data: FeedbackDetail) => React.ReactNode
 }) {
   const { t } = useTranslation()
   const displayOf = useDisplayName()
@@ -182,6 +196,16 @@ function DetailBody({
         tags={data.tags ?? []}
         availableTags={availableTags}
       />
+
+      {renderWorkflowTransition && (
+        <Section label={t('feedback.detail.workflow_state')}>
+          {renderWorkflowTransition(data)}
+        </Section>
+      )}
+
+      {renderAuditLog && (
+        <Section label={t('feedback.detail.audit_log')}>{renderAuditLog(data)}</Section>
+      )}
 
       <Section label={t('feedback.detail.source')}>
         <p className="font-mono text-xs text-muted-foreground">

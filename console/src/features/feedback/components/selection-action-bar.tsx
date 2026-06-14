@@ -1,30 +1,44 @@
-import { Tags, Trash2, X } from 'lucide-react'
+import { ArrowRight, Tags, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { TagCombobox } from '@/components/tag/tag-combobox'
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import type { Tag } from '@/proto/attune/v1/tag'
+import type { WorkflowState } from '@/proto/attune/v1/workflow'
 
 export function SelectionActionBar({
   count,
   availableTags,
   removableTags,
+  workflowStates,
   onBatchAdd,
   onBatchRemove,
+  onBatchTransition,
   onCancel,
 }: {
   count: number
   availableTags: Tag[]
   removableTags: Tag[]
+  workflowStates?: WorkflowState[]
   onBatchAdd: (tagId: string) => void
   onBatchRemove: (tagId: string) => void
+  onBatchTransition?: (toStateId: string) => void
   onCancel: () => void
 }) {
   const { t } = useTranslation()
 
   if (count === 0) return null
 
+  const activeStates = workflowStates?.filter((s) => !s.archived) ?? []
+
   return (
-    <div className="flex items-center gap-3 rounded-lg bg-primary px-4 py-2 text-primary-foreground">
+    <div className="flex flex-wrap items-center gap-3 rounded-lg bg-primary px-4 py-2 text-primary-foreground">
       <span className="text-sm font-medium">{t('feedback.batch.selected', { count })}</span>
       <TagCombobox
         availableTags={availableTags}
@@ -47,6 +61,27 @@ export function SelectionActionBar({
             </Button>
           }
         />
+      ) : null}
+      {activeStates.length > 0 && onBatchTransition ? (
+        <Select onValueChange={onBatchTransition}>
+          <SelectTrigger className="h-7 w-auto gap-1.5 border-none bg-secondary text-xs text-secondary-foreground">
+            <ArrowRight className="h-3.5 w-3.5" />
+            <SelectValue placeholder={t('feedback.batch.transition')} />
+          </SelectTrigger>
+          <SelectContent>
+            {activeStates.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                <span className="flex items-center gap-2">
+                  <span
+                    className="inline-block size-2 rounded-full"
+                    style={{ backgroundColor: s.color }}
+                  />
+                  {s.name}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       ) : null}
       <button
         type="button"

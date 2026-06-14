@@ -179,6 +179,7 @@ export const defaultFeedbackDetail: FeedbackDetail = {
   enrichedAt: '2026-06-07T00:00:00Z',
   enrichmentError: '',
   tags: [],
+  allowedNextStates: [],
 }
 export const defaultFeedbackStats: GetFeedbackStatsResponse = {
   periodStart: '',
