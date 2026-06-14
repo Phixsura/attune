@@ -99,8 +99,10 @@ func (r *Repo) Get(ctx context.Context, tenantID, jobID string) (*Job, error) {
 	return job, nil
 }
 
-// List returns jobs for a tenant with optional status filter.
-func (r *Repo) List(ctx context.Context, tenantID string, status *Status, limit int) ([]*Job, error) {
+// List returns jobs for a tenant with optional status filter and cursor-based pagination.
+// The cursor is a job ID; we return jobs created before that job's timestamp (keyset pagination).
+// Returns jobs and next_cursor (empty if no more pages).
+func (r *Repo) List(ctx context.Context, tenantID string, status *Status, limit int, cursor string) ([]*Job, string, error) {
 	const where = "repo.feedbackjob.List"
 
 	// Cap limit to 100 for safety
@@ -108,26 +110,71 @@ func (r *Repo) List(ctx context.Context, tenantID string, status *Status, limit 
 		limit = 100
 	}
 
+	// Fetch one extra to determine if there's a next page
+	fetchLimit := limit + 1
+
 	var rows pgx.Rows
 	var err error
-	if status != nil {
-		rows, err = r.pool.Query(
-			ctx,
-			"SELECT "+selectCols+" FROM batch_jobs WHERE tenant_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT $3",
-			tenantID, string(ptrext.Indirect(status)), limit,
-		)
+
+	if cursor != "" {
+		// Keyset pagination: fetch jobs with (created_at, id) < cursor's (created_at, id)
+		// First, get the cursor job's created_at
+		if status != nil {
+			rows, err = r.pool.Query(
+				ctx,
+				`SELECT `+selectCols+` FROM batch_jobs
+				 WHERE tenant_id = $1 AND status = $2
+				   AND (created_at, id) < (SELECT created_at, id FROM batch_jobs WHERE id = $3)
+				 ORDER BY created_at DESC, id DESC
+				 LIMIT $4`,
+				tenantID, string(ptrext.Indirect(status)), cursor, fetchLimit,
+			)
+		} else {
+			rows, err = r.pool.Query(
+				ctx,
+				`SELECT `+selectCols+` FROM batch_jobs
+				 WHERE tenant_id = $1
+				   AND (created_at, id) < (SELECT created_at, id FROM batch_jobs WHERE id = $2)
+				 ORDER BY created_at DESC, id DESC
+				 LIMIT $3`,
+				tenantID, cursor, fetchLimit,
+			)
+		}
 	} else {
-		rows, err = r.pool.Query(
-			ctx,
-			"SELECT "+selectCols+" FROM batch_jobs WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2",
-			tenantID, limit,
-		)
+		// No cursor — first page
+		if status != nil {
+			rows, err = r.pool.Query(
+				ctx,
+				"SELECT "+selectCols+" FROM batch_jobs WHERE tenant_id = $1 AND status = $2 ORDER BY created_at DESC, id DESC LIMIT $3",
+				tenantID, string(ptrext.Indirect(status)), fetchLimit,
+			)
+		} else {
+			rows, err = r.pool.Query(
+				ctx,
+				"SELECT "+selectCols+" FROM batch_jobs WHERE tenant_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2",
+				tenantID, fetchLimit,
+			)
+		}
 	}
 	if err != nil {
 		logext.Errorf(ctx, "[%s] query failed,tenant_id:%s,err:%+v", where, tenantID, err.Error())
-		return nil, fmt.Errorf("list batch jobs: %w", err)
+		return nil, "", fmt.Errorf("list batch jobs: %w", err)
 	}
-	return scanJobs(rows)
+
+	jobs, err := scanJobs(rows)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Determine next cursor
+	var nextCursor string
+	if len(jobs) > limit {
+		// We have more — use the last item in the returned slice as cursor
+		nextCursor = jobs[limit-1].ID
+		jobs = jobs[:limit] // Trim to requested limit
+	}
+
+	return jobs, nextCursor, nil
 }
 
 // Claim attempts to claim the next queued job for processing.

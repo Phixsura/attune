@@ -71,8 +71,9 @@ type Service interface {
 	// GetJobStatus returns the current status of an async job.
 	GetJobStatus(ctx context.Context, tenantID, jobID string) (*attunev1.JobStatusResponse, error)
 
-	// ListJobs returns jobs for a tenant with optional status filter.
-	ListJobs(ctx context.Context, tenantID string, status *string, limit int) ([]*attunev1.JobStatusResponse, error)
+	// ListJobs returns jobs for a tenant with optional status filter and cursor pagination.
+	// Returns jobs and a next_cursor (empty if no more pages).
+	ListJobs(ctx context.Context, tenantID string, status *string, limit int, cursor string) ([]*attunev1.JobStatusResponse, string, error)
 
 	// CancelJob attempts to cancel an async job that is queued or running.
 	CancelJob(ctx context.Context, tenantID, jobID string) (*attunev1.CancelJobResponse, error)

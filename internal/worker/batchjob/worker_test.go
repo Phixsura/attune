@@ -14,6 +14,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/Phixsura/attune/internal/pkg/batchconv"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -70,7 +71,7 @@ func (m *mockJobRepo) Get(ctx context.Context, tenantID, jobID string) (*feedbac
 	return nil, feedbackjob.ErrNotFound
 }
 
-func (m *mockJobRepo) List(ctx context.Context, tenantID string, status *feedbackjob.Status, limit int) ([]*feedbackjob.Job, error) {
+func (m *mockJobRepo) List(ctx context.Context, tenantID string, status *feedbackjob.Status, limit int, cursor string) ([]*feedbackjob.Job, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var result []*feedbackjob.Job
@@ -81,7 +82,7 @@ func (m *mockJobRepo) List(ctx context.Context, tenantID string, status *feedbac
 			}
 		}
 	}
-	return result, nil
+	return result, "", nil
 }
 
 func (m *mockJobRepo) Claim(ctx context.Context) (*feedbackjob.Job, error) {
@@ -815,7 +816,7 @@ func TestWorker_Heartbeat(t *testing.T) {
 	}
 }
 
-func TestRepoFailureToProto(t *testing.T) {
+func TestItemFailureToProto(t *testing.T) {
 	now := time.Now()
 	f := feedback.ItemFailure{
 		FeedbackID: 123,
@@ -824,7 +825,7 @@ func TestRepoFailureToProto(t *testing.T) {
 		UpdatedAt:  ptrext.Of(now),
 	}
 
-	pf := repoFailureToProto(f)
+	pf := batchconv.ItemFailureToProto(f)
 	if pf.FeedbackId != 123 {
 		t.Errorf("FeedbackId = %d, want 123", pf.FeedbackId)
 	}
@@ -839,14 +840,14 @@ func TestRepoFailureToProto(t *testing.T) {
 	}
 }
 
-func TestRepoFailureToProto_NoUpdatedAt(t *testing.T) {
+func TestItemFailureToProto_NoUpdatedAt(t *testing.T) {
 	f := feedback.ItemFailure{
 		FeedbackID: 456,
 		Code:       "not_found",
 		Message:    "not found",
 	}
 
-	pf := repoFailureToProto(f)
+	pf := batchconv.ItemFailureToProto(f)
 	if pf.CurrentUpdatedAt != nil {
 		t.Error("CurrentUpdatedAt should be nil")
 	}

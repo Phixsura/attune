@@ -20,15 +20,20 @@ import (
 
 type fakeJobService struct {
 	jobs       []*attunev1.JobStatusResponse
+	nextCursor string
 	statusJob  *attunev1.JobStatusResponse
 	statusErr  error
 	cancelResp *attunev1.CancelJobResponse
 	cancelErr  error
 
 	// Capture calls
-	getJobID    string
-	getTenantID string
-	cancelJobID string
+	getJobID      string
+	getTenantID   string
+	cancelJobID   string
+	listCursor    string
+	listTenantID  string
+	listStatusPtr *string
+	listLimit     int
 }
 
 func (s *fakeJobService) GetJobStatus(ctx context.Context, tenantID, jobID string) (*attunev1.JobStatusResponse, error) {
@@ -37,8 +42,12 @@ func (s *fakeJobService) GetJobStatus(ctx context.Context, tenantID, jobID strin
 	return s.statusJob, s.statusErr
 }
 
-func (s *fakeJobService) ListJobs(ctx context.Context, tenantID string, status *string, limit int) ([]*attunev1.JobStatusResponse, error) {
-	return s.jobs, nil
+func (s *fakeJobService) ListJobs(ctx context.Context, tenantID string, status *string, limit int, cursor string) ([]*attunev1.JobStatusResponse, string, error) {
+	s.listTenantID = tenantID
+	s.listStatusPtr = status
+	s.listLimit = limit
+	s.listCursor = cursor
+	return s.jobs, s.nextCursor, nil
 }
 
 func (s *fakeJobService) CancelJob(ctx context.Context, tenantID, jobID string) (*attunev1.CancelJobResponse, error) {
@@ -201,6 +210,88 @@ func TestList(t *testing.T) {
 		require.NoError(t, err)
 		jobs := body["jobs"].([]any)
 		require.Len(t, jobs, 1)
+	})
+
+	t.Run("list with cursor pagination", func(t *testing.T) {
+		svc := &fakeJobService{
+			jobs: []*attunev1.JobStatusResponse{
+				{
+					JobId:  "job-3",
+					Status: attunev1.JobStatus_JOB_STATUS_COMPLETED,
+				},
+				{
+					JobId:  "job-4",
+					Status: attunev1.JobStatus_JOB_STATUS_COMPLETED,
+				},
+			},
+			nextCursor: "job-4",
+		}
+		h := NewHandler(svc)
+		handler := dispatcher.Bind(
+			"console.feedbackjob.Handler.List",
+			dispatcher.Query(
+				func() *attunev1.ListJobsRequest { return &attunev1.ListJobsRequest{} },
+				BindListRequest,
+			),
+			h.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListJobsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(
+			http.MethodGet,
+			"/fb/v1/console/jobs?cursor=job-2&limit=2",
+			"",
+		))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		jobs := body["jobs"].([]any)
+		require.Len(t, jobs, 2)
+		require.Equal(t, "job-4", body["nextCursor"])
+		require.Equal(t, "job-2", svc.listCursor)
+		require.Equal(t, 2, svc.listLimit)
+	})
+
+	t.Run("list without next cursor when no more pages", func(t *testing.T) {
+		svc := &fakeJobService{
+			jobs: []*attunev1.JobStatusResponse{
+				{
+					JobId:  "job-5",
+					Status: attunev1.JobStatus_JOB_STATUS_COMPLETED,
+				},
+			},
+			nextCursor: "", // No more pages
+		}
+		h := NewHandler(svc)
+		handler := dispatcher.Bind(
+			"console.feedbackjob.Handler.List",
+			dispatcher.Query(
+				func() *attunev1.ListJobsRequest { return &attunev1.ListJobsRequest{} },
+				BindListRequest,
+			),
+			h.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListJobsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(
+			http.MethodGet,
+			"/fb/v1/console/jobs?cursor=job-4",
+			"",
+		))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		jobs := body["jobs"].([]any)
+		require.Len(t, jobs, 1)
+		require.Nil(t, body["nextCursor"], "should not have nextCursor when no more pages")
 	})
 }
 

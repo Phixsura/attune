@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
+	"github.com/Phixsura/attune/internal/pkg/batchconv"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -137,21 +138,35 @@ func (m *mockJobStore) Get(ctx context.Context, tenantID, jobID string) (*feedba
 	return job, nil
 }
 
-func (m *mockJobStore) List(ctx context.Context, tenantID string, status *feedbackjob.Status, limit int) ([]*feedbackjob.Job, error) {
+func (m *mockJobStore) List(ctx context.Context, tenantID string, status *feedbackjob.Status, limit int, cursor string) ([]*feedbackjob.Job, string, error) {
 	var result []*feedbackjob.Job
+	seenCursor := cursor == ""
 	for _, job := range m.jobs {
 		if job.TenantID != tenantID {
+			continue
+		}
+		// Simple cursor simulation: skip until we see the cursor job
+		if !seenCursor {
+			if job.ID == cursor {
+				seenCursor = true
+			}
 			continue
 		}
 		if status != nil && job.Status != ptrext.Indirect(status) {
 			continue
 		}
 		result = append(result, job)
-		if len(result) >= limit {
+		if len(result) >= limit+1 {
 			break
 		}
 	}
-	return result, nil
+	// Determine next cursor
+	var nextCursor string
+	if len(result) > limit {
+		nextCursor = result[limit-1].ID
+		result = result[:limit]
+	}
+	return result, nextCursor, nil
 }
 
 func (m *mockJobStore) Claim(ctx context.Context) (*feedbackjob.Job, error) {
@@ -757,7 +772,7 @@ func TestListJobs(t *testing.T) {
 
 		svc := &service{jobRepo: jobStore}
 
-		jobs, err := svc.ListJobs(ctx, "tenant-1", nil, 20)
+		jobs, _, err := svc.ListJobs(ctx, "tenant-1", nil, 20, "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -784,7 +799,7 @@ func TestListJobs(t *testing.T) {
 		svc := &service{jobRepo: jobStore}
 
 		status := "queued"
-		jobs, err := svc.ListJobs(ctx, "tenant-1", &status, 20)
+		jobs, _, err := svc.ListJobs(ctx, "tenant-1", &status, 20, "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -809,7 +824,7 @@ func TestListJobs(t *testing.T) {
 
 		svc := &service{jobRepo: jobStore}
 
-		jobs, err := svc.ListJobs(ctx, "tenant-1", nil, 5)
+		jobs, _, err := svc.ListJobs(ctx, "tenant-1", nil, 5, "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -822,7 +837,7 @@ func TestListJobs(t *testing.T) {
 		svc := &service{jobRepo: newMockJobStore()}
 
 		// This is tested indirectly - we just verify it doesn't panic with large limit.
-		_, err := svc.ListJobs(ctx, "tenant-1", nil, 1000)
+		_, _, err := svc.ListJobs(ctx, "tenant-1", nil, 1000, "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -892,17 +907,16 @@ func TestProtoFilterToRepoFilter(t *testing.T) {
 	})
 }
 
-func TestRepoFailuresToProto(t *testing.T) {
-	svc := &service{}
+func TestItemFailuresToProto(t *testing.T) {
 	now := time.Now()
 
 	t.Run("empty failures", func(t *testing.T) {
-		result := svc.repoFailuresToProto(nil)
+		result := batchconv.ItemFailuresToProto(nil)
 		if result != nil {
 			t.Error("expected nil result for nil input")
 		}
 
-		result = svc.repoFailuresToProto([]feedback.ItemFailure{})
+		result = batchconv.ItemFailuresToProto([]feedback.ItemFailure{})
 		if result != nil {
 			t.Error("expected nil result for empty input")
 		}
@@ -914,7 +928,7 @@ func TestRepoFailuresToProto(t *testing.T) {
 			{FeedbackID: 2, Code: "version_conflict", Message: "modified", UpdatedAt: ptrext.Of(now)},
 		}
 
-		result := svc.repoFailuresToProto(failures)
+		result := batchconv.ItemFailuresToProto(failures)
 
 		if len(result) != 2 {
 			t.Fatalf("expected 2 failures, got %d", len(result))

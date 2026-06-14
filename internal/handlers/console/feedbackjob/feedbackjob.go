@@ -13,7 +13,7 @@ import (
 // jobService defines the service interface for job operations.
 type jobService interface {
 	GetJobStatus(ctx context.Context, tenantID, jobID string) (*attunev1.JobStatusResponse, error)
-	ListJobs(ctx context.Context, tenantID string, status *string, limit int) ([]*attunev1.JobStatusResponse, error)
+	ListJobs(ctx context.Context, tenantID string, status *string, limit int, cursor string) ([]*attunev1.JobStatusResponse, string, error)
 	CancelJob(ctx context.Context, tenantID, jobID string) (*attunev1.CancelJobResponse, error)
 }
 

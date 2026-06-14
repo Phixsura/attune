@@ -68,12 +68,18 @@ export interface ListJobsRequest {
     | string
     | undefined;
   /** Maximum jobs to return (default: 20, max: 100). */
-  limit?: number | undefined;
+  limit?:
+    | number
+    | undefined;
+  /** Pagination cursor from previous response (job ID). */
+  cursor?: string | undefined;
 }
 
 /** ListJobsResponse contains the list of jobs. */
 export interface ListJobsResponse {
   jobs: JobStatusResponse[];
+  /** Cursor for the next page; absent when no more pages. */
+  nextCursor?: string | undefined;
 }
 
 /** CancelJobRequest cancels a running or queued job. */

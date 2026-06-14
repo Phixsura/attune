@@ -14,6 +14,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
+	"github.com/Phixsura/attune/internal/pkg/batchconv"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -381,7 +382,7 @@ func (s *service) executeSync(ctx context.Context, req *BatchRequest, ids []int6
 		TotalMatched: totalMatched,
 		Succeeded:    result.Succeeded,
 		Skipped:      result.Skipped,
-		Failed:       s.repoFailuresToProto(result.Failed),
+		Failed:       batchconv.ItemFailuresToProto(result.Failed),
 	})
 
 	// Mark idempotency key as complete.
@@ -541,28 +542,6 @@ func (s *service) executeDeleteOp(
 	return s.feedbackRepo.BatchSoftDelete(ctx, tenantID, ids, ifUnmodifiedSince)
 }
 
-// repoFailuresToProto converts repo failures to proto failures.
-func (s *service) repoFailuresToProto(failures []feedback.ItemFailure) []*attunev1.BatchItemFailure {
-	if len(failures) == 0 {
-		return nil
-	}
-
-	result := make([]*attunev1.BatchItemFailure, len(failures))
-	for i, f := range failures {
-		pf := ptrext.Of(attunev1.BatchItemFailure{
-			FeedbackId: f.FeedbackID,
-			Code:       f.Code,
-			Message:    f.Message,
-		})
-		if f.UpdatedAt != nil {
-			ts := f.UpdatedAt.Format(time.RFC3339)
-			pf.CurrentUpdatedAt = ptrext.Of(ts)
-		}
-		result[i] = pf
-	}
-	return result
-}
-
 // completeIdempotencyKey marks the idempotency key as complete with the response.
 func (s *service) completeIdempotencyKey(ctx context.Context, req *BatchRequest, resp *BatchResponse) {
 	const where = "service.feedbackbatch.completeIdempotencyKey"
@@ -614,8 +593,8 @@ func (s *service) GetJobStatus(ctx context.Context, tenantID, jobID string) (*at
 	return s.jobToProto(job), nil
 }
 
-// ListJobs returns jobs for a tenant with optional status filter.
-func (s *service) ListJobs(ctx context.Context, tenantID string, status *string, limit int) ([]*attunev1.JobStatusResponse, error) {
+// ListJobs returns jobs for a tenant with optional status filter and cursor pagination.
+func (s *service) ListJobs(ctx context.Context, tenantID string, status *string, limit int, cursor string) ([]*attunev1.JobStatusResponse, string, error) {
 	const where = "service.feedbackbatch.ListJobs"
 
 	// Convert status string to feedbackjob.Status pointer.
@@ -632,17 +611,17 @@ func (s *service) ListJobs(ctx context.Context, tenantID string, status *string,
 		limit = 100
 	}
 
-	jobs, err := s.jobRepo.List(ctx, tenantID, statusPtr, limit)
+	jobs, nextCursor, err := s.jobRepo.List(ctx, tenantID, statusPtr, limit, cursor)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] list jobs failed,tenant_id:%s,err:%+v", where, tenantID, err.Error())
-		return nil, fmt.Errorf("list jobs: %w", err)
+		return nil, "", fmt.Errorf("list jobs: %w", err)
 	}
 
 	result := make([]*attunev1.JobStatusResponse, len(jobs))
 	for i, job := range jobs {
 		result[i] = s.jobToProto(job)
 	}
-	return result, nil
+	return result, nextCursor, nil
 }
 
 // CancelJob attempts to cancel an async job.

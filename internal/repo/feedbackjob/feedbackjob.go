@@ -50,8 +50,9 @@ type Store interface {
 	// Get retrieves a job by ID (validates tenant ownership).
 	Get(ctx context.Context, tenantID, jobID string) (*Job, error)
 
-	// List returns jobs for a tenant with optional status filter.
-	List(ctx context.Context, tenantID string, status *Status, limit int) ([]*Job, error)
+	// List returns jobs for a tenant with optional status filter and cursor pagination.
+	// Returns jobs and a next cursor (empty if no more pages).
+	List(ctx context.Context, tenantID string, status *Status, limit int, cursor string) ([]*Job, string, error)
 
 	// Claim attempts to claim the next queued job for processing.
 	// Uses SELECT FOR UPDATE SKIP LOCKED to handle concurrent workers.

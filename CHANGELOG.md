@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Cursor pagination for job list endpoint (#30).** `GET /fb/v1/console/jobs`
+  now supports cursor-based pagination via `cursor` query parameter and returns
+  `next_cursor` in the response. Consistent with other list APIs.
+
 - **Batch operations for feedback (#30).** Operators can now apply bulk changes
   to feedback rows via `POST /fb/v1/console/feedback/batch`. Supports tag
   add/remove, workflow state transitions, and soft/hard delete. Selection modes:
@@ -59,6 +63,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   zh-CN i18n included.
 
 ### Fixed
+
+- **Rate limiter memory cleanup (#30).** Added `StartCleanup()` to
+  `MemorySlidingLimiter` to periodically evict keys with no recent activity,
+  preventing unbounded memory growth from abandoned rate limit keys.
 
 - **Audit log cursor pagination skipped one record (#29).** The keyset cursor
   used the overflow row's ID (`out[limit]`) instead of the last returned row's

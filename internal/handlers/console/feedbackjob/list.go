@@ -37,9 +37,12 @@ func (h *Handler) List(
 		limit = int(req.GetLimit())
 	}
 
-	logext.Infof(ctx, "[%s] start,tenant_id:%s,status:%v,limit:%d", where, auth.TenantID, status, limit)
+	// Get pagination cursor.
+	cursor := req.GetCursor()
 
-	jobs, err := h.svc.ListJobs(ctx, auth.TenantID, status, limit)
+	logext.Infof(ctx, "[%s] start,tenant_id:%s,status:%v,limit:%d,cursor:%s", where, auth.TenantID, status, limit, cursor)
+
+	jobs, nextCursor, err := h.svc.ListJobs(ctx, auth.TenantID, status, limit, cursor)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] svc.ListJobs failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
@@ -51,7 +54,10 @@ func (h *Handler) List(
 	}
 
 	resp := ptrext.Of(attunev1.ListJobsResponse{Jobs: jobs})
-	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(jobs))
+	if nextCursor != "" {
+		resp.NextCursor = ptrext.Of(nextCursor)
+	}
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d,has_more:%t", where, auth.TenantID, len(jobs), nextCursor != "")
 	return dispatcher.OK(resp)
 }
 
@@ -73,6 +79,10 @@ func BindListRequest(r *http.Request, req *attunev1.ListJobsRequest) error {
 			)
 		}
 		req.Limit = ptrext.Of(int32(limit))
+	}
+
+	if cursor := q.Get("cursor"); cursor != "" {
+		req.Cursor = ptrext.Of(cursor)
 	}
 
 	return nil
