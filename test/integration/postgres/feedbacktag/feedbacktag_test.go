@@ -45,62 +45,68 @@ func TestPG_TagCRUD(t *testing.T) {
 		t.Fatalf("new tag usage_count = %d want 0", created.UsageCount)
 	}
 
-	got, err := repo.GetByID(ctx, tenantID, created.ID)
-	if err != nil {
-		t.Fatalf("GetByID: %v", err)
-	}
-	if got.Name != "bug" {
-		t.Fatalf("GetByID name = %q want %q", got.Name, "bug")
-	}
-
-	gotName, err := repo.GetByName(ctx, tenantID, "bug")
-	if err != nil {
-		t.Fatalf("GetByName: %v", err)
-	}
-	if gotName.ID != created.ID {
-		t.Fatalf("GetByName id mismatch: got %s want %s", gotName.ID, created.ID)
-	}
-
-	updated, err := repo.Update(ctx, feedbacktag.Tag{
-		ID:          created.ID,
-		TenantID:    tenantID,
-		Name:        "bug-report",
-		Color:       "#dc2626",
-		Description: "confirmed bugs",
+	t.Run("GetByID", func(t *testing.T) {
+		got, err := repo.GetByID(ctx, tenantID, created.ID)
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if got.Name != "bug" {
+			t.Fatalf("GetByID name = %q want %q", got.Name, "bug")
+		}
 	})
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if updated.Name != "bug-report" || updated.Description != "confirmed bugs" {
-		t.Fatalf("unexpected update result: %+v", updated)
-	}
 
-	if err := repo.Archive(ctx, tenantID, created.ID); err != nil {
-		t.Fatalf("Archive: %v", err)
-	}
-	archived, err := repo.GetByID(ctx, tenantID, created.ID)
-	if err != nil {
-		t.Fatalf("GetByID after archive: %v", err)
-	}
-	if archived.ArchivedAt == nil {
-		t.Fatal("expected archived_at to be set")
-	}
+	t.Run("GetByName", func(t *testing.T) {
+		gotName, err := repo.GetByName(ctx, tenantID, "bug")
+		if err != nil {
+			t.Fatalf("GetByName: %v", err)
+		}
+		if gotName.ID != created.ID {
+			t.Fatalf("GetByName id mismatch: got %s want %s", gotName.ID, created.ID)
+		}
+	})
 
-	active, err := repo.List(ctx, tenantID, false)
-	if err != nil {
-		t.Fatalf("List active: %v", err)
-	}
-	if len(active) != 0 {
-		t.Fatalf("List(includeArchived=false) = %d want 0", len(active))
-	}
+	t.Run("Update", func(t *testing.T) {
+		updated, err := repo.Update(ctx, feedbacktag.Tag{
+			ID:          created.ID,
+			TenantID:    tenantID,
+			Name:        "bug-report",
+			Color:       "#dc2626",
+			Description: "confirmed bugs",
+		})
+		if err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if updated.Name != "bug-report" || updated.Description != "confirmed bugs" {
+			t.Fatalf("unexpected update result: %+v", updated)
+		}
+	})
 
-	all, err := repo.List(ctx, tenantID, true)
-	if err != nil {
-		t.Fatalf("List all: %v", err)
-	}
-	if len(all) != 1 {
-		t.Fatalf("List(includeArchived=true) = %d want 1", len(all))
-	}
+	t.Run("Archive_and_List", func(t *testing.T) {
+		if err := repo.Archive(ctx, tenantID, created.ID); err != nil {
+			t.Fatalf("Archive: %v", err)
+		}
+		archived, err := repo.GetByID(ctx, tenantID, created.ID)
+		if err != nil {
+			t.Fatalf("GetByID after archive: %v", err)
+		}
+		if archived.ArchivedAt == nil {
+			t.Fatal("expected archived_at to be set")
+		}
+		active, err := repo.List(ctx, tenantID, false)
+		if err != nil {
+			t.Fatalf("List active: %v", err)
+		}
+		if len(active) != 0 {
+			t.Fatalf("List(includeArchived=false) = %d want 0", len(active))
+		}
+		all, err := repo.List(ctx, tenantID, true)
+		if err != nil {
+			t.Fatalf("List all: %v", err)
+		}
+		if len(all) != 1 {
+			t.Fatalf("List(includeArchived=true) = %d want 1", len(all))
+		}
+	})
 }
 
 func TestPG_TagNameConflict(t *testing.T) {

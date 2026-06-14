@@ -100,27 +100,35 @@ func (h *FeedbackHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx],
 	for _, row := range rows {
 		items = append(items, toProtoFeedback(row))
 	}
-	if h.tagAssignments != nil && len(rows) > 0 {
-		ids := make([]int64, len(rows))
-		for i, row := range rows {
-			ids[i] = row.ID
-		}
-		tagMap, err := h.tagAssignments.ListByFeedbackBatch(ctx, auth.TenantID, ids)
-		if err != nil {
-			logext.Warnf(ctx, "[%s] tag batch load failed,tenant_id:%s,err:%+v",
-				where, auth.TenantID, err.Error())
-		} else {
-			for _, item := range items {
-				for _, info := range tagMap[item.GetId()] {
-					item.Tags = append(item.Tags, tagInfoToProto(info))
-				}
-			}
-		}
-	}
+	h.enrichItemsWithTags(ctx, where, auth.TenantID, rows, items)
 	resp := ptrext.Of(attunev1.ListFeedbackResponse{Items: items})
 	if opts.Limit > 0 && len(rows) == opts.Limit {
 		resp.NextCursor = ptrext.Of(strconv.FormatInt(rows[len(rows)-1].ID, 10))
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
 	return dispatcher.OK(resp)
+}
+
+func (h *FeedbackHandler) enrichItemsWithTags(
+	ctx *dispatcher.RequestContext[*session.AuthCtx], where, tenantID string,
+	rows []feedback.ConsoleListRow, items []*attunev1.Feedback,
+) {
+	if h.tagAssignments == nil || len(rows) == 0 {
+		return
+	}
+	ids := make([]int64, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	tagMap, err := h.tagAssignments.ListByFeedbackBatch(ctx, tenantID, ids)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] tag batch load failed,tenant_id:%s,err:%+v",
+			where, tenantID, err.Error())
+		return
+	}
+	for _, item := range items {
+		for _, info := range tagMap[item.GetId()] {
+			item.Tags = append(item.Tags, tagInfoToProto(info))
+		}
+	}
 }

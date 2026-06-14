@@ -109,32 +109,13 @@ func (h *Handler) BatchUpdate(
 			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "max 20 tag operations per batch")
 	}
 
-	addTags := make([]*feedbacktag.Tag, 0, len(req.GetAddTagIds()))
-	for _, raw := range req.GetAddTagIds() {
-		tagID, parseErr := uuid.Parse(raw)
-		if parseErr != nil {
-			return dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
-				http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid add tag id: "+raw)
-		}
-		tag, getErr := h.tags.GetByID(ctx, auth.TenantID, tagID)
-		if getErr != nil {
-			return dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
-				http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "add tag not found: "+raw)
-		}
-		addTags = append(addTags, tag)
+	addTags, fail, early := h.resolveAddTags(ctx, auth.TenantID, req.GetAddTagIds())
+	if early {
+		return fail, nil
 	}
-	rmIDs := make([]uuid.UUID, 0, len(req.GetRemoveTagIds()))
-	for _, raw := range req.GetRemoveTagIds() {
-		tagID, parseErr := uuid.Parse(raw)
-		if parseErr != nil {
-			return dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
-				http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid remove tag id: "+raw)
-		}
-		if _, getErr := h.tags.GetByID(ctx, auth.TenantID, tagID); getErr != nil {
-			return dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
-				http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "remove tag not found: "+raw)
-		}
-		rmIDs = append(rmIDs, tagID)
+	rmIDs, fail, early := h.resolveRemoveTags(ctx, auth.TenantID, req.GetRemoveTagIds())
+	if early {
+		return fail, nil
 	}
 
 	var affected int32
@@ -187,6 +168,51 @@ func (h *Handler) addWithScope(
 		_ = h.tags.IncrementUsage(ctx, tenantID, tag.ID)
 	}
 	return inserted, nil
+}
+
+type batchResult = dispatcher.Result[*attunev1.BatchUpdateFeedbackTagsResponse]
+
+func (h *Handler) resolveAddTags(
+	ctx context.Context, tenantID string, rawIDs []string,
+) ([]*feedbacktag.Tag, batchResult, bool) {
+	tags := make([]*feedbacktag.Tag, 0, len(rawIDs))
+	for _, raw := range rawIDs {
+		tagID, parseErr := uuid.Parse(raw)
+		if parseErr != nil {
+			r, _ := dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
+				http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid add tag id: "+raw)
+			return nil, r, true
+		}
+		tag, getErr := h.tags.GetByID(ctx, tenantID, tagID)
+		if getErr != nil {
+			r, _ := dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
+				http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "add tag not found: "+raw)
+			return nil, r, true
+		}
+		tags = append(tags, tag)
+	}
+	return tags, batchResult{}, false
+}
+
+func (h *Handler) resolveRemoveTags(
+	ctx context.Context, tenantID string, rawIDs []string,
+) ([]uuid.UUID, batchResult, bool) {
+	ids := make([]uuid.UUID, 0, len(rawIDs))
+	for _, raw := range rawIDs {
+		tagID, parseErr := uuid.Parse(raw)
+		if parseErr != nil {
+			r, _ := dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
+				http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid remove tag id: "+raw)
+			return nil, r, true
+		}
+		if _, getErr := h.tags.GetByID(ctx, tenantID, tagID); getErr != nil {
+			r, _ := dispatcher.Fail[*attunev1.BatchUpdateFeedbackTagsResponse](
+				http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "remove tag not found: "+raw)
+			return nil, r, true
+		}
+		ids = append(ids, tagID)
+	}
+	return ids, batchResult{}, false
 }
 
 func (h *Handler) resolveTag(
