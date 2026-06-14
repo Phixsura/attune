@@ -79,6 +79,16 @@ export enum ErrorCode {
   INVALID_TRANSITION = "INVALID_TRANSITION",
   WORKFLOW_STATE_NOT_FOUND = "WORKFLOW_STATE_NOT_FOUND",
   NO_WORKFLOW_STATE = "NO_WORKFLOW_STATE",
+  /** FEATURE_DISABLED - batch operations (#30) */
+  FEATURE_DISABLED = "FEATURE_DISABLED",
+  /** IDEMPOTENCY_CONFLICT - Same idempotency key with different params */
+  IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT",
+  /** REQUEST_IN_PROGRESS - Idempotency key is being processed */
+  REQUEST_IN_PROGRESS = "REQUEST_IN_PROGRESS",
+  /** JOB_NOT_FOUND - Async job ID not found */
+  JOB_NOT_FOUND = "JOB_NOT_FOUND",
+  /** JOB_ALREADY_CANCELLED - Job was already cancelled */
+  JOB_ALREADY_CANCELLED = "JOB_ALREADY_CANCELLED",
   UNRECOGNIZED = "UNRECOGNIZED",
 }
 
@@ -203,4 +213,44 @@ export interface Dimension {
   extractionHint: string;
   /** Optional generic presentation metadata. */
   renderer?: RendererSpec | undefined;
+}
+
+/**
+ * AttrFilter is one per-dim filter in a console list query. The
+ * `dim` is a Dimension.Name; `value` is a stable Taxonomy.Value;
+ * `multi` says whether the dim is multi-kind (needed because the
+ * SQL containment shape differs).
+ */
+export interface AttrFilter {
+  dim: string;
+  value: string;
+  multi: boolean;
+}
+
+/**
+ * FeedbackFilter is the shared filter criteria used by list and batch
+ * operations. It mirrors the query parameters of ListFeedbackRequest
+ * so batch operations can select rows by the same criteria.
+ */
+export interface FeedbackFilter {
+  /** Per-dim filters, AND-composed via JSONB containment. */
+  attrs: AttrFilter[];
+  /** nil = no filter; true = only urgent; false = only non-urgent. */
+  urgent?:
+    | boolean
+    | undefined;
+  /** Full-text query. */
+  q?:
+    | string
+    | undefined;
+  /** Filter by tag ID. */
+  tagId?:
+    | string
+    | undefined;
+  /** Filter by workflow state ID. */
+  workflowStateId?:
+    | string
+    | undefined;
+  /** Filter by workflow category (open/resolved). */
+  workflowCategory?: string | undefined;
 }

@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+import "attune/v1/common.proto";
+
+// BatchService provides batch operations on feedback rows (#30).
+// Operations can target rows by explicit IDs or by filter query.
+service BatchService {
+  rpc BatchFeedback(BatchFeedbackRequest) returns (BatchFeedbackResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/batch"
+      body: "*"
+    };
+  }
+}
+
+// BatchFeedbackRequest is the envelope for all batch operations.
+// Either feedback_ids or query must be provided to select rows.
+message BatchFeedbackRequest {
+  // Explicit row IDs to operate on (mutually exclusive with query).
+  repeated int64 feedback_ids = 1;
+
+  // Filter query to select rows (mutually exclusive with feedback_ids).
+  optional FeedbackFilter query = 2;
+
+  // Safety cap: refuse if query matches more than this many rows.
+  // Required when using query-based selection.
+  optional int32 max_affected = 3;
+
+  // Confirmation count: proceed only if matched count equals this.
+  // Prevents TOCTOU races between preview and execute.
+  optional int32 confirm_count = 4;
+
+  // If true, return what would happen without making changes.
+  bool dry_run = 5;
+
+  // The operation to perform.
+  BatchOperation operation = 6;
+
+  // Client-generated idempotency key for safe retries.
+  // Same key + same params = return cached result.
+  // Same key + different params = IDEMPOTENCY_CONFLICT error.
+  optional string idempotency_key = 7;
+
+  // Optimistic concurrency: reject if any row was modified since this timestamp.
+  // Format: RFC3339.
+  optional string if_unmodified_since = 8;
+}
+
+// BatchOperation is the discriminated union of supported batch operations.
+message BatchOperation {
+  oneof op {
+    BatchTagOp tag = 1;
+    BatchWorkflowOp workflow = 2;
+    BatchDeleteOp delete = 3;
+  }
+}
+
+// BatchTagOp adds and/or removes tags from selected rows.
+message BatchTagOp {
+  // Tag IDs to add to all selected rows.
+  repeated string add_tag_ids = 1;
+  // Tag IDs to remove from all selected rows.
+  repeated string remove_tag_ids = 2;
+}
+
+// BatchWorkflowOp transitions selected rows to a new workflow state.
+message BatchWorkflowOp {
+  // Target workflow state ID.
+  string to_state_id = 1;
+  // Optional audit comment for the transition.
+  string comment = 2;
+}
+
+// BatchDeleteOp soft-deletes or hard-deletes selected rows.
+message BatchDeleteOp {
+  // If true, permanently delete rows. If false (default), soft-delete.
+  bool hard = 1;
+}
+
+// BatchFeedbackResponse reports the outcome of a batch operation.
+message BatchFeedbackResponse {
+  // Total rows matched by the selection criteria.
+  int32 total_matched = 1;
+
+  // Number of rows successfully updated.
+  int32 succeeded = 2;
+
+  // Number of rows skipped (already in target state, etc.).
+  int32 skipped = 3;
+
+  // Per-row failures with error details.
+  repeated BatchItemFailure failed = 4;
+
+  // For async operations, the job ID to poll for status.
+  optional string job_id = 5;
+
+  // URL to poll for job status (convenience for clients).
+  optional string job_status_url = 6;
+}
+
+// BatchItemFailure describes why a single row failed in a batch operation.
+message BatchItemFailure {
+  // The feedback row that failed.
+  int64 feedback_id = 1;
+
+  // Machine-readable error code (ErrorCode enum name).
+  string code = 2;
+
+  // Human-readable error message.
+  string message = 3;
+
+  // For optimistic concurrency failures: the row's current updated_at.
+  optional string current_updated_at = 4;
+}
