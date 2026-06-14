@@ -31,6 +31,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
+	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -64,6 +65,7 @@ var (
 	NewClustersHandler           = clusters.NewClustersHandler
 	NewDigestSubscriptionHandler = digestsubscription.NewHandler
 	NewTagHandler                = consoletag.NewHandler
+	NewTagAssignmentHandler      = consoletagassignment.NewHandler
 	BootstrapAdmin               = auth.BootstrapAdmin
 )
 
@@ -128,6 +130,7 @@ type Router struct {
 	clusters           *clusters.ClustersHandler
 	digestSubscription *digestsubscription.Handler
 	tags               *consoletag.Handler
+	tagAssignments     *consoletagassignment.Handler
 	admins             adminReader
 }
 
@@ -151,6 +154,7 @@ func NewRouter(
 	clustersH *clusters.ClustersHandler,
 	digestSubscription *digestsubscription.Handler,
 	tags *consoletag.Handler,
+	tagAssignments *consoletagassignment.Handler,
 	admins adminReader,
 ) *Router {
 	return ptrext.Of(Router{
@@ -169,6 +173,7 @@ func NewRouter(
 		clusters:           clustersH,
 		digestSubscription: digestSubscription,
 		tags:               tags,
+		tagAssignments:     tagAssignments,
 		admins:             admins,
 	})
 }
@@ -600,7 +605,7 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		// /stats must come BEFORE /{id}; source order keeps the intent clear.
+		// /stats and /batch/tags must come BEFORE /{id}; source order keeps the intent clear.
 		f.Get("/stats", dispatcher.Bind(
 			"console.FeedbackHandler.Stats",
 			dispatcher.Empty(func() *attunev1.GetFeedbackStatsRequest { return ptrext.Of(attunev1.GetFeedbackStatsRequest{}) }),
@@ -609,6 +614,18 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		if r.tagAssignments != nil {
+			f.Post("/batch/tags", dispatcher.Bind(
+				"console.TagAssignmentHandler.BatchUpdate",
+				dispatcher.JSON(func() *attunev1.BatchUpdateFeedbackTagsRequest {
+					return ptrext.Of(attunev1.BatchUpdateFeedbackTagsRequest{})
+				}),
+				r.tagAssignments.BatchUpdate,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchUpdateFeedbackTagsRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+		}
 		f.Get("/{id}", dispatcher.Bind(
 			"console.FeedbackHandler.Get",
 			dispatcher.Path(
@@ -635,6 +652,38 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		if r.tagAssignments != nil {
+			f.Post("/{id}/tags", dispatcher.Bind(
+				"console.TagAssignmentHandler.Add",
+				dispatcher.Combine(
+					func() *attunev1.AddFeedbackTagRequest { return ptrext.Of(attunev1.AddFeedbackTagRequest{}) },
+					dispatcher.JSONBody[*attunev1.AddFeedbackTagRequest],
+					dispatcher.ParamInt64("id", func(req *attunev1.AddFeedbackTagRequest, id int64) {
+						req.FeedbackId = id
+					}, "id must be an integer"),
+				),
+				r.tagAssignments.Add,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.AddFeedbackTagRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+			f.Delete("/{id}/tags/{tag_id}", dispatcher.Bind(
+				"console.TagAssignmentHandler.Remove",
+				dispatcher.Path(
+					func() *attunev1.RemoveFeedbackTagRequest { return ptrext.Of(attunev1.RemoveFeedbackTagRequest{}) },
+					dispatcher.ParamInt64("id", func(req *attunev1.RemoveFeedbackTagRequest, id int64) {
+						req.FeedbackId = id
+					}, "id must be an integer"),
+					dispatcher.Param("tag_id", func(req *attunev1.RemoveFeedbackTagRequest, id string) {
+						req.TagId = id
+					}),
+				),
+				r.tagAssignments.Remove,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RemoveFeedbackTagRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+		}
 	})
 }
 
