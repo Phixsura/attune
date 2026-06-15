@@ -1,4 +1,5 @@
 # OIDC e2e test config — use with docker-compose.oidc-test.yml.
+# TEST-ONLY: This file contains intentionally weak credentials for local testing.
 #
 # Usage:
 #   cd deploy
@@ -8,8 +9,8 @@
 port: 8090
 
 database:
-  # Test-only credentials, set in docker-compose.oidc-test.yml
-  url: "postgres://attune:test-only-not-for-production@postgres:5432/attune?sslmode=disable"
+  # trufflehog:ignore — test-only credential, not for production
+  url: "postgres://attune:oidc-local-test-only@postgres:5432/attune?sslmode=disable"
 
 migrations:
   confirm_lark_delete: false

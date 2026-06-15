@@ -213,8 +213,12 @@ const sampleDigestSubscription: DigestSubscription = {
   clusteringEnabled: false,
 }
 
+// Auth providers (login page SSO detection)
+export const defaultAuthProviders = { providers: [{ type: 'local' }], oidc_only: false }
+
 export const handlers = [
   http.get(`${BASE}/me`, () => HttpResponse.json(defaultMe)),
+  http.get(`${BASE}/auth/providers`, () => HttpResponse.json(defaultAuthProviders)),
 
   http.get(`${BASE}/install/start`, ({ request }) => {
     const url = new URL(request.url)
