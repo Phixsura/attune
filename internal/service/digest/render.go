@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
 const (
@@ -124,16 +126,13 @@ func RenderPayload(view DigestView) ([]byte, error) {
 	return json.Marshal(p)
 }
 
-func renderMarkdown(view DigestView) string {
+func renderMarkdownHeader(view DigestView) string {
 	var b strings.Builder
 	res := view.Result
-
 	fmt.Fprintf(&b, "**Daily Digest — %s**\n\n", view.RunDate)
-
 	if len(view.Sparkline) > 0 {
 		fmt.Fprintf(&b, "7-day trend: %s\n\n", renderSparkline(view.Sparkline))
 	}
-
 	fmt.Fprintf(&b, "**%d** feedback", res.Stats.Total)
 	if view.Deltas.Feedback.Direction != "" {
 		fmt.Fprintf(&b, " %s", deltaArrow(view.Deltas.Feedback))
@@ -149,33 +148,53 @@ func renderMarkdown(view DigestView) string {
 		}
 	}
 	b.WriteString(")\n")
+	return b.String()
+}
+
+func renderMarkdownThemes(themes []Theme, deepLinkBase string) string {
+	var b strings.Builder
+	b.WriteString("\n**Top Themes**\n")
+	for i, t := range themes {
+		badge := lifecycleBadge(t.Lifecycle)
+		fmt.Fprintf(&b, "%d. %s%s — %d report", i+1, badge, t.Title, t.Count)
+		if t.Count != 1 {
+			b.WriteByte('s')
+		}
+		b.WriteByte('\n')
+		if len(t.ExampleTitles) > 0 {
+			fmt.Fprintf(&b, "   > \"%s\"\n", truncate(t.ExampleTitles[0], 80))
+		}
+		if deepLinkBase != "" && len(t.ExampleIDs) > 0 {
+			fmt.Fprintf(&b, "   [View →](%s/feedback?theme=%s)\n", deepLinkBase, t.Title)
+		}
+	}
+	return b.String()
+}
+
+func renderMarkdownItems(items []feedback.DigestFeedbackRow, deepLinkBase string) string {
+	var b strings.Builder
+	b.WriteString("\n**Recent Feedback**\n")
+	for _, it := range items {
+		fmt.Fprintf(&b, "- #%d %s", it.ID, truncate(it.Title, 60))
+		if deepLinkBase != "" {
+			fmt.Fprintf(&b, " [→](%s/feedback/%d)", deepLinkBase, it.ID)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func renderMarkdown(view DigestView) string {
+	var b strings.Builder
+	res := view.Result
+
+	b.WriteString(renderMarkdownHeader(view))
 
 	switch {
 	case len(res.Themes) > 0:
-		b.WriteString("\n**Top Themes**\n")
-		for i, t := range res.Themes {
-			badge := lifecycleBadge(t.Lifecycle)
-			fmt.Fprintf(&b, "%d. %s%s — %d report", i+1, badge, t.Title, t.Count)
-			if t.Count != 1 {
-				b.WriteByte('s')
-			}
-			b.WriteByte('\n')
-			if len(t.ExampleTitles) > 0 {
-				fmt.Fprintf(&b, "   > \"%s\"\n", truncate(t.ExampleTitles[0], 80))
-			}
-			if view.DeepLinkBase != "" && len(t.ExampleIDs) > 0 {
-				fmt.Fprintf(&b, "   [View →](%s/feedback?theme=%s)\n", view.DeepLinkBase, t.Title)
-			}
-		}
+		b.WriteString(renderMarkdownThemes(res.Themes, view.DeepLinkBase))
 	case len(res.Items) > 0:
-		b.WriteString("\n**Recent Feedback**\n")
-		for _, it := range res.Items {
-			fmt.Fprintf(&b, "- #%d %s", it.ID, truncate(it.Title, 60))
-			if view.DeepLinkBase != "" {
-				fmt.Fprintf(&b, " [→](%s/feedback/%d)", view.DeepLinkBase, it.ID)
-			}
-			b.WriteByte('\n')
-		}
+		b.WriteString(renderMarkdownItems(res.Items, view.DeepLinkBase))
 	}
 
 	if res.Stats.Unclustered > 0 && len(res.Themes) > 0 {
