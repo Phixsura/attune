@@ -19,6 +19,7 @@ const sample: DigestSubscription = {
   nextRunAt: '2026-06-14T09:00:00Z',
   createdAt: '2026-06-13T00:00:00Z',
   updatedAt: '2026-06-13T00:00:00Z',
+  clusteringEnabled: false,
 }
 
 describe('DigestSubscriptionPage', () => {

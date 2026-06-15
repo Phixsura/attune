@@ -38,6 +38,7 @@ export function DigestSubscriptionPage() {
   const [llmMin, setLlmMin] = useState(6)
   const [sendOnEmpty, setSendOnEmpty] = useState(false)
   const [themePrompt, setThemePrompt] = useState('')
+  const [clusteringEnabled, setClusteringEnabled] = useState(false)
 
   useEffect(() => {
     const d = q.data
@@ -49,6 +50,7 @@ export function DigestSubscriptionPage() {
     setLlmMin(d.llmMinFeedback || 6)
     setSendOnEmpty(d.sendOnEmpty)
     setThemePrompt(d.themePrompt ?? '')
+    setClusteringEnabled(d.clusteringEnabled ?? false)
   }, [q.data])
 
   const handleSave = () => {
@@ -61,6 +63,7 @@ export function DigestSubscriptionPage() {
         sendOnEmpty,
         byweekday: frequency === 'weekly' ? byweekday : undefined,
         themePrompt: themePrompt.trim() || undefined,
+        clusteringEnabled,
       },
       {
         onSuccess: () => toast.success(t('common.save')),
@@ -184,6 +187,17 @@ export function DigestSubscriptionPage() {
               data-testid="digest-theme-prompt"
             />
           </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={clusteringEnabled}
+              onChange={(e) => setClusteringEnabled(e.target.checked)}
+              data-testid="digest-clustering-enabled"
+            />
+            {t('digest.clustering_enabled_field')}
+          </label>
+          <p className="text-xs text-muted-foreground">{t('digest.clustering_enabled_help')}</p>
 
           {q.data?.nextRunAt ? (
             <p className="text-xs text-muted-foreground" data-testid="digest-next-run">

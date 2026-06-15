@@ -32,7 +32,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   similarity and names clusters via LLM. Replaces the naive hardcoded-3-themes
   approach with dynamic 5-15 theme discovery, centroid-based example selection,
   and per-cluster naming. Falls back to naive LLM path when embeddings are
-  insufficient.
+  insufficient. Console API exposes `clustering_enabled` toggle in
+  `/digest-subscription` for operators to enable/disable per tenant.
 
 - **Outbound channel-adapter framework (#34).** `internal/outbound/` provides
   the pluggable delivery SDK mirroring `internal/inbound/`. Features:

@@ -41,6 +41,7 @@ message DigestSubscription {
   optional string last_run_at = 10; // RFC3339, read-only
   string created_at = 11;           // RFC3339
   string updated_at = 12;           // RFC3339
+  bool clustering_enabled = 13;     // use embedding-based HDBSCAN clustering (#27)
 }
 
 message GetDigestSubscriptionRequest {}
@@ -54,6 +55,7 @@ message UpsertDigestSubscriptionRequest {
   int32 llm_min_feedback = 6;
   bool send_on_empty = 7;
   optional string theme_prompt = 8;
+  bool clustering_enabled = 9;      // use embedding-based HDBSCAN clustering
 }
 
 message DeleteDigestSubscriptionRequest {}

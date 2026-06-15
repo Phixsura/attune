@@ -35,6 +35,8 @@ type subscriptionRepo interface {
 // tenantReader resolves a tenant's default timezone for scheduling.
 type tenantReader interface {
 	GetByID(ctx context.Context, id string) (*tenant.Tenant, error)
+	GetClusteringEnabled(ctx context.Context, id string) (bool, error)
+	SetClusteringEnabled(ctx context.Context, id string, enabled bool) error
 }
 
 // Handler serves the digest-subscription endpoints.
@@ -57,14 +59,23 @@ func (h *Handler) Get(
 	sub, err := h.repo.GetByTenant(ctx, auth.TenantID)
 	if errors.Is(err, digestsubrepo.ErrNotFound) {
 		return dispatcher.Fail[*attunev1.DigestSubscription](
-			http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "no digest subscription configured")
+			http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "no digest subscription configured",
+		)
 	}
 	if err != nil {
 		logext.Errorf(ctx, "[%s] get failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.DigestSubscription](
-			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load digest subscription")
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load digest subscription",
+		)
 	}
-	return dispatcher.OK(toDigestProto(ptrext.Indirect(sub)))
+	clusteringEnabled, err := h.tenants.GetClusteringEnabled(ctx, auth.TenantID)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] get clustering status failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
+		// Non-fatal: default to false
+	}
+	proto := toDigestProto(ptrext.Indirect(sub))
+	proto.ClusteringEnabled = clusteringEnabled
+	return dispatcher.OK(proto)
 }
 
 // Upsert handles PUT /fb/v1/console/digest-subscription (create or replace). It
@@ -79,19 +90,22 @@ func (h *Handler) Upsert(
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: validation,tenant_id:%s,err:%s", where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.DigestSubscription](
-			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
+			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error(),
+		)
 	}
 	tz, err := h.resolveTimezone(ctx, auth.TenantID, sub.Timezone)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] resolve tz failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.DigestSubscription](
-			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to resolve timezone")
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to resolve timezone",
+		)
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: bad timezone,tenant_id:%s,tz:%s", where, auth.TenantID, tz)
 		return dispatcher.Fail[*attunev1.DigestSubscription](
-			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "timezone must be a valid IANA name")
+			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "timezone must be a valid IANA name",
+		)
 	}
 	sub.TenantID = auth.TenantID
 	sub.NextRunAt = ptrext.Of(digestsvc.NextRun(time.Now(), sub.Frequency, sub.SendHour, sub.Byweekday, loc))
@@ -99,11 +113,18 @@ func (h *Handler) Upsert(
 	if err != nil {
 		logext.Errorf(ctx, "[%s] upsert failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.DigestSubscription](
-			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to save digest subscription")
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to save digest subscription",
+		)
 	}
-	logext.Infof(ctx, "[%s] OK,tenant_id:%s,frequency:%s,send_hour:%d",
-		where, auth.TenantID, sub.Frequency, sub.SendHour)
-	return dispatcher.OK(toDigestProto(ptrext.Indirect(out)))
+	if err := h.tenants.SetClusteringEnabled(ctx, auth.TenantID, req.ClusteringEnabled); err != nil {
+		logext.Warnf(ctx, "[%s] set clustering failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
+		// Non-fatal: clustering is optional
+	}
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,frequency:%s,send_hour:%d,clustering:%t",
+		where, auth.TenantID, sub.Frequency, sub.SendHour, req.ClusteringEnabled)
+	proto := toDigestProto(ptrext.Indirect(out))
+	proto.ClusteringEnabled = req.ClusteringEnabled
+	return dispatcher.OK(proto)
 }
 
 // Delete handles DELETE /fb/v1/console/digest-subscription.
@@ -115,11 +136,13 @@ func (h *Handler) Delete(
 	if err := h.repo.DeleteByTenant(ctx, auth.TenantID); err != nil {
 		if errors.Is(err, digestsubrepo.ErrNotFound) {
 			return dispatcher.Fail[*attunev1.DeleteDigestSubscriptionResponse](
-				http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "no digest subscription configured")
+				http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "no digest subscription configured",
+			)
 		}
 		logext.Errorf(ctx, "[%s] delete failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.DeleteDigestSubscriptionResponse](
-			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to delete digest subscription")
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to delete digest subscription",
+		)
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s", where, auth.TenantID)
 	return dispatcher.NoContent[*attunev1.DeleteDigestSubscriptionResponse]()

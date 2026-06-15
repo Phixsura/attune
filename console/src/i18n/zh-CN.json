@@ -288,7 +288,9 @@
     "theme_prompt_placeholder": "留空使用默认",
     "next_run": "下次发送",
     "delete_button": "删除订阅",
-    "deleted": "已删除"
+    "deleted": "已删除",
+    "clustering_enabled_field": "使用语义聚类",
+    "clustering_enabled_help": "启用后，主题提取使用 embedding 向量聚类（HDBSCAN）而非纯 LLM 猜测，分类更准确。"
   },
   "settings": {
     "subtitle": "统一管理 Console 配置入口：AI 分类、防护策略、入站源、通知目标和 API key。",
