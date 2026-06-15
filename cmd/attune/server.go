@@ -265,12 +265,11 @@ func startBackgroundWorkers(
 }
 
 // startDigestWorker wires the daily digest scheduler + worker (#27). llm is the
-// audit-wrapping client; the naive theme-naming path rides the enrich route, so
-// no extra LLM routing config is required. The cluster path (tenants with
-// clustering enabled) reuses #114's labels and makes no LLM call.
+// audit-wrapping client. When embeddings are available, the cluster namer uses
+// HDBSCAN for theme extraction; otherwise falls back to naive LLM grouping.
 func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LLMClient, consoleBaseURL string) {
 	embedRepo := embeddingrepo.NewTaskRepo(pool)
-	agg := digestsvc.NewNaiveAggregator(embedRepo, feedback.NewFeedback(pool), llm)
+	agg := digestsvc.NewClusterAggregator(embedRepo, feedback.NewFeedback(pool), embedRepo, llm)
 	worker := digestsvc.NewWorker(
 		digestsubrepo.New(pool),
 		digestrunrepo.New(pool),
