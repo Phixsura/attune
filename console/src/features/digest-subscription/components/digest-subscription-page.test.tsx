@@ -38,4 +38,14 @@ describe('DigestSubscriptionPage', () => {
       expect(screen.queryByTestId('digest-weekday')).not.toBeNull()
     })
   })
+
+  it('populates the clustering checkbox from loaded config', async () => {
+    const withClustering: DigestSubscription = { ...sample, clusteringEnabled: true }
+    renderWithProviders(<DigestSubscriptionPage />, { queryClient: seeded(withClustering) })
+    await waitFor(() => {
+      expect((screen.getByTestId('digest-clustering-enabled') as HTMLInputElement).checked).toBe(
+        true,
+      )
+    })
+  })
 })
