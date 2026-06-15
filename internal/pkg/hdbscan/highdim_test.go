@@ -80,77 +80,51 @@ func TestHighDimensional_WithPCA(t *testing.T) {
 	}
 }
 
-// TestHighDimensional_RealisticFeedback simulates real feedback embeddings.
-func TestHighDimensional_RealisticFeedback(t *testing.T) {
-	t.Parallel()
-
-	dim := 384
-
-	// 50 feedback items in 3 rough topics
-	data := make([][]float32, 50)
-
-	rng := rand.New(rand.NewSource(123))
-
-	// Topic 1: "payment issues" - 15 items
-	for i := 0; i < 15; i++ {
+// generateTopicCluster creates points with signal in a dimension range.
+func generateTopicCluster(rng *rand.Rand, count, dim, signalStart, signalEnd int) [][]float32 {
+	data := make([][]float32, count)
+	for i := 0; i < count; i++ {
 		data[i] = make([]float32, dim)
-		for d := 0; d < 50; d++ {
-			data[i][d] = float32(0.2 + rng.NormFloat64()*0.1)
-		}
-		for d := 50; d < dim; d++ {
-			data[i][d] = float32(rng.NormFloat64() * 0.02)
-		}
-	}
-
-	// Topic 2: "login problems" - 20 items
-	for i := 15; i < 35; i++ {
-		data[i] = make([]float32, dim)
-		for d := 100; d < 150; d++ {
-			data[i][d] = float32(0.2 + rng.NormFloat64()*0.1)
-		}
 		for d := 0; d < dim; d++ {
-			if d < 100 || d >= 150 {
+			if d >= signalStart && d < signalEnd {
+				data[i][d] = float32(0.2 + rng.NormFloat64()*0.1)
+			} else {
 				data[i][d] = float32(rng.NormFloat64() * 0.02)
 			}
 		}
 	}
+	return data
+}
 
-	// Topic 3: "UI bugs" - 10 items
-	for i := 35; i < 45; i++ {
-		data[i] = make([]float32, dim)
-		for d := 200; d < 250; d++ {
-			data[i][d] = float32(0.2 + rng.NormFloat64()*0.1)
-		}
-		for d := 0; d < dim; d++ {
-			if d < 200 || d >= 250 {
-				data[i][d] = float32(rng.NormFloat64() * 0.02)
-			}
-		}
-	}
-
-	// 5 noise items (random)
-	for i := 45; i < 50; i++ {
+// generateNoisePoints creates random noise points.
+func generateNoisePoints(rng *rand.Rand, count, dim int) [][]float32 {
+	data := make([][]float32, count)
+	for i := 0; i < count; i++ {
 		data[i] = make([]float32, dim)
 		for d := 0; d < dim; d++ {
 			data[i][d] = float32(rng.NormFloat64() * 0.1)
 		}
 	}
+	return data
+}
 
-	// With PCA reduction
+// TestHighDimensional_RealisticFeedback simulates real feedback embeddings.
+func TestHighDimensional_RealisticFeedback(t *testing.T) {
+	t.Parallel()
+
+	dim := 384
+	rng := rand.New(rand.NewSource(123))
+
+	var data [][]float32
+	data = append(data, generateTopicCluster(rng, 15, dim, 0, 50)...)    // Topic 1
+	data = append(data, generateTopicCluster(rng, 20, dim, 100, 150)...) // Topic 2
+	data = append(data, generateTopicCluster(rng, 10, dim, 200, 250)...) // Topic 3
+	data = append(data, generateNoisePoints(rng, 5, dim)...)             // Noise
+
 	c := ptrext.Of(Clusterer{MinClusterSize: 5, MinSamples: 3, ReduceDims: 20})
 	result := c.Cluster(data)
 
 	t.Logf("Clusters found: %d (expected: ~3)", result.ClusterCount)
-	t.Logf("Labels: %v", result.Labels)
-
-	// Count noise points
-	noiseCount := 0
-	for _, l := range result.Labels {
-		if l == -1 {
-			noiseCount++
-		}
-	}
-	t.Logf("Noise points: %d (expected: ~5)", noiseCount)
 
 	if result.ClusterCount < 2 {
 		t.Errorf("expected at least 2 clusters, got %d", result.ClusterCount)

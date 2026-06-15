@@ -347,18 +347,19 @@ func TestCosineDistance_MismatchedLengths(t *testing.T) {
 	}
 }
 
-func BenchmarkClusterer_100Points(b *testing.B) {
-	// Generate 100 random-ish points
-	dim := 384
-	data := make([][]float32, 100)
+func makeBenchData(n, dim int) [][]float32 {
+	data := make([][]float32, n)
 	for i := range data {
 		data[i] = make([]float32, dim)
 		data[i][i%dim] = 1.0
 		data[i][(i*7)%dim] = 0.5
 	}
+	return data
+}
 
+func BenchmarkClusterer_100Points(b *testing.B) {
+	data := makeBenchData(100, 384)
 	c := ptrext.Of(Clusterer{MinClusterSize: 5})
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		c.Cluster(data)
@@ -366,16 +367,8 @@ func BenchmarkClusterer_100Points(b *testing.B) {
 }
 
 func BenchmarkClusterer_500Points(b *testing.B) {
-	dim := 384
-	data := make([][]float32, 500)
-	for i := range data {
-		data[i] = make([]float32, dim)
-		data[i][i%dim] = 1.0
-		data[i][(i*7)%dim] = 0.5
-	}
-
+	data := makeBenchData(500, 384)
 	c := ptrext.Of(Clusterer{MinClusterSize: 5})
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		c.Cluster(data)

@@ -18,27 +18,11 @@ type PCA struct {
 	MaxIter int
 }
 
-// Reduce projects data onto the top-k principal components.
-// Input: n points x d dimensions. Output: n points x k dimensions.
-func (p *PCA) Reduce(data [][]float32) [][]float32 {
-	if len(data) == 0 || p.Components <= 0 {
-		return data
-	}
+const convergenceThreshold = 0.9999
 
-	n := len(data)
-	d := len(data[0])
-
-	// If target dims >= current dims, no reduction needed
-	if p.Components >= d {
-		return data
-	}
-
-	maxIter := p.MaxIter
-	if maxIter == 0 {
-		maxIter = 100
-	}
-
-	// Step 1: Center the data (subtract mean)
+// centerData subtracts mean from each dimension and returns centered float64 data.
+func centerData(data [][]float32) [][]float64 {
+	n, d := len(data), len(data[0])
 	mean := make([]float64, d)
 	for i := 0; i < n; i++ {
 		for j := 0; j < d; j++ {
@@ -48,7 +32,6 @@ func (p *PCA) Reduce(data [][]float32) [][]float32 {
 	for j := 0; j < d; j++ {
 		mean[j] /= float64(n)
 	}
-
 	centered := make([][]float64, n)
 	for i := 0; i < n; i++ {
 		centered[i] = make([]float64, d)
@@ -56,74 +39,96 @@ func (p *PCA) Reduce(data [][]float32) [][]float32 {
 			centered[i][j] = float64(data[i][j]) - mean[j]
 		}
 	}
+	return centered
+}
 
-	// Step 2: Compute top-k principal components using power iteration
-	// For small k, this is faster than full SVD
+// powerIterationStep performs one step of power iteration: v' = X^T (X v).
+func powerIterationStep(centered [][]float64, v []float64) []float64 {
+	n, d := len(centered), len(v)
+	u := make([]float64, n)
+	for i := 0; i < n; i++ {
+		for j := 0; j < d; j++ {
+			u[i] += centered[i][j] * v[j]
+		}
+	}
+	newV := make([]float64, d)
+	for j := 0; j < d; j++ {
+		for i := 0; i < n; i++ {
+			newV[j] += centered[i][j] * u[i]
+		}
+	}
+	return newV
+}
+
+// orthogonalize removes components in the direction of previous vectors.
+func orthogonalize(v []float64, previous [][]float64) {
+	for _, prev := range previous {
+		dot := dotProduct(v, prev)
+		for j := range v {
+			v[j] -= dot * prev[j]
+		}
+	}
+}
+
+// projectData projects centered data onto principal components.
+func projectData(centered [][]float64, components [][]float64) [][]float32 {
+	n, k := len(centered), len(components)
+	result := make([][]float32, n)
+	for i := 0; i < n; i++ {
+		result[i] = make([]float32, k)
+		for c := 0; c < k; c++ {
+			var proj float64
+			for j := range components[c] {
+				proj += centered[i][j] * components[c][j]
+			}
+			result[i][c] = float32(proj)
+		}
+	}
+	return result
+}
+
+// Reduce projects data onto the top-k principal components.
+// Input: n points x d dimensions. Output: n points x k dimensions.
+func (p *PCA) Reduce(data [][]float32) [][]float32 {
+	if len(data) == 0 || p.Components <= 0 || p.Components >= len(data[0]) {
+		return data
+	}
+
+	maxIter := p.MaxIter
+	if maxIter == 0 {
+		maxIter = 100
+	}
+
+	centered := centerData(data)
+	d := len(data[0])
 	components := make([][]float64, p.Components)
 
-	const convergenceThreshold = 0.9999 // early stop when dot product exceeds this
-
 	for k := 0; k < p.Components; k++ {
-		// Initialize random-ish vector
-		v := make([]float64, d)
-		for j := 0; j < d; j++ {
-			v[j] = float64(j%7+1) / 10.0
-		}
-		normalize(v)
-
-		// Power iteration: v = (X^T X) v, repeated
+		v := initVector(d)
 		for iter := 0; iter < maxIter; iter++ {
-			// u = X * v (n-dim)
-			u := make([]float64, n)
-			for i := 0; i < n; i++ {
-				for j := 0; j < d; j++ {
-					u[i] += centered[i][j] * v[j]
-				}
-			}
-
-			// v = X^T * u (d-dim)
-			newV := make([]float64, d)
-			for j := 0; j < d; j++ {
-				for i := 0; i < n; i++ {
-					newV[j] += centered[i][j] * u[i]
-				}
-			}
-
-			// Orthogonalize against previous components
-			for prev := 0; prev < k; prev++ {
-				dot := dotProduct(newV, components[prev])
-				for j := 0; j < d; j++ {
-					newV[j] -= dot * components[prev][j]
-				}
-			}
-
+			newV := powerIterationStep(centered, v)
+			orthogonalize(newV, components[:k])
 			normalize(newV)
-
-			// Early convergence check: if direction barely changed, stop
 			if dotProduct(v, newV) > convergenceThreshold {
 				v = newV
 				break
 			}
 			v = newV
 		}
-
 		components[k] = v
 	}
 
-	// Step 3: Project data onto principal components
-	result := make([][]float32, n)
-	for i := 0; i < n; i++ {
-		result[i] = make([]float32, p.Components)
-		for k := 0; k < p.Components; k++ {
-			var proj float64
-			for j := 0; j < d; j++ {
-				proj += centered[i][j] * components[k][j]
-			}
-			result[i][k] = float32(proj)
-		}
-	}
+	return projectData(centered, components)
+}
 
-	return result
+// initVector creates an initial vector for power iteration.
+func initVector(d int) []float64 {
+	v := make([]float64, d)
+	for j := 0; j < d; j++ {
+		v[j] = float64(j%7+1) / 10.0
+	}
+	normalize(v)
+	return v
 }
 
 func dotProduct(a, b []float64) float64 {

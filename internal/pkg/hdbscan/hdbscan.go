@@ -404,68 +404,47 @@ func computeStability(condensed []condensedEdge, clusterBirth map[int]float64, n
 	return stability
 }
 
-// selectClustersEOM implements Excess of Mass cluster selection
-// allowSingleCluster=false by default (matches scikit-learn)
-func selectClustersEOM(condensed []condensedEdge, stability map[int]float64, n int) (map[int]bool, map[int]float64) {
-	// Find cluster children relationships
-	children := make(map[int][]int)
-	for _, e := range condensed {
-		if e.child >= n { // child is a cluster
-			children[e.parent] = append(children[e.parent], e.child)
-		}
-	}
-
-	// Find all clusters
-	allClusters := make(map[int]bool)
-	for c := range stability {
-		allClusters[c] = true
-	}
-
-	// Find root cluster (the one that's not a child of any other)
+// buildClusterRelations extracts parent-child relationships and root from condensed tree.
+func buildClusterRelations(condensed []condensedEdge, stability map[int]float64, n int) (children map[int][]int, root int) {
+	children = make(map[int][]int)
 	childSet := make(map[int]bool)
 	for _, e := range condensed {
 		if e.child >= n {
+			children[e.parent] = append(children[e.parent], e.child)
 			childSet[e.child] = true
 		}
 	}
-	var root int
-	for c := range allClusters {
+	for c := range stability {
 		if !childSet[c] {
 			root = c
 			break
 		}
 	}
+	return children, root
+}
 
-	// Process in bottom-up order (leaves first) using topological sort
-	// Build in-degree map (count of cluster children)
+// topologicalSortClusters returns clusters in bottom-up order (leaves first).
+func topologicalSortClusters(stability map[int]float64, children map[int][]int) ([]int, map[int]int) {
 	inDegree := make(map[int]int)
-	for c := range allClusters {
+	for c := range stability {
 		inDegree[c] = len(children[c])
 	}
-
-	// Start with leaf clusters (no cluster children)
-	var queue []int
-	for c := range allClusters {
-		if inDegree[c] == 0 {
-			queue = append(queue, c)
-		}
-	}
-
-	// Topological sort: process leaves first, then parents
-	clusters := make([]int, 0, len(allClusters))
-	parent := make(map[int]int) // child -> parent
+	parent := make(map[int]int)
 	for p, ch := range children {
 		for _, c := range ch {
 			parent[c] = p
 		}
 	}
-
+	var queue, result []int
+	for c := range stability {
+		if inDegree[c] == 0 {
+			queue = append(queue, c)
+		}
+	}
 	for len(queue) > 0 {
 		node := queue[0]
 		queue = queue[1:]
-		clusters = append(clusters, node)
-
-		// Decrement parent's in-degree
+		result = append(result, node)
 		if p, ok := parent[node]; ok {
 			inDegree[p]--
 			if inDegree[p] == 0 {
@@ -473,63 +452,90 @@ func selectClustersEOM(condensed []condensedEdge, stability map[int]float64, n i
 			}
 		}
 	}
+	return result, parent
+}
+
+// markDescendantsNonCluster recursively marks all descendants as non-clusters.
+func markDescendantsNonCluster(node int, children map[int][]int, isCluster map[int]bool) {
+	for _, ch := range children[node] {
+		isCluster[ch] = false
+		markDescendantsNonCluster(ch, children, isCluster)
+	}
+}
+
+// selectClustersEOM implements Excess of Mass cluster selection
+// allowSingleCluster=false by default (matches scikit-learn)
+func selectClustersEOM(condensed []condensedEdge, stability map[int]float64, n int) (map[int]bool, map[int]float64) {
+	children, root := buildClusterRelations(condensed, stability, n)
+	clusters, _ := topologicalSortClusters(stability, children)
 
 	isCluster := make(map[int]bool)
-	for c := range allClusters {
+	for c := range stability {
 		isCluster[c] = true
 	}
 
-	// EOM selection - process all clusters including root
 	for _, node := range clusters {
 		childStab := 0.0
 		for _, child := range children[node] {
 			childStab += stability[child]
 		}
-
 		if childStab > stability[node] {
 			isCluster[node] = false
 			stability[node] = childStab
 		} else {
-			// Node wins - mark all descendants as non-clusters
-			var markDescendants func(int)
-			markDescendants = func(nd int) {
-				for _, ch := range children[nd] {
-					isCluster[ch] = false
-					markDescendants(ch)
-				}
-			}
-			markDescendants(node)
+			markDescendantsNonCluster(node, children, isCluster)
 		}
 	}
 
-	// Handle allow_single_cluster=false (scikit-learn default)
-	// Count how many non-root clusters are selected
-	nonRootSelected := 0
-	for c, selected := range isCluster {
-		if selected && c != root {
-			nonRootSelected++
-		}
-	}
+	// allow_single_cluster=false: root is never selected
+	isCluster[root] = false
 
-	// If only root is selected, all points become noise
-	if nonRootSelected == 0 {
-		isCluster[root] = false
-	} else {
-		// Root is never selected when we have child clusters
-		isCluster[root] = false
-	}
-
-	// Compute death lambda for each cluster (max lambda of children falling out)
 	clusterDeath := make(map[int]float64)
 	for _, e := range condensed {
-		if e.parent >= n {
-			if e.lambda > clusterDeath[e.parent] {
-				clusterDeath[e.parent] = e.lambda
-			}
+		if e.parent >= n && e.lambda > clusterDeath[e.parent] {
+			clusterDeath[e.parent] = e.lambda
 		}
 	}
-
 	return isCluster, clusterDeath
+}
+
+// buildParentIndex creates a map from child cluster to parent cluster.
+func buildParentIndex(condensed []condensedEdge, n int) map[int]int {
+	parentOf := make(map[int]int)
+	for _, e := range condensed {
+		if e.child >= n {
+			parentOf[e.child] = e.parent
+		}
+	}
+	return parentOf
+}
+
+// findSelectedAncestor walks up from cluster to find a selected ancestor.
+func findSelectedAncestor(cluster int, selected map[int]bool, parentOf map[int]int, n int) int {
+	for cluster >= n && !selected[cluster] {
+		p, ok := parentOf[cluster]
+		if !ok {
+			return -1
+		}
+		cluster = p
+	}
+	if cluster >= n && selected[cluster] {
+		return cluster
+	}
+	return -1
+}
+
+// computePointProbability computes membership probability for a point.
+func computePointProbability(lambda, birth, death float64) float64 {
+	denominator := death - birth
+	if denominator <= 0 || math.IsInf(death, 1) || math.IsInf(birth, 1) || math.IsInf(lambda, 1) {
+		return 1.0
+	}
+	numerator := lambda - birth
+	if numerator < 0 {
+		numerator = 0
+	}
+	return math.Min(numerator/denominator, 1.0)
 }
 
 // assignLabelsAndProbs assigns labels and computes per-point probabilities
@@ -541,7 +547,6 @@ func assignLabelsAndProbs(condensed []condensedEdge, selected map[int]bool, clus
 		labels[i] = -1
 	}
 
-	// Map selected clusters to sequential labels
 	clusterLabels := make(map[int]int)
 	labelID := 0
 	for c := range selected {
@@ -551,67 +556,21 @@ func assignLabelsAndProbs(condensed []condensedEdge, selected map[int]bool, clus
 		}
 	}
 
-	// For each point, find which selected cluster it belongs to
-	// and record its lambda value
-	pointCluster := make(map[int]int)
-	pointLambda := make(map[int]float64)
+	parentOf := buildParentIndex(condensed, n)
 
 	for _, e := range condensed {
 		if e.child >= n {
-			continue // Skip cluster edges
+			continue
 		}
-
-		// Walk up to find selected cluster
-		cluster := e.parent
-		lambda := e.lambda
-
-		// If this cluster is not selected, find its selected ancestor
-		for cluster >= n && !selected[cluster] {
-			found := false
-			for _, ce := range condensed {
-				if ce.child == cluster {
-					cluster = ce.parent
-					found = true
-					break
-				}
-			}
-			if !found {
-				cluster = -1
-				break
-			}
+		cluster := findSelectedAncestor(e.parent, selected, parentOf, n)
+		if cluster < 0 {
+			continue
 		}
-
-		if cluster >= n && selected[cluster] {
-			pointCluster[e.child] = cluster
-			pointLambda[e.child] = lambda
-		}
-	}
-
-	// Assign labels and compute probabilities
-	for point, cluster := range pointCluster {
 		if label, ok := clusterLabels[cluster]; ok {
-			labels[point] = label
-
-			// Probability = (λ_point - λ_birth) / (λ_death - λ_birth)
-			birth := clusterBirth[cluster]
-			death := clusterDeath[cluster]
-			lambda := pointLambda[point]
-
-			denominator := death - birth
-			if denominator <= 0 || math.IsInf(death, 1) || math.IsInf(birth, 1) {
-				probs[point] = 1.0
-			} else if math.IsInf(lambda, 1) {
-				probs[point] = 1.0
-			} else {
-				numerator := lambda - birth
-				if numerator < 0 {
-					numerator = 0
-				}
-				probs[point] = math.Min(numerator/denominator, 1.0)
-			}
+			labels[e.child] = label
+			probs[e.child] = computePointProbability(e.lambda, clusterBirth[cluster], clusterDeath[cluster])
 		}
 	}
-
 	return labels, probs
 }
 
