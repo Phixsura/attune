@@ -47,6 +47,7 @@ type Config struct {
 	Secrets       SecretsConfig
 	Observability ObservabilityConfig
 	RateLimit     RateLimitConfig
+	OIDC          OIDCConfig
 
 	CustomWebhooks []CustomWebhookDest
 
@@ -115,6 +116,7 @@ type yamlConfig struct {
 	Secrets        SecretsConfig       `yaml:"secrets"`
 	Observability  ObservabilityConfig `yaml:"observability"`
 	RateLimit      RateLimitConfig     `yaml:"rate_limit"`
+	OIDC           OIDCConfig          `yaml:"oidc"`
 	CustomWebhooks []CustomWebhookDest `yaml:"custom_webhooks"`
 }
 
@@ -178,6 +180,7 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 		Secrets:        yc.Secrets,
 		Observability:  yc.Observability,
 		RateLimit:      yc.RateLimit,
+		OIDC:           yc.OIDC,
 		CustomWebhooks: yc.CustomWebhooks,
 	})
 	c.applyDefaults()
@@ -231,6 +234,7 @@ func (c *Config) applyDefaults() {
 	if c.Observability.OTLPTracesPath == "" {
 		c.Observability.OTLPTracesPath = DefaultOTLPTracesPath
 	}
+	c.OIDC.ApplyDefaults()
 }
 
 func (c *Config) validate() error {
@@ -249,6 +253,9 @@ func (c *Config) validate() error {
 		}
 	}
 	if err := c.validateConsole(); err != nil {
+		return err
+	}
+	if err := c.OIDC.Validate(); err != nil {
 		return err
 	}
 	return c.validateCustomWebhooks()

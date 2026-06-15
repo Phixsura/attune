@@ -62,6 +62,11 @@ func TestRegisteredMetricsMatchDocumentedReference(t *testing.T) {
 		"attune_search_query_duration_seconds": true,
 		"attune_search_results_count":          true,
 		"attune_embedding_cache_hits_total":    true,
+		// OIDC SSO (#40).
+		"attune_oidc_login_total":                     true,
+		"attune_oidc_login_duration_seconds":          true,
+		"attune_oidc_token_exchange_duration_seconds": true,
+		"attune_oidc_role_mapping_total":              true,
 	}
 
 	got := registeredMetricNames(t)

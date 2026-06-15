@@ -17,7 +17,12 @@ import (
 func (h *MeHandler) Me(ctx *dispatcher.RequestContext[*session.AuthCtx], _ *attunev1.GetMeRequest) (dispatcher.Result[*attunev1.GetMeResponse], error) {
 	const where = "console.MeHandler.Me"
 	auth := ctx.Auth
-	logext.Infof(ctx, "[%s] start,tenant_id:%s,user_id:%s", where, auth.TenantID, auth.UserID)
+	logext.Infof(ctx, "[%s] start,tenant_id:%s,user_id:%s,user_type:%s", where, auth.TenantID, auth.UserID, auth.UserType)
+
+	// OIDC user sessions are identified by UserType="oidc".
+	if auth.UserType == "oidc" {
+		return h.meOIDCUser(ctx, auth.TenantID, auth.UserID)
+	}
 
 	// Admin sessions are identified by UserID hitting the admins table. They
 	// may carry a non-empty TenantID resolved at login so tenant-scoped
@@ -84,6 +89,61 @@ func adminDisplay(a admin.Admin) string {
 		return a.DisplayName
 	}
 	return a.Email
+}
+
+func (h *MeHandler) meOIDCUser(ctx *dispatcher.RequestContext[*session.AuthCtx], tenantID, userID string) (dispatcher.Result[*attunev1.GetMeResponse], error) {
+	const where = "console.MeHandler.meOIDCUser"
+
+	if h.oidcUsers == nil {
+		logext.Errorf(ctx, "[%s] oidcUsers repo not configured", where)
+		return dispatcher.Fail[*attunev1.GetMeResponse](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "OIDC not configured")
+	}
+
+	user, err := h.oidcUsers.GetByID(ctx, userID)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] oidc user not found,user_id:%s,err:%s", where, userID, err.Error())
+		h.signer.ClearSessionCookie(ctx)
+		return dispatcher.Fail[*attunev1.GetMeResponse](
+			http.StatusUnauthorized, attunev1.ErrorCode_USER_GONE, "OIDC user not found")
+	}
+
+	// Build tenant block (synthetic for OIDC users without tenant association)
+	tenantPB := ptrext.Of(attunev1.Tenant{
+		Id:       "_oidc",
+		Slug:     "_oidc",
+		Name:     "SSO User",
+		Locale:   "",
+		Timezone: "",
+	})
+	if tenantID != "" && h.tenants != nil {
+		if row, err := h.tenants.GetByID(ctx, tenantID); err == nil {
+			tenantPB = ptrext.Of(attunev1.Tenant{
+				Id:       row.ID,
+				Slug:     row.Slug,
+				Name:     row.Name,
+				Locale:   row.Locale,
+				Timezone: row.Timezone,
+			})
+		}
+	}
+
+	displayName := user.DisplayName
+	if displayName == "" {
+		displayName = user.Email
+	}
+
+	me := ptrext.Of(attunev1.GetMeResponse{
+		Tenant: tenantPB,
+		User: ptrext.Of(attunev1.SessionUser{
+			OpenId: user.ExternalID,
+			Name:   displayName,
+			Role:   user.Role,
+		}),
+		CsrfToken: h.signer.CSRFToken(user.ID),
+	})
+	logext.Infof(ctx, "[%s] OK,oidc_user_id:%s,role:%s", where, user.ID, user.Role)
+	return dispatcher.OK(me)
 }
 
 func (h *MeHandler) meTenantUser(ctx *dispatcher.RequestContext[*session.AuthCtx], tenantID, userID string) (dispatcher.Result[*attunev1.GetMeResponse], error) {

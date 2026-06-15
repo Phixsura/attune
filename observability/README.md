@@ -69,6 +69,10 @@ exposition plus the portable assets in this directory.
 | `attune_search_query_duration_seconds` | histogram | `tenant`, `type` | search query latency by type (#30) |
 | `attune_search_results_count` | histogram | `tenant` | number of search results returned (#30) |
 | `attune_embedding_cache_hits_total` | counter | `tenant`, `result` | embedding cache hits vs misses (#30) |
+| `attune_oidc_login_total` | counter | `result` | OIDC login attempts by result (#40) |
+| `attune_oidc_login_duration_seconds` | histogram | — | end-to-end OIDC login latency (#40) |
+| `attune_oidc_token_exchange_duration_seconds` | histogram | — | OIDC token exchange latency (#40) |
+| `attune_oidc_role_mapping_total` | counter | `role` | OIDC role mappings by assigned role (#40) |
 
 Label values:
 
@@ -97,6 +101,10 @@ Label values:
 - batch `mode` — `sync` · `async`.
 - batch job `status` — `completed` · `failed`.
 - idempotency `outcome` — `new` · `cache_hit` · `conflict` · `in_progress` · `failed`.
+- OIDC `result` — `success` · `state_invalid` · `state_expired` · `state_mismatch` ·
+  `idp_error` · `missing_code` · `token_exchange_failed` · `no_id_token` · `id_token_invalid` ·
+  `nonce_mismatch` · `claims_invalid` · `group_denied` · `user_sync_failed` · `session_failed`.
+- OIDC `role` — `admin` · `member` or custom roles from `role_mapping` config.
 - search `type` — `semantic` · `keyword_fallback` · `hybrid`.
 - embedding cache `result` — `hit` · `miss`.
 

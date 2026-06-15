@@ -1,0 +1,41 @@
+# Dex OIDC provider config for local e2e testing.
+#
+# Test users (password: "password" for all):
+#   admin@example.com  — basic admin test
+#   user@example.com   — regular user test
+#
+# Note: staticPasswords doesn't support groups claim.
+# Groups-based role mapping requires LDAP/SAML connector.
+# This config tests the core OIDC flow without groups.
+
+issuer: http://localhost:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+
+staticClients:
+  - id: attune-console
+    secret: attune-test-secret
+    name: Attune Console
+    redirectURIs:
+      - http://localhost:8090/fb/v1/console/auth/oidc/callback
+      - http://127.0.0.1:8090/fb/v1/console/auth/oidc/callback
+
+staticPasswords:
+  - email: admin@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: Admin User
+    userID: admin-001
+
+  - email: user@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: Regular User
+    userID: user-001
+
+enablePasswordDB: true

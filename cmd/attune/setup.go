@@ -11,11 +11,13 @@ import (
 
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
+	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
+	"github.com/Phixsura/attune/internal/pkg/crypto"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
@@ -32,6 +34,7 @@ import (
 	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
 	llmconfigrepo "github.com/Phixsura/attune/internal/repo/llmconfig"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	oidcuserrepo "github.com/Phixsura/attune/internal/repo/oidcuser"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -42,6 +45,7 @@ import (
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
 	"github.com/Phixsura/attune/internal/service/llmrouter"
+	"github.com/Phixsura/attune/internal/service/oidcauth"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
 	"github.com/Phixsura/attune/internal/service/semanticsearch"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
@@ -166,7 +170,8 @@ func buildConsoleRouter(
 
 	authHandler := console.NewAuthHandler(signer, adminRepo, tenantRepo, cfg.ConsoleBaseURL)
 	changePasswordHandler := console.NewChangePasswordHandler(adminRepo, signer)
-	me := console.NewMeHandler(signer, tenantRepo, userRepo, adminRepo)
+	oidcUserRepo := oidcuserrepo.NewRepo(pool)
+	me := console.NewMeHandler(signer, tenantRepo, userRepo, adminRepo, oidcUserRepo)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
 	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
@@ -197,6 +202,9 @@ func buildConsoleRouter(
 	tagAssignmentHandler := console.NewTagAssignmentHandler(tagRepo, tagAssignmentRepo)
 	workflowHandler := console.NewWorkflowHandler(wfStateRepo, wfSvc)
 
+	// OIDC SSO handler (optional, only when OIDC is configured).
+	oidcHandler := buildOIDCHandler(context.Background(), cfg, pool, signer, tenantRepo)
+
 	// Batch operations service dependencies.
 	idempotencyRepo := idempotencyrepo.New(pool)
 	jobRepo := feedbackjobrepo.New(pool)
@@ -222,6 +230,42 @@ func buildConsoleRouter(
 		searchHandler,
 		jobHandler,
 		usage, enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
-		tagHandler, tagAssignmentHandler, workflowHandler, adminRepo,
+		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, adminRepo,
 	).Mount(), nil
+}
+
+// buildOIDCHandler creates the OIDC handler if OIDC is enabled, otherwise returns nil.
+func buildOIDCHandler(
+	ctx context.Context,
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+	signer *console.Signer,
+	tenants oidcauth.TenantResolver,
+) *consoleoidc.Handler {
+	if !cfg.OIDC.Enabled {
+		return nil
+	}
+
+	oidcUsers := oidcuserrepo.NewRepo(pool)
+	oidcSvc, err := oidcauth.NewService(ctx, &cfg.OIDC, oidcUsers, tenants) // ptrext:allow struct-field
+	if err != nil {
+		logext.Errorf(ctx, "[buildOIDCHandler] OIDC service init failed,err:%s", err.Error())
+		return nil
+	}
+	if oidcSvc == nil {
+		return nil
+	}
+
+	// OIDC state cookie encryption uses the first 32 bytes of the session key.
+	aeadKey := []byte(cfg.ConsoleSessionKey)
+	if len(aeadKey) > 32 {
+		aeadKey = aeadKey[:32]
+	}
+	aead, err := crypto.NewAEAD(aeadKey)
+	if err != nil {
+		logext.Errorf(ctx, "[buildOIDCHandler] AEAD init failed,err:%s", err.Error())
+		return nil
+	}
+
+	return consoleoidc.NewHandler(oidcSvc, signer, aead, cfg.ConsoleBaseURL)
 }

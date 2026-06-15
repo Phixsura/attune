@@ -12,6 +12,7 @@ package console
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -32,6 +33,7 @@ import (
 	consolellmconfig "github.com/Phixsura/attune/internal/handlers/console/llmconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
+	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
@@ -73,6 +75,7 @@ var (
 	NewTagHandler                = consoletag.NewHandler
 	NewTagAssignmentHandler      = consoletagassignment.NewHandler
 	NewWorkflowHandler           = consoleworkflow.NewHandler
+	NewOIDCHandler               = consoleoidc.NewHandler
 	BootstrapAdmin               = auth.BootstrapAdmin
 )
 
@@ -143,6 +146,7 @@ type Router struct {
 	tags               *consoletag.Handler
 	tagAssignments     *consoletagassignment.Handler
 	workflow           *consoleworkflow.Handler
+	oidc               *consoleoidc.Handler
 	admins             adminReader
 }
 
@@ -171,6 +175,7 @@ func NewRouter(
 	tags *consoletag.Handler,
 	tagAssignments *consoletagassignment.Handler,
 	workflow *consoleworkflow.Handler,
+	oidc *consoleoidc.Handler,
 	admins adminReader,
 ) *Router {
 	return ptrext.Of(Router{
@@ -194,6 +199,7 @@ func NewRouter(
 		tags:               tags,
 		tagAssignments:     tagAssignments,
 		workflow:           workflow,
+		oidc:               oidc,
 		admins:             admins,
 	})
 }
@@ -214,6 +220,12 @@ func (r *Router) Mount() chi.Router {
 			return struct{}{}, nil
 		}),
 	))
+
+	// OIDC SSO endpoints (public, no session required)
+	r.mountOIDC(mux)
+
+	// /auth/providers returns available auth methods (public)
+	mux.Get("/auth/providers", r.authProviders)
 
 	mux.Group(func(m chi.Router) {
 		m.Use(r.signer.RequireSession)
@@ -1209,4 +1221,47 @@ func (r *Router) mountWorkflow(m chi.Router) {
 			}),
 		))
 	})
+}
+
+func (r *Router) mountOIDC(mux chi.Router) {
+	if r.oidc == nil {
+		return
+	}
+	mux.Route("/auth/oidc", func(o chi.Router) {
+		o.Get("/start", r.oidc.Start)
+		o.Get("/callback", r.oidc.Callback)
+		o.Get("/health", r.oidc.Health)
+	})
+}
+
+// authProviders returns available authentication methods for the login UI.
+func (r *Router) authProviders(w http.ResponseWriter, req *http.Request) {
+	type provider struct {
+		Type string `json:"type"`
+		Name string `json:"name,omitempty"`
+	}
+	type response struct {
+		Providers []provider `json:"providers"`
+		OIDCOnly  bool       `json:"oidc_only,omitempty"`
+	}
+
+	resp := response{Providers: []provider{}}
+
+	// Admin login is always available unless oidc_only is set
+	oidcOnly := false
+	if r.oidc != nil {
+		oidcOnly = r.oidc.OIDCOnly()
+		resp.Providers = append(resp.Providers, provider{
+			Type: "oidc",
+			Name: r.oidc.ProviderName(),
+		})
+	}
+
+	if !oidcOnly {
+		resp.Providers = append(resp.Providers, provider{Type: "password"})
+	}
+	resp.OIDCOnly = oidcOnly
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }

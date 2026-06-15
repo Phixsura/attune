@@ -55,6 +55,7 @@ var outParamMethods = map[string]struct{}{
 	"Unmarshal":   {},
 	"Decode":      {},
 	"Scan":        {},
+	"Claims":      {}, // go-oidc idToken.Claims(&dst)
 	"Scanln":      {},
 	"Sscan":       {},
 	"Sscanf":      {},

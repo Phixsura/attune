@@ -29,6 +29,32 @@ console:
     email: "admin@example.com"
     password: "replace-this-after-first-login"
 
+# OIDC SSO (optional). Enables enterprise single sign-on via OpenID Connect.
+# oidc:
+#   enabled: true
+#   issuer_url: "https://idp.example.com"  # OIDC discovery endpoint (must support .well-known/openid-configuration)
+#   client_id: "attune-console"
+#   client_secret: "your-client-secret"
+#   redirect_uri: "https://attune.example.com/fb/v1/console/auth/oidc/callback"
+#   scopes:
+#     - openid
+#     - profile
+#     - email
+#     - groups
+#   provider_name: "Corporate SSO"         # Displayed on login button
+#   # oidc_only: true                       # Set true to hide local admin login
+#   # allowed_groups:                       # Restrict access to these groups
+#   #   - attune-users
+#   # role_mapping:                         # Map IdP groups to attune roles (first match wins)
+#   #   - role: admin
+#   #     groups: [attune-admins]
+#   #   - role: member
+#   #     groups: [attune-users]
+#   # user_claim: email                     # Claim to use as user identifier (default: email)
+#   # groups_claim: groups                  # Claim containing group membership (default: groups)
+#   # skip_issuer_check: false              # For IdPs with non-standard issuer
+#   # insecure_skip_verify: false           # Skip TLS verification (dev only!)
+
 secrets:
   # Paste the JSON printed by `attune secrets generate-keyset`.
   # All replicas must run with the same keyset. Tink ciphertexts carry key ids,

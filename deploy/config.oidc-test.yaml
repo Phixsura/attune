@@ -1,0 +1,75 @@
+# OIDC e2e test config — use with docker-compose.oidc-test.yml.
+#
+# Usage:
+#   cd deploy
+#   cp config.oidc-test.yaml config.yaml
+#   docker compose -f docker-compose.yml -f docker-compose.oidc-test.yml up -d
+
+port: 8090
+
+database:
+  url: "postgres://attune:attune_dev_password_2026@postgres:5432/attune?sslmode=disable"
+
+migrations:
+  confirm_lark_delete: false
+
+enricher:
+  interval: "30s"
+  batch: 10
+
+console:
+  base_url: "http://localhost:8090"
+  session_key: "test-session-key-at-least-32-chars-long"
+  bootstrap_admin:
+    email: "bootstrap@example.com"
+    password: "bootstrap-password-12345"
+
+# OIDC SSO configuration — connects to local dex
+oidc:
+  enabled: true
+  issuer_url: "http://localhost:5556/dex"  # Use localhost (attune has extra_hosts mapping)
+  client_id: "attune-console"
+  client_secret: "attune-test-secret"
+  redirect_uri: "http://localhost:8090/fb/v1/console/auth/oidc/callback"
+  insecure_skip_verify: true  # Allow HTTP issuer for local testing
+  scopes:
+    - openid
+    - profile
+    - email
+  provider_name: "Dex SSO"
+  # oidc_only: false  # Set true to hide local login
+
+  # Note: dex staticPasswords doesn't provide groups claim.
+  # Without groups, all users get "member" role (default).
+  # For groups testing, use LDAP/SAML connector in production.
+  # allowed_groups: []
+  # role_mapping: []
+
+secrets:
+  tink_keyset: |
+    {
+      "primaryKeyId": 123456789,
+      "key": [
+        {
+          "keyData": {
+            "typeUrl": "type.googleapis.com/google.crypto.tink.AesGcmKey",
+            "value": "GhD+qFz9EgWTCH5yIy1z6hxj",
+            "keyMaterialType": "SYMMETRIC"
+          },
+          "status": "ENABLED",
+          "keyId": 123456789,
+          "outputPrefixType": "TINK"
+        }
+      ]
+    }
+
+observability:
+  service_version: "oidc-test"
+  environment: "test"
+
+rate_limit:
+  per_minute: 120
+  burst: 500
+  disabled: false
+
+custom_webhooks: []

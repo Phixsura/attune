@@ -458,6 +458,49 @@ var EmbeddingCacheHits = prometheus.NewCounterVec(
 	[]string{"tenant", "result"},
 )
 
+// ---------- OIDC SSO Metrics (#40) ----------
+
+// OIDCLoginTotal counts OIDC login attempts by outcome.
+// result ∈ {success, state_invalid, state_expired, state_mismatch,
+//
+//	idp_error, token_exchange_failed, no_id_token, id_token_invalid,
+//	nonce_mismatch, claims_invalid, group_denied, user_sync_failed,
+//	session_failed}.
+var OIDCLoginTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_oidc_login_total",
+		Help: "OIDC login attempts by outcome.",
+	},
+	[]string{"result"},
+)
+
+// OIDCLoginDuration tracks end-to-end OIDC login latency from callback to session.
+var OIDCLoginDuration = prometheus.NewHistogram(
+	prometheus.HistogramOpts{
+		Name:    "attune_oidc_login_duration_seconds",
+		Help:    "OIDC login flow latency from callback to session creation.",
+		Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10},
+	},
+)
+
+// OIDCTokenExchangeDuration tracks IdP token exchange latency.
+var OIDCTokenExchangeDuration = prometheus.NewHistogram(
+	prometheus.HistogramOpts{
+		Name:    "attune_oidc_token_exchange_duration_seconds",
+		Help:    "OIDC token exchange (code → tokens) latency.",
+		Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5},
+	},
+)
+
+// OIDCRoleMappingTotal tracks role assignment distribution.
+var OIDCRoleMappingTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_oidc_role_mapping_total",
+		Help: "OIDC users by assigned role.",
+	},
+	[]string{"role"},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -516,6 +559,10 @@ var allMetrics = []prometheus.Collector{
 	SearchQueryDuration,
 	SearchResultsCount,
 	EmbeddingCacheHits,
+	OIDCLoginTotal,
+	OIDCLoginDuration,
+	OIDCTokenExchangeDuration,
+	OIDCRoleMappingTotal,
 }
 
 func init() {

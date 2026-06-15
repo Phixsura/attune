@@ -1,0 +1,38 @@
+# OIDC e2e testing overlay — adds dex IdP + local build.
+#
+# Usage:
+#   cd deploy
+#   docker compose -f docker-compose.yml -f docker-compose.oidc-test.yml up -d --build
+#
+# Test users (password: "password" for all):
+#   admin@example.com  — logs in via OIDC, gets member role (no groups)
+#   user@example.com   — logs in via OIDC, gets member role
+#
+# Login flow:
+#   1. Open http://localhost:8090/console/login
+#   2. Click "Sign in with Dex SSO"
+#   3. Login with one of the test users
+#   4. Observe session created and redirect to /console/
+
+services:
+  # Override postgres to use pgvector image for e2e testing
+  postgres:
+    image: pgvector/pgvector:pg17
+
+  dex:
+    image: ghcr.io/dexidp/dex:v2.40.0
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./dex-config.yaml:/etc/dex/config.yaml:ro
+    restart: unless-stopped
+
+  attune:
+    # Use local OIDC build (rebuild with: docker build -t attune:oidc-test .)
+    image: attune:oidc-test
+    depends_on:
+      - dex
+    # Allow attune to reach localhost:5556 (dex token endpoint from discovery)
+    extra_hosts:
+      - "localhost:host-gateway"
