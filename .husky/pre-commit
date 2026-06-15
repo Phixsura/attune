@@ -103,6 +103,13 @@ if [ -n "$go_files" ] && command -v golangci-lint >/dev/null 2>&1; then
   golangci-lint run || fail=1
 fi
 
+# ── ⑥b lizard — function complexity (CCN ≤15, NLOC ≤100) ─────────────────────
+# Skipped quietly when lizard is absent; `pip install lizard` to enable locally.
+if [ -n "$go_files" ] && command -v lizard >/dev/null 2>&1; then
+  say "lizard (CCN ≤15, NLOC ≤100)"
+  lizard . -l go -C 15 -T nloc=100 --warnings_only || fail=1
+fi
+
 # ── ⑦ console biome — staged console/src only, guarded on installed deps ──────
 con=$(git diff --cached --name-only --diff-filter=ACM -- 'console/src/**' \
       | grep -E '\.(ts|tsx|js|jsx|json)$' || true)

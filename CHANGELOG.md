@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **OIDC SSO for Console (#40).** Enterprise single sign-on via standard OpenID
+  Connect. Features: PKCE (S256) + nonce for security, group-based role mapping
+  (admin/member), AES-256-GCM encrypted state cookies, configurable allowed
+  groups, optional `oidc_only` mode to hide local login. New endpoints:
+  `/auth/oidc/start`, `/auth/oidc/callback`, `/auth/providers`. Console login
+  UI shows SSO button when OIDC is configured. Adds `oidc_users` table for
+  OIDC user persistence with group sync on each login.
+
 - **HDBSCAN clustering for digest themes (#27).** Implemented pure-Go HDBSCAN
   algorithm (`internal/pkg/hdbscan/`) for automatic theme discovery. When
   embeddings are available, digest aggregator clusters feedback by semantic

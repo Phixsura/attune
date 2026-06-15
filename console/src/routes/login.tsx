@@ -1,4 +1,6 @@
+import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { Building2, Loader2 } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -7,6 +9,16 @@ import { Label } from '@/components/ui/label'
 import { type ApiError, api } from '@/lib/api-client'
 import { consolePath, routePathFromConsoleRedirect } from '@/lib/console-path'
 import type { LoginRequest, LoginResponse } from '@/proto/attune/v1/session'
+
+interface AuthProvider {
+  type: string
+  name?: string
+}
+
+interface AuthProvidersResponse {
+  providers: AuthProvider[]
+  oidc_only?: boolean
+}
 
 // Login is local-admin email + password (#66 replaces the external
 // OAuth button). The form POSTs JSON to /fb/v1/console/install/login; on
@@ -42,6 +54,29 @@ function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [requestId, setRequestId] = useState<string | undefined>(undefined)
   const [submitting, setSubmitting] = useState(false)
+  const [oidcPending, setOidcPending] = useState(false)
+
+  const { data: providers } = useQuery({
+    queryKey: ['auth-providers'],
+    queryFn: () =>
+      fetch('/fb/v1/console/auth/providers').then(
+        (r) => r.json() as Promise<AuthProvidersResponse>,
+      ),
+    staleTime: 60_000,
+  })
+
+  const oidcProvider = providers?.providers?.find((p) => p.type === 'oidc')
+  const hasOIDC = !!oidcProvider
+  const oidcOnly = providers?.oidc_only ?? false
+  const providerName = oidcProvider?.name || 'SSO'
+
+  // Only allow relative paths to prevent open redirect
+  const safeRedirect = redirect?.startsWith('/') && !redirect.startsWith('//') ? redirect : ''
+
+  const handleOIDCLogin = () => {
+    setOidcPending(true)
+    window.location.href = `/fb/v1/console/auth/oidc/start?return_url=${encodeURIComponent(safeRedirect)}`
+  }
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -52,7 +87,7 @@ function LoginPage() {
       const body: LoginRequest = {
         email,
         password,
-        redirectUri: redirect ?? consolePath('/'),
+        redirectUri: safeRedirect || consolePath('/'),
       }
       const data = await api<LoginResponse>('/fb/v1/console/install/login', {
         method: 'POST',
@@ -81,53 +116,102 @@ function LoginPage() {
 
   return (
     <main className="grid min-h-screen place-items-center bg-muted/30">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-sm rounded-xl border border-border bg-card p-8 shadow-sm"
-      >
+      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 shadow-sm">
         <h1 className="text-xl font-semibold tracking-tight">{t('app.title')}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{t('auth.login_hint_admin')}</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {oidcOnly ? t('auth.login_hint_sso', { name: providerName }) : t('auth.login_hint_admin')}
+        </p>
 
-        <div className="mt-6 space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">{t('auth.email_label')}</Label>
-            <Input
-              id="email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={submitting}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">{t('auth.password_label')}</Label>
-            <Input
-              id="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={submitting}
-            />
-          </div>
-        </div>
+        {/* Local login form (hidden if oidc_only) */}
+        {!oidcOnly && (
+          <form onSubmit={onSubmit} className="mt-6">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">{t('auth.email_label')}</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={submitting || oidcPending}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">{t('auth.password_label')}</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={submitting || oidcPending}
+                />
+              </div>
+            </div>
 
-        {error && (
-          <p className="mt-4 text-sm text-destructive">
-            {error}
-            {requestId && (
-              <span className="ml-2 font-mono text-xs text-muted-foreground">({requestId})</span>
+            {error && (
+              <p className="mt-4 text-sm text-destructive">
+                {error}
+                {requestId && (
+                  <span className="ml-2 font-mono text-xs text-muted-foreground">
+                    ({requestId})
+                  </span>
+                )}
+              </p>
             )}
-          </p>
+
+            <Button
+              type="submit"
+              size="lg"
+              className="mt-6 w-full"
+              disabled={submitting || oidcPending}
+            >
+              {submitting ? t('auth.logging_in') : t('auth.login_submit')}
+            </Button>
+          </form>
         )}
 
-        <Button type="submit" size="lg" className="mt-6 w-full" disabled={submitting}>
-          {submitting ? t('auth.logging_in') : t('auth.login_submit')}
-        </Button>
-      </form>
+        {/* Divider between local login and SSO */}
+        {hasOIDC && !oidcOnly && (
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="bg-card px-2 text-muted-foreground">
+                {t('auth.or_continue_with')}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* OIDC SSO button */}
+        {hasOIDC && (
+          <Button
+            variant={oidcOnly ? 'default' : 'outline'}
+            size="lg"
+            className={oidcOnly ? 'mt-6 w-full' : 'w-full'}
+            onClick={handleOIDCLogin}
+            disabled={oidcPending || submitting}
+            aria-label={t('auth.sso_button_aria', { provider: providerName })}
+          >
+            {oidcPending ? (
+              <>
+                <Loader2 className="mr-2 size-4 animate-spin" />
+                {t('auth.redirecting')}
+              </>
+            ) : (
+              <>
+                <Building2 className="mr-2 size-4" />
+                {t('auth.sign_in_with_sso', { name: providerName })}
+              </>
+            )}
+          </Button>
+        )}
+      </div>
     </main>
   )
 }

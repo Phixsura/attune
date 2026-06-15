@@ -59,6 +59,7 @@ func TestRouterInventory(t *testing.T) {
 
 	expected := []string{
 		"POST /install/login",
+		"GET /auth/providers",
 		"GET /me",
 		"POST /logout",
 		"POST /me/change-password",

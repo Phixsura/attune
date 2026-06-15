@@ -1,0 +1,3 @@
+# Exclude test config files with intentional test-only credentials
+deploy/config.oidc-test.yaml
+deploy/docker-compose.oidc-test.yml

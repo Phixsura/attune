@@ -43,6 +43,7 @@ const (
 type Payload struct {
 	TenantID  string `json:"t"`
 	UserID    string `json:"u"`
+	UserType  string `json:"y,omitempty"` // "admin" | "oidc" (empty = admin for backwards compat)
 	ExpiresAt int64  `json:"e"`
 }
 
@@ -51,6 +52,7 @@ type Payload struct {
 type AuthCtx struct {
 	TenantID string
 	UserID   string
+	UserType string // "admin" | "oidc" (empty = admin)
 	ExpAt    time.Time
 }
 
@@ -132,11 +134,17 @@ type cookieSink interface {
 	SetCookie(*http.Cookie)
 }
 
-// IssueSessionCookie writes the session cookie after a successful login.
+// IssueSessionCookie writes the session cookie after a successful login (admin user type).
 func (s *Signer) IssueSessionCookie(sink cookieSink, tenantID, userID string) error {
+	return s.IssueSessionCookieWithType(sink, tenantID, userID, "")
+}
+
+// IssueSessionCookieWithType writes the session cookie with explicit user type.
+func (s *Signer) IssueSessionCookieWithType(sink cookieSink, tenantID, userID, userType string) error {
 	val, err := s.SignSession(Payload{
 		TenantID:  tenantID,
 		UserID:    userID,
+		UserType:  userType,
 		ExpiresAt: time.Now().Add(SessionTTL).Unix(),
 	})
 	if err != nil {
@@ -199,6 +207,7 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 		newCtx := context.WithValue(r.Context(), ctxKey{}, ptrext.Of(AuthCtx{
 			TenantID: p.TenantID,
 			UserID:   p.UserID,
+			UserType: p.UserType,
 			ExpAt:    time.Unix(p.ExpiresAt, 0),
 		}))
 		next.ServeHTTP(w, r.WithContext(newCtx))

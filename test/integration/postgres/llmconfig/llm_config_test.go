@@ -376,6 +376,7 @@ func newConsoleRouter(
 		nil, // tags
 		nil, // tagAssignments
 		nil, // workflow
+		nil, // oidc
 		fakeAdminReader{},
 	)
 	return router.Mount(), signer

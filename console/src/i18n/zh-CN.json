@@ -33,7 +33,24 @@
     "locked_out": "因连续登录失败，账户已锁定 15 分钟。",
     "login_failed": "登录失败，请稍后重试",
     "login_hint_admin": "用 config.yaml 里 bootstrap_admin 创建的管理员账号登录。",
+    "login_hint_sso": "使用 {{name}} 单点登录。",
     "cross_site_rejected": "跨站请求被拒绝。请检查反向代理是否保留了 Origin / Referer 头。",
+    "or_continue_with": "或",
+    "sign_in_with_sso": "使用 {{name}} 登录",
+    "sso_button_aria": "使用 {{provider}} 单点登录",
+    "redirecting": "跳转中…",
+    "sso_error": {
+      "state_expired": "登录会话已过期，请重试。",
+      "state_mismatch": "登录状态验证失败，请重试。",
+      "token_failed": "身份验证失败，请重试。",
+      "not_in_group": "您没有访问此应用的权限。",
+      "user_cancelled": "登录已取消。",
+      "auth_failed": "身份验证失败，请重试。",
+      "internal_error": "系统错误，请稍后重试。"
+    },
+    "try_again": "重试",
+    "request_id": "请求 ID",
+    "trace_id": "追踪 ID",
     "role": {
       "admin": "管理员",
       "member": "成员"
