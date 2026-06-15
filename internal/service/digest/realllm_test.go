@@ -148,7 +148,7 @@ func TestRealLLM_NaiveThemes(t *testing.T) {
 	}
 
 	namer := newNaiveNamer(modelClient{inner: backend, model: model})
-	themes, err := namer.Name(context.Background(), "tenant-realllm", "", rows)
+	themes, err := namer.Name(context.Background(), "tenant-realllm", "", rows, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("real LLM Name failed: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestRealLLM_ClusterThemes(t *testing.T) {
 	embeddings := generateClusterEmbeddings()
 
 	namer := newClusterNamer(fakeEmbeddingReaderForRealLLM{embeddings: embeddings}, llm, naive)
-	themes, err := namer.Name(context.Background(), "tenant-cluster-realllm", "", nil)
+	themes, err := namer.Name(context.Background(), "tenant-cluster-realllm", "", nil, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("cluster LLM Name failed: %v", err)
 	}

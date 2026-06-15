@@ -4,6 +4,7 @@ package hdbscan
 
 import (
 	"math"
+	"math/rand"
 	"testing"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -238,6 +239,104 @@ func TestClusterer_RealisticEmbeddings(t *testing.T) {
 
 	if result.ClusterCount < 2 {
 		t.Errorf("expected at least 2 clusters for realistic embeddings, got %d", result.ClusterCount)
+	}
+}
+
+func TestClusterer_AllIdenticalPoints(t *testing.T) {
+	t.Parallel()
+
+	// All embeddings at exact same location - should handle gracefully
+	data := make([][]float32, 10)
+	for i := range data {
+		data[i] = []float32{1.0, 0.0, 0.0}
+	}
+
+	c := ptrext.Of(Clusterer{MinClusterSize: 3})
+	result := c.Cluster(data)
+
+	// All identical points: MST has zero edges, should produce 1 cluster or all noise
+	t.Logf("Labels: %v, ClusterCount: %d", result.Labels, result.ClusterCount)
+	// Should not panic
+}
+
+func TestClusterer_TwoPoints(t *testing.T) {
+	t.Parallel()
+
+	data := [][]float32{{1, 0, 0}, {0, 1, 0}}
+	c := ptrext.Of(Clusterer{MinClusterSize: 2})
+	result := c.Cluster(data)
+
+	// Two points with MinClusterSize=2: may form 1 cluster or all noise
+	t.Logf("Labels: %v, ClusterCount: %d", result.Labels, result.ClusterCount)
+}
+
+func TestClusterer_MinClusterSizeGreaterThanN(t *testing.T) {
+	t.Parallel()
+
+	data := [][]float32{{1, 0}, {0, 1}, {0.5, 0.5}}
+	c := ptrext.Of(Clusterer{MinClusterSize: 10})
+	result := c.Cluster(data)
+
+	// All should be noise since MinClusterSize > n
+	for i, label := range result.Labels {
+		if label != -1 {
+			t.Errorf("point %d: expected noise (-1), got %d", i, label)
+		}
+	}
+}
+
+func TestClusterer_HighDimensions1536(t *testing.T) {
+	t.Parallel()
+
+	// OpenAI ada-002 embedding dimension
+	dim := 1536
+	pointsPerCluster := 10
+	numClusters := 3
+
+	data := make([][]float32, numClusters*pointsPerCluster)
+	rng := rand.New(rand.NewSource(42))
+
+	for c := 0; c < numClusters; c++ {
+		for p := 0; p < pointsPerCluster; p++ {
+			idx := c*pointsPerCluster + p
+			data[idx] = make([]float32, dim)
+			data[idx][c*400] = 1.0 // distinct direction per cluster
+			for d := 0; d < dim; d++ {
+				data[idx][d] += float32(rng.NormFloat64() * 0.05)
+			}
+		}
+	}
+
+	c := ptrext.Of(Clusterer{MinClusterSize: 5, ReduceDims: 20})
+	result := c.Cluster(data)
+
+	t.Logf("1536-dim: %d clusters found", result.ClusterCount)
+	if result.ClusterCount < 2 {
+		t.Errorf("expected at least 2 clusters for 1536-dim data with PCA, got %d", result.ClusterCount)
+	}
+}
+
+func TestCosineDistance_ZeroVector(t *testing.T) {
+	t.Parallel()
+
+	zero := []float32{0, 0, 0}
+	unit := []float32{1, 0, 0}
+
+	got := cosineDistance(zero, unit)
+	if got != 1.0 {
+		t.Errorf("expected 1.0 for zero vector, got %f", got)
+	}
+}
+
+func TestCosineDistance_MismatchedLengths(t *testing.T) {
+	t.Parallel()
+
+	a := []float32{1, 0}
+	b := []float32{1, 0, 0}
+
+	got := cosineDistance(a, b)
+	if got != 1.0 {
+		t.Errorf("expected 1.0 for mismatched lengths, got %f", got)
 	}
 }
 

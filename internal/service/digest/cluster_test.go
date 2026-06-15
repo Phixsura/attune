@@ -81,7 +81,7 @@ func TestClusterNamer_HappyPath(t *testing.T) {
 		fakeNamer{}, // fallback naive namer
 	)
 
-	themes, err := namer.Name(context.Background(), "tenant-1", "", nil)
+	themes, err := namer.Name(context.Background(), "tenant-1", "", nil, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestClusterNamer_FallsBackToNaive(t *testing.T) {
 		naive,
 	)
 
-	themes, err := namer.Name(context.Background(), "tenant-1", "", nil)
+	themes, err := namer.Name(context.Background(), "tenant-1", "", nil, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestClusterNamer_ZeroClusters(t *testing.T) {
 		naive,
 	)
 
-	_, err := namer.Name(context.Background(), "tenant-1", "", nil)
+	_, err := namer.Name(context.Background(), "tenant-1", "", nil, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestClusterNamer_LowCoverageFallback(t *testing.T) {
 		naive,
 	)
 
-	themes, err := namer.Name(context.Background(), "tenant-1", "", rows)
+	themes, err := namer.Name(context.Background(), "tenant-1", "", rows, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestClusterNamer_100Items(t *testing.T) {
 		fakeNamer{},
 	)
 
-	themes, err := namer.Name(context.Background(), "tenant-1", "", nil)
+	themes, err := namer.Name(context.Background(), "tenant-1", "", nil, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -254,7 +254,7 @@ func BenchmarkClusterNamer_vs_Naive(b *testing.B) {
 		)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_, _ = namer.Name(context.Background(), "tenant", "", nil)
+			_, _ = namer.Name(context.Background(), "tenant", "", nil, time.Time{}, time.Time{})
 		}
 	})
 
@@ -262,7 +262,7 @@ func BenchmarkClusterNamer_vs_Naive(b *testing.B) {
 		namer := fakeNamer{themes: []Theme{{Title: "A", Count: 50}, {Title: "B", Count: 50}}}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_, _ = namer.Name(context.Background(), "tenant", "", rows)
+			_, _ = namer.Name(context.Background(), "tenant", "", rows, time.Time{}, time.Time{})
 		}
 	})
 }

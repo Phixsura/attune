@@ -301,6 +301,26 @@ var DigestDuration = prometheus.NewHistogramVec(
 	[]string{"tenant"},
 )
 
+// DigestClusteringFallbackTotal counts when HDBSCAN clustering falls back to naive LLM.
+// reason ∈ {fetch_error, insufficient_embeddings, low_coverage, zero_clusters}.
+var DigestClusteringFallbackTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_digest_clustering_fallback_total",
+		Help: "Times digest clustering fell back to naive LLM path.",
+	},
+	[]string{"tenant", "reason"},
+)
+
+// DigestClusterCount tracks number of clusters found per digest run.
+var DigestClusterCount = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_digest_cluster_count",
+		Help:    "Number of HDBSCAN clusters found per digest run.",
+		Buckets: []float64{0, 1, 2, 3, 5, 7, 10, 15},
+	},
+	[]string{"tenant"},
+)
+
 // WorkflowTransitionsTotal counts workflow state transitions by outcome.
 // result ∈ {success, invalid, error}.
 var WorkflowTransitionsTotal = prometheus.NewCounterVec(
@@ -480,6 +500,8 @@ var allMetrics = []prometheus.Collector{
 	ReplyDraftQueueDepth,
 	DigestRunsTotal,
 	DigestDuration,
+	DigestClusteringFallbackTotal,
+	DigestClusterCount,
 	WorkflowTransitionsTotal,
 	WorkflowBatchSize,
 	BatchJobsClaimed,

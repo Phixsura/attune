@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -673,6 +674,7 @@ type EmbeddedFeedback struct {
 }
 
 // parseVectorText parses pgvector text format "[1.0,2.0,3.0]" to []float32.
+// Returns error if any element is NaN or Inf.
 func parseVectorText(s string) ([]float32, error) {
 	s = strings.TrimPrefix(s, "[")
 	s = strings.TrimSuffix(s, "]")
@@ -685,6 +687,9 @@ func parseVectorText(s string) ([]float32, error) {
 		f, err := strconv.ParseFloat(strings.TrimSpace(p), 32)
 		if err != nil {
 			return nil, fmt.Errorf("parse vector element %d: %w", i, err)
+		}
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil, fmt.Errorf("vector element %d: invalid value (NaN or Inf)", i)
 		}
 		result[i] = float32(f)
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/infra/llmclient"
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/hdbscan"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -59,26 +60,26 @@ func NewClusterAggregator(
 }
 
 // Name implements themeNamer using HDBSCAN clustering.
+// The from/to window is passed from the aggregator to ensure tenant-timezone consistency.
 func (n *clusterNamer) Name(
-	ctx context.Context, tenantID, promptOverride string, rows []feedback.DigestFeedbackRow,
+	ctx context.Context, tenantID, promptOverride string, rows []feedback.DigestFeedbackRow, from, to time.Time,
 ) ([]Theme, error) {
 	const where = "service.digest.clusterNamer.Name"
 
 	// Fetch embeddings for the window (we ignore rows param, fetch fresh with embeddings)
-	from := time.Now().AddDate(0, 0, -1).Truncate(24 * time.Hour)
-	to := from.Add(24 * time.Hour)
-
 	embedded, err := n.embeddings.EmbeddingsInWindow(ctx, tenantID, from, to, clusterInputLimit)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] fetch embeddings failed, falling back to naive,tenant_id:%s,err:%s",
 			where, tenantID, err.Error())
-		return n.naive.Name(ctx, tenantID, promptOverride, rows)
+		metrics.DigestClusteringFallbackTotal.WithLabelValues(tenantID, "fetch_error").Inc()
+		return n.naive.Name(ctx, tenantID, promptOverride, rows, from, to)
 	}
 
 	if len(embedded) < clusterMinSize*2 {
 		logext.Infof(ctx, "[%s] insufficient embeddings (%d), using naive path,tenant_id:%s",
 			where, len(embedded), tenantID)
-		return n.naive.Name(ctx, tenantID, promptOverride, rows)
+		metrics.DigestClusteringFallbackTotal.WithLabelValues(tenantID, "insufficient_embeddings").Inc()
+		return n.naive.Name(ctx, tenantID, promptOverride, rows, from, to)
 	}
 
 	// Check embedding coverage: if < 80% of feedback has embeddings, fall back to naive
@@ -87,7 +88,8 @@ func (n *clusterNamer) Name(
 		if coverage < 0.8 {
 			logext.Infof(ctx, "[%s] low embedding coverage (%.0f%%), using naive path,tenant_id:%s",
 				where, coverage*100, tenantID)
-			return n.naive.Name(ctx, tenantID, promptOverride, rows)
+			metrics.DigestClusteringFallbackTotal.WithLabelValues(tenantID, "low_coverage").Inc()
+			return n.naive.Name(ctx, tenantID, promptOverride, rows, from, to)
 		}
 	}
 
@@ -107,8 +109,12 @@ func (n *clusterNamer) Name(
 	if result.ClusterCount == 0 {
 		logext.Infof(ctx, "[%s] HDBSCAN found 0 clusters, using naive path,tenant_id:%s",
 			where, tenantID)
-		return n.naive.Name(ctx, tenantID, promptOverride, rows)
+		metrics.DigestClusteringFallbackTotal.WithLabelValues(tenantID, "zero_clusters").Inc()
+		return n.naive.Name(ctx, tenantID, promptOverride, rows, from, to)
 	}
+
+	// Record cluster count metric
+	metrics.DigestClusterCount.WithLabelValues(tenantID).Observe(float64(result.ClusterCount))
 
 	// Group feedback by cluster
 	clusterGroups := make(map[int][]embedding.EmbeddedFeedback)

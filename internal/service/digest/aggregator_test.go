@@ -59,7 +59,7 @@ type fakeNamer struct {
 	called *bool
 }
 
-func (f fakeNamer) Name(context.Context, string, string, []feedback.DigestFeedbackRow) ([]Theme, error) {
+func (f fakeNamer) Name(_ context.Context, _, _ string, _ []feedback.DigestFeedbackRow, _, _ time.Time) ([]Theme, error) {
 	if f.called != nil {
 		*f.called = true
 	}
@@ -182,7 +182,7 @@ func (f fakeLLM) Close() error { return nil }
 func TestNaiveNamerEndToEnd(t *testing.T) {
 	rows := []feedback.DigestFeedbackRow{{ID: 1, Title: "slow"}, {ID: 2, Title: "crash"}}
 	llm := fakeLLM{text: `{"themes":[{"title":"Performance","member_ids":[1,2]}]}`}
-	themes, err := newNaiveNamer(llm).Name(context.Background(), "t", "", rows)
+	themes, err := newNaiveNamer(llm).Name(context.Background(), "t", "", rows, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

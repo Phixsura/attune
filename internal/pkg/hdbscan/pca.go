@@ -62,6 +62,8 @@ func (p *PCA) Reduce(data [][]float32) [][]float32 {
 	// For small k, this is faster than full SVD
 	components := make([][]float64, p.Components)
 
+	const convergenceThreshold = 0.9999 // early stop when dot product exceeds this
+
 	for k := 0; k < p.Components; k++ {
 		// Initialize random-ish vector
 		v := make([]float64, d)
@@ -97,6 +99,12 @@ func (p *PCA) Reduce(data [][]float32) [][]float32 {
 			}
 
 			normalize(newV)
+
+			// Early convergence check: if direction barely changed, stop
+			if dotProduct(v, newV) > convergenceThreshold {
+				v = newV
+				break
+			}
 			v = newV
 		}
 

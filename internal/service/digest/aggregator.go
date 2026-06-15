@@ -68,8 +68,9 @@ type feedbackReader interface {
 
 // themeNamer turns a batch of enriched rows into named themes (the naive,
 // clustering-off path). Implemented by naiveNamer over an LLM client.
+// The from/to window is passed to ensure tenant-timezone consistency.
 type themeNamer interface {
-	Name(ctx context.Context, tenantID, promptOverride string, rows []feedback.DigestFeedbackRow) ([]Theme, error)
+	Name(ctx context.Context, tenantID, promptOverride string, rows []feedback.DigestFeedbackRow, from, to time.Time) ([]Theme, error)
 }
 
 // Aggregator turns a tenant's yesterday window into a digest Result.
@@ -156,7 +157,7 @@ func (a *Aggregator) themes(ctx context.Context, in AggInput, from, to time.Time
 	if err != nil {
 		return nil, err
 	}
-	return a.namer.Name(ctx, in.TenantID, in.ThemePrompt, rows)
+	return a.namer.Name(ctx, in.TenantID, in.ThemePrompt, rows, from, to)
 }
 
 func (a *Aggregator) clusterThemes(ctx context.Context, tenantID string, from, to time.Time) ([]Theme, error) {
