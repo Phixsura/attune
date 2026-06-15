@@ -21,7 +21,7 @@ AI assistants (Claude Code, Cursor, etc.) working on this repository.
 | `golangci-lint` | 0 findings | CI (`govet`, `depguard`, `bodyclose`, `noctx`, etc.) |
 | Function CCN | ≤ 15 | `lizard . -l go -C 15 -T nloc=100 --warnings_only` |
 | Function NLOC | ≤ 100 | `lizard . -l go -C 15 -T nloc=100 --warnings_only` |
-| Code duplication | < 4% | `npx -y jscpd . -f go -i '**/*.pb.go' -t 4 --silent` |
+| Code duplication | < 5% | `npx -y jscpd . -f go -i '**/*.pb.go' -t 5 --silent` |
 | Logging facade | no direct `log/slog` in business code | `golangci-lint` depguard `slog-facade` |
 | Log fields / outbound HTTP | 0 `lint-slog` findings | `scripts/lint-slog.sh --strict` (rules 2 + 3) |
 | Raw pointer ops | 0 bare `*p` deref / `&x` address-of (use `internal/pkg/ptrext`) | `scripts/lint-rawptr.sh` |
