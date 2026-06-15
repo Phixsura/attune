@@ -1,7 +1,9 @@
 import { QueryClient } from '@tanstack/react-query'
+import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
 import type { DigestSubscription } from '@/proto/attune/v1/digest_subscription'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { server } from '@/testing/mocks/server'
+import { fireEvent, renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 import { DigestSubscriptionPage } from './digest-subscription-page'
 
 function seeded(data: DigestSubscription | null) {
@@ -47,5 +49,76 @@ describe('DigestSubscriptionPage', () => {
         true,
       )
     })
+  })
+
+  it('calls upsert on save and includes clusteringEnabled', async () => {
+    let captured: unknown = null
+    server.use(
+      http.put('/fb/v1/console/digest-subscription', async ({ request }) => {
+        captured = await request.json()
+        return HttpResponse.json({ ...sample, clusteringEnabled: true })
+      }),
+    )
+    renderWithProviders(<DigestSubscriptionPage />, { queryClient: seeded(sample) })
+    await waitFor(() => screen.getByTestId('digest-clustering-enabled'))
+    fireEvent.click(screen.getByTestId('digest-clustering-enabled'))
+    fireEvent.click(screen.getByTestId('digest-save'))
+    await waitFor(() => expect(captured).not.toBeNull())
+    expect((captured as { clusteringEnabled?: boolean }).clusteringEnabled).toBe(true)
+  })
+
+  it('calls delete mutation on delete click', async () => {
+    let deleted = false
+    server.use(
+      http.delete('/fb/v1/console/digest-subscription', () => {
+        deleted = true
+        return HttpResponse.json({})
+      }),
+    )
+    renderWithProviders(<DigestSubscriptionPage />, { queryClient: seeded(sample) })
+    await waitFor(() => screen.getByTestId('digest-delete'))
+    fireEvent.click(screen.getByTestId('digest-delete'))
+    await waitFor(() => expect(deleted).toBe(true))
+  })
+
+  it('shows loading spinner while query is pending', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderWithProviders(<DigestSubscriptionPage />, { queryClient: qc })
+    expect(screen.getByText(/加载中/)).toBeInTheDocument()
+  })
+
+  it('updates sendOnEmpty checkbox on click', async () => {
+    renderWithProviders(<DigestSubscriptionPage />, { queryClient: seeded(sample) })
+    await waitFor(() => screen.getByTestId('digest-send-on-empty'))
+    const checkbox = screen.getByTestId('digest-send-on-empty') as HTMLInputElement
+    expect(checkbox.checked).toBe(false)
+    fireEvent.click(checkbox)
+    expect(checkbox.checked).toBe(true)
+  })
+
+  it('updates enabled checkbox on click', async () => {
+    renderWithProviders(<DigestSubscriptionPage />, { queryClient: seeded(sample) })
+    await waitFor(() => screen.getByTestId('digest-enabled'))
+    const checkbox = screen.getByTestId('digest-enabled') as HTMLInputElement
+    expect(checkbox.checked).toBe(true)
+    fireEvent.click(checkbox)
+    expect(checkbox.checked).toBe(false)
+  })
+
+  it('updates llmMin input on change', async () => {
+    renderWithProviders(<DigestSubscriptionPage />, { queryClient: seeded(sample) })
+    await waitFor(() => screen.getByTestId('digest-llm-min'))
+    const input = screen.getByTestId('digest-llm-min') as HTMLInputElement
+    expect(input.value).toBe('6')
+    fireEvent.change(input, { target: { value: '10' } })
+    expect(input.value).toBe('10')
+  })
+
+  it('updates themePrompt input on change', async () => {
+    renderWithProviders(<DigestSubscriptionPage />, { queryClient: seeded(sample) })
+    await waitFor(() => screen.getByTestId('digest-theme-prompt'))
+    const input = screen.getByTestId('digest-theme-prompt') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'custom prompt' } })
+    expect(input.value).toBe('custom prompt')
   })
 })
