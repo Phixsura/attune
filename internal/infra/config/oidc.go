@@ -59,8 +59,23 @@ func (c *OIDCConfig) Validate() error {
 	if !c.Enabled {
 		return nil
 	}
+	if err := c.validateRequired(); err != nil {
+		return err
+	}
+	if err := c.validateIssuerURL(); err != nil {
+		return err
+	}
+	if err := c.validateRedirectURI(); err != nil {
+		return err
+	}
+	if err := c.validateScopes(); err != nil {
+		return err
+	}
+	c.logSecurityWarnings()
+	return nil
+}
 
-	// Required fields
+func (c *OIDCConfig) validateRequired() error {
 	if c.IssuerURL == "" {
 		return errors.New("oidc.issuer_url required when oidc.enabled")
 	}
@@ -70,31 +85,27 @@ func (c *OIDCConfig) Validate() error {
 	if c.RedirectURI == "" {
 		return errors.New("oidc.redirect_uri required")
 	}
+	return nil
+}
 
-	// URL format validation
+func (c *OIDCConfig) validateIssuerURL() error {
 	issuer, err := url.Parse(c.IssuerURL)
 	if err != nil {
 		return fmt.Errorf("oidc.issuer_url invalid: %w", err)
 	}
-
-	// HTTPS required (except localhost for dev)
-	if issuer.Scheme != "https" && !c.InsecureSkipVerify {
-		if !isLoopback(issuer.Host) {
-			return errors.New("oidc.issuer_url must use HTTPS (set insecure_skip_verify for dev)")
-		}
+	if issuer.Scheme != "https" && !c.InsecureSkipVerify && !isLoopback(issuer.Host) {
+		return errors.New("oidc.issuer_url must use HTTPS (set insecure_skip_verify for dev)")
 	}
-
-	// Block cloud metadata endpoints (SSRF protection)
 	if isCloudMetadataHost(issuer.Host) {
 		return errors.New("oidc.issuer_url cannot be a cloud metadata endpoint")
 	}
-
-	// Block private IP ranges (SSRF protection)
 	if isPrivateHost(issuer.Host) && !c.InsecureSkipVerify {
 		return errors.New("oidc.issuer_url cannot be a private IP (set insecure_skip_verify for internal IdP)")
 	}
+	return nil
+}
 
-	// RedirectURI validation
+func (c *OIDCConfig) validateRedirectURI() error {
 	redirect, err := url.Parse(c.RedirectURI)
 	if err != nil {
 		return fmt.Errorf("oidc.redirect_uri invalid: %w", err)
@@ -102,20 +113,19 @@ func (c *OIDCConfig) Validate() error {
 	if redirect.Scheme != "https" && !isLoopback(redirect.Host) {
 		return errors.New("oidc.redirect_uri must use HTTPS (except localhost)")
 	}
+	return nil
+}
 
-	// Scopes must include openid
-	hasOpenID := false
+func (c *OIDCConfig) validateScopes() error {
 	for _, s := range c.Scopes {
 		if s == "openid" {
-			hasOpenID = true
-			break
+			return nil
 		}
 	}
-	if !hasOpenID {
-		return errors.New("oidc.scopes must include 'openid'")
-	}
+	return errors.New("oidc.scopes must include 'openid'")
+}
 
-	// Security warnings (logged, not errors)
+func (c *OIDCConfig) logSecurityWarnings() {
 	ctx := context.Background()
 	if c.InsecureSkipVerify {
 		logext.Warnf(ctx, "[config] oidc.insecure_skip_verify=true — TLS verification disabled, not for production")
@@ -123,8 +133,6 @@ func (c *OIDCConfig) Validate() error {
 	if c.SkipIssuerCheck {
 		logext.Warnf(ctx, "[config] oidc.skip_issuer_check=true — issuer validation disabled")
 	}
-
-	return nil
 }
 
 // isLoopback returns true for localhost addresses (IPv4 and IPv6).
@@ -160,54 +168,59 @@ func isCloudMetadataHost(host string) bool {
 // Also blocks DNS rebinding services and internal domain suffixes.
 func isPrivateHost(host string) bool {
 	h := normalizeHost(host)
-
-	// Check DNS rebinding services (nip.io, xip.io, etc.)
 	lowerH := strings.ToLower(h)
-	dnsRebindSuffixes := []string{".nip.io", ".xip.io", ".sslip.io", ".localtest.me", ".vcap.me"}
-	for _, suffix := range dnsRebindSuffixes {
-		if strings.HasSuffix(lowerH, suffix) {
+
+	if isDNSRebindingService(lowerH) || isInternalDomain(lowerH) {
+		return true
+	}
+	return isPrivateIP(h)
+}
+
+func isDNSRebindingService(host string) bool {
+	suffixes := []string{".nip.io", ".xip.io", ".sslip.io", ".localtest.me", ".vcap.me"}
+	for _, s := range suffixes {
+		if strings.HasSuffix(host, s) {
 			return true
 		}
 	}
+	return false
+}
 
-	// Check internal domain suffixes
-	internalSuffixes := []string{".internal", ".local", ".corp", ".cluster.local", ".private", ".lan"}
-	for _, suffix := range internalSuffixes {
-		if strings.HasSuffix(lowerH, suffix) {
+func isInternalDomain(host string) bool {
+	suffixes := []string{".internal", ".local", ".corp", ".cluster.local", ".private", ".lan"}
+	for _, s := range suffixes {
+		if strings.HasSuffix(host, s) {
 			return true
 		}
 	}
+	return false
+}
 
-	// Try parsing as standard IP
-	ip := net.ParseIP(h)
-	if ip != nil {
-		if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() ||
-			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+func isPrivateIP(host string) bool {
+	if ip := net.ParseIP(host); ip != nil {
+		return isPrivateOrReservedIP(ip)
+	}
+	if ip := parseNonStandardIP(host); ip != nil {
+		return isPrivateOrReservedIP(ip)
+	}
+	return hasPrivateIPPrefix(host)
+}
+
+func isPrivateOrReservedIP(ip net.IP) bool {
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
+func hasPrivateIPPrefix(host string) bool {
+	if strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") {
+		return true
+	}
+	for i := 16; i <= 31; i++ {
+		if strings.HasPrefix(host, fmt.Sprintf("172.%d.", i)) {
 			return true
 		}
-		return false
 	}
-
-	// Try parsing non-standard IP formats (decimal, hex)
-	if nonStdIP := parseNonStandardIP(h); nonStdIP != nil {
-		if nonStdIP.IsPrivate() || nonStdIP.IsLoopback() || nonStdIP.IsLinkLocalUnicast() ||
-			nonStdIP.IsLinkLocalMulticast() || nonStdIP.IsUnspecified() {
-			return true
-		}
-		return false
-	}
-
-	// Fallback string prefix checks for hostnames that might resolve to private IPs
-	return strings.HasPrefix(h, "10.") ||
-		strings.HasPrefix(h, "172.16.") || strings.HasPrefix(h, "172.17.") ||
-		strings.HasPrefix(h, "172.18.") || strings.HasPrefix(h, "172.19.") ||
-		strings.HasPrefix(h, "172.20.") || strings.HasPrefix(h, "172.21.") ||
-		strings.HasPrefix(h, "172.22.") || strings.HasPrefix(h, "172.23.") ||
-		strings.HasPrefix(h, "172.24.") || strings.HasPrefix(h, "172.25.") ||
-		strings.HasPrefix(h, "172.26.") || strings.HasPrefix(h, "172.27.") ||
-		strings.HasPrefix(h, "172.28.") || strings.HasPrefix(h, "172.29.") ||
-		strings.HasPrefix(h, "172.30.") || strings.HasPrefix(h, "172.31.") ||
-		strings.HasPrefix(h, "192.168.")
+	return false
 }
 
 // normalizeHost extracts and normalizes the host from host:port format.
