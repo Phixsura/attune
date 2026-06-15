@@ -34,6 +34,7 @@ type Theme struct {
 	Count         int
 	ExampleIDs    []int64
 	ExampleTitles []string
+	Lifecycle     ThemeLifecycle
 }
 
 // Result is the aggregation outcome for one run.
@@ -62,12 +63,14 @@ type clusterReader interface {
 type feedbackReader interface {
 	WindowStats(ctx context.Context, tenantID string, from, to time.Time) (feedback.DigestWindowStats, error)
 	EnrichedInWindow(ctx context.Context, tenantID string, from, to time.Time, limit int) ([]feedback.DigestFeedbackRow, error)
+	DailyCounts(ctx context.Context, tenantID string, to time.Time, days int) ([]feedback.DailyCount, error)
 }
 
 // themeNamer turns a batch of enriched rows into named themes (the naive,
 // clustering-off path). Implemented by naiveNamer over an LLM client.
+// The from/to window is passed to ensure tenant-timezone consistency.
 type themeNamer interface {
-	Name(ctx context.Context, tenantID, promptOverride string, rows []feedback.DigestFeedbackRow) ([]Theme, error)
+	Name(ctx context.Context, tenantID, promptOverride string, rows []feedback.DigestFeedbackRow, from, to time.Time) ([]Theme, error)
 }
 
 // Aggregator turns a tenant's yesterday window into a digest Result.
@@ -154,7 +157,7 @@ func (a *Aggregator) themes(ctx context.Context, in AggInput, from, to time.Time
 	if err != nil {
 		return nil, err
 	}
-	return a.namer.Name(ctx, in.TenantID, in.ThemePrompt, rows)
+	return a.namer.Name(ctx, in.TenantID, in.ThemePrompt, rows, from, to)
 }
 
 func (a *Aggregator) clusterThemes(ctx context.Context, tenantID string, from, to time.Time) ([]Theme, error) {
@@ -187,4 +190,114 @@ func buildClusterTheme(c embedding.DigestCluster, examples []embedding.DigestExa
 		t.ExampleTitles = append(t.ExampleTitles, e.Title)
 	}
 	return t
+}
+
+// Enrichment holds period-over-period deltas, sparkline, and lifecycle data.
+type Enrichment struct {
+	Deltas    Deltas
+	Sparkline []int
+}
+
+// ComputeEnrichment fetches prior-window stats, sparkline, and theme lifecycle.
+// Call after Aggregate() to populate the view with enrichment data.
+func (a *Aggregator) ComputeEnrichment(
+	ctx context.Context, tenantID string, res *Result, from, to time.Time, priorFrom, priorTo time.Time,
+) (Enrichment, error) {
+	var e Enrichment
+
+	priorStats, err := a.feedback.WindowStats(ctx, tenantID, priorFrom, priorTo)
+	if err != nil {
+		logext.Warnf(ctx, "[service.digest.Aggregator.ComputeEnrichment] prior stats failed,tenant_id:%s,err:%+v",
+			tenantID, err.Error())
+	} else {
+		e.Deltas = computeDeltas(res.Stats, priorStats)
+	}
+
+	dailyCounts, err := a.feedback.DailyCounts(ctx, tenantID, to, 7)
+	if err != nil {
+		logext.Warnf(ctx, "[service.digest.Aggregator.ComputeEnrichment] daily counts failed,tenant_id:%s,err:%+v",
+			tenantID, err.Error())
+	} else {
+		e.Sparkline = buildSparkline(dailyCounts, to, 7)
+	}
+
+	if len(res.Themes) > 0 {
+		priorThemeKeys, err := a.priorThemeKeys(ctx, tenantID, priorFrom, priorTo)
+		if err != nil {
+			logext.Warnf(ctx, "[service.digest.Aggregator.ComputeEnrichment] prior themes failed,tenant_id:%s,err:%+v",
+				tenantID, err.Error())
+		} else {
+			applyLifecycle(res.Themes, priorThemeKeys)
+		}
+	}
+
+	return e, nil
+}
+
+func computeDeltas(current, prior feedback.DigestWindowStats) Deltas {
+	return Deltas{
+		Feedback: computeDelta(current.Total, prior.Total),
+		Enriched: computeDelta(current.Enriched, prior.Enriched),
+		Urgent:   computeDelta(current.Urgent, prior.Urgent),
+	}
+}
+
+func computeDelta(current, prior int) DeltaValue {
+	change := current - prior
+	var direction string
+	switch {
+	case change > 0:
+		direction = "up"
+	case change < 0:
+		direction = "down"
+	default:
+		direction = "flat"
+	}
+	return DeltaValue{
+		Current:   current,
+		Prior:     prior,
+		Change:    change,
+		Direction: direction,
+	}
+}
+
+func buildSparkline(counts []feedback.DailyCount, to time.Time, days int) []int {
+	result := make([]int, days)
+	dateToIndex := make(map[string]int)
+	for i := 0; i < days; i++ {
+		d := to.AddDate(0, 0, -(days - 1 - i))
+		dateToIndex[d.Format("2006-01-02")] = i
+	}
+	for _, dc := range counts {
+		key := dc.Date.Format("2006-01-02")
+		if idx, ok := dateToIndex[key]; ok {
+			result[idx] = dc.Count
+		}
+	}
+	return result
+}
+
+func (a *Aggregator) priorThemeKeys(ctx context.Context, tenantID string, from, to time.Time) (map[string]bool, error) {
+	clusters, err := a.clusters.TopClustersInWindow(ctx, tenantID, from, to, 10)
+	if err != nil {
+		return nil, err
+	}
+	keys := make(map[string]bool, len(clusters))
+	for _, c := range clusters {
+		if c.Label != "" {
+			keys[strings.ToLower(c.Label)] = true
+		}
+	}
+	return keys, nil
+}
+
+func applyLifecycle(themes []Theme, priorKeys map[string]bool) {
+	for i := range themes {
+		key := strings.ToLower(themes[i].Title)
+		if priorKeys[key] {
+			themes[i].Lifecycle = LifecycleOngoing
+		} else {
+			themes[i].Lifecycle = LifecycleNew
+		}
+	}
 }

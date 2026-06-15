@@ -131,13 +131,6 @@ func runServer() error {
 	if err := syncCustomWebhooks(ctx, cfg.CustomWebhooks, tenantRepo, notifyTargetRepo); err != nil {
 		return fmt.Errorf("sync custom webhooks: %w", err)
 	}
-	notifier, err := buildNotifier(ctx, cfg, notifyTargetRepo)
-	if err != nil {
-		return fmt.Errorf("build notifier: %w", err)
-	}
-	if notifier != nil {
-		enricher.SetNotifier(notifier)
-	}
 	// Outbox wiring: enricher writes raw-webhook rows in same tx as
 	// MarkDone (at-least-once); a background worker drains them.
 	enricher.SetOutbox(outboxRepo, notifyTargetRepo)
@@ -150,7 +143,7 @@ func runServer() error {
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
 
-	batchJobWorker := startBackgroundWorkers(ctx, pool, enricher, rawLLM, llm, feedbackRepo)
+	batchJobWorker := startBackgroundWorkers(ctx, pool, enricher, rawLLM, llm, feedbackRepo, cfg.ConsoleBaseURL)
 	defer batchJobWorker.Stop()
 
 	ingestHandler := handlers.NewIngestHandler(ingestor)
@@ -256,10 +249,11 @@ func startBackgroundWorkers(
 	rawLLM *llmrouter.Router,
 	llm llmclient.LLMClient,
 	feedbackRepo *feedback.FeedbackRepo,
+	consoleBaseURL string,
 ) *batchjob.Worker {
 	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
 	startReplyDraftWorker(ctx, pool, enricher, llm)
-	startDigestWorker(ctx, pool, llm)
+	startDigestWorker(ctx, pool, llm, consoleBaseURL)
 
 	worker := batchjob.New(
 		feedbackjobrepo.New(pool),
@@ -271,12 +265,11 @@ func startBackgroundWorkers(
 }
 
 // startDigestWorker wires the daily digest scheduler + worker (#27). llm is the
-// audit-wrapping client; the naive theme-naming path rides the enrich route, so
-// no extra LLM routing config is required. The cluster path (tenants with
-// clustering enabled) reuses #114's labels and makes no LLM call.
-func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LLMClient) {
+// audit-wrapping client. When embeddings are available, the cluster namer uses
+// HDBSCAN for theme extraction; otherwise falls back to naive LLM grouping.
+func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LLMClient, consoleBaseURL string) {
 	embedRepo := embeddingrepo.NewTaskRepo(pool)
-	agg := digestsvc.NewNaiveAggregator(embedRepo, feedback.NewFeedback(pool), llm)
+	agg := digestsvc.NewClusterAggregator(embedRepo, feedback.NewFeedback(pool), embedRepo, llm)
 	worker := digestsvc.NewWorker(
 		digestsubrepo.New(pool),
 		digestrunrepo.New(pool),
@@ -284,6 +277,7 @@ func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LL
 		notifytarget.NewNotifyTarget(pool),
 		embedRepo,
 		notify.NewTransport(nil, notify.DefaultRetry()),
+		consoleBaseURL,
 	)
 	go worker.Run(ctx)
 }

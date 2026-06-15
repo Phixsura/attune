@@ -13,7 +13,128 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `bytes.Equal()` with `crypto/subtle.ConstantTimeCompare()` for comparing
   request hashes, eliminating a theoretical timing attack vector.
 
+- **SSRF protection for HTTPS notify targets (#34).** Console API now rejects
+  `https://` URLs targeting private/internal IP ranges (10.x, 172.16-31.x,
+  192.168.x, link-local, loopback). DNS resolution is performed at validation
+  time to catch domain names pointing to private IPs. HTTP loopback for local
+  testing remains allowed as documented.
+
+- **Secret length enforcement (#34).** Console API now requires secrets to be
+  at least 16 characters when provided, matching the config-based webhook
+  validation. Empty secrets remain allowed for channels with embedded tokens
+  (Lark/Slack webhook URLs).
+
 ### Added
+
+- **HDBSCAN clustering for digest themes (#27).** Implemented pure-Go HDBSCAN
+  algorithm (`internal/pkg/hdbscan/`) for automatic theme discovery. When
+  embeddings are available, digest aggregator clusters feedback by semantic
+  similarity and names clusters via LLM. Replaces the naive hardcoded-3-themes
+  approach with dynamic 5-15 theme discovery, centroid-based example selection,
+  and per-cluster naming. Falls back to naive LLM path when embeddings are
+  insufficient. Console API exposes `clustering_enabled` toggle in
+  `/digest-subscription` for operators to enable/disable per tenant.
+
+- **Outbound channel-adapter framework (#34).** `internal/outbound/` provides
+  the pluggable delivery SDK mirroring `internal/inbound/`. Features:
+  composition interfaces (`EventChannel` / `DigestChannel`) with compile-time
+  capability discovery; self-registration via `init()`; content-hash signing
+  (`sha256(canonical(envelope))`) for field-order-independent HMAC verification;
+  response checkers for webhook and GitHub semantics; depguard rules enforcing
+  the adapter boundary. Outbox worker now dispatches via `outbound.LookupEvent`
+  instead of a hardcoded switch.
+
+- **Lark and Slack delivery adapters (#34).** Native card/Block Kit rendering
+  for Lark (Feishu) and Slack. Lark adapter supports custom bot in-body signing
+  (`timestamp` + `sign` fields). Both channels support event notifications and
+  daily digests.
+
+- **Console destination type select (#34).** The notify targets dialog now has
+  a typed destination select (Raw Webhook / GitHub Issue / Lark / Slack) with
+  per-channel help text for URL and secret fields.
+
+- **Signature version column (#34).** `tenant_notify_targets.signature_version`
+  enables gradual rollout of content-hash signing. Values: `v2-content-hash`
+  (new default, field-order independent) or `v2-bytes` (legacy, for customers
+  not yet upgraded).
+
+- **Multi-channel digest delivery (#34).** The digest worker now fans out to
+  all targets with `audience=digest`, not just raw-webhook. A tenant can
+  configure Lark + Slack + raw-webhook simultaneously; each receives the
+  digest in its native format (card/Block Kit/JSON).
+
+- **Digest enrichment (#27).** Daily digests now include period-over-period
+  deltas (↑/↓ arrows), 7-day sparkline trends, theme lifecycle badges
+  ([NEW]/[BACK] for new vs returning themes), example quotes per theme,
+  and deep links to the Console. The markdown rendering is rewritten
+  severity-first with all enrichment data visible.
+
+- **Per-channel test-send (#34).** The Console "Test" button now works for
+  Lark and Slack targets, not just raw-webhook. Lark test sends include
+  in-body signature when a secret is configured; Slack test sends use
+  Block Kit format. Per-channel response checking validates `StatusCode`
+  for Lark and status code + body for Slack.
+
+### Fixed
+
+- **Lark/Slack destination validation (#34).** Handler now accepts `lark`
+  and `slack` as valid `destination_type` values. Previously the switch
+  statement rejected them with "destination_type value is not allowed".
+
+- **Adapter digest JSON field tags (#34).** Lark and Slack adapters now
+  correctly deserialize digest view fields (`Stats`, `Themes`, `Items`)
+  using uppercase JSON tags matching the source struct. Previously the
+  lowercase tags caused silent fallback to the generic markdown renderer.
+
+- **UTF-8 safe truncation (#34).** New `internal/pkg/truncate` package
+  provides `Bytes()` and `Runes()` functions that never split multi-byte
+  UTF-8 characters. All outbound adapters and notify test_send now use
+  this shared implementation instead of inline truncate functions.
+
+- **Nil Feedback map panic (#34).** Lark, Slack, and GitHub Issue adapters now
+  handle `env.Feedback == nil` gracefully instead of panicking on map access.
+
+- **Invalid signature_version rejection (#34).** Generic adapter now returns
+  an error for unknown `signature_version` values instead of silently
+  falling through to content-hash signing.
+
+- **Lark card note element format (#34).** Fixed Lark interactive card JSON
+  structure for `note` elements. The inner elements now use plain `content`
+  strings instead of nested `larkText` objects, matching Feishu's card spec.
+
+- **Outbox routing for Lark/Slack (#34).** Added `lark` and `slack` to the
+  `outboxDestTypes` map so enriched feedback triggers outbox delivery to
+  these channels. Previously only `raw-webhook` and `github-issue` were
+  routed through outbox.
+
+- **Shared digest model package (#34).** `internal/outbound/digestmodel/`
+  provides shared types for digest rendering (View, Result, Stats, Theme,
+  Item, Deltas, DeltaValue). Lark and Slack adapters now use type aliases
+  to this package, eliminating 7 duplicate struct definitions.
+
+- **Shared Lark signing package (#34).** `internal/pkg/larksig/` provides
+  `Sign(timestamp, secret)` for Lark custom bot signature generation.
+  Used by both the Lark adapter and test_send, eliminating duplicate
+  implementations.
+
+- **Consistent label format (#34).** Outbound adapter labels now use
+  `{channel}-{kind}-{tenant}` format (e.g., `generic-event-tenant1`,
+  `lark-digest-tenant1`). GitHub Issue adapter uses `github-issue-{owner}/{repo}`
+  as it targets repositories rather than tenants.
+
+- **Non-HTTP channel support (#34).** `outbound.Rendered` now supports two
+  delivery modes: HTTP (Build+Check) for webhooks/REST APIs, and Custom
+  (Send) for non-HTTP channels like email/SMS/push. Existing adapters
+  continue to use HTTP mode unchanged; new adapters can use `Send` for
+  direct delivery control.
+
+### Removed
+
+- **Dead inline notifier path (#34).** Deleted `notify.Notifier` interface,
+  `MultiNotifier`, `RawWebhookRouter`, `buildNotifier`, `Enricher.SetNotifier`,
+  and `Enricher.fanOut`. All delivery now goes through the outbox worker with
+  the #34 outbound adapter framework. This removes ~400 lines of unreachable
+  code that predates the outbox pattern.
 
 - **Cursor pagination for job list endpoint (#30).** `GET /fb/v1/console/jobs`
   now supports cursor-based pagination via `cursor` query parameter and returns

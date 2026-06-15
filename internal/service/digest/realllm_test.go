@@ -5,10 +5,13 @@ package digest
 
 import (
 	"context"
+	"math/rand"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Phixsura/attune/internal/infra/llmclient"
+	"github.com/Phixsura/attune/internal/repo/embedding"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
@@ -26,6 +29,87 @@ func (m modelClient) Complete(ctx context.Context, req llmclient.CompletionReque
 }
 
 func (m modelClient) Close() error { return m.inner.Close() }
+
+type fakeEmbeddingReaderForRealLLM struct {
+	embeddings []embedding.EmbeddedFeedback
+}
+
+func (f fakeEmbeddingReaderForRealLLM) EmbeddingsInWindow(
+	_ context.Context, _ string, _, _ time.Time, _ int,
+) ([]embedding.EmbeddedFeedback, error) {
+	return f.embeddings, nil
+}
+
+// generateClusterEmbeddings creates 30 embeddings in 3 semantic clusters.
+func generateClusterEmbeddings() []embedding.EmbeddedFeedback {
+	rng := rand.New(rand.NewSource(42))
+	dim := 384
+	embeddings := make([]embedding.EmbeddedFeedback, 0, 30)
+
+	clusters := []struct {
+		titles []string
+		base   int
+	}{
+		{titles: []string{
+			"Checkout fails on Safari",
+			"Payment broken in Safari browser",
+			"Safari purchase not working",
+			"Can't pay on Safari",
+			"Safari checkout bug",
+			"Safari payment issue",
+			"Purchase fails Safari",
+			"Safari browser checkout error",
+			"Safari won't process payment",
+			"Checkout doesn't work Safari",
+		}, base: 0},
+		{titles: []string{
+			"CSV export times out",
+			"Export hangs on large reports",
+			"Report download fails",
+			"Can't export data",
+			"Export timeout error",
+			"Large export broken",
+			"Data export not working",
+			"Export crashes",
+			"Reports won't download",
+			"Export feature broken",
+		}, base: 100},
+		{titles: []string{
+			"Need dark mode",
+			"Dark theme request",
+			"Add dark mode please",
+			"Night mode wanted",
+			"Eye strain without dark mode",
+			"Dark UI option",
+			"Too bright need dark theme",
+			"Dark mode feature request",
+			"Please add night mode",
+			"Want dark interface",
+		}, base: 200},
+	}
+
+	id := int64(1)
+	for _, c := range clusters {
+		base := make([]float32, dim)
+		base[c.base] = 1.0
+
+		for _, title := range c.titles {
+			vec := make([]float32, dim)
+			copy(vec, base)
+			for d := 0; d < dim; d++ {
+				vec[d] += float32(rng.NormFloat64() * 0.05)
+			}
+			embeddings = append(embeddings, embedding.EmbeddedFeedback{
+				ID:        id,
+				Title:     title,
+				Rationale: "user feedback",
+				Embedding: vec,
+			})
+			id++
+		}
+	}
+	return embeddings
+}
 
 // TestRealLLM_NaiveThemes exercises the full naive theme-naming path (prompt
 // build → real OpenAI-compatible call → structured-output parse → code-derived
@@ -64,7 +148,7 @@ func TestRealLLM_NaiveThemes(t *testing.T) {
 	}
 
 	namer := newNaiveNamer(modelClient{inner: backend, model: model})
-	themes, err := namer.Name(context.Background(), "tenant-realllm", "", rows)
+	themes, err := namer.Name(context.Background(), "tenant-realllm", "", rows, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("real LLM Name failed: %v", err)
 	}
@@ -94,4 +178,52 @@ func TestRealLLM_NaiveThemes(t *testing.T) {
 	}
 	t.Logf("real-LLM e2e OK: model=%s, %d themes, %d code-counted members (titles from the model; counts + ids from code)",
 		model, len(themes), totalMembers)
+}
+
+// TestRealLLM_ClusterThemes exercises the cluster-based theme pipeline:
+// HDBSCAN groups synthetic embeddings, then the real LLM names each cluster.
+//
+// Same env-var gate as TestRealLLM_NaiveThemes.
+func TestRealLLM_ClusterThemes(t *testing.T) {
+	url := os.Getenv("DIGEST_REALLLM_URL")
+	key := os.Getenv("DIGEST_REALLLM_KEY")
+	if url == "" || key == "" {
+		t.Skip("set DIGEST_REALLLM_URL + DIGEST_REALLLM_KEY to run the real-LLM e2e")
+	}
+	model := os.Getenv("DIGEST_REALLLM_MODEL")
+	if model == "" {
+		model = "gpt-4.1-mini"
+	}
+
+	backend, err := llmclient.NewOpenAICompat(url, key)
+	if err != nil {
+		t.Fatalf("build backend: %v", err)
+	}
+	defer func() { _ = backend.Close() }()
+
+	llm := modelClient{inner: backend, model: model}
+	naive := newNaiveNamer(llm)
+
+	// Generate 30 synthetic embeddings in 3 clusters with semantic meaning
+	embeddings := generateClusterEmbeddings()
+
+	namer := newClusterNamer(fakeEmbeddingReaderForRealLLM{embeddings: embeddings}, llm, naive)
+	themes, err := namer.Name(context.Background(), "tenant-cluster-realllm", "", nil, time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("cluster LLM Name failed: %v", err)
+	}
+	if len(themes) == 0 {
+		t.Fatal("cluster LLM returned no themes")
+	}
+
+	for i, th := range themes {
+		t.Logf("theme %d: %q count=%d examples=%v", i+1, th.Title, th.Count, th.ExampleTitles[:min(2, len(th.ExampleTitles))])
+		if th.Title == "" {
+			t.Errorf("theme %d has an empty title", i+1)
+		}
+		if th.Count <= 0 {
+			t.Errorf("theme %d has non-positive count", i+1)
+		}
+	}
+	t.Logf("cluster real-LLM e2e OK: model=%s, %d themes found by HDBSCAN + named by LLM", model, len(themes))
 }

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -25,7 +26,9 @@ import (
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	digestsvc "github.com/Phixsura/attune/internal/service/digest"
 	"github.com/Phixsura/attune/internal/testdb"
-	"github.com/jackc/pgx/v5/pgxpool"
+
+	// Register outbound adapters for integration tests.
+	_ "github.com/Phixsura/attune/internal/outbound/adapter/generic"
 )
 
 type fakeLLM struct{ text string }
@@ -96,6 +99,7 @@ func TestDigestWorker_EndToEnd(t *testing.T) {
 		notifytarget.NewNotifyTarget(pool),
 		embeddingrepo.NewTaskRepo(pool),
 		notify.NewTransport(nil, notify.DefaultRetry()),
+		"https://console.example.com",
 	)
 
 	// First tick: claim the run, aggregate, deliver.
@@ -107,6 +111,9 @@ func TestDigestWorker_EndToEnd(t *testing.T) {
 	require.Contains(t, payload, "Checkout broken on Safari")
 	require.Contains(t, payload, `"feedback":7`)
 	require.Contains(t, payload, fmt.Sprintf("digest:%s:2026-06-13", tenantID))
+	require.Contains(t, payload, `"deep_link_base":"https://console.example.com"`)
+	require.Contains(t, payload, `"sparkline":[`)
+	require.Contains(t, payload, `"deltas":{`)
 
 	var status string
 	var themeCount, feedbackCount int
@@ -148,6 +155,7 @@ func TestDigestWorker_SkipsEmptyDay(t *testing.T) {
 		digestsvc.NewNaiveAggregator(embeddingrepo.NewTaskRepo(pool), feedbackrepo.NewFeedback(pool), &fakeLLM{}),
 		notifytarget.NewNotifyTarget(pool), embeddingrepo.NewTaskRepo(pool),
 		notify.NewTransport(nil, notify.DefaultRetry()),
+		"",
 	)
 	worker.ProcessOnce(ctx, now)
 
@@ -203,6 +211,7 @@ func buildWorker(pool *pgxpool.Pool, subs *digestsubrepo.Repo, llmText string) *
 		digestsvc.NewNaiveAggregator(embed, feedbackrepo.NewFeedback(pool), &fakeLLM{text: llmText}),
 		notifytarget.NewNotifyTarget(pool), embed,
 		notify.NewTransport(nil, notify.DefaultRetry()),
+		"",
 	)
 }
 

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
 const (
@@ -14,11 +16,49 @@ const (
 	payloadEventType = "feedback.digest"
 )
 
+// DigestView is the channel-agnostic data structure passed to outbound adapters.
+// Each adapter (generic, lark, slack) renders this into its native format.
+type DigestView struct {
+	TenantID     string    `json:"tenant_id"`
+	RunDate      string    `json:"run_date"`
+	From         time.Time `json:"from"`
+	To           time.Time `json:"to"`
+	Result       Result    `json:"result"`
+	Deltas       Deltas    `json:"deltas,omitempty"`
+	Sparkline    []int     `json:"sparkline,omitempty"`
+	DeepLinkBase string    `json:"deep_link_base,omitempty"`
+}
+
+// Deltas holds period-over-period comparisons.
+type Deltas struct {
+	Feedback DeltaValue `json:"feedback"`
+	Enriched DeltaValue `json:"enriched"`
+	Urgent   DeltaValue `json:"urgent"`
+}
+
+// DeltaValue holds a numeric change and direction.
+type DeltaValue struct {
+	Current   int    `json:"current"`
+	Prior     int    `json:"prior"`
+	Change    int    `json:"change"`
+	Direction string `json:"direction"` // "up", "down", "flat"
+}
+
+// ThemeLifecycle indicates whether a theme is new, ongoing, or regressed.
+type ThemeLifecycle string
+
+const (
+	LifecycleNew       ThemeLifecycle = "new"
+	LifecycleOngoing   ThemeLifecycle = "ongoing"
+	LifecycleRegressed ThemeLifecycle = "regressed"
+)
+
 type themeOut struct {
-	Title         string   `json:"title"`
-	Count         int      `json:"count"`
-	ExampleIDs    []int64  `json:"example_ids"`
-	ExampleTitles []string `json:"example_titles,omitempty"`
+	Title         string         `json:"title"`
+	Count         int            `json:"count"`
+	ExampleIDs    []int64        `json:"example_ids"`
+	ExampleTitles []string       `json:"example_titles,omitempty"`
+	Lifecycle     ThemeLifecycle `json:"lifecycle,omitempty"`
 }
 
 type itemOut struct {
@@ -45,72 +85,178 @@ type payloadOut struct {
 	RunDate        string     `json:"run_date"`
 	Window         windowOut  `json:"window"`
 	Totals         totalsOut  `json:"totals"`
+	Deltas         Deltas     `json:"deltas,omitempty"`
+	Sparkline      []int      `json:"sparkline,omitempty"`
 	Themes         []themeOut `json:"themes"`
 	Items          []itemOut  `json:"items,omitempty"`
 	Markdown       string     `json:"markdown"`
 	IdempotencyKey string     `json:"idempotency_key"`
+	DeepLinkBase   string     `json:"deep_link_base,omitempty"`
 }
 
 // RenderPayload builds the JSON envelope the digest worker POSTs to the tenant's
 // raw-webhook digest target. The markdown block lets a Lark/Slack incoming
 // webhook render the digest without bespoke formatting. The idempotency_key lets
 // the receiver dedup an at-least-once redelivery.
-func RenderPayload(tenantID, runDate string, from, to time.Time, res Result) ([]byte, error) {
+func RenderPayload(view DigestView) ([]byte, error) {
 	p := payloadOut{
 		Version:   payloadVersion,
 		EventType: payloadEventType,
-		TenantID:  tenantID,
-		RunDate:   runDate,
-		Window:    windowOut{From: from.UTC().Format(time.RFC3339), To: to.UTC().Format(time.RFC3339)},
+		TenantID:  view.TenantID,
+		RunDate:   view.RunDate,
+		Window:    windowOut{From: view.From.UTC().Format(time.RFC3339), To: view.To.UTC().Format(time.RFC3339)},
 		Totals: totalsOut{
-			Feedback:    res.Stats.Total,
-			Enriched:    res.Stats.Enriched,
-			Urgent:      res.Stats.Urgent,
-			Unclustered: res.Stats.Unclustered,
+			Feedback:    view.Result.Stats.Total,
+			Enriched:    view.Result.Stats.Enriched,
+			Urgent:      view.Result.Stats.Urgent,
+			Unclustered: view.Result.Stats.Unclustered,
 		},
-		IdempotencyKey: fmt.Sprintf("digest:%s:%s", tenantID, runDate),
+		Deltas:         view.Deltas,
+		Sparkline:      view.Sparkline,
+		DeepLinkBase:   view.DeepLinkBase,
+		IdempotencyKey: fmt.Sprintf("digest:%s:%s", view.TenantID, view.RunDate),
 	}
-	for _, t := range res.Themes {
+	for _, t := range view.Result.Themes {
 		p.Themes = append(p.Themes, themeOut(t))
 	}
-	for _, it := range res.Items {
+	for _, it := range view.Result.Items {
 		p.Items = append(p.Items, itemOut{ID: it.ID, Title: it.Title})
 	}
-	p.Markdown = renderMarkdown(runDate, res)
+	p.Markdown = renderMarkdown(view)
 	return json.Marshal(p)
 }
 
-func renderMarkdown(runDate string, res Result) string {
+func renderMarkdownHeader(view DigestView) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "**Daily digest — %s**\n", runDate)
-	fmt.Fprintf(&b, "%d feedbacks yesterday (%d enriched, %d urgent).\n",
-		res.Stats.Total, res.Stats.Enriched, res.Stats.Urgent)
-	switch {
-	case len(res.Themes) > 0:
-		b.WriteString("\nTop themes:\n")
-		for i, t := range res.Themes {
-			fmt.Fprintf(&b, "%d. %s — %d reports", i+1, t.Title, t.Count)
-			if len(t.ExampleIDs) > 0 {
-				fmt.Fprintf(&b, " (%s)", joinIDs(t.ExampleIDs))
-			}
-			b.WriteByte('\n')
-		}
-	case len(res.Items) > 0:
-		b.WriteString("\nFeedback:\n")
-		for _, it := range res.Items {
-			fmt.Fprintf(&b, "- #%d %s\n", it.ID, it.Title)
+	res := view.Result
+	fmt.Fprintf(&b, "**Daily Digest — %s**\n\n", view.RunDate)
+	if len(view.Sparkline) > 0 {
+		fmt.Fprintf(&b, "7-day trend: %s\n\n", renderSparkline(view.Sparkline))
+	}
+	fmt.Fprintf(&b, "**%d** feedback", res.Stats.Total)
+	if view.Deltas.Feedback.Direction != "" {
+		fmt.Fprintf(&b, " %s", deltaArrow(view.Deltas.Feedback))
+	}
+	fmt.Fprintf(&b, " (%d enriched", res.Stats.Enriched)
+	if view.Deltas.Enriched.Direction != "" {
+		fmt.Fprintf(&b, " %s", deltaArrow(view.Deltas.Enriched))
+	}
+	if res.Stats.Urgent > 0 {
+		fmt.Fprintf(&b, ", **%d urgent**", res.Stats.Urgent)
+		if view.Deltas.Urgent.Direction != "" {
+			fmt.Fprintf(&b, " %s", deltaArrow(view.Deltas.Urgent))
 		}
 	}
-	if res.Stats.Unclustered > 0 {
-		fmt.Fprintf(&b, "\n(%d enriched rows not yet themed.)\n", res.Stats.Unclustered)
+	b.WriteString(")\n")
+	return b.String()
+}
+
+func renderMarkdownThemes(themes []Theme, deepLinkBase string) string {
+	var b strings.Builder
+	b.WriteString("\n**Top Themes**\n")
+	for i, t := range themes {
+		badge := lifecycleBadge(t.Lifecycle)
+		fmt.Fprintf(&b, "%d. %s%s — %d report", i+1, badge, t.Title, t.Count)
+		if t.Count != 1 {
+			b.WriteByte('s')
+		}
+		b.WriteByte('\n')
+		if len(t.ExampleTitles) > 0 {
+			fmt.Fprintf(&b, "   > \"%s\"\n", truncate(t.ExampleTitles[0], 80))
+		}
+		if deepLinkBase != "" && len(t.ExampleIDs) > 0 {
+			fmt.Fprintf(&b, "   [View →](%s/feedback?theme=%s)\n", deepLinkBase, t.Title)
+		}
 	}
 	return b.String()
 }
 
-func joinIDs(ids []int64) string {
-	parts := make([]string, len(ids))
-	for i, id := range ids {
-		parts[i] = fmt.Sprintf("#%d", id)
+func renderMarkdownItems(items []feedback.DigestFeedbackRow, deepLinkBase string) string {
+	var b strings.Builder
+	b.WriteString("\n**Recent Feedback**\n")
+	for _, it := range items {
+		fmt.Fprintf(&b, "- #%d %s", it.ID, truncate(it.Title, 60))
+		if deepLinkBase != "" {
+			fmt.Fprintf(&b, " [→](%s/feedback/%d)", deepLinkBase, it.ID)
+		}
+		b.WriteByte('\n')
 	}
-	return strings.Join(parts, ", ")
+	return b.String()
+}
+
+func renderMarkdown(view DigestView) string {
+	var b strings.Builder
+	res := view.Result
+
+	b.WriteString(renderMarkdownHeader(view))
+
+	switch {
+	case len(res.Themes) > 0:
+		b.WriteString(renderMarkdownThemes(res.Themes, view.DeepLinkBase))
+	case len(res.Items) > 0:
+		b.WriteString(renderMarkdownItems(res.Items, view.DeepLinkBase))
+	}
+
+	if res.Stats.Unclustered > 0 && len(res.Themes) > 0 {
+		fmt.Fprintf(&b, "\n+%d unclustered\n", res.Stats.Unclustered)
+	}
+
+	return b.String()
+}
+
+func renderSparkline(counts []int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	bars := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	maxVal := 0
+	for _, c := range counts {
+		if c > maxVal {
+			maxVal = c
+		}
+	}
+	if maxVal == 0 {
+		return strings.Repeat("▁", len(counts))
+	}
+	var sb strings.Builder
+	for _, c := range counts {
+		idx := (c * (len(bars) - 1)) / maxVal
+		sb.WriteRune(bars[idx])
+	}
+	return sb.String()
+}
+
+func deltaArrow(d DeltaValue) string {
+	switch d.Direction {
+	case "up":
+		if d.Change > 0 {
+			return fmt.Sprintf("↑%d", d.Change)
+		}
+		return "↑"
+	case "down":
+		if d.Change < 0 {
+			return fmt.Sprintf("↓%d", -d.Change)
+		}
+		return "↓"
+	default:
+		return ""
+	}
+}
+
+func lifecycleBadge(lc ThemeLifecycle) string {
+	switch lc {
+	case LifecycleNew:
+		return "[NEW] "
+	case LifecycleRegressed:
+		return "[BACK] "
+	default:
+		return ""
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

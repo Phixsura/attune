@@ -82,3 +82,38 @@ func (r *FeedbackRepo) EnrichedInWindow(
 	}
 	return out, rows.Err()
 }
+
+// DailyCount is one day's feedback count for sparkline rendering.
+type DailyCount struct {
+	Date  time.Time
+	Count int
+}
+
+// DailyCounts returns the last `days` days of feedback counts ending at `to`,
+// used for the 7-day sparkline in digests.
+func (r *FeedbackRepo) DailyCounts(
+	ctx context.Context, tenantID string, to time.Time, days int,
+) ([]DailyCount, error) {
+	from := to.AddDate(0, 0, -days)
+	rows, err := r.pool.Query(ctx, `
+		SELECT DATE(created_at AT TIME ZONE 'UTC') AS day, COUNT(*)
+		FROM user_feedback
+		WHERE tenant_id = $1
+		  AND created_at >= $2 AND created_at < $3
+		GROUP BY day
+		ORDER BY day`, tenantID, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("daily counts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []DailyCount
+	for rows.Next() {
+		var dc DailyCount
+		if err := rows.Scan(&dc.Date, &dc.Count); err != nil {
+			return nil, fmt.Errorf("scan daily count: %w", err)
+		}
+		out = append(out, dc)
+	}
+	return out, rows.Err()
+}

@@ -45,6 +45,8 @@ export interface DigestSubscription {
   createdAt: string;
   /** RFC3339 */
   updatedAt: string;
+  /** use embedding-based HDBSCAN clustering (#27) */
+  clusteringEnabled: boolean;
 }
 
 export interface GetDigestSubscriptionRequest {
@@ -58,7 +60,11 @@ export interface UpsertDigestSubscriptionRequest {
   timezone?: string | undefined;
   llmMinFeedback: number;
   sendOnEmpty: boolean;
-  themePrompt?: string | undefined;
+  themePrompt?:
+    | string
+    | undefined;
+  /** use embedding-based HDBSCAN clustering */
+  clusteringEnabled: boolean;
 }
 
 export interface DeleteDigestSubscriptionRequest {

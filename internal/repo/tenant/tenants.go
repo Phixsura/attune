@@ -131,3 +131,35 @@ func (r *TenantRepo) GetByID(ctx context.Context, id string) (*Tenant, error) {
 	}
 	return ptrext.Of(t), nil
 }
+
+// GetClusteringEnabled returns whether clustering is enabled for a tenant.
+func (r *TenantRepo) GetClusteringEnabled(ctx context.Context, id string) (bool, error) {
+	var enabled bool
+	err := r.pool.QueryRow(
+		ctx, `SELECT clustering_enabled FROM tenants WHERE id = $1`, id,
+	).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, ErrTenantNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("get clustering enabled %s: %w", id, err)
+	}
+	return enabled, nil
+}
+
+// SetClusteringEnabled updates the clustering_enabled flag for a tenant.
+func (r *TenantRepo) SetClusteringEnabled(ctx context.Context, id string, enabled bool) error {
+	const where = "repo.TenantRepo.SetClusteringEnabled"
+	tag, err := r.pool.Exec(
+		ctx, `UPDATE tenants SET clustering_enabled = $1 WHERE id = $2`, enabled, id,
+	)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] update failed,tenant_id:%s,err:%+v", where, id, err.Error())
+		return fmt.Errorf("set clustering enabled %s: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrTenantNotFound
+	}
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,enabled:%t", where, id, enabled)
+	return nil
+}

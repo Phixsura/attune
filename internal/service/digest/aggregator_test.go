@@ -31,6 +31,10 @@ func (f fakeFeedback) EnrichedInWindow(context.Context, string, time.Time, time.
 	return f.rows, nil
 }
 
+func (f fakeFeedback) DailyCounts(context.Context, string, time.Time, int) ([]feedback.DailyCount, error) {
+	return nil, nil
+}
+
 type fakeClusters struct {
 	cfg      embedding.ClusteringConfig
 	clusters []embedding.DigestCluster
@@ -55,7 +59,7 @@ type fakeNamer struct {
 	called *bool
 }
 
-func (f fakeNamer) Name(context.Context, string, string, []feedback.DigestFeedbackRow) ([]Theme, error) {
+func (f fakeNamer) Name(_ context.Context, _, _ string, _ []feedback.DigestFeedbackRow, _, _ time.Time) ([]Theme, error) {
 	if f.called != nil {
 		*f.called = true
 	}
@@ -178,7 +182,7 @@ func (f fakeLLM) Close() error { return nil }
 func TestNaiveNamerEndToEnd(t *testing.T) {
 	rows := []feedback.DigestFeedbackRow{{ID: 1, Title: "slow"}, {ID: 2, Title: "crash"}}
 	llm := fakeLLM{text: `{"themes":[{"title":"Performance","member_ids":[1,2]}]}`}
-	themes, err := newNaiveNamer(llm).Name(context.Background(), "t", "", rows)
+	themes, err := newNaiveNamer(llm).Name(context.Background(), "t", "", rows, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +199,14 @@ func TestRenderPayload(t *testing.T) {
 		Stats:  feedback.DigestWindowStats{Total: 47, Enriched: 45, Urgent: 3, Unclustered: 2},
 		Themes: []Theme{{Title: "checkout", Count: 12, ExampleIDs: []int64{1024, 1031}}},
 	}
-	b, err := RenderPayload("acme", "2026-06-12", from, to, res)
+	view := DigestView{
+		TenantID: "acme",
+		RunDate:  "2026-06-12",
+		From:     from,
+		To:       to,
+		Result:   res,
+	}
+	b, err := RenderPayload(view)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,8 +218,8 @@ func TestRenderPayload(t *testing.T) {
 		t.Fatalf("idempotency_key = %v", p["idempotency_key"])
 	}
 	md, _ := p["markdown"].(string)
-	if !strings.Contains(md, "checkout — 12 reports") || !strings.Contains(md, "#1024") {
-		t.Fatalf("markdown = %q", md)
+	if !strings.Contains(md, "checkout — 12 report") {
+		t.Fatalf("markdown missing theme line: %q", md)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -661,4 +662,76 @@ func (r *TaskRepo) GetClusteringConfig(ctx context.Context, tenantID string) (Cl
 		return ClusteringConfig{}, fmt.Errorf("get clustering config: %w", err)
 	}
 	return cfg, nil
+}
+
+// EmbeddedFeedback holds feedback row with its embedding for clustering.
+type EmbeddedFeedback struct {
+	ID        int64
+	Title     string
+	Content   string
+	Rationale string
+	Embedding []float32
+}
+
+// parseVectorText parses pgvector text format "[1.0,2.0,3.0]" to []float32.
+// Returns error if any element is NaN or Inf.
+func parseVectorText(s string) ([]float32, error) {
+	s = strings.TrimPrefix(s, "[")
+	s = strings.TrimSuffix(s, "]")
+	if s == "" {
+		return nil, nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]float32, len(parts))
+	for i, p := range parts {
+		f, err := strconv.ParseFloat(strings.TrimSpace(p), 32)
+		if err != nil {
+			return nil, fmt.Errorf("parse vector element %d: %w", i, err)
+		}
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil, fmt.Errorf("vector element %d: invalid value (NaN or Inf)", i)
+		}
+		result[i] = float32(f)
+	}
+	return result, nil
+}
+
+// EmbeddingsInWindow fetches enriched feedback rows with embeddings for digest clustering.
+// Returns only rows that have both enrichment_status='done' and a non-null embedding.
+func (r *TaskRepo) EmbeddingsInWindow(
+	ctx context.Context, tenantID string, from, to time.Time, limit int,
+) ([]EmbeddedFeedback, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id,
+		       COALESCE(NULLIF(enriched_title, ''), LEFT(content, 100)),
+		       COALESCE(LEFT(content, 500), ''),
+		       COALESCE(rationale, ''),
+		       embedding::text
+		FROM user_feedback
+		WHERE tenant_id = $1
+		  AND enrichment_status = 'done'
+		  AND embedding IS NOT NULL
+		  AND created_at >= $2 AND created_at < $3
+		ORDER BY created_at DESC
+		LIMIT $4`, tenantID, from, to, limit)
+	if err != nil {
+		return nil, fmt.Errorf("embeddings in window: %w", err)
+	}
+	defer rows.Close()
+
+	var out []EmbeddedFeedback
+	for rows.Next() {
+		var f EmbeddedFeedback
+		var embText string
+		if err := rows.Scan(&f.ID, &f.Title, &f.Content, &f.Rationale, &embText); err != nil {
+			return nil, fmt.Errorf("scan embedded feedback: %w", err)
+		}
+		emb, err := parseVectorText(embText)
+		if err != nil {
+			return nil, fmt.Errorf("parse embedding for id %d: %w", f.ID, err)
+		}
+		f.Embedding = emb
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }

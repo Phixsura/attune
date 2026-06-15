@@ -210,6 +210,7 @@ const sampleDigestSubscription: DigestSubscription = {
   lastRunAt: '2026-06-13T09:00:00Z',
   createdAt: '2026-06-07T00:00:00Z',
   updatedAt: '2026-06-13T21:00:00Z',
+  clusteringEnabled: false,
 }
 
 export const handlers = [

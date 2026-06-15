@@ -13,7 +13,6 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/pkg/logext"
-	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
@@ -64,8 +63,5 @@ func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedbac
 		"[%s] feedback enriched via fast-path,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,is_urgent:%t,attrs:%s",
 		where, trace.FromContext(ctx), row.TenantID, id, enriched.IsUrgent,
 		logext.AsLogParam(enriched.Attrs))
-	if n := e.notifier.Load(); n != nil {
-		go e.fanOut(snapshot, ptrext.Indirect(n))
-	}
 	return nil
 }

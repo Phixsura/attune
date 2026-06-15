@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -48,9 +49,10 @@ func NewNaiveAggregator(clusters clusterReader, fb feedbackReader, llm llmclient
 	return NewAggregator(clusters, fb, newNaiveNamer(llm))
 }
 
-// Name implements themeNamer.
+// Name implements themeNamer. The from/to window is unused in the naive path
+// (rows are already fetched by the caller) but accepted for interface consistency.
 func (n *naiveNamer) Name(
-	ctx context.Context, tenantID, promptOverride string, rows []feedback.DigestFeedbackRow,
+	ctx context.Context, tenantID, promptOverride string, rows []feedback.DigestFeedbackRow, _, _ time.Time,
 ) ([]Theme, error) {
 	const where = "service.digest.naiveNamer.Name"
 	if len(rows) == 0 {

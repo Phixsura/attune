@@ -35,7 +35,9 @@ describe('CreateNotifyDialog', () => {
     const { user } = renderWithProviders(
       <CreateNotifyDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
-    await user.click(screen.getByRole('combobox'))
+    // Click the audience select (second combobox, after destination type)
+    const comboboxes = screen.getAllByRole('combobox')
+    await user.click(comboboxes[1]) // audience is the second select
     await user.click(screen.getByRole('option', { name: 'digest' }))
     await user.type(screen.getByTestId('create-notify-url'), 'https://hook.example.com')
     await user.click(screen.getByTestId('create-notify-submit'))

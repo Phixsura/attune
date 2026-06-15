@@ -2522,6 +2522,8 @@ components:
                     type: string
                 updatedAt:
                     type: string
+                clusteringEnabled:
+                    type: boolean
             description: |-
                 DigestSubscription is a tenant's daily digest config. Delivery is to the
                  tenant's raw-webhook notify target whose audience='digest'.
@@ -3854,6 +3856,8 @@ components:
                     type: boolean
                 themePrompt:
                     type: string
+                clusteringEnabled:
+                    type: boolean
         UpsertLLMChannelAbilityRequest:
             required:
                 - logicalModel

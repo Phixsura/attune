@@ -32,6 +32,10 @@ import (
 	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
 	outboxsvc "github.com/Phixsura/attune/internal/service/outbox"
 	"github.com/Phixsura/attune/internal/testdb"
+
+	// Register outbound adapters for integration tests.
+	_ "github.com/Phixsura/attune/internal/outbound/adapter/generic"
+	_ "github.com/Phixsura/attune/internal/outbound/adapter/githubissue"
 )
 
 func TestPG_IngestEnrichQueuesAndDrainsOutbox(t *testing.T) {

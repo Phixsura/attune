@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/trace"
-	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
@@ -43,21 +41,12 @@ const (
 // Enricher classifies user_feedback rows via the LLM gateway. It owns
 // the claim-then-update loop but holds no SQL itself — repo does.
 //
-// wiring:
-// - inline notifier (slot reserved for the #34 outbound adapter SDK) → fire-and-forget
-// - raw-webhook → outbox row in same tx as MarkDone (at-least-once)
-//
-// SetNotifier and SetOutbox are independent; either / both / neither
-// may be wired without code changes elsewhere.
+// Wiring: raw-webhook → outbox row in same tx as MarkDone (at-least-once).
+// The #34 outbound adapter framework handles delivery via OutboxWorker.
 type Enricher struct {
-	repo  *feedback.FeedbackRepo
-	llm   llmclient.LLMClient
-	model string // resolved from config; "" → enricher rejects with 400-like error
-	// notifier is read from fanOut goroutines, written by SetNotifier
-	// (typically once at startup, but a follow-up plans dynamic per-tenant
-	// re-wiring). atomic.Pointer keeps the read race-free without
-	// per-call locking — fanOut takes a snapshot via .Load().
-	notifier      atomic.Pointer[notify.Notifier]
+	repo          *feedback.FeedbackRepo
+	llm           llmclient.LLMClient
+	model         string                         // resolved from config; "" → enricher rejects with 400-like error
 	outbox        *outboxrepo.OutboxRepo         // optional outbox writer
 	targets       *notifytarget.NotifyTargetRepo // optional, paired with outbox
 	embeddingTask *embeddingrepo.TaskRepo        // optional embedding task outbox
@@ -75,17 +64,6 @@ type classifyResult struct {
 // and let the DB-managed LLM router resolve model/channel by purpose.
 func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient, model string) *Enricher {
 	return ptrext.Of(Enricher{repo: r, llm: llm, model: model})
-}
-
-// SetNotifier wires the inline webhook fan-out. nil = no
-// notifications; rows still land in Postgres normally. Safe for concurrent
-// reads (fanOut goroutines).
-func (e *Enricher) SetNotifier(n notify.Notifier) {
-	if n == nil {
-		e.notifier.Store(nil)
-		return
-	}
-	e.notifier.Store(ptrext.Of(n))
 }
 
 // SetOutbox wires at-least-once delivery for raw-webhook destinations.
@@ -204,9 +182,6 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 		"[%s] feedback enriched,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,is_urgent:%t,title:%s,attrs:%s",
 		where, trace.FromContext(ctx), row.TenantID, id, enriched.IsUrgent, enriched.Title,
 		logext.AsLogParam(enriched.Attrs))
-	if n := e.notifier.Load(); n != nil {
-		go e.fanOut(snapshot, ptrext.Indirect(n))
-	}
 	return nil
 }
 
@@ -355,24 +330,6 @@ func droppedAttrsAudit(diagnostics []domain.AttrDropDiagnostic) map[string]any {
 }
 
 // fanOut pushes a freshly enriched snapshot to the snapshot of `notifier`
-// taken at fire time. Best-effort: per-destination errors are logged but
-// never propagated — webhook outages must not block downstream rows.
-// `n` is captured at goroutine launch so a concurrent SetNotifier(nil)
-// or replacement can't trip a nil deref mid-call.
-func (e *Enricher) fanOut(s domain.Snapshot, n notify.Notifier) {
-	const where = "service.Enricher.fanOut"
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	if err := n.PushPool(ctx, s); err != nil {
-		logext.Warnf(ctx, "[%s] pool failed,id:%d,err:%+v", where, s.ID, err.Error())
-	}
-	if s.IsUrgent {
-		if err := n.PushRadar(ctx, s); err != nil {
-			logext.Warnf(ctx, "[%s] radar failed,id:%d,err:%+v", where, s.ID, err.Error())
-		}
-	}
-}
-
 // EnrichPending sweeps up to n rows that need classification.
 func (e *Enricher) EnrichPending(ctx context.Context, n int) {
 	const where = "service.Enricher.EnrichPending"

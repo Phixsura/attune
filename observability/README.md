@@ -53,6 +53,8 @@ exposition plus the portable assets in this directory.
 | `attune_reply_draft_queue_depth` | gauge | `tenant` | number of pending reply-draft tasks per tenant (#26) |
 | `attune_digest_runs_total` | counter | `tenant`, `status` | daily digest runs by outcome — `sent` / `skipped_empty` / `failed` (#27) |
 | `attune_digest_duration_seconds` | histogram | `tenant` | end-to-end digest aggregation + delivery latency per run (#27) |
+| `attune_digest_clustering_fallback_total` | counter | `tenant`, `reason` | cluster-based theme extraction fallbacks to naive path (#27) |
+| `attune_digest_cluster_count` | histogram | `tenant` | number of clusters found per digest run (#27) |
 | `attune_workflow_transitions_total` | counter | `tenant`, `result` | workflow state transitions by outcome — `success` / `invalid` / `error` (#29) |
 | `attune_workflow_batch_size` | histogram | — | number of feedback items per batch-transition call (#29) |
 | `attune_batch_jobs_claimed_total` | counter | `tenant` | async batch jobs claimed by workers (#30) |
