@@ -8,7 +8,8 @@
 port: 8090
 
 database:
-  url: "postgres://attune:attune_dev_password_2026@postgres:5432/attune?sslmode=disable"
+  # Test-only credentials, set in docker-compose.oidc-test.yml
+  url: "postgres://attune:test-only-not-for-production@postgres:5432/attune?sslmode=disable"
 
 migrations:
   confirm_lark_delete: false
@@ -22,7 +23,7 @@ console:
   session_key: "test-session-key-at-least-32-chars-long"
   bootstrap_admin:
     email: "bootstrap@example.com"
-    password: "bootstrap-password-12345"
+    password: "replace-this-after-first-login"
 
 # OIDC SSO configuration — connects to local dex
 oidc:

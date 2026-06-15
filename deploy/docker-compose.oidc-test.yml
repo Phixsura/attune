@@ -18,6 +18,10 @@ services:
   # Override postgres to use pgvector image for e2e testing
   postgres:
     image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: attune
+      POSTGRES_PASSWORD: test-only-not-for-production
+      POSTGRES_DB: attune
 
   dex:
     image: ghcr.io/dexidp/dex:v2.40.0
