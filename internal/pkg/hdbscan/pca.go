@@ -4,7 +4,6 @@ package hdbscan
 
 import (
 	"math"
-	"sort"
 )
 
 // PCA performs Principal Component Analysis for dimensionality reduction.
@@ -146,76 +145,4 @@ func normalize(v []float64) {
 			v[i] /= norm
 		}
 	}
-}
-
-// ReduceToVariance reduces dimensions while preserving target variance ratio.
-// Uses singular value estimation to pick the right number of components.
-func ReduceToVariance(data [][]float32, targetVariance float64) [][]float32 {
-	if len(data) == 0 || targetVariance >= 1.0 {
-		return data
-	}
-
-	n := len(data)
-	d := len(data[0])
-
-	// Center data
-	mean := make([]float64, d)
-	for i := 0; i < n; i++ {
-		for j := 0; j < d; j++ {
-			mean[j] += float64(data[i][j])
-		}
-	}
-	for j := 0; j < d; j++ {
-		mean[j] /= float64(n)
-	}
-
-	centered := make([][]float64, n)
-	for i := 0; i < n; i++ {
-		centered[i] = make([]float64, d)
-		for j := 0; j < d; j++ {
-			centered[i][j] = float64(data[i][j]) - mean[j]
-		}
-	}
-
-	// Estimate variance per dimension (diagonal of covariance)
-	variances := make([]float64, d)
-	for j := 0; j < d; j++ {
-		for i := 0; i < n; i++ {
-			variances[j] += centered[i][j] * centered[i][j]
-		}
-		variances[j] /= float64(n)
-	}
-
-	// Sort by variance descending
-	type dimVar struct {
-		dim int
-		v   float64
-	}
-	dims := make([]dimVar, d)
-	totalVar := 0.0
-	for j := 0; j < d; j++ {
-		dims[j] = dimVar{j, variances[j]}
-		totalVar += variances[j]
-	}
-	sort.Slice(dims, func(i, j int) bool {
-		return dims[i].v > dims[j].v
-	})
-
-	// Find how many dimensions to keep
-	cumVar := 0.0
-	k := 0
-	for k < d && cumVar/totalVar < targetVariance {
-		cumVar += dims[k].v
-		k++
-	}
-	if k < 5 {
-		k = 5 // Minimum 5 dimensions
-	}
-	if k > d {
-		k = d
-	}
-
-	// Use PCA with that many components
-	pca := PCA{Components: k, MaxIter: 50}
-	return pca.Reduce(data)
 }

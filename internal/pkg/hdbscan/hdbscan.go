@@ -118,26 +118,32 @@ type dendroNode struct {
 func computeCoreDistances(data [][]float32, k int) []float64 {
 	n := len(data)
 	coreDistances := make([]float64, n)
+	if n <= 1 {
+		return coreDistances
+	}
+
+	// Reuse a single buffer across iterations to avoid n allocations.
+	buf := make([]float64, 0, n-1)
 
 	for i := 0; i < n; i++ {
-		sorted := make([]float64, 0, n-1)
+		buf = buf[:0] // reset length, keep capacity
 		for j := 0; j < n; j++ {
 			if i != j {
-				sorted = append(sorted, cosineDistance(data[i], data[j]))
+				buf = append(buf, cosineDistance(data[i], data[j]))
 			}
 		}
-		if len(sorted) == 0 {
+		if len(buf) == 0 {
 			continue
 		}
-		sort.Float64s(sorted)
+		sort.Float64s(buf)
 		idx := k - 1
-		if idx >= len(sorted) {
-			idx = len(sorted) - 1
+		if idx >= len(buf) {
+			idx = len(buf) - 1
 		}
 		if idx < 0 {
 			idx = 0
 		}
-		coreDistances[i] = sorted[idx]
+		coreDistances[i] = buf[idx]
 	}
 	return coreDistances
 }
@@ -430,24 +436,51 @@ func selectClustersEOM(condensed []condensedEdge, stability map[int]float64, n i
 		}
 	}
 
-	// Process in reverse topological order (leaves first)
-	clusters := make([]int, 0, len(allClusters))
+	// Process in bottom-up order (leaves first) using topological sort
+	// Build in-degree map (count of cluster children)
+	inDegree := make(map[int]int)
 	for c := range allClusters {
-		clusters = append(clusters, c)
+		inDegree[c] = len(children[c])
 	}
-	sort.Sort(sort.Reverse(sort.IntSlice(clusters)))
+
+	// Start with leaf clusters (no cluster children)
+	var queue []int
+	for c := range allClusters {
+		if inDegree[c] == 0 {
+			queue = append(queue, c)
+		}
+	}
+
+	// Topological sort: process leaves first, then parents
+	clusters := make([]int, 0, len(allClusters))
+	parent := make(map[int]int) // child -> parent
+	for p, ch := range children {
+		for _, c := range ch {
+			parent[c] = p
+		}
+	}
+
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		clusters = append(clusters, node)
+
+		// Decrement parent's in-degree
+		if p, ok := parent[node]; ok {
+			inDegree[p]--
+			if inDegree[p] == 0 {
+				queue = append(queue, p)
+			}
+		}
+	}
 
 	isCluster := make(map[int]bool)
 	for c := range allClusters {
 		isCluster[c] = true
 	}
 
-	// EOM selection
+	// EOM selection - process all clusters including root
 	for _, node := range clusters {
-		if node == root {
-			continue // Handle root separately
-		}
-
 		childStab := 0.0
 		for _, child := range children[node] {
 			childStab += stability[child]
@@ -469,13 +502,7 @@ func selectClustersEOM(condensed []condensedEdge, stability map[int]float64, n i
 		}
 	}
 
-	// Handle root: allow_single_cluster=false (scikit-learn default)
-	// If root is the only cluster, check if its children provide better stability
-	rootChildStab := 0.0
-	for _, child := range children[root] {
-		rootChildStab += stability[child]
-	}
-
+	// Handle allow_single_cluster=false (scikit-learn default)
 	// Count how many non-root clusters are selected
 	nonRootSelected := 0
 	for c, selected := range isCluster {
@@ -484,11 +511,11 @@ func selectClustersEOM(condensed []condensedEdge, stability map[int]float64, n i
 		}
 	}
 
-	// If no non-root clusters selected, root becomes noise (allow_single_cluster=false)
+	// If only root is selected, all points become noise
 	if nonRootSelected == 0 {
 		isCluster[root] = false
 	} else {
-		// Root is not selected if we have child clusters
+		// Root is never selected when we have child clusters
 		isCluster[root] = false
 	}
 
