@@ -48,10 +48,13 @@ type Worker struct {
 	graceWindow   time.Duration
 	maxAttempts   int
 	drainBatch    int
+	deepLinkBase  string
 }
 
 // NewWorker wires the digest worker. transport should carry notify.DefaultRetry
 // so a flaky webhook is retried within the call; digest_runs retries across ticks.
+// deepLinkBase is the Console base URL for deep links (e.g. "https://console.example.com");
+// pass empty string to omit links.
 func NewWorker(
 	subs *digestsubscription.Repo,
 	runs *digestrun.Repo,
@@ -59,6 +62,7 @@ func NewWorker(
 	targets targetReader,
 	embed embedQueueReader,
 	transport *notify.Transport,
+	deepLinkBase string,
 ) *Worker {
 	return ptrext.Of(Worker{
 		subs:          subs,
@@ -72,6 +76,7 @@ func NewWorker(
 		graceWindow:   2 * time.Hour,
 		maxAttempts:   5,
 		drainBatch:    20,
+		deepLinkBase:  deepLinkBase,
 	})
 }
 
@@ -292,12 +297,23 @@ func (w *Worker) deliver(
 	}
 	from, to := WindowForRunDate(run.RunDate, loc)
 
+	priorTo := from
+	priorFrom := priorTo.AddDate(0, 0, -1)
+	if sub.Frequency == "weekly" {
+		priorFrom = priorTo.AddDate(0, 0, -7)
+	}
+
+	enrichment, _ := w.agg.ComputeEnrichment(ctx, run.TenantID, ptrext.Of(res), from, to, priorFrom, priorTo)
+
 	view := DigestView{
-		TenantID: run.TenantID,
-		RunDate:  run.RunDate.Format("2006-01-02"),
-		From:     from,
-		To:       to,
-		Result:   res,
+		TenantID:     run.TenantID,
+		RunDate:      run.RunDate.Format("2006-01-02"),
+		From:         from,
+		To:           to,
+		Result:       res,
+		Deltas:       enrichment.Deltas,
+		Sparkline:    enrichment.Sparkline,
+		DeepLinkBase: w.deepLinkBase,
 	}
 
 	var errs []error

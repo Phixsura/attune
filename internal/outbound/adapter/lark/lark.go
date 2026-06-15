@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Phixsura/attune/internal/outbound"
@@ -167,18 +168,174 @@ func buildEventCard(env *outbound.Envelope) larkCard {
 }
 
 func buildDigestCard(view any) larkCard {
+	dv, ok := view.(digestView)
+	if !ok {
+		return larkCard{
+			Header: larkHeader{
+				Title:    larkText{Tag: "plain_text", Content: "Daily Feedback Digest"},
+				Template: "purple",
+			},
+			Elements: []larkElement{
+				{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: formatFallbackMarkdown(view)})},
+			},
+		}
+	}
+
+	var elements []larkElement
+
+	summary := fmt.Sprintf("**%d** feedback", dv.Result.Stats.Total)
+	if dv.Deltas.Feedback.Direction != "" && dv.Deltas.Feedback.Direction != "flat" {
+		summary += " " + deltaArrow(dv.Deltas.Feedback)
+	}
+	summary += fmt.Sprintf(" (%d enriched", dv.Result.Stats.Enriched)
+	if dv.Result.Stats.Urgent > 0 {
+		summary += fmt.Sprintf(", **%d urgent**", dv.Result.Stats.Urgent)
+	}
+	summary += ")"
+
+	if len(dv.Sparkline) > 0 {
+		summary = "📈 " + renderSparkline(dv.Sparkline) + "\n\n" + summary
+	}
+	elements = append(elements, larkElement{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: summary})})
+	elements = append(elements, larkElement{Tag: "hr"})
+
+	if len(dv.Result.Themes) > 0 {
+		for i, t := range dv.Result.Themes {
+			badge := lifecycleBadge(t.Lifecycle)
+			line := fmt.Sprintf("%d. %s**%s** — %d report", i+1, badge, t.Title, t.Count)
+			if t.Count != 1 {
+				line += "s"
+			}
+			if len(t.ExampleTitles) > 0 {
+				line += fmt.Sprintf("\n   > \"%s\"", truncate(t.ExampleTitles[0], 60))
+			}
+			elements = append(elements, larkElement{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: line})})
+		}
+	} else if len(dv.Result.Items) > 0 {
+		for _, it := range dv.Result.Items {
+			line := fmt.Sprintf("• #%d %s", it.ID, truncate(it.Title, 50))
+			elements = append(elements, larkElement{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: line})})
+		}
+	}
+
+	elements = append(elements, larkElement{Tag: "hr"})
+	elements = append(elements, larkElement{
+		Tag: "note",
+		Elements: []larkElement{{
+			Tag:     "plain_text",
+			Content: ptrext.Of(larkText{Tag: "plain_text", Content: fmt.Sprintf("via Attune · %s", dv.RunDate)}),
+		}},
+	})
+
 	return larkCard{
 		Header: larkHeader{
-			Title:    larkText{Tag: "plain_text", Content: "Daily Feedback Digest"},
+			Title:    larkText{Tag: "plain_text", Content: "📊 Daily Digest — " + dv.RunDate},
 			Template: "purple",
 		},
-		Elements: []larkElement{
-			{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: formatDigestMarkdown(view)})},
-		},
+		Elements: elements,
 	}
 }
 
-func formatDigestMarkdown(view any) string {
+type digestView struct {
+	TenantID  string `json:"tenant_id"`
+	RunDate   string `json:"run_date"`
+	Result    digestResult
+	Deltas    digestDeltas
+	Sparkline []int `json:"sparkline,omitempty"`
+}
+
+type digestResult struct {
+	Stats  digestStats
+	Themes []digestTheme
+	Items  []digestItem
+}
+
+type digestStats struct {
+	Total    int `json:"feedback"`
+	Enriched int `json:"enriched"`
+	Urgent   int `json:"urgent"`
+}
+
+type digestTheme struct {
+	Title         string   `json:"title"`
+	Count         int      `json:"count"`
+	ExampleTitles []string `json:"example_titles,omitempty"`
+	Lifecycle     string   `json:"lifecycle,omitempty"`
+}
+
+type digestItem struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+}
+
+type digestDeltas struct {
+	Feedback deltaValue `json:"feedback"`
+	Enriched deltaValue `json:"enriched"`
+	Urgent   deltaValue `json:"urgent"`
+}
+
+type deltaValue struct {
+	Current   int    `json:"current"`
+	Prior     int    `json:"prior"`
+	Change    int    `json:"change"`
+	Direction string `json:"direction"`
+}
+
+func deltaArrow(d deltaValue) string {
+	switch d.Direction {
+	case "up":
+		if d.Change > 0 {
+			return fmt.Sprintf("↑%d", d.Change)
+		}
+		return "↑"
+	case "down":
+		if d.Change < 0 {
+			return fmt.Sprintf("↓%d", -d.Change)
+		}
+		return "↓"
+	default:
+		return ""
+	}
+}
+
+func lifecycleBadge(lc string) string {
+	switch lc {
+	case "new":
+		return "[NEW] "
+	case "regressed":
+		return "[BACK] "
+	default:
+		return ""
+	}
+}
+
+func renderSparkline(counts []int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	bars := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	maxVal := 0
+	for _, c := range counts {
+		if c > maxVal {
+			maxVal = c
+		}
+	}
+	if maxVal == 0 {
+		var sb strings.Builder
+		for range counts {
+			sb.WriteRune('▁')
+		}
+		return sb.String()
+	}
+	var sb strings.Builder
+	for _, c := range counts {
+		idx := (c * (len(bars) - 1)) / maxVal
+		sb.WriteRune(bars[idx])
+	}
+	return sb.String()
+}
+
+func formatFallbackMarkdown(view any) string {
 	b, _ := json.MarshalIndent(view, "", "  ")
 	return "```\n" + truncate(string(b), 2000) + "\n```"
 }

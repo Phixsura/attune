@@ -43,6 +43,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   configure Lark + Slack + raw-webhook simultaneously; each receives the
   digest in its native format (card/Block Kit/JSON).
 
+- **Digest enrichment (#27).** Daily digests now include period-over-period
+  deltas (↑/↓ arrows), 7-day sparkline trends, theme lifecycle badges
+  ([NEW]/[BACK] for new vs returning themes), example quotes per theme,
+  and deep links to the Console. The markdown rendering is rewritten
+  severity-first with all enrichment data visible.
+
 ### Removed
 
 - **Dead inline notifier path (#34).** Deleted `notify.Notifier` interface,
