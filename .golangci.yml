@@ -98,6 +98,41 @@ linters:
               desc: "framework is below handlers"
             - pkg: github.com/Phixsura/attune/internal/notify
               desc: "inbound and notify are sibling subsystems"
+        # 3. outbound-boundary: nothing under service / handlers / repo /
+        #    infra / notify — nor the framework root itself — may import
+        #    internal/outbound/adapter/*. Adapters self-register via
+        #    init(); cmd/attune is the only legal blank-import site.
+        #    Mirrors inbound-boundary for outbound.
+        outbound-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/service/**"
+            - "**/internal/handlers/**"
+            - "**/internal/repo/**"
+            - "**/internal/infra/**"
+            - "**/internal/notify/**"
+            - "**/internal/domain/**"
+            - "**/internal/outbound/*.go"
+          deny:
+            - pkg: github.com/Phixsura/attune/internal/outbound/adapter
+              desc: "core/framework must not import outbound adapters; cmd/attune blank-imports only (#34)"
+        # 4. outbound-framework-isolation: the framework root defines
+        #    Target as a decoupled struct; no imports from service / repo /
+        #    handlers / notify. Drivers live in service and bridge to
+        #    notify.Transport.
+        outbound-framework-isolation:
+          list-mode: lax
+          files:
+            - "**/internal/outbound/*.go"
+          deny:
+            - pkg: github.com/Phixsura/attune/internal/service
+              desc: "outbound framework is below service"
+            - pkg: github.com/Phixsura/attune/internal/repo
+              desc: "outbound framework uses Target struct, not repo"
+            - pkg: github.com/Phixsura/attune/internal/handlers
+              desc: "framework is below handlers"
+            - pkg: github.com/Phixsura/attune/internal/notify
+              desc: "outbound and notify are sibling subsystems"
     revive:
       rules:
         - name: blank-imports

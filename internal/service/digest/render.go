@@ -14,6 +14,16 @@ const (
 	payloadEventType = "feedback.digest"
 )
 
+// DigestView is the channel-agnostic data structure passed to outbound adapters.
+// Each adapter (generic, lark, slack) renders this into its native format.
+type DigestView struct {
+	TenantID string    `json:"tenant_id"`
+	RunDate  string    `json:"run_date"`
+	From     time.Time `json:"from"`
+	To       time.Time `json:"to"`
+	Result   Result    `json:"result"`
+}
+
 type themeOut struct {
 	Title         string   `json:"title"`
 	Count         int      `json:"count"`

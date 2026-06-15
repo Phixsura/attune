@@ -8,6 +8,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
@@ -108,22 +109,13 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 	}
 }
 
-// supportedOutboxDestTypes mirrors service/enricher_outbox.outboxDestTypes
-// — kept here so worker can reject rows whose dest_type the enricher
-// would have accepted but worker can't actually send (catches drift
-// where someone adds a dest_type to one side and forgets the other).
-var supportedOutboxDestTypes = map[string]bool{
-	notifytarget.DestRawWebhook:  true,
-	notifytarget.DestGitHubIssue: true,
-}
-
 // processRow handles one outbox entry end-to-end: lookup destination,
 // send, mark delivered/failed/dead.
 func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow) {
 	const where = "service.OutboxWorker.processRow"
 	logext.Infof(ctx, "[%s] start,id:%d,tenant:%s,dest_type:%s,audience:%s,attempts:%d",
 		where, row.ID, row.TenantID, row.DestinationType, row.Audience, row.Attempts)
-	if !supportedOutboxDestTypes[row.DestinationType] {
+	if outbound.LookupEvent(row.DestinationType) == nil {
 		w.markDead(ctx, row, "unsupported destination_type "+row.DestinationType)
 		return
 	}
@@ -182,9 +174,8 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 	}
 }
 
-// sendByDestType, sendRawWebhook, signRawBody, checkOutboxResponse, and
-// truncateStr now live in outbox_worker_send.go to keep this file under
-// the attune no-grab-bag-files guidance.
+// sendByDestType, wrapCheck, and truncateStr live in outbox_worker_send.go
+// to keep this file under the attune no-grab-bag-files guidance.
 
 // failOrDead promotes a row to dead once attempts exceeds max.
 // Otherwise schedules the next retry per the backoff table.

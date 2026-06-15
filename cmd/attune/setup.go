@@ -16,7 +16,6 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
-	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
@@ -103,24 +102,6 @@ func syncCustomWebhooks(
 			where, d.TenantSlug, audience, d.Disabled)
 	}
 	return nil
-}
-
-// buildNotifier composes the active outbound chain.
-//
-// Post-#66 Plan T17: the inline notifier path is gone — raw-webhook
-// destinations were the only other channel and they deliver through
-// the outbox worker reading tenant_notify_targets directly. Kept as a
-// function (instead of inlining the nil) so a future outbound adapter
-// SDK (#34) can re-introduce inline channels without touching every
-// call site.
-func buildNotifier(
-	ctx context.Context,
-	_ *config.Config,
-	_ *notifytarget.NotifyTargetRepo,
-) (notify.Notifier, error) {
-	const where = "main.buildNotifier"
-	logext.Infof(ctx, "[%s] no inline notifiers wired (raw-webhook delivers via outbox; #34 will re-add)", where)
-	return nil, nil
 }
 
 // runOutboxLagRefresher ticks every 30s and updates the

@@ -26,9 +26,10 @@ type embedQueueReader interface {
 	QueueDepth(ctx context.Context, tenantID string) (int64, error)
 }
 
-// targetReader resolves the tenant's digest delivery target.
+// targetReader resolves the tenant's digest delivery targets.
 type targetReader interface {
 	GetByTenantAudience(ctx context.Context, tenantID, destType, audience string) (*notifytarget.NotifyTarget, error)
+	ListActiveByTenantAudience(ctx context.Context, tenantID, audience string) ([]notifytarget.NotifyTarget, error)
 }
 
 // Worker schedules and delivers daily digests. Each tick it (1) claims any due
@@ -274,22 +275,46 @@ func (w *Worker) aggregateRun(
 func (w *Worker) deliver(
 	ctx context.Context, run *digestrun.Run, sub *digestsubscription.DueSubscription, res Result,
 ) error {
-	target, err := w.targets.GetByTenantAudience(
-		ctx, run.TenantID, notifytarget.DestRawWebhook, notifytarget.AudienceDigest)
+	const where = "digest.Worker.deliver"
+
+	targets, err := w.targets.ListActiveByTenantAudience(ctx, run.TenantID, notifytarget.AudienceDigest)
 	if err != nil {
-		return fmt.Errorf("resolve digest target: %w", err)
+		return fmt.Errorf("list digest targets: %w", err)
 	}
-	if target.Disabled {
-		return fmt.Errorf("digest target disabled")
+	if len(targets) == 0 {
+		logext.Warnf(ctx, "[%s] no digest targets for tenant %s", where, run.TenantID)
+		return nil
 	}
+
 	loc, err := time.LoadLocation(sub.ResolvedTimezone)
 	if err != nil {
 		return fmt.Errorf("load timezone: %w", err)
 	}
 	from, to := WindowForRunDate(run.RunDate, loc)
-	payload, err := RenderPayload(run.TenantID, run.RunDate.Format("2006-01-02"), from, to, res)
-	if err != nil {
-		return fmt.Errorf("render digest: %w", err)
+
+	view := DigestView{
+		TenantID: run.TenantID,
+		RunDate:  run.RunDate.Format("2006-01-02"),
+		From:     from,
+		To:       to,
+		Result:   res,
 	}
-	return w.sender.send(ctx, target, payload, trace.New())
+
+	var errs []error
+	for i := range targets {
+		target := &targets[i]
+		if err := w.sender.send(ctx, target, view, trace.New()); err != nil {
+			logext.Warnf(ctx, "[%s] delivery failed,tenant:%s,dest_type:%s,err:%+v",
+				where, run.TenantID, target.DestinationType, err.Error())
+			errs = append(errs, err)
+		} else {
+			logext.Infof(ctx, "[%s] delivered,tenant:%s,dest_type:%s",
+				where, run.TenantID, target.DestinationType)
+		}
+	}
+
+	if len(errs) == len(targets) {
+		return fmt.Errorf("all %d digest deliveries failed", len(errs))
+	}
+	return nil
 }

@@ -15,6 +15,42 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Outbound channel-adapter framework (#34).** `internal/outbound/` provides
+  the pluggable delivery SDK mirroring `internal/inbound/`. Features:
+  composition interfaces (`EventChannel` / `DigestChannel`) with compile-time
+  capability discovery; self-registration via `init()`; content-hash signing
+  (`sha256(canonical(envelope))`) for field-order-independent HMAC verification;
+  response checkers for webhook and GitHub semantics; depguard rules enforcing
+  the adapter boundary. Outbox worker now dispatches via `outbound.LookupEvent`
+  instead of a hardcoded switch.
+
+- **Lark and Slack delivery adapters (#34).** Native card/Block Kit rendering
+  for Lark (Feishu) and Slack. Lark adapter supports custom bot in-body signing
+  (`timestamp` + `sign` fields). Both channels support event notifications and
+  daily digests.
+
+- **Console destination type select (#34).** The notify targets dialog now has
+  a typed destination select (Raw Webhook / GitHub Issue / Lark / Slack) with
+  per-channel help text for URL and secret fields.
+
+- **Signature version column (#34).** `tenant_notify_targets.signature_version`
+  enables gradual rollout of content-hash signing. Values: `v2-content-hash`
+  (new default, field-order independent) or `v2-bytes` (legacy, for customers
+  not yet upgraded).
+
+- **Multi-channel digest delivery (#34).** The digest worker now fans out to
+  all targets with `audience=digest`, not just raw-webhook. A tenant can
+  configure Lark + Slack + raw-webhook simultaneously; each receives the
+  digest in its native format (card/Block Kit/JSON).
+
+### Removed
+
+- **Dead inline notifier path (#34).** Deleted `notify.Notifier` interface,
+  `MultiNotifier`, `RawWebhookRouter`, `buildNotifier`, `Enricher.SetNotifier`,
+  and `Enricher.fanOut`. All delivery now goes through the outbox worker with
+  the #34 outbound adapter framework. This removes ~400 lines of unreachable
+  code that predates the outbox pattern.
+
 - **Cursor pagination for job list endpoint (#30).** `GET /fb/v1/console/jobs`
   now supports cursor-based pagination via `cursor` query parameter and returns
   `next_cursor` in the response. Consistent with other list APIs.

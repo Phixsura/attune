@@ -22,9 +22,35 @@ import {
 import type { NotifyTargetCreate } from '@/features/notify-targets/api/create-notify-target'
 import type { NotifyTarget } from '@/features/notify-targets/api/list-notify-targets'
 
-// raw-webhook is the only outbound destination shipped in v0.3. #34
-// will reintroduce a typed select when the outbound-adapter SDK lands.
-const FIXED_DEST_TYPE = 'raw-webhook' as const
+// #34 outbound adapter framework: typed destination select with per-channel help.
+const DEST_TYPES = [
+  {
+    value: 'raw-webhook',
+    label: 'Raw Webhook',
+    urlHelp: 'Your HTTPS endpoint that receives POST requests',
+    secretHelp: 'HMAC secret for signature verification',
+  },
+  {
+    value: 'github-issue',
+    label: 'GitHub Issue',
+    urlHelp: 'GitHub repo URL (https://github.com/owner/repo)',
+    secretHelp: 'GitHub PAT with issues:write scope',
+  },
+  {
+    value: 'lark',
+    label: 'Lark (Feishu)',
+    urlHelp: 'Lark custom bot webhook URL',
+    secretHelp: 'Bot signature secret (optional)',
+  },
+  {
+    value: 'slack',
+    label: 'Slack',
+    urlHelp: 'Slack incoming webhook URL',
+    secretHelp: 'Not used — URL is the secret',
+  },
+] as const
+
+type DestType = (typeof DEST_TYPES)[number]['value']
 
 export function CreateNotifyDialog({
   open,
@@ -38,12 +64,16 @@ export function CreateNotifyDialog({
   pending: boolean
 }) {
   const { t } = useTranslation()
+  const [destType, setDestType] = useState<DestType>('raw-webhook')
   const [url, setUrl] = useState('')
   const [secret, setSecret] = useState('')
   const [timeout, setTimeoutSec] = useState(10)
   const [audience, setAudience] = useState<'pool' | 'radar' | 'all' | 'digest'>('all')
 
+  const selectedDest = DEST_TYPES.find((d) => d.value === destType) ?? DEST_TYPES[0]
+
   const reset = () => {
+    setDestType('raw-webhook')
     setUrl('')
     setSecret('')
     setTimeoutSec(10)
@@ -66,7 +96,7 @@ export function CreateNotifyDialog({
             // Pass server-side defaults explicitly so the wire body is
             // self-describing — the API also fills these if omitted.
             const body: NotifyTargetCreate = {
-              destinationType: FIXED_DEST_TYPE,
+              destinationType: destType,
               url: url.trim(),
               audience,
               timeoutSeconds: timeout,
@@ -82,6 +112,28 @@ export function CreateNotifyDialog({
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
+              <Label htmlFor="nt-dest-type">
+                {t('notify_targets.create_dialog.dest_type_field')}
+              </Label>
+              <Select
+                value={destType}
+                onValueChange={(v) => setDestType(v as DestType)}
+                disabled={pending}
+              >
+                <SelectTrigger id="nt-dest-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DEST_TYPES.map((d) => (
+                    <SelectItem key={d.value} value={d.value}>
+                      {d.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="nt-url">{t('notify_targets.create_dialog.url_field')}</Label>
               <Input
                 id="nt-url"
@@ -92,9 +144,7 @@ export function CreateNotifyDialog({
                 disabled={pending}
                 required
               />
-              <p className="text-xs text-muted-foreground">
-                {t('notify_targets.create_dialog.url_help_raw')}
-              </p>
+              <p className="text-xs text-muted-foreground">{selectedDest.urlHelp}</p>
             </div>
 
             <div className="space-y-2">
@@ -106,9 +156,7 @@ export function CreateNotifyDialog({
                 onChange={(e) => setSecret(e.target.value)}
                 disabled={pending}
               />
-              <p className="text-xs text-muted-foreground">
-                {t('notify_targets.create_dialog.secret_help_raw')}
-              </p>
+              <p className="text-xs text-muted-foreground">{selectedDest.secretHelp}</p>
             </div>
 
             <div className="space-y-2">

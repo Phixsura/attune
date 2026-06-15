@@ -131,13 +131,6 @@ func runServer() error {
 	if err := syncCustomWebhooks(ctx, cfg.CustomWebhooks, tenantRepo, notifyTargetRepo); err != nil {
 		return fmt.Errorf("sync custom webhooks: %w", err)
 	}
-	notifier, err := buildNotifier(ctx, cfg, notifyTargetRepo)
-	if err != nil {
-		return fmt.Errorf("build notifier: %w", err)
-	}
-	if notifier != nil {
-		enricher.SetNotifier(notifier)
-	}
 	// Outbox wiring: enricher writes raw-webhook rows in same tx as
 	// MarkDone (at-least-once); a background worker drains them.
 	enricher.SetOutbox(outboxRepo, notifyTargetRepo)

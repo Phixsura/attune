@@ -1,8 +1,7 @@
 // Package sig holds the wire-canonical HMAC signing helpers + the v1
-// envelope-version constant. Centralized here so notify/test_send.go,
-// notify/adapter/rawwebhook, and service/outbox can all reference the
-// same byte-exact implementation of SignRaw — no "must stay in sync"
-// comments, no drift.
+// envelope-version constant. Centralized here so notify/test_send.go
+// and service/outbox can all reference the same byte-exact implementation
+// of SignRaw — no "must stay in sync" comments, no drift.
 //
 // The package depends only on stdlib crypto; no other internal/notify
 // types — so it can be imported from anywhere in the outbound subsystem

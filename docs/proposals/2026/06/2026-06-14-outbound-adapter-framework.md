@@ -3,9 +3,17 @@
 | | |
 |---|---|
 | **Issue** | #34 |
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Started** | 2026-06-14 CST |
+| **Revised** | 2026-06-15 CST |
 | **Related** | #27 (daily digest — first multi-channel consumer; its rendering rides this framework), #66 (inbound channel-agnostic framework — the in-house pattern this mirrors; Plan T17 deleted the inline notifier with the note "raw-webhook delivers via outbox; #34 will re-add"), #25/#26 (outbox/worker paradigm + v2 envelope), #109 (managed LLM routing — digest theme naming), #114 (semantic clustering — digest themes) |
+
+> **2026-06-15 revision.** Code review identified four design flaws in the
+> original proposal: (1) sealed `Message` type is a Go anti-pattern requiring
+> runtime type-switches; (2) single digest target per tenant is a product
+> limitation encoded in schema; (3) v2 envelope byte-passthrough defers the
+> field-order contract problem instead of solving it; (4) `Rendered` struct
+> cannot express Lark's in-body signing. This revision addresses all four.
 
 > **Why now.** #27 asked for the digest in "Lark / Slack". A code-verified review
 > showed Lark is hard-deleted, Slack is an enum stub, and *every* outbound body is
@@ -111,30 +119,26 @@ and *retry classification* — the four decisions this framework must make.
    package + one blank-import line in `cmd/attune`, **zero edits** to any driver,
    switch, or registry call site. Symmetric to `internal/inbound`.
 2. Port the two live channels (`generic` = today's raw-webhook, `github-issue`)
-   onto it **with byte-identical wire output** for existing customers, and delete
-   the dead inline scaffolding (`Notifier`/`MultiNotifier`/`RawWebhookRouter`/v1
-   envelope/`fanOut`/`buildNotifier`).
+   onto it and delete the dead inline scaffolding (`Notifier`/`MultiNotifier`/
+   `RawWebhookRouter`/v1 envelope/`fanOut`/`buildNotifier`).
 3. Two new channel plugins: `lark` (interactive card) and `slack` (Block Kit),
    each owning its own signing.
-4. One shared retry/terminal classifier; one shared transport
-   (`notify.Transport`, unchanged).
-5. The digest renders through the framework, selected by its target's
-   `destination_type` — no `output_format` field; the locked Console select
-   becomes a typed channel picker.
-6. Per-channel test-send (the Console "Test" button works for every channel, not
-   just raw-webhook).
+4. One shared transport (`notify.Transport`, unchanged); each channel provides
+   its own `ResponseChecker` (no `DefaultCheck` fallback — explicit is better).
+5. **Multi-target digest fan-out** — a tenant can subscribe to digest delivery
+   on multiple channels (Lark card + Slack + email) via `digest_subscriptions`.
+6. **Content-hash envelope signing** — replace byte-order-dependent HMAC with
+   `sha256(canonical(envelope))` so field order no longer matters.
+7. Per-channel test-send (the Console "Test" button works for every channel).
 
 **Non-goals**
 
 - `email` (SMTP) delivery — the framework leaves an obvious slot; not built here.
 - Provider-level fan-out à la Novu (one channel, many providers); attune stays
   one-level (channel = `destination_type`).
-- Multiple digest targets per tenant / multi-format fan-out of one digest — v1
-  digest still resolves **one** `audience='digest'` target (its channel decides
-  the format). (Inherited #27 limit.)
 - A URL-scheme config DSL; arbitrary user-supplied adapters at runtime (plugins
   are compile-time blank-imports, exactly like inbound).
-- Reworking the outbox backoff schedule or the v2 envelope contents.
+- Reworking the outbox backoff schedule.
 
 ## Proposal
 
@@ -142,15 +146,13 @@ and *retry classification* — the four decisions this framework must make.
 
 ```
 internal/outbound/                  framework root — channel-agnostic
-  channel.go      Channel + Factory + Rendered + the registry-facing types
+  channel.go      EventChannel + DigestChannel + Factory + Rendered
   registry.go     Register(id, Factory) / Lookup(id) / Channels()   ← copies inbound/registry.go:40
-  message.go      Message (sealed) = EventMessage | DigestMessage
-  view.go         DigestView (totals+Δ, themes+lifecycle+examples, items, trend, links)
-  check.go        DefaultCheck (the one true 2xx/408·429/4xx/5xx classifier) + ErrTerminal re-export
-  sign.go         HMACSign(body, secret) wrapper (so adapters never import notify/sig)
-internal/outbound/adapter/generic/  init(){ outbound.Register("raw-webhook", New) }  envelope+markdown, HMAC
-internal/outbound/adapter/githubissue/  ported SendGitHubIssue; EventMessage→issue body, token auth
-internal/outbound/adapter/lark/     Lark interactive card + Lark timestamp-sign
+  target.go       Target (destination row projection)
+  sign.go         ContentHashSign(envelope, secret) — the new signing scheme
+internal/outbound/adapter/generic/  init(){ outbound.Register("raw-webhook", New) }  envelope+markdown
+internal/outbound/adapter/githubissue/  ported SendGitHubIssue; token auth
+internal/outbound/adapter/lark/     Lark interactive card + in-body timestamp-sign
 internal/outbound/adapter/slack/    Slack Block Kit (incoming-webhook; URL is the secret)
 cmd/attune/main.go                  _ "…/outbound/adapter/{generic,githubissue,lark,slack}"  ← only legal site
 ```
@@ -158,30 +160,45 @@ cmd/attune/main.go                  _ "…/outbound/adapter/{generic,githubissue
 Core types (Go-shaped pseudocode; final signatures land in code):
 
 ```go
-// Channel — one outbound destination kind. ID() is the destination_type.
-type Channel interface {
+// EventChannel — renders per-feedback notifications (the outbox path).
+// Channels that don't support events (e.g. a future email-digest-only channel)
+// simply don't implement this interface.
+type EventChannel interface {
     ID() string
-    Render(msg Message, dst Target) (Rendered, error) // ErrUnsupportedMessage if N/A
+    RenderEvent(envelope *Envelope, dst Target) (Rendered, error)
+}
+
+// DigestChannel — renders daily/weekly roll-ups.
+// Channels that don't support digests (e.g. github-issue) don't implement this.
+type DigestChannel interface {
+    ID() string
+    RenderDigest(view any, dst Target) (Rendered, error)  // view is service-defined
 }
 
 // Factory — adapter init() calls Register(id, factory); dup id panics (inbound idiom).
-type Factory func() Channel
+// The returned value implements EventChannel, DigestChannel, or both.
+type Factory func() any
 
-// Rendered — everything the shared transport needs; the adapter has already
-// computed the URL, body, content-type, and signing/auth headers.
+// Rendered — the channel has full control over request construction.
+// This accommodates Lark's in-body signing, GitHub's different URL, etc.
 type Rendered struct {
-    Method      string        // "" ⇒ POST
-    URL         string        // adapter may rewrite (github → REST API; webhook → dst.URL)
-    Body        []byte
-    ContentType string
-    Headers     http.Header   // auth + signature already applied
-    Check       ResponseCheck // nil ⇒ DefaultCheck
+    Build func(ctx context.Context) (*http.Request, error)  // full control
+    Check ResponseChecker                                    // required, no default
 }
 
-// Message — sealed; adapters type-switch exhaustively.
-type Message interface{ isMessage() }
-type EventMessage  struct { EnvelopeV2 []byte }       // feedback.enriched — exact stored bytes
-type DigestMessage struct { View DigestView }          // feedback.digest — structure-first
+// Envelope — the structured v2 envelope. Channels receive structure, not bytes.
+// The framework handles content-hash signing; channels don't touch raw bytes.
+type Envelope struct {
+    Version     string         `json:"version"`
+    EventType   string         `json:"event_type"`
+    TraceID     string         `json:"trace_id"`
+    DeliveredAt time.Time      `json:"delivered_at"`
+    Feedback    FeedbackData   `json:"feedback"`
+}
+
+// ContentHashSign computes sha256(canonical-json(envelope)) and signs that.
+// Field order no longer matters — the canonical form is sorted alphabetically.
+func ContentHashSign(env *Envelope, secret string) string
 ```
 
 `registry.go` is a near-verbatim copy of `internal/inbound/registry.go` (mutex +
@@ -189,27 +206,35 @@ type DigestMessage struct { View DigestView }          // feedback.digest — st
 snapshot) — minus the `Manager`/Start/Shutdown lifecycle (rendering is on-demand,
 not long-running). Selection is `Lookup(id)`, never a `switch`.
 
-**Why `EventMessage` carries bytes, not structure.** Today the v2 envelope is
-built once at enrichment time and stored in `notify_outbox.payload`
-(`enricher_outbox.go:70`); the worker POSTs those exact bytes and customer
-verifiers depend on the canonical field order (`enricher_outbox.go:350-352`). So
-the `generic` adapter passes `EnvelopeV2` through **unchanged** — zero wire drift.
-Adapters that need structure (`github`, `lark`, `slack`) unmarshal it, exactly as
-`SendGitHubIssue` already does (`github_issue.go:142-180`). The digest is the
-opposite (no stored envelope), so `DigestMessage` is structure-first.
+**Why composition interfaces, not sealed Message.** The original design used a
+`Message` sealed type that adapters type-switch on. This is a Go anti-pattern:
+Go has no exhaustiveness checking for type-switches, so adding a new message
+kind (e.g. `AlertMessage`) silently fails at runtime. Composition interfaces
+(`EventChannel` + `DigestChannel`) make capability explicit at compile time —
+`github-issue` implements only `EventChannel`; the digest worker only calls
+channels that implement `DigestChannel`.
+
+**Why content-hash signing.** The original design passed v2 envelope bytes
+through unchanged because customers verify HMAC against raw bytes, which depend
+on JSON field order. This defers the problem: any future envelope change risks
+breaking customer verifiers. Content-hash signing (`sha256(canonical(env))`)
+uses a deterministic JSON serialization (keys sorted alphabetically), so field
+order no longer matters. This is a **breaking change** for existing verifiers —
+migration path in §Data model.
 
 ### Per-channel signing (owned by the adapter)
 
 | Channel | Auth / signing | Source |
 |---|---|---|
-| `raw-webhook` (generic) | `X-Attune-Signature: sha256=…` HMAC over body, if secret set | `outbound.HMACSign` (wraps `sig.SignRaw`) — **unchanged from today** |
+| `raw-webhook` (generic) | `X-Attune-Signature: sha256=…` HMAC over content-hash, if secret set | `outbound.ContentHashSign` — **content-hash of canonical envelope** |
 | `github-issue` | `Authorization: Bearer <token>` | ported from `github_issue.go:88-96` |
-| `lark` | Lark custom-bot `timestamp` + `sign` (HMAC-SHA256 of `timestamp\nsecret`, base64) **in the JSON body**, only when the bot has signature-verification on | new, in the lark adapter (stdlib crypto/hmac) |
+| `lark` | Lark custom-bot `timestamp` + `sign` (HMAC-SHA256 of `timestamp\nsecret`, base64) **in the JSON body**, only when the bot has signature-verification on | new, via `Build func` (full request control) |
 | `slack` | none — the incoming-webhook URL is the secret | n/a |
 
 Signing is per-channel data, so it belongs in the adapter, not a shared signer.
-The framework exposes only the generic `HMACSign` helper so adapters never reach
-into `internal/notify/sig`.
+The framework exposes `ContentHashSign` (canonical JSON → hash → HMAC) for
+generic channels; Lark's in-body signing uses `Build func` to construct the
+request with embedded `timestamp` + `sign` fields.
 
 ### Boundary rules (depguard — mirror inbound's two)
 
@@ -231,16 +256,22 @@ Both delivery drivers collapse to *resolve target → Lookup(id) → Render → 
 
 ```go
 // outbox worker (per-event) — replaces sendByDestType switch
-ch, ok := outbound.Lookup(row.DestinationType)        // was: switch row.DestinationType
-if !ok { return fmt.Errorf("%w: no channel %q", notify.ErrTerminal, row.DestinationType) }
-r, err := ch.Render(outbound.EventMessage{EnvelopeV2: row.Payload}, target)
-return w.shipped(ctx, r, outbound.EventMessage{…})    // builds *http.Request, calls Transport.Send
+ch := outbound.LookupEvent(row.DestinationType)       // was: switch row.DestinationType
+if ch == nil { return fmt.Errorf("%w: no event channel %q", notify.ErrTerminal, row.DestinationType) }
+env := &outbound.Envelope{Payload: row.Payload, SignVersion: target.SignatureVersion}
+r, err := ch.RenderEvent(env, target)
+req, err := r.Build(ctx)                              // adapter controls full request
+return w.transport.Send(ctx, label, func(ctx) (*http.Request, error) { return req, nil }, r.Check)
 
-// digest worker — replaces hardcoded raw-webhook + RenderPayload
-target := w.targets.GetByTenantAudience(ctx, tenantID, /* any digest channel */, AudienceDigest)
-ch, _ := outbound.Lookup(target.DestinationType)       // generic | lark | slack
-r, err := ch.Render(outbound.DigestMessage{View: view}, target)
-return w.ship(ctx, target, r)
+// digest worker — replaces hardcoded raw-webhook + RenderPayload; multi-target fan-out
+subs := w.subs.ListByTenant(ctx, tenantID)           // digest_subscriptions junction
+for _, sub := range subs {
+    ch := outbound.LookupDigest(sub.Target.DestinationType)   // generic | lark | slack
+    if ch == nil { continue }                                   // channel doesn't support digest
+    r, err := ch.RenderDigest(view, sub.Target)
+    req, _ := r.Build(ctx)
+    if err := w.transport.Send(ctx, label, …, r.Check); err != nil { … }
+}
 ```
 
 `shipped`/`ship` is one shared helper that turns a `Rendered` into a
@@ -250,33 +281,61 @@ return w.ship(ctx, target, r)
 
 ### Data model
 
-No new tables. Two narrow changes:
+One new table, two schema changes:
 
 ```sql
--- 029: widen the channel enum to the registered adapters.
-ALTER TABLE tenant_notify_targets DROP CONSTRAINT IF EXISTS tenant_notify_targets_dest_check;
-ALTER TABLE tenant_notify_targets ADD  CONSTRAINT tenant_notify_targets_dest_check
-  CHECK (destination_type IN ('raw-webhook','github-issue','lark','slack'));  -- 'email' when built
+-- 029: digest_subscriptions — multi-target digest delivery.
+-- A tenant can subscribe to digest on multiple channels (Lark + Slack + email).
+-- Each subscription references a notify_target; the worker fans out to all.
+CREATE TABLE IF NOT EXISTS digest_subscriptions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    notify_target_id UUID NOT NULL REFERENCES tenant_notify_targets(id) ON DELETE CASCADE,
+    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, notify_target_id)
+);
 
--- One digest target per tenant, across ALL channels. The base table is
--- UNIQUE(tenant_id, destination_type, audience), which would let a tenant hold
--- both a (lark,digest) and a (raw-webhook,digest) row — ambiguous now that the
--- channel IS the format. This partial index makes "the digest target" singular
--- and makes GetDigestTarget unambiguous (also encodes #27's v1 one-digest-target
--- limit at the DB level instead of by convention).
-CREATE UNIQUE INDEX IF NOT EXISTS uq_notify_targets_one_digest
-  ON tenant_notify_targets (tenant_id) WHERE audience = 'digest';
+CREATE INDEX IF NOT EXISTS idx_digest_subscriptions_tenant
+  ON digest_subscriptions (tenant_id) WHERE enabled = TRUE;
+
+-- 029: widen the channel enum to the registered adapters.
+-- NOTE: We do NOT add a CHECK constraint here. The registry (outbound.Channels())
+-- is the source of truth; the Console select is populated from it. Adding a CHECK
+-- would require a migration every time we add a channel.
+-- Validation happens at the application layer via outbound.Lookup().
+
+-- 029: envelope signature version column for migration.
+ALTER TABLE tenant_notify_targets
+  ADD COLUMN IF NOT EXISTS signature_version TEXT NOT NULL DEFAULT 'v2-content-hash';
+-- Existing rows start on v2-content-hash; during migration window, ops can set
+-- 'v2-bytes' for customers not yet upgraded. Worker checks this column.
 ```
 
-- **No `digest_subscriptions.output_format`.** The digest target's
-  `destination_type` is the format. A tenant who wants the digest as a Lark card
-  creates a `destination_type='lark', audience='digest'` target; the worker
-  resolves digest **by audience across channels** — drop the hardcoded
-  `'raw-webhook'` arg at `worker.go:278` and add `GetDigestTarget(tenant)` =
-  `SELECT … WHERE tenant_id=$1 AND audience='digest'`, made single-row by the
-  partial unique index above. Switching a tenant's digest channel is then a
-  channel change on that one row (or delete+create), which the index enforces.
-- `audience='digest'` already exists (#27, migration `027`).
+**Multi-target digest fan-out.** The original design forced one digest target per
+tenant via a partial unique index. This encoded a product limitation in schema —
+ops wanting Lark + Slack + email would need three tenants. The new design:
+
+1. `digest_subscriptions` is a junction table: one row per (tenant, target).
+2. Digest worker queries `SELECT nt.* FROM digest_subscriptions ds JOIN
+   tenant_notify_targets nt ON nt.id = ds.notify_target_id WHERE ds.tenant_id=$1
+   AND ds.enabled` — returns 0..N targets.
+3. Worker fans out to each, one `digest_runs` row per (tenant, run_date, target).
+4. Console gains a "Digest Channels" section listing subscribed targets.
+
+**Content-hash signing migration.** The `signature_version` column enables
+gradual rollout:
+
+| Value | Behavior |
+|-------|----------|
+| `v2-bytes` | Legacy: sign raw JSON bytes (field-order dependent) |
+| `v2-content-hash` | New: sign `sha256(canonical(envelope))` |
+
+Migration path:
+1. Deploy with both signing codepaths.
+2. New targets default to `v2-content-hash`.
+3. Existing targets stay on `v2-bytes` until customer confirms upgrade.
+4. After migration window, remove `v2-bytes` codepath; column becomes vestigial.
 
 ### Digest enrichment that the new card channels surface (the #27 "太拉" fixes)
 
@@ -338,74 +397,101 @@ quotes, links, top-N + "+N more", and the awkward "1 rows" copy fixed; `lark` an
 6. **One mega-PR.** Rejected (user chose stacked): a single PR touching every
    delivery path is unreviewable and maximizes regression blast radius. Land as a
    stack, each independently green.
-7. **Re-marshal the v2 envelope from structure in `generic`.** Rejected: risks
-   field-order drift for customer HMAC verifiers; pass the stored bytes through.
+7. **Sealed `Message` type with type-switch** (original proposal). Rejected: Go
+   has no exhaustiveness checking for type-switches, so adding a new message kind
+   silently fails at runtime. Composition interfaces (`EventChannel` +
+   `DigestChannel`) make capability explicit at compile time.
+8. **`Rendered` struct with `Body []byte` + `Headers`** (original proposal).
+   Rejected: cannot express Lark's in-body signing (`timestamp` + `sign` fields
+   in JSON body). `Build func` gives channels full control over request
+   construction.
+9. **Byte-passthrough for v2 envelope** (original proposal). Rejected: defers
+   the field-order contract problem. Content-hash signing solves it — customers
+   sign against a deterministic canonical form, not raw bytes.
+10. **One digest target per tenant** (original proposal). Rejected: encodes a
+    product limitation in schema. `digest_subscriptions` junction table enables
+    multi-channel fan-out (Lark + Slack + email).
+11. **`DefaultCheck` fallback for `ResponseChecker`** (original proposal).
+    Rejected: adapter authors forget to set `Check`, silently using the default,
+    which misclassifies GitHub 201 or Lark-specific codes. Explicit is better —
+    `Check` is required, no default.
 
 ## Risks / tradeoffs
 
 - **Live-path regression (highest).** The migration rewires the *only* production
-  delivery path (outbox). Mitigation: `generic` passes v2 bytes through unchanged;
-  every existing delivery test (below) must stay green **before** the switch is
-  deleted; land behind the stack so per-event migration is its own reviewable PR
-  with the full integration suite re-run.
-- **Customer wire compatibility.** `generic` output must be byte-identical
-  (envelope + `X-Attune-Signature`). Asserted by reusing the existing
-  `enricher_outbox_test.go` field-order test against the adapter output.
-- **Lark signing correctness.** Lark's timestamp-sign is easy to get subtly wrong
-  (newline, base64, 1-hour validity). Mitigation: unit vectors from Lark docs; the
-  signature path only engages when the operator enables bot signature-verification
-  (default off → URL-as-secret works immediately).
+  delivery path (outbox). Mitigation: `generic` adapter passes content-hash signed
+  envelope; every existing delivery test (below) must stay green **before** the
+  switch is deleted; land behind the stack so per-event migration is its own
+  reviewable PR with the full integration suite re-run.
+- **Content-hash migration.** Changing the signing scheme requires customers to
+  update their verification code. Mitigation: `signature_version` column enables
+  gradual rollout; existing rows keep `v2-bytes` until customer confirms upgrade;
+  new rows default to `v2-content-hash`.
+- **Lark signing correctness.** Lark's in-body signing (`timestamp` + `sign`) is
+  easy to get subtly wrong (newline, base64, 1-hour validity). Mitigation: unit
+  vectors from Lark docs; `Build func` gives the adapter full control over request
+  construction, including body fields.
 - **Console UX shift.** The locked select becoming typed can surface previously
   hidden stub channels. Mitigation: the select is sourced from the registry, so it
   only ever lists channels that actually deliver.
-- **Sealed `Message` growth.** A future `email`/`sms` message kind changes the
-  type-switch in every adapter. Acceptable pre-1.0; adapters return
-  `ErrUnsupportedMessage` for kinds they don't handle, so the compiler + a registry
-  conformance test catch gaps.
-- **Stacked-PR coordination.** #27/PR #116 (digest) rebases onto the framework.
-  Mitigation: the digest's existing behavior is preserved until its own stack step
-  swaps `RenderPayload` for `outbound.Lookup`.
+- **Composition interface explosion.** Adding new message capabilities (email, SMS)
+  adds new interfaces. Acceptable: each interface is opt-in, capability is explicit
+  at compile time, adapters implement only what they support.
+- **Stacked-PR coordination.** Digest PRs rebase onto the framework. Mitigation:
+  the digest's existing behavior is preserved until its own stack step wires the
+  `DigestChannel` implementation.
+- **Multi-target fan-out complexity.** `digest_subscriptions` junction table adds
+  another join. Mitigation: the query is straightforward (one join, indexed by
+  `tenant_id`); the flexibility (Lark + Slack + email per tenant) justifies the
+  schema overhead.
 - **Scope.** This is a multi-PR effort (~6–9 person-days) well beyond #27.
   Mitigated by the stack and by the large dead-code deletion that nets the diff
   down.
 
 ## Implementation plan (stacked PRs, each independently green)
 
-1. **Framework root** — `internal/outbound/{channel,registry,message,view,check,
-   sign}.go` + tests (registry dup-panic, `DefaultCheck` table, sealed-message
-   conformance); the two depguard rules. No driver changes yet. *(inert)*
-2. **Port live channels + delete dead scaffolding** — `adapter/generic` (v2
-   bytes-through, HMAC) + `adapter/githubissue` (ported `SendGitHubIssue`); swap
+1. **Framework root** — `internal/outbound/{channel,registry,envelope,render,
+   sign}.go` + tests:
+   - `EventChannel` + `DigestChannel` composition interfaces
+   - `Rendered` with `Build func` + required `Check`
+   - Registry (dup-panic, `Lookup` miss → terminal, `Channels()` sorted)
+   - Content-hash signing (`sha256(canonical(envelope))`)
+   - Two depguard rules (mirrors inbound)
+   - No driver changes yet *(inert)*
+2. **Port live channels** — `adapter/generic` (content-hash signing, EventChannel
+   only for now) + `adapter/githubissue` (ported `SendGitHubIssue`); swap
    `sendByDestType` for `outbound.Lookup` in the outbox worker; **delete**
    `Notifier`, `MultiNotifier`(+test), `RawWebhookRouter`+v1 envelope+
    `checkRawResponse`, `Enricher.fanOut`/`SetNotifier`, `buildNotifier`. Re-run
-   the **entire** delivery suite (§Verification). *Byte-identical wire output.*
-3. **New channels** — `adapter/lark` (card + sign) + `adapter/slack` (Block Kit);
-   per-channel test-send so the Console "Test" button works for each; widen the
-   `destination_type` enum (migration `029`) sourced from `outbound.Channels()`.
-4. **Console** — typed `destination_type` select (`dialogs.tsx`/`edit-dialog.tsx`),
+   the **entire** delivery suite (§Verification).
+3. **Signature migration** — migration `029` adds `signature_version` column;
+   new rows default to `v2-content-hash`; existing rows stay on `v2-bytes` until
+   customer confirms upgrade; worker checks column and applies appropriate signing.
+4. **New channels** — `adapter/lark` (card + in-body sign via `Build func`) +
+   `adapter/slack` (Block Kit); per-channel test-send; widen `destination_type`
+   enum sourced from `outbound.Channels()`.
+5. **Console** — typed `destination_type` select (`dialogs.tsx`/`edit-dialog.tsx`),
    per-channel help text, validation aligned to the registry; vitest + msw.
-5. **Digest onto the framework** — drop `RenderPayload`'s direct use for
-   `outbound.Lookup`; `GetDigestTarget(tenant)` resolves `audience='digest'`
-   across channels; remove the hardcoded `'raw-webhook'`. Digest behavior
-   unchanged for a generic target.
-6. **Digest enrichment (#27 "太拉" fixes)** — `DigestView` gains Δ / quotes /
+6. **Digest schema** — migration `030` adds `digest_subscriptions` junction table;
+   `DigestChannel` interface enables multi-target fan-out; worker queries the
+   junction table, fans out to each target, one `digest_runs` row per target.
+7. **Digest enrichment (#27 "太拉" fixes)** — `DigestView` gains Δ / quotes /
    lifecycle / sparkline / deep-links; markdown rewritten; Lark + Slack digest
-   cards. `CHANGELOG` + proposals flipped to `Implemented`; full e2e.
+   cards via `DigestChannel`. `CHANGELOG` + proposals flipped to `Implemented`;
+   full e2e.
 
-PRs 1–4 are pure #34; 5–6 close the #27 follow-up. Each PR updates `CHANGELOG`
+PRs 1–5 are pure #34; 6–7 close the #27 follow-up. Each PR updates `CHANGELOG`
 (`### Added`/`### Changed`/`### Removed` for the dead code).
 
 ## Verification
 
 **Must stay green (per-event migration, PR 2) — the existing suite:**
 
-- `enricher_outbox_test.go` — v2 envelope shape + **stable field order** +
-  `selectOutboxTargets` audience rules (pool always / radar-if-urgent / all /
-  digest-never / drops non-outbox dests). Re-asserted against `generic` adapter
-  output for byte-identity.
+- `enricher_outbox_test.go` — v2 envelope shape + `selectOutboxTargets` audience
+  rules (pool always / radar-if-urgent / all / digest-never / drops non-outbox
+  dests). Canonical form verified via content-hash signing.
 - `raw_webhook_test.go` — v1 envelope tests **removed** with the dead code;
-  replaced by `adapter/generic` tests asserting the same v2 bytes the outbox sent.
+  replaced by `adapter/generic` tests asserting content-hash signed v2 envelope.
 - `notifier_test.go` (MultiNotifier) — **removed** with the dead code.
 - `test/integration/postgres/ingest` `TestPG_IngestEnrichQueuesAndDrainsOutbox` —
   full ingest→enrich→outbox→POST receiver path, now through the registry.
@@ -415,14 +501,20 @@ PRs 1–4 are pure #34; 5–6 close the #27 follow-up. Each PR updates `CHANGELO
 **New:**
 
 - Registry: dup-`Register` panics; `Lookup` miss → terminal; `Channels()` sorted;
-  every registered channel handles or cleanly refuses each `Message` kind.
-- `DefaultCheck`: table test (2xx ok; 408/429 retry; 4xx terminal; 5xx retry);
-  github override (201 ok; 403 secondary-rate-limit demoted to retry).
-- `generic`: byte-identical to the current raw-webhook body + signature, both
-  `EventMessage` and `DigestMessage`.
-- `lark` / `slack`: golden card/Block-Kit JSON; Lark sign vectors from docs.
+  composition interfaces (`EventChannel` / `DigestChannel`) queried at runtime.
+- Response checking: table test (2xx ok; 408/429 retry; 4xx terminal; 5xx retry);
+  github override (201 ok; 403 secondary-rate-limit demoted to retry); **no
+  default** — each `Rendered.Check` is required.
+- Content-hash signing: `sha256(canonical(envelope))` — stable across marshal/
+  unmarshal; `signature_version` column controls which signing codepath.
+- `generic`: content-hash signed v2 envelope, both `EventChannel.RenderEvent`
+  and `DigestChannel.RenderDigest`.
+- `lark` / `slack`: golden card/Block-Kit JSON; Lark in-body sign vectors from
+  docs; `Build func` constructs request with body-embedded signature fields.
 - Per-channel test-send: each channel's "Test" ping builds + classifies.
 - Console: typed select renders the registry's channels; per-channel validation.
+- Digest fan-out: `digest_subscriptions` junction table; worker queries and fans
+  out to each subscribed target; one `digest_runs` row per (tenant, date, target).
 - **Real-LLM e2e** (attune bar): the digest theme path against a live provider,
   delivered as a **Lark card** and a **Slack Block Kit** message to local
   receivers, plus the generic envelope — one run documented in the PR.

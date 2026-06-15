@@ -30,11 +30,11 @@ func NewNotifyTarget(pool *pgxpool.Pool) *NotifyTargetRepo {
 // migrations/004_tenant_notify_targets.sql (and 011 for github-issue).
 //
 // All outbox-routed destinations share the same Transport + RetryPolicy;
-// only the per-type sender (notify/adapter/rawwebhook/raw_webhook.go, notify/adapter/githubissue/github_issue.go,
+// only the per-type adapter (outbound/adapter/generic, outbound/adapter/githubissue,
 // …) differs. New destinations require: (1) extend the CHECK constraint
-// via a new migration, (2) add the constant here, (3) wire a sender into
-// service/outbox/outbox_worker.go's sendByDestType, (4) include in
-// selectOutboxTargets if the audience semantics apply.
+// via a new migration, (2) add the constant here, (3) implement an adapter
+// in internal/outbound/adapter/, (4) include in selectOutboxTargets if
+// the audience semantics apply.
 const (
 	DestRawWebhook  = "raw-webhook"
 	DestSlackBot    = "slack-bot"
@@ -57,15 +57,16 @@ const (
 
 // NotifyTarget is one wired destination row.
 type NotifyTarget struct {
-	ID              uuid.UUID
-	TenantID        string
-	DestinationType string
-	Audience        string
-	URL             string
-	Secret          string
-	TimeoutSeconds  int
-	Disabled        bool
-	CreatedAt       time.Time // DB column tenant_notify_targets.created_at (UTC)
+	ID               uuid.UUID
+	TenantID         string
+	DestinationType  string
+	Audience         string
+	URL              string
+	Secret           string
+	TimeoutSeconds   int
+	Disabled         bool
+	SignatureVersion string    // "v2-content-hash" (default) or "v2-bytes" (legacy)
+	CreatedAt        time.Time // DB column tenant_notify_targets.created_at (UTC)
 	// Phase 3.2 — current alert state. LastFailureAt is non-nil iff the
 	// most recent delivery to this target failed (cleared on next success).
 	LastFailureAt *time.Time
@@ -114,7 +115,7 @@ func (r *NotifyTargetRepo) Upsert(ctx context.Context, t NotifyTarget) error {
 func (r *NotifyTargetRepo) ListAllActive(ctx context.Context) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		 created_at, last_failure_at, last_error
+		 signature_version, created_at, last_failure_at, last_error
 		 FROM tenant_notify_targets
 		 WHERE disabled = FALSE`)
 	if err != nil {
@@ -129,7 +130,7 @@ func (r *NotifyTargetRepo) ListAllActive(ctx context.Context) ([]NotifyTarget, e
 func (r *NotifyTargetRepo) ListActiveByTenant(ctx context.Context, tenantID string) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		 created_at, last_failure_at, last_error
+		 signature_version, created_at, last_failure_at, last_error
 		 FROM tenant_notify_targets
 		 WHERE tenant_id = $1
 		 AND disabled = FALSE`, tenantID)
@@ -149,7 +150,7 @@ func scanNotifyTargets(rows pgx.Rows) ([]NotifyTarget, error) {
 		if err := rows.Scan(
 			&t.ID, &t.TenantID, &t.DestinationType, &t.Audience,
 			&t.URL, &t.Secret, &t.TimeoutSeconds, &t.Disabled,
-			&t.CreatedAt, &t.LastFailureAt, &t.LastError,
+			&t.SignatureVersion, &t.CreatedAt, &t.LastFailureAt, &t.LastError,
 		); err != nil {
 			return nil, fmt.Errorf("scan notify target: %w", err)
 		}
@@ -163,12 +164,30 @@ func scanNotifyTargets(rows pgx.Rows) ([]NotifyTarget, error) {
 func (r *NotifyTargetRepo) ListByTenant(ctx context.Context, tenantID string) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
-		 created_at, last_failure_at, last_error
+		 signature_version, created_at, last_failure_at, last_error
 		 FROM tenant_notify_targets
 		 WHERE tenant_id = $1
 		 ORDER BY destination_type, audience`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list notify targets by tenant: %w", err)
+	}
+	defer rows.Close()
+	return scanNotifyTargets(rows)
+}
+
+// ListActiveByTenantAudience returns all enabled targets for a tenant with
+// the specified audience. Used by the digest worker for multi-channel fan-out.
+func (r *NotifyTargetRepo) ListActiveByTenantAudience(ctx context.Context, tenantID, audience string) ([]NotifyTarget, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,
+		 signature_version, created_at, last_failure_at, last_error
+		 FROM tenant_notify_targets
+		 WHERE tenant_id = $1
+		 AND audience = $2
+		 AND disabled = FALSE
+		 ORDER BY destination_type`, tenantID, audience)
+	if err != nil {
+		return nil, fmt.Errorf("list notify targets by tenant audience: %w", err)
 	}
 	defer rows.Close()
 	return scanNotifyTargets(rows)

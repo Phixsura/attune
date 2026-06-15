@@ -426,6 +426,7 @@
     },
     "create_dialog": {
       "title": "添加通知目标",
+      "dest_type_field": "通道类型",
       "url_field": "Webhook URL",
       "url_help_raw": "你的 HTTPS 端点。HMAC 签名将通过 X-Attune-Signature header 发送。",
       "secret_field": "签名 secret",

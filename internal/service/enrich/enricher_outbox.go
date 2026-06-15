@@ -347,9 +347,8 @@ func extractTraceID(ctx context.Context) string {
 // traceID is embedded as the top-level "trace_id" field so customers
 // can correlate the received envelope with their own logs.
 //
-// Field order + names MUST match notify/adapter/rawwebhook/raw_webhook.go's inline path
-// because customer verifiers may rely on canonical JSON. json.Marshal
-// preserves struct field order — change with caution.
+// The #34 outbound framework uses content-hash signing which is field-order
+// independent. json.Marshal preserves struct field order for readability.
 func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 	type enrichedOut struct {
 		Title            string         `json:"title"`
