@@ -6,6 +6,7 @@ package member
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
@@ -51,6 +52,7 @@ func (h *Handler) List(ctx *dispatcher.RequestContext[*session.AuthCtx], _ *attu
 			Id:         m.ID,
 			MemberType: m.MemberType,
 			UserId:     m.UserID,
+			Email:      ptrext.IndirectOr(m.Email, ""),
 			Role:       string(m.Role),
 			RoleSource: m.RoleSource,
 			InvitedAt:  m.InvitedAt.Unix(),
@@ -81,6 +83,19 @@ func (h *Handler) UpdateRole(ctx *dispatcher.RequestContext[*session.AuthCtx], r
 		logext.Errorf(ctx, "[%s] get failed,id:%s,err:%s", where, req.Id, err.Error())
 		return dispatcher.Fail[*attunev1.UpdateMemberRoleResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to get member")
+	}
+
+	if target.TenantID != auth.TenantID {
+		logext.Warnf(ctx, "[%s] cross-tenant access denied,actor_tenant:%s,target_tenant:%s",
+			where, auth.TenantID, target.TenantID)
+		return dispatcher.Fail[*attunev1.UpdateMemberRoleResponse](
+			http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "member not found")
+	}
+
+	if target.UserID != "" && target.UserID == auth.UserID {
+		logext.Warnf(ctx, "[%s] denied: cannot change own role,actor:%s", where, auth.UserID)
+		return dispatcher.Fail[*attunev1.UpdateMemberRoleResponse](
+			http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "cannot change own role")
 	}
 
 	newRole := domain.ParseRole(req.Role)
@@ -140,7 +155,14 @@ func (h *Handler) Remove(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to get member")
 	}
 
-	if !pol.CanRemove(target.ID, target.Role) {
+	if target.TenantID != auth.TenantID {
+		logext.Warnf(ctx, "[%s] cross-tenant access denied,actor_tenant:%s,target_tenant:%s",
+			where, auth.TenantID, target.TenantID)
+		return dispatcher.Fail[*attunev1.RemoveMemberResponse](
+			http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "member not found")
+	}
+
+	if !pol.CanRemove(target.UserID, target.Role) {
 		logext.Warnf(ctx, "[%s] denied: cannot remove,actor:%s,target:%s,target_role:%s",
 			where, auth.UserID, req.Id, target.Role)
 		return dispatcher.Fail[*attunev1.RemoveMemberResponse](
@@ -159,4 +181,81 @@ func (h *Handler) Remove(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,target_id:%s", where, auth.TenantID, req.Id)
 	return dispatcher.OK(ptrext.Of(attunev1.RemoveMemberResponse{}))
+}
+
+// Invite creates a pending invite for a new member.
+func (h *Handler) Invite(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.InviteMemberRequest) (dispatcher.Result[*attunev1.InviteMemberResponse], error) {
+	const where = "console.MemberHandler.Invite"
+	auth := ctx.Auth
+	logext.Infof(ctx, "[%s] start,tenant_id:%s,email:%s,role:%s", where, auth.TenantID, req.Email, req.Role)
+
+	actorRole := rbac.FromContext(ctx)
+	pol := policy.NewMemberPolicy(actorRole, auth.UserID)
+
+	newRole := domain.ParseRole(req.Role)
+	if !newRole.IsValid() {
+		return dispatcher.Fail[*attunev1.InviteMemberResponse](
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid role")
+	}
+
+	if newRole == domain.RoleAdmin {
+		if !pol.CanPromoteToAdmin() {
+			logext.Warnf(ctx, "[%s] denied: cannot invite as admin,actor:%s", where, auth.UserID)
+			return dispatcher.Fail[*attunev1.InviteMemberResponse](
+				http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "cannot invite as admin")
+		}
+	} else if !pol.CanInvite() {
+		logext.Warnf(ctx, "[%s] denied: cannot invite members,actor:%s", where, auth.UserID)
+		return dispatcher.Fail[*attunev1.InviteMemberResponse](
+			http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "cannot invite members")
+	}
+
+	exists, err := h.members.ExistsByEmail(ctx, auth.TenantID, req.Email)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] check existing failed,email:%s,err:%s", where, req.Email, err.Error())
+		return dispatcher.Fail[*attunev1.InviteMemberResponse](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to check existing member")
+	}
+	if exists {
+		logext.Infof(ctx, "[%s] member already exists,tenant_id:%s,email:%s", where, auth.TenantID, req.Email)
+		return dispatcher.Fail[*attunev1.InviteMemberResponse](
+			http.StatusConflict, attunev1.ErrorCode_CONFLICT, "member with this email already exists")
+	}
+
+	actor, err := h.members.GetByUser(ctx, auth.TenantID, auth.UserType, auth.UserID)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] get actor failed,user_id:%s,err:%s", where, auth.UserID, err.Error())
+		return dispatcher.Fail[*attunev1.InviteMemberResponse](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to get inviter")
+	}
+
+	m, err := h.members.Create(ctx, tenantmember.Member{
+		TenantID:   auth.TenantID,
+		MemberType: "invite",
+		UserID:     "",
+		Email:      ptrext.Of(req.Email),
+		Role:       newRole,
+		RoleSource: "manual",
+		InvitedBy:  ptrext.Of(actor.ID),
+		InvitedAt:  time.Now(),
+	})
+	if err != nil {
+		logext.Errorf(ctx, "[%s] create failed,email:%s,err:%s", where, req.Email, err.Error())
+		return dispatcher.Fail[*attunev1.InviteMemberResponse](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to create invite")
+	}
+
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,email:%s,invite_id:%s", where, auth.TenantID, req.Email, m.ID)
+	return dispatcher.OK(ptrext.Of(attunev1.InviteMemberResponse{
+		Member: ptrext.Of(attunev1.Member{
+			Id:         m.ID,
+			MemberType: m.MemberType,
+			UserId:     m.UserID,
+			Email:      ptrext.IndirectOr(m.Email, ""),
+			Role:       string(m.Role),
+			RoleSource: m.RoleSource,
+			InvitedAt:  m.InvitedAt.Unix(),
+			AcceptedAt: 0,
+		}),
+	}))
 }

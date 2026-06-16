@@ -16,6 +16,18 @@ import { useLogout } from '@/features/session/api/logout'
 import { consolePath } from '@/lib/console-path'
 import { usePermissions } from '@/lib/hooks/use-permissions'
 
+function NavLink({ to, children }: { to: string; children: React.ReactNode }) {
+  return (
+    <Link
+      to={to}
+      className="text-muted-foreground transition-colors hover:text-foreground"
+      activeProps={{ className: 'text-foreground' }}
+    >
+      {children}
+    </Link>
+  )
+}
+
 interface TopBarProps {
   me: SessionMe
 }
@@ -27,7 +39,7 @@ export function TopBar({ me }: TopBarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const logout = useLogout()
-  const { canManage, isAdmin, role } = usePermissions()
+  const { can, isAdmin, role } = usePermissions()
 
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
@@ -40,12 +52,8 @@ export function TopBar({ me }: TopBarProps) {
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
           <NavLink to="/usage">{t('nav.usage')}</NavLink>
           <NavLink to="/llm-usage">{t('nav.llm_usage')}</NavLink>
-          {canManage() && (
-            <>
-              <NavLink to="/llm-config">{t('nav.llm_config')}</NavLink>
-              <NavLink to="/settings">{t('nav.settings')}</NavLink>
-            </>
-          )}
+          {can('nav:llm_config') && <NavLink to="/llm-config">{t('nav.llm_config')}</NavLink>}
+          {can('nav:settings') && <NavLink to="/settings">{t('nav.settings')}</NavLink>}
         </nav>
         <div className="ml-auto flex items-center gap-3">
           <RoleBadge role={role} />
@@ -88,22 +96,5 @@ export function TopBar({ me }: TopBarProps) {
         </div>
       </div>
     </header>
-  )
-}
-
-interface NavLinkProps {
-  to: string
-  children: React.ReactNode
-}
-
-function NavLink({ to, children }: NavLinkProps) {
-  return (
-    <Link
-      to={to}
-      className="text-muted-foreground transition-colors hover:text-foreground"
-      activeProps={{ className: 'text-foreground' }}
-    >
-      {children}
-    </Link>
   )
 }

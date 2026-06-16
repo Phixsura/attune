@@ -25,8 +25,9 @@ var (
 type Member struct {
 	ID         string
 	TenantID   string
-	MemberType string // "admin" | "oidc_user" | "tenant_user"
+	MemberType string // "admin" | "oidc_user" | "tenant_user" | "invite"
 	UserID     string
+	Email      *string // for invites and display
 	Role       domain.Role
 	RoleSource string // "idp" | "manual" | "bootstrap"
 	InvitedBy  *string
@@ -49,7 +50,7 @@ func NewRepo(pool *pgxpool.Pool) *Repo {
 // GetByUser finds a membership by tenant, member type, and user ID.
 func (r *Repo) GetByUser(ctx context.Context, tenantID, memberType, userID string) (Member, error) {
 	const q = `
-		SELECT id, tenant_id, member_type, user_id, role, role_source,
+		SELECT id, tenant_id, member_type, user_id, email, role, role_source,
 		       invited_by, invited_at, accepted_at, created_at, updated_at
 		FROM tenant_members
 		WHERE tenant_id = $1 AND member_type = $2 AND user_id = $3`
@@ -61,7 +62,7 @@ func (r *Repo) GetByUser(ctx context.Context, tenantID, memberType, userID strin
 
 	var m Member
 	err := r.pool.QueryRow(ctx, q, tenantID, memberType, userID).Scan(
-		&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Role, &m.RoleSource,
+		&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Email, &m.Role, &m.RoleSource,
 		&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt, &m.CreatedAt, &m.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -76,14 +77,14 @@ func (r *Repo) GetByUser(ctx context.Context, tenantID, memberType, userID strin
 // GetByID finds a membership by its ID.
 func (r *Repo) GetByID(ctx context.Context, id string) (Member, error) {
 	const q = `
-		SELECT id, tenant_id, member_type, user_id, role, role_source,
+		SELECT id, tenant_id, member_type, user_id, email, role, role_source,
 		       invited_by, invited_at, accepted_at, created_at, updated_at
 		FROM tenant_members
 		WHERE id = $1`
 
 	var m Member
 	err := r.pool.QueryRow(ctx, q, id).Scan(
-		&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Role, &m.RoleSource,
+		&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Email, &m.Role, &m.RoleSource,
 		&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt, &m.CreatedAt, &m.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -120,7 +121,7 @@ func (r *Repo) GetRole(ctx context.Context, tenantID, memberType, userID string)
 // List returns all members for a tenant.
 func (r *Repo) List(ctx context.Context, tenantID string) ([]Member, error) {
 	const q = `
-		SELECT id, tenant_id, member_type, user_id, role, role_source,
+		SELECT id, tenant_id, member_type, user_id, email, role, role_source,
 		       invited_by, invited_at, accepted_at, created_at, updated_at
 		FROM tenant_members
 		WHERE tenant_id = $1
@@ -136,7 +137,7 @@ func (r *Repo) List(ctx context.Context, tenantID string) ([]Member, error) {
 	for rows.Next() {
 		var m Member
 		if err := rows.Scan(
-			&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Role, &m.RoleSource,
+			&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Email, &m.Role, &m.RoleSource,
 			&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt, &m.CreatedAt, &m.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -158,14 +159,14 @@ func (r *Repo) CountAdmins(ctx context.Context, tenantID string) (int, error) {
 func (r *Repo) Create(ctx context.Context, m Member) (Member, error) {
 	const q = `
 		INSERT INTO tenant_members (
-			tenant_id, member_type, user_id, role, role_source,
+			tenant_id, member_type, user_id, email, role, role_source,
 			invited_by, invited_at, accepted_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at, updated_at`
 
 	err := r.pool.QueryRow(
 		ctx, q,
-		m.TenantID, m.MemberType, m.UserID, m.Role, m.RoleSource,
+		m.TenantID, m.MemberType, m.UserID, m.Email, m.Role, m.RoleSource,
 		m.InvitedBy, m.InvitedAt, m.AcceptedAt,
 	).Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt)
 	if err != nil {
@@ -285,6 +286,61 @@ func (r *Repo) EnsureOIDCMember(ctx context.Context, tenantID, userID string, ro
 		&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Role, &m.RoleSource,
 		&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt, &m.CreatedAt, &m.UpdatedAt,
 	)
+	if err != nil {
+		return Member{}, err
+	}
+	return m, nil
+}
+
+// ExistsByEmail checks if any member with this email exists in the tenant.
+func (r *Repo) ExistsByEmail(ctx context.Context, tenantID, email string) (bool, error) {
+	const q = `SELECT EXISTS(SELECT 1 FROM tenant_members WHERE tenant_id = $1 AND email = $2)`
+	var exists bool
+	err := r.pool.QueryRow(ctx, q, tenantID, email).Scan(&exists)
+	return exists, err
+}
+
+// GetPendingInviteByEmail finds a pending invite by email.
+// Returns ErrNotFound if no invite exists.
+func (r *Repo) GetPendingInviteByEmail(ctx context.Context, tenantID, email string) (Member, error) {
+	const q = `
+		SELECT id, tenant_id, member_type, user_id, email, role, role_source,
+		       invited_by, invited_at, accepted_at, created_at, updated_at
+		FROM tenant_members
+		WHERE tenant_id = $1 AND email = $2 AND member_type = 'invite' AND accepted_at IS NULL`
+
+	var m Member
+	err := r.pool.QueryRow(ctx, q, tenantID, email).Scan(
+		&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Email, &m.Role, &m.RoleSource,
+		&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt, &m.CreatedAt, &m.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Member{}, ErrNotFound
+	}
+	if err != nil {
+		return Member{}, err
+	}
+	return m, nil
+}
+
+// AcceptInvite converts a pending invite to an actual membership.
+// Returns ErrNotFound if the invite doesn't exist or is already accepted.
+func (r *Repo) AcceptInvite(ctx context.Context, inviteID, memberType, userID string) (Member, error) {
+	const q = `
+		UPDATE tenant_members
+		SET member_type = $1, user_id = $2, accepted_at = NOW(), updated_at = NOW()
+		WHERE id = $3 AND member_type = 'invite' AND accepted_at IS NULL
+		RETURNING id, tenant_id, member_type, user_id, email, role, role_source,
+		          invited_by, invited_at, accepted_at, created_at, updated_at`
+
+	var m Member
+	err := r.pool.QueryRow(ctx, q, memberType, userID, inviteID).Scan(
+		&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Email, &m.Role, &m.RoleSource,
+		&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt, &m.CreatedAt, &m.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Member{}, ErrNotFound
+	}
 	if err != nil {
 		return Member{}, err
 	}

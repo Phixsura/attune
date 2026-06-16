@@ -34,6 +34,7 @@ import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-p
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
 import { TagsPage } from '@/features/tags/components/tags-page'
 import { WorkflowSettingsPage } from '@/features/workflow/components/workflow-settings-page'
+import { usePermissions } from '@/lib/hooks/use-permissions'
 import type { Dimension } from '@/proto/attune/v1/common'
 
 type SettingsSection =
@@ -62,7 +63,8 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
 export const Route = createFileRoute('/_authed/settings')({
   beforeLoad: async ({ context }) => {
     const me = await context.queryClient.ensureQueryData(meQuery())
-    if (me.user?.role !== 'admin') {
+    const role = me.user?.role
+    if (role !== 'admin' && role !== 'member') {
       throw redirect({ to: '/feedback' })
     }
   },
@@ -81,6 +83,7 @@ function SettingsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { section } = Route.useSearch()
+  const { can } = usePermissions()
   const cfg = useQuery(enrichConfigQuery())
   const save = useUpdateEnrichConfig()
   const preview = usePreviewEnrichPrompt()
@@ -159,6 +162,7 @@ function SettingsPage() {
 
         {section === 'classification' ? (
           <ClassificationSettings
+            canEdit={can('settings:enrich_config:edit')}
             dimensions={dimensions}
             modeLabel={modeLabel}
             previewPending={preview.isPending}
@@ -182,6 +186,7 @@ function SettingsPage() {
 }
 
 function ClassificationSettings({
+  canEdit,
   dimensions,
   modeLabel,
   onDimensionsChange,
@@ -196,6 +201,7 @@ function ClassificationSettings({
   sample,
   savePending,
 }: {
+  canEdit: boolean
   dimensions: Dimension[]
   modeLabel: string
   onDimensionsChange: (dimensions: Dimension[]) => void
@@ -234,16 +240,19 @@ function ClassificationSettings({
             <Label htmlFor="prompt">{t('settings.prompt_label')}</Label>
             <textarea
               id="prompt"
-              className="min-h-[220px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="min-h-[220px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               value={prompt}
               onChange={(e) => onPromptChange(e.target.value)}
+              disabled={!canEdit}
             />
             <p className="text-xs text-muted-foreground">{t('settings.prompt_tokens')}</p>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={onRestoreDefault}>
-            <RotateCcw className="mr-2 h-3.5 w-3.5" />
-            {t('settings.restore_default')}
-          </Button>
+          {canEdit && (
+            <Button type="button" variant="outline" size="sm" onClick={onRestoreDefault}>
+              <RotateCcw className="mr-2 h-3.5 w-3.5" />
+              {t('settings.restore_default')}
+            </Button>
+          )}
         </CardContent>
       </Card>
 
@@ -253,7 +262,7 @@ function ClassificationSettings({
           <CardDescription>{t('settings.dimensions_help')}</CardDescription>
         </CardHeader>
         <CardContent>
-          <DimensionsEditor value={dimensions} onChange={onDimensionsChange} />
+          <DimensionsEditor value={dimensions} onChange={onDimensionsChange} disabled={!canEdit} />
         </CardContent>
       </Card>
 
@@ -288,12 +297,14 @@ function ClassificationSettings({
         </CardContent>
       </Card>
 
-      <div className="flex justify-end">
-        <Button onClick={onSave} disabled={savePending}>
-          {savePending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-          {t('common.save')}
-        </Button>
-      </div>
+      {canEdit && (
+        <div className="flex justify-end">
+          <Button onClick={onSave} disabled={savePending}>
+            {savePending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {t('common.save')}
+          </Button>
+        </div>
+      )}
     </section>
   )
 }

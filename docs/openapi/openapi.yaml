@@ -1559,6 +1559,30 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - MemberService
+            description: POST /fb/v1/console/members — invite a new member.
+            operationId: MemberService_InviteMember
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/InviteMemberRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/InviteMemberResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/members/{id}:
         delete:
             tags:
@@ -3112,6 +3136,21 @@ components:
                     type: string
                     description: Enrichment lifecycle state at ingest time (always "pending" here).
             description: IngestResponse is returned on 200.
+        InviteMemberRequest:
+            required:
+                - email
+                - role
+            type: object
+            properties:
+                email:
+                    type: string
+                role:
+                    type: string
+        InviteMemberResponse:
+            type: object
+            properties:
+                member:
+                    $ref: '#/components/schemas/Member'
         JobStatusResponse:
             type: object
             properties:
@@ -3429,6 +3468,8 @@ components:
                 memberType:
                     type: string
                 userId:
+                    type: string
+                email:
                     type: string
                 role:
                     type: string

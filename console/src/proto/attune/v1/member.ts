@@ -11,9 +11,11 @@ export const protobufPackage = "attune.v1";
 /** Member represents a user's membership in a tenant. */
 export interface Member {
   id: string;
-  /** "admin" | "oidc_user" | "tenant_user" */
+  /** "admin" | "oidc_user" | "tenant_user" | "invite" */
   memberType: string;
   userId: string;
+  /** display email (from user record or invite) */
+  email: string;
   /** "admin" | "member" | "viewer" */
   role: string;
   /** "idp" | "manual" | "bootstrap" */
@@ -29,6 +31,16 @@ export interface ListMembersRequest {
 
 export interface ListMembersResponse {
   members: Member[];
+}
+
+export interface InviteMemberRequest {
+  email: string;
+  /** "admin" | "member" | "viewer" */
+  role: string;
+}
+
+export interface InviteMemberResponse {
+  member?: Member | undefined;
 }
 
 export interface UpdateMemberRoleRequest {
@@ -52,6 +64,8 @@ export interface RemoveMemberResponse {
 export interface MemberService {
   /** GET /fb/v1/console/members — list all tenant members. */
   ListMembers(request: ListMembersRequest): Promise<ListMembersResponse>;
+  /** POST /fb/v1/console/members — invite a new member. */
+  InviteMember(request: InviteMemberRequest): Promise<InviteMemberResponse>;
   /** PATCH /fb/v1/console/members/{id} — change role. */
   UpdateMemberRole(request: UpdateMemberRoleRequest): Promise<UpdateMemberRoleResponse>;
   /** DELETE /fb/v1/console/members/{id} — remove from tenant. */

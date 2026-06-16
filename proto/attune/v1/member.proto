@@ -11,6 +11,13 @@ service MemberService {
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse) {
     option (google.api.http) = {get: "/fb/v1/console/members"};
   }
+  // POST /fb/v1/console/members — invite a new member.
+  rpc InviteMember(InviteMemberRequest) returns (InviteMemberResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/members"
+      body: "*"
+    };
+  }
   // PATCH /fb/v1/console/members/{id} — change role.
   rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (UpdateMemberRoleResponse) {
     option (google.api.http) = {
@@ -27,18 +34,28 @@ service MemberService {
 // Member represents a user's membership in a tenant.
 message Member {
   string id = 1;
-  string member_type = 2;  // "admin" | "oidc_user" | "tenant_user"
+  string member_type = 2;  // "admin" | "oidc_user" | "tenant_user" | "invite"
   string user_id = 3;
-  string role = 4;         // "admin" | "member" | "viewer"
-  string role_source = 5;  // "idp" | "manual" | "bootstrap"
-  int64 invited_at = 6;    // unix seconds
-  int64 accepted_at = 7;   // unix seconds, 0 if pending
+  string email = 4;        // display email (from user record or invite)
+  string role = 5;         // "admin" | "member" | "viewer"
+  string role_source = 6;  // "idp" | "manual" | "bootstrap"
+  int64 invited_at = 7;    // unix seconds
+  int64 accepted_at = 8;   // unix seconds, 0 if pending
 }
 
 message ListMembersRequest {}
 
 message ListMembersResponse {
   repeated Member members = 1;
+}
+
+message InviteMemberRequest {
+  string email = 1 [(google.api.field_behavior) = REQUIRED];
+  string role = 2 [(google.api.field_behavior) = REQUIRED];  // "admin" | "member" | "viewer"
+}
+
+message InviteMemberResponse {
+  Member member = 1;
 }
 
 message UpdateMemberRoleRequest {

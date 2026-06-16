@@ -6,7 +6,8 @@ import { meQuery } from '@/features/session/api/get-me'
 export const Route = createFileRoute('/_authed/llm-config')({
   beforeLoad: async ({ context }) => {
     const me = await context.queryClient.ensureQueryData(meQuery())
-    if (me.user?.role !== 'admin') {
+    const role = me.user?.role
+    if (role !== 'admin' && role !== 'member') {
       throw redirect({ to: '/feedback' })
     }
   },

@@ -38,9 +38,12 @@ import {
 } from '@/features/llm-config/components/dialogs'
 import { AbilityTable, ChannelTable, RouteTable } from '@/features/llm-config/components/tables'
 import type { ApiError } from '@/lib/api-client'
+import { usePermissions } from '@/lib/hooks/use-permissions'
 
 export function LLMConfigPage() {
   const { t } = useTranslation()
+  const { can } = usePermissions()
+  const canEdit = can('llm_config:edit')
   const channels = useQuery(llmChannelsQuery())
   const routes = useQuery(llmRoutesQuery())
   const [selectedId, setSelectedId] = useState('')
@@ -196,10 +199,12 @@ export function LLMConfigPage() {
           <Button variant="outline" onClick={refresh} title={t('llm_config.actions.refresh')}>
             <RefreshCw className="size-4" />
           </Button>
-          <Button onClick={() => setChannelDialog({ open: true, target: null })}>
-            <Plus className="mr-2 size-4" />
-            {t('llm_config.channels.create')}
-          </Button>
+          {canEdit && (
+            <Button onClick={() => setChannelDialog({ open: true, target: null })}>
+              <Plus className="mr-2 size-4" />
+              {t('llm_config.channels.create')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -225,23 +230,39 @@ export function LLMConfigPage() {
                 selectedId={selected?.id ?? ''}
                 testingId={testChannel.isPending ? testChannel.variables?.id : undefined}
                 onSelect={(channel) => setSelectedId(channel.id)}
-                onEdit={(channel) => setChannelDialog({ open: true, target: channel })}
-                onAbilities={(channel) => {
-                  setSelectedId(channel.id)
-                  setAbilityDialog('new')
-                }}
-                onTest={setTestTarget}
-                onDelete={(channel) => setDeleteTarget({ kind: 'channel', row: channel })}
+                onEdit={
+                  canEdit
+                    ? (channel) => setChannelDialog({ open: true, target: channel })
+                    : undefined
+                }
+                onAbilities={
+                  canEdit
+                    ? (channel) => {
+                        setSelectedId(channel.id)
+                        setAbilityDialog('new')
+                      }
+                    : undefined
+                }
+                onTest={canEdit ? setTestTarget : undefined}
+                onDelete={
+                  canEdit
+                    ? (channel) => setDeleteTarget({ kind: 'channel', row: channel })
+                    : undefined
+                }
               />
             ) : (
               <EmptyState
                 icon={Bot}
                 title={t('llm_config.channels.empty_title')}
                 description={t('llm_config.channels.empty_body')}
-                action={{
-                  label: t('llm_config.channels.create'),
-                  onClick: () => setChannelDialog({ open: true, target: null }),
-                }}
+                action={
+                  canEdit
+                    ? {
+                        label: t('llm_config.channels.create'),
+                        onClick: () => setChannelDialog({ open: true, target: null }),
+                      }
+                    : undefined
+                }
               />
             )}
           </CardContent>
@@ -255,14 +276,16 @@ export function LLMConfigPage() {
                 {selected?.name ?? t('llm_config.abilities.no_channel')}
               </CardDescription>
             </div>
-            <Button
-              size="sm"
-              disabled={!selected}
-              onClick={() => setAbilityDialog('new')}
-              title={t('llm_config.abilities.create')}
-            >
-              <Plus className="size-4" />
-            </Button>
+            {canEdit && (
+              <Button
+                size="sm"
+                disabled={!selected}
+                onClick={() => setAbilityDialog('new')}
+                title={t('llm_config.abilities.create')}
+              >
+                <Plus className="size-4" />
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             {!selected ? (
@@ -283,18 +306,26 @@ export function LLMConfigPage() {
             ) : abilities.data && abilities.data.length > 0 ? (
               <AbilityTable
                 abilities={abilities.data}
-                onEdit={(ability) => setAbilityDialog(ability)}
-                onDelete={(ability) => setDeleteTarget({ kind: 'ability', row: ability })}
+                onEdit={canEdit ? (ability) => setAbilityDialog(ability) : undefined}
+                onDelete={
+                  canEdit
+                    ? (ability) => setDeleteTarget({ kind: 'ability', row: ability })
+                    : undefined
+                }
               />
             ) : (
               <EmptyState
                 icon={SlidersHorizontal}
                 title={t('llm_config.abilities.empty_title')}
                 description={t('llm_config.abilities.empty_body')}
-                action={{
-                  label: t('llm_config.abilities.create'),
-                  onClick: () => setAbilityDialog('new'),
-                }}
+                action={
+                  canEdit
+                    ? {
+                        label: t('llm_config.abilities.create'),
+                        onClick: () => setAbilityDialog('new'),
+                      }
+                    : undefined
+                }
               />
             )}
           </CardContent>
@@ -307,13 +338,15 @@ export function LLMConfigPage() {
             <CardTitle>{t('llm_config.routes.title')}</CardTitle>
             <CardDescription>{routes.data?.length ?? 0}</CardDescription>
           </div>
-          <Button
-            size="sm"
-            onClick={() => setRouteDialog('new')}
-            title={t('llm_config.routes.create')}
-          >
-            <Plus className="size-4" />
-          </Button>
+          {canEdit && (
+            <Button
+              size="sm"
+              onClick={() => setRouteDialog('new')}
+              title={t('llm_config.routes.create')}
+            >
+              <Plus className="size-4" />
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           {routes.isPending ? (
@@ -328,18 +361,24 @@ export function LLMConfigPage() {
           ) : routes.data && routes.data.length > 0 ? (
             <RouteTable
               routes={routes.data}
-              onEdit={(route) => setRouteDialog(route)}
-              onDelete={(route) => setDeleteTarget({ kind: 'route', row: route })}
+              onEdit={canEdit ? (route) => setRouteDialog(route) : undefined}
+              onDelete={
+                canEdit ? (route) => setDeleteTarget({ kind: 'route', row: route }) : undefined
+              }
             />
           ) : (
             <EmptyState
               icon={RouteIcon}
               title={t('llm_config.routes.empty_title')}
               description={t('llm_config.routes.empty_body')}
-              action={{
-                label: t('llm_config.routes.create'),
-                onClick: () => setRouteDialog('new'),
-              }}
+              action={
+                canEdit
+                  ? {
+                      label: t('llm_config.routes.create'),
+                      onClick: () => setRouteDialog('new'),
+                    }
+                  : undefined
+              }
             />
           )}
         </CardContent>

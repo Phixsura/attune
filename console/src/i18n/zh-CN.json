@@ -107,7 +107,14 @@
     "remove_confirm": "确定要移除成员 {{user}} 吗？此操作无法撤销。",
     "remove_button": "移除",
     "empty_title": "暂无成员",
-    "empty_body": "该租户暂无其他成员。"
+    "empty_body": "该租户暂无其他成员。",
+    "invite_button": "邀请成员",
+    "invite_title": "邀请新成员",
+    "invite_description": "通过邮箱邀请新成员加入团队。被邀请人通过 SSO 登录后将自动获得指定角色。",
+    "invite_email": "邮箱地址",
+    "invite_role": "角色",
+    "invite_submit": "发送邀请",
+    "invited": "邀请已发送"
   },
   "llm_config": {
     "subtitle": "管理 Provider channel、模型能力和租户路由。",

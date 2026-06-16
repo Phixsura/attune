@@ -1,30 +1,40 @@
 import type { ReactNode } from 'react'
-import { usePermissions } from '@/lib/hooks/use-permissions'
-
-type Action = 'view' | 'edit' | 'manage' | 'delete'
+import { type Permission, usePermissions } from '@/lib/hooks/use-permissions'
 
 interface CanProps {
-  action: Action
-  ownerId?: string
+  /** Permission to check */
+  permission: Permission
+  /** Content to render if permission is granted */
   children: ReactNode
+  /** Content to render if permission is denied (default: null) */
   fallback?: ReactNode
 }
 
-export function Can({ action, ownerId, children, fallback = null }: CanProps) {
-  const perms = usePermissions()
+/**
+ * Permission-aware component wrapper.
+ *
+ * Usage:
+ *   <Can permission="settings:members:invite">
+ *     <Button>Invite Member</Button>
+ *   </Can>
+ *
+ *   <Can permission="feedback:delete" fallback={<DisabledButton />}>
+ *     <DeleteButton />
+ *   </Can>
+ */
+export function Can({ permission, children, fallback = null }: CanProps) {
+  const { can } = usePermissions()
+  return <>{can(permission) ? children : fallback}</>
+}
 
-  const allowed = (() => {
-    switch (action) {
-      case 'view':
-        return perms.canView()
-      case 'edit':
-        return perms.canEdit()
-      case 'manage':
-        return perms.canManage()
-      case 'delete':
-        return perms.canDelete(ownerId)
-    }
-  })()
-
-  return <>{allowed ? children : fallback}</>
+/**
+ * Hook for checking permissions in component logic.
+ *
+ * Usage:
+ *   const canInvite = useCan('settings:members:invite')
+ *   if (canInvite) { ... }
+ */
+export function useCan(permission: Permission): boolean {
+  const { can } = usePermissions()
+  return can(permission)
 }

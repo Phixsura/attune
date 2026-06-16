@@ -1,14 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { meQuery } from '@/features/session/api/get-me'
+import { hasPermission, type Permission, type Role } from '@/lib/permissions'
 
-export type Role = 'admin' | 'member' | 'viewer'
-
-const ROLE_HIERARCHY: Record<Role, number> = {
-  viewer: 0,
-  member: 1,
-  admin: 2,
-}
+export type { Permission, Role } from '@/lib/permissions'
 
 export interface Permissions {
   role: Role
@@ -18,6 +13,10 @@ export interface Permissions {
   isMember: boolean
   isViewer: boolean
 
+  /** Check if user has a specific permission */
+  can: (permission: Permission) => boolean
+
+  /** Legacy methods - prefer using can() with specific permissions */
   canView: () => boolean
   canEdit: () => boolean
   canManage: () => boolean
@@ -39,8 +38,11 @@ export function usePermissions(): Permissions {
       isMember: role === 'member',
       isViewer: role === 'viewer',
 
+      can: (permission: Permission) => hasPermission(role, permission),
+
+      // Legacy methods for backwards compatibility
       canView: () => true,
-      canEdit: () => ROLE_HIERARCHY[role] >= ROLE_HIERARCHY.member,
+      canEdit: () => hasPermission(role, 'feedback:edit'),
       canManage: () => role === 'admin',
       canDelete: (ownerId?: string) => {
         if (role === 'admin') return true

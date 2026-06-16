@@ -39,9 +39,11 @@ type DimRefKey = string
 export function DimensionsEditor({
   value,
   onChange,
+  disabled = false,
 }: {
   value: Dimension[]
   onChange: (next: Dimension[]) => void
+  disabled?: boolean
 }) {
   const { t } = useTranslation()
   const baseId = useId()
@@ -101,15 +103,18 @@ export function DimensionsEditor({
             key={id}
             dim={dim}
             isNew={isNew}
+            disabled={disabled}
             onChange={(patch) => updateDim(i, patch)}
             onRemove={() => removeDim(i)}
           />
         )
       })}
-      <Button type="button" variant="outline" onClick={addDim} data-testid="dim-editor-add-dim">
-        <Plus className="h-4 w-4 mr-1" />
-        {t('dim.editor.add_dim')}
-      </Button>
+      {!disabled && (
+        <Button type="button" variant="outline" onClick={addDim} data-testid="dim-editor-add-dim">
+          <Plus className="h-4 w-4 mr-1" />
+          {t('dim.editor.add_dim')}
+        </Button>
+      )}
     </div>
   )
 }
@@ -117,11 +122,13 @@ export function DimensionsEditor({
 function DimensionCard({
   dim,
   isNew,
+  disabled = false,
   onChange,
   onRemove,
 }: {
   dim: Dimension
   isNew: boolean
+  disabled?: boolean
   onChange: (patch: Partial<Dimension>) => void
   onRemove: () => void
 }) {
@@ -173,20 +180,22 @@ function DimensionCard({
               ({dim.name || '?'}, {dim.kind})
             </span>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
-            onClick={(e) => {
-              e.stopPropagation()
-              onRemove()
-            }}
-            aria-label={t('dim.editor.delete_dim')}
-            data-testid="dim-editor-delete-dim"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {!disabled && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+              onClick={(e) => {
+                e.stopPropagation()
+                onRemove()
+              }}
+              aria-label={t('dim.editor.delete_dim')}
+              data-testid="dim-editor-delete-dim"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </CardHeader>
       {open && (
@@ -197,10 +206,10 @@ function DimensionCard({
               <Input
                 id={`dim-name-${dim.name}`}
                 value={dim.name}
-                readOnly={!isNew}
+                readOnly={!isNew || disabled}
                 onChange={(e) => onChange({ name: e.target.value })}
                 placeholder="lowercase_only"
-                className={cn('font-mono text-sm', !isNew && 'opacity-70')}
+                className={cn('font-mono text-sm', (!isNew || disabled) && 'opacity-70')}
               />
               <p className="text-xs text-muted-foreground">{t('dim.editor.name_help')}</p>
             </div>
@@ -209,7 +218,7 @@ function DimensionCard({
               <Select
                 value={dim.kind}
                 onValueChange={(v) => onChange({ kind: v })}
-                disabled={!isNew}
+                disabled={!isNew || disabled}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -229,6 +238,7 @@ function DimensionCard({
               value={(dim.displayName?.entries ?? {}) as Record<string, string>}
               onChange={(entries) => onChange({ displayName: { entries } })}
               placeholder={dim.name}
+              disabled={disabled}
             />
             <p className="text-xs text-muted-foreground">{t('dim.editor.display_name_help')}</p>
           </div>
@@ -236,10 +246,12 @@ function DimensionCard({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>{t('dim.editor.taxonomy_label')}</Label>
-              <Button type="button" variant="ghost" size="sm" onClick={addTaxonomy}>
-                <Plus className="h-3 w-3 mr-1" />
-                {t('dim.editor.add_value')}
-              </Button>
+              {!disabled && (
+                <Button type="button" variant="ghost" size="sm" onClick={addTaxonomy}>
+                  <Plus className="h-3 w-3 mr-1" />
+                  {t('dim.editor.add_value')}
+                </Button>
+              )}
             </div>
             <p
               className="text-xs text-muted-foreground"
@@ -259,6 +271,7 @@ function DimensionCard({
                     key={id}
                     tax={tax}
                     isNew={isNewTax}
+                    disabled={disabled}
                     onChange={(patch) => {
                       const prev = dim.taxonomy[taxIdx]
                       const merged = { ...prev, ...patch }
@@ -301,6 +314,7 @@ function DimensionCard({
                     <button
                       key={tax.value}
                       type="button"
+                      disabled={disabled}
                       onClick={() =>
                         setUrgentSet(
                           checked
@@ -313,6 +327,7 @@ function DimensionCard({
                         checked
                           ? 'border-destructive bg-destructive/10 text-destructive'
                           : 'border-border bg-muted hover:border-foreground/30',
+                        disabled && 'cursor-not-allowed opacity-50',
                       )}
                     >
                       {displayOf(tax.displayName) || tax.value}
@@ -331,11 +346,13 @@ function DimensionCard({
 function TaxonomyRow({
   tax,
   isNew,
+  disabled = false,
   onChange,
   onRemove,
 }: {
   tax: Taxonomy
   isNew: boolean
+  disabled?: boolean
   onChange: (patch: Partial<Taxonomy>) => void
   onRemove: () => void
 }) {
@@ -345,22 +362,27 @@ function TaxonomyRow({
       <div className="flex items-center gap-2">
         <Input
           value={tax.value}
-          readOnly={!isNew}
+          readOnly={!isNew || disabled}
           onChange={(e) => onChange({ value: e.target.value })}
           placeholder="stable_value"
-          className={cn('h-8 max-w-[200px] font-mono text-sm', !isNew && 'opacity-70')}
+          className={cn(
+            'h-8 max-w-[200px] font-mono text-sm',
+            (!isNew || disabled) && 'opacity-70',
+          )}
         />
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
-          onClick={onRemove}
-          aria-label={t('dim.editor.remove_value')}
-          data-testid="dim-editor-remove-value"
-        >
-          <Trash2 className="h-3 w-3" />
-        </Button>
+        {!disabled && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+            onClick={onRemove}
+            aria-label={t('dim.editor.remove_value')}
+            data-testid="dim-editor-remove-value"
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        )}
       </div>
       <div className="pl-4">
         <I18nInput
@@ -368,6 +390,7 @@ function TaxonomyRow({
           value={(tax.displayName?.entries ?? {}) as Record<string, string>}
           onChange={(entries) => onChange({ displayName: { entries } })}
           placeholder={tax.value}
+          disabled={disabled}
         />
       </div>
     </div>
