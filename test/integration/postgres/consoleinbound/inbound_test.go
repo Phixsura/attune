@@ -85,7 +85,9 @@ func newConsoleRouter(t *testing.T, pool *pgxpool.Pool) (http.Handler, *console.
 		nil, // tagAssignments
 		nil, // workflow
 		nil, // oidc
+		nil, // member
 		nil, // admins
+		nil, // tenantmemberRepo
 	).Mount(), signer
 }
 
