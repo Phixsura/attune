@@ -54,6 +54,11 @@ func (r *Repo) GetByUser(ctx context.Context, tenantID, memberType, userID strin
 		FROM tenant_members
 		WHERE tenant_id = $1 AND member_type = $2 AND user_id = $3`
 
+	// Backwards compat: empty memberType in session means "admin" (legacy admin login).
+	if memberType == "" {
+		memberType = "admin"
+	}
+
 	var m Member
 	err := r.pool.QueryRow(ctx, q, tenantID, memberType, userID).Scan(
 		&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Role, &m.RoleSource,
@@ -95,6 +100,11 @@ func (r *Repo) GetRole(ctx context.Context, tenantID, memberType, userID string)
 	const q = `
 		SELECT role FROM tenant_members
 		WHERE tenant_id = $1 AND member_type = $2 AND user_id = $3`
+
+	// Backwards compat: empty memberType in session means "admin" (legacy admin login).
+	if memberType == "" {
+		memberType = "admin"
+	}
 
 	var role domain.Role
 	err := r.pool.QueryRow(ctx, q, tenantID, memberType, userID).Scan(&role)
