@@ -307,3 +307,78 @@ describe('MembersPage table headers', () => {
     expect(headers.length).toBeGreaterThanOrEqual(5)
   })
 })
+
+describe('MembersPage mutations', () => {
+  it('submits an invite (covers handleInvite success path)', async () => {
+    setupMembersResponse(mockMembers)
+    let posted: { email?: string; role?: string } = {}
+    server.use(
+      http.post('/fb/v1/console/members', async ({ request }) => {
+        posted = (await request.json()) as { email?: string; role?: string }
+        return HttpResponse.json({ member: { id: 'new', email: posted.email, role: posted.role } })
+      }),
+    )
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => expect(screen.getByText('admin@example.com')).toBeInTheDocument())
+    await user.click(screen.getByText(TEXT.invite))
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+
+    await user.type(screen.getByPlaceholderText('user@example.com'), 'invitee@example.com')
+    // The submit button is the dialog's primary action (邀请).
+    const submit = screen.getByRole('button', { name: '发送邀请' })
+    await user.click(submit)
+
+    await waitFor(() => expect(posted.email).toBe('invitee@example.com'))
+  })
+
+  it('confirms removal (covers handleRemove success path)', async () => {
+    setupMembersResponse(mockMembers)
+    let deletedId = ''
+    server.use(
+      http.delete('/fb/v1/console/members/:id', ({ params }) => {
+        deletedId = String(params.id)
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => expect(screen.getByText('member@example.com')).toBeInTheDocument())
+
+    const trashButtons = screen.getAllByRole('button', { name: '' })
+    const memberTrash = trashButtons.find((b) =>
+      b.closest('tr')?.textContent?.includes('member@example.com'),
+    )
+    expect(memberTrash).toBeDefined()
+    if (memberTrash) await user.click(memberTrash)
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+    // Confirm button (移除) inside the remove dialog.
+    await user.click(screen.getByRole('button', { name: '移除' }))
+
+    await waitFor(() => expect(deletedId).toBe('m2'))
+  })
+
+  it('rejects invalid email before sending (covers validation branch)', async () => {
+    setupMembersResponse(mockMembers)
+    let postCalled = false
+    server.use(
+      http.post('/fb/v1/console/members', () => {
+        postCalled = true
+        return HttpResponse.json({ member: {} })
+      }),
+    )
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => expect(screen.getByText('admin@example.com')).toBeInTheDocument())
+    await user.click(screen.getByText(TEXT.invite))
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+
+    await user.type(screen.getByPlaceholderText('user@example.com'), 'not-an-email')
+    await user.click(screen.getByRole('button', { name: '发送邀请' }))
+
+    // Invalid email is rejected client-side; no POST is made.
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+    expect(postCalled).toBe(false)
+  })
+})
