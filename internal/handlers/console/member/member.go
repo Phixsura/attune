@@ -193,7 +193,7 @@ func (h *Handler) Invite(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 	const where = "console.MemberHandler.Invite"
 	auth := ctx.Auth
 
-	email := strings.TrimSpace(req.Email)
+	email := strings.ToLower(strings.TrimSpace(req.Email))
 	if email == "" {
 		return dispatcher.Fail[*attunev1.InviteMemberResponse](
 			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "email is required")

@@ -294,7 +294,7 @@ func (r *Repo) EnsureOIDCMember(ctx context.Context, tenantID, userID string, ro
 
 // ExistsByEmail checks if any member with this email exists in the tenant.
 func (r *Repo) ExistsByEmail(ctx context.Context, tenantID, email string) (bool, error) {
-	const q = `SELECT EXISTS(SELECT 1 FROM tenant_members WHERE tenant_id = $1 AND email = $2)`
+	const q = `SELECT EXISTS(SELECT 1 FROM tenant_members WHERE tenant_id = $1 AND LOWER(email) = LOWER($2))`
 	var exists bool
 	err := r.pool.QueryRow(ctx, q, tenantID, email).Scan(&exists)
 	return exists, err
@@ -307,7 +307,7 @@ func (r *Repo) GetPendingInviteByEmail(ctx context.Context, tenantID, email stri
 		SELECT id, tenant_id, member_type, user_id, email, role, role_source,
 		       invited_by, invited_at, accepted_at, created_at, updated_at
 		FROM tenant_members
-		WHERE tenant_id = $1 AND email = $2 AND member_type = 'invite' AND accepted_at IS NULL`
+		WHERE tenant_id = $1 AND LOWER(email) = LOWER($2) AND member_type = 'invite' AND accepted_at IS NULL`
 
 	var m Member
 	err := r.pool.QueryRow(ctx, q, tenantID, email).Scan(

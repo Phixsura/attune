@@ -89,7 +89,7 @@ export function MembersPage() {
   }
 
   const handleInvite = () => {
-    const email = inviteEmail.trim()
+    const email = inviteEmail.trim().toLowerCase()
     if (!email) {
       toast.error(t('members.email_required'))
       return
