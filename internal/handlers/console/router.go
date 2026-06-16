@@ -1283,8 +1283,8 @@ func (r *Router) mountMembers(m chi.Router) {
 		return
 	}
 	m.Route("/members", func(mb chi.Router) {
-		mb.Use(r.requireAdminStrict)
-		mb.Get("/", dispatcher.Bind(
+		// GET is viewer+ (all authenticated users can see member list)
+		mb.With(r.requireViewer).Get("/", dispatcher.Bind(
 			"console.MemberHandler.List",
 			dispatcher.Empty(func() *attunev1.ListMembersRequest {
 				return ptrext.Of(attunev1.ListMembersRequest{})
@@ -1294,7 +1294,8 @@ func (r *Router) mountMembers(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		mb.Post("/", dispatcher.Bind(
+		// Mutations require admin (strict = bypass cache)
+		mb.With(r.requireAdminStrict).Post("/", dispatcher.Bind(
 			"console.MemberHandler.Invite",
 			dispatcher.JSON(func() *attunev1.InviteMemberRequest {
 				return ptrext.Of(attunev1.InviteMemberRequest{})
@@ -1304,7 +1305,7 @@ func (r *Router) mountMembers(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		mb.Patch("/{id}", dispatcher.Bind(
+		mb.With(r.requireAdminStrict).Patch("/{id}", dispatcher.Bind(
 			"console.MemberHandler.UpdateRole",
 			dispatcher.Combine(
 				func() *attunev1.UpdateMemberRoleRequest {
@@ -1320,7 +1321,7 @@ func (r *Router) mountMembers(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		mb.Delete("/{id}", dispatcher.Bind(
+		mb.With(r.requireAdminStrict).Delete("/{id}", dispatcher.Bind(
 			"console.MemberHandler.Remove",
 			dispatcher.Path(
 				func() *attunev1.RemoveMemberRequest {
