@@ -2,14 +2,17 @@ package apikey
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/service/apikey"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 type apiKeysService interface {
@@ -22,11 +25,20 @@ type apiKeysService interface {
 // scope to the session's tenant — see auth.RequireSession middleware
 // which writes TenantID to context before this handler runs.
 type APIKeysHandler struct {
-	svc apiKeysService
+	svc   apiKeysService
+	audit auditRecorder
+}
+
+type auditRecorder interface {
+	Record(ctx context.Context, event auditlogsvc.Event) error
 }
 
 func NewAPIKeysHandler(svc *apikey.APIKeys) *APIKeysHandler {
 	return ptrext.Of(APIKeysHandler{svc: svc})
+}
+
+func (h *APIKeysHandler) SetAuditLogger(audit auditRecorder) {
+	h.audit = audit
 }
 
 func toProtoAPIKey(row apikeyrepo.APIKeyListRow) *attunev1.ApiKey {
@@ -44,4 +56,12 @@ func toProtoAPIKey(row apikeyrepo.APIKeyListRow) *attunev1.ApiKey {
 		k.RevokedAt = ptrext.Of(row.RevokedAt.UTC().Format(time.RFC3339))
 	}
 	return k
+}
+
+func auditActor(auth *session.AuthCtx, req *http.Request) auditlogsvc.Actor {
+	actorType := auth.UserType
+	if actorType == "" {
+		actorType = "admin"
+	}
+	return auditlogsvc.ActorFromRequest(actorType, auth.UserID, req)
 }

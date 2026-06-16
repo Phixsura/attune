@@ -46,6 +46,7 @@ func (h *Handler) UpsertAbility(
 	if err != nil {
 		return dispatcher.Result[*attunev1.LLMChannelAbility]{}, err
 	}
+	before := h.findAbility(ctx, channelID, req.GetLogicalModel())
 	row, err := h.svc.UpsertAbility(ctx, channelID, llmsvc.AbilityInput{
 		LogicalModel:  req.GetLogicalModel(),
 		ProviderModel: req.GetProviderModel(),
@@ -56,7 +57,18 @@ func (h *Handler) UpsertAbility(
 	if err != nil {
 		return abilityWriteError[*attunev1.LLMChannelAbility](err, "failed to upsert llm ability")
 	}
-	return dispatcher.OK(toAbilityProto(ptrext.Indirect(row)))
+	var beforeSnapshot any
+	if before != nil {
+		beforeValue := ptrext.Indirect(before)
+		beforeSnapshot = abilityAuditSnapshot(beforeValue)
+	}
+	rowValue := ptrext.Indirect(row)
+	if err := h.recordAudit(ctx, "llm_ability.upsert", "llm_ability",
+		llmTargetID(rowValue.ID.String(), channelID.String(), rowValue.LogicalModel),
+		llmAbilitySummary("Upserted LLM ability", rowValue), beforeSnapshot, abilityAuditSnapshot(rowValue)); err != nil {
+		return dispatcher.Fail[*attunev1.LLMChannelAbility](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
+	return dispatcher.OK(toAbilityProto(rowValue))
 }
 
 func (h *Handler) DeleteAbility(
@@ -67,6 +79,7 @@ func (h *Handler) DeleteAbility(
 	if err != nil {
 		return dispatcher.Result[*attunev1.DeleteLLMChannelAbilityResponse]{}, err
 	}
+	before := h.findAbility(ctx, channelID, req.GetLogicalModel())
 	if err := h.svc.DeleteAbility(ctx, channelID, req.GetLogicalModel()); err != nil {
 		if errors.Is(err, llmrepo.ErrAbilityNotFound) {
 			return dispatcher.Fail[*attunev1.DeleteLLMChannelAbilityResponse](
@@ -78,6 +91,17 @@ func (h *Handler) DeleteAbility(
 		}
 		return dispatcher.Fail[*attunev1.DeleteLLMChannelAbilityResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to delete llm ability")
+	}
+	var beforeSnapshot any
+	summary := "Deleted LLM ability"
+	if before != nil {
+		beforeValue := ptrext.Indirect(before)
+		beforeSnapshot = abilityAuditSnapshot(beforeValue)
+		summary = llmAbilitySummary(summary, beforeValue)
+	}
+	if err := h.recordAudit(ctx, "llm_ability.delete", "llm_ability",
+		llmTargetID("", channelID.String(), req.GetLogicalModel()), summary, beforeSnapshot, nil); err != nil {
+		return dispatcher.Fail[*attunev1.DeleteLLMChannelAbilityResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.DeleteLLMChannelAbilityResponse{}))
 }

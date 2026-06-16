@@ -3,6 +3,7 @@ package notifytarget
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 // notifyTargetRepo is the subset of *notifytarget.NotifyTargetRepo that the
@@ -27,11 +29,20 @@ type notifyTargetRepo interface {
 
 // NotifyTargetsHandler serves /fb/v1/console/notify-targets.
 type NotifyTargetsHandler struct {
-	repo notifyTargetRepo
+	repo  notifyTargetRepo
+	audit auditRecorder
+}
+
+type auditRecorder interface {
+	Record(ctx context.Context, event auditlogsvc.Event) error
 }
 
 func NewNotifyTargetsHandler(r notifyTargetRepo) *NotifyTargetsHandler {
 	return ptrext.Of(NotifyTargetsHandler{repo: r})
+}
+
+func (h *NotifyTargetsHandler) SetAuditLogger(audit auditRecorder) {
+	h.audit = audit
 }
 
 // toNotifyProto drops Secret (write-only) + TenantID (known via session).
@@ -85,6 +96,9 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 	if u.Scheme != "https" && !loopbackHTTP {
 		return errors.New("url must be https://... or a loopback http://127.0.0.1")
 	}
+	if u.User != nil {
+		return errors.New("url must not embed credentials")
+	}
 	switch req.Audience {
 	case "":
 		req.Audience = notifytarget.AudienceAll
@@ -103,4 +117,63 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 
 func isLoopback(host string) bool {
 	return host == "127.0.0.1" || host == "localhost" || host == "[::1]"
+}
+
+func (h *NotifyTargetsHandler) recordAudit(
+	ctx context.Context,
+	authType, actorID, tenantID, action string,
+	req *http.Request,
+	target notifytarget.NotifyTarget,
+	summary string,
+	before, after any,
+) error {
+	if h.audit == nil {
+		return nil
+	}
+	if authType == "" {
+		authType = "admin"
+	}
+	return h.audit.Record(ctx, auditlogsvc.Event{
+		TenantID:   tenantID,
+		Actor:      auditlogsvc.ActorFromRequest(authType, actorID, req),
+		Action:     action,
+		TargetType: "notify_target",
+		TargetID:   target.ID.String(),
+		Summary:    summary,
+		Before:     before,
+		After:      after,
+	})
+}
+
+func notifyTargetSummary(action string, target notifytarget.NotifyTarget) string {
+	if target.DestinationType == "" {
+		return action
+	}
+	return action + " (" + target.DestinationType + ")"
+}
+
+func auditNotifyTargetSnapshot(target notifytarget.NotifyTarget) map[string]any {
+	return map[string]any{
+		"id":               target.ID.String(),
+		"destination_type": target.DestinationType,
+		"audience":         target.Audience,
+		"url":              sanitizeNotifyTargetURL(target.URL),
+		"timeout_seconds":  target.TimeoutSeconds,
+		"disabled":         target.Disabled,
+	}
+}
+
+func sanitizeNotifyTargetURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }

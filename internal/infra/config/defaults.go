@@ -19,7 +19,11 @@ const (
 	DefaultRateLimitPerMinute = 60
 	DefaultRateLimitBurst     = 300
 
+	DefaultAuditRetentionDays = 365
+
 	DefaultServiceVersion = "dev"
 	DefaultEnvironment    = "dev"
 	DefaultOTLPTracesPath = "/opentelemetry/v1/traces"
 )
+
+var DefaultAuditPruneInterval = 24 * time.Hour

@@ -11,6 +11,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 // Revoke handles DELETE /fb/v1/console/api-keys/{id}.
@@ -35,6 +36,24 @@ func (h *APIKeysHandler) Revoke(ctx *dispatcher.RequestContext[*session.AuthCtx]
 		logext.Errorf(ctx, "[%s] svc.Revoke failed,tenant_id:%s,key_id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
 		return dispatcher.Fail[*attunev1.DeleteApiKeyResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "revoke failed")
+	}
+	if h.audit != nil {
+		if err := h.audit.Record(ctx, auditlogsvc.Event{
+			TenantID:   auth.TenantID,
+			Actor:      auditActor(auth, ctx.Request()),
+			Action:     "api_key.revoke",
+			TargetType: "api_key",
+			TargetID:   id.String(),
+			Summary:    "Revoked API key",
+			After: map[string]any{
+				"id":        id.String(),
+				"is_active": false,
+			},
+		}); err != nil {
+			logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,key_id:%s,err:%+v",
+				where, auth.TenantID, id, err.Error())
+			return dispatcher.Fail[*attunev1.DeleteApiKeyResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+		}
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,key_id:%s", where, auth.TenantID, id)
 	return dispatcher.NoContent[*attunev1.DeleteApiKeyResponse]()

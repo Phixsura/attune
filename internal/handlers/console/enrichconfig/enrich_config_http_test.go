@@ -36,6 +36,7 @@ func (f *fakeConfigService) Get(_ context.Context, _ string) (enrich.View, error
 func (f *fakeConfigService) Update(_ context.Context, tenantID string, v enrich.View) error {
 	f.updateTenant = tenantID
 	f.updateView = v
+	f.view = v
 	return nil
 }
 

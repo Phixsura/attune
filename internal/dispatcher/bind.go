@@ -141,7 +141,7 @@ func bind[Auth any, Req, Resp proto.Message](
 			return
 		}
 
-		rc := ptrext.Of(RequestContext[Auth]{Context: ctx, Auth: auth, response: w})
+		rc := ptrext.Of(RequestContext[Auth]{Context: ctx, Auth: auth, response: w, request: r})
 		if err := runBefore(ctx, auth, w, req, cfg.before); err != nil {
 			writeHandlerError(ctx, w, err, where, start)
 			return

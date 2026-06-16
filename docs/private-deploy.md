@@ -44,8 +44,8 @@ Edit `.env` and set:
 |---|---|
 | `POSTGRES_PASSWORD` | A strong password, also pasted into `database.url` in `config.yaml`. |
 
-Then edit `config.yaml` and set `database.url`, `console.*`, and
-`secrets.tink_keyset`. Generate the keyset with:
+Then edit `config.yaml` and set `database.url`, `console.*`,
+`secrets.tink_keyset`, and the audit retention block. Generate the keyset with:
 
 ```bash
 docker compose run --rm attune secrets generate-keyset
@@ -58,6 +58,18 @@ docker compose run --rm attune secrets generate-keyset
 
 > **The real `config.yaml` is private**. Never commit real DB URLs, bootstrap
 > credentials, provider keys, or Tink keysets.
+
+Recommended audit settings:
+
+```yaml
+audit:
+  retention_days: 365
+  prune_interval: 1h
+```
+
+- `audit.retention_days` defines how long immutable Console audit rows are kept.
+- `audit.prune_interval` controls how often the background pruner removes expired rows.
+- CSV audit exports contain actor metadata and sanitized before/after payloads; treat them like internal security records and avoid sharing them through public channels.
 
 If this deployment already has inbound sources encrypted by the old
 `ATTUNE_INBOUND_MASTER_KEY`, paste that old 32-byte key as hex/base64 into

@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/httpbody.proto";
+
+service AuditLogService {
+  rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/audit-log"};
+  }
+  rpc ExportAuditLogCSV(ExportAuditLogCSVRequest) returns (google.api.HttpBody) {
+    option (google.api.http) = {get: "/fb/v1/console/audit-log/export.csv"};
+  }
+}
+
+message AuditLogEntry {
+  int64 id = 1;
+  string actor_type = 2;
+  string actor_id = 3;
+  string actor_email = 4;
+  string actor_ip = 5;
+  string actor_user_agent = 6;
+  string action = 7;
+  string target_type = 8;
+  string target_id = 9;
+  string summary = 10;
+  string before_json = 11;
+  string after_json = 12;
+  string created_at = 13;
+}
+
+message ListAuditLogRequest {
+  string action = 1;
+  string actor_type = 2;
+  string actor_id = 3;
+  string target_type = 4;
+  string target_id = 5;
+  string from = 6;
+  string to = 7;
+  int32 limit = 8;
+  optional string cursor = 9;
+  repeated string actions = 10;
+}
+
+message ListAuditLogResponse {
+  repeated AuditLogEntry items = 1;
+  optional string next_cursor = 2;
+}
+
+message ExportAuditLogCSVRequest {
+  string action = 1;
+  string actor_type = 2;
+  string actor_id = 3;
+  string target_type = 4;
+  string target_id = 5;
+  string from = 6;
+  string to = 7;
+  repeated string actions = 8;
+}

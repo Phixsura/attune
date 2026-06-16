@@ -4,6 +4,7 @@ import {
   Bell,
   Bot,
   GitBranch,
+  History,
   KeyRound,
   Loader2,
   Mailbox,
@@ -23,13 +24,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiKeysPage } from '@/features/api-keys/components/api-keys-page'
+import { AuditLogPage } from '@/features/audit-log/components/audit-log-page'
 import { DigestSubscriptionPage } from '@/features/digest-subscription/components/digest-subscription-page'
 import { GuardPoliciesPage } from '@/features/guard-policies/components/guard-policies-page'
 import { InboundSourcesPage } from '@/features/inbound-sources/components/inbound-sources-page'
 import { MembersPage } from '@/features/members/components/members-page'
 import { NotifyTargetsPage } from '@/features/notify-targets/components/notify-targets-page'
 import { meQuery } from '@/features/session/api/get-me'
-import { usePermissions } from '@/features/session/hooks/use-permissions'
+import { type Permission, usePermissions } from '@/features/session/hooks/use-permissions'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
@@ -44,6 +46,7 @@ type SettingsSection =
   | 'notify_targets'
   | 'digest_subscription'
   | 'api_keys'
+  | 'audit_log'
   | 'tags'
   | 'workflow'
   | 'members'
@@ -55,6 +58,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'notify_targets',
   'digest_subscription',
   'api_keys',
+  'audit_log',
   'tags',
   'workflow',
   'members',
@@ -131,23 +135,35 @@ function SettingsPage() {
     )
   }
 
-  if (section === 'classification' && cfg.isPending) {
-    return (
-      <div className="flex items-center justify-center py-16 text-muted-foreground">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        {t('app.loading')}
-      </div>
-    )
-  }
-
   const constrained = dimensions.some((d) => d.taxonomy.length > 0)
   const modeLabel = constrained ? t('settings.mode_constrained') : t('settings.mode_freeform')
+  const visibleSections = SETTINGS_SECTIONS.filter((item) => sectionVisible(item, can))
+  const activeSection = visibleSections.includes(section)
+    ? section
+    : (visibleSections[0] ?? 'classification')
   const setSection = (next: SettingsSection) => {
     void navigate({
       to: '/settings',
       search: { section: next },
       replace: true,
     })
+  }
+  useEffect(() => {
+    if (activeSection === section) return
+    void navigate({
+      to: '/settings',
+      search: { section: activeSection },
+      replace: true,
+    })
+  }, [activeSection, navigate, section])
+
+  if (activeSection === 'classification' && cfg.isPending) {
+    return (
+      <div className="flex items-center justify-center py-16 text-muted-foreground">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        {t('app.loading')}
+      </div>
+    )
   }
 
   return (
@@ -158,9 +174,9 @@ function SettingsPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <SettingsSidebar active={section} onSelect={setSection} />
+        <SettingsSidebar active={activeSection} onSelect={setSection} />
 
-        {section === 'classification' ? (
+        {activeSection === 'classification' ? (
           <ClassificationSettings
             canEdit={can('settings:enrich_config:edit')}
             dimensions={dimensions}
@@ -178,7 +194,7 @@ function SettingsPage() {
             onSave={handleSave}
           />
         ) : (
-          <SettingsSectionContent section={section} />
+          <SettingsSectionContent section={activeSection} />
         )}
       </div>
     </div>
@@ -317,6 +333,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
       {section === 'notify_targets' ? <NotifyTargetsPage /> : null}
       {section === 'digest_subscription' ? <DigestSubscriptionPage /> : null}
       {section === 'api_keys' ? <ApiKeysPage /> : null}
+      {section === 'audit_log' ? <AuditLogPage /> : null}
       {section === 'tags' ? <TagsPage /> : null}
       {section === 'workflow' ? <WorkflowSettingsPage /> : null}
       {section === 'members' ? <MembersPage /> : null}
@@ -332,6 +349,7 @@ function SettingsSidebar({
   onSelect: (section: SettingsSection) => void
 }) {
   const { t } = useTranslation()
+  const { can } = usePermissions()
   const areas = [
     {
       section: 'classification',
@@ -368,28 +386,40 @@ function SettingsSidebar({
       icon: KeyRound,
       title: t('settings.areas.api_keys.title'),
       body: t('settings.areas.api_keys.body'),
+      permission: 'settings:api_keys:view',
+    },
+    {
+      section: 'audit_log',
+      icon: History,
+      title: t('settings.areas.audit_log.title'),
+      body: t('settings.areas.audit_log.body'),
+      permission: 'settings:audit_log:view',
     },
     {
       section: 'tags',
       icon: Tags,
       title: t('settings.areas.tags.title'),
       body: t('settings.areas.tags.body'),
+      permission: 'settings:tags:view',
     },
     {
       section: 'workflow',
       icon: GitBranch,
       title: t('settings.areas.workflow.title'),
       body: t('settings.areas.workflow.body'),
+      permission: 'settings:workflow:view',
     },
     {
       section: 'members',
       icon: Users,
       title: t('settings.areas.members.title'),
       body: t('settings.areas.members.body'),
+      permission: 'settings:members:view',
     },
   ] satisfies Array<{
     body: string
     icon: typeof Bot
+    permission?: Permission
     section: SettingsSection
     title: string
   }>
@@ -399,25 +429,54 @@ function SettingsSidebar({
         aria-label={t('settings.sidebar_label')}
         className="flex gap-1 overflow-x-auto border-b border-border pb-2 lg:block lg:space-y-1 lg:overflow-visible lg:border-r lg:border-b-0 lg:pr-4 lg:pb-0"
       >
-        {areas.map((area) => (
-          <button
-            key={area.section}
-            type="button"
-            className={
-              active === area.section
-                ? 'flex min-w-48 items-start gap-3 rounded-md bg-primary/5 px-3 py-2 text-left text-sm ring-1 ring-primary/20 lg:min-w-0'
-                : 'flex min-w-48 items-start gap-3 rounded-md px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground lg:min-w-0'
-            }
-            onClick={() => onSelect(area.section)}
-          >
-            <area.icon className="mt-0.5 h-4 w-4 shrink-0" />
-            <div className="min-w-0">
-              <div className="font-medium">{area.title}</div>
-              <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{area.body}</p>
-            </div>
-          </button>
-        ))}
+        {areas
+          .filter((area) => !area.permission || can(area.permission))
+          .map((area) => (
+            <button
+              key={area.section}
+              type="button"
+              className={
+                active === area.section
+                  ? 'flex min-w-48 items-start gap-3 rounded-md bg-primary/5 px-3 py-2 text-left text-sm ring-1 ring-primary/20 lg:min-w-0'
+                  : 'flex min-w-48 items-start gap-3 rounded-md px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground lg:min-w-0'
+              }
+              onClick={() => onSelect(area.section)}
+            >
+              <area.icon className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="min-w-0">
+                <div className="font-medium">{area.title}</div>
+                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{area.body}</p>
+              </div>
+            </button>
+          ))}
       </nav>
     </aside>
   )
+}
+
+function sectionVisible(section: SettingsSection, can: (permission: Permission) => boolean) {
+  switch (section) {
+    case 'classification':
+      return can('settings:enrich_config:view')
+    case 'guard_policies':
+      return can('settings:guard_policies:view')
+    case 'inbound_sources':
+      return can('settings:inbound:view')
+    case 'notify_targets':
+      return can('settings:notify_targets:view')
+    case 'digest_subscription':
+      return can('settings:digest:view')
+    case 'api_keys':
+      return can('settings:api_keys:view')
+    case 'audit_log':
+      return can('settings:audit_log:view')
+    case 'tags':
+      return can('settings:tags:view')
+    case 'workflow':
+      return can('settings:workflow:view')
+    case 'members':
+      return can('settings:members:view')
+    default:
+      return false
+  }
 }

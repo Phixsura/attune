@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Security
 
+- **Immutable console audit log for sensitive actions (#39).** Added an
+  append-only `audit_log` table with retention pruning, admin-only read/export
+  APIs, and request-scoped actor metadata (user type/id, IP, user-agent).
+  Sensitive console mutations now emit immutable audit rows for API keys,
+  tenant members, notify targets (including test sends), digest subscriptions,
+  tag configuration, inbound source management (including test-connection),
+  feedback job cancellation, guard policies, enrich config, workflow settings,
+  LLM config, and feedback batch delete. Added a mutating-route audit coverage
+  inventory test plus an audit action allowlist so future console write
+  endpoints must declare an explicit audit decision and register any new audit
+  action. Notify-target audit snapshots now strip embedded URL credentials and
+  query tokens.
+
 - **Constant-time hash comparison in idempotency repo (#30).** Replaced
   `bytes.Equal()` with `crypto/subtle.ConstantTimeCompare()` for comparing
   request hashes, eliminating a theoretical timing attack vector.
@@ -25,6 +38,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   (Lark/Slack webhook URLs).
 
 ### Added
+
+- **Console audit log page and CSV export (#39).** Added `/fb/v1/console/audit-log`
+  plus `/fb/v1/console/audit-log/export.csv`, a new Settings > Audit Log page,
+  audit-log proto/OpenAPI contract generation, retention config
+  (`audit.retention_days`, `audit.prune_interval`), and audit metrics
+  (`attune_audit_rows_written_total`, `attune_audit_rows_pruned_total`,
+  `attune_audit_prune_duration_seconds`). The audit log list now supports
+  cursor pagination with a matching “加载更多” Console flow, multi-action and
+  date-range filtering, and request-metadata drill-down in row details, while
+  CSV export returns the full filtered result set instead of only the visible
+  page.
 
 - **RBAC: admin/member/viewer roles (#38).** Three-level role hierarchy with
   route-level middleware (`RequireRole`) and resource-level policy classes

@@ -16,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	"github.com/Phixsura/attune/internal/service/feedbackbatch"
 )
 
@@ -23,6 +24,15 @@ import (
 type fakeBatchService struct {
 	resp *feedbackbatch.BatchResponse
 	err  error
+}
+
+type fakeAuditRecorder struct {
+	events []auditlogsvc.Event
+}
+
+func (f *fakeAuditRecorder) Record(_ context.Context, event auditlogsvc.Event) error {
+	f.events = append(f.events, event)
+	return nil
 }
 
 func (f *fakeBatchService) Execute(_ context.Context, _ *feedbackbatch.BatchRequest) (*feedbackbatch.BatchResponse, error) {
@@ -43,6 +53,16 @@ func (f *fakeBatchService) CancelJob(_ context.Context, _, _ string) (*attunev1.
 
 func newBatchHandler(svc feedbackbatch.Service) http.HandlerFunc {
 	h := NewBatchHandler(svc)
+	return newBatchHandlerWithAudit(h)
+}
+
+func newBatchHandlerWithRecorder(svc feedbackbatch.Service, audit *fakeAuditRecorder) http.HandlerFunc {
+	h := NewBatchHandler(svc)
+	h.SetAuditLogger(audit)
+	return newBatchHandlerWithAudit(h)
+}
+
+func newBatchHandlerWithAudit(h *BatchHandler) http.HandlerFunc {
 	return dispatcher.Bind(
 		"console.BatchHandler.Execute",
 		dispatcher.JSON(func() *attunev1.BatchFeedbackRequest {
@@ -290,5 +310,61 @@ func TestBatchHandler_Execute(t *testing.T) {
 			`{"feedback_ids":[1],"if_unmodified_since":"2025-01-15T10:00:00Z","operation":{"delete":{}}}`))
 
 		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("delete operation records audit", func(t *testing.T) {
+		audit := &fakeAuditRecorder{}
+		handler := newBatchHandlerWithRecorder(&fakeBatchService{
+			resp: &feedbackbatch.BatchResponse{
+				TotalMatched: 2,
+				Succeeded:    2,
+			},
+		}, audit)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/batch",
+			`{"feedback_ids":[11,12],"operation":{"delete":{}}}`))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Len(t, audit.events, 1)
+		require.Equal(t, "feedback.batch_delete", audit.events[0].Action)
+	})
+
+	t.Run("query delete records filter snapshot", func(t *testing.T) {
+		audit := &fakeAuditRecorder{}
+		handler := newBatchHandlerWithRecorder(&fakeBatchService{
+			resp: &feedbackbatch.BatchResponse{
+				TotalMatched: 4,
+				Succeeded:    4,
+			},
+		}, audit)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/batch",
+			`{"query":{"urgent":true,"q":"checkout","workflow_state_id":"s-1"},"operation":{"delete":{}}}`))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Len(t, audit.events, 1)
+		before := audit.events[0].Before.(map[string]any)
+		query := before["query"].(map[string]any)
+		require.Equal(t, true, query["urgent"])
+		require.Equal(t, "checkout", query["q"])
+		require.Equal(t, "s-1", query["workflow_state_id"])
+	})
+
+	t.Run("dry run does not record audit", func(t *testing.T) {
+		audit := &fakeAuditRecorder{}
+		handler := newBatchHandlerWithRecorder(&fakeBatchService{
+			resp: &feedbackbatch.BatchResponse{
+				TotalMatched: 2,
+			},
+		}, audit)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/batch",
+			`{"feedback_ids":[11,12],"dry_run":true,"operation":{"delete":{}}}`))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Empty(t, audit.events)
 	})
 }

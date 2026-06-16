@@ -48,6 +48,10 @@ func (h *Handler) CreateChannel(
 	if err != nil {
 		return channelWriteError[*attunev1.LLMChannel](err, "failed to create llm channel")
 	}
+	if err := h.recordAudit(ctx, "llm_channel.create", "llm_channel", row.ID.String(),
+		llmChannelSummary("Created LLM channel", ptrext.Indirect(row)), nil, channelAuditSnapshot(ptrext.Indirect(row))); err != nil {
+		return dispatcher.Fail[*attunev1.LLMChannel](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 	return dispatcher.OK(toChannelProto(ptrext.Indirect(row)))
 }
 
@@ -79,6 +83,11 @@ func (h *Handler) UpdateChannel(
 	if err != nil {
 		return dispatcher.Result[*attunev1.LLMChannel]{}, err
 	}
+	before, beforeErr := h.svc.GetChannel(ctx, id)
+	if beforeErr != nil && !errors.Is(beforeErr, llmrepo.ErrChannelNotFound) {
+		return dispatcher.Fail[*attunev1.LLMChannel](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load llm channel")
+	}
 	row, err := h.svc.UpdateChannel(ctx, id, llmsvc.ChannelInput{
 		Name:           req.GetName(),
 		Protocol:       req.GetProtocol(),
@@ -92,6 +101,14 @@ func (h *Handler) UpdateChannel(
 	})
 	if err != nil {
 		return channelWriteError[*attunev1.LLMChannel](err, "failed to update llm channel")
+	}
+	var beforeSnapshot any
+	if before != nil {
+		beforeSnapshot = channelAuditSnapshot(ptrext.Indirect(before))
+	}
+	if err := h.recordAudit(ctx, "llm_channel.update", "llm_channel", row.ID.String(),
+		llmChannelSummary("Updated LLM channel", ptrext.Indirect(row)), beforeSnapshot, channelAuditSnapshot(ptrext.Indirect(row))); err != nil {
+		return dispatcher.Fail[*attunev1.LLMChannel](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
 	return dispatcher.OK(toChannelProto(ptrext.Indirect(row)))
 }
@@ -109,7 +126,18 @@ func (h *Handler) TestChannel(
 		Prompt:        req.GetPrompt(),
 	})
 	if err != nil {
+		if auditErr := h.recordAudit(ctx, "llm_channel.test", "llm_channel", id.String(), "Tested LLM channel", nil,
+			channelTestAuditSnapshot(id.String(), req.GetProviderModel(), false, err)); auditErr != nil {
+			return dispatcher.Fail[*attunev1.TestLLMChannelResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+		}
 		return channelTestError(err)
+	}
+	after := channelTestAuditSnapshot(id.String(), row.ProviderModel, true, nil)
+	after["input_tokens"] = row.InputTokens
+	after["output_tokens"] = row.OutputTokens
+	after["latency_ms"] = row.LatencyMS
+	if err := h.recordAudit(ctx, "llm_channel.test", "llm_channel", id.String(), "Tested LLM channel", nil, after); err != nil {
+		return dispatcher.Fail[*attunev1.TestLLMChannelResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
 	return dispatcher.OK(toChannelTestProto(ptrext.Indirect(row)))
 }
@@ -141,6 +169,11 @@ func (h *Handler) DeleteChannel(
 	if err != nil {
 		return dispatcher.Result[*attunev1.DeleteLLMChannelResponse]{}, err
 	}
+	before, beforeErr := h.svc.GetChannel(ctx, id)
+	if beforeErr != nil && !errors.Is(beforeErr, llmrepo.ErrChannelNotFound) {
+		return dispatcher.Fail[*attunev1.DeleteLLMChannelResponse](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load llm channel")
+	}
 	if err := h.svc.DeleteChannel(ctx, id); err != nil {
 		if errors.Is(err, llmrepo.ErrChannelNotFound) {
 			return dispatcher.Fail[*attunev1.DeleteLLMChannelResponse](
@@ -148,6 +181,15 @@ func (h *Handler) DeleteChannel(
 		}
 		return dispatcher.Fail[*attunev1.DeleteLLMChannelResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to delete llm channel")
+	}
+	var beforeSnapshot any
+	summary := "Deleted LLM channel"
+	if before != nil {
+		beforeSnapshot = channelAuditSnapshot(ptrext.Indirect(before))
+		summary = llmChannelSummary(summary, ptrext.Indirect(before))
+	}
+	if err := h.recordAudit(ctx, "llm_channel.delete", "llm_channel", id.String(), summary, beforeSnapshot, nil); err != nil {
+		return dispatcher.Fail[*attunev1.DeleteLLMChannelResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.DeleteLLMChannelResponse{}))
 }

@@ -43,6 +43,7 @@ func (h *NotifyTargetsHandler) Patch(ctx *dispatcher.RequestContext[*session.Aut
 			where, auth.TenantID, id, err.Error())
 		return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read notify target")
 	}
+	before := ptrext.Indirect(cur)
 
 	// Apply present fields (proto optional → nil means "leave unchanged").
 	// Empty-string secret is intentionally allowed ("clear the secret").
@@ -91,6 +92,22 @@ func (h *NotifyTargetsHandler) Patch(ctx *dispatcher.RequestContext[*session.Aut
 		logext.Errorf(ctx, "[%s] repo.UpdateByID failed,tenant_id:%s,id:%s,err:%+v",
 			where, auth.TenantID, id, err.Error())
 		return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to update notify target")
+	}
+	if err := h.recordAudit(
+		ctx,
+		auth.UserType,
+		auth.UserID,
+		auth.TenantID,
+		"notify_target.update",
+		ctx.Request(),
+		before,
+		notifyTargetSummary("Updated notify target", before),
+		auditNotifyTargetSnapshot(before),
+		auditNotifyTargetSnapshot(ptrext.Indirect(cur)),
+	); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,id:%s,err:%+v",
+			where, auth.TenantID, id, err.Error())
+		return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s", where, auth.TenantID, id)

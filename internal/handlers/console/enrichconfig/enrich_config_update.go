@@ -18,6 +18,13 @@ import (
 func (h *Handler) Update(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.UpdateEnrichConfigRequest) (dispatcher.Result[*attunev1.UpdateEnrichConfigResponse], error) {
 	const where = "console.EnrichConfigHandler.Update"
 	auth := ctx.Auth
+	var beforeSnapshot map[string]any
+	beforeView, beforeErr := h.svc.Get(ctx, auth.TenantID)
+	if beforeErr == nil {
+		beforeSnapshot = enrichConfigSnapshot(beforeView)
+	} else if !errors.Is(beforeErr, tenant.ErrTenantNotFound) {
+		logext.Warnf(ctx, "[%s] before snapshot load failed,tenant_id:%s,err:%+v", where, auth.TenantID, beforeErr.Error())
+	}
 	dims, err := dimsFromProto(req.GetDimensions())
 	if err != nil {
 		return dispatcher.Fail[*attunev1.UpdateEnrichConfigResponse](http.StatusBadRequest, enrich.ErrToCode(err), enrich.ErrToMessage(err))
@@ -51,6 +58,16 @@ func (h *Handler) Update(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 	v, err := h.svc.Get(ctx, auth.TenantID)
 	if err != nil {
 		return dispatcher.Fail[*attunev1.UpdateEnrichConfigResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to read enrich config")
+	}
+	if err := h.recordAudit(
+		ctx,
+		"enrich_config.update",
+		"Updated enrich config",
+		beforeSnapshot,
+		enrichConfigSnapshot(v),
+	); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
+		return dispatcher.Fail[*attunev1.UpdateEnrichConfigResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.UpdateEnrichConfigResponse{Config: toProtoConfig(v)}))
 }

@@ -361,6 +361,7 @@ func newConsoleRouter(
 		nil,
 		nil,
 		nil,
+		nil, // auditLog
 		nil,
 		nil,
 		nil, // batchHandler

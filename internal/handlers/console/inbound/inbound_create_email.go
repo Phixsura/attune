@@ -56,6 +56,17 @@ func (h *Handler) createEmail(ctx context.Context, auth *session.AuthCtx, req *a
 	resp := ptrext.Of(attunev1.CreateInboundSourceResponse{
 		Source: rowToProto(stored),
 	})
+	if err := h.recordAudit(ctx, auth.UserType, auth.UserID, auth.TenantID, "inbound_source.create", stored.ID, "Created email inbound source", nil, nil, map[string]any{
+		"id":      stored.ID,
+		"channel": stored.Channel,
+		"name":    stored.Name,
+		"slug":    stored.Slug,
+		"enabled": stored.Enabled,
+	}); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,id:%s,err:%+v",
+			where, auth.TenantID, stored.ID, err.Error())
+		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s,slug:%s",
 		where, auth.TenantID, id, slug)
 	return dispatcher.Created(resp)

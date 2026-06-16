@@ -21,5 +21,10 @@ func (h *Handler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 	if err != nil {
 		return guardPolicyWriteError(ctx, where, auth.TenantID, err)
 	}
+	if err := h.recordAudit(ctx, "guard_policy.create", "guard_policy", created.ID,
+		guardPolicySummary("Created guard policy", created), nil, auditPolicySnapshot(created)); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,policy_id:%s,err:%+v", where, auth.TenantID, created.ID, err.Error())
+		return dispatcher.Fail[*attunev1.GuardPolicy](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 	return dispatcher.OK(policyToProto(created))
 }

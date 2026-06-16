@@ -12,7 +12,8 @@ import (
 )
 
 type Handler struct {
-	svc service
+	svc   service
+	audit auditRecorder
 }
 
 type service interface {

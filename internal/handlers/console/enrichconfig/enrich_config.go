@@ -13,7 +13,8 @@ import (
 // Handler serves /fb/v1/console/enrich-config (#10 → E3
 // metadata-driven Dimensions).
 type Handler struct {
-	svc configService
+	svc   configService
+	audit auditRecorder
 }
 
 type configService interface {

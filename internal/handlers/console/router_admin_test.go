@@ -77,6 +77,12 @@ func authedReq() *http.Request {
 		ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserType: "oidc_user", UserID: "user-1"})))
 }
 
+func legacyAdminReq() *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/llm/channels", nil)
+	return req.WithContext(session.WithAuthCtx(req.Context(),
+		ptrext.Of(session.AuthCtx{UserID: "user-1"})))
+}
+
 func TestRequireAdmin_RBACBranchAllowsAdmin(t *testing.T) {
 	t.Parallel()
 	called := false
@@ -134,6 +140,40 @@ func TestRequireViewer_LegacyFallbackPassesThrough(t *testing.T) {
 	ptrext.Of(Router{}).requireViewer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		called = true
 	})).ServeHTTP(w, authedReq())
+
+	require.True(t, called)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequireAdmin_RBACRouterFallsBackToLegacyAdminSession(t *testing.T) {
+	t.Parallel()
+	router := ptrext.Of(Router{
+		rbac:   rbac.NewMiddleware(fakeRoleStore{role: domain.RoleViewer}),
+		admins: roleAdminReader{row: admin.Admin{ID: "user-1", Role: "admin"}},
+	})
+	called := false
+	w := httptest.NewRecorder()
+
+	router.requireAdmin(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	})).ServeHTTP(w, legacyAdminReq())
+
+	require.True(t, called)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequireViewer_RBACRouterFallsBackToLegacyAdminSession(t *testing.T) {
+	t.Parallel()
+	router := ptrext.Of(Router{
+		rbac:   rbac.NewMiddleware(fakeRoleStore{role: domain.RoleViewer}),
+		admins: roleAdminReader{row: admin.Admin{ID: "user-1", Role: "admin"}},
+	})
+	called := false
+	w := httptest.NewRecorder()
+
+	router.requireViewer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	})).ServeHTTP(w, legacyAdminReq())
 
 	require.True(t, called)
 	require.Equal(t, http.StatusOK, w.Code)

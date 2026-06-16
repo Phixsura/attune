@@ -84,6 +84,7 @@
     "inbound_sources": "入站源",
     "guard_policies": "防护策略",
     "api_keys": "API key",
+    "audit_log": "审计日志",
     "settings": "设置",
     "usage": "用量",
     "llm_usage": "LLM 成本",
@@ -368,6 +369,10 @@
         "title": "API key",
         "body": "租户 API key、前缀、状态与撤销。"
       },
+      "audit_log": {
+        "title": "审计日志",
+        "body": "管理员敏感操作记录、筛选与 CSV 导出。"
+      },
       "tags": {
         "title": "标签",
         "body": "反馈手动标签、颜色、互斥组与归档。"
@@ -459,6 +464,46 @@
     },
     "empty_title": "还没有 API key",
     "empty_body": "签一把就能把 ingest API 接到你的产品里。明文 key 仅签发时返回一次。"
+  },
+  "audit_log": {
+    "title": "审计日志",
+    "subtitle": "查看控制台敏感操作的不可变审计记录，并按条件导出 CSV。",
+    "export": "导出 CSV",
+    "exporting": "导出中...",
+    "export_failed": "导出失败",
+    "filters_title": "筛选条件",
+    "filters_help": "可按时间范围、动作、目标类型和操作者筛选。点击“应用筛选”后更新列表。",
+    "filters_actions_placeholder": "选择一个或多个动作",
+    "filters_actions_selected": "已选择 {{count}} 个动作",
+    "filters_actions_clear": "清空动作",
+    "filters_from": "开始时间",
+    "filters_to": "结束时间",
+    "apply": "应用筛选",
+    "reset": "重置",
+    "load_more": "加载更多",
+    "table_title": "审计记录",
+    "table_help": "列表按时间倒序分页展示；CSV 导出会包含当前筛选条件下的全部匹配记录。",
+    "empty_title": "暂无审计记录",
+    "empty_body": "符合当前筛选条件的敏感操作还没有审计事件。",
+    "error_title": "加载审计记录失败",
+    "error_body": "请稍后重试，或确认当前账号具有查看审计日志的权限。",
+    "retry": "重试",
+    "before": "变更前",
+    "after": "变更后",
+    "request_metadata": "请求元数据",
+    "fields": {
+      "created_at": "时间",
+      "action": "动作",
+      "actor": "操作者",
+      "actor_id": "操作者 ID",
+      "actor_email": "操作者邮箱",
+      "actor_ip": "操作者 IP",
+      "actor_user_agent": "User-Agent",
+      "target": "目标",
+      "target_type": "目标类型",
+      "summary": "摘要",
+      "details": "详情"
+    }
   },
   "notify_targets": {
     "subtitle": "告诉 Attune 把反馈推到哪里——你自己的 HTTPS 接收端。",

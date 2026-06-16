@@ -62,6 +62,22 @@ func (h *NotifyTargetsHandler) Create(ctx *dispatcher.RequestContext[*session.Au
 	}
 	target.ID = id
 	target.CreatedAt = createdAt
+	if err := h.recordAudit(
+		ctx,
+		auth.UserType,
+		auth.UserID,
+		auth.TenantID,
+		"notify_target.create",
+		ctx.Request(),
+		target,
+		notifyTargetSummary("Created notify target", target),
+		nil,
+		auditNotifyTargetSnapshot(target),
+	); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,id:%s,err:%+v",
+			where, auth.TenantID, id, err.Error())
+		return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s,dest:%s",
 		where, auth.TenantID, id, nreq.DestinationType)
 	return dispatcher.Created(toNotifyProto(target))

@@ -33,6 +33,8 @@ export type Permission =
   // Settings - API Keys
   | 'settings:api_keys:view'
   | 'settings:api_keys:edit'
+  // Settings - Audit Log
+  | 'settings:audit_log:view'
   // Settings - Tags
   | 'settings:tags:view'
   | 'settings:tags:edit'
@@ -80,6 +82,7 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'settings:digest:edit',
     'settings:api_keys:view',
     'settings:api_keys:edit',
+    'settings:audit_log:view',
     'settings:tags:view',
     'settings:tags:edit',
     'settings:workflow:view',
