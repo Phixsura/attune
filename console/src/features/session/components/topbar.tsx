@@ -44,6 +44,7 @@ export function TopBar({ me }: TopBarProps) {
             <>
               <NavLink to="/llm-config">{t('nav.llm_config')}</NavLink>
               <NavLink to="/settings">{t('nav.settings')}</NavLink>
+              <NavLink to="/members">{t('nav.members')}</NavLink>
             </>
           )}
         </nav>
