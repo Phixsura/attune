@@ -42,6 +42,12 @@ import type { Member } from '@/proto/attune/v1/member'
 
 const ROLES: Role[] = ['admin', 'member', 'viewer']
 
+const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
+
+function isValidEmail(email: string): boolean {
+  return EMAIL_RE.test(email)
+}
+
 export function MembersPage() {
   const { t, i18n } = useTranslation()
   const { data: members, isPending } = useMembers()
@@ -83,9 +89,17 @@ export function MembersPage() {
   }
 
   const handleInvite = () => {
-    if (!inviteEmail.trim()) return
+    const email = inviteEmail.trim()
+    if (!email) {
+      toast.error(t('members.email_required'))
+      return
+    }
+    if (!isValidEmail(email)) {
+      toast.error(t('members.invalid_email'))
+      return
+    }
     inviteMember.mutate(
-      { email: inviteEmail.trim(), role: inviteRole },
+      { email, role: inviteRole },
       {
         onSuccess: () => {
           setInviteOpen(false)

@@ -19,11 +19,15 @@ module.exports = {
       severity: 'error',
       comment:
         'A feature may not import another feature (bulletproof-react §unidirectional). ' +
-        'Move the shared piece up into src/components/ or src/lib/ instead.',
+        'Move the shared piece up into src/components/ or src/lib/ instead. ' +
+        'Exception: features/session/ is a "shared feature" providing auth context.',
       from: { path: '^src/features/([^/]+)/.+' },
       to: {
         path: '^src/features/([^/]+)/.+',
-        pathNot: '^src/features/$1/.+',
+        pathNot: [
+          '^src/features/$1/.+', // same feature is OK
+          '^src/features/session/.+', // session is shared (auth context)
+        ],
       },
     },
     {

@@ -114,7 +114,9 @@
     "invite_email": "邮箱地址",
     "invite_role": "角色",
     "invite_submit": "发送邀请",
-    "invited": "邀请已发送"
+    "invited": "邀请已发送",
+    "email_required": "请输入邮箱地址",
+    "invalid_email": "邮箱格式不正确"
   },
   "llm_config": {
     "subtitle": "管理 Provider channel、模型能力和租户路由。",

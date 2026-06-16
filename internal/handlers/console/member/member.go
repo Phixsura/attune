@@ -6,6 +6,8 @@ package member
 import (
 	"errors"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
@@ -183,11 +185,25 @@ func (h *Handler) Remove(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 	return dispatcher.OK(ptrext.Of(attunev1.RemoveMemberResponse{}))
 }
 
+// emailRE is a basic email validation regex (RFC 5322 simplified).
+var emailRE = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
 // Invite creates a pending invite for a new member.
 func (h *Handler) Invite(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.InviteMemberRequest) (dispatcher.Result[*attunev1.InviteMemberResponse], error) {
 	const where = "console.MemberHandler.Invite"
 	auth := ctx.Auth
-	logext.Infof(ctx, "[%s] start,tenant_id:%s,email:%s,role:%s", where, auth.TenantID, req.Email, req.Role)
+
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		return dispatcher.Fail[*attunev1.InviteMemberResponse](
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "email is required")
+	}
+	if !emailRE.MatchString(email) {
+		return dispatcher.Fail[*attunev1.InviteMemberResponse](
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid email format")
+	}
+
+	logext.Infof(ctx, "[%s] start,tenant_id:%s,email:%s,role:%s", where, auth.TenantID, email, req.Role)
 
 	actorRole := rbac.FromContext(ctx)
 	pol := policy.NewMemberPolicy(actorRole, auth.UserID)
@@ -210,14 +226,14 @@ func (h *Handler) Invite(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 			http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "cannot invite members")
 	}
 
-	exists, err := h.members.ExistsByEmail(ctx, auth.TenantID, req.Email)
+	exists, err := h.members.ExistsByEmail(ctx, auth.TenantID, email)
 	if err != nil {
-		logext.Errorf(ctx, "[%s] check existing failed,email:%s,err:%s", where, req.Email, err.Error())
+		logext.Errorf(ctx, "[%s] check existing failed,email:%s,err:%s", where, email, err.Error())
 		return dispatcher.Fail[*attunev1.InviteMemberResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to check existing member")
 	}
 	if exists {
-		logext.Infof(ctx, "[%s] member already exists,tenant_id:%s,email:%s", where, auth.TenantID, req.Email)
+		logext.Infof(ctx, "[%s] member already exists,tenant_id:%s,email:%s", where, auth.TenantID, email)
 		return dispatcher.Fail[*attunev1.InviteMemberResponse](
 			http.StatusConflict, attunev1.ErrorCode_CONFLICT, "member with this email already exists")
 	}
@@ -233,19 +249,19 @@ func (h *Handler) Invite(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 		TenantID:   auth.TenantID,
 		MemberType: "invite",
 		UserID:     "",
-		Email:      ptrext.Of(req.Email),
+		Email:      ptrext.Of(email),
 		Role:       newRole,
 		RoleSource: "manual",
 		InvitedBy:  ptrext.Of(actor.ID),
 		InvitedAt:  time.Now(),
 	})
 	if err != nil {
-		logext.Errorf(ctx, "[%s] create failed,email:%s,err:%s", where, req.Email, err.Error())
+		logext.Errorf(ctx, "[%s] create failed,email:%s,err:%s", where, email, err.Error())
 		return dispatcher.Fail[*attunev1.InviteMemberResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to create invite")
 	}
 
-	logext.Infof(ctx, "[%s] OK,tenant_id:%s,email:%s,invite_id:%s", where, auth.TenantID, req.Email, m.ID)
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,email:%s,invite_id:%s", where, auth.TenantID, email, m.ID)
 	return dispatcher.OK(ptrext.Of(attunev1.InviteMemberResponse{
 		Member: ptrext.Of(attunev1.Member{
 			Id:         m.ID,
