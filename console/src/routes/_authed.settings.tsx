@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Sparkles,
   Tags,
+  Users,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -25,6 +26,7 @@ import { ApiKeysPage } from '@/features/api-keys/components/api-keys-page'
 import { DigestSubscriptionPage } from '@/features/digest-subscription/components/digest-subscription-page'
 import { GuardPoliciesPage } from '@/features/guard-policies/components/guard-policies-page'
 import { InboundSourcesPage } from '@/features/inbound-sources/components/inbound-sources-page'
+import { MembersPage } from '@/features/members/components/members-page'
 import { NotifyTargetsPage } from '@/features/notify-targets/components/notify-targets-page'
 import { meQuery } from '@/features/session/api/get-me'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
@@ -43,6 +45,7 @@ type SettingsSection =
   | 'api_keys'
   | 'tags'
   | 'workflow'
+  | 'members'
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'classification',
@@ -53,6 +56,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'api_keys',
   'tags',
   'workflow',
+  'members',
 ]
 
 export const Route = createFileRoute('/_authed/settings')({
@@ -304,6 +308,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
       {section === 'api_keys' ? <ApiKeysPage /> : null}
       {section === 'tags' ? <TagsPage /> : null}
       {section === 'workflow' ? <WorkflowSettingsPage /> : null}
+      {section === 'members' ? <MembersPage /> : null}
     </section>
   )
 }
@@ -364,6 +369,12 @@ function SettingsSidebar({
       icon: GitBranch,
       title: t('settings.areas.workflow.title'),
       body: t('settings.areas.workflow.body'),
+    },
+    {
+      section: 'members',
+      icon: Users,
+      title: t('settings.areas.members.title'),
+      body: t('settings.areas.members.body'),
     },
   ] satisfies Array<{
     body: string

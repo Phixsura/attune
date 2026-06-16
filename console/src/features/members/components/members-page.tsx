@@ -73,11 +73,6 @@ export function MembersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t('nav.members')}</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t('members.subtitle')}</p>
-      </div>
-
       <Card>
         <CardHeader>
           <CardTitle>{t('members.title')}</CardTitle>
