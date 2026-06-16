@@ -71,6 +71,12 @@ func TestFeedbackPolicy_CanBatchDelete(t *testing.T) {
 	assert.False(t, NewFeedbackPolicy(domain.RoleViewer, "a").CanBatchDelete())
 }
 
+func TestMemberPolicy_CanView(t *testing.T) {
+	assert.True(t, NewMemberPolicy(domain.RoleAdmin, "a").CanView())
+	assert.True(t, NewMemberPolicy(domain.RoleMember, "a").CanView())
+	assert.True(t, NewMemberPolicy(domain.RoleViewer, "a").CanView())
+}
+
 func TestMemberPolicy_CanInvite(t *testing.T) {
 	assert.True(t, NewMemberPolicy(domain.RoleAdmin, "a").CanInvite())
 	assert.False(t, NewMemberPolicy(domain.RoleMember, "a").CanInvite())
