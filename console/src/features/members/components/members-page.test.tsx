@@ -4,7 +4,7 @@ import { HttpResponse, http } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import { MembersPage } from '@/features/members/components/members-page'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
 // Mock usePermissions hook
 vi.mock('@/features/session/hooks/use-permissions', () => ({
@@ -380,5 +380,65 @@ describe('MembersPage mutations', () => {
     // Invalid email is rejected client-side; no POST is made.
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
     expect(postCalled).toBe(false)
+  })
+
+  it('changes a member role via the role select (covers handleRoleChange)', async () => {
+    setupMembersResponse(mockMembers)
+    let patched: { id?: string; role?: string } = {}
+    server.use(
+      http.patch('/fb/v1/console/members/:id', async ({ request, params }) => {
+        patched = {
+          id: String(params.id),
+          role: ((await request.json()) as { role?: string }).role,
+        }
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => expect(screen.getByText('member@example.com')).toBeInTheDocument())
+
+    // The member row's role select trigger (combobox). m2 (member) is
+    // manageable by the admin actor, so its select is enabled.
+    const combos = screen.getAllByRole('combobox')
+    const memberCombo = combos.find((c) =>
+      c.closest('tr')?.textContent?.includes('member@example.com'),
+    )
+    expect(memberCombo).toBeDefined()
+    if (!memberCombo) return
+    await user.click(memberCombo)
+
+    // Pick "viewer" (只读) from the opened listbox.
+    const option = await screen.findByRole('option', { name: '只读' })
+    await user.click(option)
+
+    await waitFor(() => expect(patched.id).toBe('m2'))
+    expect(patched.role).toBe('viewer')
+  })
+
+  it('invites with a chosen role via the role select (covers invite role select)', async () => {
+    setupMembersResponse(mockMembers)
+    let posted: { email?: string; role?: string } = {}
+    server.use(
+      http.post('/fb/v1/console/members', async ({ request }) => {
+        posted = (await request.json()) as { email?: string; role?: string }
+        return HttpResponse.json({ member: { id: 'new', email: posted.email, role: posted.role } })
+      }),
+    )
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => expect(screen.getByText('admin@example.com')).toBeInTheDocument())
+    await user.click(screen.getByText(TEXT.invite))
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+
+    // Change the invite role to admin via the dialog's role select.
+    await user.click(within(screen.getByRole('dialog')).getByRole('combobox'))
+    await user.click(await screen.findByRole('option', { name: '管理员' }))
+
+    await user.type(screen.getByPlaceholderText('user@example.com'), 'boss@example.com')
+    await user.click(screen.getByRole('button', { name: '发送邀请' }))
+
+    await waitFor(() => expect(posted.email).toBe('boss@example.com'))
+    expect(posted.role).toBe('admin')
   })
 })
