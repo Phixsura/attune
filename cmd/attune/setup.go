@@ -225,8 +225,9 @@ func buildConsoleRouter(
 	// Job handler uses batch service (implements jobService interface).
 	jobHandler := feedbackjob.NewHandler(batchSvc)
 
-	// Tenant member repo for RBAC (#38).
+	// Tenant member repo and handler for RBAC (#38).
 	memberRepo := tenantmember.NewRepo(pool)
+	memberHandler := console.NewMemberHandler(memberRepo)
 
 	return console.NewRouter(
 		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback,
@@ -234,7 +235,7 @@ func buildConsoleRouter(
 		searchHandler,
 		jobHandler,
 		usage, enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
-		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, adminRepo, memberRepo,
+		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	).Mount(), nil
 }
 

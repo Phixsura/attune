@@ -33,6 +33,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	consolellmconfig "github.com/Phixsura/attune/internal/handlers/console/llmconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
+	"github.com/Phixsura/attune/internal/handlers/console/member"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
@@ -78,6 +79,7 @@ var (
 	NewTagAssignmentHandler      = consoletagassignment.NewHandler
 	NewWorkflowHandler           = consoleworkflow.NewHandler
 	NewOIDCHandler               = consoleoidc.NewHandler
+	NewMemberHandler             = member.NewHandler
 	BootstrapAdmin               = auth.BootstrapAdmin
 )
 
@@ -149,6 +151,7 @@ type Router struct {
 	tagAssignments     *consoletagassignment.Handler
 	workflow           *consoleworkflow.Handler
 	oidc               *consoleoidc.Handler
+	members            *member.Handler
 	admins             adminReader
 	rbac               *rbac.Middleware
 }
@@ -179,12 +182,13 @@ func NewRouter(
 	tagAssignments *consoletagassignment.Handler,
 	workflow *consoleworkflow.Handler,
 	oidc *consoleoidc.Handler,
+	membersHandler *member.Handler,
 	admins adminReader,
-	members *tenantmember.Repo,
+	membersRepo *tenantmember.Repo,
 ) *Router {
 	var rbacMW *rbac.Middleware
-	if members != nil {
-		rbacMW = rbac.NewMiddleware(members)
+	if membersRepo != nil {
+		rbacMW = rbac.NewMiddleware(membersRepo)
 	}
 	return ptrext.Of(Router{
 		signer:             signer,
@@ -208,6 +212,7 @@ func NewRouter(
 		tagAssignments:     tagAssignments,
 		workflow:           workflow,
 		oidc:               oidc,
+		members:            membersHandler,
 		admins:             admins,
 		rbac:               rbacMW,
 	})
@@ -309,6 +314,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountClusters(m)
 	r.mountTags(m)
 	r.mountWorkflow(m)
+	r.mountMembers(m)
 }
 
 func (r *Router) mountLLMConfig(m chi.Router) {
@@ -1243,6 +1249,56 @@ func (r *Router) mountWorkflow(m chi.Router) {
 			}),
 			r.workflow.SeedDefaults,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SeedDefaultsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+}
+
+func (r *Router) mountMembers(m chi.Router) {
+	if r.members == nil {
+		return
+	}
+	m.Route("/members", func(mb chi.Router) {
+		mb.Use(r.requireAdminStrict)
+		mb.Get("/", dispatcher.Bind(
+			"console.MemberHandler.List",
+			dispatcher.Empty(func() *attunev1.ListMembersRequest {
+				return ptrext.Of(attunev1.ListMembersRequest{})
+			}),
+			r.members.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListMembersRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		mb.Patch("/{id}", dispatcher.Bind(
+			"console.MemberHandler.UpdateRole",
+			dispatcher.Combine(
+				func() *attunev1.UpdateMemberRoleRequest {
+					return ptrext.Of(attunev1.UpdateMemberRoleRequest{})
+				},
+				dispatcher.JSONBody[*attunev1.UpdateMemberRoleRequest],
+				dispatcher.Param("id", func(req *attunev1.UpdateMemberRoleRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.members.UpdateRole,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateMemberRoleRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		mb.Delete("/{id}", dispatcher.Bind(
+			"console.MemberHandler.Remove",
+			dispatcher.Path(
+				func() *attunev1.RemoveMemberRequest {
+					return ptrext.Of(attunev1.RemoveMemberRequest{})
+				},
+				dispatcher.Param("id", func(req *attunev1.RemoveMemberRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.members.Remove,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RemoveMemberRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
