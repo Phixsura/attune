@@ -867,5 +867,15 @@
     "audit": {
       "empty": "暂无操作记录"
     }
+  },
+  "role": {
+    "admin": "管理员",
+    "member": "成员",
+    "viewer": "只读"
+  },
+  "permission": {
+    "denied": "您没有执行此操作的权限",
+    "requires_admin": "此操作需要管理员权限",
+    "requires_member": "此操作需要成员权限"
   }
 }

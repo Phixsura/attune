@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import {
   Bell,
   Bot,
@@ -26,6 +26,7 @@ import { DigestSubscriptionPage } from '@/features/digest-subscription/component
 import { GuardPoliciesPage } from '@/features/guard-policies/components/guard-policies-page'
 import { InboundSourcesPage } from '@/features/inbound-sources/components/inbound-sources-page'
 import { NotifyTargetsPage } from '@/features/notify-targets/components/notify-targets-page'
+import { meQuery } from '@/features/session/api/get-me'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
@@ -55,7 +56,13 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
 ]
 
 export const Route = createFileRoute('/_authed/settings')({
-  validateSearch: (search): { section: SettingsSection } => {
+  beforeLoad: async ({ context }) => {
+    const me = await context.queryClient.ensureQueryData(meQuery())
+    if (me.user?.role !== 'admin') {
+      throw redirect({ to: '/feedback' })
+    }
+  },
+  validateSearch: (search: Record<string, unknown>): { section: SettingsSection } => {
     const raw = typeof search.section === 'string' ? search.section : 'classification'
     return {
       section: SETTINGS_SECTIONS.includes(raw as SettingsSection)

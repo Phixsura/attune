@@ -1,6 +1,7 @@
 import { Link, useNavigate } from '@tanstack/react-router'
 import { KeyRound, LogOut, User } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { RoleBadge } from '@/components/auth/role-badge'
 import { Logo } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,6 +14,7 @@ import {
 import type { SessionMe } from '@/features/session/api/get-me'
 import { useLogout } from '@/features/session/api/logout'
 import { consolePath } from '@/lib/console-path'
+import { usePermissions } from '@/lib/hooks/use-permissions'
 
 interface TopBarProps {
   me: SessionMe
@@ -25,7 +27,7 @@ export function TopBar({ me }: TopBarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const logout = useLogout()
-  const isAdmin = me.user?.role === 'admin'
+  const { canManage, isAdmin, role } = usePermissions()
 
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
@@ -38,10 +40,15 @@ export function TopBar({ me }: TopBarProps) {
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
           <NavLink to="/usage">{t('nav.usage')}</NavLink>
           <NavLink to="/llm-usage">{t('nav.llm_usage')}</NavLink>
-          <NavLink to="/llm-config">{t('nav.llm_config')}</NavLink>
-          <NavLink to="/settings">{t('nav.settings')}</NavLink>
+          {canManage() && (
+            <>
+              <NavLink to="/llm-config">{t('nav.llm_config')}</NavLink>
+              <NavLink to="/settings">{t('nav.settings')}</NavLink>
+            </>
+          )}
         </nav>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
+          <RoleBadge role={role} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="gap-2">
@@ -50,19 +57,18 @@ export function TopBar({ me }: TopBarProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                {t(isAdmin ? 'auth.role.admin' : 'auth.role.member')}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
               {isAdmin && (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    void navigate({ to: '/change-password' })
-                  }}
-                >
-                  <KeyRound className="size-4" />
-                  {t('auth.change_password.menu')}
-                </DropdownMenuItem>
+                <>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      void navigate({ to: '/change-password' })
+                    }}
+                  >
+                    <KeyRound className="size-4" />
+                    {t('auth.change_password.menu')}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
               )}
               <DropdownMenuItem
                 onSelect={() => {

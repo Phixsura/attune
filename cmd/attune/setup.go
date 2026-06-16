@@ -38,6 +38,7 @@ import (
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 	"github.com/Phixsura/attune/internal/repo/tenant"
+	"github.com/Phixsura/attune/internal/repo/tenantmember"
 	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -224,13 +225,16 @@ func buildConsoleRouter(
 	// Job handler uses batch service (implements jobService interface).
 	jobHandler := feedbackjob.NewHandler(batchSvc)
 
+	// Tenant member repo for RBAC (#38).
+	memberRepo := tenantmember.NewRepo(pool)
+
 	return console.NewRouter(
 		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback,
 		batchHandler,
 		searchHandler,
 		jobHandler,
 		usage, enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
-		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, adminRepo,
+		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, adminRepo, memberRepo,
 	).Mount(), nil
 }
 

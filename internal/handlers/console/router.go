@@ -29,6 +29,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
 	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/rbac"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	consolellmconfig "github.com/Phixsura/attune/internal/handlers/console/llmconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
@@ -42,6 +43,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	"github.com/Phixsura/attune/internal/repo/tenantmember"
 )
 
 // Re-exports so cmd/attune can keep a single `console.X` surface even
@@ -148,6 +150,7 @@ type Router struct {
 	workflow           *consoleworkflow.Handler
 	oidc               *consoleoidc.Handler
 	admins             adminReader
+	rbac               *rbac.Middleware
 }
 
 type adminReader interface {
@@ -177,7 +180,12 @@ func NewRouter(
 	workflow *consoleworkflow.Handler,
 	oidc *consoleoidc.Handler,
 	admins adminReader,
+	members *tenantmember.Repo,
 ) *Router {
+	var rbacMW *rbac.Middleware
+	if members != nil {
+		rbacMW = rbac.NewMiddleware(members)
+	}
 	return ptrext.Of(Router{
 		signer:             signer,
 		login:              authH,
@@ -201,6 +209,7 @@ func NewRouter(
 		workflow:           workflow,
 		oidc:               oidc,
 		admins:             admins,
+		rbac:               rbacMW,
 	})
 }
 
@@ -307,7 +316,7 @@ func (r *Router) mountLLMConfig(m chi.Router) {
 		return
 	}
 	m.Route("/llm", func(l chi.Router) {
-		l.Use(r.requireAdmin)
+		l.Use(r.requireAdminStrict) // Bypass cache for sensitive LLM config
 		l.Get("/channels", dispatcher.Bind(
 			"console.llmconfig.ListChannels",
 			dispatcher.Empty(func() *attunev1.ListLLMChannelsRequest { return ptrext.Of(attunev1.ListLLMChannelsRequest{}) }),
@@ -391,7 +400,24 @@ func (r *Router) mountLLMConfig(m chi.Router) {
 }
 
 func (r *Router) requireAdmin(next http.Handler) http.Handler {
-	const where = "console.Router.requireAdmin"
+	// Use RBAC middleware if available (tenant_members table exists)
+	if r.rbac != nil {
+		return r.rbac.RequireAdmin()(next)
+	}
+	// Fallback to legacy admin table check
+	return r.requireAdminLegacy(next)
+}
+
+func (r *Router) requireAdminStrict(next http.Handler) http.Handler {
+	// Use RBAC strict middleware if available (bypasses cache)
+	if r.rbac != nil {
+		return r.rbac.RequireAdminStrict()(next)
+	}
+	return r.requireAdminLegacy(next)
+}
+
+func (r *Router) requireAdminLegacy(next http.Handler) http.Handler {
+	const where = "console.Router.requireAdminLegacy"
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		authCtx := session.FromContext(req.Context())
 		if r.admins == nil {
