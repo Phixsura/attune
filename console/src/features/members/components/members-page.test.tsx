@@ -235,3 +235,45 @@ describe('MembersPage current user', () => {
     })
   })
 })
+
+describe('MembersPage remove dialog', () => {
+  it('opens remove dialog when trash icon clicked', async () => {
+    setupMembersResponse(mockMembers)
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('member@example.com')).toBeInTheDocument()
+    })
+
+    // Find trash buttons and click one for a non-admin member
+    const trashButtons = screen.getAllByRole('button', { name: '' })
+    // Click the second trash button (for member-user, not admin)
+    const memberTrashButton = trashButtons.find((btn) =>
+      btn.closest('tr')?.textContent?.includes('member@example.com'),
+    )
+    if (memberTrashButton) {
+      await user.click(memberTrashButton)
+    }
+
+    // The remove dialog should open
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+  })
+})
+
+describe('MembersPage role badges', () => {
+  it('shows role source for each member', async () => {
+    setupMembersResponse(mockMembers)
+    renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument()
+    })
+
+    // Check role sources are displayed
+    expect(screen.getByText('bootstrap')).toBeInTheDocument()
+    expect(screen.getByText('idp')).toBeInTheDocument()
+    expect(screen.getByText('manual')).toBeInTheDocument()
+  })
+})
