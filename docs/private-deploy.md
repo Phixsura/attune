@@ -23,6 +23,74 @@ distroless image.
 
 ---
 
+## What counts as a reasonable private deployment
+
+Private deployment is reasonable only when the operator can own the runtime
+risks around data, identity, upgrades, and observability. Use this guide for a
+fast single-node install, but treat it as the first rung of a deployment ladder,
+not the whole production story.
+
+Deployment tiers:
+
+- **Evaluation**: local trial, demo data, or short-lived pilot. Docker Compose,
+  bundled Postgres, and loopback-only HTTP are acceptable.
+- **Small private install**: low-risk internal workflow with manual operations.
+  Use Compose or one VM, encrypted config, scheduled backups, and a TLS proxy.
+- **Production private install**: customer data, multiple teams, SSO, or uptime
+  expectations. Use Kubernetes/Helm, external Postgres with PITR, managed
+  secrets, monitoring, and a rollback plan.
+
+Non-negotiable production gates:
+
+- **Secrets are operator-owned.** Real `config.yaml`, database URLs, Tink
+  keysets, session keys, OIDC client secrets, bootstrap credentials, and
+  provider keys stay outside git. In Kubernetes, use `config.existingSecret`;
+  do not put production secrets in Helm values.
+- **Postgres is durable and recoverable.** Use external PostgreSQL with
+  backups, point-in-time recovery, restore drills, and pgvector 0.5.0+.
+  The embedded Postgres container is for evaluation and low-risk installs.
+- **The Tink keyset is backed up with the database.** Losing the keyset means
+  encrypted inbound credentials, webhook secrets, and managed LLM API keys are
+  unrecoverable even if the database backup exists.
+- **The public entrypoint is TLS-fronted.** Expose Attune through a reverse
+  proxy or ingress with HTTPS. Bind directly to `0.0.0.0` only behind that
+  proxy.
+- **Identity is deliberate.** Use Console bootstrap only for first admin
+  creation, then remove bootstrap credentials. For production, prefer OIDC/SSO
+  with controlled allowed groups.
+- **Upgrades are rehearsed.** Pin image tags or digests, read the changelog,
+  take backups before destructive migrations, and test rollback on staging.
+- **Observability exists before traffic.** Scrape `/metrics`, collect logs,
+  alert on readiness failures, DB errors, queue lag, and enrichment failures.
+- **Shutdown and rollout are graceful.** Kubernetes installs should use
+  `/readyz`, at least two replicas, PDB, `maxUnavailable: 0`, and the graceful
+  shutdown defaults described in
+  [`docs/k8s-deploy.md`](k8s-deploy.md#graceful-shutdown).
+
+Before putting real customer data through a private install, run this acceptance
+check:
+
+```bash
+curl -fsS http://127.0.0.1:8090/healthz
+curl -fsS http://127.0.0.1:8090/readyz
+docker compose logs attune --tail=200
+docker compose exec -T postgres psql -U attune attune <<'SQL'
+CREATE EXTENSION IF NOT EXISTS vector;
+SELECT extversion FROM pg_extension WHERE extname = 'vector';
+SQL
+docker compose exec postgres pg_dump -U attune attune \
+  >/tmp/attune-backup-smoke.sql
+test -s /tmp/attune-backup-smoke.sql
+```
+
+For production Kubernetes, use the Helm path in
+[`docs/k8s-deploy.md`](k8s-deploy.md). It has chart-level fail-fast validation
+for production secrets, external Postgres, replica counts, HPA resources, PDB
+settings, NetworkPolicy rules, DNS smoke tests, rolling deploys, and
+blue/green traffic switching.
+
+---
+
 ## Step 1 -- Clone
 
 ```bash

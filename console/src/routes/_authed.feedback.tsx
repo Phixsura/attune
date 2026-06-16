@@ -248,7 +248,7 @@ function FeedbackPage() {
             allowedNext={data.allowedNextStates ?? []}
           />
         )}
-        renderAuditLog={(data) => <AuditTimeline feedbackId={Number(data.id)} />}
+        renderAuditLog={(data) => <AuditTimeline feedbackId={String(data.id)} />}
       />
     </div>
   )

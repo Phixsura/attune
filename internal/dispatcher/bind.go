@@ -207,8 +207,14 @@ func runBefore[Auth any, Req proto.Message](
 // HealthzHandler writes the dispatcher-owned plain text liveness response.
 func HealthzHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		writeText(w, http.StatusOK, "text/plain; charset=utf-8", "ok")
+		WriteText(w, http.StatusOK, "ok")
 	}
+}
+
+// WriteText writes a dispatcher-owned plain text response for non-proto routes
+// such as Kubernetes health probes.
+func WriteText(w http.ResponseWriter, status int, body string) {
+	writeText(w, status, "text/plain; charset=utf-8", body)
 }
 
 // Reject writes a standard error envelope for middleware and other pre-handler

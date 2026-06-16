@@ -5,7 +5,7 @@ import { Clock, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { type AuditEntry, auditQuery } from '@/features/workflow/api/list-audit'
 
-export function AuditTimeline({ feedbackId }: { feedbackId: number }) {
+export function AuditTimeline({ feedbackId }: { feedbackId: string }) {
   const { t } = useTranslation()
   const audit = useQuery(auditQuery(feedbackId))
 

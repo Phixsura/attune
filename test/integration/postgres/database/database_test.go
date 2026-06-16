@@ -5,6 +5,7 @@ package database_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,6 +21,34 @@ func TestPG_RunMigrations_Idempotent(t *testing.T) {
 	before := migrationCount(t, ctx, pool)
 	if err := database.RunMigrations(ctx, pool); err != nil {
 		t.Fatalf("second RunMigrations: %v", err)
+	}
+	after := migrationCount(t, ctx, pool)
+	if after != before {
+		t.Fatalf("migration tracker count changed: before=%d after=%d", before, after)
+	}
+}
+
+func TestPG_RunMigrations_Concurrent(t *testing.T) {
+	pool := testdb.NewPool(t)
+	ctx := context.Background()
+	before := migrationCount(t, ctx, pool)
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 4)
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- database.RunMigrations(ctx, pool)
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("RunMigrations concurrent error: %v", err)
+		}
 	}
 	after := migrationCount(t, ctx, pool)
 	if after != before {

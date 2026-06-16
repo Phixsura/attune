@@ -1,0 +1,46 @@
+{{- include "attune.validate" . -}}
+{{- if .Values.rollout.trafficService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "attune.trafficServiceName" . }}
+  labels:
+    {{- include "attune.labels" . | nindent 4 }}
+    app.kubernetes.io/component: traffic
+  {{- with .Values.rollout.trafficService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  {{- with .Values.service.loadBalancerClass }}
+  loadBalancerClass: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.service.loadBalancerIP }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
+  {{- with .Values.service.ipFamilyPolicy }}
+  ipFamilyPolicy: {{ . }}
+  {{- end }}
+  {{- with .Values.service.ipFamilies }}
+  ipFamilies:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      {{- with .Values.rollout.trafficService.appProtocol }}
+      appProtocol: {{ . | quote }}
+      {{- end }}
+  selector:
+    {{- include "attune.trafficSelectorLabels" . | nindent 4 }}
+{{- end }}

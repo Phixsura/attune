@@ -6,11 +6,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,13 +29,15 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 )
 
 // buildRouter wires the chi router: OTel root span + X-Trace-Id, the standard
-// middleware chain, /healthz, /metrics, the /v1 API (api-key /
+// middleware chain, /healthz, /readyz, /metrics, the /v1 API (api-key /
 // rate-limited feedback ingest + inbound adapter mux), and — when
 // CONSOLE_SESSION_KEY is set — the Console under /fb/v1/console.
 func buildRouter(
@@ -42,6 +46,7 @@ func buildRouter(
 	ingestHandler *handlers.IngestHandler,
 	apiKeys *apikeysvc.APIKeys,
 	pool *pgxpool.Pool,
+	ready readinessChecker,
 	llm llmclient.LLMClient,
 	inboundMux chi.Router,
 	inboundSecrets *secretstore.TinkStore,
@@ -65,7 +70,7 @@ func buildRouter(
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(305 * time.Second))
-	mountHealth(r)
+	mountHealth(r, ready)
 	// Prometheus scrape endpoint. Restrict to internal CIDR via nginx
 	// in production — no auth at the Go level.
 	r.Handle("/metrics", metrics.Handler())
@@ -175,8 +180,58 @@ func serveConsoleIndex(w http.ResponseWriter, req *http.Request, dir string) {
 // convention, where the trailing "z" keeps a health route from colliding with a
 // real application path. (The pre-0.2 /health route was removed; see CHANGELOG.)
 // The otelchi /health-prefix filter in buildRouter keeps /healthz out of traces.
-func mountHealth(r chi.Router) {
+type readinessChecker interface {
+	Ping(context.Context) error
+}
+
+var errServerDraining = errors.New("server draining")
+
+type drainAwareReadiness struct {
+	base     readinessChecker
+	draining atomic.Bool
+}
+
+func newDrainAwareReadiness(base readinessChecker) *drainAwareReadiness {
+	return ptrext.Of(drainAwareReadiness{base: base})
+}
+
+func (r *drainAwareReadiness) BeginDrain() {
+	r.draining.Store(true)
+}
+
+func (r *drainAwareReadiness) Ping(ctx context.Context) error {
+	if r == nil || r.draining.Load() {
+		return errServerDraining
+	}
+	if r.base == nil {
+		return errServerDraining
+	}
+	return r.base.Ping(ctx)
+}
+
+func mountHealth(r chi.Router, ready readinessChecker) {
 	r.Get("/healthz", dispatcher.HealthzHandler())
+	r.Get("/readyz", readyzHandler(ready))
+}
+
+func readyzHandler(ready readinessChecker) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if ready == nil {
+			writeNotReady(req.Context(), w)
+			return
+		}
+		ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+		defer cancel()
+		if err := ready.Ping(ctx); err != nil {
+			writeNotReady(req.Context(), w)
+			return
+		}
+		dispatcher.WriteText(w, http.StatusOK, "ok")
+	}
+}
+
+func writeNotReady(ctx context.Context, w http.ResponseWriter) {
+	dispatcher.Reject(ctx, w, http.StatusServiceUnavailable, attunev1.ErrorCode_INTERNAL, "not ready")
 }
 
 // traceIDResponseHeader writes the active OTel trace_id into the

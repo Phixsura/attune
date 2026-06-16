@@ -34,7 +34,7 @@ describe('AuditTimeline', () => {
       ),
     )
     // Use a fresh QueryClient that has not pre-fetched
-    renderWithProviders(<AuditTimeline feedbackId={42} />)
+    renderWithProviders(<AuditTimeline feedbackId="42" />)
     expect(screen.getByText('加载中…')).toBeInTheDocument()
   })
 
@@ -42,7 +42,7 @@ describe('AuditTimeline', () => {
     server.use(
       http.get('/fb/v1/console/feedback/99/audit', () => HttpResponse.json({ entries: [] })),
     )
-    renderWithProviders(<AuditTimeline feedbackId={99} />)
+    renderWithProviders(<AuditTimeline feedbackId="99" />)
     await waitFor(() => {
       expect(screen.getByText('暂无操作记录')).toBeInTheDocument()
     })
@@ -52,7 +52,7 @@ describe('AuditTimeline', () => {
     server.use(
       http.get('/fb/v1/console/feedback/42/audit', () => HttpResponse.json({ entries: [entry] })),
     )
-    renderWithProviders(<AuditTimeline feedbackId={42} />)
+    renderWithProviders(<AuditTimeline feedbackId="42" />)
     await waitFor(() => {
       expect(screen.getByText('state')).toBeInTheDocument()
     })
@@ -68,7 +68,7 @@ describe('AuditTimeline', () => {
         HttpResponse.json({ entries: [entryNoOld] }),
       ),
     )
-    renderWithProviders(<AuditTimeline feedbackId={42} />)
+    renderWithProviders(<AuditTimeline feedbackId="42" />)
     await waitFor(() => {
       expect(screen.getByText('state')).toBeInTheDocument()
     })
@@ -82,11 +82,24 @@ describe('AuditTimeline', () => {
         HttpResponse.json({ entries: [entryNoOld] }),
       ),
     )
-    renderWithProviders(<AuditTimeline feedbackId={42} />)
+    renderWithProviders(<AuditTimeline feedbackId="42" />)
     await waitFor(() => {
       expect(screen.getByText('state')).toBeInTheDocument()
     })
     expect(screen.queryByText(/starting work/)).not.toBeInTheDocument()
+  })
+
+  it('renders entries without a timestamp', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/42/audit', () =>
+        HttpResponse.json({ entries: [{ ...entry, id: 'ae-no-time', createdAt: '' }] }),
+      ),
+    )
+    renderWithProviders(<AuditTimeline feedbackId="42" />)
+    await waitFor(() => {
+      expect(screen.getByText('state')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Alice ·')).toBeInTheDocument()
   })
 
   it('renders multiple entries as an ordered list', async () => {
@@ -103,7 +116,7 @@ describe('AuditTimeline', () => {
         HttpResponse.json({ entries: [entry, second] }),
       ),
     )
-    renderWithProviders(<AuditTimeline feedbackId={42} />)
+    renderWithProviders(<AuditTimeline feedbackId="42" />)
     await waitFor(() => {
       expect(screen.getByText('state')).toBeInTheDocument()
     })
@@ -114,8 +127,8 @@ describe('AuditTimeline', () => {
 
   it('uses pre-seeded query data when available', async () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    qc.setQueryData(['console', 'feedback', 42, 'audit'], [entry])
-    renderWithProviders(<AuditTimeline feedbackId={42} />, { queryClient: qc })
+    qc.setQueryData(['console', 'feedback', '42', 'audit'], [entry])
+    renderWithProviders(<AuditTimeline feedbackId="42" />, { queryClient: qc })
     // Should render immediately without loading state
     expect(screen.getByText('state')).toBeInTheDocument()
     expect(screen.getByText('In Progress')).toBeInTheDocument()

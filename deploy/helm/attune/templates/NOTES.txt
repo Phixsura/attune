@@ -1,0 +1,40 @@
+Attune has been installed.
+
+{{ if .Values.rollout.trafficService.enabled -}}
+Stable traffic Service:
+  {{ include "attune.trafficServiceName" . }}:{{ .Values.service.port }}
+  activeColor={{ .Values.rollout.trafficService.activeColor }}
+
+{{ end -}}
+{{ if .Values.service.enabled -}}
+Service:
+  {{ include "attune.fullname" . }}:{{ .Values.service.port }}
+
+Health:
+  kubectl port-forward svc/{{ include "attune.fullname" . }} 8090:{{ .Values.service.port }}
+  curl http://127.0.0.1:8090/healthz
+  curl http://127.0.0.1:8090/readyz
+
+{{ else if .Values.rollout.trafficService.enabled -}}
+Traffic health after the active color has ready endpoints:
+  kubectl port-forward svc/{{ include "attune.trafficServiceName" . }} 8090:{{ .Values.service.port }}
+  curl http://127.0.0.1:8090/healthz
+  curl http://127.0.0.1:8090/readyz
+
+{{ end -}}
+Production secret note:
+  Do not put production database URLs, Tink keysets, session keys, OIDC client
+  secrets, or webhook secrets in Helm values. Create a Secret containing the
+  full config.yaml and set config.existingSecret.
+
+Dev keyset helper:
+  attune secrets generate-keyset > keyset.json
+  helm upgrade --install {{ .Release.Name }} {{ .Chart.Name }} \
+    --set postgres.embedded.auth.password='<password>' \
+    --set-file config.render.secrets.tinkKeyset=keyset.json
+
+{{ if .Values.workload.enabled -}}
+In-cluster CLI path:
+  kubectl exec deploy/{{ include "attune.fullname" . }} -- \
+    /app/attune --config {{ include "attune.configPath" . }} tenant create --slug acme
+{{ end -}}

@@ -1,0 +1,26 @@
+{{- if .Values.postgres.embedded.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "attune.postgresFullname" . }}
+  labels:
+    {{- include "attune.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+  {{- with .Values.postgres.embedded.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  {{- if .Values.postgres.embedded.service.headless }}
+  clusterIP: None
+  publishNotReadyAddresses: true
+  {{- end }}
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.embedded.service.port }}
+      targetPort: postgres
+      protocol: TCP
+  selector:
+    {{- include "attune.postgresSelectorLabels" . | nindent 4 }}
+{{- end }}

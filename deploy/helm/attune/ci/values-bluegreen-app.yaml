@@ -1,0 +1,29 @@
+profile: dev
+
+replicaCount: 2
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+rollout:
+  color: blue
+
+postgres:
+  embedded:
+    auth:
+      password: attune-dev
+    persistence:
+      enabled: false
+
+config:
+  render:
+    observability:
+      environment: dev
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi

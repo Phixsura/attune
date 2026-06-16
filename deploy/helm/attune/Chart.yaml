@@ -1,0 +1,18 @@
+apiVersion: v2
+name: attune
+description: Helm chart for Attune feedback intelligence on Kubernetes
+type: application
+version: 0.1.0
+appVersion: "v0.3.0"
+home: https://github.com/Phixsura/attune
+sources:
+  - https://github.com/Phixsura/attune
+keywords:
+  - feedback
+  - ai
+  - llm
+  - kubernetes
+maintainers:
+  - name: Phixsura
+annotations:
+  artifacthub.io/category: monitoring-logging

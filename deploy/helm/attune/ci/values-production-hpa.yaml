@@ -1,0 +1,31 @@
+profile: production
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+topologySpread:
+  enabled: true
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: ScheduleAnyway
+
+postgres:
+  embedded:
+    enabled: false
+  external:
+    enabled: true
+
+config:
+  existingSecret: attune-config

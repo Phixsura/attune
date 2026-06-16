@@ -6,8 +6,10 @@
 #     .github/dependabot.yml bumps both together weekly.
 #   * Go + pnpm use the toolchains' BUILT-IN caching (setup-go keyed on go.sum,
 #     setup-node `cache: pnpm`) — no hand-rolled actions/cache.
-#   * dorny/paths-filter runs the Go jobs only on `**/*.go` and the console job
-#     only on `console/**`; touching this workflow re-runs everything.
+#   * dorny/paths-filter keeps unrelated PRs fast, but contract and deploy
+#     changes deliberately fan out: proto changes exercise Go + Console + proto;
+#     deploy changes exercise image/chart paths because production runs the
+#     built backend + SPA together.
 #   * `ci-gate` is an `if: always()` aggregator and is the ONLY job that should
 #     be marked "required" in branch protection — a path-skipped job reports
 #     success, so gating on the real jobs directly would let unrelated PRs pass
@@ -57,23 +59,36 @@ jobs:
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
+              - 'proto/**'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - 'buf.lock'
               - 'Dockerfile'
               - 'codecov.yml'
               - 'scripts/lint-integration-layout.sh'
               - '.github/workflows/ci.yml'
             console:
               - 'console/**'
+              - 'proto/**'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - 'buf.lock'
               - 'codecov.yml'
               - '.github/workflows/ci.yml'
             # `code` = substantive source whose change should carry a changelog entry
             code:
               - '**/*.go'
               - 'console/src/**'
+              - 'proto/**'
+              - 'deploy/helm/**'
+              - 'Dockerfile'
             changelog:
               - 'CHANGELOG.md'
             deploy:
               - 'deploy/**'
+              - 'Dockerfile'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
             proto:
               - 'proto/**'
               - 'buf.yaml'
@@ -113,8 +128,17 @@ jobs:
           cache-dependency-path: go.sum
       - name: Integration tests (real Postgres)
         env:
-          ATTUNE_TEST_DATABASE_URL: postgres://attune:attune@localhost:5432/attune?sslmode=disable
-        run: make test-integration
+          ATTUNE_TEST_DATABASE_HOST: localhost
+          ATTUNE_TEST_DATABASE_PORT: "5432"
+          ATTUNE_TEST_DATABASE_NAME: attune
+          ATTUNE_TEST_DATABASE_USER: attune
+          ATTUNE_TEST_DATABASE_PASSWORD: attune
+        run: |
+          db_userinfo="${ATTUNE_TEST_DATABASE_USER}:${ATTUNE_TEST_DATABASE_PASSWORD}"
+          db_host="${ATTUNE_TEST_DATABASE_HOST}:${ATTUNE_TEST_DATABASE_PORT}"
+          ATTUNE_TEST_DATABASE_URL="postgres://${db_userinfo}@${db_host}/${ATTUNE_TEST_DATABASE_NAME}?sslmode=disable"
+          export ATTUNE_TEST_DATABASE_URL
+          make test-integration
 
   # ── Go: vet / build / test ─────────────────────────────────────────────────
   go-checks:
@@ -346,7 +370,10 @@ jobs:
   # ── Docker image smoke build (multi-arch, no push) ──────────────────────────
   docker-build:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: >-
+      needs.changes.outputs.go == 'true' ||
+      needs.changes.outputs.console == 'true' ||
+      needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -378,6 +405,390 @@ jobs:
         run: |
           cp .env.example .env
           docker compose -f docker-compose.yml -f docker-compose.obs.yml config -q
+
+  # ── Helm chart: lint + schema/render validation + kind smoke ──────────────
+  helm-chart:
+    needs: changes
+    if: >-
+      needs.changes.outputs.go == 'true' ||
+      needs.changes.outputs.console == 'true' ||
+      needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Helm version
+        run: helm version --short
+      - name: Generate disposable Tink keyset
+        run: go run ./cmd/attune secrets generate-keyset >/tmp/attune-keyset.json
+      - name: Helm lint
+        run: |
+          helm lint deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-kind.yaml \
+            --set-file config.render.secrets.tinkKeyset=/tmp/attune-keyset.json
+          helm lint deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-kind.yaml \
+            -f deploy/helm/attune/ci/values-distributed-kind.yaml \
+            --set-file config.render.secrets.tinkKeyset=/tmp/attune-keyset.json
+          helm lint deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-external-postgres.yaml
+          helm lint deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-production-hpa.yaml
+          helm lint deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-bluegreen-router.yaml
+          helm lint deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-bluegreen-app.yaml \
+            --set-file config.render.secrets.tinkKeyset=/tmp/attune-keyset.json
+      - name: Render kind/dev values
+        run: |
+          helm template attune deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-kind.yaml \
+            --set-file config.render.secrets.tinkKeyset=/tmp/attune-keyset.json \
+            >/tmp/attune-kind.yaml
+      - name: Render external Postgres values
+        run: helm template attune deploy/helm/attune -f deploy/helm/attune/ci/values-external-postgres.yaml >/tmp/attune-external.yaml
+      - name: Render production HPA values
+        run: helm template attune deploy/helm/attune -f deploy/helm/attune/ci/values-production-hpa.yaml >/tmp/attune-production-hpa.yaml
+      - name: Render blue-green values
+        run: |
+          helm template attune-router deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-bluegreen-router.yaml \
+            >/tmp/attune-bluegreen-router.yaml
+          helm template attune-blue deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-bluegreen-app.yaml \
+            --set-file config.render.secrets.tinkKeyset=/tmp/attune-keyset.json \
+            >/tmp/attune-bluegreen-app.yaml
+      - name: Render distributed kind values
+        run: |
+          helm template attune deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-kind.yaml \
+            -f deploy/helm/attune/ci/values-distributed-kind.yaml \
+            --set-file config.render.secrets.tinkKeyset=/tmp/attune-keyset.json \
+            >/tmp/attune-distributed-kind.yaml
+      - name: Helm negative validation
+        run: |
+          expect_failure() {
+            name="$1"
+            shift
+            if "$@" >/tmp/"${name}".out 2>&1; then
+              echo "expected ${name} to fail" >&2
+              cat /tmp/"${name}".out >&2
+              exit 1
+            fi
+            cat /tmp/"${name}".out
+          }
+
+          expect_failure production-single-replica \
+            helm template attune deploy/helm/attune \
+              --set profile=production \
+              --set config.existingSecret=attune-config \
+              --set postgres.embedded.enabled=false \
+              --set postgres.external.enabled=true \
+              --set replicaCount=1
+          expect_failure production-without-external-postgres \
+            helm template attune deploy/helm/attune \
+              --set profile=production \
+              --set config.existingSecret=attune-config \
+              --set postgres.embedded.enabled=false \
+              --set replicaCount=2
+          expect_failure rendered-config-without-database \
+            helm template attune deploy/helm/attune \
+              --set config.render.secrets.tinkKeyset=dummy \
+              --set postgres.embedded.enabled=false
+          expect_failure traffic-service-missing-active-color \
+            helm template attune deploy/helm/attune \
+              -f deploy/helm/attune/ci/values-bluegreen-router.yaml \
+              --set rollout.trafficService.activeColor=
+          expect_failure traffic-service-name-collision \
+            helm template attune deploy/helm/attune \
+              --set config.render.secrets.tinkKeyset=dummy \
+              --set postgres.embedded.auth.password=dummy \
+              --set rollout.trafficService.enabled=true \
+              --set rollout.trafficService.name=attune \
+              --set rollout.trafficService.activeColor=blue
+          expect_failure router-release-with-workload-dependencies \
+            helm template attune deploy/helm/attune \
+              --set workload.enabled=false \
+              --set rollout.trafficService.enabled=true \
+              --set rollout.trafficService.activeColor=blue
+          expect_failure helm-test-without-service \
+            helm template attune deploy/helm/attune \
+              --set config.render.secrets.tinkKeyset=dummy \
+              --set postgres.embedded.auth.password=dummy \
+              --set service.enabled=false
+          expect_failure hpa-min-greater-than-max \
+            helm template attune deploy/helm/attune \
+              --set config.render.secrets.tinkKeyset=dummy \
+              --set postgres.embedded.auth.password=dummy \
+              --set autoscaling.enabled=true \
+              --set autoscaling.minReplicas=5 \
+              --set autoscaling.maxReplicas=2 \
+              --set resources.requests.cpu=250m \
+              --set resources.requests.memory=512Mi
+          expect_failure rendered-port-mismatch \
+            helm template attune deploy/helm/attune \
+              --set config.render.secrets.tinkKeyset=dummy \
+              --set postgres.embedded.auth.password=dummy \
+              --set app.port=8090 \
+              --set config.render.port=9090
+          expect_failure pdb-blocks-all-evictions \
+            helm template attune deploy/helm/attune \
+              --set config.render.secrets.tinkKeyset=dummy \
+              --set postgres.embedded.auth.password=dummy \
+              --set podDisruptionBudget.enabled=true \
+              --set podDisruptionBudget.minAvailable=1 \
+              --set replicaCount=1
+          expect_failure networkpolicy-empty-rules \
+            helm template attune deploy/helm/attune \
+              --set config.render.secrets.tinkKeyset=dummy \
+              --set postgres.embedded.auth.password=dummy \
+              --set networkPolicy.enabled=true
+          expect_failure hpa-missing-resource-requests \
+            helm template attune deploy/helm/attune \
+              --set config.render.secrets.tinkKeyset=dummy \
+              --set postgres.embedded.auth.password=dummy \
+              --set autoscaling.enabled=true
+      - name: kubeconform rendered manifests
+        run: |
+          docker run --rm -v /tmp:/tmp ghcr.io/yannh/kubeconform:v0.6.7 \
+            -strict -ignore-missing-schemas \
+            /tmp/attune-kind.yaml \
+            /tmp/attune-external.yaml \
+            /tmp/attune-production-hpa.yaml \
+            /tmp/attune-bluegreen-router.yaml \
+            /tmp/attune-bluegreen-app.yaml \
+            /tmp/attune-distributed-kind.yaml
+      - name: kind install + test + upgrade smoke
+        run: |
+          go install sigs.k8s.io/kind@v0.24.0
+          kind_bin="$(go env GOPATH)/bin/kind"
+          "$kind_bin" create cluster --name attune-chart --wait 90s
+          trap '"$kind_bin" delete cluster --name attune-chart' EXIT
+
+          docker build -t ghcr.io/phixsura/attune:chart-ci .
+          "$kind_bin" load docker-image ghcr.io/phixsura/attune:chart-ci --name attune-chart
+
+          ready_service_targets() {
+            service_name="${1:?service name}"
+            kubectl -n attune get endpointslice \
+              -l "kubernetes.io/service-name=${service_name}" \
+              -o jsonpath='{range .items[*].endpoints[?(@.conditions.ready==true)]}{.targetRef.name}{"\n"}{end}' | sort -u
+          }
+
+          wait_for_service_target_count() {
+            service_name="${1:?service name}"
+            expected_count="${2:?expected target count}"
+            deadline=$((SECONDS + 300))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              targets="$(ready_service_targets "$service_name")"
+              target_count="$(printf '%s\n' "$targets" | sed '/^$/d' | wc -l | tr -d ' ')"
+              if [ "$target_count" -eq "$expected_count" ]; then
+                printf '%s\n' "$targets"
+                return 0
+              fi
+              echo "waiting for ${service_name} ready endpoints: got ${target_count}, want ${expected_count}" >&2
+              printf '%s\n' "$targets" >&2
+              sleep 2
+            done
+
+            targets="$(ready_service_targets "$service_name")"
+            target_count="$(printf '%s\n' "$targets" | sed '/^$/d' | wc -l | tr -d ' ')"
+            echo "timed out waiting for ${service_name} ready endpoints: got ${target_count}, want ${expected_count}" >&2
+            printf '%s\n' "$targets" >&2
+            return 1
+          }
+
+          check_distributed_endpoints() {
+            expected_app_pods="${1:?expected app pod count}"
+            kubectl -n attune rollout status deploy/attune --timeout 5m
+
+            app_targets="$(
+              wait_for_service_target_count attune "$expected_app_pods"
+            )"
+            echo "attune Service targets:"
+            echo "$app_targets"
+            if echo "$app_targets" | grep -E 'postgres|smoke'; then
+              echo "attune Service selected a non-app pod" >&2
+              exit 1
+            fi
+
+            postgres_targets="$(
+              wait_for_service_target_count attune-postgres 1
+            )"
+            echo "postgres Service targets:"
+            echo "$postgres_targets"
+            echo "$postgres_targets" | grep -q '^attune-postgres-0$'
+          }
+
+          probe_attune_service() {
+            name="attune-probe-${RANDOM}-${RANDOM}"
+            kubectl -n attune run "$name" \
+              --rm \
+              --quiet \
+              -i \
+              --restart=Never \
+              --image=curlimages/curl:8.11.1 \
+              --image-pull-policy=IfNotPresent \
+              --command -- sh -ec \
+              'curl -fsS --max-time 3 http://attune:8090/readyz >/dev/null'
+          }
+
+          probe_attune_service_until_success() {
+            attempts="${1:?attempts}"
+            i=1
+            while [ "$i" -le "$attempts" ]; do
+              if probe_attune_service; then
+                return 0
+              fi
+              sleep 1
+              i=$((i + 1))
+            done
+            probe_attune_service
+          }
+
+          force_delete_one_app_pod_smoke() {
+            probe_attune_service_until_success 5
+
+            victim=""
+            for attempt in 1 2 3 4 5; do
+              candidate="$(ready_service_targets attune | head -n 1)"
+              if [ -z "$candidate" ]; then
+                echo "no ready app Service endpoint available before force delete attempt ${attempt}" >&2
+                sleep 1
+                continue
+              fi
+              if kubectl -n attune get pod "$candidate" >/dev/null 2>&1; then
+                victim="$candidate"
+                break
+              fi
+              echo "selected endpoint pod disappeared before delete: $candidate" >&2
+              sleep 1
+            done
+            test -n "$victim"
+            echo "force deleting app pod: $victim"
+
+            kubectl -n attune delete pod "$victim" \
+              --force \
+              --grace-period=0 \
+              --wait=false
+
+            probe_attune_service_until_success 30
+            kubectl -n attune rollout status deploy/attune --timeout 5m
+            check_distributed_endpoints 3
+            remaining_targets="$(
+              kubectl -n attune get endpointslice \
+                -l kubernetes.io/service-name=attune \
+                -o jsonpath='{range .items[*].endpoints[?(@.conditions.ready==true)]}{.targetRef.name}{"\n"}{end}' | sort -u
+            )"
+            if echo "$remaining_targets" | grep -qx "$victim"; then
+              echo "force-deleted pod is still a ready Service endpoint" >&2
+              exit 1
+            fi
+          }
+
+          helm upgrade --install attune deploy/helm/attune \
+            --namespace attune \
+            --create-namespace \
+            -f deploy/helm/attune/ci/values-kind.yaml \
+            -f deploy/helm/attune/ci/values-distributed-kind.yaml \
+            --set image.tag=chart-ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set-file config.render.secrets.tinkKeyset=/tmp/attune-keyset.json \
+            --wait \
+            --timeout 8m
+          helm test attune --namespace attune --timeout 5m
+          check_distributed_endpoints 2
+
+          kubectl -n attune exec deploy/attune -- \
+            /app/attune --config /app/config/config.yaml tenant create \
+            --slug chart-ci --name "Chart CI"
+
+          helm upgrade attune deploy/helm/attune \
+            --namespace attune \
+            --reuse-values \
+            --set podAnnotations.chart-ci-upgrade="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --wait \
+            --timeout 8m
+          helm test attune --namespace attune --timeout 5m
+          check_distributed_endpoints 2
+
+          helm upgrade attune deploy/helm/attune \
+            --namespace attune \
+            --reuse-values \
+            --set replicaCount=3 \
+            --set podAnnotations.chart-ci-scale="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --wait \
+            --timeout 8m
+          helm test attune --namespace attune --timeout 5m
+          check_distributed_endpoints 3
+          force_delete_one_app_pod_smoke
+          helm test attune --namespace attune --timeout 5m
+
+          kubectl -n attune exec deploy/attune -- \
+            /app/attune --config /app/config/config.yaml keys issue \
+            --tenant chart-ci --label after-scale-out >/tmp/attune-ci-key.txt
+
+          check_traffic_color() {
+            namespace="$1"
+            service_name="$2"
+            expected_prefix="$3"
+            forbidden_prefix="$4"
+            targets="$(
+              kubectl -n "$namespace" get endpointslice \
+                -l kubernetes.io/service-name="$service_name" \
+                -o jsonpath='{range .items[*].endpoints[?(@.conditions.ready==true)]}{.targetRef.name}{"\n"}{end}' | sort -u
+            )"
+            echo "${service_name} traffic targets:"
+            echo "$targets"
+            test "$(echo "$targets" | sed '/^$/d' | wc -l | tr -d ' ')" -ge 1
+            echo "$targets" | grep -q "^${expected_prefix}"
+            if echo "$targets" | grep -q "^${forbidden_prefix}"; then
+              echo "${service_name} selected inactive color pods" >&2
+              exit 1
+            fi
+          }
+
+          helm upgrade --install attune-router deploy/helm/attune \
+            --namespace attune-bg \
+            --create-namespace \
+            -f deploy/helm/attune/ci/values-bluegreen-router.yaml \
+            --wait \
+            --timeout 5m
+          helm upgrade --install attune-blue deploy/helm/attune \
+            --namespace attune-bg \
+            -f deploy/helm/attune/ci/values-bluegreen-app.yaml \
+            --set image.tag=chart-ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set-file config.render.secrets.tinkKeyset=/tmp/attune-keyset.json \
+            --wait \
+            --timeout 8m
+          helm test attune-blue --namespace attune-bg --timeout 5m
+          check_traffic_color attune-bg attune attune-blue attune-green
+
+          helm upgrade --install attune-green deploy/helm/attune \
+            --namespace attune-bg \
+            -f deploy/helm/attune/ci/values-bluegreen-app.yaml \
+            --set rollout.color=green \
+            --set image.tag=chart-ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set-file config.render.secrets.tinkKeyset=/tmp/attune-keyset.json \
+            --wait \
+            --timeout 8m
+          helm test attune-green --namespace attune-bg --timeout 5m
+          check_traffic_color attune-bg attune attune-blue attune-green
+
+          helm upgrade attune-router deploy/helm/attune \
+            --namespace attune-bg \
+            -f deploy/helm/attune/ci/values-bluegreen-router.yaml \
+            --set rollout.trafficService.activeColor=green \
+            --wait \
+            --timeout 5m
+          check_traffic_color attune-bg attune attune-green attune-blue
 
   # ── proto: buf lint + codegen drift gate (issue #19) ───────────────────────
   proto:
@@ -417,7 +828,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, changelog, docker-build, compose-config, proto]
+    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, changelog, docker-build, compose-config, helm-chart, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:

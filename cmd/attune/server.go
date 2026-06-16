@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -63,6 +64,11 @@ import (
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	feedbackjobrepo "github.com/Phixsura/attune/internal/repo/feedbackjob"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
+)
+
+const (
+	databaseConnectTimeout       = 60 * time.Second
+	databaseConnectRetryInterval = 2 * time.Second
 )
 
 // ── server ────────────────────────────────────────────────────────────────
@@ -156,9 +162,10 @@ func runServer() error {
 		return err
 	}
 	defer inb.shutdown()
+	ready := newDrainAwareReadiness(pool)
 
 	r, err := buildRouter(
-		ctx, cfg, ingestHandler, apiKeys, pool, llm,
+		ctx, cfg, ingestHandler, apiKeys, pool, ready, llm,
 		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo,
 	)
 	if err != nil {
@@ -174,6 +181,17 @@ func runServer() error {
 	})
 	logext.Infof(ctx, "[%s] attune server listening,addr:%s", where, srv.Addr)
 
+	return serveUntilStopped(ctx, srv, ready, cfg.ShutdownDrainDelay, cfg.ShutdownTimeout)
+}
+
+func serveUntilStopped(
+	ctx context.Context,
+	srv *http.Server,
+	ready *drainAwareReadiness,
+	drainDelay time.Duration,
+	shutdownTimeout time.Duration,
+) error {
+	const where = "main.serveUntilStopped"
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -182,13 +200,30 @@ func runServer() error {
 	}()
 	select {
 	case <-ctx.Done():
-		logext.Infof(ctx, "[%s] shutting down", where)
-		shutdownCtx, c := context.WithTimeout(context.Background(), 10*time.Second)
+		ready.BeginDrain()
+		logext.Infof(
+			context.Background(),
+			"[%s] shutting down,drain_delay:%s,timeout:%s",
+			where,
+			drainDelay,
+			shutdownTimeout,
+		)
+		sleepBeforeShutdown(drainDelay)
+		shutdownCtx, c := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer c()
 		return srv.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		return err
 	}
+}
+
+func sleepBeforeShutdown(delay time.Duration) {
+	if delay <= 0 {
+		return
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	<-timer.C
 }
 
 func runAuditPruner(ctx context.Context, svc *auditlogsvc.Service, retention, interval time.Duration) {
@@ -351,7 +386,7 @@ func setupDatabase(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, erro
 	if err != nil {
 		return nil, fmt.Errorf("pgxpool: %w", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
+	if err := retryDatabasePing(ctx, databaseConnectTimeout, databaseConnectRetryInterval, pool.Ping); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("pg ping: %w", err)
 	}
@@ -368,6 +403,64 @@ func setupDatabase(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, erro
 		return nil, fmt.Errorf("migrations: %w", err)
 	}
 	return pool, nil
+}
+
+func retryDatabasePing(
+	ctx context.Context,
+	timeout time.Duration,
+	interval time.Duration,
+	ping func(context.Context) error,
+) error {
+	if timeout <= 0 {
+		return ping(ctx)
+	}
+	if interval <= 0 {
+		interval = timeout
+	}
+	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	attempt := 0
+	var lastErr error
+	for {
+		attempt++
+		err := ping(deadlineCtx)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if deadlineCtx.Err() != nil {
+			return lastErr
+		}
+		logDatabasePingRetry(deadlineCtx, attempt, timeout, interval, lastErr)
+		timer := time.NewTimer(interval)
+		select {
+		case <-deadlineCtx.Done():
+			timer.Stop()
+			return lastErr
+		case <-timer.C:
+		}
+	}
+}
+
+func logDatabasePingRetry(ctx context.Context, attempt int, timeout, interval time.Duration, err error) {
+	const where = "main.retryDatabasePing"
+	if attempt != 1 && attempt%5 != 0 {
+		return
+	}
+	maxAttempts := int(math.Ceil(float64(timeout) / float64(interval)))
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	logext.Warnf(
+		ctx,
+		"[%s] postgres unavailable,attempt:%d/%d,retry_in:%s,err:%+v",
+		where,
+		attempt,
+		maxAttempts,
+		interval,
+		err.Error(),
+	)
 }
 
 func signalContext() (context.Context, context.CancelFunc) {

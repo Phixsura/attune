@@ -39,6 +39,21 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Helm chart for Kubernetes deployment (#42).** Added a first-party
+  `deploy/helm/attune` chart with Attune Deployment/Service/Ingress/HPA/PDB,
+  optional embedded pgvector Postgres, config Secret or `existingSecret`
+  support, ServiceMonitor, Grafana dashboard ConfigMaps, NetworkPolicy,
+  values schema validation, Helm smoke tests for Service DNS, TCP, and HTTP
+  readiness, fail-fast validation for unsafe production/HPA/PDB/NetworkPolicy
+  value combinations, rolling release hardening, blue/green traffic Service
+  support, kubeconform plus multi-replica kind install, upgrade, scale-out, and
+  sudden pod failure and blue/green switch smoke checks in CI, GHCR OCI chart
+  publication during releases, cross-triggered Go/Console/proto/image/chart CI
+  checks, and Kubernetes deployment docs.
+  The server now also exposes `/readyz` for PostgreSQL-backed readiness while
+  `/healthz` remains process liveness, and `SIGTERM` marks readiness unhealthy
+  before bounded HTTP shutdown so Kubernetes rollouts can drain traffic.
+
 - **Console audit log page and CSV export (#39).** Added `/fb/v1/console/audit-log`
   plus `/fb/v1/console/audit-log/export.csv`, a new Settings > Audit Log page,
   audit-log proto/OpenAPI contract generation, retention config
@@ -117,6 +132,25 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   for Lark and status code + body for Slack.
 
 ### Fixed
+
+- **Serialized startup migrations (#42).** `database.RunMigrations` now takes a
+  PostgreSQL advisory lock so multiple replicas cannot race schema migrations
+  during Kubernetes rollouts or other parallel starts.
+
+- **Kubernetes cold-start database readiness (#42).** Server startup now retries
+  the initial PostgreSQL ping for a bounded window, avoiding container restarts
+  while Kubernetes Service DNS and embedded Postgres endpoints settle.
+
+- **Kubernetes service selector isolation (#42).** The chart now labels and
+  selects Attune app pods with `app.kubernetes.io/component=app`, preventing the
+  main Service and ServiceMonitor from matching embedded Postgres or Helm test
+  pods.
+
+- **Console audit timeline ID handling (#42).** Feedback audit queries now keep
+  protoJSON int64 feedback IDs as strings instead of converting them through
+  JavaScript numbers, avoiding `NaN` paths and large-ID precision loss. Console
+  coverage tests also use a coverage-only timeout budget and default workflow
+  audit/state mocks so the frontend CI gate is stable.
 
 - **Lark/Slack destination validation (#34).** Handler now accepts `lark`
   and `slack` as valid `destination_type` values. Previously the switch
