@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #38 |
-| **Status** | Accepted |
+| **Status** | Implemented (Phase 1-4 partial) |
 | **Started** | 2026-06-16 |
 | **Related** | #39 (audit log — pairs with RBAC), #40 (OIDC SSO — merged, provides role mapping), #41 (API key scopes — similar permission model), #43 (GDPR export/delete — needs permission check), #121 (OIDC SSO — merged) |
 
