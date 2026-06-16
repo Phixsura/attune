@@ -8,14 +8,17 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/repo/tenantmember"
 )
 
 // inviteCtx builds a RequestContext with a default (viewer) role in context.
@@ -142,4 +145,183 @@ func TestEmailNormalization(t *testing.T) {
 			assert.Equal(t, tt.expected, normalized)
 		})
 	}
+}
+
+// fakeStore is an in-memory memberStore for handler tests.
+type fakeStore struct {
+	listResult []tenantmember.Member
+	listErr    error
+	getResult  tenantmember.Member
+	getErr     error
+}
+
+func (f *fakeStore) List(context.Context, string) ([]tenantmember.Member, error) {
+	return f.listResult, f.listErr
+}
+
+func (f *fakeStore) GetByID(context.Context, string) (tenantmember.Member, error) {
+	return f.getResult, f.getErr
+}
+
+func (f *fakeStore) GetByUser(context.Context, string, string, string) (tenantmember.Member, error) {
+	return tenantmember.Member{}, nil
+}
+
+func (f *fakeStore) Create(_ context.Context, m tenantmember.Member) (tenantmember.Member, error) {
+	return m, nil
+}
+
+func (f *fakeStore) UpdateRole(context.Context, string, domain.Role, string) error { return nil }
+
+func (f *fakeStore) Remove(context.Context, string) error { return nil }
+
+func (f *fakeStore) ExistsByEmail(context.Context, string, string) (bool, error) { return false, nil }
+
+// memberCtx builds a RequestContext with a default (viewer) role for the
+// tenant under test. Reuses the same auth as inviteCtx.
+func memberCtx() *dispatcher.RequestContext[*session.AuthCtx] {
+	return inviteCtx()
+}
+
+func TestList_Success(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{listResult: []tenantmember.Member{
+		{ID: "m1", MemberType: "oidc_user", UserID: "u1", Role: domain.RoleAdmin, RoleSource: "idp", InvitedAt: time.Unix(1700000000, 0), AcceptedAt: ptrext.Of(time.Unix(1700000001, 0))},
+		{ID: "m2", MemberType: "invite", Email: ptrext.Of("p@example.com"), Role: domain.RoleViewer, RoleSource: "manual", InvitedAt: time.Unix(1700000000, 0)},
+	}})})
+
+	res, err := h.List(memberCtx(), ptrext.Of(attunev1.ListMembersRequest{}))
+
+	require.NoError(t, err)
+	require.Len(t, res.Body.Members, 2)
+	assert.Equal(t, "m1", res.Body.Members[0].Id)
+	assert.Equal(t, int64(1700000001), res.Body.Members[0].AcceptedAt)
+	assert.Equal(t, "p@example.com", res.Body.Members[1].Email)
+	assert.Equal(t, int64(0), res.Body.Members[1].AcceptedAt, "pending invite has no accepted time")
+}
+
+func TestList_RepoError(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{listErr: errors.New("db down")})})
+
+	_, err := h.List(memberCtx(), ptrext.Of(attunev1.ListMembersRequest{}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusInternalServerError, derr.Status)
+	assert.Equal(t, attunev1.ErrorCode_INTERNAL, derr.Code)
+}
+
+func TestUpdateRole_MemberNotFound(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{getErr: tenantmember.ErrNotFound})})
+
+	_, err := h.UpdateRole(memberCtx(), ptrext.Of(attunev1.UpdateMemberRoleRequest{Id: "x", Role: "member"}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusNotFound, derr.Status)
+}
+
+func TestUpdateRole_GetError(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{getErr: errors.New("db down")})})
+
+	_, err := h.UpdateRole(memberCtx(), ptrext.Of(attunev1.UpdateMemberRoleRequest{Id: "x", Role: "member"}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusInternalServerError, derr.Status)
+}
+
+func TestUpdateRole_CrossTenantHiddenAs404(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{getResult: tenantmember.Member{
+		ID: "x", TenantID: "other-tenant", UserID: "u9", Role: domain.RoleMember,
+	}})})
+
+	_, err := h.UpdateRole(memberCtx(), ptrext.Of(attunev1.UpdateMemberRoleRequest{Id: "x", Role: "member"}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusNotFound, derr.Status, "cross-tenant target must look like not-found")
+}
+
+func TestUpdateRole_CannotChangeOwnRole(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{getResult: tenantmember.Member{
+		ID: "self", TenantID: "tenant-1", UserID: "user-1", Role: domain.RoleAdmin,
+	}})})
+
+	_, err := h.UpdateRole(memberCtx(), ptrext.Of(attunev1.UpdateMemberRoleRequest{Id: "self", Role: "member"}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusForbidden, derr.Status)
+	assert.Contains(t, derr.Message, "own role")
+}
+
+func TestUpdateRole_ViewerCannotChangeRole(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{getResult: tenantmember.Member{
+		ID: "x", TenantID: "tenant-1", UserID: "u9", Role: domain.RoleViewer,
+	}})})
+
+	// Default actor is viewer → CanChangeRole is false.
+	_, err := h.UpdateRole(memberCtx(), ptrext.Of(attunev1.UpdateMemberRoleRequest{Id: "x", Role: "member"}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusForbidden, derr.Status)
+}
+
+func TestUpdateRole_ViewerCannotPromoteToAdmin(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{getResult: tenantmember.Member{
+		ID: "x", TenantID: "tenant-1", UserID: "u9", Role: domain.RoleMember,
+	}})})
+
+	_, err := h.UpdateRole(memberCtx(), ptrext.Of(attunev1.UpdateMemberRoleRequest{Id: "x", Role: "admin"}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusForbidden, derr.Status)
+	assert.Contains(t, derr.Message, "admin")
+}
+
+func TestRemove_MemberNotFound(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{getErr: tenantmember.ErrNotFound})})
+
+	_, err := h.Remove(memberCtx(), ptrext.Of(attunev1.RemoveMemberRequest{Id: "x"}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusNotFound, derr.Status)
+}
+
+func TestRemove_GetError(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{getErr: errors.New("db down")})})
+
+	_, err := h.Remove(memberCtx(), ptrext.Of(attunev1.RemoveMemberRequest{Id: "x"}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusInternalServerError, derr.Status)
+}
+
+func TestRemove_CrossTenantHiddenAs404(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{getResult: tenantmember.Member{
+		ID: "x", TenantID: "other-tenant", UserID: "u9", Role: domain.RoleMember,
+	}})})
+
+	_, err := h.Remove(memberCtx(), ptrext.Of(attunev1.RemoveMemberRequest{Id: "x"}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusNotFound, derr.Status)
+}
+
+func TestRemove_ViewerCannotRemove(t *testing.T) {
+	h := ptrext.Of(Handler{members: ptrext.Of(fakeStore{getResult: tenantmember.Member{
+		ID: "x", TenantID: "tenant-1", UserID: "u9", Role: domain.RoleViewer,
+	}})})
+
+	// Default actor is viewer → CanRemove is false.
+	_, err := h.Remove(memberCtx(), ptrext.Of(attunev1.RemoveMemberRequest{Id: "x"}))
+
+	var derr *dispatcher.Error
+	require.True(t, errors.As(err, &derr))
+	assert.Equal(t, http.StatusForbidden, derr.Status)
 }

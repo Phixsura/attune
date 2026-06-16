@@ -4,6 +4,7 @@
 package member
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"regexp"
@@ -21,13 +22,26 @@ import (
 	"github.com/Phixsura/attune/internal/service/policy"
 )
 
+// memberStore is the subset of *tenantmember.Repo the handler needs.
+// *tenantmember.Repo satisfies it; the interface lets tests inject a fake
+// without a database.
+type memberStore interface {
+	List(ctx context.Context, tenantID string) ([]tenantmember.Member, error)
+	GetByID(ctx context.Context, id string) (tenantmember.Member, error)
+	GetByUser(ctx context.Context, tenantID, memberType, userID string) (tenantmember.Member, error)
+	Create(ctx context.Context, m tenantmember.Member) (tenantmember.Member, error)
+	UpdateRole(ctx context.Context, id string, newRole domain.Role, changedBy string) error
+	Remove(ctx context.Context, id string) error
+	ExistsByEmail(ctx context.Context, tenantID, email string) (bool, error)
+}
+
 // Handler provides member management endpoints.
 type Handler struct {
-	members *tenantmember.Repo
+	members memberStore
 }
 
 // NewHandler creates a new member handler.
-func NewHandler(members *tenantmember.Repo) *Handler {
+func NewHandler(members memberStore) *Handler {
 	return ptrext.Of(Handler{members: members})
 }
 

@@ -23,14 +23,20 @@ import (
 
 type roleCtxKey struct{}
 
+// roleStore reads a member's effective role. *tenantmember.Repo satisfies
+// it; the interface lets tests inject a fake without a database.
+type roleStore interface {
+	GetRole(ctx context.Context, tenantID, memberType, userID string) (domain.Role, error)
+}
+
 // Middleware provides role-based access control for console routes.
 type Middleware struct {
-	members *tenantmember.Repo
+	members roleStore
 	cache   *roleCache
 }
 
 // NewMiddleware creates a new RBAC middleware.
-func NewMiddleware(members *tenantmember.Repo) *Middleware {
+func NewMiddleware(members roleStore) *Middleware {
 	return ptrext.Of(Middleware{
 		members: members,
 		cache:   newRoleCache(5 * time.Minute),

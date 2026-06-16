@@ -4,6 +4,7 @@ package rbac
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/repo/tenantmember"
 )
 
 func TestFromContext(t *testing.T) {
@@ -146,4 +148,158 @@ func TestSessionContextIntegration(t *testing.T) {
 	assert.Equal(t, "tenant-1", retrievedAuth.TenantID)
 	assert.Equal(t, "oidc_user", retrievedAuth.UserType)
 	assert.Equal(t, "user-1", retrievedAuth.UserID)
+}
+
+// fakeRoleStore is an in-memory roleStore for middleware tests.
+type fakeRoleStore struct {
+	role domain.Role
+	err  error
+	hits int
+}
+
+func (f *fakeRoleStore) GetRole(context.Context, string, string, string) (domain.Role, error) {
+	f.hits++
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.role, nil
+}
+
+// serveWithAuth runs mw around a handler that records the role it sees, with
+// an AuthCtx in the request context (as RequireSession would install). The
+// handler runs synchronously inside ServeHTTP, so the returned role is final
+// by the time this returns.
+func serveWithAuth(mw func(http.Handler) http.Handler) (*httptest.ResponseRecorder, domain.Role) {
+	var seen domain.Role
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = FromContext(r.Context())
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx := session.WithAuthCtx(req.Context(), ptrext.Of(session.AuthCtx{
+		TenantID: "tenant-1", UserType: "oidc_user", UserID: "user-1",
+	}))
+	rec := httptest.NewRecorder()
+	mw(next).ServeHTTP(rec, req.WithContext(ctx))
+	return rec, seen
+}
+
+func TestRequireRole_AllowsSufficientRole(t *testing.T) {
+	store := ptrext.Of(fakeRoleStore{role: domain.RoleAdmin})
+	m := NewMiddleware(store)
+
+	rec, seen := serveWithAuth(m.RequireRole(domain.RoleMember))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, domain.RoleAdmin, seen, "role should be propagated to next handler")
+}
+
+func TestRequireRole_DeniesInsufficientRole(t *testing.T) {
+	store := ptrext.Of(fakeRoleStore{role: domain.RoleViewer})
+	m := NewMiddleware(store)
+
+	rec, _ := serveWithAuth(m.RequireRole(domain.RoleAdmin))
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"FORBIDDEN"`)
+}
+
+func TestRequireRole_UsesCacheOnSecondCall(t *testing.T) {
+	store := ptrext.Of(fakeRoleStore{role: domain.RoleAdmin})
+	m := NewMiddleware(store)
+
+	_, _ = serveWithAuth(m.RequireRole(domain.RoleViewer))
+	_, _ = serveWithAuth(m.RequireRole(domain.RoleViewer))
+
+	assert.Equal(t, 1, store.hits, "second request should hit the cache, not the store")
+}
+
+func TestRequireRole_NotAMemberReturns403(t *testing.T) {
+	store := ptrext.Of(fakeRoleStore{err: tenantmember.ErrNotFound})
+	m := NewMiddleware(store)
+
+	rec, _ := serveWithAuth(m.RequireRole(domain.RoleViewer))
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "not a tenant member")
+}
+
+func TestRequireRole_LookupErrorReturns500(t *testing.T) {
+	store := ptrext.Of(fakeRoleStore{err: errors.New("db down")})
+	m := NewMiddleware(store)
+
+	rec, _ := serveWithAuth(m.RequireRole(domain.RoleViewer))
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":"INTERNAL"`)
+}
+
+func TestRequireRoleStrict_BypassesCache(t *testing.T) {
+	store := ptrext.Of(fakeRoleStore{role: domain.RoleAdmin})
+	m := NewMiddleware(store)
+
+	_, _ = serveWithAuth(m.RequireRoleStrict(domain.RoleViewer))
+	_, _ = serveWithAuth(m.RequireRoleStrict(domain.RoleViewer))
+
+	assert.Equal(t, 2, store.hits, "strict mode must not use the cache")
+}
+
+func TestRequireRoleStrict_DeniesInsufficientRole(t *testing.T) {
+	store := ptrext.Of(fakeRoleStore{role: domain.RoleViewer})
+	m := NewMiddleware(store)
+
+	rec, _ := serveWithAuth(m.RequireRoleStrict(domain.RoleAdmin))
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestRequireRoleStrict_NotAMemberReturns403(t *testing.T) {
+	store := ptrext.Of(fakeRoleStore{err: tenantmember.ErrNotFound})
+	m := NewMiddleware(store)
+
+	rec, _ := serveWithAuth(m.RequireRoleStrict(domain.RoleViewer))
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestRequireConvenienceWrappers(t *testing.T) {
+	// pick selects a convenience wrapper by name. Closures (not method
+	// expressions) keep the *Middleware in a receiver position the rawptr
+	// lint accepts.
+	pick := func(m *Middleware, name string) func(http.Handler) http.Handler {
+		switch name {
+		case "admin":
+			return m.RequireAdmin()
+		case "adminStrict":
+			return m.RequireAdminStrict()
+		case "member":
+			return m.RequireMember()
+		default:
+			return m.RequireViewer()
+		}
+	}
+	tests := []struct {
+		name   string
+		wrap   string
+		role   domain.Role
+		wantOK bool
+	}{
+		{"RequireAdmin allows admin", "admin", domain.RoleAdmin, true},
+		{"RequireAdmin denies member", "admin", domain.RoleMember, false},
+		{"RequireAdminStrict allows admin", "adminStrict", domain.RoleAdmin, true},
+		{"RequireAdminStrict denies viewer", "adminStrict", domain.RoleViewer, false},
+		{"RequireMember allows member", "member", domain.RoleMember, true},
+		{"RequireMember denies viewer", "member", domain.RoleViewer, false},
+		{"RequireViewer allows viewer", "viewer", domain.RoleViewer, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewMiddleware(ptrext.Of(fakeRoleStore{role: tt.role}))
+			rec, _ := serveWithAuth(pick(m, tt.wrap))
+			if tt.wantOK {
+				assert.Equal(t, http.StatusOK, rec.Code)
+			} else {
+				assert.Equal(t, http.StatusForbidden, rec.Code)
+			}
+		})
+	}
 }
