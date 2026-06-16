@@ -277,3 +277,33 @@ describe('MembersPage role badges', () => {
     expect(screen.getByText('manual')).toBeInTheDocument()
   })
 })
+
+describe('MembersPage role select', () => {
+  it('displays role select triggers for each member', async () => {
+    setupMembersResponse(mockMembers)
+    renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument()
+    })
+
+    // Role selects should be present (one for each member)
+    const selectTriggers = screen.getAllByRole('combobox')
+    expect(selectTriggers.length).toBeGreaterThanOrEqual(3)
+  })
+})
+
+describe('MembersPage table headers', () => {
+  it('displays all table column headers', async () => {
+    setupMembersResponse(mockMembers)
+    renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument()
+    })
+
+    // Check table headers exist (columnheader role)
+    const headers = screen.getAllByRole('columnheader')
+    expect(headers.length).toBeGreaterThanOrEqual(5)
+  })
+})
