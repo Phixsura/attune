@@ -1,6 +1,7 @@
 # Release — on a `v*` tag: build the standalone multi-arch image, push it to
-# ghcr.io, and publish a GitHub Release whose notes come from the matching
-# CHANGELOG section. Reuses the #14 Dockerfile, which cross-compiles
+# ghcr.io, package/push the Helm chart, and publish a GitHub Release whose
+# notes come from the matching CHANGELOG section. Reuses the #14 Dockerfile,
+# which cross-compiles
 # (FROM --platform=$BUILDPLATFORM + GOOS/GOARCH) so both arches build without
 # qemu — hence no setup-qemu-action here.
 #
@@ -66,6 +67,32 @@ jobs:
             APP_VERSION=${{ steps.meta.outputs.version }}
           cache-from: type=gha # best-effort reuse of the ci.yml docker-build cache
 
+      - name: Package Helm chart
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          chart_version="${TAG#v}"
+          mkdir -p dist
+          helm lint deploy/helm/attune \
+            -f deploy/helm/attune/ci/values-external-postgres.yaml
+          helm package deploy/helm/attune \
+            --version "$chart_version" \
+            --app-version "$TAG" \
+            --destination dist
+
+      - name: Push Helm chart to GHCR
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          chart_version="${TAG#v}"
+          echo "$GH_TOKEN" | helm registry login ghcr.io \
+            --username "$GITHUB_ACTOR" \
+            --password-stdin
+          helm push "dist/attune-${chart_version}.tgz" oci://ghcr.io/phixsura/charts
+
       - name: Release notes from CHANGELOG
         if: github.event_name == 'push'
         env:
@@ -91,4 +118,4 @@ jobs:
         run: |
           flags=(--title "$TAG" --notes-file release-notes.md)
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
-          gh release create "$TAG" "${flags[@]}"
+          gh release create "$TAG" dist/*.tgz "${flags[@]}"

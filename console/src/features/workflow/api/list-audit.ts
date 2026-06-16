@@ -4,10 +4,10 @@ import type { AuditEntry, ListAuditResponse } from '@/proto/attune/v1/workflow'
 
 export type { AuditEntry }
 
-export const auditQueryKey = (feedbackId: number) =>
+export const auditQueryKey = (feedbackId: string) =>
   ['console', 'feedback', feedbackId, 'audit'] as const
 
-export const auditQuery = (feedbackId: number) =>
+export const auditQuery = (feedbackId: string) =>
   queryOptions({
     queryKey: auditQueryKey(feedbackId),
     queryFn: async ({ signal }) => {

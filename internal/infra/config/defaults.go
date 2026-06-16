@@ -21,6 +21,9 @@ const (
 
 	DefaultAuditRetentionDays = 365
 
+	DefaultShutdownDrainDelay = 5 * time.Second
+	DefaultShutdownTimeout    = 20 * time.Second
+
 	DefaultServiceVersion = "dev"
 	DefaultEnvironment    = "dev"
 	DefaultOTLPTracesPath = "/opentelemetry/v1/traces"

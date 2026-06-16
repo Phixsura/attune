@@ -1,0 +1,104 @@
+{{- if .Values.helmTest.enabled }}
+{{- $appName := include "attune.fullname" . -}}
+{{- $appFQDN := printf "%s.%s.svc.cluster.local" $appName .Release.Namespace -}}
+{{- $postgresName := include "attune.postgresFullname" . -}}
+{{- $postgresFQDN := printf "%s.%s.svc.cluster.local" $postgresName .Release.Namespace -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "attune.fullname" . }}-smoke
+  labels:
+    {{- include "attune.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  {{- with .Values.helmTest.podSecurityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: network
+      image: "{{ .Values.helmTest.dnsImage.repository }}:{{ .Values.helmTest.dnsImage.tag }}"
+      imagePullPolicy: {{ .Values.helmTest.dnsImage.pullPolicy }}
+      {{- with .Values.helmTest.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      command:
+        - sh
+        - -ec
+      args:
+        - |
+          show_dns() {
+            name="$1"
+            output="$(nslookup "${name}" 2>&1 || true)"
+            echo "${output}"
+          }
+          wait_dns() {
+            name="$1"
+            attempts=30
+            i=1
+            while [ "${i}" -le "${attempts}" ]; do
+              if nslookup "${name}"; then
+                return 0
+              fi
+              sleep 2
+              i=$((i + 1))
+            done
+            nslookup "${name}"
+          }
+          wait_tcp() {
+            name="$1"
+            port="$2"
+            attempts=30
+            i=1
+            while [ "${i}" -le "${attempts}" ]; do
+              if nc -z -w 5 "${name}" "${port}"; then
+                return 0
+              fi
+              sleep 2
+              i=$((i + 1))
+            done
+            nc -z -w 5 "${name}" "${port}"
+          }
+          app={{ $appName | quote }}
+          app_fqdn={{ $appFQDN | quote }}
+          echo "resolve ${app}"
+          show_dns "${app}"
+          echo "wait resolve ${app_fqdn}"
+          wait_dns "${app_fqdn}"
+          echo "connect ${app}:{{ .Values.service.port }}"
+          wait_tcp "${app}" {{ .Values.service.port }}
+          echo "connect ${app_fqdn}:{{ .Values.service.port }}"
+          wait_tcp "${app_fqdn}" {{ .Values.service.port }}
+          {{- if .Values.postgres.embedded.enabled }}
+          postgres={{ $postgresName | quote }}
+          postgres_fqdn={{ $postgresFQDN | quote }}
+          echo "resolve ${postgres}"
+          show_dns "${postgres}"
+          echo "wait resolve ${postgres_fqdn}"
+          wait_dns "${postgres_fqdn}"
+          echo "connect ${postgres}:{{ .Values.postgres.embedded.service.port }}"
+          wait_tcp "${postgres}" {{ .Values.postgres.embedded.service.port }}
+          echo "connect ${postgres_fqdn}:{{ .Values.postgres.embedded.service.port }}"
+          wait_tcp "${postgres_fqdn}" {{ .Values.postgres.embedded.service.port }}
+          {{- end }}
+    - name: smoke
+      image: "{{ .Values.helmTest.image.repository }}:{{ .Values.helmTest.image.tag }}"
+      imagePullPolicy: {{ .Values.helmTest.image.pullPolicy }}
+      {{- with .Values.helmTest.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      command:
+        - sh
+        - -ec
+      args:
+        - |
+          curl -fsS http://{{ $appName }}:{{ .Values.service.port }}/healthz
+          curl -fsS http://{{ $appName }}:{{ .Values.service.port }}/readyz
+          curl -fsS http://{{ $appFQDN }}:{{ .Values.service.port }}/healthz
+          curl -fsS http://{{ $appFQDN }}:{{ .Values.service.port }}/readyz
+{{- end }}

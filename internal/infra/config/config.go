@@ -45,6 +45,7 @@ type Config struct {
 	Enricher      EnricherConfig
 	Audit         AuditConfig
 	Console       ConsoleConfig
+	Shutdown      ShutdownConfig
 	Secrets       SecretsConfig
 	Observability ObservabilityConfig
 	RateLimit     RateLimitConfig
@@ -64,6 +65,8 @@ type Config struct {
 	RateLimitDisabled  bool
 	AuditRetention     time.Duration
 	AuditPruneInterval time.Duration
+	ShutdownDrainDelay time.Duration
+	ShutdownTimeout    time.Duration
 }
 
 type DatabaseConfig struct {
@@ -88,6 +91,11 @@ type ConsoleConfig struct {
 	BaseURL        string               `yaml:"base_url"`
 	SessionKey     string               `yaml:"session_key"`
 	BootstrapAdmin BootstrapAdminConfig `yaml:"bootstrap_admin"`
+}
+
+type ShutdownConfig struct {
+	DrainDelay string `yaml:"drain_delay"`
+	Timeout    string `yaml:"timeout"`
 }
 
 type BootstrapAdminConfig struct {
@@ -122,6 +130,7 @@ type yamlConfig struct {
 	Enricher       EnricherConfig      `yaml:"enricher"`
 	Audit          AuditConfig         `yaml:"audit"`
 	Console        ConsoleConfig       `yaml:"console"`
+	Shutdown       ShutdownConfig      `yaml:"shutdown"`
 	Secrets        SecretsConfig       `yaml:"secrets"`
 	Observability  ObservabilityConfig `yaml:"observability"`
 	RateLimit      RateLimitConfig     `yaml:"rate_limit"`
@@ -187,6 +196,7 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 		Enricher:       yc.Enricher,
 		Audit:          yc.Audit,
 		Console:        yc.Console,
+		Shutdown:       yc.Shutdown,
 		Secrets:        yc.Secrets,
 		Observability:  yc.Observability,
 		RateLimit:      yc.RateLimit,
@@ -212,6 +222,14 @@ func (c *Config) parseDerivedFields() error {
 	if err != nil {
 		return fmt.Errorf("audit.prune_interval: %w", err)
 	}
+	shutdownDrainDelay, err := time.ParseDuration(c.Shutdown.DrainDelay)
+	if err != nil {
+		return fmt.Errorf("shutdown.drain_delay: %w", err)
+	}
+	shutdownTimeout, err := time.ParseDuration(c.Shutdown.Timeout)
+	if err != nil {
+		return fmt.Errorf("shutdown.timeout: %w", err)
+	}
 	c.DatabaseURL = strings.TrimSpace(c.Database.URL)
 	c.EnricherInterval = d
 	c.EnricherBatch = c.Enricher.Batch
@@ -222,6 +240,8 @@ func (c *Config) parseDerivedFields() error {
 	c.RateLimitDisabled = c.RateLimit.Disabled
 	c.AuditRetention = time.Duration(c.Audit.RetentionDays) * 24 * time.Hour
 	c.AuditPruneInterval = pruneInterval
+	c.ShutdownDrainDelay = shutdownDrainDelay
+	c.ShutdownTimeout = shutdownTimeout
 	return nil
 }
 
@@ -240,6 +260,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Audit.PruneInterval == "" {
 		c.Audit.PruneInterval = DefaultAuditPruneInterval.String()
+	}
+	if c.Shutdown.DrainDelay == "" {
+		c.Shutdown.DrainDelay = DefaultShutdownDrainDelay.String()
+	}
+	if c.Shutdown.Timeout == "" {
+		c.Shutdown.Timeout = DefaultShutdownTimeout.String()
 	}
 	if c.RateLimit.PerMinute == 0 {
 		c.RateLimit.PerMinute = DefaultRateLimitPerMinute
@@ -285,6 +311,12 @@ func (c *Config) validate() error {
 	}
 	if c.AuditPruneInterval <= 0 {
 		return fmt.Errorf("config: audit.prune_interval must be positive")
+	}
+	if c.ShutdownDrainDelay < 0 {
+		return fmt.Errorf("config: shutdown.drain_delay must be non-negative")
+	}
+	if c.ShutdownTimeout <= 0 {
+		return fmt.Errorf("config: shutdown.timeout must be positive")
 	}
 	return c.validateCustomWebhooks()
 }

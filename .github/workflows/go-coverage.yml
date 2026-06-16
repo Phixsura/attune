@@ -9,6 +9,10 @@ on:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
+      - "proto/**"
+      - "buf.yaml"
+      - "buf.gen.yaml"
+      - "buf.lock"
       - "scripts/compare-go-coverage.mjs"
       - ".github/workflows/go-coverage.yml"
 

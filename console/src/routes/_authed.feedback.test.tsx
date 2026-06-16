@@ -32,7 +32,7 @@ const dimsFixture = [
 ]
 
 const itemFixture = {
-  id: 'f-101',
+  id: '101',
   content: 'login is broken when password has unicode',
   enrichedTitle: 'Login fails on unicode password',
   enrichedDisplayTitle: 'Unicode 密码登录失败',
@@ -49,7 +49,7 @@ const itemFixture = {
 }
 
 const detailFixture = {
-  id: 'f-101',
+  id: '101',
   content: 'login is broken when password has unicode',
   source: 'web',
   type: 'bug',
@@ -92,6 +92,10 @@ describe('_authed.feedback route — user flow smoke', () => {
       ),
       http.get('/fb/v1/console/feedback/:id', ({ params }) =>
         HttpResponse.json({ ...detailFixture, id: params.id }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/feedback/:id/audit', ({ params }) =>
+        HttpResponse.json({ entries: [], feedbackId: params.id }),
       ),
       http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
       http.get('/fb/v1/console/clusters', () =>
@@ -137,7 +141,7 @@ describe('_authed.feedback route — user flow smoke', () => {
       expect(screen.getByText('Unicode 规范化问题')).toBeInTheDocument()
     })
     expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
-  }, 30000)
+  })
 
   it('500 from /feedback → empty state (not crash) — documents current behavior', async () => {
     // Backend errors currently render as "no feedback" rather than a
@@ -162,6 +166,7 @@ describe('_authed.feedback route — user flow smoke', () => {
           urgentCount: '0',
         }),
       ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
       http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
       http.get('/fb/v1/console/clusters', () =>
         HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),

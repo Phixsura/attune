@@ -7,6 +7,10 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
       - "console/**"
+      - "proto/**"
+      - "buf.yaml"
+      - "buf.gen.yaml"
+      - "buf.lock"
       - "scripts/compare-console-coverage.mjs"
       - ".github/workflows/console-coverage.yml"
 

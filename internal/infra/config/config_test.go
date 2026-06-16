@@ -30,6 +30,12 @@ func TestLoadPathNewConfig(t *testing.T) {
 	if cfg.AuditPruneInterval != DefaultAuditPruneInterval {
 		t.Fatalf("AuditPruneInterval = %s", cfg.AuditPruneInterval)
 	}
+	if cfg.ShutdownDrainDelay != DefaultShutdownDrainDelay {
+		t.Fatalf("ShutdownDrainDelay = %s", cfg.ShutdownDrainDelay)
+	}
+	if cfg.ShutdownTimeout != DefaultShutdownTimeout {
+		t.Fatalf("ShutdownTimeout = %s", cfg.ShutdownTimeout)
+	}
 	if cfg.Console.BootstrapAdmin.Email != "admin@example.com" {
 		t.Fatalf("bootstrap admin email = %q", cfg.Console.BootstrapAdmin.Email)
 	}
@@ -211,6 +217,55 @@ func TestLoadPathRejectsInvalidAuditPruneInterval(t *testing.T) {
 		t.Fatal("expected audit.prune_interval parse error")
 	}
 	if !strings.Contains(err.Error(), "audit.prune_interval") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadPathParsesShutdownConfig(t *testing.T) {
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"observability:\n",
+		"shutdown:\n  drain_delay: \"250ms\"\n  timeout: \"2s\"\nobservability:\n",
+		1,
+	)
+	cfg, err := LoadPath(writeConfig(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ShutdownDrainDelay.String() != "250ms" {
+		t.Fatalf("ShutdownDrainDelay = %s, want 250ms", cfg.ShutdownDrainDelay)
+	}
+	if cfg.ShutdownTimeout.String() != "2s" {
+		t.Fatalf("ShutdownTimeout = %s, want 2s", cfg.ShutdownTimeout)
+	}
+}
+
+func TestLoadPathRejectsInvalidShutdownConfig(t *testing.T) {
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"observability:\n",
+		"shutdown:\n  drain_delay: \"-1s\"\n  timeout: \"2s\"\nobservability:\n",
+		1,
+	)
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected shutdown.drain_delay validation error")
+	}
+	if !strings.Contains(err.Error(), "shutdown.drain_delay") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw = strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"observability:\n",
+		"shutdown:\n  drain_delay: \"1s\"\n  timeout: \"0s\"\nobservability:\n",
+		1,
+	)
+	_, err = LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected shutdown.timeout validation error")
+	}
+	if !strings.Contains(err.Error(), "shutdown.timeout") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -1,0 +1,21 @@
+profile: dev
+
+postgres:
+  embedded:
+    auth:
+      password: attune-dev
+    persistence:
+      enabled: false
+
+config:
+  render:
+    observability:
+      environment: dev
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+
+helmTest:
+  enabled: true

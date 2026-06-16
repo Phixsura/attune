@@ -1,0 +1,49 @@
+profile: production
+
+postgres:
+  embedded:
+    enabled: false
+  external:
+    enabled: true
+
+config:
+  existingSecret: attune-config
+
+replicaCount: 2
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: attune.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: attune-tls
+      hosts:
+        - attune.example.com
+
+serviceMonitor:
+  enabled: true
+
+grafanaDashboard:
+  enabled: true
+
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+  egress:
+    - {}

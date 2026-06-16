@@ -65,7 +65,11 @@ docker compose run --rm attune llm routes upsert \
   --purpose enrich --logical-model enrich-default
 ```
 
-See [`deploy/README.md`](deploy/README.md) for the compose-kit quick-reference, or the full [private deployment guide](docs/private-deploy.md) for a step-by-step walk-through with monitoring, SSL, upgrades, and troubleshooting. Or build from source:
+See [`deploy/README.md`](deploy/README.md) for the compose-kit quick-reference,
+the full [private deployment guide](docs/private-deploy.md) for a step-by-step
+walk-through with monitoring, SSL, upgrades, and troubleshooting, or
+[`docs/k8s-deploy.md`](docs/k8s-deploy.md) for the Helm/Kubernetes install path.
+Or build from source:
 
 ```bash
 go build ./cmd/attune

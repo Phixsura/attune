@@ -1,0 +1,30 @@
+workload:
+  enabled: false
+
+service:
+  enabled: false
+
+ingress:
+  enabled: true
+  hosts:
+    - host: attune.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+postgres:
+  embedded:
+    enabled: false
+
+config:
+  render:
+    enabled: false
+
+helmTest:
+  enabled: false
+
+rollout:
+  trafficService:
+    enabled: true
+    name: attune
+    activeColor: blue

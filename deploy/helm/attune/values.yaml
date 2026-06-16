@@ -1,0 +1,287 @@
+profile: dev
+
+nameOverride: ""
+fullnameOverride: ""
+commonLabels: {}
+commonAnnotations: {}
+
+app:
+  port: 8090
+
+workload:
+  enabled: true
+  minReadySeconds: 0
+  progressDeadlineSeconds: 600
+
+image:
+  repository: ghcr.io/phixsura/attune
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+replicaCount: 1
+revisionHistoryLimit: 10
+terminationGracePeriodSeconds: 60
+strategy: {}
+
+rollout:
+  color: ""
+  trafficService:
+    enabled: false
+    name: ""
+    activeColor: ""
+    annotations: {}
+    appProtocol: http
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources: {}
+
+probes:
+  startup:
+    enabled: true
+    path: /healthz
+    failureThreshold: 30
+    periodSeconds: 2
+    timeoutSeconds: 1
+  liveness:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpread:
+  enabled: false
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: ScheduleAnyway
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+schedulerName: ""
+hostAliases: []
+dnsConfig: {}
+enableServiceLinks: false
+
+extraEnv: []
+extraEnvFrom: []
+extraInitContainers: []
+extraContainers: []
+extraVolumes: []
+extraVolumeMounts: []
+lifecycle: {}
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8090
+  annotations: {}
+  appProtocol: http
+  loadBalancerClass: ""
+  loadBalancerIP: ""
+  loadBalancerSourceRanges: []
+  externalTrafficPolicy: ""
+  ipFamilyPolicy: ""
+  ipFamilies: []
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
+
+config:
+  existingSecret: ""
+  existingSecretChecksum: ""
+  secretKey: config.yaml
+  mountPath: /app/config
+  render:
+    enabled: true
+    port: 8090
+    databaseURL: ""
+    migrations:
+      confirmLarkDelete: false
+    enricher:
+      interval: 30s
+      batch: 10
+    audit:
+      retentionDays: 365
+      pruneInterval: 24h
+    shutdown:
+      drainDelay: 5s
+      timeout: 20s
+    console:
+      baseURL: ""
+      sessionKey: ""
+      bootstrapAdmin:
+        email: ""
+    secrets:
+      tinkKeyset: ""
+      legacyInboundMasterKey: ""
+    observability:
+      serviceVersion: ""
+      environment: production
+      otlpEndpoint: ""
+      otlpTracesPath: /opentelemetry/v1/traces
+      otlpHeaders: {}
+      otlpInsecure: false
+    rateLimit:
+      perMinute: 60
+      burst: 300
+      disabled: false
+    oidc:
+      enabled: false
+      issuerURL: ""
+      clientID: ""
+      clientSecret: ""
+      redirectURI: ""
+      scopes:
+        - openid
+        - email
+        - profile
+      userClaim: email
+      groupsClaim: groups
+      providerName: SSO
+      roleMapping: []
+      allowedGroups: []
+      oidcOnly: false
+      skipIssuerCheck: false
+      insecureSkipVerify: false
+    customWebhooks: []
+
+postgres:
+  embedded:
+    enabled: true
+    image:
+      repository: pgvector/pgvector
+      tag: pg17
+      pullPolicy: IfNotPresent
+    service:
+      port: 5432
+      headless: true
+      annotations: {}
+    auth:
+      database: attune
+      username: attune
+      existingSecret: ""
+      secretKeys:
+        username: username
+        password: password
+        database: database
+    persistence:
+      enabled: true
+      existingClaim: ""
+      accessModes:
+        - ReadWriteOnce
+      size: 10Gi
+      storageClass: ""
+      annotations: {}
+    resources: {}
+    podSecurityContext: {}
+    securityContext: {}
+    podAnnotations: {}
+    podLabels: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    priorityClassName: ""
+    extraEnv: []
+    extraVolumeMounts: []
+    extraVolumes: []
+  external:
+    enabled: false
+
+serviceMonitor:
+  enabled: false
+  labels: {}
+  annotations: {}
+  namespaceSelector: {}
+  interval: 30s
+  scrapeTimeout: 10s
+  path: /metrics
+  scheme: http
+  tlsConfig: {}
+  bearerTokenSecret: {}
+  relabelings: []
+  metricRelabelings: []
+  targetLabels: []
+  podTargetLabels: []
+
+grafanaDashboard:
+  enabled: false
+  labels:
+    grafana_dashboard: "1"
+  annotations: {}
+
+helmTest:
+  enabled: true
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  image:
+    repository: curlimages/curl
+    tag: 8.11.1
+    pullPolicy: IfNotPresent
+  dnsImage:
+    repository: busybox
+    tag: 1.37.0
+    pullPolicy: IfNotPresent

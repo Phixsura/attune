@@ -19,6 +19,7 @@ import (
 	"embed"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -30,12 +31,53 @@ var migrationFS embed.FS
 
 const trackerTable = "schema_migrations_feedback"
 
+// migrationLockKey is a stable pg_advisory_lock key for Attune schema changes.
+// It serializes startup migrations across replicas and deploy mechanisms.
+const migrationLockKey int64 = 0x7AEC0ADBA51C042
+
 // RunMigrations applies any unapplied migrations from migrations/*.sql in
 // lexicographic order. Each file is wrapped in its own transaction.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
+	conn, err := acquireMigrationLock(ctx, pool)
+	if err != nil {
+		return err
+	}
+	defer releaseMigrationLock(conn)
+	return runMigrationsLocked(ctx, conn)
+}
+
+func acquireMigrationLock(ctx context.Context, pool *pgxpool.Pool) (*pgxpool.Conn, error) {
+	const where = "database.acquireMigrationLock"
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire migration connection: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		conn.Release()
+		logext.Errorf(ctx, "[%s] lock failed,err:%+v", where, err.Error())
+		return nil, fmt.Errorf("acquire migration lock: %w", err)
+	}
+	logext.Infof(ctx, "[%s] OK", where)
+	return conn, nil
+}
+
+func releaseMigrationLock(conn *pgxpool.Conn) {
+	const where = "database.releaseMigrationLock"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var unlocked bool
+	err := conn.QueryRow(ctx, `SELECT pg_advisory_unlock($1)`, migrationLockKey).Scan(&unlocked)
+	if err != nil || !unlocked {
+		logext.Warnf(ctx, "[%s] unlock failed,unlocked:%t,err:%+v", where, unlocked, err)
+		_ = conn.Conn().Close(context.Background())
+	}
+	conn.Release()
+}
+
+func runMigrationsLocked(ctx context.Context, conn *pgxpool.Conn) error {
 	const where = "database.RunMigrations"
 	logext.Infof(ctx, "[%s] start", where)
-	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+	if _, err := conn.Exec(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			version INT PRIMARY KEY,
 			filename TEXT NOT NULL,
@@ -61,7 +103,7 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	for i, name := range names {
 		version := i + 1
 		var applied bool
-		if err := pool.QueryRow(
+		if err := conn.QueryRow(
 			ctx,
 			fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE version=$1)", trackerTable),
 			version,
@@ -77,7 +119,7 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			logext.Errorf(ctx, "[%s] read file failed,file:%s,err:%+v", where, name, err.Error())
 			return fmt.Errorf("read %s: %w", name, err)
 		}
-		tx, err := pool.Begin(ctx)
+		tx, err := conn.Begin(ctx)
 		if err != nil {
 			logext.Errorf(ctx, "[%s] begin tx failed,version:%d,err:%+v",
 				where, version, err.Error())

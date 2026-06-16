@@ -30,6 +30,7 @@ import type {
 } from '@/proto/attune/v1/notify_target'
 import type { GetMeResponse } from '@/proto/attune/v1/session'
 import type { GetLLMUsageResponse } from '@/proto/attune/v1/usage'
+import type { ListAuditResponse, ListStatesResponse } from '@/proto/attune/v1/workflow'
 
 // Forward-friendly default handlers for every /fb/v1/console/* endpoint.
 // Per §4-G of the design proposal: cover the full surface so adding a
@@ -200,6 +201,9 @@ export const defaultLLMUsage: GetLLMUsageResponse = {
   errors: '0',
 }
 
+export const defaultWorkflowStates: ListStatesResponse = { states: [] }
+export const defaultWorkflowAudit: ListAuditResponse = { entries: [] }
+
 const sampleDigestSubscription: DigestSubscription = {
   enabled: true,
   frequency: 'daily',
@@ -285,5 +289,7 @@ export const handlers = [
   http.get(`${BASE}/feedback/:id`, ({ params }) =>
     HttpResponse.json({ ...defaultFeedbackDetail, id: params.id }),
   ),
+  http.get(`${BASE}/workflow/states`, () => HttpResponse.json(defaultWorkflowStates)),
+  http.get(`${BASE}/feedback/:id/audit`, () => HttpResponse.json(defaultWorkflowAudit)),
   http.get(`${BASE}/llm-usage`, () => HttpResponse.json(defaultLLMUsage)),
 ]

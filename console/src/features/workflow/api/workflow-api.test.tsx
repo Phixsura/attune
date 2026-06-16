@@ -127,17 +127,17 @@ describe('workflow API hooks', () => {
         ),
       )
       const qc = makeQueryClient()
-      await expect(qc.fetchQuery(auditQuery(42))).resolves.toEqual([auditFixture])
+      await expect(qc.fetchQuery(auditQuery('42'))).resolves.toEqual([auditFixture])
     })
 
     it('auditQuery returns empty array when entries is undefined', async () => {
       server.use(http.get('/fb/v1/console/feedback/42/audit', () => HttpResponse.json({})))
       const qc = makeQueryClient()
-      await expect(qc.fetchQuery(auditQuery(42))).resolves.toEqual([])
+      await expect(qc.fetchQuery(auditQuery('42'))).resolves.toEqual([])
     })
 
     it('auditQueryKey includes feedbackId', () => {
-      expect(auditQueryKey(42)).toEqual(['console', 'feedback', 42, 'audit'])
+      expect(auditQueryKey('42')).toEqual(['console', 'feedback', '42', 'audit'])
     })
   })
 
