@@ -73,6 +73,7 @@ exposition plus the portable assets in this directory.
 | `attune_oidc_login_duration_seconds` | histogram | — | end-to-end OIDC login latency (#40) |
 | `attune_oidc_token_exchange_duration_seconds` | histogram | — | OIDC token exchange latency (#40) |
 | `attune_oidc_role_mapping_total` | counter | `role` | OIDC role mappings by assigned role (#40) |
+| `attune_authz_denied_total` | counter | `role`, `required` | Authorization denials by user role and required role (#38) |
 
 Label values:
 

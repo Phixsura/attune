@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **RBAC: admin/member/viewer roles (#38).** Three-level role hierarchy with
+  route-level middleware (`RequireRole`) and resource-level policy classes
+  (`FeedbackPolicy`, `MemberPolicy`). Role cached for 5min with explicit
+  invalidation; sensitive operations bypass cache. Last-admin protection
+  prevents demoting/removing the sole admin. Migration promotes all existing
+  users to admin for zero disruption. New `tenant_members` table unifies
+  authorization across admin/oidc_user/tenant_user sources. Adds
+  `attune_authz_denied_total` metric.
+
 - **OIDC SSO for Console (#40).** Enterprise single sign-on via standard OpenID
   Connect. Features: PKCE (S256) + nonce for security, group-based role mapping
   (admin/member), AES-256-GCM encrypted state cookies, configurable allowed
