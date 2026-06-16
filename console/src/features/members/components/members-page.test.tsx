@@ -179,4 +179,59 @@ describe('MembersPage invite dialog', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
   })
+
+  it('can type in email field', async () => {
+    setupMembersResponse(mockMembers)
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByText(TEXT.invite))
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    const emailInput = screen.getByPlaceholderText('user@example.com')
+    await user.type(emailInput, 'new@test.com')
+    expect(emailInput).toHaveValue('new@test.com')
+  })
+})
+
+describe('MembersPage empty state', () => {
+  it('shows empty state when no members', async () => {
+    setupMembersResponse([])
+    renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText(TEXT.noMembers)).toBeInTheDocument()
+    })
+  })
+})
+
+describe('MembersPage current user', () => {
+  it('shows "you" badge for current user', async () => {
+    vi.doMock('@/features/session/hooks/use-permissions', () => ({
+      usePermissions: () => ({
+        role: 'admin',
+        userId: 'admin-user',
+        isAdmin: true,
+        isMember: false,
+        isViewer: false,
+        can: () => true,
+        canView: () => true,
+        canEdit: () => true,
+        canManage: () => true,
+        canDelete: () => true,
+      }),
+    }))
+    setupMembersResponse(mockMembers)
+    renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument()
+    })
+  })
 })
