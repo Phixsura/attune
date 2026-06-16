@@ -43,6 +43,7 @@ type tenantReader interface {
 type Handler struct {
 	repo    subscriptionRepo
 	tenants tenantReader
+	audit   auditRecorder
 }
 
 // NewHandler wires the handler.
@@ -86,6 +87,18 @@ func (h *Handler) Upsert(
 ) (dispatcher.Result[*attunev1.DigestSubscription], error) {
 	const where = "console.DigestSubscriptionHandler.Upsert"
 	auth := ctx.Auth
+	var beforeSnapshot *digestSubscriptionSnapshot
+	beforeSub, beforeErr := h.repo.GetByTenant(ctx, auth.TenantID)
+	if beforeErr == nil && beforeSub != nil {
+		beforeClustering, clusteringErr := h.tenants.GetClusteringEnabled(ctx, auth.TenantID)
+		if clusteringErr != nil {
+			logext.Warnf(ctx, "[%s] before clustering lookup failed,tenant_id:%s,err:%+v", where, auth.TenantID, clusteringErr.Error())
+		}
+		snapshot := toDigestSubscriptionSnapshot(ptrext.Indirect(beforeSub), beforeClustering)
+		beforeSnapshot = ptrext.Of(snapshot)
+	} else if beforeErr != nil && !errors.Is(beforeErr, digestsubrepo.ErrNotFound) {
+		logext.Warnf(ctx, "[%s] before snapshot load failed,tenant_id:%s,err:%+v", where, auth.TenantID, beforeErr.Error())
+	}
 	sub, err := normalizeUpsert(req)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] reject: validation,tenant_id:%s,err:%s", where, auth.TenantID, err.Error())
@@ -122,6 +135,19 @@ func (h *Handler) Upsert(
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,frequency:%s,send_hour:%d,clustering:%t",
 		where, auth.TenantID, sub.Frequency, sub.SendHour, req.ClusteringEnabled)
+	afterSnapshot := toDigestSubscriptionSnapshot(ptrext.Indirect(out), req.ClusteringEnabled)
+	if err := h.recordAudit(
+		ctx,
+		"digest_subscription.upsert",
+		digestSubscriptionSummary("Upserted digest subscription", afterSnapshot),
+		beforeSnapshot,
+		afterSnapshot,
+	); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
+		return dispatcher.Fail[*attunev1.DigestSubscription](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log",
+		)
+	}
 	proto := toDigestProto(ptrext.Indirect(out))
 	proto.ClusteringEnabled = req.ClusteringEnabled
 	return dispatcher.OK(proto)
@@ -133,6 +159,18 @@ func (h *Handler) Delete(
 ) (dispatcher.Result[*attunev1.DeleteDigestSubscriptionResponse], error) {
 	const where = "console.DigestSubscriptionHandler.Delete"
 	auth := ctx.Auth
+	var beforeSnapshot *digestSubscriptionSnapshot
+	beforeSub, beforeErr := h.repo.GetByTenant(ctx, auth.TenantID)
+	if beforeErr == nil && beforeSub != nil {
+		beforeClustering, clusteringErr := h.tenants.GetClusteringEnabled(ctx, auth.TenantID)
+		if clusteringErr != nil {
+			logext.Warnf(ctx, "[%s] before clustering lookup failed,tenant_id:%s,err:%+v", where, auth.TenantID, clusteringErr.Error())
+		}
+		snapshot := toDigestSubscriptionSnapshot(ptrext.Indirect(beforeSub), beforeClustering)
+		beforeSnapshot = ptrext.Of(snapshot)
+	} else if beforeErr != nil && !errors.Is(beforeErr, digestsubrepo.ErrNotFound) {
+		logext.Warnf(ctx, "[%s] before snapshot load failed,tenant_id:%s,err:%+v", where, auth.TenantID, beforeErr.Error())
+	}
 	if err := h.repo.DeleteByTenant(ctx, auth.TenantID); err != nil {
 		if errors.Is(err, digestsubrepo.ErrNotFound) {
 			return dispatcher.Fail[*attunev1.DeleteDigestSubscriptionResponse](
@@ -142,6 +180,18 @@ func (h *Handler) Delete(
 		logext.Errorf(ctx, "[%s] delete failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.DeleteDigestSubscriptionResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to delete digest subscription",
+		)
+	}
+	if err := h.recordAudit(
+		ctx,
+		"digest_subscription.delete",
+		"Deleted digest subscription",
+		beforeSnapshot,
+		nil,
+	); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
+		return dispatcher.Fail[*attunev1.DeleteDigestSubscriptionResponse](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log",
 		)
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s", where, auth.TenantID)

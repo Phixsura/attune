@@ -24,6 +24,12 @@ func TestLoadPathNewConfig(t *testing.T) {
 	if cfg.EnricherBatch != DefaultEnricherBatch {
 		t.Fatalf("EnricherBatch = %d", cfg.EnricherBatch)
 	}
+	if cfg.Audit.RetentionDays != DefaultAuditRetentionDays {
+		t.Fatalf("Audit.RetentionDays = %d", cfg.Audit.RetentionDays)
+	}
+	if cfg.AuditPruneInterval != DefaultAuditPruneInterval {
+		t.Fatalf("AuditPruneInterval = %s", cfg.AuditPruneInterval)
+	}
 	if cfg.Console.BootstrapAdmin.Email != "admin@example.com" {
 		t.Fatalf("bootstrap admin email = %q", cfg.Console.BootstrapAdmin.Email)
 	}
@@ -185,6 +191,28 @@ rate_limit:
   burst: 20
 custom_webhooks: []
 `, "TINK_KEYSET", indent(keysetJSON, "    "), 1)
+}
+
+func TestLoadPathRejectsInvalidAuditRetention(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\naudit:\n  retention_days: -1\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected audit.retention_days validation error")
+	}
+	if !strings.Contains(err.Error(), "audit.retention_days") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadPathRejectsInvalidAuditPruneInterval(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\naudit:\n  prune_interval: \"bad\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected audit.prune_interval parse error")
+	}
+	if !strings.Contains(err.Error(), "audit.prune_interval") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func validTinkKeyset(t *testing.T) string {

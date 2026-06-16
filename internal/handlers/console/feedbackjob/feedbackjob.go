@@ -8,6 +8,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 // jobService defines the service interface for job operations.
@@ -19,10 +20,19 @@ type jobService interface {
 
 // Handler handles async job HTTP operations.
 type Handler struct {
-	svc jobService
+	svc   jobService
+	audit auditRecorder
+}
+
+type auditRecorder interface {
+	Record(ctx context.Context, event auditlogsvc.Event) error
 }
 
 // NewHandler creates a new job handler with the provided service.
 func NewHandler(svc jobService) *Handler {
 	return ptrext.Of(Handler{svc: svc})
+}
+
+func (h *Handler) SetAuditLogger(audit auditRecorder) {
+	h.audit = audit
 }

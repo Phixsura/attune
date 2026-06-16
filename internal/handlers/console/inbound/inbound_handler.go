@@ -22,6 +22,7 @@ package inbound
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/inboundsource"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 // Channel names — aliased from the adapter packages so a typo in this
@@ -65,6 +67,11 @@ type Handler struct {
 	rotate     rotator
 	testConn   testConnFn
 	tenantSlug tenantLookup
+	audit      auditRecorder
+}
+
+type auditRecorder interface {
+	Record(ctx context.Context, event auditlogsvc.Event) error
 }
 
 // NewHandler wires production dependencies — pool for direct DELETE,
@@ -81,6 +88,10 @@ func NewHandler(sources *inboundsource.Repo, p *pgxpool.Pool, secrets inbound.Se
 		testConn:   imapDialAndProbe,
 		tenantSlug: tenantSlugFromPool(p),
 	})
+}
+
+func (h *Handler) SetAuditLogger(audit auditRecorder) {
+	h.audit = audit
 }
 
 // rowToProto projects an inbound.Source into the wire-shape
@@ -121,4 +132,28 @@ func tenantSlugFromPool(p *pgxpool.Pool) tenantLookup {
 		}
 		return slug, err
 	}
+}
+
+func (h *Handler) recordAudit(
+	ctx context.Context,
+	authType, actorID, tenantID, action, targetID, summary string,
+	req *http.Request,
+	before, after any,
+) error {
+	if h.audit == nil {
+		return nil
+	}
+	if authType == "" {
+		authType = "admin"
+	}
+	return h.audit.Record(ctx, auditlogsvc.Event{
+		TenantID:   tenantID,
+		Actor:      auditlogsvc.ActorFromRequest(authType, actorID, req),
+		Action:     action,
+		TargetType: "inbound_source",
+		TargetID:   targetID,
+		Summary:    summary,
+		Before:     before,
+		After:      after,
+	})
 }

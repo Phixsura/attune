@@ -510,6 +510,32 @@ var AuthzDeniedTotal = prometheus.NewCounterVec(
 	[]string{"role", "required"},
 )
 
+// AuditRowsWrittenTotal counts successful immutable audit-log writes by action.
+var AuditRowsWrittenTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_audit_rows_written_total",
+		Help: "Immutable audit-log rows written by action.",
+	},
+	[]string{"action"},
+)
+
+// AuditRowsPrunedTotal counts audit-log rows removed by the retention worker.
+var AuditRowsPrunedTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "attune_audit_rows_pruned_total",
+		Help: "Immutable audit-log rows pruned by retention policy.",
+	},
+)
+
+// AuditPruneDurationSeconds tracks audit-log prune run latency.
+var AuditPruneDurationSeconds = prometheus.NewHistogram(
+	prometheus.HistogramOpts{
+		Name:    "attune_audit_prune_duration_seconds",
+		Help:    "Audit-log retention prune duration.",
+		Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10},
+	},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -573,6 +599,9 @@ var allMetrics = []prometheus.Collector{
 	OIDCTokenExchangeDuration,
 	OIDCRoleMappingTotal,
 	AuthzDeniedTotal,
+	AuditRowsWrittenTotal,
+	AuditRowsPrunedTotal,
+	AuditPruneDurationSeconds,
 }
 
 func init() {

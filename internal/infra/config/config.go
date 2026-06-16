@@ -43,6 +43,7 @@ type Config struct {
 	Database      DatabaseConfig
 	Migrations    MigrationsConfig
 	Enricher      EnricherConfig
+	Audit         AuditConfig
 	Console       ConsoleConfig
 	Secrets       SecretsConfig
 	Observability ObservabilityConfig
@@ -61,6 +62,8 @@ type Config struct {
 	RateLimitPerMinute int
 	RateLimitBurst     int
 	RateLimitDisabled  bool
+	AuditRetention     time.Duration
+	AuditPruneInterval time.Duration
 }
 
 type DatabaseConfig struct {
@@ -74,6 +77,11 @@ type MigrationsConfig struct {
 type EnricherConfig struct {
 	Interval string `yaml:"interval"`
 	Batch    int    `yaml:"batch"`
+}
+
+type AuditConfig struct {
+	RetentionDays int    `yaml:"retention_days"`
+	PruneInterval string `yaml:"prune_interval"`
 }
 
 type ConsoleConfig struct {
@@ -112,6 +120,7 @@ type yamlConfig struct {
 	Database       DatabaseConfig      `yaml:"database"`
 	Migrations     MigrationsConfig    `yaml:"migrations"`
 	Enricher       EnricherConfig      `yaml:"enricher"`
+	Audit          AuditConfig         `yaml:"audit"`
 	Console        ConsoleConfig       `yaml:"console"`
 	Secrets        SecretsConfig       `yaml:"secrets"`
 	Observability  ObservabilityConfig `yaml:"observability"`
@@ -176,6 +185,7 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 		Database:       yc.Database,
 		Migrations:     yc.Migrations,
 		Enricher:       yc.Enricher,
+		Audit:          yc.Audit,
 		Console:        yc.Console,
 		Secrets:        yc.Secrets,
 		Observability:  yc.Observability,
@@ -198,6 +208,10 @@ func (c *Config) parseDerivedFields() error {
 	if err != nil {
 		return fmt.Errorf("enricher.interval: %w", err)
 	}
+	pruneInterval, err := time.ParseDuration(c.Audit.PruneInterval)
+	if err != nil {
+		return fmt.Errorf("audit.prune_interval: %w", err)
+	}
 	c.DatabaseURL = strings.TrimSpace(c.Database.URL)
 	c.EnricherInterval = d
 	c.EnricherBatch = c.Enricher.Batch
@@ -206,6 +220,8 @@ func (c *Config) parseDerivedFields() error {
 	c.RateLimitPerMinute = c.RateLimit.PerMinute
 	c.RateLimitBurst = c.RateLimit.Burst
 	c.RateLimitDisabled = c.RateLimit.Disabled
+	c.AuditRetention = time.Duration(c.Audit.RetentionDays) * 24 * time.Hour
+	c.AuditPruneInterval = pruneInterval
 	return nil
 }
 
@@ -218,6 +234,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Enricher.Batch == 0 {
 		c.Enricher.Batch = DefaultEnricherBatch
+	}
+	if c.Audit.RetentionDays == 0 {
+		c.Audit.RetentionDays = DefaultAuditRetentionDays
+	}
+	if c.Audit.PruneInterval == "" {
+		c.Audit.PruneInterval = DefaultAuditPruneInterval.String()
 	}
 	if c.RateLimit.PerMinute == 0 {
 		c.RateLimit.PerMinute = DefaultRateLimitPerMinute
@@ -257,6 +279,12 @@ func (c *Config) validate() error {
 	}
 	if err := c.OIDC.Validate(); err != nil {
 		return err
+	}
+	if c.Audit.RetentionDays < 1 {
+		return fmt.Errorf("config: audit.retention_days must be at least 1")
+	}
+	if c.AuditPruneInterval <= 0 {
+		return fmt.Errorf("config: audit.prune_interval must be positive")
 	}
 	return c.validateCustomWebhooks()
 }

@@ -40,6 +40,27 @@ func (h *NotifyTargetsHandler) Test(ctx *dispatcher.RequestContext[*session.Auth
 
 	result := notify.TestSend(ctx, ptrext.Indirect(target))
 	if !result.OK {
+		if err := h.recordAudit(
+			ctx,
+			auth.UserType,
+			auth.UserID,
+			auth.TenantID,
+			"notify_target.test",
+			ctx.Request(),
+			ptrext.Indirect(target),
+			notifyTargetSummary("Tested notify target", ptrext.Indirect(target)),
+			nil,
+			map[string]any{
+				"ok":          false,
+				"status_code": result.StatusCode,
+				"latency_ms":  result.LatencyMs,
+				"error":       errMessage(result.Err),
+			},
+		); err != nil {
+			logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,id:%s,err:%+v",
+				where, auth.TenantID, id, err.Error())
+			return dispatcher.Fail[*attunev1.TestNotifyTargetResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+		}
 		logext.Warnf(ctx, "[%s] reject: delivery failed,tenant_id:%s,id:%s,status:%d,latency_ms:%d,err:%s",
 			where, auth.TenantID, id, result.StatusCode, result.LatencyMs, errMessage(result.Err))
 		return dispatcher.Fail[*attunev1.TestNotifyTargetResponse](http.StatusBadGateway, attunev1.ErrorCode_DELIVERY_FAILED, errMessage(result.Err))
@@ -51,6 +72,26 @@ func (h *NotifyTargetsHandler) Test(ctx *dispatcher.RequestContext[*session.Auth
 		StatusCode: ptrext.Of(sc),
 		LatencyMs:  ptrext.Of(lat),
 	})
+	if err := h.recordAudit(
+		ctx,
+		auth.UserType,
+		auth.UserID,
+		auth.TenantID,
+		"notify_target.test",
+		ctx.Request(),
+		ptrext.Indirect(target),
+		notifyTargetSummary("Tested notify target", ptrext.Indirect(target)),
+		nil,
+		map[string]any{
+			"ok":          true,
+			"status_code": result.StatusCode,
+			"latency_ms":  result.LatencyMs,
+		},
+	); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,id:%s,err:%+v",
+			where, auth.TenantID, id, err.Error())
+		return dispatcher.Fail[*attunev1.TestNotifyTargetResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%s,status:%d,latency_ms:%d",
 		where, auth.TenantID, id, result.StatusCode, result.LatencyMs)
 	return dispatcher.OK(resp)

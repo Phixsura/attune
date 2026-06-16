@@ -32,6 +32,7 @@ type workflowService interface {
 type Handler struct {
 	states  stateStore
 	service workflowService
+	audit   auditRecorder
 }
 
 func NewHandler(states stateStore, svc workflowService) *Handler {
@@ -111,6 +112,11 @@ func (h *Handler) CreateState(
 	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,state_id:%s,name:%s", where, auth.TenantID, created.ID, created.Name)
+	if err := h.recordAudit(ctx, "workflow_state.create", "workflow_state", created.ID,
+		workflowSummary("Created workflow state", created.Name), nil, stateAuditSnapshot(ptrext.Indirect(created))); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,state_id:%s,err:%+v", where, auth.TenantID, created.ID, err.Error())
+		return dispatcher.Fail[*attunev1.CreateStateResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 	return dispatcher.OK(ptrext.Of(attunev1.CreateStateResponse{State: StateToProto(ptrext.Indirect(created))}))
 }
 
@@ -130,6 +136,7 @@ func (h *Handler) UpdateState(
 		return dispatcher.Fail[*attunev1.UpdateStateResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "lookup failed")
 	}
+	beforeSnapshot := stateAuditSnapshot(ptrext.Indirect(existing))
 
 	if req.Name != nil {
 		existing.Name = req.GetName()
@@ -160,6 +167,11 @@ func (h *Handler) UpdateState(
 	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,state_id:%s", where, auth.TenantID, updated.ID)
+	if err := h.recordAudit(ctx, "workflow_state.update", "workflow_state", updated.ID,
+		workflowSummary("Updated workflow state", updated.Name), beforeSnapshot, stateAuditSnapshot(ptrext.Indirect(updated))); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,state_id:%s,err:%+v", where, auth.TenantID, updated.ID, err.Error())
+		return dispatcher.Fail[*attunev1.UpdateStateResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 	return dispatcher.OK(ptrext.Of(attunev1.UpdateStateResponse{State: StateToProto(ptrext.Indirect(updated))}))
 }
 
@@ -168,6 +180,10 @@ func (h *Handler) ArchiveState(
 ) (dispatcher.Result[*attunev1.ArchiveStateResponse], error) {
 	const where = "console.WorkflowHandler.ArchiveState"
 	auth := ctx.Auth
+	before, beforeErr := h.states.GetByTenantAndID(ctx, auth.TenantID, req.GetId())
+	if beforeErr != nil && !errors.Is(beforeErr, workflowstate.ErrNotFound) {
+		logext.Warnf(ctx, "[%s] prefetch failed,id:%s,err:%+v", where, req.GetId(), beforeErr.Error())
+	}
 
 	err := h.service.ArchiveState(ctx, auth.TenantID, req.GetId())
 	if err != nil {
@@ -189,6 +205,19 @@ func (h *Handler) ArchiveState(
 	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,state_id:%s", where, auth.TenantID, req.GetId())
+	var beforeSnapshot any
+	summary := "Archived workflow state"
+	if before != nil {
+		beforeSnapshot = stateAuditSnapshot(ptrext.Indirect(before))
+		summary = workflowSummary(summary, before.Name)
+	}
+	if err := h.recordAudit(ctx, "workflow_state.archive", "workflow_state", req.GetId(), summary, beforeSnapshot, map[string]any{
+		"id":       req.GetId(),
+		"archived": true,
+	}); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,state_id:%s,err:%+v", where, auth.TenantID, req.GetId(), err.Error())
+		return dispatcher.Fail[*attunev1.ArchiveStateResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 	return dispatcher.OK(ptrext.Of(attunev1.ArchiveStateResponse{}))
 }
 
@@ -221,6 +250,10 @@ func (h *Handler) ReplaceTransitions(
 ) (dispatcher.Result[*attunev1.ReplaceTransitionsResponse], error) {
 	const where = "console.WorkflowHandler.ReplaceTransitions"
 	auth := ctx.Auth
+	before, beforeErr := h.states.ListTransitions(ctx, auth.TenantID)
+	if beforeErr != nil {
+		logext.Warnf(ctx, "[%s] prefetch transitions failed,tenant_id:%s,err:%+v", where, auth.TenantID, beforeErr.Error())
+	}
 
 	edges := make([]workflowstate.TransitionEdge, len(req.GetTransitions()))
 	for i, e := range req.GetTransitions() {
@@ -247,6 +280,15 @@ func (h *Handler) ReplaceTransitions(
 	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,edges:%d", where, auth.TenantID, len(transitions))
+	var beforeSnapshot any
+	if beforeErr == nil {
+		beforeSnapshot = transitionsAuditSnapshot(before)
+	}
+	if err := h.recordAudit(ctx, "workflow_transition.replace", "workflow_transition_set", auth.TenantID,
+		"Replaced workflow transitions", beforeSnapshot, transitionsAuditSnapshot(transitions)); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
+		return dispatcher.Fail[*attunev1.ReplaceTransitionsResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 	return dispatcher.OK(ptrext.Of(attunev1.ReplaceTransitionsResponse{Transitions: out}))
 }
 
@@ -255,13 +297,56 @@ func (h *Handler) SeedDefaults(
 ) (dispatcher.Result[*attunev1.SeedDefaultsResponse], error) {
 	const where = "console.WorkflowHandler.SeedDefaults"
 	auth := ctx.Auth
+	beforeStates, beforeStatesErr := h.states.List(ctx, auth.TenantID, true)
+	if beforeStatesErr != nil {
+		logext.Warnf(ctx, "[%s] prefetch states failed,tenant_id:%s,err:%+v", where, auth.TenantID, beforeStatesErr.Error())
+	}
+	beforeTransitions, beforeTransitionsErr := h.states.ListTransitions(ctx, auth.TenantID)
+	if beforeTransitionsErr != nil {
+		logext.Warnf(ctx, "[%s] prefetch transitions failed,tenant_id:%s,err:%+v", where, auth.TenantID, beforeTransitionsErr.Error())
+	}
 
 	if err := h.service.SeedDefaults(ctx, auth.TenantID); err != nil {
 		logext.Errorf(ctx, "[%s] seed failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.SeedDefaultsResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to seed defaults")
 	}
+	afterStates, afterStatesErr := h.states.List(ctx, auth.TenantID, true)
+	if afterStatesErr != nil {
+		logext.Warnf(ctx, "[%s] post-seed states failed,tenant_id:%s,err:%+v", where, auth.TenantID, afterStatesErr.Error())
+	}
+	afterTransitions, afterTransitionsErr := h.states.ListTransitions(ctx, auth.TenantID)
+	if afterTransitionsErr != nil {
+		logext.Warnf(ctx, "[%s] post-seed transitions failed,tenant_id:%s,err:%+v", where, auth.TenantID, afterTransitionsErr.Error())
+	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s", where, auth.TenantID)
+	var beforeSnapshot any
+	if beforeStatesErr == nil || beforeTransitionsErr == nil {
+		snapshot := map[string]any{}
+		if beforeStatesErr == nil {
+			snapshot["states"] = statesAuditSnapshot(beforeStates)
+		}
+		if beforeTransitionsErr == nil {
+			snapshot["transitions"] = transitionsAuditSnapshot(beforeTransitions)
+		}
+		beforeSnapshot = snapshot
+	}
+	var afterSnapshot any
+	if afterStatesErr == nil || afterTransitionsErr == nil {
+		snapshot := map[string]any{}
+		if afterStatesErr == nil {
+			snapshot["states"] = statesAuditSnapshot(afterStates)
+		}
+		if afterTransitionsErr == nil {
+			snapshot["transitions"] = transitionsAuditSnapshot(afterTransitions)
+		}
+		afterSnapshot = snapshot
+	}
+	if err := h.recordAudit(ctx, "workflow_seed_defaults.run", "workflow_state_set", auth.TenantID,
+		"Seeded default workflow states", beforeSnapshot, afterSnapshot); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
+		return dispatcher.Fail[*attunev1.SeedDefaultsResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 	return dispatcher.OK(ptrext.Of(attunev1.SeedDefaultsResponse{}))
 }

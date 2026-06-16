@@ -50,6 +50,21 @@ func (h *Handler) Cancel(
 			"failed to cancel job",
 		)
 	}
+	if err := h.recordAudit(ctx, "feedback_job.cancel", jobID, "Cancelled feedback batch job", map[string]any{
+		"job_id": jobID,
+	}, map[string]any{
+		"job_id":  jobID,
+		"status":  resp.GetStatus().String(),
+		"message": resp.GetMessage(),
+	}); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,job_id:%s,err:%+v",
+			where, auth.TenantID, jobID, err.Error())
+		return dispatcher.Fail[*attunev1.CancelJobResponse](
+			http.StatusInternalServerError,
+			attunev1.ErrorCode_INTERNAL,
+			"failed to write audit log",
+		)
+	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,job_id:%s", where, auth.TenantID, jobID)
 	return dispatcher.OK(resp)

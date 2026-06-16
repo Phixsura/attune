@@ -10,6 +10,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 // Create handles POST /fb/v1/console/api-keys.
@@ -55,6 +56,26 @@ func (h *APIKeysHandler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx]
 		Key:    toProtoAPIKey(newRow),
 		Secret: raw,
 	})
+	if h.audit != nil {
+		if err := h.audit.Record(ctx, auditlogsvc.Event{
+			TenantID:   auth.TenantID,
+			Actor:      auditActor(auth, ctx.Request()),
+			Action:     "api_key.create",
+			TargetType: "api_key",
+			TargetID:   id.String(),
+			Summary:    "Created API key",
+			After: map[string]any{
+				"id":         id.String(),
+				"label":      newRow.Label,
+				"key_prefix": newRow.KeyPrefix,
+				"is_active":  newRow.IsActive,
+			},
+		}); err != nil {
+			logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,key_id:%s,err:%+v",
+				where, auth.TenantID, id, err.Error())
+			return dispatcher.Fail[*attunev1.CreateApiKeyResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+		}
+	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,key_id:%s", where, auth.TenantID, id)
 	return dispatcher.Created(resp)
 }

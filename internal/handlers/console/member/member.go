@@ -6,6 +6,7 @@ package member
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	"github.com/Phixsura/attune/internal/service/policy"
 )
 
@@ -38,11 +40,20 @@ type memberStore interface {
 // Handler provides member management endpoints.
 type Handler struct {
 	members memberStore
+	audit   auditRecorder
+}
+
+type auditRecorder interface {
+	Record(ctx context.Context, event auditlogsvc.Event) error
 }
 
 // NewHandler creates a new member handler.
 func NewHandler(members memberStore) *Handler {
 	return ptrext.Of(Handler{members: members})
+}
+
+func (h *Handler) SetAuditLogger(audit auditRecorder) {
+	h.audit = audit
 }
 
 // List returns all members for the tenant.
@@ -145,6 +156,16 @@ func (h *Handler) UpdateRole(ctx *dispatcher.RequestContext[*session.AuthCtx], r
 		return dispatcher.Fail[*attunev1.UpdateMemberRoleResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to update role")
 	}
+	if err := h.recordAudit(ctx, "member.update_role", target, map[string]any{
+		"id":   target.ID,
+		"role": string(target.Role),
+	}, map[string]any{
+		"id":   target.ID,
+		"role": string(newRole),
+	}); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,target_id:%s,err:%+v", where, auth.TenantID, target.ID, err.Error())
+		return dispatcher.Fail[*attunev1.UpdateMemberRoleResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,target_id:%s,new_role:%s",
 		where, auth.TenantID, req.Id, newRole)
@@ -193,6 +214,15 @@ func (h *Handler) Remove(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 		logext.Errorf(ctx, "[%s] remove failed,id:%s,err:%s", where, req.Id, err.Error())
 		return dispatcher.Fail[*attunev1.RemoveMemberResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to remove member")
+	}
+	if err := h.recordAudit(ctx, "member.remove", target, map[string]any{
+		"id":          target.ID,
+		"email":       ptrext.IndirectOr(target.Email, ""),
+		"role":        string(target.Role),
+		"member_type": target.MemberType,
+	}, nil); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,target_id:%s,err:%+v", where, auth.TenantID, target.ID, err.Error())
+		return dispatcher.Fail[*attunev1.RemoveMemberResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,target_id:%s", where, auth.TenantID, req.Id)
@@ -274,6 +304,15 @@ func (h *Handler) Invite(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 		return dispatcher.Fail[*attunev1.InviteMemberResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to create invite")
 	}
+	if err := h.recordAudit(ctx, "member.invite", m, nil, map[string]any{
+		"id":          m.ID,
+		"email":       ptrext.IndirectOr(m.Email, ""),
+		"role":        string(m.Role),
+		"member_type": m.MemberType,
+	}); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,invite_id:%s,err:%+v", where, auth.TenantID, m.ID, err.Error())
+		return dispatcher.Fail[*attunev1.InviteMemberResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,email:%s,invite_id:%s", where, auth.TenantID, email, m.ID)
 	return dispatcher.OK(ptrext.Of(attunev1.InviteMemberResponse{
@@ -288,4 +327,24 @@ func (h *Handler) Invite(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 			AcceptedAt: 0,
 		}),
 	}))
+}
+
+func (h *Handler) recordAudit(ctx *dispatcher.RequestContext[*session.AuthCtx], action string, target tenantmember.Member, before, after any) error {
+	if h.audit == nil {
+		return nil
+	}
+	actorType := ctx.Auth.UserType
+	if actorType == "" {
+		actorType = "admin"
+	}
+	return h.audit.Record(ctx, auditlogsvc.Event{
+		TenantID:   ctx.Auth.TenantID,
+		Actor:      auditlogsvc.ActorFromRequest(actorType, ctx.Auth.UserID, ctx.Request()),
+		Action:     action,
+		TargetType: "member",
+		TargetID:   target.ID,
+		Summary:    fmt.Sprintf("%s on member %s", action, target.ID),
+		Before:     before,
+		After:      after,
+	})
 }

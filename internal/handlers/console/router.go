@@ -21,6 +21,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
+	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/clusters"
 	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
@@ -60,6 +61,7 @@ type (
 var (
 	NewSigner                    = session.NewSigner
 	NewAuthHandler               = auth.NewHandler
+	NewAuditLogHandler           = consoleauditlog.NewHandler
 	NewChangePasswordHandler     = auth.NewChangePasswordHandler
 	NewMeHandler                 = me.NewMeHandler
 	NewAPIKeysHandler            = apikey.NewAPIKeysHandler
@@ -134,6 +136,7 @@ type Router struct {
 	login              *auth.Handler
 	changePassword     *auth.ChangePasswordHandler
 	me                 *me.MeHandler
+	auditLog           *consoleauditlog.Handler
 	apiKeys            *apikey.APIKeysHandler
 	notifyTargets      *notifytarget.NotifyTargetsHandler
 	feedback           *feedback.FeedbackHandler
@@ -165,6 +168,7 @@ func NewRouter(
 	authH *auth.Handler,
 	changePassword *auth.ChangePasswordHandler,
 	me *me.MeHandler,
+	auditLog *consoleauditlog.Handler,
 	apiKeys *apikey.APIKeysHandler,
 	notifyTargets *notifytarget.NotifyTargetsHandler,
 	feedback *feedback.FeedbackHandler,
@@ -195,6 +199,7 @@ func NewRouter(
 		login:              authH,
 		changePassword:     changePassword,
 		me:                 me,
+		auditLog:           auditLog,
 		apiKeys:            apiKeys,
 		notifyTargets:      notifyTargets,
 		feedback:           feedback,
@@ -284,6 +289,7 @@ func (r *Router) mountSession(m chi.Router) {
 		))
 	}
 	r.mountAPIKeys(m)
+	r.mountAuditLog(m)
 	r.mountNotifyTargets(m)
 	r.mountDigestSubscription(m)
 	r.mountFeedback(m)
@@ -409,28 +415,49 @@ func (r *Router) mountLLMConfig(m chi.Router) {
 }
 
 func (r *Router) requireAdmin(next http.Handler) http.Handler {
-	// Use RBAC middleware if available (tenant_members table exists)
-	if r.rbac != nil {
-		return r.rbac.RequireAdmin()(next)
-	}
-	// Fallback to legacy admin table check
-	return r.requireAdminLegacy(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if r.useRBACForRequest(req) {
+			r.rbac.RequireAdmin()(next).ServeHTTP(w, req)
+			return
+		}
+		r.requireAdminLegacy(next).ServeHTTP(w, req)
+	})
 }
 
 func (r *Router) requireAdminStrict(next http.Handler) http.Handler {
-	// Use RBAC strict middleware if available (bypasses cache)
-	if r.rbac != nil {
-		return r.rbac.RequireAdminStrict()(next)
-	}
-	return r.requireAdminLegacy(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if r.useRBACForRequest(req) {
+			r.rbac.RequireAdminStrict()(next).ServeHTTP(w, req)
+			return
+		}
+		r.requireAdminLegacy(next).ServeHTTP(w, req)
+	})
 }
 
 func (r *Router) requireViewer(next http.Handler) http.Handler {
-	if r.rbac != nil {
-		return r.rbac.RequireViewer()(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if r.useRBACForRequest(req) {
+			r.rbac.RequireViewer()(next).ServeHTTP(w, req)
+			return
+		}
+		if r.admins != nil {
+			r.requireAdminLegacy(next).ServeHTTP(w, req)
+			return
+		}
+		// Legacy fallback: all authenticated users pass (viewer is baseline)
+		next.ServeHTTP(w, req)
+	})
+}
+
+func (r *Router) useRBACForRequest(req *http.Request) bool {
+	if r.rbac == nil {
+		return false
 	}
-	// Legacy fallback: all authenticated users pass (viewer is baseline)
-	return next
+	auth := session.FromContext(req.Context())
+	if auth == nil {
+		return false
+	}
+	return auth.TenantID != "" && auth.UserType != ""
 }
 
 func (r *Router) requireAdminLegacy(next http.Handler) http.Handler {
@@ -573,6 +600,27 @@ func (r *Router) mountAPIKeys(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+	})
+}
+
+func (r *Router) mountAuditLog(m chi.Router) {
+	if r.auditLog == nil {
+		return
+	}
+	m.Route("/audit-log", func(a chi.Router) {
+		a.Use(r.requireAdminStrict)
+		a.Get("/", dispatcher.Bind(
+			"console.auditlog.List",
+			dispatcher.Query(
+				func() *attunev1.ListAuditLogRequest { return ptrext.Of(attunev1.ListAuditLogRequest{}) },
+				consoleauditlog.BindListRequest,
+			),
+			r.auditLog.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListAuditLogRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		a.Get("/export.csv", r.auditLog.ExportCSV)
 	})
 }
 

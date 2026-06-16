@@ -71,6 +71,17 @@ func (h *Handler) createWebhook(ctx context.Context, auth *session.AuthCtx, name
 		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "row created but reload failed")
 	}
 	resp := ptrext.Of(attunev1.CreateInboundSourceResponse{Source: rowToProto(stored)})
+	if err := h.recordAudit(ctx, auth.UserType, auth.UserID, auth.TenantID, "inbound_source.create", stored.ID, "Created webhook inbound source", nil, nil, map[string]any{
+		"id":      stored.ID,
+		"channel": stored.Channel,
+		"name":    stored.Name,
+		"slug":    stored.Slug,
+		"enabled": stored.Enabled,
+	}); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,id:%s,err:%+v",
+			where, auth.TenantID, stored.ID, err.Error())
+		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
 
 	tenantSlug, err := h.tenantSlug(ctx, auth.TenantID)
 	if err != nil {

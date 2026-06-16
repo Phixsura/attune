@@ -28,6 +28,7 @@ type RequestContext[Auth any] struct {
 	context.Context
 	Auth     Auth
 	response http.ResponseWriter
+	request  *http.Request
 }
 
 // SetCookie allows handlers to attach cookie side-effects while keeping
@@ -40,6 +41,13 @@ func (c *RequestContext[Auth]) SetCookie(cookie *http.Cookie) {
 // response body/status writing owned by dispatcher.
 func (c *RequestContext[Auth]) SetHeader(key, value string) {
 	c.response.Header().Set(key, value)
+}
+
+// Request returns the underlying HTTP request when the handler was invoked via
+// dispatcher.Bind. Unit tests that construct RequestContext directly may leave
+// it nil.
+func (c *RequestContext[Auth]) Request() *http.Request {
+	return c.request
 }
 
 // Result carries the successful response payload and HTTP status.

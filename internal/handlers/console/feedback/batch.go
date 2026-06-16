@@ -18,6 +18,7 @@ import (
 // BatchHandler handles batch feedback operations.
 type BatchHandler struct {
 	service feedbackbatch.Service
+	audit   auditRecorder
 }
 
 // NewBatchHandler creates a new batch handler with the given service.
@@ -45,6 +46,11 @@ func (h *BatchHandler) Execute(
 	resp, err := h.service.Execute(ctx, svcReq)
 	if err != nil {
 		return h.handleServiceError(ctx, auth.TenantID, err)
+	}
+	if err := h.recordDeleteAudit(ctx, svcReq, resp); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
+		return dispatcher.Fail[*attunev1.BatchFeedbackResponse](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
 
 	// Convert service response to proto response.

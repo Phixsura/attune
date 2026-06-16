@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +61,33 @@ func (h *Handler) TestConnection(ctx *dispatcher.RequestContext[*session.AuthCtx
 	defer cancel()
 	start := time.Now()
 	if err := h.testConn(probeCtx, inputs); err != nil {
+		if auditErr := h.recordAudit(
+			ctx,
+			auth.UserType,
+			auth.UserID,
+			auth.TenantID,
+			"inbound_source.test_connection",
+			inputs.Host,
+			"Tested inbound email connection",
+			ctx.Request(),
+			nil,
+			map[string]any{
+				"channel":    channelEmail,
+				"host":       inputs.Host,
+				"port":       inputs.Port,
+				"tls":        inputs.TLS,
+				"folder":     inputs.Folder,
+				"ok":         false,
+				"latency_ms": time.Since(start).Milliseconds(),
+				"error":      err.Error(),
+			},
+		); auditErr != nil {
+			logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,host:%s,err:%+v",
+				where, auth.TenantID, inputs.Host, auditErr.Error())
+			return dispatcher.Fail[*attunev1.TestInboundConnectionResponse](
+				http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log",
+			)
+		}
 		logext.Warnf(ctx, "[%s] probe failed,tenant_id:%s,host:%s,err:%s",
 			where, auth.TenantID, inputs.Host, err.Error())
 		return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
@@ -72,6 +100,32 @@ func (h *Handler) TestConnection(ctx *dispatcher.RequestContext[*session.AuthCtx
 		Ok:        true,
 		LatencyMs: ptrext.Of(latency),
 	})
+	if err := h.recordAudit(
+		ctx,
+		auth.UserType,
+		auth.UserID,
+		auth.TenantID,
+		"inbound_source.test_connection",
+		inputs.Host,
+		"Tested inbound email connection",
+		ctx.Request(),
+		nil,
+		map[string]any{
+			"channel":    channelEmail,
+			"host":       inputs.Host,
+			"port":       inputs.Port,
+			"tls":        inputs.TLS,
+			"folder":     inputs.Folder,
+			"ok":         true,
+			"latency_ms": latency,
+		},
+	); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,host:%s,err:%+v",
+			where, auth.TenantID, inputs.Host, err.Error())
+		return dispatcher.Fail[*attunev1.TestInboundConnectionResponse](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log",
+		)
+	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,host:%s,latency_ms:%d",
 		where, auth.TenantID, inputs.Host, latency)
 	return dispatcher.OK(resp)

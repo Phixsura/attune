@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	"github.com/Phixsura/attune/internal/service/feedbackbatch"
 )
 
@@ -34,6 +35,15 @@ type fakeJobService struct {
 	listTenantID  string
 	listStatusPtr *string
 	listLimit     int
+}
+
+type fakeAuditRecorder struct {
+	events []auditlogsvc.Event
+}
+
+func (f *fakeAuditRecorder) Record(_ context.Context, event auditlogsvc.Event) error {
+	f.events = append(f.events, event)
+	return nil
 }
 
 func (s *fakeJobService) GetJobStatus(ctx context.Context, tenantID, jobID string) (*attunev1.JobStatusResponse, error) {
@@ -393,5 +403,42 @@ func TestCancel(t *testing.T) {
 		body, err := dispatchtest.DecodeJSON(w.Body)
 		require.NoError(t, err)
 		require.Equal(t, "JOB_NOT_FOUND", body["code"])
+	})
+
+	t.Run("cancel records audit", func(t *testing.T) {
+		svc := &fakeJobService{
+			cancelResp: ptrext.Of(attunev1.CancelJobResponse{
+				Status:  attunev1.JobStatus_JOB_STATUS_CANCELLED,
+				Message: "Job cancelled successfully",
+			}),
+		}
+		audit := &fakeAuditRecorder{}
+		h := NewHandler(svc)
+		h.SetAuditLogger(audit)
+		handler := dispatcher.Bind(
+			"console.feedbackjob.Handler.Cancel",
+			dispatcher.Path(
+				func() *attunev1.CancelJobRequest { return &attunev1.CancelJobRequest{} },
+				dispatcher.Param("job_id", func(req *attunev1.CancelJobRequest, id string) { req.JobId = id }),
+			),
+			h.Cancel,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CancelJobRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(
+			http.MethodPost,
+			"/fb/v1/console/jobs/job-123/cancel",
+			"",
+			dispatchtest.Param{Name: "job_id", Value: "job-123"},
+		))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Len(t, audit.events, 1)
+		require.Equal(t, "feedback_job.cancel", audit.events[0].Action)
+		require.Equal(t, "job-123", audit.events[0].TargetID)
+		require.NotNil(t, audit.events[0].After)
 	})
 }

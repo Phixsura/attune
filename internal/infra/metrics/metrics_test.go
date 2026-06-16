@@ -69,6 +69,10 @@ func TestRegisteredMetricsMatchDocumentedReference(t *testing.T) {
 		"attune_oidc_role_mapping_total":              true,
 		// RBAC (#38).
 		"attune_authz_denied_total": true,
+		// Audit log (#39).
+		"attune_audit_rows_written_total":     true,
+		"attune_audit_rows_pruned_total":      true,
+		"attune_audit_prune_duration_seconds": true,
 	}
 
 	got := registeredMetricNames(t)

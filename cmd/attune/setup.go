@@ -21,6 +21,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -41,6 +42,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
 	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/service/apikey"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/feedbackbatch"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
@@ -165,6 +167,7 @@ func buildConsoleRouter(
 
 	tenantRepo := tenant.NewTenant(pool)
 	userRepo := tenant.NewTenantUserRepo(pool)
+	auditLogSvc := auditlogsvc.New(auditlogrepo.New(pool))
 	apiKeySvc := apikey.NewAPIKeys(apikeyrepo.NewAPIKey(pool))
 	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
 	feedbackRepo := feedback.NewFeedback(pool)
@@ -173,6 +176,7 @@ func buildConsoleRouter(
 	changePasswordHandler := console.NewChangePasswordHandler(adminRepo, signer)
 	oidcUserRepo := oidcuserrepo.NewRepo(pool)
 	me := console.NewMeHandler(signer, tenantRepo, userRepo, adminRepo, oidcUserRepo)
+	auditLog := console.NewAuditLogHandler(auditLogSvc)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
 	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
@@ -228,9 +232,21 @@ func buildConsoleRouter(
 	// Tenant member repo and handler for RBAC (#38).
 	memberRepo := tenantmember.NewRepo(pool)
 	memberHandler := console.NewMemberHandler(memberRepo)
+	apiKeys.SetAuditLogger(auditLogSvc)
+	notifyTargets.SetAuditLogger(auditLogSvc)
+	inboundHandler.SetAuditLogger(auditLogSvc)
+	memberHandler.SetAuditLogger(auditLogSvc)
+	guardPolicies.SetAuditLogger(auditLogSvc)
+	enrichConfig.SetAuditLogger(auditLogSvc)
+	jobHandler.SetAuditLogger(auditLogSvc)
+	llmConfig.SetAuditLogger(auditLogSvc)
+	workflowHandler.SetAuditLogger(auditLogSvc)
+	batchHandler.SetAuditLogger(auditLogSvc)
+	digestSub.SetAuditLogger(auditLogSvc)
+	tagHandler.SetAuditLogger(auditLogSvc)
 
 	return console.NewRouter(
-		signer, authHandler, changePasswordHandler, me, apiKeys, notifyTargets, feedback,
+		signer, authHandler, changePasswordHandler, me, auditLog, apiKeys, notifyTargets, feedback,
 		batchHandler,
 		searchHandler,
 		jobHandler,

@@ -35,7 +35,8 @@ type service interface {
 }
 
 type Handler struct {
-	svc service
+	svc   service
+	audit auditRecorder
 }
 
 type protoMessage interface {

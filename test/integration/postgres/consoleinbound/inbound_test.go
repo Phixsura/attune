@@ -70,6 +70,7 @@ func newConsoleRouter(t *testing.T, pool *pgxpool.Pool) (http.Handler, *console.
 		nil,
 		nil,
 		nil,
+		nil, // auditLog
 		nil,
 		nil,
 		nil, // batchHandler

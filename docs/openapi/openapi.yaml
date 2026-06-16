@@ -74,6 +74,119 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/audit-log:
+        get:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_ListAuditLog
+            parameters:
+                - name: action
+                  in: query
+                  schema:
+                    type: string
+                - name: actorType
+                  in: query
+                  schema:
+                    type: string
+                - name: actorId
+                  in: query
+                  schema:
+                    type: string
+                - name: targetType
+                  in: query
+                  schema:
+                    type: string
+                - name: targetId
+                  in: query
+                  schema:
+                    type: string
+                - name: from
+                  in: query
+                  schema:
+                    type: string
+                - name: to
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: actions
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListAuditLogResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/audit-log/export.csv:
+        get:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_ExportAuditLogCSV
+            parameters:
+                - name: action
+                  in: query
+                  schema:
+                    type: string
+                - name: actorType
+                  in: query
+                  schema:
+                    type: string
+                - name: actorId
+                  in: query
+                  schema:
+                    type: string
+                - name: targetType
+                  in: query
+                  schema:
+                    type: string
+                - name: targetId
+                  in: query
+                  schema:
+                    type: string
+                - name: from
+                  in: query
+                  schema:
+                    type: string
+                - name: to
+                  in: query
+                  schema:
+                    type: string
+                - name: actions
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        '*/*': {}
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/clusters:
         get:
             tags:
@@ -2168,6 +2281,35 @@ components:
                     type: string
                 createdAt:
                     type: string
+        AuditLogEntry:
+            type: object
+            properties:
+                id:
+                    type: string
+                actorType:
+                    type: string
+                actorId:
+                    type: string
+                actorEmail:
+                    type: string
+                actorIp:
+                    type: string
+                actorUserAgent:
+                    type: string
+                action:
+                    type: string
+                targetType:
+                    type: string
+                targetId:
+                    type: string
+                summary:
+                    type: string
+                beforeJson:
+                    type: string
+                afterJson:
+                    type: string
+                createdAt:
+                    type: string
         BatchDeleteOp:
             type: object
             properties:
@@ -3317,6 +3459,15 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ApiKey'
+        ListAuditLogResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/AuditLogEntry'
+                nextCursor:
+                    type: string
         ListAuditResponse:
             type: object
             properties:
@@ -4128,6 +4279,7 @@ components:
 tags:
     - name: ApiKeyService
       description: ApiKeyService manages a tenant's external ingest API keys (console).
+    - name: AuditLogService
     - name: BatchService
       description: |-
         BatchService provides batch operations on feedback rows (#30).

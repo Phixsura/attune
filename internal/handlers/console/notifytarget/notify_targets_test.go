@@ -125,3 +125,22 @@ func TestCreateNotifyTargetValidationAndConflict(t *testing.T) {
 	require.Equal(t, http.StatusConflict, conflict.Status)
 	require.Equal(t, attunev1.ErrorCode_CONFLICT, conflict.Code)
 }
+
+func TestValidateNotifyCreateRejectsEmbeddedCredentials(t *testing.T) {
+	t.Parallel()
+
+	err := validateNotifyCreate(&createNotifyRequest{
+		DestinationType: notifytarget.DestRawWebhook,
+		URL:             "https://user:pass@example.com/hook",
+	})
+
+	require.EqualError(t, err, "url must not embed credentials")
+}
+
+func TestSanitizeNotifyTargetURLDropsCredentialsAndQuery(t *testing.T) {
+	t.Parallel()
+
+	got := sanitizeNotifyTargetURL("https://user:pass@example.com/hook?token=secret#frag")
+
+	require.Equal(t, "https://example.com/hook", got)
+}

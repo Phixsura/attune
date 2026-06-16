@@ -34,6 +34,7 @@ func (h *Handler) UpsertRoute(
 	ctx *dispatcher.RequestContext[*session.AuthCtx],
 	req *attunev1.UpsertLLMRouteRequest,
 ) (dispatcher.Result[*attunev1.LLMRoute], error) {
+	before := h.findRoute(ctx, req.GetTenantId(), req.GetPurpose())
 	row, err := h.svc.UpsertRoute(ctx, llmsvc.RouteInput{
 		TenantID:     req.GetTenantId(),
 		Purpose:      req.GetPurpose(),
@@ -48,13 +49,25 @@ func (h *Handler) UpsertRoute(
 		return dispatcher.Fail[*attunev1.LLMRoute](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to upsert llm route")
 	}
-	return dispatcher.OK(toRouteProto(ptrext.Indirect(row)))
+	var beforeSnapshot any
+	if before != nil {
+		beforeValue := ptrext.Indirect(before)
+		beforeSnapshot = routeAuditSnapshot(beforeValue)
+	}
+	rowValue := ptrext.Indirect(row)
+	if err := h.recordAudit(ctx, "llm_route.upsert", "llm_route",
+		llmTargetID(rowValue.ID.String(), rowValue.TenantID, rowValue.Purpose),
+		llmRouteSummary("Upserted LLM route", rowValue), beforeSnapshot, routeAuditSnapshot(rowValue)); err != nil {
+		return dispatcher.Fail[*attunev1.LLMRoute](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
+	return dispatcher.OK(toRouteProto(rowValue))
 }
 
 func (h *Handler) DeleteRoute(
 	ctx *dispatcher.RequestContext[*session.AuthCtx],
 	req *attunev1.DeleteLLMRouteRequest,
 ) (dispatcher.Result[*attunev1.DeleteLLMRouteResponse], error) {
+	before := h.findRoute(ctx, req.GetTenantId(), req.GetPurpose())
 	if err := h.svc.DeleteRoute(ctx, req.GetTenantId(), req.GetPurpose()); err != nil {
 		if errors.Is(err, llmrepo.ErrRouteNotFound) {
 			return dispatcher.Fail[*attunev1.DeleteLLMRouteResponse](
@@ -66,6 +79,17 @@ func (h *Handler) DeleteRoute(
 		}
 		return dispatcher.Fail[*attunev1.DeleteLLMRouteResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to delete llm route")
+	}
+	var beforeSnapshot any
+	summary := "Deleted LLM route"
+	if before != nil {
+		beforeValue := ptrext.Indirect(before)
+		beforeSnapshot = routeAuditSnapshot(beforeValue)
+		summary = llmRouteSummary(summary, beforeValue)
+	}
+	if err := h.recordAudit(ctx, "llm_route.delete", "llm_route",
+		llmTargetID("", req.GetTenantId(), req.GetPurpose()), summary, beforeSnapshot, nil); err != nil {
+		return dispatcher.Fail[*attunev1.DeleteLLMRouteResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.DeleteLLMRouteResponse{}))
 }

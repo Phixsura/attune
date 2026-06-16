@@ -36,6 +36,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/guardpolicy"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
@@ -45,6 +46,7 @@ import (
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/apikey"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	digestsvc "github.com/Phixsura/attune/internal/service/digest"
 	embeddingsvc "github.com/Phixsura/attune/internal/service/embedding"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -142,6 +144,7 @@ func runServer() error {
 	// attune_outbox_lag_seconds is refreshed on a 30s ticker rather than
 	// on every Prometheus scrape — avoids hammering the DB.
 	go runOutboxLagRefresher(ctx, outboxRepo)
+	go runAuditPruner(ctx, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
 
 	batchJobWorker := startBackgroundWorkers(ctx, pool, enricher, rawLLM, llm, feedbackRepo, cfg.ConsoleBaseURL)
 	defer batchJobWorker.Stop()
@@ -186,6 +189,33 @@ func runServer() error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func runAuditPruner(ctx context.Context, svc *auditlogsvc.Service, retention, interval time.Duration) {
+	if svc == nil || retention <= 0 || interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	pruneAuditOnce(ctx, svc, retention)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pruneAuditOnce(ctx, svc, retention)
+		}
+	}
+}
+
+func pruneAuditOnce(ctx context.Context, svc *auditlogsvc.Service, retention time.Duration) {
+	const where = "main.pruneAuditLog"
+	rows, err := svc.Prune(ctx, retention)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] failed,err:%+v", where, err.Error())
+		return
+	}
+	logext.Infof(ctx, "[%s] OK,rows:%d,retention_hours:%d", where, rows, int(retention.Hours()))
 }
 
 // setupTracing builds the OpenTelemetry tracer from config. An empty
