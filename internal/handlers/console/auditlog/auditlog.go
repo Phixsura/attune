@@ -46,7 +46,7 @@ func BindListRequest(r *http.Request, req *attunev1.ListAuditLogRequest) error {
 	req.From = strings.TrimSpace(q.Get("from"))
 	req.To = strings.TrimSpace(q.Get("to"))
 	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
-		limit, err := strconv.Atoi(raw)
+		limit, err := strconv.ParseInt(raw, 10, 32)
 		if err != nil {
 			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "limit must be an integer")
 		}
