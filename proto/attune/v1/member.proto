@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+// MemberService manages tenant membership for RBAC (#38).
+service MemberService {
+  // GET /fb/v1/console/members — list all tenant members.
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/members"};
+  }
+  // PATCH /fb/v1/console/members/{id} — change role.
+  rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (UpdateMemberRoleResponse) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/members/{id}"
+      body: "*"
+    };
+  }
+  // DELETE /fb/v1/console/members/{id} — remove from tenant.
+  rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/members/{id}"};
+  }
+}
+
+// Member represents a user's membership in a tenant.
+message Member {
+  string id = 1;
+  string member_type = 2;  // "admin" | "oidc_user" | "tenant_user"
+  string user_id = 3;
+  string role = 4;         // "admin" | "member" | "viewer"
+  string role_source = 5;  // "idp" | "manual" | "bootstrap"
+  int64 invited_at = 6;    // unix seconds
+  int64 accepted_at = 7;   // unix seconds, 0 if pending
+}
+
+message ListMembersRequest {}
+
+message ListMembersResponse {
+  repeated Member members = 1;
+}
+
+message UpdateMemberRoleRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string role = 2 [(google.api.field_behavior) = REQUIRED];  // "admin" | "member" | "viewer"
+}
+
+message UpdateMemberRoleResponse {}
+
+message RemoveMemberRequest {
+  string id = 1;  // path param (UUID)
+}
+
+message RemoveMemberResponse {}
