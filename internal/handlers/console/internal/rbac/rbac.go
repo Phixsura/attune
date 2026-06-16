@@ -67,7 +67,7 @@ func (m *Middleware) RequireRole(required domain.Role) func(http.Handler) http.H
 				return
 			}
 
-			ctx = withRole(ctx, role)
+			ctx = WithRole(ctx, role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -91,7 +91,7 @@ func (m *Middleware) RequireRoleStrict(required domain.Role) func(http.Handler) 
 				return
 			}
 
-			ctx = withRole(ctx, role)
+			ctx = WithRole(ctx, role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -154,7 +154,10 @@ func FromContext(ctx context.Context) domain.Role {
 	return role
 }
 
-func withRole(ctx context.Context, role domain.Role) context.Context {
+// WithRole attaches an effective role to ctx. The middleware uses it after a
+// successful role lookup; it is also the symmetric counterpart to FromContext
+// for constructing role-bearing contexts in tests.
+func WithRole(ctx context.Context, role domain.Role) context.Context {
 	return context.WithValue(ctx, roleCtxKey{}, role)
 }
 

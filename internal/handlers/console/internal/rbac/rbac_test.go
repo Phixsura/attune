@@ -26,7 +26,7 @@ func TestFromContext(t *testing.T) {
 	})
 
 	t.Run("returns role from context", func(t *testing.T) {
-		ctx := withRole(context.Background(), domain.RoleAdmin)
+		ctx := WithRole(context.Background(), domain.RoleAdmin)
 		role := FromContext(ctx)
 		assert.Equal(t, domain.RoleAdmin, role)
 	})
@@ -74,11 +74,11 @@ func TestWithRole(t *testing.T) {
 	assert.Equal(t, domain.RoleViewer, FromContext(ctx))
 
 	// Add admin role
-	ctx = withRole(ctx, domain.RoleAdmin)
+	ctx = WithRole(ctx, domain.RoleAdmin)
 	assert.Equal(t, domain.RoleAdmin, FromContext(ctx))
 
 	// Override with member
-	ctx = withRole(ctx, domain.RoleMember)
+	ctx = WithRole(ctx, domain.RoleMember)
 	assert.Equal(t, domain.RoleMember, FromContext(ctx))
 }
 
@@ -102,7 +102,7 @@ func TestMiddlewareContextPropagation(t *testing.T) {
 	// With role set in context
 	t.Run("with role in context", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		ctx := withRole(req.Context(), domain.RoleAdmin)
+		ctx := WithRole(req.Context(), domain.RoleAdmin)
 		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
