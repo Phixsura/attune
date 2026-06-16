@@ -6,6 +6,16 @@ import { MembersPage } from '@/features/members/components/members-page'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
+// Spy on toast so error-path assertions can verify a notification fired.
+const toastError = vi.fn()
+const toastSuccess = vi.fn()
+vi.mock('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => toastError(...args),
+    success: (...args: unknown[]) => toastSuccess(...args),
+  },
+}))
+
 // Mock usePermissions hook
 vi.mock('@/features/session/hooks/use-permissions', () => ({
   usePermissions: () => ({
@@ -440,5 +450,71 @@ describe('MembersPage mutations', () => {
 
     await waitFor(() => expect(posted.email).toBe('boss@example.com'))
     expect(posted.role).toBe('admin')
+  })
+})
+
+describe('MembersPage mutation errors', () => {
+  it('shows an error toast and keeps the dialog open when invite fails', async () => {
+    toastError.mockClear()
+    setupMembersResponse(mockMembers)
+    server.use(
+      http.post('/fb/v1/console/members', () =>
+        HttpResponse.json({ code: 'CONFLICT', message: 'already a member' }, { status: 409 }),
+      ),
+    )
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => expect(screen.getByText('admin@example.com')).toBeInTheDocument())
+    await user.click(screen.getByText(TEXT.invite))
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+
+    await user.type(screen.getByPlaceholderText('user@example.com'), 'dup@example.com')
+    await user.click(screen.getByRole('button', { name: '发送邀请' }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    // On failure the dialog stays open (only success closes it).
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('shows an error toast when removal fails', async () => {
+    toastError.mockClear()
+    setupMembersResponse(mockMembers)
+    server.use(
+      http.delete('/fb/v1/console/members/:id', () =>
+        HttpResponse.json({ code: 'CONFLICT', message: 'last admin' }, { status: 409 }),
+      ),
+    )
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => expect(screen.getByText('member@example.com')).toBeInTheDocument())
+    const trash = screen
+      .getAllByRole('button', { name: '' })
+      .find((b) => b.closest('tr')?.textContent?.includes('member@example.com'))
+    if (trash) await user.click(trash)
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: '移除' }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+  })
+
+  it('shows an error toast when role change fails', async () => {
+    toastError.mockClear()
+    setupMembersResponse(mockMembers)
+    server.use(
+      http.patch('/fb/v1/console/members/:id', () =>
+        HttpResponse.json({ code: 'FORBIDDEN', message: 'nope' }, { status: 403 }),
+      ),
+    )
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => expect(screen.getByText('member@example.com')).toBeInTheDocument())
+    const combo = screen
+      .getAllByRole('combobox')
+      .find((c) => c.closest('tr')?.textContent?.includes('member@example.com'))
+    if (!combo) return
+    await user.click(combo)
+    await user.click(await screen.findByRole('option', { name: '只读' }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
 })
