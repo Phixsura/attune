@@ -37,8 +37,8 @@ import {
   TestChannelDialog,
 } from '@/features/llm-config/components/dialogs'
 import { AbilityTable, ChannelTable, RouteTable } from '@/features/llm-config/components/tables'
+import { usePermissions } from '@/features/session/hooks/use-permissions'
 import type { ApiError } from '@/lib/api-client'
-import { usePermissions } from '@/lib/hooks/use-permissions'
 
 export function LLMConfigPage() {
   const { t } = useTranslation()

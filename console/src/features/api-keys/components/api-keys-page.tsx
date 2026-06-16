@@ -24,7 +24,7 @@ import {
   RevokeKeyDialog,
   SecretKeyDialog,
 } from '@/features/api-keys/components/dialogs'
-import { usePermissions } from '@/lib/hooks/use-permissions'
+import { usePermissions } from '@/features/session/hooks/use-permissions'
 
 export function ApiKeysPage() {
   const { t } = useTranslation()

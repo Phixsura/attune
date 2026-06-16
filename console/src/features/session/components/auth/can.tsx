@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { type Permission, usePermissions } from '@/lib/hooks/use-permissions'
+import { type Permission, usePermissions } from '@/features/session/hooks/use-permissions'
 
 interface CanProps {
   /** Permission to check */

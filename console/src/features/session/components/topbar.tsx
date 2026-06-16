@@ -1,7 +1,6 @@
 import { Link, useNavigate } from '@tanstack/react-router'
 import { KeyRound, LogOut, User } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { RoleBadge } from '@/components/auth/role-badge'
 import { Logo } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,8 +12,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import type { SessionMe } from '@/features/session/api/get-me'
 import { useLogout } from '@/features/session/api/logout'
+import { RoleBadge } from '@/features/session/components/auth/role-badge'
+import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { consolePath } from '@/lib/console-path'
-import { usePermissions } from '@/lib/hooks/use-permissions'
 
 function NavLink({ to, children }: { to: string; children: React.ReactNode }) {
   return (

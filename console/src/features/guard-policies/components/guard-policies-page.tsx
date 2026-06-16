@@ -31,7 +31,7 @@ import {
   usePatchGuardPolicy,
   useResolveGuardPolicy,
 } from '@/features/guard-policies/api/guard-policies'
-import { usePermissions } from '@/lib/hooks/use-permissions'
+import { usePermissions } from '@/features/session/hooks/use-permissions'
 
 const CHANNELS = ['all', 'api', 'webhook', 'email'] as const
 const PURPOSES = ['enrich', 'digest', 'reply_draft', 'eval', 'outbound'] as const

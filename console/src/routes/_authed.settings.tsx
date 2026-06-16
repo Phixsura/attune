@@ -29,12 +29,12 @@ import { InboundSourcesPage } from '@/features/inbound-sources/components/inboun
 import { MembersPage } from '@/features/members/components/members-page'
 import { NotifyTargetsPage } from '@/features/notify-targets/components/notify-targets-page'
 import { meQuery } from '@/features/session/api/get-me'
+import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
 import { TagsPage } from '@/features/tags/components/tags-page'
 import { WorkflowSettingsPage } from '@/features/workflow/components/workflow-settings-page'
-import { usePermissions } from '@/lib/hooks/use-permissions'
 import type { Dimension } from '@/proto/attune/v1/common'
 
 type SettingsSection =

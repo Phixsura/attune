@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import type { Role } from '@/lib/hooks/use-permissions'
+import type { Role } from '@/features/session/hooks/use-permissions'
 import { cn } from '@/lib/utils'
 
 interface RoleBadgeProps {
