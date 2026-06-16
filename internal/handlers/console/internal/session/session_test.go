@@ -150,3 +150,100 @@ func flipFirstChar(s string) string {
 	}
 	return "A" + s[1:]
 }
+
+func TestFromContext_PanicsWhenNoAuth(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("FromContext should panic when AuthCtx is missing")
+		}
+	}()
+	ctx := t.Context()
+	FromContext(ctx) // should panic
+}
+
+func TestWithAuthCtx_RoundTrip(t *testing.T) {
+	ctx := t.Context()
+	auth := ptrext.Of(AuthCtx{
+		TenantID: "tenant-1",
+		UserID:   "user-1",
+		UserType: "oidc",
+		ExpAt:    time.Now().Add(time.Hour),
+	})
+	ctx = WithAuthCtx(ctx, auth)
+
+	got := FromContext(ctx)
+	if got == nil {
+		t.Fatal("FromContext returned nil after WithAuthCtx")
+	}
+	if got.TenantID != "tenant-1" || got.UserID != "user-1" || got.UserType != "oidc" {
+		t.Fatalf("auth mismatch: %+v", got)
+	}
+}
+
+func TestIssueSessionCookie_SetsCookie(t *testing.T) {
+	s, _ := NewSigner(testKey)
+	rec := httptest.NewRecorder()
+
+	err := s.IssueSessionCookie(cookieRecorder{rec}, "tenant-1", "user-1")
+	if err != nil {
+		t.Fatalf("IssueSessionCookie: %v", err)
+	}
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected 1 cookie, got %d", len(cookies))
+	}
+	if cookies[0].Name != SessionCookieName {
+		t.Fatalf("cookie name = %s, want %s", cookies[0].Name, SessionCookieName)
+	}
+	if !cookies[0].HttpOnly || !cookies[0].Secure {
+		t.Fatal("cookie should be HttpOnly and Secure")
+	}
+}
+
+func TestIssueSessionCookieWithType_SetsUserType(t *testing.T) {
+	s, _ := NewSigner(testKey)
+	rec := httptest.NewRecorder()
+
+	err := s.IssueSessionCookieWithType(cookieRecorder{rec}, "tenant-1", "user-1", "oidc")
+	if err != nil {
+		t.Fatalf("IssueSessionCookieWithType: %v", err)
+	}
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected 1 cookie, got %d", len(cookies))
+	}
+
+	// Verify the cookie can be decoded and contains the right user type
+	p, err := s.VerifySession(cookies[0].Value)
+	if err != nil {
+		t.Fatalf("VerifySession: %v", err)
+	}
+	if p.UserType != "oidc" {
+		t.Fatalf("UserType = %s, want oidc", p.UserType)
+	}
+}
+
+func TestClearSessionCookie_ExpiresImmediately(t *testing.T) {
+	s, _ := NewSigner(testKey)
+	rec := httptest.NewRecorder()
+
+	s.ClearSessionCookie(cookieRecorder{rec})
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected 1 cookie, got %d", len(cookies))
+	}
+	if cookies[0].MaxAge != -1 {
+		t.Fatalf("MaxAge = %d, want -1", cookies[0].MaxAge)
+	}
+}
+
+type cookieRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+func (c cookieRecorder) SetCookie(cookie *http.Cookie) {
+	http.SetCookie(c.ResponseRecorder, cookie)
+}
