@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import {
   Bell,
   Bot,
@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Sparkles,
   Tags,
+  Users,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -25,7 +26,10 @@ import { ApiKeysPage } from '@/features/api-keys/components/api-keys-page'
 import { DigestSubscriptionPage } from '@/features/digest-subscription/components/digest-subscription-page'
 import { GuardPoliciesPage } from '@/features/guard-policies/components/guard-policies-page'
 import { InboundSourcesPage } from '@/features/inbound-sources/components/inbound-sources-page'
+import { MembersPage } from '@/features/members/components/members-page'
 import { NotifyTargetsPage } from '@/features/notify-targets/components/notify-targets-page'
+import { meQuery } from '@/features/session/api/get-me'
+import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
@@ -42,6 +46,7 @@ type SettingsSection =
   | 'api_keys'
   | 'tags'
   | 'workflow'
+  | 'members'
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'classification',
@@ -52,10 +57,18 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'api_keys',
   'tags',
   'workflow',
+  'members',
 ]
 
 export const Route = createFileRoute('/_authed/settings')({
-  validateSearch: (search): { section: SettingsSection } => {
+  beforeLoad: async ({ context }) => {
+    const me = await context.queryClient.ensureQueryData(meQuery())
+    const role = me.user?.role
+    if (role !== 'admin' && role !== 'member') {
+      throw redirect({ to: '/feedback' })
+    }
+  },
+  validateSearch: (search: Record<string, unknown>): { section: SettingsSection } => {
     const raw = typeof search.section === 'string' ? search.section : 'classification'
     return {
       section: SETTINGS_SECTIONS.includes(raw as SettingsSection)
@@ -70,6 +83,7 @@ function SettingsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { section } = Route.useSearch()
+  const { can } = usePermissions()
   const cfg = useQuery(enrichConfigQuery())
   const save = useUpdateEnrichConfig()
   const preview = usePreviewEnrichPrompt()
@@ -148,6 +162,7 @@ function SettingsPage() {
 
         {section === 'classification' ? (
           <ClassificationSettings
+            canEdit={can('settings:enrich_config:edit')}
             dimensions={dimensions}
             modeLabel={modeLabel}
             previewPending={preview.isPending}
@@ -171,6 +186,7 @@ function SettingsPage() {
 }
 
 function ClassificationSettings({
+  canEdit,
   dimensions,
   modeLabel,
   onDimensionsChange,
@@ -185,6 +201,7 @@ function ClassificationSettings({
   sample,
   savePending,
 }: {
+  canEdit: boolean
   dimensions: Dimension[]
   modeLabel: string
   onDimensionsChange: (dimensions: Dimension[]) => void
@@ -223,16 +240,19 @@ function ClassificationSettings({
             <Label htmlFor="prompt">{t('settings.prompt_label')}</Label>
             <textarea
               id="prompt"
-              className="min-h-[220px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="min-h-[220px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               value={prompt}
               onChange={(e) => onPromptChange(e.target.value)}
+              disabled={!canEdit}
             />
             <p className="text-xs text-muted-foreground">{t('settings.prompt_tokens')}</p>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={onRestoreDefault}>
-            <RotateCcw className="mr-2 h-3.5 w-3.5" />
-            {t('settings.restore_default')}
-          </Button>
+          {canEdit && (
+            <Button type="button" variant="outline" size="sm" onClick={onRestoreDefault}>
+              <RotateCcw className="mr-2 h-3.5 w-3.5" />
+              {t('settings.restore_default')}
+            </Button>
+          )}
         </CardContent>
       </Card>
 
@@ -242,7 +262,7 @@ function ClassificationSettings({
           <CardDescription>{t('settings.dimensions_help')}</CardDescription>
         </CardHeader>
         <CardContent>
-          <DimensionsEditor value={dimensions} onChange={onDimensionsChange} />
+          <DimensionsEditor value={dimensions} onChange={onDimensionsChange} disabled={!canEdit} />
         </CardContent>
       </Card>
 
@@ -277,12 +297,14 @@ function ClassificationSettings({
         </CardContent>
       </Card>
 
-      <div className="flex justify-end">
-        <Button onClick={onSave} disabled={savePending}>
-          {savePending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-          {t('common.save')}
-        </Button>
-      </div>
+      {canEdit && (
+        <div className="flex justify-end">
+          <Button onClick={onSave} disabled={savePending}>
+            {savePending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {t('common.save')}
+          </Button>
+        </div>
+      )}
     </section>
   )
 }
@@ -297,6 +319,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
       {section === 'api_keys' ? <ApiKeysPage /> : null}
       {section === 'tags' ? <TagsPage /> : null}
       {section === 'workflow' ? <WorkflowSettingsPage /> : null}
+      {section === 'members' ? <MembersPage /> : null}
     </section>
   )
 }
@@ -357,6 +380,12 @@ function SettingsSidebar({
       icon: GitBranch,
       title: t('settings.areas.workflow.title'),
       body: t('settings.areas.workflow.body'),
+    },
+    {
+      section: 'members',
+      icon: Users,
+      title: t('settings.areas.members.title'),
+      body: t('settings.areas.members.body'),
     },
   ] satisfies Array<{
     body: string

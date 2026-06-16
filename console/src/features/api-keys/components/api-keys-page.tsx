@@ -24,9 +24,12 @@ import {
   RevokeKeyDialog,
   SecretKeyDialog,
 } from '@/features/api-keys/components/dialogs'
+import { usePermissions } from '@/features/session/hooks/use-permissions'
 
 export function ApiKeysPage() {
   const { t } = useTranslation()
+  const { can } = usePermissions()
+  const canEdit = can('settings:api_keys:edit')
   const list = useQuery(apiKeysQuery())
   const create = useCreateApiKey()
   const revoke = useRevokeApiKey()
@@ -63,7 +66,9 @@ export function ApiKeysPage() {
           <h1 className="text-2xl font-semibold tracking-tight">{t('nav.api_keys')}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t('api_keys.subtitle')}</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>{t('api_keys.create_button')}</Button>
+        {canEdit && (
+          <Button onClick={() => setCreateOpen(true)}>{t('api_keys.create_button')}</Button>
+        )}
       </div>
 
       <Card className="mt-6">
@@ -80,7 +85,7 @@ export function ApiKeysPage() {
           ) : list.data && list.data.length > 0 ? (
             <KeyTable
               keys={list.data}
-              onRevoke={(k) => setRevokeTarget(k)}
+              onRevoke={canEdit ? (k) => setRevokeTarget(k) : undefined}
               revokingId={revoke.isPending ? revokeTarget?.id : undefined}
             />
           ) : (
@@ -88,10 +93,14 @@ export function ApiKeysPage() {
               icon={Key}
               title={t('api_keys.empty_title')}
               description={t('api_keys.empty_body')}
-              action={{
-                label: t('api_keys.create_button'),
-                onClick: () => setCreateOpen(true),
-              }}
+              action={
+                canEdit
+                  ? {
+                      label: t('api_keys.create_button'),
+                      onClick: () => setCreateOpen(true),
+                    }
+                  : undefined
+              }
             />
           )}
         </CardContent>
@@ -120,7 +129,7 @@ function KeyTable({
   revokingId,
 }: {
   keys: ApiKey[]
-  onRevoke: (k: ApiKey) => void
+  onRevoke?: (k: ApiKey) => void
   revokingId: string | undefined
 }) {
   const { t } = useTranslation()
@@ -157,7 +166,7 @@ function KeyTable({
               )}
             </TableCell>
             <TableCell className="text-right">
-              {k.isActive ? (
+              {k.isActive && onRevoke ? (
                 <Button
                   variant="ghost"
                   size="sm"

@@ -1540,6 +1540,104 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/members:
+        get:
+            tags:
+                - MemberService
+            description: GET /fb/v1/console/members — list all tenant members.
+            operationId: MemberService_ListMembers
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListMembersResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - MemberService
+            description: POST /fb/v1/console/members — invite a new member.
+            operationId: MemberService_InviteMember
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/InviteMemberRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/InviteMemberResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/members/{id}:
+        delete:
+            tags:
+                - MemberService
+            description: DELETE /fb/v1/console/members/{id} — remove from tenant.
+            operationId: MemberService_RemoveMember
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RemoveMemberResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        patch:
+            tags:
+                - MemberService
+            description: PATCH /fb/v1/console/members/{id} — change role.
+            operationId: MemberService_UpdateMemberRole
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateMemberRoleRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateMemberRoleResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/notify-targets:
         get:
             tags:
@@ -3038,6 +3136,21 @@ components:
                     type: string
                     description: Enrichment lifecycle state at ingest time (always "pending" here).
             description: IngestResponse is returned on 200.
+        InviteMemberRequest:
+            required:
+                - email
+                - role
+            type: object
+            properties:
+                email:
+                    type: string
+                role:
+                    type: string
+        InviteMemberResponse:
+            type: object
+            properties:
+                member:
+                    $ref: '#/components/schemas/Member'
         JobStatusResponse:
             type: object
             properties:
@@ -3289,6 +3402,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/LLMRoute'
+        ListMembersResponse:
+            type: object
+            properties:
+                members:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Member'
         ListNotifyTargetsResponse:
             type: object
             properties:
@@ -3340,6 +3460,26 @@ components:
         LogoutResponse:
             type: object
             properties: {}
+        Member:
+            type: object
+            properties:
+                id:
+                    type: string
+                memberType:
+                    type: string
+                userId:
+                    type: string
+                email:
+                    type: string
+                role:
+                    type: string
+                roleSource:
+                    type: string
+                invitedAt:
+                    type: string
+                acceptedAt:
+                    type: string
+            description: Member represents a user's membership in a tenant.
         NotifyTarget:
             type: object
             properties:
@@ -3401,6 +3541,9 @@ components:
                 replyDraftGeneratedAt:
                     type: string
         RemoveFeedbackTagResponse:
+            type: object
+            properties: {}
+        RemoveMemberResponse:
             type: object
             properties: {}
         RendererSpec:
@@ -3784,6 +3927,19 @@ components:
                 timeoutSeconds:
                     type: integer
                     format: int32
+        UpdateMemberRoleRequest:
+            required:
+                - id
+                - role
+            type: object
+            properties:
+                id:
+                    type: string
+                role:
+                    type: string
+        UpdateMemberRoleResponse:
+            type: object
+            properties: {}
         UpdateNotifyTargetRequest:
             type: object
             properties:
@@ -4014,6 +4170,8 @@ tags:
       description: JobService provides status tracking for async batch operations (#30).
     - name: LLMConfigService
       description: LLMConfigService manages DB-backed provider channels and routes.
+    - name: MemberService
+      description: MemberService manages tenant membership for RBAC (#38).
     - name: NotifyTargetService
       description: NotifyTargetService manages a tenant's outbound notification destinations.
     - name: SearchService

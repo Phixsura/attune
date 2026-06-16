@@ -19,11 +19,13 @@ export function I18nInput({
   onChange,
   inline = false,
   placeholder,
+  disabled = false,
 }: {
   value: I18nString
   onChange: (next: I18nString) => void
   inline?: boolean
   placeholder?: string
+  disabled?: boolean
 }) {
   const { t } = useTranslation()
   const [extraLocale, setExtraLocale] = useState('')
@@ -61,8 +63,9 @@ export function I18nInput({
             placeholder={placeholder}
             onChange={(e) => setEntry(locale, e.target.value)}
             className="h-8 text-sm"
+            disabled={disabled}
           />
-          {locale !== 'default' && (
+          {locale !== 'default' && !disabled && (
             <Button
               type="button"
               variant="ghost"
@@ -76,30 +79,32 @@ export function I18nInput({
           )}
         </div>
       ))}
-      <div className="flex items-center gap-2">
-        <Input
-          value={extraLocale}
-          placeholder={t('dim.i18n.add_locale_placeholder')}
-          onChange={(e) => setExtraLocale(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              addLocale()
-            }
-          }}
-          className="h-8 max-w-[160px] text-xs font-mono"
-        />
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={addLocale}
-          data-testid="i18n-input-add-locale"
-        >
-          <Plus className="h-3 w-3 mr-1" />
-          {t('dim.i18n.add_locale')}
-        </Button>
-      </div>
+      {!disabled && (
+        <div className="flex items-center gap-2">
+          <Input
+            value={extraLocale}
+            placeholder={t('dim.i18n.add_locale_placeholder')}
+            onChange={(e) => setExtraLocale(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                addLocale()
+              }
+            }}
+            className="h-8 max-w-[160px] text-xs font-mono"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={addLocale}
+            data-testid="i18n-input-add-locale"
+          >
+            <Plus className="h-3 w-3 mr-1" />
+            {t('dim.i18n.add_locale')}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

@@ -33,10 +33,10 @@ export function ChannelTable({
   selectedId: string
   testingId?: string
   onSelect: (channel: LLMChannel) => void
-  onEdit: (channel: LLMChannel) => void
-  onAbilities: (channel: LLMChannel) => void
-  onTest: (channel: LLMChannel) => void
-  onDelete: (channel: LLMChannel) => void
+  onEdit?: (channel: LLMChannel) => void
+  onAbilities?: (channel: LLMChannel) => void
+  onTest?: (channel: LLMChannel) => void
+  onDelete?: (channel: LLMChannel) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -103,39 +103,47 @@ export function ChannelTable({
               )}
             </TableCell>
             <TableCell className="text-right" onClick={(event) => event.stopPropagation()}>
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t('llm_config.actions.test')}
-                onClick={() => onTest(channel)}
-                disabled={testingId === channel.id}
-              >
-                <Zap className="size-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t('llm_config.actions.abilities')}
-                onClick={() => onAbilities(channel)}
-              >
-                <SlidersHorizontal className="size-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t('common.edit')}
-                onClick={() => onEdit(channel)}
-              >
-                <Pencil className="size-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t('common.delete')}
-                onClick={() => onDelete(channel)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
+              {onTest && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('llm_config.actions.test')}
+                  onClick={() => onTest(channel)}
+                  disabled={testingId === channel.id}
+                >
+                  <Zap className="size-3.5" />
+                </Button>
+              )}
+              {onAbilities && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('llm_config.actions.abilities')}
+                  onClick={() => onAbilities(channel)}
+                >
+                  <SlidersHorizontal className="size-3.5" />
+                </Button>
+              )}
+              {onEdit && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('common.edit')}
+                  onClick={() => onEdit(channel)}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+              )}
+              {onDelete && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('common.delete')}
+                  onClick={() => onDelete(channel)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              )}
             </TableCell>
           </TableRow>
         ))}
@@ -150,8 +158,8 @@ export function AbilityTable({
   onDelete,
 }: {
   abilities: LLMChannelAbility[]
-  onEdit: (ability: LLMChannelAbility) => void
-  onDelete: (ability: LLMChannelAbility) => void
+  onEdit?: (ability: LLMChannelAbility) => void
+  onDelete?: (ability: LLMChannelAbility) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -177,22 +185,26 @@ export function AbilityTable({
               <StatusText value={ability.enabled ? 'enabled' : 'disabled'} />
             </TableCell>
             <TableCell className="text-right">
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t('common.edit')}
-                onClick={() => onEdit(ability)}
-              >
-                <Pencil className="size-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t('common.delete')}
-                onClick={() => onDelete(ability)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
+              {onEdit && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('common.edit')}
+                  onClick={() => onEdit(ability)}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+              )}
+              {onDelete && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('common.delete')}
+                  onClick={() => onDelete(ability)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              )}
             </TableCell>
           </TableRow>
         ))}
@@ -207,8 +219,8 @@ export function RouteTable({
   onDelete,
 }: {
   routes: LLMRoute[]
-  onEdit: (route: LLMRoute) => void
-  onDelete: (route: LLMRoute) => void
+  onEdit?: (route: LLMRoute) => void
+  onDelete?: (route: LLMRoute) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -234,22 +246,26 @@ export function RouteTable({
               <StatusText value={route.enabled ? 'enabled' : 'disabled'} />
             </TableCell>
             <TableCell className="text-right">
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t('common.edit')}
-                onClick={() => onEdit(route)}
-              >
-                <Pencil className="size-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t('common.delete')}
-                onClick={() => onDelete(route)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
+              {onEdit && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('common.edit')}
+                  onClick={() => onEdit(route)}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+              )}
+              {onDelete && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('common.delete')}
+                  onClick={() => onDelete(route)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              )}
             </TableCell>
           </TableRow>
         ))}

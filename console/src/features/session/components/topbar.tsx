@@ -12,7 +12,21 @@ import {
 } from '@/components/ui/dropdown-menu'
 import type { SessionMe } from '@/features/session/api/get-me'
 import { useLogout } from '@/features/session/api/logout'
+import { RoleBadge } from '@/features/session/components/auth/role-badge'
+import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { consolePath } from '@/lib/console-path'
+
+function NavLink({ to, children }: { to: string; children: React.ReactNode }) {
+  return (
+    <Link
+      to={to}
+      className="text-muted-foreground transition-colors hover:text-foreground"
+      activeProps={{ className: 'text-foreground' }}
+    >
+      {children}
+    </Link>
+  )
+}
 
 interface TopBarProps {
   me: SessionMe
@@ -25,7 +39,7 @@ export function TopBar({ me }: TopBarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const logout = useLogout()
-  const isAdmin = me.user?.role === 'admin'
+  const { can, isAdmin, role } = usePermissions()
 
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
@@ -38,10 +52,11 @@ export function TopBar({ me }: TopBarProps) {
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
           <NavLink to="/usage">{t('nav.usage')}</NavLink>
           <NavLink to="/llm-usage">{t('nav.llm_usage')}</NavLink>
-          <NavLink to="/llm-config">{t('nav.llm_config')}</NavLink>
-          <NavLink to="/settings">{t('nav.settings')}</NavLink>
+          {can('nav:llm_config') && <NavLink to="/llm-config">{t('nav.llm_config')}</NavLink>}
+          {can('nav:settings') && <NavLink to="/settings">{t('nav.settings')}</NavLink>}
         </nav>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
+          <RoleBadge role={role} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="gap-2">
@@ -50,19 +65,18 @@ export function TopBar({ me }: TopBarProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                {t(isAdmin ? 'auth.role.admin' : 'auth.role.member')}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
               {isAdmin && (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    void navigate({ to: '/change-password' })
-                  }}
-                >
-                  <KeyRound className="size-4" />
-                  {t('auth.change_password.menu')}
-                </DropdownMenuItem>
+                <>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      void navigate({ to: '/change-password' })
+                    }}
+                  >
+                    <KeyRound className="size-4" />
+                    {t('auth.change_password.menu')}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
               )}
               <DropdownMenuItem
                 onSelect={() => {
@@ -82,22 +96,5 @@ export function TopBar({ me }: TopBarProps) {
         </div>
       </div>
     </header>
-  )
-}
-
-interface NavLinkProps {
-  to: string
-  children: React.ReactNode
-}
-
-function NavLink({ to, children }: NavLinkProps) {
-  return (
-    <Link
-      to={to}
-      className="text-muted-foreground transition-colors hover:text-foreground"
-      activeProps={{ className: 'text-foreground' }}
-    >
-      {children}
-    </Link>
   )
 }

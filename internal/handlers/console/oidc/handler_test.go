@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Phixsura/attune/internal/pkg/crypto"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -150,6 +151,7 @@ func TestIsValidReturnURL(t *testing.T) {
 		{"no leading slash", "console/feedback", false},
 		{"javascript protocol", "javascript:alert(1)", false},
 		{"data protocol", "data:text/html,<script>", false},
+		{"unparseable url (control char)", "/foo\x7fbar", false},
 	}
 
 	for _, tt := range tests {
@@ -157,4 +159,58 @@ func TestIsValidReturnURL(t *testing.T) {
 			assert.Equal(t, tt.want, h.isValidReturnURL(tt.url))
 		})
 	}
+}
+
+func TestRedirectError(t *testing.T) {
+	t.Parallel()
+
+	h := ptrext.Of(Handler{})
+	req := httptest.NewRequest(http.MethodGet, "/callback", nil)
+	req.Header.Set("X-Request-Id", "req-123")
+	rec := httptest.NewRecorder()
+
+	h.redirectError(rec, req, "bad_state")
+
+	assert.Equal(t, http.StatusFound, rec.Code)
+	loc := rec.Header().Get("Location")
+	assert.Contains(t, loc, "/console/login/error")
+	assert.Contains(t, loc, "code=bad_state")
+	assert.Contains(t, loc, "request_id=req-123")
+}
+
+func TestRedirectError_IncludesTraceID(t *testing.T) {
+	t.Parallel()
+
+	tid, err := trace.TraceIDFromHex("0123456789abcdef0123456789abcdef")
+	require.NoError(t, err)
+	sid, err := trace.SpanIDFromHex("0123456789abcdef")
+	require.NoError(t, err)
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    tid,
+		SpanID:     sid,
+		TraceFlags: trace.FlagsSampled,
+	})
+
+	h := ptrext.Of(Handler{})
+	req := httptest.NewRequest(http.MethodGet, "/callback", nil)
+	req = req.WithContext(trace.ContextWithSpanContext(req.Context(), sc))
+	rec := httptest.NewRecorder()
+
+	h.redirectError(rec, req, "bad_state")
+
+	assert.Contains(t, rec.Header().Get("Location"), "trace_id=0123456789abcdef0123456789abcdef")
+}
+
+func TestResponseWriterAdapter_SetCookie(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	adapter := responseWriterAdapter{w: rec}
+
+	adapter.SetCookie(ptrext.Of(http.Cookie{Name: "x", Value: "y"}))
+
+	cookies := rec.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, "x", cookies[0].Name)
+	assert.Equal(t, "y", cookies[0].Value)
 }

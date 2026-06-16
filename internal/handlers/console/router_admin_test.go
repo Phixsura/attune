@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/rbac"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
@@ -55,4 +57,84 @@ func (r roleAdminReader) GetByID(context.Context, string) (admin.Admin, error) {
 		return admin.Admin{}, r.err
 	}
 	return r.row, nil
+}
+
+// fakeRoleStore satisfies the rbac middleware's roleStore dependency so the
+// router's RBAC-backed branch (r.rbac != nil) can be exercised.
+type fakeRoleStore struct{ role domain.Role }
+
+func (f fakeRoleStore) GetRole(context.Context, string, string, string) (domain.Role, error) {
+	return f.role, nil
+}
+
+func rbacRouter(role domain.Role) *Router {
+	return ptrext.Of(Router{rbac: rbac.NewMiddleware(fakeRoleStore{role: role})})
+}
+
+func authedReq() *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/llm/channels", nil)
+	return req.WithContext(session.WithAuthCtx(req.Context(),
+		ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserType: "oidc_user", UserID: "user-1"})))
+}
+
+func TestRequireAdmin_RBACBranchAllowsAdmin(t *testing.T) {
+	t.Parallel()
+	called := false
+	w := httptest.NewRecorder()
+	rbacRouter(domain.RoleAdmin).requireAdmin(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	})).ServeHTTP(w, authedReq())
+
+	require.True(t, called)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequireAdmin_RBACBranchDeniesViewer(t *testing.T) {
+	t.Parallel()
+	called := false
+	w := httptest.NewRecorder()
+	rbacRouter(domain.RoleViewer).requireAdmin(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	})).ServeHTTP(w, authedReq())
+
+	require.False(t, called)
+	require.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestRequireAdminStrict_RBACBranchDeniesViewer(t *testing.T) {
+	t.Parallel()
+	called := false
+	w := httptest.NewRecorder()
+	rbacRouter(domain.RoleViewer).requireAdminStrict(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	})).ServeHTTP(w, authedReq())
+
+	require.False(t, called)
+	require.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestRequireViewer_RBACBranchAllowsViewer(t *testing.T) {
+	t.Parallel()
+	called := false
+	w := httptest.NewRecorder()
+	rbacRouter(domain.RoleViewer).requireViewer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	})).ServeHTTP(w, authedReq())
+
+	require.True(t, called)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequireViewer_LegacyFallbackPassesThrough(t *testing.T) {
+	t.Parallel()
+	// No rbac and no admins repo: viewer is the baseline, so the legacy
+	// fallback simply forwards to the next handler.
+	called := false
+	w := httptest.NewRecorder()
+	ptrext.Of(Router{}).requireViewer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	})).ServeHTTP(w, authedReq())
+
+	require.True(t, called)
+	require.Equal(t, http.StatusOK, w.Code)
 }

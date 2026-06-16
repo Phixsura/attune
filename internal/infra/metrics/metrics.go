@@ -501,6 +501,15 @@ var OIDCRoleMappingTotal = prometheus.NewCounterVec(
 	[]string{"role"},
 )
 
+// AuthzDeniedTotal counts authorization denials by user role and required role.
+var AuthzDeniedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_authz_denied_total",
+		Help: "Authorization denials by user role and required role.",
+	},
+	[]string{"role", "required"},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -563,6 +572,7 @@ var allMetrics = []prometheus.Collector{
 	OIDCLoginDuration,
 	OIDCTokenExchangeDuration,
 	OIDCRoleMappingTotal,
+	AuthzDeniedTotal,
 }
 
 func init() {

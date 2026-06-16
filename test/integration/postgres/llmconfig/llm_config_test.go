@@ -377,7 +377,9 @@ func newConsoleRouter(
 		nil, // tagAssignments
 		nil, // workflow
 		nil, // oidc
+		nil, // member
 		fakeAdminReader{},
+		nil, // tenantmemberRepo
 	)
 	return router.Mount(), signer
 }

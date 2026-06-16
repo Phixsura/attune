@@ -29,9 +29,11 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
 	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
+	"github.com/Phixsura/attune/internal/handlers/console/internal/rbac"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	consolellmconfig "github.com/Phixsura/attune/internal/handlers/console/llmconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
+	"github.com/Phixsura/attune/internal/handlers/console/member"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
@@ -42,6 +44,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	"github.com/Phixsura/attune/internal/repo/tenantmember"
 )
 
 // Re-exports so cmd/attune can keep a single `console.X` surface even
@@ -76,6 +79,7 @@ var (
 	NewTagAssignmentHandler      = consoletagassignment.NewHandler
 	NewWorkflowHandler           = consoleworkflow.NewHandler
 	NewOIDCHandler               = consoleoidc.NewHandler
+	NewMemberHandler             = member.NewHandler
 	BootstrapAdmin               = auth.BootstrapAdmin
 )
 
@@ -147,7 +151,9 @@ type Router struct {
 	tagAssignments     *consoletagassignment.Handler
 	workflow           *consoleworkflow.Handler
 	oidc               *consoleoidc.Handler
+	members            *member.Handler
 	admins             adminReader
+	rbac               *rbac.Middleware
 }
 
 type adminReader interface {
@@ -176,8 +182,14 @@ func NewRouter(
 	tagAssignments *consoletagassignment.Handler,
 	workflow *consoleworkflow.Handler,
 	oidc *consoleoidc.Handler,
+	membersHandler *member.Handler,
 	admins adminReader,
+	membersRepo *tenantmember.Repo,
 ) *Router {
+	var rbacMW *rbac.Middleware
+	if membersRepo != nil {
+		rbacMW = rbac.NewMiddleware(membersRepo)
+	}
 	return ptrext.Of(Router{
 		signer:             signer,
 		login:              authH,
@@ -200,7 +212,9 @@ func NewRouter(
 		tagAssignments:     tagAssignments,
 		workflow:           workflow,
 		oidc:               oidc,
+		members:            membersHandler,
 		admins:             admins,
+		rbac:               rbacMW,
 	})
 }
 
@@ -273,25 +287,28 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountNotifyTargets(m)
 	r.mountDigestSubscription(m)
 	r.mountFeedback(m)
-	m.Get("/usage", dispatcher.Bind(
-		"console.UsageHandler.Get",
-		dispatcher.Empty(func() *attunev1.GetUsageRequest { return ptrext.Of(attunev1.GetUsageRequest{}) }),
-		r.usage.Get,
-		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetUsageRequest) (*session.AuthCtx, error) {
-			return session.FromContext(r.Context()), nil
-		}),
-	))
-	m.Get("/llm-usage", dispatcher.Bind(
-		"console.UsageHandler.GetLLMUsage",
-		dispatcher.Query(
-			func() *attunev1.GetLLMUsageRequest { return ptrext.Of(attunev1.GetLLMUsageRequest{}) },
-			usage.BindLLMUsageRequest,
-		),
-		r.usage.GetLLMUsage,
-		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetLLMUsageRequest) (*session.AuthCtx, error) {
-			return session.FromContext(r.Context()), nil
-		}),
-	))
+	m.Group(func(u chi.Router) {
+		u.Use(r.requireViewer) // Usage stats visible to all roles
+		u.Get("/usage", dispatcher.Bind(
+			"console.UsageHandler.Get",
+			dispatcher.Empty(func() *attunev1.GetUsageRequest { return ptrext.Of(attunev1.GetUsageRequest{}) }),
+			r.usage.Get,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetUsageRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		u.Get("/llm-usage", dispatcher.Bind(
+			"console.UsageHandler.GetLLMUsage",
+			dispatcher.Query(
+				func() *attunev1.GetLLMUsageRequest { return ptrext.Of(attunev1.GetLLMUsageRequest{}) },
+				usage.BindLLMUsageRequest,
+			),
+			r.usage.GetLLMUsage,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetLLMUsageRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
 	r.mountEnrichConfig(m)
 	r.mountGuardPolicies(m)
 	r.mountInbound(m)
@@ -300,6 +317,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountClusters(m)
 	r.mountTags(m)
 	r.mountWorkflow(m)
+	r.mountMembers(m)
 }
 
 func (r *Router) mountLLMConfig(m chi.Router) {
@@ -307,7 +325,7 @@ func (r *Router) mountLLMConfig(m chi.Router) {
 		return
 	}
 	m.Route("/llm", func(l chi.Router) {
-		l.Use(r.requireAdmin)
+		l.Use(r.requireAdminStrict) // Bypass cache for sensitive LLM config
 		l.Get("/channels", dispatcher.Bind(
 			"console.llmconfig.ListChannels",
 			dispatcher.Empty(func() *attunev1.ListLLMChannelsRequest { return ptrext.Of(attunev1.ListLLMChannelsRequest{}) }),
@@ -391,7 +409,32 @@ func (r *Router) mountLLMConfig(m chi.Router) {
 }
 
 func (r *Router) requireAdmin(next http.Handler) http.Handler {
-	const where = "console.Router.requireAdmin"
+	// Use RBAC middleware if available (tenant_members table exists)
+	if r.rbac != nil {
+		return r.rbac.RequireAdmin()(next)
+	}
+	// Fallback to legacy admin table check
+	return r.requireAdminLegacy(next)
+}
+
+func (r *Router) requireAdminStrict(next http.Handler) http.Handler {
+	// Use RBAC strict middleware if available (bypasses cache)
+	if r.rbac != nil {
+		return r.rbac.RequireAdminStrict()(next)
+	}
+	return r.requireAdminLegacy(next)
+}
+
+func (r *Router) requireViewer(next http.Handler) http.Handler {
+	if r.rbac != nil {
+		return r.rbac.RequireViewer()(next)
+	}
+	// Legacy fallback: all authenticated users pass (viewer is baseline)
+	return next
+}
+
+func (r *Router) requireAdminLegacy(next http.Handler) http.Handler {
+	const where = "console.Router.requireAdminLegacy"
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		authCtx := session.FromContext(req.Context())
 		if r.admins == nil {
@@ -500,6 +543,7 @@ func (r *Router) mountLLMRoutes(l chi.Router) {
 
 func (r *Router) mountAPIKeys(m chi.Router) {
 	m.Route("/api-keys", func(k chi.Router) {
+		k.Use(r.requireAdminStrict) // API keys are admin-only
 		k.Get("/", dispatcher.Bind(
 			"console.APIKeysHandler.List",
 			dispatcher.Empty(func() *attunev1.ListApiKeysRequest { return ptrext.Of(attunev1.ListApiKeysRequest{}) }),
@@ -534,6 +578,7 @@ func (r *Router) mountAPIKeys(m chi.Router) {
 
 func (r *Router) mountNotifyTargets(m chi.Router) {
 	m.Route("/notify-targets", func(n chi.Router) {
+		n.Use(r.requireAdmin) // Notify targets are admin-only
 		n.Get("/", dispatcher.Bind(
 			"console.NotifyTargetsHandler.List",
 			dispatcher.Empty(func() *attunev1.ListNotifyTargetsRequest { return ptrext.Of(attunev1.ListNotifyTargetsRequest{}) }),
@@ -597,40 +642,44 @@ func (r *Router) mountNotifyTargets(m chi.Router) {
 // a singleton resource (one subscription per tenant), so get / upsert / delete
 // with no id path param.
 func (r *Router) mountDigestSubscription(m chi.Router) {
-	m.Get("/digest-subscription", dispatcher.Bind(
-		"console.DigestSubscriptionHandler.Get",
-		dispatcher.Empty(func() *attunev1.GetDigestSubscriptionRequest {
-			return ptrext.Of(attunev1.GetDigestSubscriptionRequest{})
-		}),
-		r.digestSubscription.Get,
-		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetDigestSubscriptionRequest) (*session.AuthCtx, error) {
-			return session.FromContext(r.Context()), nil
-		}),
-	))
-	m.Put("/digest-subscription", dispatcher.Bind(
-		"console.DigestSubscriptionHandler.Upsert",
-		dispatcher.JSON(func() *attunev1.UpsertDigestSubscriptionRequest {
-			return ptrext.Of(attunev1.UpsertDigestSubscriptionRequest{})
-		}),
-		r.digestSubscription.Upsert,
-		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpsertDigestSubscriptionRequest) (*session.AuthCtx, error) {
-			return session.FromContext(r.Context()), nil
-		}),
-	))
-	m.Delete("/digest-subscription", dispatcher.Bind(
-		"console.DigestSubscriptionHandler.Delete",
-		dispatcher.Empty(func() *attunev1.DeleteDigestSubscriptionRequest {
-			return ptrext.Of(attunev1.DeleteDigestSubscriptionRequest{})
-		}),
-		r.digestSubscription.Delete,
-		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteDigestSubscriptionRequest) (*session.AuthCtx, error) {
-			return session.FromContext(r.Context()), nil
-		}),
-	))
+	m.Group(func(d chi.Router) {
+		d.Use(r.requireAdmin) // Digest subscription is admin-only
+		d.Get("/digest-subscription", dispatcher.Bind(
+			"console.DigestSubscriptionHandler.Get",
+			dispatcher.Empty(func() *attunev1.GetDigestSubscriptionRequest {
+				return ptrext.Of(attunev1.GetDigestSubscriptionRequest{})
+			}),
+			r.digestSubscription.Get,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetDigestSubscriptionRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		d.Put("/digest-subscription", dispatcher.Bind(
+			"console.DigestSubscriptionHandler.Upsert",
+			dispatcher.JSON(func() *attunev1.UpsertDigestSubscriptionRequest {
+				return ptrext.Of(attunev1.UpsertDigestSubscriptionRequest{})
+			}),
+			r.digestSubscription.Upsert,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpsertDigestSubscriptionRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		d.Delete("/digest-subscription", dispatcher.Bind(
+			"console.DigestSubscriptionHandler.Delete",
+			dispatcher.Empty(func() *attunev1.DeleteDigestSubscriptionRequest {
+				return ptrext.Of(attunev1.DeleteDigestSubscriptionRequest{})
+			}),
+			r.digestSubscription.Delete,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteDigestSubscriptionRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
 }
 
 func (r *Router) mountFeedback(m chi.Router) {
 	m.Route("/feedback", func(f chi.Router) {
+		f.Use(r.requireViewer) // Feedback visible to all roles; write ops check policy in handlers
 		f.Get("/", dispatcher.Bind(
 			"console.FeedbackHandler.List",
 			dispatcher.Query(func() *attunev1.ListFeedbackRequest { return ptrext.Of(attunev1.ListFeedbackRequest{}) }, feedback.BindListRequest),
@@ -806,6 +855,7 @@ func (r *Router) mountFeedbackBatchRoutes(f chi.Router) {
 
 func (r *Router) mountEnrichConfig(m chi.Router) {
 	m.Route("/enrich-config", func(e chi.Router) {
+		e.Use(r.requireAdmin) // AI classification config is admin-only
 		e.Get("/", dispatcher.Bind(
 			"console.EnrichConfigHandler.Get",
 			dispatcher.Empty(func() *attunev1.GetEnrichConfigRequest { return ptrext.Of(attunev1.GetEnrichConfigRequest{}) }),
@@ -835,6 +885,7 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 
 func (r *Router) mountGuardPolicies(m chi.Router) {
 	m.Route("/guard-policies", func(g chi.Router) {
+		g.Use(r.requireAdmin) // Guard policies are admin-only
 		g.Get("/", dispatcher.Bind(
 			"console.GuardPolicyHandler.List",
 			dispatcher.Empty(func() *attunev1.ListGuardPoliciesRequest {
@@ -914,6 +965,7 @@ func (r *Router) mountInbound(m chi.Router) {
 		return
 	}
 	m.Route("/inbound/sources", func(s chi.Router) {
+		s.Use(r.requireAdmin) // Inbound sources are admin-only
 		s.Get("/", dispatcher.Bind(
 			"console.inbound.List",
 			dispatcher.Empty(func() *attunev1.ListInboundSourcesRequest { return ptrext.Of(attunev1.ListInboundSourcesRequest{}) }),
@@ -1005,6 +1057,7 @@ func (r *Router) mountClusters(m chi.Router) {
 		return
 	}
 	m.Route("/clusters", func(c chi.Router) {
+		c.Use(r.requireViewer) // Clusters are read-only, visible to all roles
 		c.Get("/", dispatcher.Bind(
 			"console.ClustersHandler.List",
 			dispatcher.Query(
@@ -1038,6 +1091,7 @@ func (r *Router) mountTags(m chi.Router) {
 		return
 	}
 	m.Route("/tags", func(t chi.Router) {
+		t.Use(r.requireAdmin) // Tags config is admin-only
 		t.Get("/", dispatcher.Bind(
 			"console.TagHandler.List",
 			dispatcher.Query(
@@ -1097,6 +1151,7 @@ func (r *Router) mountJobs(m chi.Router) {
 		return
 	}
 	m.Route("/jobs", func(j chi.Router) {
+		j.Use(r.requireAdmin) // Jobs are admin-only
 		j.Get("/", dispatcher.Bind(
 			"console.feedbackjob.Handler.List",
 			dispatcher.Query(
@@ -1217,6 +1272,67 @@ func (r *Router) mountWorkflow(m chi.Router) {
 			}),
 			r.workflow.SeedDefaults,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SeedDefaultsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+}
+
+func (r *Router) mountMembers(m chi.Router) {
+	if r.members == nil {
+		return
+	}
+	m.Route("/members", func(mb chi.Router) {
+		// GET is viewer+ (all authenticated users can see member list)
+		mb.With(r.requireViewer).Get("/", dispatcher.Bind(
+			"console.MemberHandler.List",
+			dispatcher.Empty(func() *attunev1.ListMembersRequest {
+				return ptrext.Of(attunev1.ListMembersRequest{})
+			}),
+			r.members.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListMembersRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		// Mutations require admin (strict = bypass cache)
+		mb.With(r.requireAdminStrict).Post("/", dispatcher.Bind(
+			"console.MemberHandler.Invite",
+			dispatcher.JSON(func() *attunev1.InviteMemberRequest {
+				return ptrext.Of(attunev1.InviteMemberRequest{})
+			}),
+			r.members.Invite,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.InviteMemberRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		mb.With(r.requireAdminStrict).Patch("/{id}", dispatcher.Bind(
+			"console.MemberHandler.UpdateRole",
+			dispatcher.Combine(
+				func() *attunev1.UpdateMemberRoleRequest {
+					return ptrext.Of(attunev1.UpdateMemberRoleRequest{})
+				},
+				dispatcher.JSONBody[*attunev1.UpdateMemberRoleRequest],
+				dispatcher.Param("id", func(req *attunev1.UpdateMemberRoleRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.members.UpdateRole,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateMemberRoleRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		mb.With(r.requireAdminStrict).Delete("/{id}", dispatcher.Bind(
+			"console.MemberHandler.Remove",
+			dispatcher.Path(
+				func() *attunev1.RemoveMemberRequest {
+					return ptrext.Of(attunev1.RemoveMemberRequest{})
+				},
+				dispatcher.Param("id", func(req *attunev1.RemoveMemberRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.members.Remove,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RemoveMemberRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))

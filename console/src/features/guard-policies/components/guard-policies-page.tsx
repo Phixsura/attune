@@ -31,6 +31,7 @@ import {
   usePatchGuardPolicy,
   useResolveGuardPolicy,
 } from '@/features/guard-policies/api/guard-policies'
+import { usePermissions } from '@/features/session/hooks/use-permissions'
 
 const CHANNELS = ['all', 'api', 'webhook', 'email'] as const
 const PURPOSES = ['enrich', 'digest', 'reply_draft', 'eval', 'outbound'] as const
@@ -57,6 +58,8 @@ type GuardPolicyFormState = {
 
 export function GuardPoliciesPage() {
   const { t } = useTranslation()
+  const { can } = usePermissions()
+  const canEdit = can('settings:guard_policies:edit')
   const list = useQuery(guardPoliciesQuery())
   const resolve = useResolveGuardPolicy()
   const create = useCreateGuardPolicy()
@@ -136,10 +139,12 @@ export function GuardPoliciesPage() {
             <RotateCcw className="h-4 w-4" />
             {t('guard_policies.refresh')}
           </Button>
-          <Button type="button" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" />
-            {t('guard_policies.create')}
-          </Button>
+          {canEdit && (
+            <Button type="button" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" />
+              {t('guard_policies.create')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -221,8 +226,8 @@ export function GuardPoliciesPage() {
           ) : (
             <PolicyList
               policies={policies}
-              onEdit={setEditing}
-              onDelete={setDeleting}
+              onEdit={canEdit ? setEditing : undefined}
+              onDelete={canEdit ? setDeleting : undefined}
               writePending={writePending}
             />
           )}
@@ -262,8 +267,8 @@ function PolicyList({
   writePending,
 }: {
   policies: GuardPolicy[]
-  onEdit: (policy: GuardPolicy) => void
-  onDelete: (policy: GuardPolicy) => void
+  onEdit?: (policy: GuardPolicy) => void
+  onDelete?: (policy: GuardPolicy) => void
   writePending: boolean
 }) {
   const { t } = useTranslation()
@@ -298,32 +303,42 @@ function PolicyList({
                   {t('guard_policies.priority_value', { value: policy.priority })}
                 </div>
               </div>
-              <div className="flex shrink-0 gap-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  disabled={!tenantPolicy || writePending}
-                  title={
-                    tenantPolicy ? t('guard_policies.edit') : t('guard_policies.system_readonly')
-                  }
-                  onClick={() => onEdit(policy)}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={!tenantPolicy || writePending}
-                  title={
-                    tenantPolicy ? t('guard_policies.delete') : t('guard_policies.system_readonly')
-                  }
-                  onClick={() => onDelete(policy)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
+              {(onEdit || onDelete) && (
+                <div className="flex shrink-0 gap-1">
+                  {onEdit && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      disabled={!tenantPolicy || writePending}
+                      title={
+                        tenantPolicy
+                          ? t('guard_policies.edit')
+                          : t('guard_policies.system_readonly')
+                      }
+                      onClick={() => onEdit(policy)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  )}
+                  {onDelete && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={!tenantPolicy || writePending}
+                      title={
+                        tenantPolicy
+                          ? t('guard_policies.delete')
+                          : t('guard_policies.system_readonly')
+                      }
+                      onClick={() => onDelete(policy)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
             <div className="mt-3 grid gap-3 text-xs md:grid-cols-[1fr_2fr]">
               <pre className="min-h-16 whitespace-pre-wrap rounded-md bg-muted/40 p-3 font-sans text-muted-foreground">

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/inbound/inboundtest"
+	"github.com/Phixsura/attune/internal/repo/admin"
 	"github.com/Phixsura/attune/internal/repo/inboundsource"
 	"github.com/Phixsura/attune/internal/testdb"
 )
@@ -85,8 +86,16 @@ func newConsoleRouter(t *testing.T, pool *pgxpool.Pool) (http.Handler, *console.
 		nil, // tagAssignments
 		nil, // workflow
 		nil, // oidc
-		nil, // admins
+		nil, // member
+		fakeAdminReader{},
+		nil, // tenantmemberRepo
 	).Mount(), signer
+}
+
+type fakeAdminReader struct{}
+
+func (fakeAdminReader) GetByID(context.Context, string) (admin.Admin, error) {
+	return admin.Admin{ID: "user-1", Role: "admin"}, nil
 }
 
 func authedRequest(t *testing.T, signer *console.Signer, method, urlStr string) *http.Request {
