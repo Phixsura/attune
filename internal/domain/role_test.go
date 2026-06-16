@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package domain
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func TestRole_AtLeast(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     Role
+		required Role
+		expected bool
+	}{
+		{"admin >= admin", RoleAdmin, RoleAdmin, true},
+		{"admin >= member", RoleAdmin, RoleMember, true},
+		{"admin >= viewer", RoleAdmin, RoleViewer, true},
+		{"member >= admin", RoleMember, RoleAdmin, false},
+		{"member >= member", RoleMember, RoleMember, true},
+		{"member >= viewer", RoleMember, RoleViewer, true},
+		{"viewer >= admin", RoleViewer, RoleAdmin, false},
+		{"viewer >= member", RoleViewer, RoleMember, false},
+		{"viewer >= viewer", RoleViewer, RoleViewer, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.role.AtLeast(tt.required))
+		})
+	}
+}
+
+func TestRole_CanManage(t *testing.T) {
+	tests := []struct {
+		name     string
+		actor    Role
+		target   Role
+		expected bool
+	}{
+		{"admin can manage member", RoleAdmin, RoleMember, true},
+		{"admin can manage viewer", RoleAdmin, RoleViewer, true},
+		{"admin cannot manage admin", RoleAdmin, RoleAdmin, false},
+		{"member can manage viewer", RoleMember, RoleViewer, true},
+		{"member cannot manage member", RoleMember, RoleMember, false},
+		{"member cannot manage admin", RoleMember, RoleAdmin, false},
+		{"viewer cannot manage anyone", RoleViewer, RoleViewer, false},
+		{"viewer cannot manage member", RoleViewer, RoleMember, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.actor.CanManage(tt.target))
+		})
+	}
+}
+
+func TestRole_String(t *testing.T) {
+	assert.Equal(t, "admin", RoleAdmin.String())
+	assert.Equal(t, "member", RoleMember.String())
+	assert.Equal(t, "viewer", RoleViewer.String())
+}
+
+func TestRole_IsValid(t *testing.T) {
+	assert.True(t, RoleAdmin.IsValid())
+	assert.True(t, RoleMember.IsValid())
+	assert.True(t, RoleViewer.IsValid())
+	assert.False(t, Role("invalid").IsValid())
+	assert.False(t, Role("").IsValid())
+}
+
+func TestParseRole(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected Role
+	}{
+		{"admin", RoleAdmin},
+		{"member", RoleMember},
+		{"viewer", RoleViewer},
+		{"invalid", RoleViewer}, // defaults to viewer
+		{"", RoleViewer},        // defaults to viewer
+		{"ADMIN", RoleViewer},   // case-sensitive, defaults to viewer
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, ParseRole(tt.input))
+		})
+	}
+}
