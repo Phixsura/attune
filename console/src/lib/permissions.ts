@@ -18,6 +18,9 @@ export type Permission =
   // Settings - AI Classification
   | 'settings:enrich_config:view'
   | 'settings:enrich_config:edit'
+  // Settings - Enrichment Runtime
+  | 'settings:enrichment_runtime:view'
+  | 'settings:enrichment_runtime:edit'
   // Settings - Guard Policies
   | 'settings:guard_policies:view'
   | 'settings:guard_policies:edit'
@@ -76,6 +79,8 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     // Settings - full access
     'settings:enrich_config:view',
     'settings:enrich_config:edit',
+    'settings:enrichment_runtime:view',
+    'settings:enrichment_runtime:edit',
     'settings:guard_policies:view',
     'settings:guard_policies:edit',
     'settings:inbound:view',

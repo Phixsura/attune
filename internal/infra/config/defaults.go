@@ -14,6 +14,15 @@ const (
 	// DefaultEnricherInterval controls the background polling cadence.
 	DefaultEnricherInterval = 30 * time.Second
 
+	// DefaultEnricherQueueLen bounds the in-process enrichment submission queue.
+	DefaultEnricherQueueLen = 1000
+
+	// DefaultEnricherWorkers bounds concurrent enrichment executions.
+	DefaultEnricherWorkers = 3
+
+	// DefaultEnricherBatchWindow is the max time spent collecting one execution batch.
+	DefaultEnricherBatchWindow = 5 * time.Second
+
 	// DefaultRateLimitPerMinute / DefaultRateLimitBurst are conservative
 	// single-tenant defaults for human-speed ingest.
 	DefaultRateLimitPerMinute = 60

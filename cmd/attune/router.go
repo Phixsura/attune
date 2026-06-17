@@ -34,6 +34,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/admin"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
+	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 )
 
 // buildRouter wires the chi router: OTel root span + X-Trace-Id, the standard
@@ -52,6 +53,7 @@ func buildRouter(
 	inboundSecrets *secretstore.TinkStore,
 	inboundSources *inboundsourcerepo.Repo,
 	adminRepo *admin.Repo,
+	enrichRuntime *enrichruntimesvc.Service,
 ) (chi.Router, error) {
 	const where = "main.buildRouter"
 	r := chi.NewRouter()
@@ -94,7 +96,7 @@ func buildRouter(
 	// proxy forwards external traffic here. Disabled gracefully
 	// when ConsoleSessionKey is empty (single-process dev defaults).
 	if cfg.ConsoleSessionKey != "" {
-		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, adminRepo, llm)
+		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, adminRepo, llm, enrichRuntime)
 		if err != nil {
 			return nil, fmt.Errorf("build console: %w", err)
 		}

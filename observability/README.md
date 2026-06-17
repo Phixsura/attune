@@ -35,6 +35,10 @@ exposition plus the portable assets in this directory.
 | `attune_enrich_suggested_attrs_total` | counter | `tenant`, `dim` | enrich rows with off-list attr suggestions per dim (#10 → E3) |
 | `attune_enrich_attrs_size_bytes` | histogram | `tenant` | serialized enriched_attrs JSONB size, per tenant (#10 → E3) |
 | `attune_enrich_attrs_rejected_total` | counter | `tenant` | rows refused because enriched_attrs exceeded `MaxAttrsBytes` (32 KiB) |
+| `attune_enrich_queue_depth` | gauge | — | current in-process enrichment queue depth |
+| `attune_enrich_queue_full_total` | counter | — | non-blocking enrichment queue submit rejections caused by a full queue |
+| `attune_enrich_batch_size` | histogram | — | actual jobs executed per enrichment processor batch |
+| `attune_enrich_sweep_submitted_total` | counter | — | pending DB rows successfully resubmitted by the enrich sweeper |
 | `attune_notify_failures_total` | counter | `destination_type`, `reason` | notifier push failures |
 | `attune_outbox_lag_seconds` | gauge | — | age of the oldest pending outbox row (0 = empty) |
 | `attune_claim_contention_total` | counter | — | enricher `tryClaim` lost to another worker |
@@ -45,6 +49,7 @@ exposition plus the portable assets in this directory.
 | `attune_llm_calls_total` | counter | `tenant`, `model`, `status` | LLM provider calls that reached a backend |
 | `attune_llm_tokens_total` | counter | `tenant`, `model`, `direction` | provider-reported prompt/completion token usage |
 | `attune_llm_cost_usd_total` | counter | `tenant`, `model` | estimated USD cost from the static model-price table |
+| `attune_llm_rate_limit_wait_seconds` | histogram | — | time spent waiting for the local outbound LLM rate limiter |
 | `attune_embed_cluster_assignments_total` | counter | `tenant`, `cluster_type` | feedback items assigned to clusters (#25) |
 | `attune_embed_errors_total` | counter | `tenant`, `error_type` | embedding processing errors by type (#25) |
 | `attune_embed_duration_seconds` | histogram | `tenant` | end-to-end embedding and clustering latency per row (#25) |

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 )
@@ -23,6 +24,15 @@ func TestLoadPathNewConfig(t *testing.T) {
 	}
 	if cfg.EnricherBatch != DefaultEnricherBatch {
 		t.Fatalf("EnricherBatch = %d", cfg.EnricherBatch)
+	}
+	if cfg.EnricherQueueLen != DefaultEnricherQueueLen {
+		t.Fatalf("EnricherQueueLen = %d", cfg.EnricherQueueLen)
+	}
+	if cfg.EnricherWorkers != DefaultEnricherWorkers {
+		t.Fatalf("EnricherWorkers = %d", cfg.EnricherWorkers)
+	}
+	if cfg.EnricherBatchWindow != DefaultEnricherBatchWindow {
+		t.Fatalf("EnricherBatchWindow = %s", cfg.EnricherBatchWindow)
 	}
 	if cfg.Audit.RetentionDays != DefaultAuditRetentionDays {
 		t.Fatalf("Audit.RetentionDays = %d", cfg.Audit.RetentionDays)
@@ -237,6 +247,56 @@ func TestLoadPathRejectsInvalidGDPRDurations(t *testing.T) {
 		t.Fatal("expected gdpr.delete_grace_window parse error")
 	}
 	if !strings.Contains(err.Error(), "gdpr.delete_grace_window") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadPathParsesExtendedEnricherConfig(t *testing.T) {
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"enricher:\n  interval: \"30s\"\n",
+		"enricher:\n  interval: \"45s\"\n  batch: 12\n  queue_len: 250\n  workers: 4\n  batch_window: \"750ms\"\n  llm_max_qps: 8\n  llm_burst: 9\n",
+		1,
+	)
+	cfg, err := LoadPath(writeConfig(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EnricherInterval != 45*time.Second {
+		t.Fatalf("EnricherInterval = %s, want 45s", cfg.EnricherInterval)
+	}
+	if cfg.EnricherBatch != 12 {
+		t.Fatalf("EnricherBatch = %d, want 12", cfg.EnricherBatch)
+	}
+	if cfg.EnricherQueueLen != 250 {
+		t.Fatalf("EnricherQueueLen = %d, want 250", cfg.EnricherQueueLen)
+	}
+	if cfg.EnricherWorkers != 4 {
+		t.Fatalf("EnricherWorkers = %d, want 4", cfg.EnricherWorkers)
+	}
+	if cfg.EnricherBatchWindow != 750*time.Millisecond {
+		t.Fatalf("EnricherBatchWindow = %s, want 750ms", cfg.EnricherBatchWindow)
+	}
+	if cfg.EnricherLLMMaxQPS != 8 {
+		t.Fatalf("EnricherLLMMaxQPS = %v, want 8", cfg.EnricherLLMMaxQPS)
+	}
+	if cfg.EnricherLLMBurst != 9 {
+		t.Fatalf("EnricherLLMBurst = %d, want 9", cfg.EnricherLLMBurst)
+	}
+}
+
+func TestLoadPathRejectsInvalidExtendedEnricherConfig(t *testing.T) {
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"enricher:\n  interval: \"30s\"\n",
+		"enricher:\n  interval: \"30s\"\n  queue_len: -1\n",
+		1,
+	)
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected enricher.queue_len validation error")
+	}
+	if !strings.Contains(err.Error(), "enricher.queue_len") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

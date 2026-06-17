@@ -59,6 +59,11 @@ type Config struct {
 	DatabaseURL           string
 	EnricherInterval      time.Duration
 	EnricherBatch         int
+	EnricherQueueLen      int
+	EnricherWorkers       int
+	EnricherBatchWindow   time.Duration
+	EnricherLLMMaxQPS     float64
+	EnricherLLMBurst      int
 	ConsoleSessionKey     string
 	ConsoleBaseURL        string
 	RateLimitPerMinute    int
@@ -82,8 +87,13 @@ type MigrationsConfig struct {
 }
 
 type EnricherConfig struct {
-	Interval string `yaml:"interval"`
-	Batch    int    `yaml:"batch"`
+	Interval    string  `yaml:"interval"`
+	Batch       int     `yaml:"batch"`
+	QueueLen    int     `yaml:"queue_len"`
+	Workers     int     `yaml:"workers"`
+	BatchWindow string  `yaml:"batch_window"`
+	LLMMaxQPS   float64 `yaml:"llm_max_qps"`
+	LLMBurst    int     `yaml:"llm_burst"`
 }
 
 type AuditConfig struct {
@@ -230,6 +240,10 @@ func (c *Config) parseDerivedFields() error {
 	if err != nil {
 		return fmt.Errorf("enricher.interval: %w", err)
 	}
+	batchWindow, err := time.ParseDuration(c.Enricher.BatchWindow)
+	if err != nil {
+		return fmt.Errorf("enricher.batch_window: %w", err)
+	}
 	pruneInterval, err := time.ParseDuration(c.Audit.PruneInterval)
 	if err != nil {
 		return fmt.Errorf("audit.prune_interval: %w", err)
@@ -257,6 +271,11 @@ func (c *Config) parseDerivedFields() error {
 	c.DatabaseURL = strings.TrimSpace(c.Database.URL)
 	c.EnricherInterval = d
 	c.EnricherBatch = c.Enricher.Batch
+	c.EnricherQueueLen = c.Enricher.QueueLen
+	c.EnricherWorkers = c.Enricher.Workers
+	c.EnricherBatchWindow = batchWindow
+	c.EnricherLLMMaxQPS = c.Enricher.LLMMaxQPS
+	c.EnricherLLMBurst = c.Enricher.LLMBurst
 	c.ConsoleSessionKey = strings.TrimSpace(c.Console.SessionKey)
 	c.ConsoleBaseURL = strings.TrimSpace(c.Console.BaseURL)
 	c.RateLimitPerMinute = c.RateLimit.PerMinute
@@ -281,6 +300,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Enricher.Batch == 0 {
 		c.Enricher.Batch = DefaultEnricherBatch
+	}
+	if c.Enricher.QueueLen == 0 {
+		c.Enricher.QueueLen = DefaultEnricherQueueLen
+	}
+	if c.Enricher.Workers == 0 {
+		c.Enricher.Workers = DefaultEnricherWorkers
+	}
+	if c.Enricher.BatchWindow == "" {
+		c.Enricher.BatchWindow = DefaultEnricherBatchWindow.String()
+	}
+	if c.Enricher.LLMBurst == 0 && c.Enricher.LLMMaxQPS > 0 {
+		c.Enricher.LLMBurst = max(1, int(c.Enricher.LLMMaxQPS))
 	}
 	if c.Audit.RetentionDays == 0 {
 		c.Audit.RetentionDays = DefaultAuditRetentionDays
@@ -350,12 +381,32 @@ func (c *Config) validate() error {
 	if err := c.OIDC.Validate(); err != nil {
 		return err
 	}
+	if err := c.validateAuditConfig(); err != nil {
+		return err
+	}
+	if err := c.validateGDPRConfig(); err != nil {
+		return err
+	}
+	if err := c.validateShutdownConfig(); err != nil {
+		return err
+	}
+	if err := c.validateEnricherConfig(); err != nil {
+		return err
+	}
+	return c.validateCustomWebhooks()
+}
+
+func (c *Config) validateAuditConfig() error {
 	if c.Audit.RetentionDays < 1 {
 		return fmt.Errorf("config: audit.retention_days must be at least 1")
 	}
 	if c.AuditPruneInterval <= 0 {
 		return fmt.Errorf("config: audit.prune_interval must be positive")
 	}
+	return nil
+}
+
+func (c *Config) validateGDPRConfig() error {
 	if c.GDPRExportTTL <= 0 {
 		return fmt.Errorf("config: gdpr.export_ttl must be positive")
 	}
@@ -365,13 +416,39 @@ func (c *Config) validate() error {
 	if c.GDPRDeleteGraceWindow <= 0 {
 		return fmt.Errorf("config: gdpr.delete_grace_window must be positive")
 	}
+	return nil
+}
+
+func (c *Config) validateShutdownConfig() error {
 	if c.ShutdownDrainDelay < 0 {
 		return fmt.Errorf("config: shutdown.drain_delay must be non-negative")
 	}
 	if c.ShutdownTimeout <= 0 {
 		return fmt.Errorf("config: shutdown.timeout must be positive")
 	}
-	return c.validateCustomWebhooks()
+	return nil
+}
+
+func (c *Config) validateEnricherConfig() error {
+	if c.EnricherBatch <= 0 {
+		return fmt.Errorf("config: enricher.batch must be positive")
+	}
+	if c.EnricherQueueLen <= 0 {
+		return fmt.Errorf("config: enricher.queue_len must be positive")
+	}
+	if c.EnricherWorkers <= 0 {
+		return fmt.Errorf("config: enricher.workers must be positive")
+	}
+	if c.EnricherBatchWindow <= 0 {
+		return fmt.Errorf("config: enricher.batch_window must be positive")
+	}
+	if c.EnricherLLMMaxQPS < 0 {
+		return fmt.Errorf("config: enricher.llm_max_qps must be non-negative")
+	}
+	if c.EnricherLLMBurst < 0 {
+		return fmt.Errorf("config: enricher.llm_burst must be non-negative")
+	}
+	return nil
 }
 
 func (c *Config) validateConsole() error {

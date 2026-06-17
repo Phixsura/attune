@@ -38,6 +38,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
+	enrichmentruntimerepo "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	gdprrepo "github.com/Phixsura/attune/internal/repo/gdpr"
 	"github.com/Phixsura/attune/internal/repo/guardpolicy"
@@ -52,6 +53,7 @@ import (
 	digestsvc "github.com/Phixsura/attune/internal/service/digest"
 	embeddingsvc "github.com/Phixsura/attune/internal/service/embedding"
 	"github.com/Phixsura/attune/internal/service/enrich"
+	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
 	"github.com/Phixsura/attune/internal/service/ingest"
 	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
@@ -72,6 +74,21 @@ const (
 	databaseConnectTimeout       = 60 * time.Second
 	databaseConnectRetryInterval = 2 * time.Second
 )
+
+type runtimeServices struct {
+	llm              *llmauditsvc.Client
+	rawLLM           *llmrouter.Router
+	rateLimitedLLM   *llmclient.MutableRateLimitedClient
+	feedbackRepo     *feedback.FeedbackRepo
+	apiKeys          *apikey.APIKeys
+	tenantRepo       *tenant.TenantRepo
+	notifyTargetRepo *notifytarget.NotifyTargetRepo
+	outboxRepo       *outboxrepo.OutboxRepo
+	enricher         *enrich.Enricher
+	enrichRunner     *enrich.Runner
+	enrichRuntime    *enrichruntimesvc.Service
+	ingestor         *ingest.Ingestor
+}
 
 // ── server ────────────────────────────────────────────────────────────────
 
@@ -118,48 +135,42 @@ func runServer() error {
 	if err != nil {
 		return err
 	}
-	llmConfigRepo := llmconfigrepo.New(pool)
-	llmConfig := llmconfigsvc.NewService(llmConfigRepo, secrets)
-	if err := llmConfig.SyncKeyRegistry(ctx); err != nil {
-		return fmt.Errorf("sync secret key registry: %w", err)
+	runtimeDeps, err := setupRuntimeServices(ctx, pool, cfg, secrets)
+	if err != nil {
+		return err
 	}
-	rawLLM := llmrouter.New(llmConfigRepo, secrets)
-	guardedLLM := llmguard.NewClient(rawLLM, guardpolicy.New(pool))
-	llm := llmauditsvc.NewClient(guardedLLM, llmauditrepo.New(pool))
-	defer llm.Close()
+	defer runtimeDeps.llm.Close()
 	logext.Infof(ctx, "[%s] llm router ready,primary_secret_key:%s", where, secrets.PrimaryKeyID())
 
-	feedbackRepo := feedback.NewFeedback(pool)
-	apikeyRepo := apikeyrepo.NewAPIKey(pool)
-	tenantRepo := tenant.NewTenant(pool)
-	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
-	outboxRepo := outboxrepo.NewOutbox(pool)
-	enricher := enrich.NewEnricher(feedbackRepo, llm, "")
-	ingestor := ingest.NewIngestor(feedbackRepo, enricher)
-	apiKeys := apikey.NewAPIKeys(apikeyRepo)
-
-	if err := syncCustomWebhooks(ctx, cfg.CustomWebhooks, tenantRepo, notifyTargetRepo); err != nil {
+	if err := syncCustomWebhooks(ctx, cfg.CustomWebhooks, runtimeDeps.tenantRepo, runtimeDeps.notifyTargetRepo); err != nil {
 		return fmt.Errorf("sync custom webhooks: %w", err)
 	}
 	// Outbox wiring: enricher writes raw-webhook rows in same tx as
 	// MarkDone (at-least-once); a background worker drains them.
-	enricher.SetOutbox(outboxRepo, notifyTargetRepo)
+	runtimeDeps.enricher.SetOutbox(runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo)
 	outboxWorker := outbox.NewOutboxWorker(
-		outboxRepo, notifyTargetRepo,
+		runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo,
 		notify.NewTransport(nil, notify.DefaultRetry()),
 	)
 	go outboxWorker.Run(ctx)
 	// attune_outbox_lag_seconds is refreshed on a 30s ticker rather than
 	// on every Prometheus scrape — avoids hammering the DB.
-	go runOutboxLagRefresher(ctx, outboxRepo)
+	go runOutboxLagRefresher(ctx, runtimeDeps.outboxRepo)
 	go runAuditPruner(ctx, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
 
-	batchJobWorker := startBackgroundWorkers(ctx, pool, enricher, rawLLM, llm, feedbackRepo, cfg.ConsoleBaseURL, cfg.GDPRExportTTL)
+	batchJobWorker := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, cfg.ConsoleBaseURL, cfg.GDPRExportTTL)
 	defer batchJobWorker.Stop()
 
-	ingestHandler := handlers.NewIngestHandler(ingestor)
+	ingestHandler := handlers.NewIngestHandler(runtimeDeps.ingestor)
 
-	inb, err := setupInbound(ctx, pool, ingestor, secrets, cfg.Console.BootstrapAdmin, cfg.ConsoleSessionKey != "")
+	inb, err := setupInbound(
+		ctx,
+		pool,
+		runtimeDeps.ingestor,
+		secrets,
+		cfg.Console.BootstrapAdmin,
+		cfg.ConsoleSessionKey != "",
+	)
 	if err != nil {
 		return err
 	}
@@ -167,14 +178,12 @@ func runServer() error {
 	ready := newDrainAwareReadiness(pool)
 
 	r, err := buildRouter(
-		ctx, cfg, ingestHandler, apiKeys, pool, ready, llm,
-		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo,
+		ctx, cfg, ingestHandler, runtimeDeps.apiKeys, pool, ready, runtimeDeps.llm,
+		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo, runtimeDeps.enrichRuntime,
 	)
 	if err != nil {
 		return err
 	}
-
-	go enricher.RunBackground(ctx, cfg.EnricherInterval, cfg.EnricherBatch)
 
 	srv := ptrext.Of(http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
@@ -183,7 +192,82 @@ func runServer() error {
 	})
 	logext.Infof(ctx, "[%s] attune server listening,addr:%s", where, srv.Addr)
 
-	return serveUntilStopped(ctx, srv, ready, cfg.ShutdownDrainDelay, cfg.ShutdownTimeout)
+	if err := serveUntilStopped(ctx, srv, ready, cfg.ShutdownDrainDelay, cfg.ShutdownTimeout); err != nil {
+		return err
+	}
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancelWait()
+	if err := runtimeDeps.enrichRunner.Wait(waitCtx); err != nil {
+		logext.Warnf(waitCtx, "[%s] enrich runner shutdown timed out,err:%+v", where, err.Error())
+	}
+	return nil
+}
+
+func setupRuntimeServices(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	cfg *config.Config,
+	secrets *secretstore.TinkStore,
+) (runtimeServices, error) {
+	llmConfigRepo := llmconfigrepo.New(pool)
+	llmConfig := llmconfigsvc.NewService(llmConfigRepo, secrets)
+	if err := llmConfig.SyncKeyRegistry(ctx); err != nil {
+		return runtimeServices{}, fmt.Errorf("sync secret key registry: %w", err)
+	}
+
+	rawLLM := llmrouter.New(llmConfigRepo, secrets)
+	guardedLLM := llmguard.NewClient(rawLLM, guardpolicy.New(pool))
+	rateLimitedLLM := llmclient.NewMutableRateLimitedClient(guardedLLM, llmclient.RateLimitConfig{
+		Enabled: cfg.EnricherLLMMaxQPS > 0,
+		QPS:     cfg.EnricherLLMMaxQPS,
+		Burst:   cfg.EnricherLLMBurst,
+	})
+	llm := llmauditsvc.NewClient(rateLimitedLLM, llmauditrepo.New(pool))
+
+	feedbackRepo := feedback.NewFeedback(pool)
+	apikeyRepo := apikeyrepo.NewAPIKey(pool)
+	tenantRepo := tenant.NewTenant(pool)
+	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
+	outboxRepo := outboxrepo.NewOutbox(pool)
+	enricher := enrich.NewEnricher(feedbackRepo, llm, "")
+	enrichRunner := enrich.NewRunner(feedbackRepo, enricher, enrich.RunnerConfig{
+		QueueLen:      cfg.EnricherQueueLen,
+		Workers:       cfg.EnricherWorkers,
+		BatchSize:     cfg.EnricherBatch,
+		BatchWindow:   cfg.EnricherBatchWindow,
+		SweepInterval: cfg.EnricherInterval,
+	})
+	go enrichRunner.Run(ctx)
+
+	instanceID := "attune-" + uuid.NewString()
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		instanceID = hostname
+	}
+	enrichRuntime := enrichruntimesvc.New(
+		enrichmentruntimerepo.New(pool),
+		enrichRunner,
+		rateLimitedLLM,
+		enrichmentRuntimeBootstrapSpec(cfg),
+		enrichmentRuntimeBootstrapVersion(cfg),
+		instanceID,
+		uuid.NewString(),
+	)
+	go enrichRuntime.Run(ctx)
+
+	return runtimeServices{
+		llm:              llm,
+		rawLLM:           rawLLM,
+		rateLimitedLLM:   rateLimitedLLM,
+		feedbackRepo:     feedbackRepo,
+		apiKeys:          apikey.NewAPIKeys(apikeyRepo),
+		tenantRepo:       tenantRepo,
+		notifyTargetRepo: notifyTargetRepo,
+		outboxRepo:       outboxRepo,
+		enricher:         enricher,
+		enrichRunner:     enrichRunner,
+		enrichRuntime:    enrichRuntime,
+		ingestor:         ingest.NewIngestor(feedbackRepo, enrichRunner),
+	}, nil
 }
 
 func serveUntilStopped(

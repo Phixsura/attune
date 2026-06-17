@@ -17,6 +17,7 @@ import (
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	"github.com/Phixsura/attune/internal/repo/tenant"
+	"github.com/Phixsura/attune/internal/repo/tenantmember"
 )
 
 // Handler owns the local-admin login + logout endpoints (#66 Plan T11)
@@ -25,6 +26,7 @@ type Handler struct {
 	signer  *session.Signer
 	admins  adminStore
 	tenants tenantScopeResolver
+	members adminMembershipStore
 	baseURL string
 }
 
@@ -39,12 +41,17 @@ type tenantScopeResolver interface {
 	FirstActiveID(ctx context.Context) (string, error)
 }
 
+type adminMembershipStore interface {
+	EnsureAdminMember(ctx context.Context, tenantID, userID string) (tenantmember.Member, error)
+}
+
 // NewHandler wires the dependencies.
-func NewHandler(signer *session.Signer, admins *admin.Repo, tenants *tenant.TenantRepo, baseURL string) *Handler {
+func NewHandler(signer *session.Signer, admins *admin.Repo, tenants *tenant.TenantRepo, members adminMembershipStore, baseURL string) *Handler {
 	return ptrext.Of(Handler{
 		signer:  signer,
 		admins:  admins,
 		tenants: tenants,
+		members: members,
 		baseURL: strings.TrimRight(baseURL, "/"),
 	})
 }
@@ -79,6 +86,7 @@ func (h *Handler) ScopeAdminSession(next http.Handler) http.Handler {
 		}
 		scoped := ptrext.Indirect(authCtx)
 		scoped.TenantID = tenantID
+		h.ensureAdminMembership(r.Context(), where, tenantID, authCtx.UserID)
 		next.ServeHTTP(w, r.WithContext(session.WithAuthCtx(r.Context(), ptrext.Of(scoped))))
 	})
 }
@@ -119,6 +127,9 @@ func (h *Handler) Login(ctx *dispatcher.RequestContext[struct{}], req *attunev1.
 	}
 
 	scopeTenantID := h.resolveAdminScope(ctx, where)
+	if scopeTenantID != "" {
+		h.ensureAdminMembership(ctx, where, scopeTenantID, a.ID)
+	}
 	if err := h.signer.IssueSessionCookie(ctx, scopeTenantID, a.ID); err != nil {
 		logext.Errorf(ctx, "[%s] IssueSessionCookie failed,err:%+v", where, err.Error())
 		return dispatcher.Fail[*attunev1.LoginResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "internal error")
@@ -196,6 +207,16 @@ func (h *Handler) resolveAdminScope(ctx context.Context, where string) string {
 		logext.Warnf(ctx, "[%s] FirstActiveID failed,err:%+v", where, err.Error())
 	}
 	return ""
+}
+
+func (h *Handler) ensureAdminMembership(ctx context.Context, where, tenantID, userID string) {
+	if h == nil || h.members == nil || tenantID == "" || userID == "" {
+		return
+	}
+	if _, err := h.members.EnsureAdminMember(ctx, tenantID, userID); err != nil {
+		logext.Warnf(ctx, "[%s] ensure admin member failed,tenant_id:%s,user_id:%s,err:%+v",
+			where, tenantID, userID, err.Error())
+	}
 }
 
 // originAllowed returns true when the request's Origin (or Referer

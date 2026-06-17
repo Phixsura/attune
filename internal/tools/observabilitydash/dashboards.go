@@ -45,8 +45,10 @@ func overviewDashboard() dashboard {
 			targetExpr("C", zero(`sum(increase(attune_authz_denied_total[$__range]))`), "authz denied"),
 			targetExpr("D", zero(`sum(increase(attune_audit_rows_written_total[$__range]))`), "audit rows"),
 		}, "short", gp(0, 20, 12, 8)),
-		seriesDesc(13, "Queue pressure", "Outbox lag trend. Rising lag with flat delivery failures points to worker capacity; rising failures points to destination/API issues.", []target{
-			targetExpr("A", `attune_outbox_lag_seconds`, "lag"),
+		seriesDesc(13, "Queue pressure", "Outbox lag plus local enrichment queue signals. Rising enrichment queue depth or full submits point to worker pressure before provider failures appear.", []target{
+			targetExpr("A", `attune_outbox_lag_seconds`, "outbox lag"),
+			targetExpr("B", `attune_enrich_queue_depth`, "enrich queue depth"),
+			targetExpr("C", zero(`increase(attune_enrich_queue_full_total[$__range])`), "enrich queue full"),
 		}, "s", gp(12, 20, 12, 8)),
 		statDesc(14, "Inbound events", "Inbound adapter events in the selected range. Zero is fine only when no inbound sources are configured.", zero(`sum(increase(attune_inbound_total{tenant=~"$tenant"}[$__range]))`), "short", gp(0, 28, 4, 4), nil),
 		statDesc(15, "LLM calls", "Provider calls in the selected range. Compare with Needs AI to catch provider misconfiguration or disabled enrichment.", zero(`sum(increase(attune_llm_calls_total{tenant=~"$tenant"}[$__range]))`), "short", gp(4, 28, 4, 4), nil),
@@ -133,13 +135,14 @@ func aiPipelineDashboard() dashboard {
 		statDesc(5, "Guard blocks", "AI guardrail blocks in the selected range. Non-zero can be healthy protection, but should map to expected stages and reasons below.", zero(`sum(increase(attune_guard_blocked_total{tenant=~"$tenant"}[$__range]))`), "short", gp(8, 3, 4, 4), greenWarnRed(1, 20)),
 		statDesc(6, "Reply drafts", "Reply drafts generated in the selected range. A drop with stable traffic means the reply-draft path needs attention.", zero(`sum(increase(attune_reply_draft_generated_total{tenant=~"$tenant"}[$__range]))`), "short", gp(12, 3, 4, 4), nil),
 		statDesc(7, "Enrich p95", "P95 enrichment duration. This is the main user-facing AI latency signal.", zero(`histogram_quantile(0.95, sum by (le) (rate(attune_enrich_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`), "s", gp(16, 3, 4, 4), greenWarnRed(5, 30)),
-		statDesc(8, "AI queues", "Combined embedding and reply-draft queue depth. A sustained non-zero value means workers are falling behind.", zero(`sum(attune_embed_queue_depth{tenant=~"$tenant"}) + sum(attune_reply_draft_queue_depth{tenant=~"$tenant"})`), "short", gp(20, 3, 4, 4), greenWarnRed(10, 100)),
+		statDesc(8, "AI queues", "Combined enrich, embedding, and reply-draft queue depth. A sustained non-zero value means workers are falling behind.", zero(`attune_enrich_queue_depth + sum(attune_embed_queue_depth{tenant=~"$tenant"}) + sum(attune_reply_draft_queue_depth{tenant=~"$tenant"})`), "short", gp(20, 3, 4, 4), greenWarnRed(10, 100)),
 		seriesDesc(9, "Triage decisions", "Decision mix explains both AI cost and latency. A high full-AI share is normal only when traffic quality demands it.", []target{
 			targetExpr("A", `sum by (decision) (rate(attune_triage_decisions_total{tenant=~"$tenant"}[$__rate_interval]))`, "{{decision}}"),
 		}, "reqps", gp(0, 8, 12, 8)),
-		seriesDesc(10, "Enrich duration", "Enrichment latency percentiles split by result. Spikes with normal traffic usually point to provider or queue pressure.", []target{
+		seriesDesc(10, "Enrich duration", "Enrichment latency percentiles split by result. Spikes with normal traffic usually point to provider, limiter, or queue pressure.", []target{
 			targetExpr("A", `histogram_quantile(0.50, sum by (le, result) (rate(attune_enrich_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "p50 / {{result}}"),
 			targetExpr("B", `histogram_quantile(0.95, sum by (le, result) (rate(attune_enrich_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "p95 / {{result}}"),
+			targetExpr("C", `histogram_quantile(0.95, sum by (le) (rate(attune_llm_rate_limit_wait_seconds_bucket[$__rate_interval])))`, "llm wait p95"),
 		}, "s", gp(12, 8, 12, 8)),
 		rowPanel(11, "Guardrails and attributes", 16),
 		seriesDesc(12, "Enrich attr controls", "Attribute control rates. Dropped, suggested, and rejected attributes help separate data shape issues from model behavior.", []target{
@@ -156,17 +159,20 @@ func aiPipelineDashboard() dashboard {
 			targetExpr("B", `sum by (stage, reason) (rate(attune_guard_blocked_total{tenant=~"$tenant"}[$__rate_interval]))`, "blocked / {{stage}} / {{reason}}"),
 		}, "reqps", gp(0, 25, 24, 8)),
 		rowPanel(15, "Downstream AI jobs", 33),
-		seriesDesc(16, "Embedding", "Embedding worker health: assignments, errors, p95 duration, and queue depth. Queue growth is the leading saturation signal.", []target{
+		seriesDesc(16, "Embedding", "Embedding worker health plus enrichment queue depth. Queue growth is the leading saturation signal across the AI pipeline.", []target{
 			targetExpr("A", `sum by (cluster_type) (rate(attune_embed_cluster_assignments_total{tenant=~"$tenant"}[$__rate_interval]))`, "{{cluster_type}}"),
 			targetExpr("B", `sum by (error_type) (rate(attune_embed_errors_total{tenant=~"$tenant"}[$__rate_interval]))`, "error / {{error_type}}"),
 			targetExpr("C", `histogram_quantile(0.95, sum by (le) (rate(attune_embed_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "duration p95"),
 			targetExpr("D", `sum(attune_embed_queue_depth{tenant=~"$tenant"})`, "queue depth"),
+			targetExpr("E", `attune_enrich_queue_depth`, "enrich queue depth"),
 		}, "short", gp(0, 34, 24, 8)),
-		seriesDesc(17, "Reply draft generation", "Reply draft path health: generation rate, errors, duration, and queue depth.", []target{
+		seriesDesc(17, "Reply draft generation", "Reply draft path health plus enrichment batch and sweep signals. Use this to separate upstream enrich starvation from draft worker lag.", []target{
 			targetExpr("A", `sum(rate(attune_reply_draft_generated_total{tenant=~"$tenant"}[$__rate_interval]))`, "generated"),
 			targetExpr("B", `sum by (error_type) (rate(attune_reply_draft_errors_total{tenant=~"$tenant"}[$__rate_interval]))`, "error / {{error_type}}"),
 			targetExpr("C", `histogram_quantile(0.95, sum by (le) (rate(attune_reply_draft_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "duration p95"),
 			targetExpr("D", `sum(attune_reply_draft_queue_depth{tenant=~"$tenant"})`, "queue depth"),
+			targetExpr("E", `histogram_quantile(0.95, sum by (le) (rate(attune_enrich_batch_size_bucket[$__rate_interval])))`, "enrich batch p95"),
+			targetExpr("F", `sum(rate(attune_enrich_sweep_submitted_total[$__rate_interval]))`, "enrich sweep submit"),
 		}, "short", gp(0, 42, 12, 8)),
 		seriesDesc(18, "Digest runs", "Digest worker outcomes, p95 duration, clustering fallback, and cluster count. Missing scheduled digests should show up here first.", []target{
 			targetExpr("A", `sum by (status) (rate(attune_digest_runs_total{tenant=~"$tenant"}[$__rate_interval]))`, "{{status}}"),
@@ -301,8 +307,12 @@ func llmCostDashboard() dashboard {
 		seriesDesc(12, "Error calls by model", "Provider error calls by model. This separates provider/model instability from user traffic changes.", []target{
 			targetExpr("A", `sum by (model) (increase(attune_llm_calls_total{tenant=~"$tenant",model=~"$model",status="error"}[$__rate_interval]))`, "{{model}}"),
 		}, "short", gp(12, 17, 12, 8)),
+		seriesDesc(13, "Rate-limit wait", "Local LLM rate-limit wait time. Rising p95 here means Attune is protecting the provider by queueing work before dispatch.", []target{
+			targetExpr("A", `histogram_quantile(0.50, sum by (le) (rate(attune_llm_rate_limit_wait_seconds_bucket[$__rate_interval])))`, "p50"),
+			targetExpr("B", `histogram_quantile(0.95, sum by (le) (rate(attune_llm_rate_limit_wait_seconds_bucket[$__rate_interval])))`, "p95"),
+		}, "s", gp(0, 25, 24, 8)),
 	}
-	d.Panels = layoutFourCardDashboard(d.Panels, 7, 2)
+	d.Panels = layoutFourCardDashboard(d.Panels, 7, 6)
 	return d
 }
 

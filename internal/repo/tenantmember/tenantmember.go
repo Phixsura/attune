@@ -292,6 +292,42 @@ func (r *Repo) EnsureOIDCMember(ctx context.Context, tenantID, userID string, ro
 	return m, nil
 }
 
+// EnsureAdminMember creates or refreshes membership for a legacy admin session.
+// The admin table remains the source of truth for whether this identity is a
+// legacy console admin; tenant_members mirrors that authority so tenant-scoped
+// RBAC, membership listing, and invite flows can operate on one consistent
+// model.
+func (r *Repo) EnsureAdminMember(ctx context.Context, tenantID, userID string) (Member, error) {
+	const q = `
+		WITH inserted AS (
+			INSERT INTO tenant_members (
+				tenant_id, member_type, user_id, role, role_source, invited_at, accepted_at
+			) VALUES ($1, 'admin', $2, 'admin', 'bootstrap', NOW(), NOW())
+			ON CONFLICT (tenant_id, member_type, user_id) DO NOTHING
+			RETURNING id, tenant_id, member_type, user_id, email, role, role_source,
+			          invited_by, invited_at, accepted_at, created_at, updated_at
+		)
+		SELECT id, tenant_id, member_type, user_id, email, role, role_source,
+		       invited_by, invited_at, accepted_at, created_at, updated_at
+		FROM inserted
+		UNION ALL
+		SELECT id, tenant_id, member_type, user_id, email, role, role_source,
+		       invited_by, invited_at, accepted_at, created_at, updated_at
+		FROM tenant_members
+		WHERE tenant_id = $1 AND member_type = 'admin' AND user_id = $2
+		LIMIT 1`
+
+	var m Member
+	err := r.pool.QueryRow(ctx, q, tenantID, userID).Scan(
+		&m.ID, &m.TenantID, &m.MemberType, &m.UserID, &m.Email, &m.Role, &m.RoleSource,
+		&m.InvitedBy, &m.InvitedAt, &m.AcceptedAt, &m.CreatedAt, &m.UpdatedAt,
+	)
+	if err != nil {
+		return Member{}, err
+	}
+	return m, nil
+}
+
 // ExistsByEmail checks if any member with this email exists in the tenant.
 func (r *Repo) ExistsByEmail(ctx context.Context, tenantID, email string) (bool, error) {
 	const q = `SELECT EXISTS(SELECT 1 FROM tenant_members WHERE tenant_id = $1 AND LOWER(email) = LOWER($2))`

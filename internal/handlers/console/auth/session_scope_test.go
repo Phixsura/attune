@@ -13,6 +13,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	"github.com/Phixsura/attune/internal/repo/tenant"
+	"github.com/Phixsura/attune/internal/repo/tenantmember"
 )
 
 type fakeAdminStore struct {
@@ -51,12 +52,27 @@ func (f *fakeTenantScopeResolver) FirstActiveID(context.Context) (string, error)
 	return f.id, nil
 }
 
+type fakeAdminMembershipStore struct {
+	tenantID string
+	userID   string
+	calls    int
+}
+
+func (f *fakeAdminMembershipStore) EnsureAdminMember(_ context.Context, tenantID, userID string) (tenantmember.Member, error) {
+	f.tenantID = tenantID
+	f.userID = userID
+	f.calls++
+	return tenantmember.Member{TenantID: tenantID, UserID: userID, MemberType: "admin"}, nil
+}
+
 func TestScopeAdminSessionScopesEmptyAdminTenant(t *testing.T) {
 	t.Parallel()
 
+	memberSync := ptrext.Of(fakeAdminMembershipStore{})
 	h := ptrext.Of(Handler{
 		admins:  ptrext.Of(fakeAdminStore{row: admin.Admin{ID: "admin-1"}}),
 		tenants: ptrext.Of(fakeTenantScopeResolver{id: "tenant-1"}),
+		members: memberSync,
 	})
 	req := scopedRequest("", "admin-1")
 	rec := httptest.NewRecorder()
@@ -69,6 +85,9 @@ func TestScopeAdminSessionScopesEmptyAdminTenant(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, "tenant-1", got.TenantID)
 	require.Equal(t, "admin-1", got.UserID)
+	require.Equal(t, 1, memberSync.calls)
+	require.Equal(t, "tenant-1", memberSync.tenantID)
+	require.Equal(t, "admin-1", memberSync.userID)
 	require.Empty(t, rec.Result().Cookies())
 }
 

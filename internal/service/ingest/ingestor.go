@@ -3,17 +3,14 @@ package ingest
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
-	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/pkg/subjectkey"
-	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
@@ -22,12 +19,20 @@ import (
 // enrichment. Handlers depend on this concrete type (not an interface)
 // because there is one ingest pipeline today.
 type Ingestor struct {
-	repo     *feedback.FeedbackRepo
-	enricher *enrich.Enricher
+	repo      feedbackInserter
+	submitter enrich.Submitter
 }
 
-func NewIngestor(r *feedback.FeedbackRepo, e *enrich.Enricher) *Ingestor {
-	return ptrext.Of(Ingestor{repo: r, enricher: e})
+type feedbackInserter interface {
+	Insert(
+		ctx context.Context,
+		tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
+		in domain.IngestInput,
+	) (int64, error)
+}
+
+func NewIngestor(r feedbackInserter, submitter enrich.Submitter) *Ingestor {
+	return ptrext.Of(Ingestor{repo: r, submitter: submitter})
 }
 
 // IngestRow validates input, persists it, and fires off best-effort
@@ -57,13 +62,11 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 		return 0, fmt.Errorf("repo insert: %w", err)
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d", where, tenantID, id)
-	if i.enricher != nil {
-		// Capture the inbound trace_id (customer webhook / email
-		// adapter) and the OTel SpanContext (attune's own trace) so
-		// the async enrich goroutine inherits both. Downstream the
-		// enricher propagates traceparent on its LLM call, which lets
-		// the trace backend join attune's spans with the gateway's.
-		go i.fireEnrich(ctx, id, trace.FromContext(ctx))
+	if i.submitter != nil {
+		if err := i.submitter.Submit(ctx, enrich.Job{ID: id, TraceID: trace.FromContext(ctx)}); err != nil {
+			logext.Warnf(ctx, "[%s] enrich submit deferred,feedback_id:%d,inbound_trace_id:%s,err:%+v",
+				where, id, trace.FromContext(ctx), err.Error())
+		}
 	}
 	return id, nil
 }
@@ -100,36 +103,4 @@ func composeUserID(keyID uuid.UUID, sourceUser string) string {
 		uid = uid + ":" + sourceUser
 	}
 	return uid
-}
-
-// fireEnrich runs enrichment in a fresh, bounded context so a slow LLM
-// call cannot pin the inbound HTTP request goroutine.
-//
-// traceID is the inbound webhook trace id; we propagate it onto the
-// customer envelope downstream.
-// inboundCtx is the original HTTP request ctx. We extract the OTel
-// SpanContext, detach it from the HTTP cancellation, and reattach it
-// onto a fresh timeout ctx so the enricher's outbound call shares the
-// inbound trace.
-//
-// Errors are only logged — the row stays 'pending' and the background
-// poller will pick it up on the next tick.
-func (i *Ingestor) fireEnrich(inboundCtx context.Context, id int64, traceID string) {
-	const where = "service.Ingestor.fireEnrich"
-	// Detach the OTel SpanContext onto a fresh bounded ctx:
-	// - the new ctx survives the inbound HTTP request closing (60s timeout);
-	// - the OTel SpanContext rides along, keeping trace_id stitched;
-	// - the inbound business trace_id (customer / inbound adapter) is propagated via trace.WithID.
-	span := oteltrace.SpanFromContext(inboundCtx)
-	ctx, cancel := context.WithTimeout(
-		oteltrace.ContextWithSpanContext(context.Background(), span.SpanContext()),
-		90*time.Second,
-	)
-	defer cancel()
-	ctx = trace.WithID(ctx, traceID)
-	if err := i.enricher.EnrichOne(ctx, id); err != nil {
-		logext.Warnf(ctx,
-			"[%s] inline enrich failed,id:%d,inbound_trace_id:%s,err:%+v",
-			where, id, traceID, err.Error())
-	}
 }

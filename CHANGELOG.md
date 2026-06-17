@@ -50,6 +50,39 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Bounded enrichment execution and local LLM throttling (#80).** Ingest now
+  submits enrichment work into a bounded in-process queue instead of spawning an
+  unbounded goroutine per accepted row. A shared enrichment runner batches work,
+  executes `EnrichOne` with capped concurrency, and refills from pending DB rows
+  on a sweep interval so restart recovery still comes from `user_feedback`.
+  Added `enricher.queue_len`, `enricher.workers`, `enricher.batch_window`,
+  `enricher.llm_max_qps`, and `enricher.llm_burst` config knobs plus new queue
+  and limiter metrics (`attune_enrich_queue_depth`,
+  `attune_enrich_queue_full_total`, `attune_enrich_batch_size`,
+  `attune_enrich_sweep_submitted_total`,
+  `attune_llm_rate_limit_wait_seconds`). Rate-limit wait cancellation now leaves
+  rows recoverable instead of recording them as ordinary provider failures.
+
+- **Enrichment runtime control-plane and live Console controls (#80).** Added a
+  new `EnrichmentRuntimeService` proto contract, Postgres tables for desired
+  runtime policy/history/per-instance status, admin-only Console routes for
+  get/update/reset/rollback, a deployment-scoped runtime service that persists
+  desired policy revisions and publishes local instance state, plus mutable
+  enrichment runner/LLM limiter primitives that support live reconfiguration
+  without process restart. The Settings UI now exposes full queue/worker/batch
+  and LLM rate-limit controls, step-up protected reset and rollback actions,
+  live per-instance convergence status, and recent revision history. Follow-up
+  hardening aligned runtime auth with RBAC admins, stopped heartbeat no-op
+  reconciles from refilling local rate-limit tokens, kept queue resize state in
+  `applying` until effective capacity actually converges, stabilized instance
+  identity across process restarts, wired runtime mutations into unified audit
+  logging plus DB-backed action allowlists, and prevented background polling in
+  the Console from overwriting an operator's in-progress edits. The operator
+  experience was then refined into a more product-grade control surface with
+  value framing, direct operating guidance, field-level explanations, secondary
+  disclosure for opaque IDs, and clearer separation between current live nodes
+  and historical runtime rows.
+
 - **Console GDPR settings surface (#43).** Added a dedicated Settings > GDPR
   page for exact subject-key export and permanent delete operations, wired to
   the new proto/OpenAPI contract and admin-only permission gates.

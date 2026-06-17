@@ -398,6 +398,7 @@ func newConsoleRouter(
 		nil,
 		nil,
 		nil,
+		nil,
 		console.NewLLMConfigHandler(svc),
 		nil,
 		nil, // digestSubscription
