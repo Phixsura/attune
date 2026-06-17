@@ -104,6 +104,8 @@ type schedulingRepo struct {
 	deleteResult       *gdprrepo.DeleteResult
 	cancelledRequest   *gdprrepo.Request
 	revokedJob         *gdprrepo.ExportJob
+	listResult         gdprrepo.ListRequestResult
+	operationsSummary  *gdprrepo.OperationsSummary
 	createExecuteAfter time.Time
 	createSubjectHash  string
 	cancelRequestID    string
@@ -119,11 +121,14 @@ func (s *schedulingRepo) Delete(context.Context, string, string) (*gdprrepo.Dele
 }
 
 func (s *schedulingRepo) ListRequests(context.Context, gdprrepo.ListRequestFilter) (gdprrepo.ListRequestResult, error) {
-	return gdprrepo.ListRequestResult{}, nil
+	return s.listResult, nil
 }
 
 func (s *schedulingRepo) GetOperationsSummary(context.Context, string) (*gdprrepo.OperationsSummary, error) {
-	return ptrext.Of(gdprrepo.OperationsSummary{}), nil
+	if s.operationsSummary == nil {
+		return ptrext.Of(gdprrepo.OperationsSummary{}), nil
+	}
+	return s.operationsSummary, nil
 }
 
 func (s *schedulingRepo) CreateDeleteRequest(_ context.Context, _, _, subjectHash, _ string, executeAfter time.Time) (*gdprrepo.DeleteResult, error) {
@@ -260,5 +265,174 @@ func TestRevokeExportAudits(t *testing.T) {
 	}
 	if len(audit.events) != 1 || audit.events[0].Action != "gdpr.export.revoked" {
 		t.Fatalf("expected gdpr.export.revoked audit event, got %#v", audit.events)
+	}
+}
+
+func TestRecordDeleteCompletionAudits(t *testing.T) {
+	t.Parallel()
+
+	audit := ptrext.Of(stubAudit{})
+	svc := New(ptrext.Of(stubRepo{}), audit)
+
+	err := svc.RecordDeleteCompletion(
+		context.Background(),
+		"tenant-1",
+		"alice@example.com",
+		auditlogsvc.Actor{Type: "admin", ID: "u-1"},
+		ptrext.Of(gdprrepo.DeleteResult{
+			Counts: gdprrepo.Counts{
+				FeedbackCount:      2,
+				TagAssignmentCount: 3,
+				FeedbackAuditCount: 4,
+				LLMAuditCount:      5,
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("RecordDeleteCompletion err = %v", err)
+	}
+	if len(audit.events) != 1 || audit.events[0].Action != "gdpr.delete" {
+		t.Fatalf("expected gdpr.delete audit event, got %#v", audit.events)
+	}
+}
+
+func TestListRequestsMapsProtoFields(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC)
+	startedAt := now.Add(time.Minute)
+	completedAt := now.Add(2 * time.Minute)
+	expiresAt := now.Add(time.Hour)
+	executeAfter := now.Add(30 * time.Minute)
+	downloadedAt := now.Add(3 * time.Minute)
+	cancelledAt := now.Add(4 * time.Minute)
+	revokedAt := now.Add(5 * time.Minute)
+
+	repo := ptrext.Of(schedulingRepo{
+		listResult: gdprrepo.ListRequestResult{
+			Items: []gdprrepo.Request{
+				{
+					ID:              "req-1",
+					RequestType:     gdprrepo.RequestTypeExport,
+					Status:          gdprrepo.RequestStatusDownloaded,
+					SubjectKey:      "alice@example.com",
+					SubjectDisplay:  "Alice",
+					SubjectHash:     subjectkey.Hash("tenant-1", "alice@example.com"),
+					ArchiveFilename: "alice.zip",
+					Error:           "warning",
+					CreatedBy:       "admin-1",
+					Counts: gdprrepo.Counts{
+						FeedbackCount:      2,
+						TagAssignmentCount: 3,
+						FeedbackAuditCount: 4,
+						LLMAuditCount:      5,
+					},
+					CreatedAt:    now,
+					StartedAt:    ptrext.Of(startedAt),
+					CompletedAt:  ptrext.Of(completedAt),
+					ExpiresAt:    ptrext.Of(expiresAt),
+					ExecuteAfter: ptrext.Of(executeAfter),
+					DownloadedAt: ptrext.Of(downloadedAt),
+					CancelledAt:  ptrext.Of(cancelledAt),
+					RevokedAt:    ptrext.Of(revokedAt),
+				},
+			},
+			NextCursor: "cursor-2",
+		},
+	})
+	svc := New(
+		repo,
+		ptrext.Of(stubAudit{}),
+		WithAuditRetention(90, 12*time.Hour),
+		WithExportTTL(4*time.Hour),
+		WithStepUpTTL(20*time.Minute),
+		WithDeleteGraceWindow(45*time.Minute),
+	)
+
+	listResp, err := svc.ListRequests(context.Background(), "tenant-1", "", 25, "export")
+	if err != nil {
+		t.Fatalf("ListRequests err = %v", err)
+	}
+	if len(listResp.Items) != 1 {
+		t.Fatalf("items len = %d", len(listResp.Items))
+	}
+	item := listResp.Items[0]
+	if item.GetRequestId() != "req-1" || item.GetRequestType() != attunev1.GdprRequestType_GDPR_REQUEST_TYPE_EXPORT {
+		t.Fatalf("list item = %#v", item)
+	}
+	if item.GetStatus() != attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_DOWNLOADED {
+		t.Fatalf("status = %v", item.GetStatus())
+	}
+	if item.GetArchiveFilename() != "alice.zip" || item.GetError() != "warning" {
+		t.Fatalf("archive fields = %#v", item)
+	}
+	if listResp.GetNextCursor() != "cursor-2" {
+		t.Fatalf("next cursor = %q", listResp.GetNextCursor())
+	}
+}
+
+func TestGetOperationsMapsProtoFields(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC)
+	nextExpiry := now.Add(6 * time.Hour)
+	repo := ptrext.Of(schedulingRepo{
+		operationsSummary: ptrext.Of(gdprrepo.OperationsSummary{
+			QueuedRequestCount:   1,
+			ActiveRequestCount:   2,
+			ReadyExportCount:     3,
+			ScheduledDeleteCount: 4,
+			NextExportExpiryAt:   ptrext.Of(nextExpiry),
+		}),
+	})
+	svc := New(
+		repo,
+		ptrext.Of(stubAudit{}),
+		WithAuditRetention(90, 12*time.Hour),
+		WithExportTTL(4*time.Hour),
+		WithStepUpTTL(20*time.Minute),
+		WithDeleteGraceWindow(45*time.Minute),
+	)
+
+	stepUpVerifiedAt := now.Add(-2 * time.Minute)
+	stepUpExpiresAt := now.Add(18 * time.Minute)
+	opsResp, err := svc.GetOperations(context.Background(), "tenant-1", StepUpStatus{
+		Satisfied:       true,
+		PasswordAllowed: true,
+		Method:          "password",
+		VerifiedAt:      ptrext.Of(stepUpVerifiedAt),
+		ExpiresAt:       ptrext.Of(stepUpExpiresAt),
+	})
+	if err != nil {
+		t.Fatalf("GetOperations err = %v", err)
+	}
+	if opsResp.GetExportTtlSeconds() != int32((4 * time.Hour).Seconds()) {
+		t.Fatalf("export ttl = %d", opsResp.GetExportTtlSeconds())
+	}
+	if opsResp.GetAuditRetentionDays() != 90 || opsResp.GetDeleteGraceWindowSeconds() != int32((45*time.Minute).Seconds()) {
+		t.Fatalf("operations = %#v", opsResp)
+	}
+	if opsResp.GetQueuedRequestCount() != 1 || opsResp.GetScheduledDeleteCount() != 4 {
+		t.Fatalf("summary counts = %#v", opsResp)
+	}
+	if opsResp.GetNextExportExpiryAt() == "" || opsResp.GetStepUp().GetMethod() != "password" {
+		t.Fatalf("step up = %#v", opsResp.GetStepUp())
+	}
+}
+
+func TestRequestProtoHelpersCoverFallbacks(t *testing.T) {
+	t.Parallel()
+
+	if requestTypeProto(gdprrepo.RequestTypeDelete) != attunev1.GdprRequestType_GDPR_REQUEST_TYPE_DELETE {
+		t.Fatal("expected delete request type")
+	}
+	if requestTypeProto(gdprrepo.RequestType("mystery")) != attunev1.GdprRequestType_GDPR_REQUEST_TYPE_UNSPECIFIED {
+		t.Fatal("expected unknown request type fallback")
+	}
+	if requestStatusProto(gdprrepo.RequestStatusRevoked) != attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_REVOKED {
+		t.Fatal("expected revoked request status")
+	}
+	if requestStatusProto(gdprrepo.RequestStatus("mystery")) != attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_UNSPECIFIED {
+		t.Fatal("expected unknown request status fallback")
 	}
 }

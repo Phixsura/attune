@@ -2,8 +2,10 @@ package gdpr
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -267,5 +269,139 @@ func TestCancelRequestReturnsCancelledStatus(t *testing.T) {
 	}
 	if result.Body.GetStatus() != attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_CANCELLED {
 		t.Fatalf("CancelRequest status = %v", result.Body.GetStatus())
+	}
+}
+
+func TestBindListRequestsParsesAliasesAndLimit(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/fb/v1/console/gdpr/requests?cursor=abc&limit=15&requestType=delete", http.NoBody)
+	protoReq := ptrext.Of(attunev1.ListGdprRequestsRequest{})
+	if err := BindListRequests(req, protoReq); err != nil {
+		t.Fatalf("BindListRequests err = %v", err)
+	}
+	if protoReq.GetCursor() != "abc" || protoReq.GetLimit() != 15 || protoReq.GetRequestType() != "delete" {
+		t.Fatalf("parsed request = %#v", protoReq)
+	}
+}
+
+func TestBindListRequestsRejectsNonIntegerLimit(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/fb/v1/console/gdpr/requests?limit=nope", http.NoBody)
+	err := BindListRequests(req, ptrext.Of(attunev1.ListGdprRequestsRequest{}))
+	if err == nil {
+		t.Fatal("expected BindListRequests error")
+	}
+}
+
+func TestListRequestsAndOperationsProxyServiceResponses(t *testing.T) {
+	t.Parallel()
+
+	fake := ptrext.Of(fakeService{
+		listResp: ptrext.Of(attunev1.ListGdprRequestsResponse{
+			Items: []*attunev1.GdprRequestSummary{{RequestId: "req-1"}},
+		}),
+		opsResp: ptrext.Of(attunev1.GdprOperationsResponse{
+			QueuedRequestCount: 3,
+		}),
+	})
+	h := NewHandler(fake, nil, nil, 20*time.Minute)
+	ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth: ptrext.Of(session.AuthCtx{
+			TenantID: "tenant-1",
+			UserID:   "admin-1",
+		}),
+	})
+
+	listResult, err := h.ListRequests(ctx, ptrext.Of(attunev1.ListGdprRequestsRequest{
+		Cursor:      ptrext.Of("cursor-1"),
+		Limit:       10,
+		RequestType: "export",
+	}))
+	if err != nil {
+		t.Fatalf("ListRequests err = %v", err)
+	}
+	if len(listResult.Body.GetItems()) != 1 || listResult.Body.GetItems()[0].GetRequestId() != "req-1" {
+		t.Fatalf("list result = %#v", listResult.Body)
+	}
+
+	opsResult, err := h.GetOperations(ctx, ptrext.Of(attunev1.GetGdprOperationsRequest{}))
+	if err != nil {
+		t.Fatalf("GetOperations err = %v", err)
+	}
+	if opsResult.Body.GetQueuedRequestCount() != 3 {
+		t.Fatalf("ops result = %#v", opsResult.Body)
+	}
+}
+
+func TestMapErrorAndHelpers(t *testing.T) {
+	t.Parallel()
+
+	cases := []error{
+		gdprsvc.ErrInvalidSubjectKey,
+		gdprsvc.ErrSubjectNotFound,
+		gdprsvc.ErrExportJobNotFound,
+		gdprsvc.ErrExportJobNotDownloadable,
+		gdprsvc.ErrExportJobNotRevocable,
+		gdprrepo.ErrDeleteRequestNotCancellable,
+		errors.New("boom"),
+	}
+	for _, input := range cases {
+		if mapError(input) == nil {
+			t.Fatalf("expected mapped error for %v", input)
+		}
+	}
+
+	now := time.Now().UTC()
+	expiry := authStepUpExpiry(ptrext.Of(now), 5*time.Minute)
+	if expiry == nil || !expiry.After(now) {
+		t.Fatalf("expiry = %#v", expiry)
+	}
+	if authStepUpExpiry(nil, 5*time.Minute) != nil {
+		t.Fatal("expected nil expiry for nil timestamp")
+	}
+	if stepUpMethod(ptrext.Of(session.AuthCtx{})) != "" {
+		t.Fatal("expected empty method without step-up time")
+	}
+	if stepUpMethod(ptrext.Of(session.AuthCtx{StepUpAt: ptrext.Of(now)})) != "session" {
+		t.Fatal("expected session step-up method")
+	}
+	if firstQueryValue(url.Values{"type": []string{" export "}}, "request_type", "type") != "export" {
+		t.Fatal("expected firstQueryValue to trim and return alias")
+	}
+	if requestStatusProto(gdprrepo.RequestStatusCancelled) != attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_CANCELLED {
+		t.Fatal("expected cancelled request status")
+	}
+	if requestStatusProto(gdprrepo.RequestStatusRevoked) != attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_UNSPECIFIED {
+		t.Fatal("expected revoked to map to unspecified in handler proto helper")
+	}
+}
+
+func TestVerifyStepUpReusesSatisfiedSessionForNonAdmin(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	h := NewHandler(ptrext.Of(fakeService{}), nil, nil, 15*time.Minute)
+	ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth: ptrext.Of(session.AuthCtx{
+			TenantID: "tenant-1",
+			UserID:   "member-1",
+			UserType: "member",
+			StepUpAt: ptrext.Of(now),
+		}),
+	})
+
+	result, err := h.VerifyStepUp(ctx, ptrext.Of(attunev1.VerifyGdprStepUpRequest{}))
+	if err != nil {
+		t.Fatalf("VerifyStepUp err = %v", err)
+	}
+	if !result.Body.GetStepUp().GetSatisfied() || result.Body.GetStepUp().GetMethod() != "session" {
+		t.Fatalf("step-up status = %#v", result.Body.GetStepUp())
+	}
+	if result.Body.GetStepUp().GetVerifiedAt() == "" || result.Body.GetStepUp().GetExpiresAt() == "" {
+		t.Fatalf("expected timestamps in step-up status: %#v", result.Body.GetStepUp())
 	}
 }
