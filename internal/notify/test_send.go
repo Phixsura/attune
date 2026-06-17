@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/Phixsura/attune/internal/notify/sig"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
@@ -102,8 +104,12 @@ func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult 
 	logext.Infof(ctx, "[%s] upstream req,dest_type:%s,url:%s,body:%s",
 		where, target.DestinationType, target.URL, truncate(string(body), 1024))
 
+	httpClient := http.Client{
+		Transport: otelhttp.NewTransport(clonedDefaultTransport()),
+		Timeout:   timeout,
+	}
 	start := time.Now()
-	resp, doErr := http.DefaultClient.Do(req)
+	resp, doErr := httpClient.Do(req)
 	latencyMs := time.Since(start).Milliseconds()
 	if doErr != nil {
 		logext.Errorf(ctx, "[%s] http do failed,url:%s,latency_ms:%d,err:%+v",
@@ -123,6 +129,13 @@ func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult 
 	logext.Infof(ctx, "[%s] OK,target_id:%s,status:%d,latency_ms:%d",
 		where, target.ID, resp.StatusCode, latencyMs)
 	return TestResult{OK: true, StatusCode: resp.StatusCode, LatencyMs: latencyMs}
+}
+
+func clonedDefaultTransport() http.RoundTripper {
+	if tr, ok := http.DefaultTransport.(*http.Transport); ok {
+		return tr.Clone()
+	}
+	return http.DefaultTransport
 }
 
 // buildRawTestBody constructs a minimal envelope marked event_type="test"

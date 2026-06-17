@@ -146,6 +146,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Notify target test-send stability (#63).** Console notify-target test sends
+  now use an isolated OTel-wrapped HTTP transport instead of the shared default
+  client, avoiding cross-test idle-connection interference in race/coverage runs.
+
 - **Serialized startup migrations (#42).** `database.RunMigrations` now takes a
   PostgreSQL advisory lock so multiple replicas cannot race schema migrations
   during Kubernetes rollouts or other parallel starts.

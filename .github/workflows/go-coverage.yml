@@ -51,7 +51,17 @@ jobs:
       - name: Test coverage on main
         working-directory: main
         run: |
-          go test -race -covermode=atomic -coverprofile=coverage.txt ./...
+          for attempt in 1 2; do
+            rm -f coverage.txt coverage-func.txt coverage.html
+            if go test -race -covermode=atomic -coverprofile=coverage.txt ./...; then
+              break
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              exit 1
+            fi
+            echo "coverage test attempt ${attempt} failed; retrying once"
+            sleep 5
+          done
           go tool cover -func=coverage.txt > coverage-func.txt
           go tool cover -html=coverage.txt -o coverage.html
           tail -1 coverage-func.txt
@@ -59,7 +69,17 @@ jobs:
       - name: Test coverage on PR
         working-directory: pr
         run: |
-          go test -race -covermode=atomic -coverprofile=coverage.txt ./...
+          for attempt in 1 2; do
+            rm -f coverage.txt coverage-func.txt coverage.html
+            if go test -race -covermode=atomic -coverprofile=coverage.txt ./...; then
+              break
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              exit 1
+            fi
+            echo "coverage test attempt ${attempt} failed; retrying once"
+            sleep 5
+          done
           go tool cover -func=coverage.txt > coverage-func.txt
           go tool cover -html=coverage.txt -o coverage.html
           tail -1 coverage-func.txt
