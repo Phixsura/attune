@@ -49,3 +49,85 @@ func TestRetryDatabasePingReturnsLastErrorOnTimeout(t *testing.T) {
 		t.Fatalf("retryDatabasePing() err = %v; want %v", err, want)
 	}
 }
+
+func TestRetryDatabasePingWithoutTimeoutCallsPingOnce(t *testing.T) {
+	t.Parallel()
+	called := 0
+
+	err := retryDatabasePing(
+		context.Background(),
+		0,
+		time.Millisecond,
+		func(context.Context) error {
+			called++
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("retryDatabasePing() err = %v; want nil", err)
+	}
+	if called != 1 {
+		t.Fatalf("ping calls = %d; want 1", called)
+	}
+}
+
+func TestRetryDatabasePingDefaultsZeroInterval(t *testing.T) {
+	t.Parallel()
+	called := 0
+
+	err := retryDatabasePing(
+		context.Background(),
+		10*time.Millisecond,
+		0,
+		func(context.Context) error {
+			called++
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("retryDatabasePing() err = %v; want nil", err)
+	}
+	if called != 1 {
+		t.Fatalf("ping calls = %d; want 1", called)
+	}
+}
+
+func TestSleepBeforeShutdownReturnsImmediatelyForNonPositiveDelay(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	sleepBeforeShutdown(0)
+	if time.Since(start) > 20*time.Millisecond {
+		t.Fatalf("sleepBeforeShutdown(0) took too long: %s", time.Since(start))
+	}
+}
+
+func TestSleepBeforeShutdownWaitsForDelay(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	sleepBeforeShutdown(5 * time.Millisecond)
+	if elapsed := time.Since(start); elapsed < 4*time.Millisecond {
+		t.Fatalf("sleepBeforeShutdown() elapsed = %s; want at least 4ms", elapsed)
+	}
+}
+
+func TestShutdownTracingInvokesShutdownWithDeadline(t *testing.T) {
+	t.Parallel()
+	called := false
+
+	shutdownTracing(func(ctx context.Context) error {
+		called = true
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("expected shutdown context deadline")
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 || remaining > 5*time.Second {
+			t.Fatalf("shutdown deadline remaining = %s; want within 0..5s", remaining)
+		}
+		return errors.New("flush failed")
+	})
+
+	if !called {
+		t.Fatal("expected shutdown function to be called")
+	}
+}

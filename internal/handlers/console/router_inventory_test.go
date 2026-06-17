@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
+	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
 	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
@@ -37,6 +38,7 @@ func TestRouterInventory(t *testing.T) {
 		login:              &auth.Handler{},
 		changePassword:     &auth.ChangePasswordHandler{},
 		me:                 &me.MeHandler{},
+		gdpr:               &consolegdpr.Handler{},
 		apiKeys:            &apikey.APIKeysHandler{},
 		notifyTargets:      &notifytarget.NotifyTargetsHandler{},
 		digestSubscription: &digestsubscription.Handler{},
@@ -66,6 +68,15 @@ func TestRouterInventory(t *testing.T) {
 		"GET /api-keys/",
 		"POST /api-keys/",
 		"DELETE /api-keys/{id}",
+		"GET /gdpr/requests",
+		"GET /gdpr/operations",
+		"POST /gdpr/step-up/verify",
+		"POST /gdpr/export",
+		"GET /gdpr/exports/{job_id}",
+		"GET /gdpr/exports/{job_id}/download",
+		"POST /gdpr/exports/{job_id}/revoke",
+		"POST /gdpr/delete",
+		"POST /gdpr/requests/{request_id}/cancel",
 		"GET /notify-targets/",
 		"POST /notify-targets/",
 		"PATCH /notify-targets/{id}",

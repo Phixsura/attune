@@ -240,6 +240,38 @@ func TestClearSessionCookie_ExpiresImmediately(t *testing.T) {
 	}
 }
 
+func TestRefreshStepUpCookie_UpdatesStepUpTimestamp(t *testing.T) {
+	s, _ := NewSigner(testKey)
+	rec := httptest.NewRecorder()
+	expAt := time.Now().Add(time.Hour)
+
+	err := s.RefreshStepUpCookie(cookieRecorder{rec}, ptrext.Of(AuthCtx{
+		TenantID: "tenant-1",
+		UserID:   "user-1",
+		UserType: "admin",
+		IssuedAt: time.Now().Add(-10 * time.Minute),
+		ExpAt:    expAt,
+	}))
+	if err != nil {
+		t.Fatalf("RefreshStepUpCookie: %v", err)
+	}
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected 1 cookie, got %d", len(cookies))
+	}
+	payload, err := s.VerifySession(cookies[0].Value)
+	if err != nil {
+		t.Fatalf("VerifySession: %v", err)
+	}
+	if payload.StepUpAt == 0 {
+		t.Fatal("expected step_up timestamp in refreshed session")
+	}
+	if payload.ExpiresAt != expAt.Unix() {
+		t.Fatalf("ExpiresAt = %d, want %d", payload.ExpiresAt, expAt.Unix())
+	}
+}
+
 type cookieRecorder struct {
 	*httptest.ResponseRecorder
 }

@@ -393,7 +393,7 @@ func TestPG_Insert_AutoAssignsDefaultWorkflowState(t *testing.T) {
 	}
 
 	repo := feedback.NewFeedback(pool)
-	id, err := repo.Insert(ctx, tenantID, "u1", domain.IngestInput{
+	id, err := repo.Insert(ctx, tenantID, "u1", "u1", "u1", "hash-u1", domain.IngestInput{
 		Content: "auto-assign test",
 		Source:  "api",
 	})
@@ -428,7 +428,7 @@ func TestPG_Insert_NullWorkflowStateWhenNoDefault(t *testing.T) {
 	}
 
 	repo := feedback.NewFeedback(pool)
-	id, err := repo.Insert(ctx, tenantID, "u1", domain.IngestInput{
+	id, err := repo.Insert(ctx, tenantID, "u1", "u1", "u1", "hash-u1", domain.IngestInput{
 		Content: "no default test",
 		Source:  "api",
 	})

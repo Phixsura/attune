@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Security
 
+- **GDPR subject export/delete controls (#43).** Added canonical
+  `user_feedback.subject_key` identity tracking plus admin-only
+  `/fb/v1/console/gdpr/export` and `/fb/v1/console/gdpr/delete` flows for
+  tenant-scoped data-subject access and erasure. GDPR exports now bundle
+  feedback rows, tag assignments, workflow audit rows, reply drafts, embedding
+  metadata, and linked `llm_audit` rows into a ZIP archive, while GDPR delete
+  hard-deletes subject-linked feedback data and derived AI artifacts. Unified
+  audit log coverage now records hashed `gdpr.export` / `gdpr.delete` events
+  without writing subject identifiers in clear text to the append-only
+  `audit_log` stream.
+
 - **Immutable console audit log for sensitive actions (#39).** Added an
   append-only `audit_log` table with retention pruning, admin-only read/export
   APIs, and request-scoped actor metadata (user type/id, IP, user-agent).
@@ -38,6 +49,35 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   (Lark/Slack webhook URLs).
 
 ### Added
+
+- **Console GDPR settings surface (#43).** Added a dedicated Settings > GDPR
+  page for exact subject-key export and permanent delete operations, wired to
+  the new proto/OpenAPI contract and admin-only permission gates.
+
+- **GDPR request center and operations panel (#43).** Extended the GDPR
+  settings surface with a first-class request center backed by `gdpr_requests`,
+  live request-status history for export/delete operations, and an explicit
+  operations panel showing step-up windows, export artifact TTL, audit
+  retention, prune cadence, and current archive/request backlog.
+
+- **Sensitive-action GDPR step-up flow (#43).** Added recent-auth session
+  tracking plus password-based step-up verification for local admin sessions,
+  and now require recent step-up auth before GDPR export or permanent delete
+  actions can execute.
+
+- **Scheduled GDPR deletes with cancel window (#43).** Permanent delete
+  requests now enter an explicit grace-period queue backed by `gdpr_requests`,
+  expose `execute_after` / cancellation state in the Console request center,
+  support audited `POST /fb/v1/console/gdpr/requests/{request_id}/cancel`,
+  and execute through the background GDPR worker instead of deleting inline on
+  the request thread.
+
+- **Revocable GDPR export artifacts (#43).** Ready/downloaded GDPR archives
+  can now be explicitly revoked before TTL expiry through the Console request
+  center and export status panel, with audited
+  `POST /fb/v1/console/gdpr/exports/{job_id}/revoke`, explicit `revoked`
+  lifecycle state, and server-side archive invalidation that blocks any later
+  download attempt.
 
 - **Mixin-grade Grafana dashboard coverage (#63).** Added generated first-party
   dashboards for inbound, AI pipeline, operations, security/compliance, overview,

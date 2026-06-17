@@ -10,6 +10,7 @@ import {
   Mailbox,
   Newspaper,
   RotateCcw,
+  Scale,
   ShieldCheck,
   Sparkles,
   Tags,
@@ -26,6 +27,7 @@ import { Label } from '@/components/ui/label'
 import { ApiKeysPage } from '@/features/api-keys/components/api-keys-page'
 import { AuditLogPage } from '@/features/audit-log/components/audit-log-page'
 import { DigestSubscriptionPage } from '@/features/digest-subscription/components/digest-subscription-page'
+import { GDPRPage } from '@/features/gdpr/components/gdpr-page'
 import { GuardPoliciesPage } from '@/features/guard-policies/components/guard-policies-page'
 import { InboundSourcesPage } from '@/features/inbound-sources/components/inbound-sources-page'
 import { MembersPage } from '@/features/members/components/members-page'
@@ -46,6 +48,7 @@ type SettingsSection =
   | 'notify_targets'
   | 'digest_subscription'
   | 'api_keys'
+  | 'gdpr'
   | 'audit_log'
   | 'tags'
   | 'workflow'
@@ -58,6 +61,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'notify_targets',
   'digest_subscription',
   'api_keys',
+  'gdpr',
   'audit_log',
   'tags',
   'workflow',
@@ -333,6 +337,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
       {section === 'notify_targets' ? <NotifyTargetsPage /> : null}
       {section === 'digest_subscription' ? <DigestSubscriptionPage /> : null}
       {section === 'api_keys' ? <ApiKeysPage /> : null}
+      {section === 'gdpr' ? <GDPRPage /> : null}
       {section === 'audit_log' ? <AuditLogPage /> : null}
       {section === 'tags' ? <TagsPage /> : null}
       {section === 'workflow' ? <WorkflowSettingsPage /> : null}
@@ -387,6 +392,13 @@ function SettingsSidebar({
       title: t('settings.areas.api_keys.title'),
       body: t('settings.areas.api_keys.body'),
       permission: 'settings:api_keys:view',
+    },
+    {
+      section: 'gdpr',
+      icon: Scale,
+      title: t('settings.areas.gdpr.title'),
+      body: t('settings.areas.gdpr.body'),
+      permission: 'settings:gdpr:view',
     },
     {
       section: 'audit_log',
@@ -468,6 +480,8 @@ function sectionVisible(section: SettingsSection, can: (permission: Permission) 
       return can('settings:digest:view')
     case 'api_keys':
       return can('settings:api_keys:view')
+    case 'gdpr':
+      return can('settings:gdpr:view')
     case 'audit_log':
       return can('settings:audit_log:view')
     case 'tags':

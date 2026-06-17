@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -24,10 +26,21 @@ import (
 	"github.com/Phixsura/attune/internal/testdb"
 )
 
-func TestPG_AuditLogRejectsUpdateDeleteTruncateAndUnknownAction(t *testing.T) {
-	t.Parallel()
+var sharedPool *pgxpool.Pool
 
-	pool := testdb.NewPool(t)
+func TestMain(m *testing.M) {
+	pool, cleanup, err := testdb.OpenPool()
+	if err != nil {
+		panic(err)
+	}
+	sharedPool = pool
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
+}
+
+func TestPG_AuditLogRejectsUpdateDeleteTruncateAndUnknownAction(t *testing.T) {
+	pool := sharedPool
 	ctx := context.Background()
 	tenantID := insertTenant(t, ctx, pool, "audit-immutable")
 	insertAuditRow(t, ctx, pool, auditRow{
@@ -63,9 +76,7 @@ func TestPG_AuditLogRejectsUpdateDeleteTruncateAndUnknownAction(t *testing.T) {
 }
 
 func TestPG_AuditLogListFiltersByActionActorAndDateRange(t *testing.T) {
-	t.Parallel()
-
-	pool := testdb.NewPool(t)
+	pool := sharedPool
 	ctx := context.Background()
 	tenantID := insertTenant(t, ctx, pool, "audit-filters")
 	memberRepo := tenantmember.NewRepo(pool)
@@ -156,9 +167,7 @@ func TestPG_AuditLogListFiltersByActionActorAndDateRange(t *testing.T) {
 }
 
 func TestPG_AuditLogPruneRemovesRowsPastRetention(t *testing.T) {
-	t.Parallel()
-
-	pool := testdb.NewPool(t)
+	pool := sharedPool
 	ctx := context.Background()
 	tenantID := insertTenant(t, ctx, pool, "audit-prune")
 	svc := auditlogsvc.New(auditlogrepo.New(pool))
@@ -196,9 +205,7 @@ func TestPG_AuditLogPruneRemovesRowsPastRetention(t *testing.T) {
 }
 
 func TestPG_InviteMemberWritesAuditRowWithBeforeAfter(t *testing.T) {
-	t.Parallel()
-
-	pool := testdb.NewPool(t)
+	pool := sharedPool
 	ctx := context.Background()
 	tenantID := insertTenant(t, ctx, pool, "audit-member-invite")
 	memberRepo := tenantmember.NewRepo(pool)
@@ -278,6 +285,7 @@ func newAuditRouter(t *testing.T, pool *pgxpool.Pool) (http.Handler, *console.Si
 		nil,
 		nil,
 		nil,
+		nil,
 		tenantmember.NewRepo(pool),
 	)
 	return router.Mount(), signer
@@ -315,6 +323,7 @@ func newMemberRouter(t *testing.T, pool *pgxpool.Pool) (http.Handler, *console.S
 		nil,
 		nil,
 		nil,
+		nil,
 		memberHandler,
 		nil,
 		memberRepo,
@@ -325,7 +334,7 @@ func newMemberRouter(t *testing.T, pool *pgxpool.Pool) (http.Handler, *console.S
 func insertTenant(t *testing.T, ctx context.Context, pool *pgxpool.Pool, slug string) string {
 	t.Helper()
 
-	const tenantID = "tenant-1"
+	tenantID := uuid.NewString()
 	_, err := pool.Exec(ctx, `
 		INSERT INTO tenants (id, slug, name)
 		VALUES ($1, $2, $3)

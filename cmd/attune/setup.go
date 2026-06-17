@@ -11,6 +11,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
+	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -29,6 +30,7 @@ import (
 	feedbackjobrepo "github.com/Phixsura/attune/internal/repo/feedbackjob"
 	feedbacktagrepo "github.com/Phixsura/attune/internal/repo/feedbacktag"
 	feedbacktagassignmentrepo "github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
+	gdprrepo "github.com/Phixsura/attune/internal/repo/gdpr"
 	guardpolicyrepo "github.com/Phixsura/attune/internal/repo/guardpolicy"
 	idempotencyrepo "github.com/Phixsura/attune/internal/repo/idempotency"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
@@ -45,6 +47,7 @@ import (
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	"github.com/Phixsura/attune/internal/service/feedbackbatch"
+	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
 	"github.com/Phixsura/attune/internal/service/llmrouter"
@@ -186,6 +189,7 @@ func buildConsoleRouter(
 	// to bound a scripted loop's LLM spend on top of the per-row cooldown.
 	feedback.SetRegenLimiter(ratelimit.New(60, 20, false, nil))
 	usage := console.NewUsageHandler(feedbackRepo, llmauditrepo.New(pool))
+	gdprHandler := buildGDPRHandler(cfg, pool, auditLogSvc, signer, adminRepo)
 	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
 	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool)))
 	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
@@ -250,9 +254,32 @@ func buildConsoleRouter(
 		batchHandler,
 		searchHandler,
 		jobHandler,
+		gdprHandler,
 		usage, enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
 		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	).Mount(), nil
+}
+
+func buildGDPRHandler(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+	auditLogSvc *auditlogsvc.Service,
+	signer *console.Signer,
+	adminRepo *admin.Repo,
+) *consolegdpr.Handler {
+	return console.NewGDPRHandler(
+		gdprsvc.New(
+			gdprrepo.New(pool),
+			auditLogSvc,
+			gdprsvc.WithAuditRetention(cfg.Audit.RetentionDays, cfg.AuditPruneInterval),
+			gdprsvc.WithExportTTL(cfg.GDPRExportTTL),
+			gdprsvc.WithStepUpTTL(cfg.GDPRStepUpTTL),
+			gdprsvc.WithDeleteGraceWindow(cfg.GDPRDeleteGraceWindow),
+		),
+		signer,
+		adminRepo,
+		cfg.GDPRStepUpTTL,
+	)
 }
 
 // buildOIDCHandler creates the OIDC handler if OIDC is enabled, otherwise returns nil.

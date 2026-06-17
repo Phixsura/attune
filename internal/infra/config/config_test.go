@@ -30,6 +30,15 @@ func TestLoadPathNewConfig(t *testing.T) {
 	if cfg.AuditPruneInterval != DefaultAuditPruneInterval {
 		t.Fatalf("AuditPruneInterval = %s", cfg.AuditPruneInterval)
 	}
+	if cfg.GDPRExportTTL != DefaultGDPRExportTTL {
+		t.Fatalf("GDPRExportTTL = %s", cfg.GDPRExportTTL)
+	}
+	if cfg.GDPRStepUpTTL != DefaultGDPRStepUpTTL {
+		t.Fatalf("GDPRStepUpTTL = %s", cfg.GDPRStepUpTTL)
+	}
+	if cfg.GDPRDeleteGraceWindow != DefaultGDPRDeleteGraceWindow {
+		t.Fatalf("GDPRDeleteGraceWindow = %s", cfg.GDPRDeleteGraceWindow)
+	}
 	if cfg.ShutdownDrainDelay != DefaultShutdownDrainDelay {
 		t.Fatalf("ShutdownDrainDelay = %s", cfg.ShutdownDrainDelay)
 	}
@@ -221,6 +230,17 @@ func TestLoadPathRejectsInvalidAuditPruneInterval(t *testing.T) {
 	}
 }
 
+func TestLoadPathRejectsInvalidGDPRDurations(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\ngdpr:\n  delete_grace_window: \"bad\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected gdpr.delete_grace_window parse error")
+	}
+	if !strings.Contains(err.Error(), "gdpr.delete_grace_window") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadPathParsesShutdownConfig(t *testing.T) {
 	raw := strings.Replace(
 		validConfigYAML(t, validTinkKeyset(t)),
@@ -267,6 +287,41 @@ func TestLoadPathRejectsInvalidShutdownConfig(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "shutdown.timeout") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSetPathAndPath(t *testing.T) {
+	original := Path()
+	t.Cleanup(func() {
+		SetPath(original)
+	})
+
+	SetPath("  custom.yaml  ")
+	if got := Path(); got != "custom.yaml" {
+		t.Fatalf("Path() = %q, want custom.yaml", got)
+	}
+
+	SetPath("   ")
+	if got := Path(); got != defaultPath {
+		t.Fatalf("Path() = %q, want %q", got, defaultPath)
+	}
+}
+
+func TestLoadUsesActivePath(t *testing.T) {
+	original := Path()
+	t.Cleanup(func() {
+		SetPath(original)
+	})
+
+	path := writeConfig(t, validConfigYAML(t, validTinkKeyset(t)))
+	SetPath(path)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Port != 8090 {
+		t.Fatalf("Port = %d, want 8090", cfg.Port)
 	}
 }
 

@@ -39,6 +39,7 @@ import (
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	gdprrepo "github.com/Phixsura/attune/internal/repo/gdpr"
 	"github.com/Phixsura/attune/internal/repo/guardpolicy"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
@@ -51,6 +52,7 @@ import (
 	digestsvc "github.com/Phixsura/attune/internal/service/digest"
 	embeddingsvc "github.com/Phixsura/attune/internal/service/embedding"
 	"github.com/Phixsura/attune/internal/service/enrich"
+	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
 	"github.com/Phixsura/attune/internal/service/ingest"
 	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
@@ -152,7 +154,7 @@ func runServer() error {
 	go runOutboxLagRefresher(ctx, outboxRepo)
 	go runAuditPruner(ctx, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
 
-	batchJobWorker := startBackgroundWorkers(ctx, pool, enricher, rawLLM, llm, feedbackRepo, cfg.ConsoleBaseURL)
+	batchJobWorker := startBackgroundWorkers(ctx, pool, enricher, rawLLM, llm, feedbackRepo, cfg.ConsoleBaseURL, cfg.GDPRExportTTL)
 	defer batchJobWorker.Stop()
 
 	ingestHandler := handlers.NewIngestHandler(ingestor)
@@ -315,10 +317,12 @@ func startBackgroundWorkers(
 	llm llmclient.LLMClient,
 	feedbackRepo *feedback.FeedbackRepo,
 	consoleBaseURL string,
+	gdprExportTTL time.Duration,
 ) *batchjob.Worker {
 	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
 	startReplyDraftWorker(ctx, pool, enricher, llm)
 	startDigestWorker(ctx, pool, llm, consoleBaseURL)
+	startGDPRExportWorker(ctx, pool, gdprExportTTL)
 
 	worker := batchjob.New(
 		feedbackjobrepo.New(pool),
@@ -327,6 +331,12 @@ func startBackgroundWorkers(
 	)
 	worker.Start(ctx)
 	return worker
+}
+
+func startGDPRExportWorker(ctx context.Context, pool *pgxpool.Pool, exportTTL time.Duration) {
+	repo := gdprrepo.New(pool)
+	worker := gdprsvc.NewWorker(repo, repo, auditlogsvc.New(auditlogrepo.New(pool)), gdprsvc.WithWorkerExportTTL(exportTTL))
+	go worker.Run(ctx)
 }
 
 // startDigestWorker wires the daily digest scheduler + worker (#27). llm is the

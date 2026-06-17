@@ -145,6 +145,37 @@ func TestPG_SourceOverrideRequiresTrustedInboundSourceID(t *testing.T) {
 	assertLLMReceivedRedactedPrompt(t, publicLLM)
 }
 
+func TestPG_IngestWithoutSourceUserFallsBackToComposedUserIDForSubject(t *testing.T) {
+	pool := testdb.NewPool(t)
+	ctx := context.Background()
+	tenantID := createTenant(t, ctx, pool)
+	feedbackRepo := feedback.NewFeedback(pool)
+	keyID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+
+	id, err := ingest.NewIngestor(feedbackRepo, nil).IngestRow(ctx, tenantID, keyID, domain.IngestInput{
+		Content: "anonymous-but-addressable feedback",
+		Source:  "api",
+	})
+	if err != nil {
+		t.Fatalf("IngestRow without source user: %v", err)
+	}
+
+	var userID, subjectKey, subjectDisplay string
+	err = pool.QueryRow(
+		ctx, `
+		SELECT user_id, subject_key, subject_display
+		FROM user_feedback
+		WHERE id = $1`, id,
+	).Scan(&userID, &subjectKey, &subjectDisplay)
+	if err != nil {
+		t.Fatalf("select subject fields: %v", err)
+	}
+	want := "ext_00000000-0000-0000-0000-000000000123"
+	if userID != want || subjectKey != want || subjectDisplay != want {
+		t.Fatalf("got user_id=%q subject_key=%q subject_display=%q, want all %q", userID, subjectKey, subjectDisplay, want)
+	}
+}
+
 type fakeLLM struct {
 	prompt string
 }
@@ -197,7 +228,8 @@ func insertRawWebhookTarget(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 func insertInboundSource(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string) string {
 	t.Helper()
 	id := uuid.NewString()
-	if _, err := pool.Exec(ctx, `
+	if _, err := pool.Exec(
+		ctx, `
 		INSERT INTO inbound_sources (id, tenant_id, channel, name, slug, config, enabled)
 		VALUES ($1, $2, 'webhook', 'Trusted Webhook', 'trusted-webhook', $3, TRUE)`,
 		id, tenantID, []byte("{}"),
@@ -264,7 +296,8 @@ func assertFeedbackDone(t *testing.T, ctx context.Context, pool *pgxpool.Pool, i
 	var language string
 	var displayLanguage string
 	var confidence float64
-	if err := pool.QueryRow(ctx, `
+	if err := pool.QueryRow(
+		ctx, `
 		SELECT enrichment_status, is_urgent, enriched_title, COALESCE(enriched_display_title, ''),
 		 content, COALESCE(language, ''), COALESCE(enriched_display_locale, ''),
 		 COALESCE(classification_confidence, -1)
@@ -304,7 +337,8 @@ func assertLLMAudit(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id in
 	var status string
 	var promptTokens int
 	var completionTokens int
-	if err := pool.QueryRow(ctx, `
+	if err := pool.QueryRow(
+		ctx, `
 		SELECT feedback_id, tenant_id, model_id, purpose, status, prompt_tokens, completion_tokens
 		FROM llm_audit
 		WHERE feedback_id = $1`, id,
@@ -330,7 +364,8 @@ func assertSemanticRun(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id
 	var confidence float64
 	var attrsRaw []byte
 	var droppedRaw []byte
-	if err := pool.QueryRow(ctx, `
+	if err := pool.QueryRow(
+		ctx, `
 		SELECT domain_pack, model, COALESCE((confidence->>'overall')::float8, -1), attrs, dropped_attrs
 		FROM semantic_extraction_runs
 		WHERE subject_type = 'feedback' AND subject_id = $1`, id,

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -24,8 +25,22 @@ import (
 	"github.com/Phixsura/attune/internal/testdb"
 )
 
+var sharedPool *pgxpool.Pool
+
+func TestMain(m *testing.M) {
+	pool, cleanup, err := testdb.OpenPool()
+	if err != nil {
+		panic(err)
+	}
+	sharedPool = pool
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
+}
+
 func TestPG_SecretKeyRegistryRejectsFingerprintMismatch(t *testing.T) {
-	pool := testdb.NewPool(t)
+	pool := sharedPool
+	resetLLMConfigState(t, pool)
 	repo := llmconfigrepo.New(pool)
 	ctx := context.Background()
 
@@ -52,7 +67,8 @@ func TestPG_SecretKeyRegistryRejectsFingerprintMismatch(t *testing.T) {
 
 func TestPG_ChannelCRUDPersistsEncryptedKeyAndZeroWeights(t *testing.T) {
 	ctx := context.Background()
-	pool := testdb.NewPool(t)
+	pool := sharedPool
+	resetLLMConfigState(t, pool)
 	repo := llmconfigrepo.New(pool)
 	store := newTinkStore(t)
 	svc := llmconfigsvc.NewService(repo, store)
@@ -126,7 +142,8 @@ func TestPG_ChannelCRUDPersistsEncryptedKeyAndZeroWeights(t *testing.T) {
 
 func TestPG_DisabledTenantRouteBlocksGlobalFallback(t *testing.T) {
 	ctx := context.Background()
-	pool := testdb.NewPool(t)
+	pool := sharedPool
+	resetLLMConfigState(t, pool)
 	repo := llmconfigrepo.New(pool)
 	svc := llmconfigsvc.NewService(repo, newTinkStore(t))
 	channel, err := svc.CreateChannel(ctx, llmconfigsvc.ChannelInput{
@@ -158,10 +175,11 @@ func TestPG_DisabledTenantRouteBlocksGlobalFallback(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertRoute global: %v", err)
 	}
-	tenantID := "tenant-route-disabled"
-	if _, err := pool.Exec(ctx,
+	tenantID := "tenant-route-disabled-" + uuid.NewString()
+	if _, err := pool.Exec(
+		ctx,
 		`INSERT INTO tenants (id, slug, name) VALUES ($1, $2, $3)`,
-		tenantID, "tenant-route-disabled", "Tenant Route Disabled",
+		tenantID, tenantID, "Tenant Route Disabled",
 	); err != nil {
 		t.Fatalf("insert tenant: %v", err)
 	}
@@ -187,7 +205,8 @@ func TestPG_DisabledTenantRouteBlocksGlobalFallback(t *testing.T) {
 
 func TestPG_LocalNoAuthChannelStoresNoCredential(t *testing.T) {
 	ctx := context.Background()
-	svc := llmconfigsvc.NewService(llmconfigrepo.New(testdb.NewPool(t)), newTinkStore(t))
+	resetLLMConfigState(t, sharedPool)
+	svc := llmconfigsvc.NewService(llmconfigrepo.New(sharedPool), newTinkStore(t))
 	channel, err := svc.CreateChannel(ctx, llmconfigsvc.ChannelInput{
 		Name:           "local",
 		Protocol:       llmconfigrepo.ProtocolOpenAICompat,
@@ -207,7 +226,8 @@ func TestPG_LocalNoAuthChannelStoresNoCredential(t *testing.T) {
 
 func TestPG_ConsoleLLMConfigAPIUsesRealDBAndWriteOnlyKeys(t *testing.T) {
 	ctx := context.Background()
-	pool := testdb.NewPool(t)
+	pool := sharedPool
+	resetLLMConfigState(t, pool)
 	store := newTinkStore(t)
 	svc := llmconfigsvc.NewService(llmconfigrepo.New(pool), store)
 	if err := svc.SyncKeyRegistry(ctx); err != nil {
@@ -264,7 +284,8 @@ func TestPG_ConsoleLLMConfigAPIUsesRealDBAndWriteOnlyKeys(t *testing.T) {
 
 func TestPG_SyncKeyRegistryRejectsLLMCredentialKeyIDMismatch(t *testing.T) {
 	ctx := context.Background()
-	pool := testdb.NewPool(t)
+	pool := sharedPool
+	resetLLMConfigState(t, pool)
 	oldRaw, combinedRaw, _ := rotationKeysets(t)
 	oldStore := mustTinkStoreFromJSON(t, oldRaw)
 	combinedStore := mustTinkStoreFromJSON(t, combinedRaw)
@@ -276,7 +297,8 @@ func TestPG_SyncKeyRegistryRejectsLLMCredentialKeyIDMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encrypt old llm credential: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
+	if _, err := pool.Exec(
+		ctx, `
 		INSERT INTO llm_channels
 		 (id, name, protocol, base_url, auth_mode, credential_key_id,
 		  credential_ciphertext, status, priority, weight, timeout_seconds)
@@ -295,7 +317,8 @@ func TestPG_SyncKeyRegistryRejectsLLMCredentialKeyIDMismatch(t *testing.T) {
 
 func TestPG_SyncKeyRegistryRejectsNestedInboundSecretWithMissingKey(t *testing.T) {
 	ctx := context.Background()
-	pool := testdb.NewPool(t)
+	pool := sharedPool
+	resetLLMConfigState(t, pool)
 	oldRaw, combinedRaw, oldKeyID := rotationKeysets(t)
 	oldStore := mustTinkStoreFromJSON(t, oldRaw)
 	combinedStore := mustTinkStoreFromJSON(t, combinedRaw)
@@ -305,9 +328,11 @@ func TestPG_SyncKeyRegistryRejectsNestedInboundSecretWithMissingKey(t *testing.T
 	}
 	newOnlyStore := mustTinkStoreFromJSON(t, newOnlyRaw)
 
-	if _, err := pool.Exec(ctx,
+	tenantID := "tenant-nested-key-check-" + uuid.NewString()
+	if _, err := pool.Exec(
+		ctx,
 		`INSERT INTO tenants (id, slug, name) VALUES ($1, $2, $3)`,
-		"tenant-nested-key-check", "nested-key-check", "Nested Key Check",
+		tenantID, tenantID, "Nested Key Check",
 	); err != nil {
 		t.Fatalf("insert tenant: %v", err)
 	}
@@ -328,10 +353,11 @@ func TestPG_SyncKeyRegistryRejectsNestedInboundSecretWithMissingKey(t *testing.T
 		t.Fatalf("encrypt outer webhook config: %v", err)
 	}
 	sourceID := uuid.New()
-	if _, err := pool.Exec(ctx, `
+	if _, err := pool.Exec(
+		ctx, `
 		INSERT INTO inbound_sources (id, tenant_id, channel, name, slug, config, enabled)
-		VALUES ($1, 'tenant-nested-key-check', 'webhook', 'nested key check', 'nested-key-check', $2, TRUE)`,
-		sourceID, outer.Ciphertext,
+		VALUES ($1, $2, 'webhook', 'nested key check', $3, $4, TRUE)`,
+		sourceID, tenantID, tenantID, outer.Ciphertext,
 	); err != nil {
 		t.Fatalf("insert inbound source: %v", err)
 	}
@@ -367,6 +393,7 @@ func newConsoleRouter(
 		nil, // batchHandler
 		nil, // searchHandler
 		nil, // jobHandler
+		nil, // gdprHandler
 		nil,
 		nil,
 		nil,
@@ -428,6 +455,22 @@ func authedRequest(
 	}
 	req.AddCookie(cookies[0])
 	return req
+}
+
+func resetLLMConfigState(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `
+		TRUNCATE TABLE
+			inbound_sources,
+			llm_routes,
+			llm_channel_abilities,
+			llm_channels,
+			secret_key_registry
+		RESTART IDENTITY CASCADE`)
+	if err != nil {
+		t.Fatalf("reset llm config state: %v", err)
+	}
 }
 
 type cookieSinkRecorder struct {

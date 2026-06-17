@@ -48,6 +48,7 @@ describe('hasPermission', () => {
     it('can view settings but not edit', () => {
       expect(hasPermission(role, 'settings:enrich_config:view')).toBe(true)
       expect(hasPermission(role, 'settings:enrich_config:edit')).toBe(false)
+      expect(hasPermission(role, 'settings:gdpr:view')).toBe(false)
       expect(hasPermission(role, 'settings:members:view')).toBe(true)
       expect(hasPermission(role, 'settings:members:invite')).toBe(false)
       expect(hasPermission(role, 'settings:members:edit_role')).toBe(false)

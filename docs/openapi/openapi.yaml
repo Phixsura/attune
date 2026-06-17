@@ -740,6 +740,234 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/gdpr/delete:
+        post:
+            tags:
+                - GdprService
+            operationId: GdprService_DeleteGdprSubject
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DeleteGdprSubjectRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteGdprSubjectResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/gdpr/export:
+        post:
+            tags:
+                - GdprService
+            operationId: GdprService_ExportGdprSubject
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ExportGdprSubjectRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExportGdprSubjectResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/gdpr/exports/{jobId}:
+        get:
+            tags:
+                - GdprService
+            operationId: GdprService_GetGdprExport
+            parameters:
+                - name: jobId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GdprExportStatusResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/gdpr/exports/{jobId}/download:
+        get:
+            tags:
+                - GdprService
+            operationId: GdprService_DownloadGdprExport
+            parameters:
+                - name: jobId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        '*/*': {}
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/gdpr/exports/{jobId}/revoke:
+        post:
+            tags:
+                - GdprService
+            operationId: GdprService_RevokeGdprExport
+            parameters:
+                - name: jobId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RevokeGdprExportRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RevokeGdprExportResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/gdpr/operations:
+        get:
+            tags:
+                - GdprService
+            operationId: GdprService_GetGdprOperations
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GdprOperationsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/gdpr/requests:
+        get:
+            tags:
+                - GdprService
+            operationId: GdprService_ListGdprRequests
+            parameters:
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: requestType
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListGdprRequestsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/gdpr/requests/{requestId}/cancel:
+        post:
+            tags:
+                - GdprService
+            operationId: GdprService_CancelGdprRequest
+            parameters:
+                - name: requestId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CancelGdprRequestRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CancelGdprRequestResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/gdpr/step-up/verify:
+        post:
+            tags:
+                - GdprService
+            operationId: GdprService_VerifyGdprStepUp
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VerifyGdprStepUpRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VerifyGdprStepUpResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/guard-policies:
         get:
             tags:
@@ -2490,6 +2718,31 @@ components:
                     type: string
                     description: Optional audit comment for the transition.
             description: BatchWorkflowOp transitions selected rows to a new workflow state.
+        CancelGdprRequestRequest:
+            type: object
+            properties:
+                requestId:
+                    type: string
+        CancelGdprRequestResponse:
+            type: object
+            properties:
+                requestId:
+                    type: string
+                status:
+                    enum:
+                        - GDPR_REQUEST_STATUS_UNSPECIFIED
+                        - GDPR_REQUEST_STATUS_QUEUED
+                        - GDPR_REQUEST_STATUS_RUNNING
+                        - GDPR_REQUEST_STATUS_READY
+                        - GDPR_REQUEST_STATUS_DOWNLOADED
+                        - GDPR_REQUEST_STATUS_COMPLETED
+                        - GDPR_REQUEST_STATUS_FAILED
+                        - GDPR_REQUEST_STATUS_EXPIRED
+                        - GDPR_REQUEST_STATUS_SCHEDULED
+                        - GDPR_REQUEST_STATUS_CANCELLED
+                        - GDPR_REQUEST_STATUS_REVOKED
+                    type: string
+                    format: enum
         CancelJobRequest:
             type: object
             properties:
@@ -2696,6 +2949,47 @@ components:
         DeleteDigestSubscriptionResponse:
             type: object
             properties: {}
+        DeleteGdprSubjectRequest:
+            type: object
+            properties:
+                subjectKey:
+                    type: string
+        DeleteGdprSubjectResponse:
+            type: object
+            properties:
+                requestId:
+                    type: string
+                status:
+                    enum:
+                        - GDPR_REQUEST_STATUS_UNSPECIFIED
+                        - GDPR_REQUEST_STATUS_QUEUED
+                        - GDPR_REQUEST_STATUS_RUNNING
+                        - GDPR_REQUEST_STATUS_READY
+                        - GDPR_REQUEST_STATUS_DOWNLOADED
+                        - GDPR_REQUEST_STATUS_COMPLETED
+                        - GDPR_REQUEST_STATUS_FAILED
+                        - GDPR_REQUEST_STATUS_EXPIRED
+                        - GDPR_REQUEST_STATUS_SCHEDULED
+                        - GDPR_REQUEST_STATUS_CANCELLED
+                        - GDPR_REQUEST_STATUS_REVOKED
+                    type: string
+                    format: enum
+                executeAfter:
+                    type: string
+                subjectKey:
+                    type: string
+                feedbackCount:
+                    type: integer
+                    format: int32
+                tagAssignmentCount:
+                    type: integer
+                    format: int32
+                feedbackAuditCount:
+                    type: integer
+                    format: int32
+                llmAuditCount:
+                    type: integer
+                    format: int32
         DeleteGuardPolicyResponse:
             type: object
             properties: {}
@@ -2887,6 +3181,30 @@ components:
                         Per-tenant Dimension set. Migration 014 seeds 3 dims (type +
                          severity + labels) on every fresh tenant; operators may add /
                          remove / edit any dim from here.
+        ExportGdprSubjectRequest:
+            type: object
+            properties:
+                subjectKey:
+                    type: string
+        ExportGdprSubjectResponse:
+            type: object
+            properties:
+                jobId:
+                    type: string
+                status:
+                    enum:
+                        - GDPR_EXPORT_STATUS_UNSPECIFIED
+                        - GDPR_EXPORT_STATUS_QUEUED
+                        - GDPR_EXPORT_STATUS_RUNNING
+                        - GDPR_EXPORT_STATUS_COMPLETED
+                        - GDPR_EXPORT_STATUS_FAILED
+                        - GDPR_EXPORT_STATUS_EXPIRED
+                        - GDPR_EXPORT_STATUS_REVOKED
+                    type: string
+                    format: enum
+                retryAfterSeconds:
+                    type: integer
+                    format: int32
         Feedback:
             type: object
             properties:
@@ -3034,6 +3352,177 @@ components:
                 FeedbackFilter is the shared filter criteria used by list and batch
                  operations. It mirrors the query parameters of ListFeedbackRequest
                  so batch operations can select rows by the same criteria.
+        GdprExportStatusResponse:
+            type: object
+            properties:
+                jobId:
+                    type: string
+                subjectKey:
+                    type: string
+                subjectDisplay:
+                    type: string
+                status:
+                    enum:
+                        - GDPR_EXPORT_STATUS_UNSPECIFIED
+                        - GDPR_EXPORT_STATUS_QUEUED
+                        - GDPR_EXPORT_STATUS_RUNNING
+                        - GDPR_EXPORT_STATUS_COMPLETED
+                        - GDPR_EXPORT_STATUS_FAILED
+                        - GDPR_EXPORT_STATUS_EXPIRED
+                        - GDPR_EXPORT_STATUS_REVOKED
+                    type: string
+                    format: enum
+                retryAfterSeconds:
+                    type: integer
+                    format: int32
+                downloadPath:
+                    type: string
+                archiveFilename:
+                    type: string
+                error:
+                    type: string
+                feedbackCount:
+                    type: integer
+                    format: int32
+                tagAssignmentCount:
+                    type: integer
+                    format: int32
+                feedbackAuditCount:
+                    type: integer
+                    format: int32
+                llmAuditCount:
+                    type: integer
+                    format: int32
+                createdAt:
+                    type: string
+                startedAt:
+                    type: string
+                completedAt:
+                    type: string
+                expiresAt:
+                    type: string
+                downloadedAt:
+                    type: string
+                revokedAt:
+                    type: string
+        GdprOperationsResponse:
+            type: object
+            properties:
+                stepUp:
+                    $ref: '#/components/schemas/GdprStepUpStatus'
+                exportTtlSeconds:
+                    type: integer
+                    format: int32
+                auditRetentionDays:
+                    type: integer
+                    format: int32
+                auditPruneIntervalSeconds:
+                    type: integer
+                    format: int32
+                queuedRequestCount:
+                    type: integer
+                    format: int32
+                activeRequestCount:
+                    type: integer
+                    format: int32
+                readyExportCount:
+                    type: integer
+                    format: int32
+                nextExportExpiryAt:
+                    type: string
+                hashedAuditResidue:
+                    type: boolean
+                backupsMayRetainUntilRotation:
+                    type: boolean
+                legalHoldSupported:
+                    type: boolean
+                deleteGraceWindowSeconds:
+                    type: integer
+                    format: int32
+                scheduledDeleteCount:
+                    type: integer
+                    format: int32
+        GdprRequestSummary:
+            type: object
+            properties:
+                requestId:
+                    type: string
+                requestType:
+                    enum:
+                        - GDPR_REQUEST_TYPE_UNSPECIFIED
+                        - GDPR_REQUEST_TYPE_EXPORT
+                        - GDPR_REQUEST_TYPE_DELETE
+                    type: string
+                    format: enum
+                status:
+                    enum:
+                        - GDPR_REQUEST_STATUS_UNSPECIFIED
+                        - GDPR_REQUEST_STATUS_QUEUED
+                        - GDPR_REQUEST_STATUS_RUNNING
+                        - GDPR_REQUEST_STATUS_READY
+                        - GDPR_REQUEST_STATUS_DOWNLOADED
+                        - GDPR_REQUEST_STATUS_COMPLETED
+                        - GDPR_REQUEST_STATUS_FAILED
+                        - GDPR_REQUEST_STATUS_EXPIRED
+                        - GDPR_REQUEST_STATUS_SCHEDULED
+                        - GDPR_REQUEST_STATUS_CANCELLED
+                        - GDPR_REQUEST_STATUS_REVOKED
+                    type: string
+                    format: enum
+                subjectKey:
+                    type: string
+                subjectDisplay:
+                    type: string
+                createdBy:
+                    type: string
+                feedbackCount:
+                    type: integer
+                    format: int32
+                tagAssignmentCount:
+                    type: integer
+                    format: int32
+                feedbackAuditCount:
+                    type: integer
+                    format: int32
+                llmAuditCount:
+                    type: integer
+                    format: int32
+                createdAt:
+                    type: string
+                startedAt:
+                    type: string
+                completedAt:
+                    type: string
+                expiresAt:
+                    type: string
+                downloadedAt:
+                    type: string
+                archiveFilename:
+                    type: string
+                error:
+                    type: string
+                executeAfter:
+                    type: string
+                cancelledAt:
+                    type: string
+                revokedAt:
+                    type: string
+        GdprStepUpStatus:
+            type: object
+            properties:
+                satisfied:
+                    type: boolean
+                passwordAllowed:
+                    type: boolean
+                method:
+                    type: string
+                ttlSeconds:
+                    type: integer
+                    format: int32
+                verifiedAt:
+                    type: string
+                expiresAt:
+                    type: string
         GetClusterMembersResponse:
             type: object
             properties:
@@ -3500,6 +3989,15 @@ components:
                         $ref: '#/components/schemas/Feedback'
                 nextCursor:
                     type: string
+        ListGdprRequestsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GdprRequestSummary'
+                nextCursor:
+                    type: string
         ListGuardPoliciesResponse:
             type: object
             properties:
@@ -3762,6 +4260,42 @@ components:
             properties:
                 id:
                     type: string
+        RevokeGdprExportRequest:
+            type: object
+            properties:
+                jobId:
+                    type: string
+        RevokeGdprExportResponse:
+            type: object
+            properties:
+                jobId:
+                    type: string
+                status:
+                    enum:
+                        - GDPR_EXPORT_STATUS_UNSPECIFIED
+                        - GDPR_EXPORT_STATUS_QUEUED
+                        - GDPR_EXPORT_STATUS_RUNNING
+                        - GDPR_EXPORT_STATUS_COMPLETED
+                        - GDPR_EXPORT_STATUS_FAILED
+                        - GDPR_EXPORT_STATUS_EXPIRED
+                        - GDPR_EXPORT_STATUS_REVOKED
+                    type: string
+                    format: enum
+                requestStatus:
+                    enum:
+                        - GDPR_REQUEST_STATUS_UNSPECIFIED
+                        - GDPR_REQUEST_STATUS_QUEUED
+                        - GDPR_REQUEST_STATUS_RUNNING
+                        - GDPR_REQUEST_STATUS_READY
+                        - GDPR_REQUEST_STATUS_DOWNLOADED
+                        - GDPR_REQUEST_STATUS_COMPLETED
+                        - GDPR_REQUEST_STATUS_FAILED
+                        - GDPR_REQUEST_STATUS_EXPIRED
+                        - GDPR_REQUEST_STATUS_SCHEDULED
+                        - GDPR_REQUEST_STATUS_CANCELLED
+                        - GDPR_REQUEST_STATUS_REVOKED
+                    type: string
+                    format: enum
         RotateInboundSourceSecretRequest:
             type: object
             properties:
@@ -4215,6 +4749,16 @@ components:
                 count:
                     type: string
             description: ValueCount is one bucket of a per-dim distribution.
+        VerifyGdprStepUpRequest:
+            type: object
+            properties:
+                password:
+                    type: string
+        VerifyGdprStepUpResponse:
+            type: object
+            properties:
+                stepUp:
+                    $ref: '#/components/schemas/GdprStepUpStatus'
         WebhookCreateConfig:
             type: object
             properties: {}
@@ -4306,6 +4850,7 @@ tags:
          annotation exists only so protoc-gen-openapi emits the REST path + operation
          into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
     - name: FeedbackTagService
+    - name: GdprService
     - name: GuardPolicyService
       description: |-
         GuardPolicyService manages tenant-scoped guard policies and effective-policy

@@ -30,3 +30,9 @@ const (
 )
 
 var DefaultAuditPruneInterval = 24 * time.Hour
+
+var (
+	DefaultGDPRExportTTL         = 24 * time.Hour
+	DefaultGDPRStepUpTTL         = 15 * time.Minute
+	DefaultGDPRDeleteGraceWindow = 15 * time.Minute
+)
