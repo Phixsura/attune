@@ -290,6 +290,41 @@ func TestLoadPathRejectsInvalidShutdownConfig(t *testing.T) {
 	}
 }
 
+func TestSetPathAndPath(t *testing.T) {
+	original := Path()
+	t.Cleanup(func() {
+		SetPath(original)
+	})
+
+	SetPath("  custom.yaml  ")
+	if got := Path(); got != "custom.yaml" {
+		t.Fatalf("Path() = %q, want custom.yaml", got)
+	}
+
+	SetPath("   ")
+	if got := Path(); got != defaultPath {
+		t.Fatalf("Path() = %q, want %q", got, defaultPath)
+	}
+}
+
+func TestLoadUsesActivePath(t *testing.T) {
+	original := Path()
+	t.Cleanup(func() {
+		SetPath(original)
+	})
+
+	path := writeConfig(t, validConfigYAML(t, validTinkKeyset(t)))
+	SetPath(path)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Port != 8090 {
+		t.Fatalf("Port = %d, want 8090", cfg.Port)
+	}
+}
+
 func validTinkKeyset(t *testing.T) string {
 	t.Helper()
 	keysetJSON, err := secretstore.GenerateAES256GCMKeysetJSON()
