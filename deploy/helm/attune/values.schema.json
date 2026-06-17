@@ -411,6 +411,15 @@
         "annotations": { "type": "object" }
       }
     },
+    "prometheusRule": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "labels": { "type": "object" },
+        "annotations": { "type": "object" }
+      }
+    },
     "helmTest": {
       "type": "object",
       "additionalProperties": true,

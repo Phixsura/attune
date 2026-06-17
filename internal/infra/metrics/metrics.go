@@ -604,6 +604,64 @@ var allMetrics = []prometheus.Collector{
 	AuditPruneDurationSeconds,
 }
 
+// RegisteredMetricNames returns the attune metric families registered by this
+// package. Keep it sorted in registration order so drift-test failures are easy
+// to compare with allMetrics.
+func RegisteredMetricNames() []string {
+	return []string{
+		"attune_ingest_total",
+		"attune_enrich_duration_seconds",
+		"attune_enrich_attrs_dropped_total",
+		"attune_enrich_suggested_attrs_total",
+		"attune_enrich_attrs_size_bytes",
+		"attune_enrich_attrs_rejected_total",
+		"attune_notify_failures_total",
+		"attune_outbox_lag_seconds",
+		"attune_claim_contention_total",
+		"attune_ingest_rate_limit_total",
+		"attune_triage_decisions_total",
+		"attune_guard_actions_total",
+		"attune_guard_blocked_total",
+		"attune_llm_calls_total",
+		"attune_llm_tokens_total",
+		"attune_llm_cost_usd_total",
+		"attune_embed_cluster_assignments_total",
+		"attune_embed_errors_total",
+		"attune_embed_duration_seconds",
+		"attune_embed_queue_depth",
+		"attune_reply_draft_generated_total",
+		"attune_reply_draft_errors_total",
+		"attune_reply_draft_duration_seconds",
+		"attune_reply_draft_queue_depth",
+		"attune_digest_runs_total",
+		"attune_digest_duration_seconds",
+		"attune_digest_clustering_fallback_total",
+		"attune_digest_cluster_count",
+		"attune_workflow_transitions_total",
+		"attune_workflow_batch_size",
+		"attune_batch_jobs_claimed_total",
+		"attune_batch_jobs_completed_total",
+		"attune_batch_job_duration_seconds",
+		"attune_batch_jobs_recovered_total",
+		"attune_batch_operations_total",
+		"attune_batch_operation_items_total",
+		"attune_batch_operation_duration_seconds",
+		"attune_idempotency_key_usage_total",
+		"attune_search_queries_total",
+		"attune_search_query_duration_seconds",
+		"attune_search_results_count",
+		"attune_embedding_cache_hits_total",
+		"attune_oidc_login_total",
+		"attune_oidc_login_duration_seconds",
+		"attune_oidc_token_exchange_duration_seconds",
+		"attune_oidc_role_mapping_total",
+		"attune_authz_denied_total",
+		"attune_audit_rows_written_total",
+		"attune_audit_rows_pruned_total",
+		"attune_audit_prune_duration_seconds",
+	}
+}
+
 func init() {
 	Registry.MustRegister(allMetrics...)
 }

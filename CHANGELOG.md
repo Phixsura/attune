@@ -39,6 +39,19 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Mixin-grade Grafana dashboard coverage (#63).** Added generated first-party
+  dashboards for inbound, AI pipeline, operations, security/compliance, overview,
+  and LLM cost signals, with drift guards for metric coverage, datasource-less
+  portability, generated JSON freshness, and Helm dashboard copy sync. The
+  overview now follows RED/golden-signal operational flow, adds diagnostic
+  descriptions and thresholds, and ships a load E2E script for validating metric
+  values through Prometheus and Grafana.
+- **Prometheus rules for Attune observability (#63).** Added portable recording
+  and alert rules for ingest, inbound, AI, operations, LLM provider, and security
+  signals, wired into the Docker Compose observability overlay and exposed as an
+  optional Helm `PrometheusRule`. Alert annotations now include dashboard links,
+  runbook links, and first-response actions.
+
 - **Helm chart for Kubernetes deployment (#42).** Added a first-party
   `deploy/helm/attune` chart with Attune Deployment/Service/Ingress/HPA/PDB,
   optional embedded pgvector Postgres, config Secret or `existingSecret`

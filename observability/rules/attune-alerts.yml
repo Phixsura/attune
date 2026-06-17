@@ -1,0 +1,178 @@
+groups:
+  - name: attune.alerts.ingest
+    rules:
+      - alert: AttuneIngestValidationErrorsHigh
+        expr: attune:ingest_validation_error_ratio:ratio5m > 0.02
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune ingest validation errors are above 2%"
+          description: "Tenant {{ $labels.tenant }} has validation_error_ratio={{ $value | humanizePercentage }} over 5m. Check Attune Overview > Traffic by source/result before changing server code."
+          dashboard: "Attune Overview"
+          dashboard_url: "/d/attune-overview/attune-overview?var-tenant={{ $labels.tenant }}"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestvalidationerrorshigh"
+          action: "Identify the source/result driving validate_err, sample recent rejected payloads, and confirm whether the client contract or source adapter changed."
+
+      - alert: AttuneIngestRateLimited
+        expr: attune:ingest_rate_limit:rate5m > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune ingest is rate limiting sustained traffic"
+          description: "Tenant {{ $labels.tenant }} is being rate limited at {{ $value | humanize }} req/s over 5m. Check Attune Overview > Top tenants by volume."
+          dashboard: "Attune Overview"
+          dashboard_url: "/d/attune-overview/attune-overview?var-tenant={{ $labels.tenant }}"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestratelimited"
+          action: "Confirm whether the tenant is bursting legitimately, retrying aggressively, or misconfigured before changing limiter values."
+
+  - name: attune.alerts.inbound
+    rules:
+      - alert: AttuneInboundAvailabilityLow
+        expr: attune:inbound_availability:ratio5m < 0.99
+        for: 10m
+        labels:
+          severity: critical
+          service: attune
+        annotations:
+          summary: "Attune inbound availability is below 99%"
+          description: "Tenant {{ $labels.tenant }} channel {{ $labels.channel }} has inbound availability {{ $value | humanizePercentage }} over 5m. Check Attune Inbound > Events by channel/result."
+          dashboard: "Attune Inbound"
+          dashboard_url: "/d/attune-inbound/attune-inbound?var-tenant={{ $labels.tenant }}&var-channel={{ $labels.channel }}"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneinboundavailabilitylow"
+          action: "Split errors by source_slug/result, then verify source credentials, upstream API status, and payload shape."
+
+      - alert: AttuneInboundLatencyHigh
+        expr: attune:inbound_p95_seconds:5m > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune inbound p95 latency is above 2s"
+          description: "Tenant {{ $labels.tenant }} channel {{ $labels.channel }} has inbound p95={{ $value | humanizeDuration }} over 5m. Check Attune Inbound > Inbound latency."
+          dashboard: "Attune Inbound"
+          dashboard_url: "/d/attune-inbound/attune-inbound?var-tenant={{ $labels.tenant }}&var-channel={{ $labels.channel }}"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneinboundlatencyhigh"
+          action: "Compare latency with event rate and source attribution; if traffic is flat, inspect adapter or upstream source latency."
+
+      - alert: AttuneInboundSourcesStale
+        expr: attune:inbound_stale_sources:count > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune inbound poll sources are stale"
+          description: "Tenant {{ $labels.tenant }} channel {{ $labels.channel }} has {{ $value | humanize }} stale poll sources. Check Attune Inbound > Poll lag by source."
+          dashboard: "Attune Inbound"
+          dashboard_url: "/d/attune-inbound/attune-inbound?var-tenant={{ $labels.tenant }}&var-channel={{ $labels.channel }}"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneinboundsourcesstale"
+          action: "Open Poll lag by source, identify stale source_slug values, and verify worker scheduling plus upstream credentials."
+
+  - name: attune.alerts.ai
+    rules:
+      - alert: AttuneEnrichmentLatencyHigh
+        expr: attune:enrich_p95_seconds:5m > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune enrichment p95 is above 5s"
+          description: "Tenant {{ $labels.tenant }} has enrichment p95={{ $value | humanizeDuration }} over 5m. Check Attune AI Pipeline > Enrich duration and LLM Cost > Provider errors."
+          dashboard: "Attune AI Pipeline"
+          dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline?var-tenant={{ $labels.tenant }}"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneenrichmentlatencyhigh"
+          action: "Compare triage mix, AI queue depth, and LLM provider errors to separate load, worker backlog, and provider latency."
+
+      - alert: AttuneAIQueueBacklog
+        expr: attune:ai_queue_depth:sum > 10
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune AI queues are backing up"
+          description: "Tenant {{ $labels.tenant }} has combined AI queue depth {{ $value | humanize }}. Check Attune AI Pipeline > Downstream AI jobs."
+          dashboard: "Attune AI Pipeline"
+          dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline?var-tenant={{ $labels.tenant }}"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneaiqueuebacklog"
+          action: "Check embedding and reply-draft queues separately, then confirm worker health before increasing concurrency."
+
+      - alert: AttuneLLMProviderErrors
+        expr: attune:llm_provider_error_ratio:ratio5m > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune LLM provider error ratio is above 1%"
+          description: "Tenant {{ $labels.tenant }} model {{ $labels.model }} has provider error ratio {{ $value | humanizePercentage }} over 5m. Check Attune LLM Cost > Error calls by model."
+          dashboard: "Attune LLM Cost"
+          dashboard_url: "/d/attune-llm-cost/attune-llm-cost?var-tenant={{ $labels.tenant }}&var-model={{ $labels.model }}"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunellmprovidererrors"
+          action: "Confirm the affected model, provider status, and configured credentials; then compare with enrichment latency before retry policy changes."
+
+  - name: attune.alerts.operations
+    rules:
+      - alert: AttuneOutboxLagHigh
+        expr: attune:outbox_lag_seconds:max > 60
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune outbox lag is above 60s"
+          description: "Oldest pending delivery is {{ $value | humanizeDuration }}. Check Attune Operations > Delivery and contention."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxlaghigh"
+          action: "Compare outbox lag with notification failures and claim contention to decide whether this is destination failure or worker capacity."
+
+      - alert: AttuneNotifyFailures
+        expr: sum(attune:notify_failures:rate5m) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune notification delivery failures are occurring"
+          description: "Notification failures are non-zero over 5m. Check Attune Operations > Delivery and contention for destination type and reason."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunenotifyfailures"
+          action: "Group by destination_type/reason, verify customer webhook or Lark target health, and avoid replaying until terminal failures are understood."
+
+  - name: attune.alerts.security
+    rules:
+      - alert: AttuneAuthorizationDenialsHigh
+        expr: sum(rate(attune_authz_denied_total[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune authorization denials are elevated"
+          description: "Authorization denials are above 0.1/s over 5m. Check Attune Security & Compliance > Authorization denials."
+          dashboard: "Attune Security & Compliance"
+          dashboard_url: "/d/attune-security-compliance/attune-security-compliance"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneauthorizationdenialshigh"
+          action: "Split by role and required permission, then determine whether this is expected access control, role drift, or probing."
+
+      - alert: AttuneAuditRowsMissing
+        expr: sum(rate(attune_audit_rows_written_total[30m])) == 0 and sum(rate(attune_authz_denied_total[30m])) > 0
+        for: 30m
+        labels:
+          severity: critical
+          service: attune
+        annotations:
+          summary: "Attune audit rows may be missing"
+          description: "Authorization denials occurred in the last 30m but audit rows did not increase. Check Attune Security & Compliance > Audit log."
+          dashboard: "Attune Security & Compliance"
+          dashboard_url: "/d/attune-security-compliance/attune-security-compliance"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneauditrowsmissing"
+          action: "Treat as compliance-sensitive: verify audit writer health, database writes, and recent authorization-denial paths before suppressing."

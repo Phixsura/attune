@@ -11,77 +11,21 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// TestRegisteredMetricsMatchDocumentedReference is the drift-guard: the metrics
-// registered in metrics.go must exactly equal the catalog documented in
-// observability/README.md. Add or rename a metric without updating the docs and
-// this fails. (Names are a semver-stable contract — proposal #6.)
-func TestRegisteredMetricsMatchDocumentedReference(t *testing.T) {
-	// Mirror of observability/README.md's metrics reference.
-	documented := map[string]bool{
-		"attune_ingest_total":                     true,
-		"attune_enrich_duration_seconds":          true,
-		"attune_enrich_attrs_dropped_total":       true,
-		"attune_enrich_suggested_attrs_total":     true,
-		"attune_enrich_attrs_size_bytes":          true,
-		"attune_enrich_attrs_rejected_total":      true,
-		"attune_notify_failures_total":            true,
-		"attune_outbox_lag_seconds":               true,
-		"attune_claim_contention_total":           true,
-		"attune_ingest_rate_limit_total":          true,
-		"attune_triage_decisions_total":           true,
-		"attune_guard_actions_total":              true,
-		"attune_guard_blocked_total":              true,
-		"attune_llm_calls_total":                  true,
-		"attune_llm_tokens_total":                 true,
-		"attune_llm_cost_usd_total":               true,
-		"attune_embed_cluster_assignments_total":  true,
-		"attune_embed_errors_total":               true,
-		"attune_embed_duration_seconds":           true,
-		"attune_embed_queue_depth":                true,
-		"attune_reply_draft_generated_total":      true,
-		"attune_reply_draft_errors_total":         true,
-		"attune_reply_draft_duration_seconds":     true,
-		"attune_reply_draft_queue_depth":          true,
-		"attune_digest_runs_total":                true,
-		"attune_digest_duration_seconds":          true,
-		"attune_digest_clustering_fallback_total": true,
-		"attune_digest_cluster_count":             true,
-		"attune_workflow_transitions_total":       true,
-		"attune_workflow_batch_size":              true,
-		// Batch operations (#30).
-		"attune_batch_jobs_claimed_total":         true,
-		"attune_batch_jobs_completed_total":       true,
-		"attune_batch_job_duration_seconds":       true,
-		"attune_batch_jobs_recovered_total":       true,
-		"attune_batch_operations_total":           true,
-		"attune_batch_operation_items_total":      true,
-		"attune_batch_operation_duration_seconds": true,
-		"attune_idempotency_key_usage_total":      true,
-		// Semantic search (#30).
-		"attune_search_queries_total":          true,
-		"attune_search_query_duration_seconds": true,
-		"attune_search_results_count":          true,
-		"attune_embedding_cache_hits_total":    true,
-		// OIDC SSO (#40).
-		"attune_oidc_login_total":                     true,
-		"attune_oidc_login_duration_seconds":          true,
-		"attune_oidc_token_exchange_duration_seconds": true,
-		"attune_oidc_role_mapping_total":              true,
-		// RBAC (#38).
-		"attune_authz_denied_total": true,
-		// Audit log (#39).
-		"attune_audit_rows_written_total":     true,
-		"attune_audit_rows_pruned_total":      true,
-		"attune_audit_prune_duration_seconds": true,
+// TestRegisteredMetricsMatchPackageCatalog is the drift-guard between the
+// collectors registered in metrics.go and the package-owned catalog helper.
+func TestRegisteredMetricsMatchPackageCatalog(t *testing.T) {
+	catalog := make(map[string]bool)
+	for _, name := range RegisteredMetricNames() {
+		catalog[name] = true
 	}
 
 	got := registeredMetricNames(t)
-	if len(got) != len(documented) {
-		t.Fatalf("registered %d metrics, documented %d: %v", len(got), len(documented), got)
+	if len(got) != len(catalog) {
+		t.Fatalf("registered %d metrics, cataloged %d: %v", len(got), len(catalog), got)
 	}
 	for _, name := range got {
-		if !documented[name] {
-			t.Errorf("metric %q is registered but missing from observability/README.md's reference", name)
+		if !catalog[name] {
+			t.Errorf("metric %q is registered but missing from RegisteredMetricNames", name)
 		}
 	}
 }

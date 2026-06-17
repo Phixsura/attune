@@ -16,6 +16,8 @@ exposition plus the portable assets in this directory.
   - `dashboards/*.json` — Grafana dashboards with **no hardcoded datasource**, so
     they render against whatever default Prometheus-compatible datasource you
     provision (our bundled Prometheus, your VictoriaMetrics, …).
+  - `rules/*.yml` — Prometheus recording and alert rules for Attune SLI, latency,
+    backlog, provider, inbound, and security signals.
   - `targets.yaml` — a `file_sd_configs` target list for an **external**
     Prometheus/VictoriaMetrics reading `127.0.0.1:8090` (the standalone-host case).
 - **Reference runtime** — `../deploy/docker-compose.obs.yml` bundles Prometheus +
@@ -77,6 +79,10 @@ exposition plus the portable assets in this directory.
 | `attune_audit_rows_written_total` | counter | `action` | immutable audit-log rows written by action (#39) |
 | `attune_audit_rows_pruned_total` | counter | — | immutable audit-log rows pruned by retention policy (#39) |
 | `attune_audit_prune_duration_seconds` | histogram | — | audit-log retention prune latency (#39) |
+| `attune_inbound_total` | counter | `channel`, `tenant`, `source_slug`, `result` | channel-agnostic inbound events by source (#66) |
+| `attune_inbound_latency_seconds` | histogram | `channel`, `tenant`, `source_slug` | end-to-end inbound processing latency (#66) |
+| `attune_inbound_source_state` | gauge | `channel`, `tenant`, `source_slug`, `state` | inbound source state, 1 when active (#66) |
+| `attune_inbound_poll_lag_seconds` | gauge | `channel`, `tenant`, `source_slug` | seconds since last successful poll for poll-mode sources (#66) |
 
 Label values:
 
@@ -111,9 +117,165 @@ Label values:
 - OIDC `role` — `admin` · `member` or custom roles from `role_mapping` config.
 - search `type` — `semantic` · `keyword_fallback` · `hybrid`.
 - embedding cache `result` — `hit` · `miss`.
+- inbound `channel` — bounded adapter channel names such as `email` or `webhook`.
+- inbound `source_slug` — operator-defined source slug from `inbound_sources`.
+- inbound `state` — bounded source state labels such as `enabled`.
+- inbound `result` — bounded adapter result labels such as `ok` or `error`.
 
 The registered set is drift-guarded by `internal/infra/metrics/metrics_test.go` —
-it must match this table.
+and `internal/tools/observabilitydash` — it must match this table and first-party
+dashboard coverage.
+
+## Dashboard suite
+
+First-party Grafana dashboards are generated from
+`internal/tools/observabilitydash` and committed in two distribution locations:
+
+- `observability/dashboards/*.json` for Docker Compose and external monitoring
+  stacks.
+- `deploy/helm/attune/dashboards/*.json` for the Helm chart's dashboard
+  ConfigMap.
+
+Dashboards:
+
+- `Attune Overview` — landing page for traffic, latency, rate limits, triage,
+  backlog, delivery, and top-level risk signals.
+- `Attune Inbound` — channel/source volume, latency, source state, and poll lag.
+- `Attune AI Pipeline` — enrichment, triage, guardrails, embedding, reply draft,
+  and digest health.
+- `Attune Operations` — workflow, batch operations, search, idempotency, outbox,
+  notify, and worker contention.
+- `Attune Security & Compliance` — OIDC, authorization, audit, and guard policy
+  activity.
+- `Attune LLM Cost` — LLM calls, tokens, provider errors, and cost.
+
+## How to read the dashboards
+
+Start with `Attune Overview`. It is organized around the SRE golden-signal / RED
+shape:
+
+- **Traffic** answers whether feedback is arriving at the expected rate.
+- **Validation error %** separates client/schema issues from backend failures.
+- **Rate-limited** shows whether tenants are being protected from bursts or are
+  blocked by a too-low limit.
+- **Needs AI** explains cost and latency pressure by showing how much feedback
+  reaches full LLM enrichment.
+- **Enrich p95** is the primary user-facing AI latency signal.
+- **Outbox lag** is the delivery backlog signal; rising lag with flat traffic
+  means worker or destination pressure.
+
+Then drill down:
+
+- Traffic down: open `Attune Inbound`, inspect source state and poll lag.
+- Validation errors up: inspect `Traffic by source/result` and the affected
+  source/client before changing server code.
+- Rate-limited up: inspect `Top tenants by load`; decide whether it is customer
+  burst behavior, abuse, or an undersized tenant limit.
+- Needs AI or Enrich p95 up: open `Attune AI Pipeline`, then compare triage mix,
+  guard blocks, provider errors, and queue depth.
+- Outbox lag up: open `Attune Operations`; compare lag with notification
+  failures and worker claim contention.
+- Auth, audit, or guard signals up: open `Attune Security & Compliance` and
+  inspect the role/action/reason breakdown before treating it as noise.
+- Cost up: open `Attune LLM Cost`; compare calls, model mix, token direction,
+  and provider errors.
+
+Regenerate dashboards with:
+
+```bash
+make observability-dashboards
+```
+
+Do not edit generated dashboard JSON by hand. The generator tests verify metric
+coverage, datasource portability, generated-output drift, and Helm copy sync.
+
+## Recording and alert rules
+
+Prometheus rules live in `observability/rules/` and are copied into the Helm
+chart under `deploy/helm/attune/rules/`.
+
+Files:
+
+- `attune-recording.yml` — precomputes operational SLI series such as ingest
+  validation error ratio, inbound availability/freshness, inbound p95, enrichment
+  p95, outbox lag, LLM provider error ratio, notification failures, and combined
+  AI queue depth.
+- `attune-alerts.yml` — alert rules aligned with the dashboard lenses:
+  validation errors, sustained rate limiting, inbound availability/latency/stale
+  sources, enrichment latency, AI queue backlog, LLM provider errors, outbox lag,
+  notification failures, authorization denials, and suspicious missing audit
+  writes.
+- `runbooks.md` — alert response guides. Every first-party alert annotation
+  includes `dashboard`, `dashboard_url`, `runbook_url`, and `action` so
+  Alertmanager and the Prometheus UI can point operators to the right view and
+  first diagnostic step.
+
+The Docker Compose observability overlay loads these rules automatically through
+`deploy/prometheus.yml`. For Kubernetes, enable the optional Prometheus Operator
+resource:
+
+```yaml
+serviceMonitor:
+  enabled: true
+prometheusRule:
+  enabled: true
+```
+
+Rule thresholds intentionally match the dashboard targets first. Tune labels,
+severity routing, and `for:` durations in your production Alertmanager stack
+after you know normal tenant traffic patterns.
+
+Alert annotations are part of the observability contract. Keep them actionable:
+
+- `summary` — one-line symptom.
+- `description` — current value, affected label set, and dashboard panel to
+  inspect.
+- `dashboard` / `dashboard_url` — the Grafana entry point with scoped variables
+  when available.
+- `runbook_url` — the matching section in `observability/runbooks.md`.
+- `action` — the first response step, written as an operator action rather than a
+  generic explanation.
+
+Validate the reference Prometheus config and rules with:
+
+```bash
+make observability-rules
+```
+
+## Load and data validation
+
+Use the load E2E script when changing metrics or dashboards. It sends mixed
+real traffic through `/v1/feedback/ingest`, waits for scrape windows, and checks
+the exposed metrics, recording rules, alert rule groups, and, optionally,
+Grafana's datasource proxy.
+
+```bash
+API_KEY=fbk_live_... \
+BASE_URL=http://127.0.0.1:18090 \
+PROM_URL=http://127.0.0.1:19090 \
+GRAFANA_URL=http://127.0.0.1:13000 \
+GRAFANA_USER=admin \
+GRAFANA_PASSWORD=... \
+REQUESTS=240 \
+CONCURRENCY=24 \
+RATE_LIMIT_WARMUP_REQUESTS=60 \
+RATE_LIMIT_REFILL_SECONDS=40 \
+make observability-load-e2e
+```
+
+Expected behavior under load:
+
+- `attune_ingest_total{result="ok"}` increases for accepted requests.
+- `attune_ingest_total{result="validate_err"}` increases for malformed payloads.
+- `attune_ingest_rate_limit_total` increases when the configured limiter rejects
+  bursts.
+- `attune_triage_decisions_total` increases after the enrichment worker handles
+  accepted rows.
+- Overview range panels should become non-empty after at least two scrapes for
+  the same label set. Counter families that first appear during a burst need a
+  baseline scrape before `increase()` can show a non-zero range value; the load
+  script primes ingest, validation, and rate-limit label sets before measured
+  traffic for this reason.
 
 ## Add a dashboard
 

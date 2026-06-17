@@ -1,0 +1,86 @@
+rule_files:
+  - /etc/prometheus/rules/attune-recording.yml
+  - /etc/prometheus/rules/attune-alerts.yml
+
+evaluation_interval: 30s
+
+tests:
+  - interval: 30s
+    input_series:
+      - series: 'attune_ingest_total{tenant="tenant-a",source="api",result="ok"}'
+        values: '0+60x40'
+      - series: 'attune_ingest_total{tenant="tenant-a",source="api",result="validate_err"}'
+        values: '0+3x40'
+      - series: 'attune_ingest_rate_limit_total{tenant="tenant-a"}'
+        values: '0+6x40'
+      - series: 'attune_llm_calls_total{tenant="tenant-a",model="unknown",status="ok"}'
+        values: '0+294x40'
+      - series: 'attune_llm_calls_total{tenant="tenant-a",model="unknown",status="error"}'
+        values: '0+6x40'
+      - series: 'attune_outbox_lag_seconds'
+        values: '120x40'
+
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AttuneIngestValidationErrorsHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneIngestValidationErrorsHigh
+              service: attune
+              severity: warning
+              tenant: tenant-a
+            exp_annotations:
+              action: Identify the source/result driving validate_err, sample recent rejected payloads, and confirm whether the client contract or source adapter changed.
+              dashboard: Attune Overview
+              dashboard_url: /d/attune-overview/attune-overview?var-tenant=tenant-a
+              description: Tenant tenant-a has validation_error_ratio=4.762% over 5m. Check Attune Overview > Traffic by source/result before changing server code.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestvalidationerrorshigh
+              summary: Attune ingest validation errors are above 2%
+
+      - eval_time: 20m
+        alertname: AttuneIngestRateLimited
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneIngestRateLimited
+              service: attune
+              severity: warning
+              tenant: tenant-a
+            exp_annotations:
+              action: Confirm whether the tenant is bursting legitimately, retrying aggressively, or misconfigured before changing limiter values.
+              dashboard: Attune Overview
+              dashboard_url: /d/attune-overview/attune-overview?var-tenant=tenant-a
+              description: Tenant tenant-a is being rate limited at 200m req/s over 5m. Check Attune Overview > Top tenants by volume.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestratelimited
+              summary: Attune ingest is rate limiting sustained traffic
+
+      - eval_time: 20m
+        alertname: AttuneLLMProviderErrors
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneLLMProviderErrors
+              model: unknown
+              service: attune
+              severity: warning
+              tenant: tenant-a
+            exp_annotations:
+              action: Confirm the affected model, provider status, and configured credentials; then compare with enrichment latency before retry policy changes.
+              dashboard: Attune LLM Cost
+              dashboard_url: /d/attune-llm-cost/attune-llm-cost?var-tenant=tenant-a&var-model=unknown
+              description: Tenant tenant-a model unknown has provider error ratio 2% over 5m. Check Attune LLM Cost > Error calls by model.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunellmprovidererrors
+              summary: Attune LLM provider error ratio is above 1%
+
+      - eval_time: 20m
+        alertname: AttuneOutboxLagHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneOutboxLagHigh
+              service: attune
+              severity: warning
+            exp_annotations:
+              action: Compare outbox lag with notification failures and claim contention to decide whether this is destination failure or worker capacity.
+              dashboard: Attune Operations
+              dashboard_url: /d/attune-operations/attune-operations
+              description: Oldest pending delivery is 2m 0s. Check Attune Operations > Delivery and contention.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxlaghigh
+              summary: Attune outbox lag is above 60s

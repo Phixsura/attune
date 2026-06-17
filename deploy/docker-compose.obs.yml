@@ -26,6 +26,7 @@ services:
           memory: 512M
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/rules/:/etc/prometheus/rules/:ro
       - attune-prom:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml

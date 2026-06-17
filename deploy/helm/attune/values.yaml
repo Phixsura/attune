@@ -263,6 +263,11 @@ grafanaDashboard:
     grafana_dashboard: "1"
   annotations: {}
 
+prometheusRule:
+  enabled: false
+  labels: {}
+  annotations: {}
+
 helmTest:
   enabled: true
   podSecurityContext:

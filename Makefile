@@ -8,7 +8,7 @@
 # plugins, so no local protoc-gen-* installs are needed — only network access to
 # the Buf Schema Registry. To change a proto dependency, run `make proto-deps`.
 
-.PHONY: help proto proto-lint proto-breaking proto-deps test test-live test-live-list ci-check
+.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e test test-live test-live-list ci-check
 
 help: ## List targets.
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -25,6 +25,26 @@ proto-breaking: ## Check proto compatibility against main.
 
 proto-deps: ## Refresh buf.lock (after changing deps in buf.yaml).
 	buf dep update
+
+observability-dashboards: ## Regenerate Grafana dashboards and Helm copies.
+	go run ./internal/tools/observabilitydash
+
+observability-rules: ## Validate Prometheus scrape config, recording rules, and alert rules.
+	docker run --rm \
+		--entrypoint promtool \
+		-v "$(CURDIR)/deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+		-v "$(CURDIR)/observability/rules:/etc/prometheus/rules:ro" \
+		prom/prometheus:v3.12.0 \
+		check config /etc/prometheus/prometheus.yml
+	docker run --rm \
+		--entrypoint promtool \
+		-v "$(CURDIR)/observability/rules:/etc/prometheus/rules:ro" \
+		-v "$(CURDIR)/observability/rule-tests:/etc/prometheus/rule-tests:ro" \
+		prom/prometheus:v3.12.0 \
+		test rules /etc/prometheus/rule-tests/attune-rules.test.yml
+
+observability-load-e2e: ## Send load and verify metrics via Prometheus/Grafana. Requires API_KEY.
+	bash scripts/observability-load-e2e.sh
 
 # ── Test tiers (docs/testing.md) ─────────────────────────────────────────
 #
