@@ -1,4 +1,5 @@
 import { HttpResponse, http } from 'msw'
+import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 import { GDPRPage } from '@/features/gdpr/components/gdpr-page'
 import { GdprExportStatus, GdprRequestStatus, GdprRequestType } from '@/proto/attune/v1/gdpr'
@@ -350,5 +351,29 @@ describe('GDPRPage', () => {
 
     expect(screen.getByText('无权限访问 GDPR 页面')).toBeInTheDocument()
     expect(screen.getByText('当前账号没有查看或执行数据主体导出/删除的权限。')).toBeInTheDocument()
+  })
+
+  it('shows validation toast for missing subject key and disables delete until confirmation matches', async () => {
+    permissionsMock.mockReturnValue({
+      can: () => true,
+    })
+
+    server.use(
+      http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(baseOperations)),
+      http.get('/fb/v1/console/gdpr/requests', () => HttpResponse.json({ items: [] })),
+    )
+
+    const { user } = renderWithProviders(<GDPRPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('GDPR 数据请求')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '导出 ZIP' }))
+    expect(toast.error).toHaveBeenCalledWith('请输入 subject key')
+
+    await user.type(screen.getByTestId('gdpr-subject-key'), 'alice@example.com')
+    await user.type(screen.getByTestId('gdpr-confirm-subject-key'), 'alice+wrong@example.com')
+    expect(screen.getByTestId('gdpr-delete-submit')).toBeDisabled()
   })
 })

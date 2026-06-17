@@ -100,6 +100,32 @@ func TestDeleteTranslatesNotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteDirectlyExecutesWhenRequestStoreUnavailable(t *testing.T) {
+	t.Parallel()
+
+	repo := ptrext.Of(stubRepo{
+		deleteResult: ptrext.Of(gdprrepo.DeleteResult{
+			SubjectKey: "alice@example.com",
+			Counts: gdprrepo.Counts{
+				FeedbackCount: 1,
+			},
+		}),
+	})
+	audit := ptrext.Of(stubAudit{})
+	svc := New(repo, audit)
+
+	result, err := svc.Delete(context.Background(), "tenant-1", "alice@example.com", auditlogsvc.Actor{Type: "admin", ID: "u-1"})
+	if err != nil {
+		t.Fatalf("Delete err = %v", err)
+	}
+	if result.SubjectKey != "alice@example.com" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(audit.events) != 1 || audit.events[0].Action != "gdpr.delete" {
+		t.Fatalf("expected gdpr.delete audit event, got %#v", audit.events)
+	}
+}
+
 type schedulingRepo struct {
 	deleteResult       *gdprrepo.DeleteResult
 	cancelledRequest   *gdprrepo.Request
@@ -268,6 +294,22 @@ func TestRevokeExportAudits(t *testing.T) {
 	}
 }
 
+func TestTranslateRepoErrorAndRecordNilAudit(t *testing.T) {
+	t.Parallel()
+
+	if got := translateRepoError(ErrInvalidSubjectKey); !errors.Is(got, ErrInvalidSubjectKey) {
+		t.Fatalf("translateRepoError invalid subject = %v", got)
+	}
+	if got := translateRepoError(errors.New("boom")); got == nil || got.Error() != "boom" {
+		t.Fatalf("translateRepoError passthrough = %v", got)
+	}
+
+	svc := New(ptrext.Of(stubRepo{}), nil)
+	if err := svc.record(context.Background(), "tenant-1", "alice@example.com", auditlogsvc.Actor{}, "gdpr.export", "summary", nil, nil); err != nil {
+		t.Fatalf("record err = %v", err)
+	}
+}
+
 func TestRecordDeleteCompletionAudits(t *testing.T) {
 	t.Parallel()
 
@@ -423,14 +465,35 @@ func TestGetOperationsMapsProtoFields(t *testing.T) {
 func TestRequestProtoHelpersCoverFallbacks(t *testing.T) {
 	t.Parallel()
 
-	if requestTypeProto(gdprrepo.RequestTypeDelete) != attunev1.GdprRequestType_GDPR_REQUEST_TYPE_DELETE {
-		t.Fatal("expected delete request type")
+	requestTypes := map[gdprrepo.RequestType]attunev1.GdprRequestType{
+		gdprrepo.RequestTypeExport: attunev1.GdprRequestType_GDPR_REQUEST_TYPE_EXPORT,
+		gdprrepo.RequestTypeDelete: attunev1.GdprRequestType_GDPR_REQUEST_TYPE_DELETE,
+	}
+	for input, want := range requestTypes {
+		if got := requestTypeProto(input); got != want {
+			t.Fatalf("requestTypeProto(%q) = %v, want %v", input, got, want)
+		}
 	}
 	if requestTypeProto(gdprrepo.RequestType("mystery")) != attunev1.GdprRequestType_GDPR_REQUEST_TYPE_UNSPECIFIED {
 		t.Fatal("expected unknown request type fallback")
 	}
-	if requestStatusProto(gdprrepo.RequestStatusRevoked) != attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_REVOKED {
-		t.Fatal("expected revoked request status")
+
+	statuses := map[gdprrepo.RequestStatus]attunev1.GdprRequestStatus{
+		gdprrepo.RequestStatusQueued:     attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_QUEUED,
+		gdprrepo.RequestStatusRunning:    attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_RUNNING,
+		gdprrepo.RequestStatusReady:      attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_READY,
+		gdprrepo.RequestStatusDownloaded: attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_DOWNLOADED,
+		gdprrepo.RequestStatusCompleted:  attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_COMPLETED,
+		gdprrepo.RequestStatusFailed:     attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_FAILED,
+		gdprrepo.RequestStatusExpired:    attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_EXPIRED,
+		gdprrepo.RequestStatusScheduled:  attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_SCHEDULED,
+		gdprrepo.RequestStatusCancelled:  attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_CANCELLED,
+		gdprrepo.RequestStatusRevoked:    attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_REVOKED,
+	}
+	for input, want := range statuses {
+		if got := requestStatusProto(input); got != want {
+			t.Fatalf("requestStatusProto(%q) = %v, want %v", input, got, want)
+		}
 	}
 	if requestStatusProto(gdprrepo.RequestStatus("mystery")) != attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_UNSPECIFIED {
 		t.Fatal("expected unknown request status fallback")

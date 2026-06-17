@@ -251,6 +251,31 @@ func TestRevokeExportMapsRepoErrors(t *testing.T) {
 	}
 }
 
+func TestWorkerProcessNextExportFailsJobOnExportError(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		claimJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:         "job-123",
+			TenantID:   "tenant-1",
+			SubjectKey: "alice@example.com",
+		}),
+	})
+	worker := NewWorker(
+		ptrext.Of(exportRepoStub{exportErr: context.DeadlineExceeded}),
+		store,
+		ptrext.Of(stubAudit{}),
+	)
+
+	err := worker.processNextExport(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("processNextExport err = %v", err)
+	}
+	if store.failJobID != "job-123" || store.failErrMsg == "" {
+		t.Fatalf("failed job state = id:%q err:%q", store.failJobID, store.failErrMsg)
+	}
+}
+
 func TestWorkerProcessNextExportCompletesAndAudits(t *testing.T) {
 	t.Parallel()
 
@@ -338,6 +363,19 @@ func TestJobStatusResponseIncludesDownloadPathAndMetadata(t *testing.T) {
 func TestExportJobStatusProtoCoversUnknown(t *testing.T) {
 	t.Parallel()
 
+	statuses := map[gdprrepo.ExportJobStatus]attunev1.GdprExportStatus{
+		gdprrepo.ExportJobQueued:    attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_QUEUED,
+		gdprrepo.ExportJobRunning:   attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_RUNNING,
+		gdprrepo.ExportJobCompleted: attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_COMPLETED,
+		gdprrepo.ExportJobFailed:    attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_FAILED,
+		gdprrepo.ExportJobExpired:   attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_EXPIRED,
+		gdprrepo.ExportJobRevoked:   attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_REVOKED,
+	}
+	for input, want := range statuses {
+		if got := exportJobStatusProto(input); got != want {
+			t.Fatalf("exportJobStatusProto(%q) = %v, want %v", input, got, want)
+		}
+	}
 	if got := exportJobStatusProto(gdprrepo.ExportJobStatus("mystery")); got != attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_UNSPECIFIED {
 		t.Fatalf("status = %v", got)
 	}
@@ -390,4 +428,13 @@ func TestWorkerProcessNextDeleteFailsRequest(t *testing.T) {
 	if store.failedID != "req-123" {
 		t.Fatalf("failed request id = %q", store.failedID)
 	}
+}
+
+func TestWorkerRunStopsOnCancelledContext(t *testing.T) {
+	t.Parallel()
+
+	worker := NewWorker(ptrext.Of(exportRepoStub{}), ptrext.Of(exportJobStoreStub{}), ptrext.Of(stubAudit{}))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	worker.Run(ctx)
 }

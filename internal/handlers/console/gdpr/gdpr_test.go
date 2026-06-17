@@ -6,13 +6,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	consoleauth "github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/repo/admin"
 	gdprrepo "github.com/Phixsura/attune/internal/repo/gdpr"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
@@ -29,6 +32,15 @@ type fakeService struct {
 	cancelRequestID  string
 	listResp         *attunev1.ListGdprRequestsResponse
 	opsResp          *attunev1.GdprOperationsResponse
+}
+
+type fakeAdminReader struct {
+	admin admin.Admin
+	err   error
+}
+
+func (f *fakeAdminReader) GetByID(context.Context, string) (admin.Admin, error) {
+	return f.admin, f.err
 }
 
 func (f *fakeService) StartExport(context.Context, string, string, auditlogsvc.Actor) (*attunev1.ExportGdprSubjectResponse, error) {
@@ -414,5 +426,95 @@ func TestVerifyStepUpReusesSatisfiedSessionForNonAdmin(t *testing.T) {
 	}
 	if result.Body.GetStepUp().GetVerifiedAt() == "" || result.Body.GetStepUp().GetExpiresAt() == "" {
 		t.Fatalf("expected timestamps in step-up status: %#v", result.Body.GetStepUp())
+	}
+}
+
+func TestVerifyStepUpPasswordFlows(t *testing.T) {
+	t.Parallel()
+
+	signingKey := "gdpr-step-up-test-key-32-bytes-long!"
+	signer, err := session.NewSigner(signingKey)
+	if err != nil {
+		t.Fatalf("NewSigner err = %v", err)
+	}
+	passwordHash, err := consoleauth.HashPassword("correct-password")
+	if err != nil {
+		t.Fatalf("HashPassword err = %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		adminReader   adminReader
+		body          string
+		wantStatus    int
+		wantContains  string
+		wantSetCookie bool
+	}{
+		{
+			name:         "missing password",
+			adminReader:  ptrext.Of(fakeAdminReader{admin: admin.Admin{ID: "admin-1", PasswordHash: passwordHash}}),
+			body:         `{}`,
+			wantStatus:   http.StatusBadRequest,
+			wantContains: `"code":"BAD_REQUEST"`,
+		},
+		{
+			name:         "admin missing",
+			adminReader:  ptrext.Of(fakeAdminReader{err: admin.ErrNotFound}),
+			body:         `{"password":"correct-password"}`,
+			wantStatus:   http.StatusForbidden,
+			wantContains: `"code":"FORBIDDEN"`,
+		},
+		{
+			name:         "wrong password",
+			adminReader:  ptrext.Of(fakeAdminReader{admin: admin.Admin{ID: "admin-1", PasswordHash: passwordHash}}),
+			body:         `{"password":"wrong-password"}`,
+			wantStatus:   http.StatusUnauthorized,
+			wantContains: `"code":"UNAUTHORIZED"`,
+		},
+		{
+			name:          "success",
+			adminReader:   ptrext.Of(fakeAdminReader{admin: admin.Admin{ID: "admin-1", PasswordHash: passwordHash}}),
+			body:          `{"password":"correct-password"}`,
+			wantStatus:    http.StatusOK,
+			wantContains:  `"satisfied":true`,
+			wantSetCookie: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := NewHandler(ptrext.Of(fakeService{}), signer, tc.adminReader, 15*time.Minute)
+			route := dispatcher.Bind(
+				"console.gdpr.VerifyStepUp",
+				dispatcher.JSON(func() *attunev1.VerifyGdprStepUpRequest {
+					return ptrext.Of(attunev1.VerifyGdprStepUpRequest{})
+				}),
+				h.VerifyStepUp,
+				dispatcher.WithAuth(func(_ *http.Request, _ *attunev1.VerifyGdprStepUpRequest) (*session.AuthCtx, error) {
+					return ptrext.Of(session.AuthCtx{
+						TenantID: "tenant-1",
+						UserID:   "admin-1",
+						ExpAt:    time.Now().UTC().Add(time.Hour),
+					}), nil
+				}),
+			)
+
+			req := httptest.NewRequest(http.MethodPost, "/fb/v1/console/gdpr/step-up/verify", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			route(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantContains) {
+				t.Fatalf("body = %s, want substring %s", rec.Body.String(), tc.wantContains)
+			}
+			if tc.wantSetCookie && len(rec.Result().Cookies()) == 0 {
+				t.Fatal("expected refreshed step-up cookie on success")
+			}
+		})
 	}
 }
