@@ -76,7 +76,8 @@ docker compose -f docker-compose.yml -f docker-compose.obs.yml up -d
 ```
 
 > **This is a reference / dev stack** — pinned images, single-node Prometheus
-> (15 d / 2 GB retention), memory-capped, **no alerting or HA**. For a real
+> (15 d / 2 GB retention), memory-capped, with built-in Prometheus rules but
+> **no Alertmanager or HA**. For a real
 > production setup, point your *existing* monitoring (a Prometheus / Grafana /
 > VictoriaMetrics / Datadog running **separately from the app host**, with your
 > own retention + alerting) at attune's `/metrics` — see the contract in

@@ -1,0 +1,85 @@
+groups:
+  - name: attune.recording.sli
+    interval: 30s
+    rules:
+      - record: attune:ingest_requests:rate5m
+        expr: sum by (tenant, source, result) (rate(attune_ingest_total[5m]))
+
+      - record: attune:ingest_validation_error_ratio:ratio5m
+        expr: |
+          (
+            sum by (tenant) (rate(attune_ingest_total{result="validate_err"}[5m]))
+          )
+          /
+          clamp_min(sum by (tenant) (rate(attune_ingest_total[5m])), 1e-9)
+
+      - record: attune:ingest_rate_limit:rate5m
+        expr: sum by (tenant) (rate(attune_ingest_rate_limit_total[5m]))
+
+      - record: attune:enrich_p95_seconds:5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (tenant, le) (rate(attune_enrich_duration_seconds_bucket[5m]))
+          )
+
+      - record: attune:outbox_lag_seconds:max
+        expr: max(attune_outbox_lag_seconds)
+
+      - record: attune:notify_failures:rate5m
+        expr: sum by (destination_type, reason) (rate(attune_notify_failures_total[5m]))
+
+      - record: attune:llm_provider_error_ratio:ratio5m
+        expr: |
+          (
+            sum by (tenant, model) (rate(attune_llm_calls_total{status="error"}[5m]))
+          )
+          /
+          clamp_min(sum by (tenant, model) (rate(attune_llm_calls_total[5m])), 1e-9)
+
+      - record: attune:ai_queue_depth:sum
+        expr: |
+          (sum by (tenant) (attune_embed_queue_depth) or vector(0))
+          +
+          (sum by (tenant) (attune_reply_draft_queue_depth) or vector(0))
+
+  - name: attune.recording.inbound
+    interval: 30s
+    rules:
+      - record: attune:inbound_events:rate5m
+        expr: sum by (tenant, channel, result) (rate(attune_inbound_total[5m]))
+
+      - record: attune:inbound_availability:ratio5m
+        expr: |
+          1 - (
+            (
+              sum by (tenant, channel) (rate(attune_inbound_total{result!="ok"}[5m]))
+            )
+            /
+            clamp_min(sum by (tenant, channel) (rate(attune_inbound_total[5m])), 1e-9)
+          )
+
+      - record: attune:inbound_p95_seconds:5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (tenant, channel, le) (rate(attune_inbound_latency_seconds_bucket[5m]))
+          )
+
+      - record: attune:inbound_enabled_sources:count
+        expr: sum by (tenant, channel) (attune_inbound_source_state{state="enabled"})
+
+      - record: attune:inbound_stale_sources:count
+        expr: count by (tenant, channel) (attune_inbound_poll_lag_seconds > 900)
+
+      - record: attune:inbound_freshness:ratio
+        expr: |
+          1 - (
+            (
+              count by (tenant, channel) (attune_inbound_poll_lag_seconds > 900)
+              or
+              0 * sum by (tenant, channel) (attune_inbound_source_state{state="enabled"})
+            )
+            /
+            clamp_min(sum by (tenant, channel) (attune_inbound_source_state{state="enabled"}), 1)
+          )

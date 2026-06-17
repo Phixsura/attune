@@ -152,7 +152,7 @@ describe('AuditLogPage', () => {
       expect(screen.getByText('member.invite')).toBeInTheDocument()
     })
 
-    await user.click(screen.getAllByText('详情')[1])
+    await user.click(screen.getByText('详情'))
 
     expect(screen.getByText('请求元数据')).toBeInTheDocument()
     expect(screen.getByText('admin@example.com')).toBeInTheDocument()

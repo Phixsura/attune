@@ -26,6 +26,18 @@ type promMetrics struct {
 	pollLag *prometheus.GaugeVec
 }
 
+// RegisteredMetricNames returns the inbound metric families registered by
+// NewPrometheusMetrics. Observability drift guards use this as the package-owned
+// catalog instead of scraping constructor internals.
+func RegisteredMetricNames() []string {
+	return []string{
+		"attune_inbound_total",
+		"attune_inbound_latency_seconds",
+		"attune_inbound_source_state",
+		"attune_inbound_poll_lag_seconds",
+	}
+}
+
 // NewPrometheusMetrics — registers the four standard inbound metrics on
 // the supplied Registerer. Call once from cmd/attune; pass the result
 // into inbound.Deps.

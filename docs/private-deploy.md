@@ -434,8 +434,9 @@ docker compose -f docker-compose.yml -f docker-compose.obs.yml down
 ```
 
 > This is a **reference / dev stack** -- pinned images, single-node Prometheus
-> (15 d / 2 GB retention), memory-capped, no alerting or HA. For production,
-> point your existing monitoring at attune's `/metrics` endpoint (see
+> (15 d / 2 GB retention), memory-capped, with built-in Prometheus rules but no
+> Alertmanager or HA. For production, point your existing monitoring at attune's
+> `/metrics` endpoint (see
 > [`../observability/README.md`](../observability/README.md)).
 
 ---
