@@ -371,11 +371,22 @@ func TestMapErrorAndHelpers(t *testing.T) {
 	if firstQueryValue(url.Values{"type": []string{" export "}}, "request_type", "type") != "export" {
 		t.Fatal("expected firstQueryValue to trim and return alias")
 	}
-	if requestStatusProto(gdprrepo.RequestStatusCancelled) != attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_CANCELLED {
-		t.Fatal("expected cancelled request status")
+	statusCases := map[gdprrepo.RequestStatus]attunev1.GdprRequestStatus{
+		gdprrepo.RequestStatusQueued:     attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_QUEUED,
+		gdprrepo.RequestStatusRunning:    attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_RUNNING,
+		gdprrepo.RequestStatusReady:      attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_READY,
+		gdprrepo.RequestStatusDownloaded: attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_DOWNLOADED,
+		gdprrepo.RequestStatusCompleted:  attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_COMPLETED,
+		gdprrepo.RequestStatusFailed:     attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_FAILED,
+		gdprrepo.RequestStatusExpired:    attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_EXPIRED,
+		gdprrepo.RequestStatusScheduled:  attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_SCHEDULED,
+		gdprrepo.RequestStatusCancelled:  attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_CANCELLED,
+		gdprrepo.RequestStatusRevoked:    attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_UNSPECIFIED,
 	}
-	if requestStatusProto(gdprrepo.RequestStatusRevoked) != attunev1.GdprRequestStatus_GDPR_REQUEST_STATUS_UNSPECIFIED {
-		t.Fatal("expected revoked to map to unspecified in handler proto helper")
+	for input, want := range statusCases {
+		if got := requestStatusProto(input); got != want {
+			t.Fatalf("requestStatusProto(%q) = %v, want %v", input, got, want)
+		}
 	}
 }
 

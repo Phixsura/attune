@@ -205,6 +205,52 @@ func TestDownloadExportMapsDownloadableBundle(t *testing.T) {
 	}
 }
 
+func TestDownloadExportMapsRepoErrors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{name: "not downloadable", err: gdprrepo.ErrExportJobNotDownloadable, want: ErrExportJobNotDownloadable},
+		{name: "not found", err: gdprrepo.ErrExportJobNotFound, want: ErrExportJobNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc := New(ptrext.Of(exportJobStoreStub{downloadErr: tc.err}), nil)
+			_, err := svc.DownloadExport(context.Background(), "tenant-1", "job-123")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("DownloadExport err = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRevokeExportMapsRepoErrors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{name: "not revocable", err: gdprrepo.ErrExportJobNotRevocable, want: ErrExportJobNotRevocable},
+		{name: "not found", err: gdprrepo.ErrExportJobNotFound, want: ErrExportJobNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc := New(ptrext.Of(exportJobStoreStub{revokeErr: tc.err}), nil)
+			_, err := svc.RevokeExport(context.Background(), "tenant-1", "job-123", auditlogsvc.Actor{ID: "admin-1"})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("RevokeExport err = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestWorkerProcessNextExportCompletesAndAudits(t *testing.T) {
 	t.Parallel()
 
