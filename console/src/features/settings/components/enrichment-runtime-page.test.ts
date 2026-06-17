@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { HttpResponse, http } from 'msw'
+import { createElement } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import { EnrichmentRuntimePage } from '@/features/settings/components/enrichment-runtime-page'
+import { server } from '@/testing/mocks/server'
+import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 import {
   buildChangeImpactNotes,
   buildInstanceConditions,
@@ -11,6 +16,225 @@ import {
   shouldHydrateRuntimeDraft,
   validateRuntimeSpec,
 } from './enrichment-runtime-page'
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
+
+const baseRuntimeResponse = {
+  runtime: {
+    bootstrapDefault: {
+      queueLen: 1000,
+      workers: 3,
+      batchSize: 10,
+      batchWindow: '5s',
+      sweepInterval: '30s',
+      llmRateLimitEnabled: false,
+      llmMaxQps: 0,
+      llmBurst: 0,
+    },
+    desiredSpec: {
+      queueLen: 1007,
+      workers: 3,
+      batchSize: 10,
+      batchWindow: '5s',
+      sweepInterval: '30s',
+      llmRateLimitEnabled: false,
+      llmMaxQps: 0,
+      llmBurst: 0,
+    },
+    desiredRevision: {
+      version: '14',
+      updatedAt: '2026-06-18T03:44:45Z',
+      updatedBy: 'admin-1',
+      updateReason: 'browser e2e revert queue 1007',
+      bootstrapSnapshotVersion: 'enricher:1000:3:10:5s:30s:0:0',
+      specVersion: 1,
+      lastKnownGoodVersion: '13',
+    },
+    summary: {
+      desiredVersion: '14',
+      liveInstances: 1,
+      staleInstances: 0,
+      expiredInstances: 5,
+      degradedInstances: 0,
+      fullyAppliedInstances: 1,
+      fullyConverged: true,
+    },
+    instances: [
+      {
+        instanceId: 'phjdeMacBook-Pro.local',
+        bootId: 'boot-live-1',
+        desiredVersion: '14',
+        observedDesiredVersion: '14',
+        runnerEffectiveVersion: '14',
+        limiterEffectiveVersion: '14',
+        attemptedRunnerVersion: '14',
+        attemptedLimiterVersion: '14',
+        runnerApplyStatus: 'RUNTIME_APPLY_STATUS_APPLIED',
+        limiterApplyStatus: 'RUNTIME_APPLY_STATUS_APPLIED',
+        queueDepth: 0,
+        queueCapacityTarget: 1007,
+        queueCapacityEffective: 1007,
+        queueResizePending: false,
+        inFlight: 0,
+        degradedReason: '',
+        lastAppliedAt: '2026-06-18T03:44:45Z',
+        lastReconciledAt: '2026-06-18T03:44:45Z',
+        lastSeenAt: '2026-06-18T03:50:52Z',
+        appliedSpec: {
+          queueLen: 1007,
+          workers: 3,
+          batchSize: 10,
+          batchWindow: '5s',
+          sweepInterval: '30s',
+          llmRateLimitEnabled: false,
+          llmMaxQps: 0,
+          llmBurst: 0,
+        },
+      },
+      {
+        instanceId: 'attune-c43e0420-6bcf-4ef1-9584-5759bdb271aa',
+        bootId: 'boot-old-1',
+        desiredVersion: '6',
+        observedDesiredVersion: '6',
+        runnerEffectiveVersion: '6',
+        limiterEffectiveVersion: '6',
+        attemptedRunnerVersion: '6',
+        attemptedLimiterVersion: '6',
+        runnerApplyStatus: 'RUNTIME_APPLY_STATUS_APPLIED',
+        limiterApplyStatus: 'RUNTIME_APPLY_STATUS_APPLIED',
+        queueDepth: 0,
+        queueCapacityTarget: 1000,
+        queueCapacityEffective: 1000,
+        queueResizePending: false,
+        inFlight: 0,
+        degradedReason: '',
+        lastAppliedAt: '2026-06-18T02:36:14Z',
+        lastReconciledAt: '2026-06-18T02:36:14Z',
+        lastSeenAt: '2026-06-18T02:36:14Z',
+        appliedSpec: {
+          queueLen: 1000,
+          workers: 3,
+          batchSize: 10,
+          batchWindow: '5s',
+          sweepInterval: '30s',
+          llmRateLimitEnabled: false,
+          llmMaxQps: 0,
+          llmBurst: 0,
+        },
+      },
+    ],
+    history: [
+      {
+        revision: {
+          version: '14',
+          updatedAt: '2026-06-18T03:44:45Z',
+          updatedBy: 'admin-1',
+          updateReason: 'browser e2e revert queue 1007',
+          bootstrapSnapshotVersion: 'cfg-v1',
+          specVersion: 1,
+          lastKnownGoodVersion: '13',
+        },
+        operationType: 'update',
+        riskLevel: 'normal',
+        sourceVersion: '13',
+        targetVersion: '14',
+        rollbackLineage: '',
+      },
+      {
+        revision: {
+          version: '13',
+          updatedAt: '2026-06-18T03:44:41Z',
+          updatedBy: 'admin-1',
+          updateReason: 'browser e2e save queue 1008',
+          bootstrapSnapshotVersion: 'cfg-v1',
+          specVersion: 1,
+          lastKnownGoodVersion: '12',
+        },
+        operationType: 'update',
+        riskLevel: 'normal',
+        sourceVersion: '12',
+        targetVersion: '13',
+        rollbackLineage: '',
+      },
+    ],
+  },
+}
+
+const verifiedOperations = {
+  stepUp: {
+    satisfied: true,
+    passwordAllowed: true,
+    method: 'password',
+    ttlSeconds: 900,
+    verifiedAt: '2026-06-18T03:43:48Z',
+    expiresAt: '2026-06-18T03:58:48Z',
+  },
+}
+
+function mockRuntimePage(options?: {
+  operations?: typeof verifiedOperations
+  onUpdate?: (body: unknown) => void
+  onReset?: (body: unknown) => void
+  onRollback?: (body: unknown) => void
+  onVerify?: (body: unknown) => void
+}) {
+  server.use(
+    http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
+    http.get('/fb/v1/console/gdpr/operations', () =>
+      HttpResponse.json(options?.operations ?? verifiedOperations),
+    ),
+    http.put('/fb/v1/console/enrichment-runtime', async ({ request }) => {
+      const body = await request.json()
+      options?.onUpdate?.(body)
+      return HttpResponse.json({
+        runtime: {
+          ...baseRuntimeResponse.runtime,
+          desiredSpec: {
+            queueLen: 1008,
+            workers: 3,
+            batchSize: 10,
+            batchWindow: '5s',
+            sweepInterval: '30s',
+            llmRateLimitEnabled: false,
+            llmMaxQps: 0,
+            llmBurst: 0,
+          },
+          desiredRevision: {
+            ...baseRuntimeResponse.runtime.desiredRevision,
+            version: '15',
+            updateReason: 'raise queue',
+            lastKnownGoodVersion: '14',
+          },
+          summary: {
+            ...baseRuntimeResponse.runtime.summary,
+            desiredVersion: '15',
+          },
+        },
+      })
+    }),
+    http.post('/fb/v1/console/enrichment-runtime/reset', async ({ request }) => {
+      const body = await request.json()
+      options?.onReset?.(body)
+      return HttpResponse.json(baseRuntimeResponse)
+    }),
+    http.post('/fb/v1/console/enrichment-runtime/rollback', async ({ request }) => {
+      const body = await request.json()
+      options?.onRollback?.(body)
+      return HttpResponse.json(baseRuntimeResponse)
+    }),
+    http.post('/fb/v1/console/gdpr/step-up/verify', async ({ request }) => {
+      const body = await request.json()
+      options?.onVerify?.(body)
+      return HttpResponse.json({
+        verifiedAt: '2026-06-18T03:50:00Z',
+        expiresAt: '2026-06-18T04:05:00Z',
+        method: 'password',
+      })
+    }),
+  )
+}
 
 describe('shouldHydrateRuntimeDraft', () => {
   it('hydrates when the desired version changes even if the local draft is dirty', () => {
@@ -443,5 +667,155 @@ describe('partitionRuntimeInstances', () => {
 
     expect(partitioned.active.map((item) => item.instanceId)).toEqual(['node-new'])
     expect(partitioned.historical.map((item) => item.instanceId)).toEqual(['node-old'])
+  })
+})
+
+describe('EnrichmentRuntimePage', () => {
+  it('renders operator-facing runtime state, hides raw ids by default, and expands historical nodes on demand', async () => {
+    mockRuntimePage()
+    const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+
+    expect(await screen.findByText('富化运行时控制面')).toBeInTheDocument()
+    expect(screen.getByText('Live control plane')).toBeInTheDocument()
+    expect(screen.getByText('phjdeMacBook-Pro')).toBeInTheDocument()
+    expect(
+      screen.queryByText('attune-c43e0420-6bcf-4ef1-9584-5759bdb271aa'),
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '展开历史节点详情' }))
+    expect(await screen.findByText('运行节点 2')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收起历史节点详情' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+
+    const detailButtons = screen.getAllByRole('button', { name: '查看技术详情' })
+    expect(detailButtons).toHaveLength(2)
+    const historicalDetailButton = detailButtons[1]
+    if (!historicalDetailButton) {
+      throw new Error('expected historical detail button')
+    }
+    await user.hover(historicalDetailButton)
+    expect(
+      await screen.findAllByText((text) =>
+        text.includes('attune-c43e0420-6bcf-4ef1-9584-5759bdb271aa'),
+      ),
+    ).not.toHaveLength(0)
+  })
+
+  it('validates edits in Chinese and saves the updated runtime spec', async () => {
+    let updateBody: unknown
+    mockRuntimePage({
+      onUpdate: (body) => {
+        updateBody = body
+      },
+    })
+    const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+
+    expect(await screen.findByText('目标策略')).toBeInTheDocument()
+    const queueInput = screen.getByLabelText('队列容量')
+    await user.clear(queueInput)
+    await user.type(queueInput, '0')
+    expect(await screen.findByText('队列容量必须大于 0')).toBeInTheDocument()
+
+    await user.clear(queueInput)
+    await user.type(queueInput, '1008')
+    await user.type(screen.getByLabelText('变更说明'), 'raise queue')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => {
+      expect(updateBody).toEqual({
+        expectedVersion: '14',
+        updateReason: 'raise queue',
+        spec: {
+          queueLen: 1008,
+          workers: 3,
+          batchSize: 10,
+          batchWindow: '5s',
+          sweepInterval: '30s',
+          llmRateLimitEnabled: false,
+          llmMaxQps: 0,
+          llmBurst: 0,
+        },
+      })
+    })
+    expect(await screen.findByText('目标版本 15 · schema v1')).toBeInTheDocument()
+  })
+
+  it('opens runtime-specific step-up copy and verifies by password when recent auth is missing', async () => {
+    let verifyBody: unknown
+    mockRuntimePage({
+      operations: {
+        stepUp: {
+          satisfied: false,
+          passwordAllowed: true,
+          method: 'password',
+          ttlSeconds: 900,
+          verifiedAt: '',
+          expiresAt: '',
+        },
+      },
+      onVerify: (body) => {
+        verifyBody = body
+      },
+    })
+    const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+
+    expect(await screen.findByText('需要二次验证')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '完成二次验证' }))
+    const stepUpDialog = await screen.findByRole('dialog', { name: '确认运行时敏感操作' })
+    expect(within(stepUpDialog).getByText(/运行时保存、重置和回滚操作/)).toBeInTheDocument()
+    await user.type(within(stepUpDialog).getByLabelText('当前密码'), 'correct horse battery staple')
+    await user.click(within(stepUpDialog).getByRole('button', { name: '验证并继续' }))
+    await waitFor(() => {
+      expect(verifyBody).toEqual({ password: 'correct horse battery staple' })
+    })
+  })
+
+  it('submits reset and rollback actions when recent auth is already satisfied', async () => {
+    let resetBody: unknown
+    let rollbackBody: unknown
+    mockRuntimePage({
+      onReset: (body) => {
+        resetBody = body
+      },
+      onRollback: (body) => {
+        rollbackBody = body
+      },
+    })
+    const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+
+    expect(await screen.findByText('目标策略')).toBeInTheDocument()
+    expect(screen.getAllByText('二次验证已通过')).not.toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: '按字段重置' }))
+    const resetDialog = await screen.findByRole('dialog', { name: '重置运行时配置' })
+    await user.click(within(resetDialog).getByRole('checkbox', { name: '工作协程数' }))
+    await user.type(within(resetDialog).getByLabelText('变更说明'), 'reset workers')
+    await user.click(within(resetDialog).getByRole('button', { name: '执行重置' }))
+    await waitFor(() => {
+      expect(resetBody).toEqual({
+        expectedVersion: '14',
+        fields: ['workers'],
+        resetAll: false,
+        updateReason: 'reset workers',
+      })
+    })
+
+    await user.click(screen.getByRole('button', { name: '回滚到已知良好版本' }))
+    const rollbackDialog = await screen.findByRole('dialog', { name: '回滚到历史版本' })
+    expect(
+      within(rollbackDialog).getByDisplayValue('rollback to last known good 13'),
+    ).toBeInTheDocument()
+    await user.clear(within(rollbackDialog).getByLabelText('变更说明'))
+    await user.type(within(rollbackDialog).getByLabelText('变更说明'), 'rollback for stability')
+    await user.click(within(rollbackDialog).getByRole('button', { name: '确认回滚' }))
+    await waitFor(() => {
+      expect(rollbackBody).toEqual({
+        expectedVersion: '14',
+        targetVersion: '13',
+        updateReason: 'rollback for stability',
+      })
+    })
   })
 })
