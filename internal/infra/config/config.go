@@ -44,6 +44,7 @@ type Config struct {
 	Migrations    MigrationsConfig
 	Enricher      EnricherConfig
 	Audit         AuditConfig
+	GDPR          GDPRConfig
 	Console       ConsoleConfig
 	Shutdown      ShutdownConfig
 	Secrets       SecretsConfig
@@ -55,18 +56,21 @@ type Config struct {
 
 	// Convenience fields used by legacy wiring while the runtime contract is
 	// config-first/nested.
-	DatabaseURL        string
-	EnricherInterval   time.Duration
-	EnricherBatch      int
-	ConsoleSessionKey  string
-	ConsoleBaseURL     string
-	RateLimitPerMinute int
-	RateLimitBurst     int
-	RateLimitDisabled  bool
-	AuditRetention     time.Duration
-	AuditPruneInterval time.Duration
-	ShutdownDrainDelay time.Duration
-	ShutdownTimeout    time.Duration
+	DatabaseURL           string
+	EnricherInterval      time.Duration
+	EnricherBatch         int
+	ConsoleSessionKey     string
+	ConsoleBaseURL        string
+	RateLimitPerMinute    int
+	RateLimitBurst        int
+	RateLimitDisabled     bool
+	AuditRetention        time.Duration
+	AuditPruneInterval    time.Duration
+	GDPRExportTTL         time.Duration
+	GDPRStepUpTTL         time.Duration
+	GDPRDeleteGraceWindow time.Duration
+	ShutdownDrainDelay    time.Duration
+	ShutdownTimeout       time.Duration
 }
 
 type DatabaseConfig struct {
@@ -85,6 +89,12 @@ type EnricherConfig struct {
 type AuditConfig struct {
 	RetentionDays int    `yaml:"retention_days"`
 	PruneInterval string `yaml:"prune_interval"`
+}
+
+type GDPRConfig struct {
+	ExportTTL         string `yaml:"export_ttl"`
+	StepUpTTL         string `yaml:"step_up_ttl"`
+	DeleteGraceWindow string `yaml:"delete_grace_window"`
 }
 
 type ConsoleConfig struct {
@@ -129,6 +139,7 @@ type yamlConfig struct {
 	Migrations     MigrationsConfig    `yaml:"migrations"`
 	Enricher       EnricherConfig      `yaml:"enricher"`
 	Audit          AuditConfig         `yaml:"audit"`
+	GDPR           GDPRConfig          `yaml:"gdpr"`
 	Console        ConsoleConfig       `yaml:"console"`
 	Shutdown       ShutdownConfig      `yaml:"shutdown"`
 	Secrets        SecretsConfig       `yaml:"secrets"`
@@ -195,6 +206,7 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 		Migrations:     yc.Migrations,
 		Enricher:       yc.Enricher,
 		Audit:          yc.Audit,
+		GDPR:           yc.GDPR,
 		Console:        yc.Console,
 		Shutdown:       yc.Shutdown,
 		Secrets:        yc.Secrets,
@@ -222,6 +234,18 @@ func (c *Config) parseDerivedFields() error {
 	if err != nil {
 		return fmt.Errorf("audit.prune_interval: %w", err)
 	}
+	gdprExportTTL, err := time.ParseDuration(c.GDPR.ExportTTL)
+	if err != nil {
+		return fmt.Errorf("gdpr.export_ttl: %w", err)
+	}
+	gdprStepUpTTL, err := time.ParseDuration(c.GDPR.StepUpTTL)
+	if err != nil {
+		return fmt.Errorf("gdpr.step_up_ttl: %w", err)
+	}
+	gdprDeleteGrace, err := time.ParseDuration(c.GDPR.DeleteGraceWindow)
+	if err != nil {
+		return fmt.Errorf("gdpr.delete_grace_window: %w", err)
+	}
 	shutdownDrainDelay, err := time.ParseDuration(c.Shutdown.DrainDelay)
 	if err != nil {
 		return fmt.Errorf("shutdown.drain_delay: %w", err)
@@ -240,6 +264,9 @@ func (c *Config) parseDerivedFields() error {
 	c.RateLimitDisabled = c.RateLimit.Disabled
 	c.AuditRetention = time.Duration(c.Audit.RetentionDays) * 24 * time.Hour
 	c.AuditPruneInterval = pruneInterval
+	c.GDPRExportTTL = gdprExportTTL
+	c.GDPRStepUpTTL = gdprStepUpTTL
+	c.GDPRDeleteGraceWindow = gdprDeleteGrace
 	c.ShutdownDrainDelay = shutdownDrainDelay
 	c.ShutdownTimeout = shutdownTimeout
 	return nil
@@ -261,6 +288,7 @@ func (c *Config) applyDefaults() {
 	if c.Audit.PruneInterval == "" {
 		c.Audit.PruneInterval = DefaultAuditPruneInterval.String()
 	}
+	c.applyGDPRDefaults()
 	if c.Shutdown.DrainDelay == "" {
 		c.Shutdown.DrainDelay = DefaultShutdownDrainDelay.String()
 	}
@@ -273,6 +301,23 @@ func (c *Config) applyDefaults() {
 	if c.RateLimit.Burst == 0 {
 		c.RateLimit.Burst = DefaultRateLimitBurst
 	}
+	c.applyObservabilityDefaults()
+	c.OIDC.ApplyDefaults()
+}
+
+func (c *Config) applyGDPRDefaults() {
+	if c.GDPR.ExportTTL == "" {
+		c.GDPR.ExportTTL = DefaultGDPRExportTTL.String()
+	}
+	if c.GDPR.StepUpTTL == "" {
+		c.GDPR.StepUpTTL = DefaultGDPRStepUpTTL.String()
+	}
+	if c.GDPR.DeleteGraceWindow == "" {
+		c.GDPR.DeleteGraceWindow = DefaultGDPRDeleteGraceWindow.String()
+	}
+}
+
+func (c *Config) applyObservabilityDefaults() {
 	if c.Observability.ServiceVersion == "" {
 		c.Observability.ServiceVersion = DefaultServiceVersion
 	}
@@ -282,7 +327,6 @@ func (c *Config) applyDefaults() {
 	if c.Observability.OTLPTracesPath == "" {
 		c.Observability.OTLPTracesPath = DefaultOTLPTracesPath
 	}
-	c.OIDC.ApplyDefaults()
 }
 
 func (c *Config) validate() error {
@@ -311,6 +355,15 @@ func (c *Config) validate() error {
 	}
 	if c.AuditPruneInterval <= 0 {
 		return fmt.Errorf("config: audit.prune_interval must be positive")
+	}
+	if c.GDPRExportTTL <= 0 {
+		return fmt.Errorf("config: gdpr.export_ttl must be positive")
+	}
+	if c.GDPRStepUpTTL <= 0 {
+		return fmt.Errorf("config: gdpr.step_up_ttl must be positive")
+	}
+	if c.GDPRDeleteGraceWindow <= 0 {
+		return fmt.Errorf("config: gdpr.delete_grace_window must be positive")
 	}
 	if c.ShutdownDrainDelay < 0 {
 		return fmt.Errorf("config: shutdown.drain_delay must be non-negative")

@@ -30,6 +30,15 @@ func TestLoadPathNewConfig(t *testing.T) {
 	if cfg.AuditPruneInterval != DefaultAuditPruneInterval {
 		t.Fatalf("AuditPruneInterval = %s", cfg.AuditPruneInterval)
 	}
+	if cfg.GDPRExportTTL != DefaultGDPRExportTTL {
+		t.Fatalf("GDPRExportTTL = %s", cfg.GDPRExportTTL)
+	}
+	if cfg.GDPRStepUpTTL != DefaultGDPRStepUpTTL {
+		t.Fatalf("GDPRStepUpTTL = %s", cfg.GDPRStepUpTTL)
+	}
+	if cfg.GDPRDeleteGraceWindow != DefaultGDPRDeleteGraceWindow {
+		t.Fatalf("GDPRDeleteGraceWindow = %s", cfg.GDPRDeleteGraceWindow)
+	}
 	if cfg.ShutdownDrainDelay != DefaultShutdownDrainDelay {
 		t.Fatalf("ShutdownDrainDelay = %s", cfg.ShutdownDrainDelay)
 	}
@@ -217,6 +226,17 @@ func TestLoadPathRejectsInvalidAuditPruneInterval(t *testing.T) {
 		t.Fatal("expected audit.prune_interval parse error")
 	}
 	if !strings.Contains(err.Error(), "audit.prune_interval") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadPathRejectsInvalidGDPRDurations(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\ngdpr:\n  delete_grace_window: \"bad\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected gdpr.delete_grace_window parse error")
+	}
+	if !strings.Contains(err.Error(), "gdpr.delete_grace_window") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

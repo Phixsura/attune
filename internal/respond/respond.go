@@ -12,6 +12,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
+	httpbody "google.golang.org/genproto/googleapis/api/httpbody"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -40,6 +41,18 @@ var marshal = protojson.MarshalOptions{EmitUnpopulated: true}
 // Empty repeated / message / scalar fields emit their zero value so
 // the wire shape is stable for SPA consumers (see `marshal` above).
 func Proto(w http.ResponseWriter, status int, m proto.Message) {
+	if body, ok := m.(*httpbody.HttpBody); ok {
+		if w.Header().Get("Content-Type") == "" {
+			contentType := body.GetContentType()
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
+			w.Header().Set("Content-Type", contentType)
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write(body.GetData())
+		return
+	}
 	b, err := marshal.Marshal(m)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

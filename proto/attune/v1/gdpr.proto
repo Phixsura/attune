@@ -1,0 +1,231 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/httpbody.proto";
+
+service GdprService {
+  rpc ExportGdprSubject(ExportGdprSubjectRequest) returns (ExportGdprSubjectResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/gdpr/export"
+      body: "*"
+    };
+  }
+
+  rpc GetGdprExport(GetGdprExportRequest) returns (GdprExportStatusResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/gdpr/exports/{job_id}"};
+  }
+
+  rpc DownloadGdprExport(DownloadGdprExportRequest) returns (google.api.HttpBody) {
+    option (google.api.http) = {get: "/fb/v1/console/gdpr/exports/{job_id}/download"};
+  }
+
+  rpc RevokeGdprExport(RevokeGdprExportRequest) returns (RevokeGdprExportResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/gdpr/exports/{job_id}/revoke"
+      body: "*"
+    };
+  }
+
+  rpc DeleteGdprSubject(DeleteGdprSubjectRequest) returns (DeleteGdprSubjectResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/gdpr/delete"
+      body: "*"
+    };
+  }
+
+  rpc CancelGdprRequest(CancelGdprRequestRequest) returns (CancelGdprRequestResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/gdpr/requests/{request_id}/cancel"
+      body: "*"
+    };
+  }
+
+  rpc ListGdprRequests(ListGdprRequestsRequest) returns (ListGdprRequestsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/gdpr/requests"};
+  }
+
+  rpc GetGdprOperations(GetGdprOperationsRequest) returns (GdprOperationsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/gdpr/operations"};
+  }
+
+  rpc VerifyGdprStepUp(VerifyGdprStepUpRequest) returns (VerifyGdprStepUpResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/gdpr/step-up/verify"
+      body: "*"
+    };
+  }
+}
+
+message ExportGdprSubjectRequest {
+  string subject_key = 1;
+}
+
+enum GdprExportStatus {
+  GDPR_EXPORT_STATUS_UNSPECIFIED = 0;
+  GDPR_EXPORT_STATUS_QUEUED = 1;
+  GDPR_EXPORT_STATUS_RUNNING = 2;
+  GDPR_EXPORT_STATUS_COMPLETED = 3;
+  GDPR_EXPORT_STATUS_FAILED = 4;
+  GDPR_EXPORT_STATUS_EXPIRED = 5;
+  GDPR_EXPORT_STATUS_REVOKED = 6;
+}
+
+enum GdprRequestStatus {
+  GDPR_REQUEST_STATUS_UNSPECIFIED = 0;
+  GDPR_REQUEST_STATUS_QUEUED = 1;
+  GDPR_REQUEST_STATUS_RUNNING = 2;
+  GDPR_REQUEST_STATUS_READY = 3;
+  GDPR_REQUEST_STATUS_DOWNLOADED = 4;
+  GDPR_REQUEST_STATUS_COMPLETED = 5;
+  GDPR_REQUEST_STATUS_FAILED = 6;
+  GDPR_REQUEST_STATUS_EXPIRED = 7;
+  GDPR_REQUEST_STATUS_SCHEDULED = 8;
+  GDPR_REQUEST_STATUS_CANCELLED = 9;
+  GDPR_REQUEST_STATUS_REVOKED = 10;
+}
+
+enum GdprRequestType {
+  GDPR_REQUEST_TYPE_UNSPECIFIED = 0;
+  GDPR_REQUEST_TYPE_EXPORT = 1;
+  GDPR_REQUEST_TYPE_DELETE = 2;
+}
+
+message ExportGdprSubjectResponse {
+  string job_id = 1;
+  GdprExportStatus status = 2;
+  int32 retry_after_seconds = 3;
+}
+
+message GetGdprExportRequest {
+  string job_id = 1;
+}
+
+message DownloadGdprExportRequest {
+  string job_id = 1;
+}
+
+message RevokeGdprExportRequest {
+  string job_id = 1;
+}
+
+message RevokeGdprExportResponse {
+  string job_id = 1;
+  GdprExportStatus status = 2;
+  GdprRequestStatus request_status = 3;
+}
+
+message GdprExportStatusResponse {
+  string job_id = 1;
+  string subject_key = 2;
+  string subject_display = 3;
+  GdprExportStatus status = 4;
+  int32 retry_after_seconds = 5;
+  optional string download_path = 6;
+  optional string archive_filename = 7;
+  optional string error = 8;
+  int32 feedback_count = 9;
+  int32 tag_assignment_count = 10;
+  int32 feedback_audit_count = 11;
+  int32 llm_audit_count = 12;
+  string created_at = 13;
+  optional string started_at = 14;
+  optional string completed_at = 15;
+  optional string expires_at = 16;
+  optional string downloaded_at = 17;
+  optional string revoked_at = 18;
+}
+
+message DeleteGdprSubjectRequest {
+  string subject_key = 1;
+}
+
+message DeleteGdprSubjectResponse {
+  string request_id = 1;
+  GdprRequestStatus status = 2;
+  optional string execute_after = 3;
+  string subject_key = 4;
+  int32 feedback_count = 5;
+  int32 tag_assignment_count = 6;
+  int32 feedback_audit_count = 7;
+  int32 llm_audit_count = 8;
+}
+
+message CancelGdprRequestRequest {
+  string request_id = 1;
+}
+
+message CancelGdprRequestResponse {
+  string request_id = 1;
+  GdprRequestStatus status = 2;
+}
+
+message ListGdprRequestsRequest {
+  optional string cursor = 1;
+  int32 limit = 2;
+  string request_type = 3;
+}
+
+message GdprRequestSummary {
+  string request_id = 1;
+  GdprRequestType request_type = 2;
+  GdprRequestStatus status = 3;
+  string subject_key = 4;
+  string subject_display = 5;
+  string created_by = 6;
+  int32 feedback_count = 7;
+  int32 tag_assignment_count = 8;
+  int32 feedback_audit_count = 9;
+  int32 llm_audit_count = 10;
+  string created_at = 11;
+  optional string started_at = 12;
+  optional string completed_at = 13;
+  optional string expires_at = 14;
+  optional string downloaded_at = 15;
+  optional string archive_filename = 16;
+  optional string error = 17;
+  optional string execute_after = 18;
+  optional string cancelled_at = 19;
+  optional string revoked_at = 20;
+}
+
+message ListGdprRequestsResponse {
+  repeated GdprRequestSummary items = 1;
+  optional string next_cursor = 2;
+}
+
+message GetGdprOperationsRequest {}
+
+message GdprStepUpStatus {
+  bool satisfied = 1;
+  bool password_allowed = 2;
+  string method = 3;
+  int32 ttl_seconds = 4;
+  optional string verified_at = 5;
+  optional string expires_at = 6;
+}
+
+message GdprOperationsResponse {
+  GdprStepUpStatus step_up = 1;
+  int32 export_ttl_seconds = 2;
+  int32 audit_retention_days = 3;
+  int32 audit_prune_interval_seconds = 4;
+  int32 queued_request_count = 5;
+  int32 active_request_count = 6;
+  int32 ready_export_count = 7;
+  optional string next_export_expiry_at = 8;
+  bool hashed_audit_residue = 9;
+  bool backups_may_retain_until_rotation = 10;
+  bool legal_hold_supported = 11;
+  int32 delete_grace_window_seconds = 12;
+  int32 scheduled_delete_count = 13;
+}
+
+message VerifyGdprStepUpRequest {
+  optional string password = 1;
+}
+
+message VerifyGdprStepUpResponse {
+  GdprStepUpStatus step_up = 1;
+}

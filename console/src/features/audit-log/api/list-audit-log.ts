@@ -1,5 +1,6 @@
 import { infiniteQueryOptions } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
+import { triggerBlobDownload } from '@/lib/blob-download'
 import type { AuditLogEntry, ListAuditLogResponse } from '@/proto/attune/v1/audit'
 
 export type { AuditLogEntry }
@@ -56,14 +57,9 @@ export async function downloadAuditLogCsv(filters: AuditLogFilters) {
     throw new Error(await readErrorMessage(res))
   }
   const blob = await res.blob()
-  const url = window.URL.createObjectURL(blob)
-  const link = document.createElement('a')
   const disposition = res.headers.get('Content-Disposition')
   const match = disposition?.match(/filename="([^"]+)"/)
-  link.href = url
-  link.download = match?.[1] ?? 'audit-log.csv'
-  link.click()
-  window.URL.revokeObjectURL(url)
+  triggerBlobDownload(blob, match?.[1] ?? 'audit-log.csv')
 }
 
 async function readErrorMessage(res: Response) {

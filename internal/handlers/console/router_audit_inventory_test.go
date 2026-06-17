@@ -17,6 +17,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
+	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
 	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
@@ -42,6 +43,7 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 		changePassword:     &auth.ChangePasswordHandler{},
 		me:                 &me.MeHandler{},
 		auditLog:           &consoleauditlog.Handler{},
+		gdpr:               &consolegdpr.Handler{},
 		apiKeys:            &apikey.APIKeysHandler{},
 		notifyTargets:      &notifytarget.NotifyTargetsHandler{},
 		digestSubscription: &digestsubscription.Handler{},
@@ -76,7 +78,12 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 		"POST /logout":                                     "exempt: logout tears down a session only",
 		"POST /me/change-password":                         "exempt: self-service auth flow outside the tenant-scoped unified audit stream",
 		"POST /api-keys/":                                  "audited: api_key.create",
+		"POST /gdpr/step-up/verify":                        "exempt: recent-auth refreshes the session but does not mutate tenant data directly",
 		"DELETE /api-keys/{id}":                            "audited: api_key.revoke",
+		"POST /gdpr/export":                                "audited: gdpr.export",
+		"POST /gdpr/exports/{job_id}/revoke":               "audited: gdpr.export.revoked",
+		"POST /gdpr/delete":                                "audited: gdpr.delete",
+		"POST /gdpr/requests/{request_id}/cancel":          "audited: gdpr.delete.cancelled",
 		"POST /notify-targets/":                            "audited: notify_target.create",
 		"PATCH /notify-targets/{id}":                       "audited: notify_target.update",
 		"DELETE /notify-targets/{id}":                      "audited: notify_target.delete",

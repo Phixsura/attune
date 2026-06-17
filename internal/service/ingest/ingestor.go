@@ -12,6 +12,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/pkg/subjectkey"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
@@ -44,7 +45,12 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 	}
 	in = scrubUntrustedSourceMeta(keyID, in)
 	userID := composeUserID(keyID, in.SourceUser)
-	id, err := i.repo.Insert(ctx, tenantID, userID, in)
+	subjectKey, subjectDisplay := subjectkey.Normalize(in.SourceUser, userID)
+	subjectHash := ""
+	if subjectKey != "" {
+		subjectHash = subjectkey.Hash(tenantID, subjectKey)
+	}
+	id, err := i.repo.Insert(ctx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] repo.Insert failed,tenant_id:%s,err:%+v",
 			where, tenantID, err.Error())

@@ -76,6 +76,7 @@ func newConsoleRouter(t *testing.T, pool *pgxpool.Pool) (http.Handler, *console.
 		nil, // batchHandler
 		nil, // searchHandler
 		nil, // jobHandler
+		nil, // gdprHandler
 		nil,
 		nil,
 		nil,
@@ -126,7 +127,8 @@ func (c cookieSinkRecorder) SetCookie(cookie *http.Cookie) {
 
 func insertTenant(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(ctx, `
+	if _, err := pool.Exec(
+		ctx, `
 		INSERT INTO tenants (id, slug, name)
 		VALUES ('tenant-1', 'inbound-delete', 'Inbound Delete')`,
 	); err != nil {
@@ -137,7 +139,8 @@ func insertTenant(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 func insertSource(t *testing.T, ctx context.Context, pool *pgxpool.Pool, enabled bool) string {
 	t.Helper()
 	id := uuid.NewString()
-	if _, err := pool.Exec(ctx, `
+	if _, err := pool.Exec(
+		ctx, `
 		INSERT INTO inbound_sources (id, tenant_id, channel, name, slug, config, enabled)
 		VALUES ($1, 'tenant-1', 'webhook', 'Webhook Delete', 'webhook-delete', $2, $3)`,
 		id, []byte("{}"), enabled,
@@ -149,7 +152,8 @@ func insertSource(t *testing.T, ctx context.Context, pool *pgxpool.Pool, enabled
 
 func installDeleteSuppressingTrigger(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(ctx, `
+	if _, err := pool.Exec(
+		ctx, `
 		CREATE FUNCTION suppress_inbound_source_delete()
 		RETURNS trigger
 		LANGUAGE plpgsql

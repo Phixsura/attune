@@ -5,6 +5,7 @@ package testdb
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -28,16 +29,28 @@ const serviceContainerDSNEnv = "ATTUNE_TEST_DATABASE_URL"
 // that env var is unset, it starts a fresh testcontainers Postgres.
 func NewPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	if dsn := os.Getenv(serviceContainerDSNEnv); dsn != "" {
-		return newServicePool(t, dsn)
+	pool, cleanup, err := OpenPool()
+	if err != nil {
+		t.Fatalf("open postgres pool: %v", err)
 	}
-	return newContainerPool(t)
+	t.Cleanup(cleanup)
+	return pool
 }
 
-func newContainerPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
+// OpenPool returns a migrated PostgreSQL pool plus a cleanup callback. It is
+// intended for package-level integration fixtures that want to reuse one
+// database across multiple tests.
+func OpenPool() (*pgxpool.Pool, func(), error) {
+	if dsn := os.Getenv(serviceContainerDSNEnv); dsn != "" {
+		return openServicePool(dsn)
+	}
+	return openContainerPool()
+}
+
+func openContainerPool() (*pgxpool.Pool, func(), error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
+	var pool *pgxpool.Pool
 
 	pg, err := tcpg.Run(
 		ctx,
@@ -52,42 +65,46 @@ func newContainerPool(t *testing.T) *pgxpool.Pool {
 		),
 	)
 	if err != nil {
-		t.Fatalf("start postgres container: %v", err)
+		return nil, nil, fmt.Errorf("start postgres container: %w", err)
 	}
-	t.Cleanup(func() {
+	cleanup := func() {
+		if pool != nil {
+			pool.Close()
+		}
 		_ = pg.Terminate(context.Background())
-	})
+	}
 
 	dsn, err := pg.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		t.Fatalf("postgres dsn: %v", err)
+		cleanup()
+		return nil, nil, fmt.Errorf("postgres dsn: %w", err)
 	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err = pgxpool.New(context.Background(), dsn)
 	if err != nil {
-		t.Fatalf("connect postgres pool: %v", err)
+		cleanup()
+		return nil, nil, fmt.Errorf("connect postgres pool: %w", err)
 	}
-	t.Cleanup(pool.Close)
 
 	if err := database.RunMigrations(context.Background(), pool); err != nil {
-		t.Fatalf("run migrations: %v", err)
+		cleanup()
+		return nil, nil, fmt.Errorf("run migrations: %w", err)
 	}
-	return pool
+	return pool, cleanup, nil
 }
 
-func newServicePool(t *testing.T, adminDSN string) *pgxpool.Pool {
-	t.Helper()
+func openServicePool(adminDSN string) (*pgxpool.Pool, func(), error) {
 	ctx := context.Background()
 	admin, err := pgxpool.New(ctx, adminDSN)
 	if err != nil {
-		t.Fatalf("connect service postgres: %v", err)
+		return nil, nil, fmt.Errorf("connect service postgres: %w", err)
 	}
-	t.Cleanup(admin.Close)
 
 	dbName := "attune_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if _, err := admin.Exec(ctx, `CREATE DATABASE `+pgx.Identifier{dbName}.Sanitize()); err != nil {
-		t.Fatalf("create test database %s: %v", dbName, err)
+		admin.Close()
+		return nil, nil, fmt.Errorf("create test database %s: %w", dbName, err)
 	}
-	t.Cleanup(func() {
+	dropDB := func() {
 		dropCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_, _ = admin.Exec(dropCtx, `
@@ -95,20 +112,27 @@ func newServicePool(t *testing.T, adminDSN string) *pgxpool.Pool {
 			FROM pg_stat_activity
 			WHERE datname = $1 AND pid <> pg_backend_pid()`, dbName)
 		_, _ = admin.Exec(dropCtx, `DROP DATABASE IF EXISTS `+pgx.Identifier{dbName}.Sanitize())
-	})
+		admin.Close()
+	}
 
 	cfg, err := pgxpool.ParseConfig(adminDSN)
 	if err != nil {
-		t.Fatalf("parse service postgres dsn: %v", err)
+		dropDB()
+		return nil, nil, fmt.Errorf("parse service postgres dsn: %w", err)
 	}
 	cfg.ConnConfig.Config.Database = dbName
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
-		t.Fatalf("connect test database %s: %v", dbName, err)
+		dropDB()
+		return nil, nil, fmt.Errorf("connect test database %s: %w", dbName, err)
 	}
-	t.Cleanup(pool.Close)
 	if err := database.RunMigrations(ctx, pool); err != nil {
-		t.Fatalf("run migrations in %s: %v", dbName, err)
+		pool.Close()
+		dropDB()
+		return nil, nil, fmt.Errorf("run migrations in %s: %w", dbName, err)
 	}
-	return pool
+	return pool, func() {
+		pool.Close()
+		dropDB()
+	}, nil
 }

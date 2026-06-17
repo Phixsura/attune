@@ -28,6 +28,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
+	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
 	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/rbac"
@@ -70,6 +71,7 @@ var (
 	NewBatchHandler              = feedback.NewBatchHandler
 	NewSearchHandler             = feedback.NewSearchHandler
 	NewFeedbackJobHandler        = feedbackjob.NewHandler
+	NewGDPRHandler               = consolegdpr.NewHandler
 	NewUsageHandler              = usage.NewUsageHandler
 	NewEnrichConfigHandler       = enrichconfig.NewHandler
 	NewGuardPolicyHandler        = consoleguardpolicy.NewHandler
@@ -143,6 +145,7 @@ type Router struct {
 	feedbackBatch      *feedback.BatchHandler
 	feedbackSearch     *feedback.SearchHandler
 	feedbackJob        *feedbackjob.Handler
+	gdpr               *consolegdpr.Handler
 	usage              *usage.UsageHandler
 	enrichConfig       *enrichconfig.Handler
 	guardPolicies      *consoleguardpolicy.Handler
@@ -175,6 +178,7 @@ func NewRouter(
 	feedbackBatch *feedback.BatchHandler,
 	feedbackSearch *feedback.SearchHandler,
 	feedbackJob *feedbackjob.Handler,
+	gdprHandler *consolegdpr.Handler,
 	usage *usage.UsageHandler,
 	enrichConfig *enrichconfig.Handler,
 	guardPolicies *consoleguardpolicy.Handler,
@@ -206,6 +210,7 @@ func NewRouter(
 		feedbackBatch:      feedbackBatch,
 		feedbackSearch:     feedbackSearch,
 		feedbackJob:        feedbackJob,
+		gdpr:               gdprHandler,
 		usage:              usage,
 		enrichConfig:       enrichConfig,
 		guardPolicies:      guardPolicies,
@@ -290,6 +295,7 @@ func (r *Router) mountSession(m chi.Router) {
 	}
 	r.mountAPIKeys(m)
 	r.mountAuditLog(m)
+	r.mountGDPR(m)
 	r.mountNotifyTargets(m)
 	r.mountDigestSubscription(m)
 	r.mountFeedback(m)
@@ -621,6 +627,124 @@ func (r *Router) mountAuditLog(m chi.Router) {
 			}),
 		))
 		a.Get("/export.csv", r.auditLog.ExportCSV)
+	})
+}
+
+func (r *Router) mountGDPR(m chi.Router) {
+	if r.gdpr == nil {
+		return
+	}
+	m.Route("/gdpr", func(g chi.Router) {
+		g.Use(r.requireAdminStrict)
+		g.Get("/requests", dispatcher.Bind(
+			"console.gdpr.ListRequests",
+			dispatcher.Combine(
+				func() *attunev1.ListGdprRequestsRequest { return ptrext.Of(attunev1.ListGdprRequestsRequest{}) },
+				consolegdpr.BindListRequests,
+			),
+			r.gdpr.ListRequests,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListGdprRequestsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Get("/operations", dispatcher.Bind(
+			"console.gdpr.GetOperations",
+			dispatcher.Empty(func() *attunev1.GetGdprOperationsRequest {
+				return ptrext.Of(attunev1.GetGdprOperationsRequest{})
+			}),
+			r.gdpr.GetOperations,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetGdprOperationsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Post("/step-up/verify", dispatcher.Bind(
+			"console.gdpr.VerifyStepUp",
+			dispatcher.JSON(func() *attunev1.VerifyGdprStepUpRequest {
+				return ptrext.Of(attunev1.VerifyGdprStepUpRequest{})
+			}),
+			r.gdpr.VerifyStepUp,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.VerifyGdprStepUpRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Post("/requests/{request_id}/cancel", dispatcher.Bind(
+			"console.gdpr.CancelRequest",
+			dispatcher.Empty(func() *attunev1.CancelGdprRequestRequest {
+				return ptrext.Of(attunev1.CancelGdprRequestRequest{})
+			}),
+			r.gdpr.CancelRequest,
+			dispatcher.WithBinders(
+				dispatcher.Param("request_id", func(req *attunev1.CancelGdprRequestRequest, id string) {
+					req.RequestId = id
+				}),
+			),
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CancelGdprRequestRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Post("/export", dispatcher.Bind(
+			"console.gdpr.Export",
+			dispatcher.JSON(func() *attunev1.ExportGdprSubjectRequest {
+				return ptrext.Of(attunev1.ExportGdprSubjectRequest{})
+			}),
+			r.gdpr.Export,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ExportGdprSubjectRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Get("/exports/{job_id}", dispatcher.Bind(
+			"console.gdpr.GetExport",
+			dispatcher.Empty(func() *attunev1.GetGdprExportRequest { return ptrext.Of(attunev1.GetGdprExportRequest{}) }),
+			r.gdpr.GetExport,
+			dispatcher.WithBinders(
+				dispatcher.Param("job_id", func(req *attunev1.GetGdprExportRequest, id string) {
+					req.JobId = id
+				}),
+			),
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetGdprExportRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Get("/exports/{job_id}/download", dispatcher.Bind(
+			"console.gdpr.DownloadExport",
+			dispatcher.Empty(func() *attunev1.DownloadGdprExportRequest {
+				return ptrext.Of(attunev1.DownloadGdprExportRequest{})
+			}),
+			r.gdpr.DownloadExport,
+			dispatcher.WithBinders(
+				dispatcher.Param("job_id", func(req *attunev1.DownloadGdprExportRequest, id string) {
+					req.JobId = id
+				}),
+			),
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DownloadGdprExportRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Post("/exports/{job_id}/revoke", dispatcher.Bind(
+			"console.gdpr.RevokeExport",
+			dispatcher.Empty(func() *attunev1.RevokeGdprExportRequest {
+				return ptrext.Of(attunev1.RevokeGdprExportRequest{})
+			}),
+			r.gdpr.RevokeExport,
+			dispatcher.WithBinders(
+				dispatcher.Param("job_id", func(req *attunev1.RevokeGdprExportRequest, id string) {
+					req.JobId = id
+				}),
+			),
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RevokeGdprExportRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		g.Post("/delete", dispatcher.Bind(
+			"console.gdpr.Delete",
+			dispatcher.JSON(func() *attunev1.DeleteGdprSubjectRequest {
+				return ptrext.Of(attunev1.DeleteGdprSubjectRequest{})
+			}),
+			r.gdpr.Delete,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteGdprSubjectRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 	})
 }
 

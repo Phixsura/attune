@@ -39,9 +39,13 @@ func NewFeedback(pool *pgxpool.Pool) *FeedbackRepo {
 }
 
 // Insert creates one row and returns its new id. userID is the composed
-// upstream identifier ("ext_<api-key-uuid>:<source-user>"); the caller
-// (service.Ingestor) is responsible for building it.
-func (r *FeedbackRepo) Insert(ctx context.Context, tenantID, userID string, in domain.IngestInput) (int64, error) {
+// upstream identifier ("ext_<api-key-uuid>:<source-user>"). subjectKey /
+// subjectDisplay / subjectHash hold the GDPR-facing canonical subject identity.
+func (r *FeedbackRepo) Insert(
+	ctx context.Context,
+	tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
+	in domain.IngestInput,
+) (int64, error) {
 	const where = "repo.FeedbackRepo.Insert"
 	sourceMetaJSON := []byte("{}")
 	if in.SourceMeta != nil {
@@ -58,13 +62,14 @@ func (r *FeedbackRepo) Insert(ctx context.Context, tenantID, userID string, in d
 	err := r.pool.QueryRow(
 		ctx, `
 		INSERT INTO user_feedback
-		 (user_id, tenant_id, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id)
+		 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id)
 		VALUES
-		 ($1, $2, 'other', $3, $4, '[]'::jsonb, $5, $6,
-		  (SELECT id FROM inbound_sources WHERE id = $7 AND tenant_id = $2 AND channel = $5),
+		 ($1, $2, $3, $4, $5, 'other', $6, $7, '[]'::jsonb, $8, $9,
+		  (SELECT id FROM inbound_sources WHERE id = $10 AND tenant_id = $2 AND channel = $8),
 		  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1))
 		RETURNING id`,
-		userID, tenantID, in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
+		userID, tenantID, subjectKey, subjectDisplay, subjectHash,
+		in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
 	).Scan(&id)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,source:%s,err:%+v",

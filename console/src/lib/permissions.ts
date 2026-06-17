@@ -33,6 +33,10 @@ export type Permission =
   // Settings - API Keys
   | 'settings:api_keys:view'
   | 'settings:api_keys:edit'
+  // Settings - GDPR
+  | 'settings:gdpr:view'
+  | 'settings:gdpr:export'
+  | 'settings:gdpr:delete'
   // Settings - Audit Log
   | 'settings:audit_log:view'
   // Settings - Tags
@@ -82,6 +86,9 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'settings:digest:edit',
     'settings:api_keys:view',
     'settings:api_keys:edit',
+    'settings:gdpr:view',
+    'settings:gdpr:export',
+    'settings:gdpr:delete',
     'settings:audit_log:view',
     'settings:tags:view',
     'settings:tags:edit',

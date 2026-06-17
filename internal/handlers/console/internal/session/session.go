@@ -44,6 +44,8 @@ type Payload struct {
 	TenantID  string `json:"t"`
 	UserID    string `json:"u"`
 	UserType  string `json:"y,omitempty"` // "admin" | "oidc" (empty = admin for backwards compat)
+	IssuedAt  int64  `json:"i,omitempty"`
+	StepUpAt  int64  `json:"s,omitempty"`
 	ExpiresAt int64  `json:"e"`
 }
 
@@ -53,6 +55,8 @@ type AuthCtx struct {
 	TenantID string
 	UserID   string
 	UserType string // "admin" | "oidc" (empty = admin)
+	IssuedAt time.Time
+	StepUpAt *time.Time
 	ExpAt    time.Time
 }
 
@@ -141,11 +145,14 @@ func (s *Signer) IssueSessionCookie(sink cookieSink, tenantID, userID string) er
 
 // IssueSessionCookieWithType writes the session cookie with explicit user type.
 func (s *Signer) IssueSessionCookieWithType(sink cookieSink, tenantID, userID, userType string) error {
+	now := time.Now()
 	val, err := s.SignSession(Payload{
 		TenantID:  tenantID,
 		UserID:    userID,
 		UserType:  userType,
-		ExpiresAt: time.Now().Add(SessionTTL).Unix(),
+		IssuedAt:  now.Unix(),
+		StepUpAt:  now.Unix(),
+		ExpiresAt: now.Add(SessionTTL).Unix(),
 	})
 	if err != nil {
 		return err
@@ -157,7 +164,36 @@ func (s *Signer) IssueSessionCookieWithType(sink cookieSink, tenantID, userID, u
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(SessionTTL),
+		Expires:  now.Add(SessionTTL),
+	}))
+	return nil
+}
+
+func (s *Signer) RefreshStepUpCookie(sink cookieSink, auth *AuthCtx) error {
+	now := time.Now()
+	issuedAt := auth.IssuedAt
+	if issuedAt.IsZero() {
+		issuedAt = now
+	}
+	val, err := s.SignSession(Payload{
+		TenantID:  auth.TenantID,
+		UserID:    auth.UserID,
+		UserType:  auth.UserType,
+		IssuedAt:  issuedAt.Unix(),
+		StepUpAt:  now.Unix(),
+		ExpiresAt: auth.ExpAt.Unix(),
+	})
+	if err != nil {
+		return err
+	}
+	sink.SetCookie(ptrext.Of(http.Cookie{
+		Name:     SessionCookieName,
+		Value:    val,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  auth.ExpAt,
 	}))
 	return nil
 }
@@ -204,12 +240,17 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 				return
 			}
 		}
-		newCtx := context.WithValue(r.Context(), ctxKey{}, ptrext.Of(AuthCtx{
+		auth := ptrext.Of(AuthCtx{
 			TenantID: p.TenantID,
 			UserID:   p.UserID,
 			UserType: p.UserType,
+			IssuedAt: time.Unix(p.IssuedAt, 0),
 			ExpAt:    time.Unix(p.ExpiresAt, 0),
-		}))
+		})
+		if p.StepUpAt > 0 {
+			auth.StepUpAt = ptrext.Of(time.Unix(p.StepUpAt, 0))
+		}
+		newCtx := context.WithValue(r.Context(), ctxKey{}, auth)
 		next.ServeHTTP(w, r.WithContext(newCtx))
 	})
 }
