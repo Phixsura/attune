@@ -59,6 +59,14 @@ func (f *fakeAPIKeysService) GetScopes(_ context.Context, _ uuid.UUID) ([]domain
 	return f.scopes, nil
 }
 
+func (f *fakeAPIKeysService) GetScopesBatch(_ context.Context, keyIDs []uuid.UUID) (map[uuid.UUID][]domain.Scope, error) {
+	result := make(map[uuid.UUID][]domain.Scope, len(keyIDs))
+	for _, id := range keyIDs {
+		result[id] = f.scopes
+	}
+	return result, nil
+}
+
 func (f *fakeAPIKeysService) Revoke(_ context.Context, tenantID string, id uuid.UUID) error {
 	f.revokeTenant = tenantID
 	f.revokeID = id

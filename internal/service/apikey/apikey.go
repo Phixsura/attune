@@ -140,7 +140,7 @@ func (s *APIKeys) LookupWithScopes(ctx context.Context, raw string) (tenantID st
 	return row.TenantID, row.ID, scopes, nil
 }
 
-// IssueWithScopes mints a key with specific scopes.
+// IssueWithScopes mints a key with specific scopes atomically.
 func (s *APIKeys) IssueWithScopes(ctx context.Context, tenantID, label string, scopes []domain.Scope) (raw string, keyID uuid.UUID, err error) {
 	const where = "service.APIKeys.IssueWithScopes"
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,label:%s,scopes:%d", where, tenantID, label, len(scopes))
@@ -150,16 +150,10 @@ func (s *APIKeys) IssueWithScopes(ctx context.Context, tenantID, label string, s
 		logext.Errorf(ctx, "[%s] generate failed,err:%+v", where, err.Error())
 		return "", uuid.Nil, err
 	}
-	keyID, err = s.repo.Insert(ctx, tenantID, hash, prefix, label)
+	keyID, err = s.repo.InsertWithScopes(ctx, tenantID, hash, prefix, label, scopes)
 	if err != nil {
-		logext.Errorf(ctx, "[%s] repo.Insert failed,tenant_id:%s,err:%+v",
+		logext.Errorf(ctx, "[%s] InsertWithScopes failed,tenant_id:%s,err:%+v",
 			where, tenantID, err.Error())
-		return "", uuid.Nil, err
-	}
-
-	if err := s.repo.InsertScopes(ctx, keyID, scopes); err != nil {
-		logext.Errorf(ctx, "[%s] InsertScopes failed,key_id:%s,err:%+v",
-			where, keyID, err.Error())
 		return "", uuid.Nil, err
 	}
 
@@ -171,6 +165,11 @@ func (s *APIKeys) IssueWithScopes(ctx context.Context, tenantID, label string, s
 // GetScopes returns scopes for a given key ID.
 func (s *APIKeys) GetScopes(ctx context.Context, keyID uuid.UUID) ([]domain.Scope, error) {
 	return s.repo.GetScopes(ctx, keyID)
+}
+
+// GetScopesBatch returns scopes for multiple keys in a single query.
+func (s *APIKeys) GetScopesBatch(ctx context.Context, keyIDs []uuid.UUID) (map[uuid.UUID][]domain.Scope, error) {
+	return s.repo.GetScopesBatch(ctx, keyIDs)
 }
 
 // touchAsync debounces s.repo.TouchLastUsed: skips the goroutine if this

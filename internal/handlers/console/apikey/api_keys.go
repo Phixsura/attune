@@ -21,6 +21,7 @@ type apiKeysService interface {
 	Issue(ctx context.Context, tenantID, label string) (raw string, keyID uuid.UUID, err error)
 	IssueWithScopes(ctx context.Context, tenantID, label string, scopes []domain.Scope) (raw string, keyID uuid.UUID, err error)
 	GetScopes(ctx context.Context, keyID uuid.UUID) ([]domain.Scope, error)
+	GetScopesBatch(ctx context.Context, keyIDs []uuid.UUID) (map[uuid.UUID][]domain.Scope, error)
 	Revoke(ctx context.Context, tenantID string, id uuid.UUID) error
 }
 

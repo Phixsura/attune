@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
@@ -52,6 +53,57 @@ func (r *APIKeyRepo) Insert(ctx context.Context, tenantID string, hash []byte, p
 		logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,prefix:%s,err:%+v",
 			where, tenantID, prefix, err.Error())
 		return uuid.Nil, fmt.Errorf("insert api key: %w", err)
+	}
+	return id, nil
+}
+
+// InsertWithScopes atomically creates a key and its scopes in a single transaction.
+func (r *APIKeyRepo) InsertWithScopes(ctx context.Context, tenantID string, hash []byte, prefix, label string, scopes []domain.Scope) (uuid.UUID, error) {
+	const where = "repo.APIKeyRepo.InsertWithScopes"
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] begin tx failed,err:%+v", where, err.Error())
+		return uuid.Nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var id uuid.UUID
+	err = tx.QueryRow(
+		ctx, `
+		INSERT INTO external_api_keys (tenant_id, key_hash, key_prefix, label)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id`,
+		tenantID, hash, prefix, label,
+	).Scan(&id)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] insert key failed,tenant_id:%s,prefix:%s,err:%+v",
+			where, tenantID, prefix, err.Error())
+		return uuid.Nil, fmt.Errorf("insert api key: %w", err)
+	}
+
+	if len(scopes) > 0 {
+		batch := ptrext.Of(pgx.Batch{})
+		for _, s := range scopes {
+			batch.Queue(
+				`INSERT INTO api_key_scopes (key_id, scope) VALUES ($1, $2)`,
+				id, string(s),
+			)
+		}
+		br := tx.SendBatch(ctx, batch)
+		for range scopes {
+			if _, err := br.Exec(); err != nil {
+				br.Close()
+				logext.Errorf(ctx, "[%s] insert scopes failed,key_id:%s,err:%+v",
+					where, id, err.Error())
+				return uuid.Nil, fmt.Errorf("insert scopes: %w", err)
+			}
+		}
+		br.Close()
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		logext.Errorf(ctx, "[%s] commit failed,key_id:%s,err:%+v", where, id, err.Error())
+		return uuid.Nil, fmt.Errorf("commit: %w", err)
 	}
 	return id, nil
 }

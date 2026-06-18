@@ -15,7 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/testdb"
 )
 
-func TestPG_APIKeyScopes_InsertAndGet(t *testing.T) {
+func TestPG_APIKeyScopes_InsertWithScopesAndGet(t *testing.T) {
 	pool := testdb.NewPool(t)
 	ctx := context.Background()
 
@@ -25,11 +25,8 @@ func TestPG_APIKeyScopes_InsertAndGet(t *testing.T) {
 	repo := apikey.NewAPIKey(pool)
 
 	hash := []byte("testhash0123456789abcdef")
-	keyID, err := repo.Insert(ctx, tenantID, hash, "fbk_live_tes", "test key")
-	require.NoError(t, err)
-
 	scopes := []domain.Scope{domain.ScopeFeedbackRead, domain.ScopeIngestWrite}
-	err = repo.InsertScopes(ctx, keyID, scopes)
+	keyID, err := repo.InsertWithScopes(ctx, tenantID, hash, "fbk_live_tes", "test key", scopes)
 	require.NoError(t, err)
 
 	got, err := repo.GetScopes(ctx, keyID)
@@ -37,7 +34,7 @@ func TestPG_APIKeyScopes_InsertAndGet(t *testing.T) {
 	assert.ElementsMatch(t, scopes, got)
 }
 
-func TestPG_APIKeyScopes_EmptyScopes(t *testing.T) {
+func TestPG_APIKeyScopes_InsertWithEmptyScopes(t *testing.T) {
 	pool := testdb.NewPool(t)
 	ctx := context.Background()
 
@@ -47,10 +44,7 @@ func TestPG_APIKeyScopes_EmptyScopes(t *testing.T) {
 	repo := apikey.NewAPIKey(pool)
 
 	hash := []byte("emptyhash123456789abcdef")
-	keyID, err := repo.Insert(ctx, tenantID, hash, "fbk_live_emp", "empty key")
-	require.NoError(t, err)
-
-	err = repo.InsertScopes(ctx, keyID, nil)
+	keyID, err := repo.InsertWithScopes(ctx, tenantID, hash, "fbk_live_emp", "empty key", nil)
 	require.NoError(t, err)
 
 	got, err := repo.GetScopes(ctx, keyID)
@@ -58,24 +52,21 @@ func TestPG_APIKeyScopes_EmptyScopes(t *testing.T) {
 	assert.Empty(t, got)
 }
 
-func TestPG_APIKeyScopes_GetScopesByHash(t *testing.T) {
+func TestPG_APIKeyScopes_AtomicRollback(t *testing.T) {
 	pool := testdb.NewPool(t)
 	ctx := context.Background()
 
-	tenantID, err := tenant.NewTenant(pool).Create(ctx, "scope-hash", "Hash Scope Org")
+	tenantID, err := tenant.NewTenant(pool).Create(ctx, "scope-atomic", "Atomic Scope Org")
 	require.NoError(t, err)
 
 	repo := apikey.NewAPIKey(pool)
 
-	hash := []byte("hashscope123456789abcdef")
-	keyID, err := repo.Insert(ctx, tenantID, hash, "fbk_live_hsh", "hash key")
+	hash := []byte("atomichash12345678abcdef")
+	scopes := []domain.Scope{domain.ScopeFeedbackRead, domain.ScopeIngestWrite}
+	keyID, err := repo.InsertWithScopes(ctx, tenantID, hash, "fbk_live_atm", "atomic key", scopes)
 	require.NoError(t, err)
 
-	scopes := []domain.Scope{domain.ScopeLLMRead, domain.ScopeAuditRead}
-	err = repo.InsertScopes(ctx, keyID, scopes)
+	got, err := repo.GetScopes(ctx, keyID)
 	require.NoError(t, err)
-
-	got, err := repo.GetScopesByHash(ctx, hash)
-	require.NoError(t, err)
-	assert.ElementsMatch(t, scopes, got)
+	assert.Len(t, got, 2, "both scopes should be inserted atomically")
 }

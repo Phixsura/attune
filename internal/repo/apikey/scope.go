@@ -5,41 +5,9 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/Phixsura/attune/internal/domain"
-	"github.com/Phixsura/attune/internal/pkg/logext"
-	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
-
-// InsertScopes persists scopes for a newly created key.
-// Called within the same transaction as Insert.
-func (r *APIKeyRepo) InsertScopes(ctx context.Context, keyID uuid.UUID, scopes []domain.Scope) error {
-	const where = "repo.APIKeyRepo.InsertScopes"
-	if len(scopes) == 0 {
-		return nil
-	}
-
-	batch := ptrext.Of(pgx.Batch{})
-	for _, s := range scopes {
-		batch.Queue(
-			`INSERT INTO api_key_scopes (key_id, scope) VALUES ($1, $2)`,
-			keyID, string(s),
-		)
-	}
-
-	br := r.pool.SendBatch(ctx, batch)
-	defer br.Close()
-
-	for range scopes {
-		if _, err := br.Exec(); err != nil {
-			logext.Errorf(ctx, "[%s] batch insert failed,key_id:%s,err:%+v",
-				where, keyID, err.Error())
-			return fmt.Errorf("insert scopes: %w", err)
-		}
-	}
-	return nil
-}
 
 // GetScopes returns all scopes for a key. Returns empty slice if none.
 func (r *APIKeyRepo) GetScopes(ctx context.Context, keyID uuid.UUID) ([]domain.Scope, error) {
@@ -64,45 +32,35 @@ func (r *APIKeyRepo) GetScopes(ctx context.Context, keyID uuid.UUID) ([]domain.S
 	return scopes, rows.Err()
 }
 
-// GetScopesByHash returns scopes for a key identified by its hash.
-// Used by LookupWithScopes for atomic auth+scope loading.
-func (r *APIKeyRepo) GetScopesByHash(ctx context.Context, hash []byte) ([]domain.Scope, error) {
+// GetScopesBatch returns scopes for multiple keys in a single query.
+// Returns a map from key ID to scopes. Keys not found have empty slices.
+func (r *APIKeyRepo) GetScopesBatch(ctx context.Context, keyIDs []uuid.UUID) (map[uuid.UUID][]domain.Scope, error) {
+	if len(keyIDs) == 0 {
+		return make(map[uuid.UUID][]domain.Scope), nil
+	}
+
 	rows, err := r.pool.Query(
 		ctx,
-		`SELECT s.scope
-         FROM api_key_scopes s
-         JOIN external_api_keys k ON k.id = s.key_id
-         WHERE k.key_hash = $1 AND k.is_active = TRUE AND k.revoked_at IS NULL`,
-		hash,
+		`SELECT key_id, scope FROM api_key_scopes WHERE key_id = ANY($1)`,
+		keyIDs,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("get scopes by hash: %w", err)
+		return nil, fmt.Errorf("get scopes batch: %w", err)
 	}
 	defer rows.Close()
 
-	var scopes []domain.Scope
+	result := make(map[uuid.UUID][]domain.Scope, len(keyIDs))
+	for _, id := range keyIDs {
+		result[id] = []domain.Scope{}
+	}
+
 	for rows.Next() {
+		var keyID uuid.UUID
 		var s string
-		if err := rows.Scan(&s); err != nil {
+		if err := rows.Scan(&keyID, &s); err != nil {
 			return nil, fmt.Errorf("scan scope: %w", err)
 		}
-		scopes = append(scopes, domain.Scope(s))
+		result[keyID] = append(result[keyID], domain.Scope(s))
 	}
-	return scopes, rows.Err()
-}
-
-func scopesToStrings(scopes []domain.Scope) []string {
-	strs := make([]string, len(scopes))
-	for i, s := range scopes {
-		strs[i] = string(s)
-	}
-	return strs
-}
-
-func stringsToScopes(strs []string) []domain.Scope {
-	scopes := make([]domain.Scope, len(strs))
-	for i, s := range strs {
-		scopes[i] = domain.Scope(s)
-	}
-	return scopes
+	return result, rows.Err()
 }
