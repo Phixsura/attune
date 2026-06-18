@@ -8,10 +8,10 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
--- Add environment and rotation columns to api_keys
-ALTER TABLE api_keys
+-- Add environment and rotation columns to external_api_keys
+ALTER TABLE external_api_keys
     ADD COLUMN IF NOT EXISTS environment api_key_environment NOT NULL DEFAULT 'production',
-    ADD COLUMN IF NOT EXISTS rotated_from_id UUID REFERENCES api_keys(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS rotated_from_id UUID REFERENCES external_api_keys(id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS grace_period_ends_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS service_account_id UUID;
 
@@ -31,8 +31,8 @@ CREATE INDEX IF NOT EXISTS idx_service_accounts_tenant ON service_accounts(tenan
 
 -- Add foreign key for service_account_id
 DO $$ BEGIN
-    ALTER TABLE api_keys
-        ADD CONSTRAINT fk_api_keys_service_account
+    ALTER TABLE external_api_keys
+        ADD CONSTRAINT fk_external_api_keys_service_account
         FOREIGN KEY (service_account_id) REFERENCES service_accounts(id) ON DELETE SET NULL;
 EXCEPTION
     WHEN duplicate_object THEN NULL;
@@ -80,7 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_api_key_request_logs_tenant ON api_key_request_lo
 -- Resource bindings for API keys
 CREATE TABLE IF NOT EXISTS api_key_resource_bindings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_id UUID NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+    key_id UUID NOT NULL REFERENCES external_api_keys(id) ON DELETE CASCADE,
     resource_type TEXT NOT NULL,
     resource_id TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -117,7 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_api_key_event_subscriptions_tenant ON api_key_eve
 CREATE TABLE IF NOT EXISTS api_key_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id TEXT NOT NULL,
-    key_id UUID REFERENCES api_keys(id) ON DELETE SET NULL,
+    key_id UUID REFERENCES external_api_keys(id) ON DELETE SET NULL,
     event_type api_key_event_type NOT NULL,
     payload JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -129,7 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_api_key_events_key ON api_key_events(key_id, crea
 -- Leaked key detection table
 CREATE TABLE IF NOT EXISTS api_key_leak_detections (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_id UUID NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+    key_id UUID NOT NULL REFERENCES external_api_keys(id) ON DELETE CASCADE,
     tenant_id TEXT NOT NULL,
     source TEXT NOT NULL,
     source_url TEXT,
