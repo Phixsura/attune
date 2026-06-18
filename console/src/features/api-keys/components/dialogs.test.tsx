@@ -34,7 +34,7 @@ describe('CreateKeyDialog', () => {
     const input = screen.getByRole('textbox') as HTMLInputElement
     await user.type(input, '  ci/automation  ')
     await user.click(screen.getByTestId('create-key-submit'))
-    expect(onSubmit).toHaveBeenCalledWith('ci/automation')
+    expect(onSubmit).toHaveBeenCalledWith({ label: 'ci/automation', scopes: [] })
     await vi.waitFor(() => expect(input.value).toBe(''))
   })
 
