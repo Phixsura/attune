@@ -109,13 +109,15 @@ func TestCreateState_HTTP(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		handler(w, dispatchtest.Request(http.MethodPost, "/workflow/states",
-			`{"name":"Open","category":"open","color":"#3b82f6"}`))
+			`{"name":"open","displayName":{"entries":{"default":"Open"}},"category":"open","color":"#3b82f6"}`))
 
 		require.Equal(t, http.StatusOK, w.Code)
 		body, err := dispatchtest.DecodeJSON(w.Body)
 		require.NoError(t, err)
 		state := body["state"].(map[string]any)
-		require.Equal(t, "Open", state["name"])
+		require.Equal(t, "open", state["name"])
+		dn := state["displayName"].(map[string]any)["entries"].(map[string]any)
+		require.Equal(t, "Open", dn["default"])
 	})
 
 	t.Run("400 empty name", func(t *testing.T) {
@@ -149,7 +151,7 @@ func TestCreateState_HTTP(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		handler(w, dispatchtest.Request(http.MethodPost, "/workflow/states",
-			`{"name":"X","category":"invalid"}`))
+			`{"name":"x","displayName":{"entries":{"default":"X"}},"category":"invalid"}`))
 
 		require.Equal(t, http.StatusBadRequest, w.Code)
 	})
@@ -170,7 +172,7 @@ func TestCreateState_HTTP(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		handler(w, dispatchtest.Request(http.MethodPost, "/workflow/states",
-			`{"name":"Dup","category":"open"}`))
+			`{"name":"dup","displayName":{"entries":{"default":"Dup"}},"category":"open"}`))
 
 		require.Equal(t, http.StatusConflict, w.Code)
 	})
@@ -316,13 +318,15 @@ func TestUpdateState_HTTP(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/s-1",
-			`{"id":"s-1","name":"Renamed","color":"#ef4444","position":2,"isDefault":true}`))
+			`{"id":"s-1","displayName":{"entries":{"default":"Renamed"}},"color":"#ef4444","position":2,"isDefault":true}`))
 
 		require.Equal(t, http.StatusOK, w.Code)
 		body, err := dispatchtest.DecodeJSON(w.Body)
 		require.NoError(t, err)
 		state := body["state"].(map[string]any)
-		require.Equal(t, "Renamed", state["name"])
+		require.Equal(t, "Open", state["name"]) // key immutable on update
+		dn := state["displayName"].(map[string]any)["entries"].(map[string]any)
+		require.Equal(t, "Renamed", dn["default"])
 	})
 
 	t.Run("404 not found", func(t *testing.T) {

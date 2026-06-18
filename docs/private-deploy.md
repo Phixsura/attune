@@ -378,13 +378,13 @@ of yesterday's feedback with LLM-labeled top themes (#27).
 
 The digest is delivered to the tenant's **`raw-webhook` notify target whose
 `audience` is `digest`** — a routing filter that keeps the digest target out of
-per-event traffic. Create it in Console (Settings → 通知目标) or via the API with
+per-event traffic. Create it in Console (Settings → Notify Targets) or via the API with
 `audience = digest`; the digest worker addresses it by
 `(tenant, raw-webhook, digest)`.
 
 ### Configure the schedule
 
-In Console (Settings → 日报摘要) or via `PUT /fb/v1/console/digest-subscription`,
+In Console (Settings → Daily Digest) or via `PUT /fb/v1/console/digest-subscription`,
 set `enabled`, `frequency` (`daily` / `weekly` + `byweekday`), the tenant-local
 `send_hour`, the `llm_min_feedback` theme threshold, and `send_on_empty`. The
 worker fires at most once per tenant per local day (timezone- and DST-aware),

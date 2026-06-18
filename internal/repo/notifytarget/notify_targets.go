@@ -67,8 +67,8 @@ type NotifyTarget struct {
 	Disabled         bool
 	SignatureVersion string    // "v2-content-hash" (default) or "v2-bytes" (legacy)
 	CreatedAt        time.Time // DB column tenant_notify_targets.created_at (UTC)
-	// Phase 3.2 — current alert state. LastFailureAt is non-nil iff the
-	// most recent delivery to this target failed (cleared on next success).
+	// Current alert state. LastFailureAt is non-nil iff the most recent
+	// delivery to this target failed (cleared on next success).
 	LastFailureAt *time.Time
 	LastError     string
 }
@@ -109,9 +109,8 @@ func (r *NotifyTargetRepo) Upsert(ctx context.Context, t NotifyTarget) error {
 }
 
 // ListAllActive returns every active row across all tenants. Used by
-// startup wiring to build the in-memory routing table for .
-// a follow-up may add a "refresh on tenant_notify_targets change" mechanism;
-// for now, attune restart picks up any DB-side change.
+// startup wiring to build the in-memory routing table; attune picks up
+// any DB-side change on restart.
 func (r *NotifyTargetRepo) ListAllActive(ctx context.Context) ([]NotifyTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, destination_type, audience, url, secret, timeout_seconds, disabled,

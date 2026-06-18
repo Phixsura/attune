@@ -11,7 +11,8 @@ vi.mock('sonner', () => ({
 
 const openState: WorkflowState = {
   id: 'ws-1',
-  name: 'Open',
+  name: 'open',
+  displayName: { entries: { default: 'Open' } },
   color: '#3b82f6',
   category: 'open',
   position: 0,
@@ -23,7 +24,8 @@ const openState: WorkflowState = {
 
 const progressState: WorkflowState = {
   id: 'ws-2',
-  name: 'In Progress',
+  name: 'in_progress',
+  displayName: { entries: { default: 'In Progress' } },
   color: '#f59e0b',
   category: 'active',
   position: 1,
@@ -35,7 +37,8 @@ const progressState: WorkflowState = {
 
 const doneState: WorkflowState = {
   id: 'ws-3',
-  name: 'Done',
+  name: 'done',
+  displayName: { entries: { default: 'Done' } },
   color: '#22c55e',
   category: 'closed',
   position: 2,
@@ -48,7 +51,8 @@ const doneState: WorkflowState = {
 const archivedState: WorkflowState = {
   ...doneState,
   id: 'ws-4',
-  name: 'Archived',
+  name: 'archived',
+  displayName: { entries: { default: 'Archived' } },
   archived: true,
 }
 
@@ -150,12 +154,25 @@ describe('WorkflowSettingsPage', () => {
 
     await user.click(screen.getByRole('button', { name: /新建状态/ }))
     const dialog = screen.getByRole('dialog')
-    const nameInput = within(dialog).getByLabelText('名称')
-    await user.type(nameInput, 'In Progress')
+    const keyInput = within(dialog).getByLabelText('Key（稳定标识）')
+    await user.type(keyInput, 'in_progress')
+    // Fill the default-locale display name (first empty textbox in the dialog).
+    const emptyBox = within(dialog)
+      .getAllByRole('textbox')
+      .find(
+        (el) =>
+          (el as HTMLInputElement).id !== 'state-key' && (el as HTMLInputElement).value === '',
+      )
+    if (emptyBox) await user.type(emptyBox, 'In Progress')
     await user.click(within(dialog).getByRole('button', { name: '新建' }))
 
     await waitFor(() => {
-      expect(createBody).toMatchObject({ name: 'In Progress' })
+      expect(createBody).toMatchObject({
+        name: 'in_progress',
+        displayName: { entries: { default: 'In Progress' } },
+        category: 'open',
+        position: 1,
+      })
     })
   })
 
@@ -172,8 +189,43 @@ describe('WorkflowSettingsPage', () => {
 
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByText('编辑状态')).toBeInTheDocument()
-    const nameInput = within(dialog).getByLabelText('名称')
-    expect(nameInput).toHaveValue('Open')
+    // Key is shown locked as the slug; the display name is pre-filled.
+    const keyInput = within(dialog).getByLabelText('Key（稳定标识）')
+    expect(keyInput).toHaveValue('open')
+    expect(keyInput).toHaveAttribute('readonly')
+    expect(within(dialog).getByDisplayValue('Open')).toBeInTheDocument()
+  })
+
+  it('edit submits displayName and color without the immutable key', async () => {
+    let patchBody: unknown
+    server.use(
+      http.get('/fb/v1/console/workflow/states', () =>
+        HttpResponse.json({ states: [openState, progressState, doneState] }),
+      ),
+      http.get('/fb/v1/console/workflow/transitions', () => HttpResponse.json({ transitions })),
+      http.patch('/fb/v1/console/workflow/states/:id', async ({ request }) => {
+        patchBody = await request.json()
+        return HttpResponse.json({ state: openState })
+      }),
+    )
+    const { user } = renderWithProviders(<WorkflowSettingsPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Open').length).toBeGreaterThanOrEqual(1)
+    })
+
+    await user.click(screen.getAllByRole('button', { name: '编辑状态' })[0])
+    const dialog = screen.getByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '#ef4444' }))
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() => {
+      expect(patchBody).toEqual({
+        id: 'ws-1',
+        displayName: { entries: { default: 'Open' } },
+        color: '#ef4444',
+      })
+    })
   })
 
   it('opens archive confirmation dialog and archives on confirm', async () => {

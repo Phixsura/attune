@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { WorkflowStateBadge } from '@/components/workflow/workflow-state-badge'
+import { useDisplayName } from '@/lib/i18n-resolve'
 import type {
   WorkflowState,
   WorkflowTransition,
@@ -22,6 +23,7 @@ export function TransitionMatrix({
   onSave: (edges: WorkflowTransitionEdge[]) => void
 }) {
   const { t } = useTranslation()
+  const displayOf = useDisplayName()
   const active = useMemo(() => states.filter((s) => !s.archived), [states])
 
   const initialEdges = useMemo(() => {
@@ -74,12 +76,7 @@ export function TransitionMatrix({
               </th>
               {active.map((to) => (
                 <th key={to.id} className="p-2 text-center">
-                  <WorkflowStateBadge
-                    name={to.name}
-                    color={to.color}
-                    category={to.category}
-                    className="text-[10px]"
-                  />
+                  <WorkflowStateBadge state={to} className="text-[10px]" />
                 </th>
               ))}
             </tr>
@@ -88,12 +85,7 @@ export function TransitionMatrix({
             {active.map((from) => (
               <tr key={from.id} className="border-t border-border/60">
                 <td className="p-2">
-                  <WorkflowStateBadge
-                    name={from.name}
-                    color={from.color}
-                    category={from.category}
-                    className="text-[10px]"
-                  />
+                  <WorkflowStateBadge state={from} className="text-[10px]" />
                 </td>
                 {active.map((to) => (
                   <td key={to.id} className="p-2 text-center">
@@ -103,7 +95,9 @@ export function TransitionMatrix({
                       <Checkbox
                         checked={edges.has(`${from.id}→${to.id}`)}
                         onCheckedChange={() => toggleEdge(from.id, to.id)}
-                        aria-label={`${from.name} → ${to.name}`}
+                        aria-label={`${displayOf(from.displayName) || from.name} → ${
+                          displayOf(to.displayName) || to.name
+                        }`}
                       />
                     )}
                   </td>

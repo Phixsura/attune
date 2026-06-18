@@ -3,6 +3,7 @@ syntax = "proto3";
 package attune.v1;
 
 import "google/api/annotations.proto";
+import "attune/v1/common.proto";
 
 service WorkflowService {
   rpc ListStates(ListStatesRequest) returns (ListStatesResponse) {
@@ -56,7 +57,9 @@ service WorkflowService {
 }
 
 message WorkflowState {
-  string id         = 1;
+  string id = 1;
+  // Stable machine key (slug, ^[a-z][a-z0-9_]{0,30}$), immutable after
+  // creation — mirrors Dimension.name. The SPA renders display_name.
   string name       = 2;
   string color      = 3;
   string category   = 4;
@@ -65,6 +68,8 @@ message WorkflowState {
   bool   archived   = 7;
   string created_at = 8;
   string updated_at = 9;
+  // Per-locale display name; the SPA resolves, the backend never does.
+  I18nString display_name = 10;
 }
 
 message WorkflowTransition {
@@ -82,10 +87,12 @@ message ListStatesResponse {
 }
 
 message CreateStateRequest {
-  string name     = 1;
-  string color    = 2;
-  string category = 3;
-  int32  position = 4;
+  // Stable machine key (slug); see WorkflowState.name.
+  string     name         = 1;
+  string     color        = 2;
+  string     category     = 3;
+  int32      position     = 4;
+  I18nString display_name = 5;
 }
 
 message CreateStateResponse {
@@ -93,11 +100,14 @@ message CreateStateResponse {
 }
 
 message UpdateStateRequest {
-  string          id         = 1;
+  string id = 1;
+  // Deprecated: the machine key (name) is immutable; send display_name to
+  // relabel a state. Retained for wire compatibility; ignored by the server.
   optional string name       = 2;
   optional string color      = 3;
   optional int32  position   = 4;
   optional bool   is_default = 5;
+  I18nString      display_name = 6;
 }
 
 message UpdateStateResponse {

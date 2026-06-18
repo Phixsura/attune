@@ -5,11 +5,16 @@
 // source: attune/v1/workflow.proto
 
 /* eslint-disable */
+import { type I18nString } from "./common";
 
 export const protobufPackage = "attune.v1";
 
 export interface WorkflowState {
   id: string;
+  /**
+   * Stable machine key (slug, ^[a-z][a-z0-9_]{0,30}$), immutable after
+   * creation — mirrors Dimension.name. The SPA renders display_name.
+   */
   name: string;
   color: string;
   category: string;
@@ -18,6 +23,8 @@ export interface WorkflowState {
   archived: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Per-locale display name; the SPA resolves, the backend never does. */
+  displayName?: I18nString | undefined;
 }
 
 export interface WorkflowTransition {
@@ -35,10 +42,12 @@ export interface ListStatesResponse {
 }
 
 export interface CreateStateRequest {
+  /** Stable machine key (slug); see WorkflowState.name. */
   name: string;
   color: string;
   category: string;
   position: number;
+  displayName?: I18nString | undefined;
 }
 
 export interface CreateStateResponse {
@@ -47,10 +56,15 @@ export interface CreateStateResponse {
 
 export interface UpdateStateRequest {
   id: string;
+  /**
+   * Deprecated: the machine key (name) is immutable; send display_name to
+   * relabel a state. Retained for wire compatibility; ignored by the server.
+   */
   name?: string | undefined;
   color?: string | undefined;
   position?: number | undefined;
   isDefault?: boolean | undefined;
+  displayName?: I18nString | undefined;
 }
 
 export interface UpdateStateResponse {

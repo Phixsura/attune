@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"time"
+	"regexp"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
@@ -39,19 +39,8 @@ func NewHandler(states stateStore, svc workflowService) *Handler {
 	return ptrext.Of(Handler{states: states, service: svc})
 }
 
-func StateToProto(s workflowstate.WorkflowState) *attunev1.WorkflowState {
-	return ptrext.Of(attunev1.WorkflowState{
-		Id:        s.ID,
-		Name:      s.Name,
-		Color:     s.Color,
-		Category:  s.Category,
-		Position:  int32(s.Position),
-		IsDefault: s.IsDefault,
-		Archived:  s.ArchivedAt != nil,
-		CreatedAt: s.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt: s.UpdatedAt.UTC().Format(time.RFC3339),
-	})
-}
+// stateKeyPattern validates the stable machine key (mirrors Dimension.name).
+var stateKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,30}$`)
 
 func (h *Handler) ListStates(
 	ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.ListStatesRequest,
@@ -80,9 +69,14 @@ func (h *Handler) CreateState(
 	auth := ctx.Auth
 
 	name := req.GetName()
-	if name == "" || len(name) > 48 {
+	if !stateKeyPattern.MatchString(name) {
 		return dispatcher.Fail[*attunev1.CreateStateResponse](
-			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "name must be 1-48 chars")
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "name (machine key) must match ^[a-z][a-z0-9_]{0,30}$")
+	}
+	display := i18nFromProto(req.GetDisplayName())
+	if !display.NonEmpty() {
+		return dispatcher.Fail[*attunev1.CreateStateResponse](
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "display_name must have at least one non-empty entry")
 	}
 	cat := req.GetCategory()
 	if cat != "open" && cat != "active" && cat != "closed" {
@@ -95,11 +89,12 @@ func (h *Handler) CreateState(
 	}
 
 	created, err := h.states.Create(ctx, workflowstate.WorkflowState{
-		TenantID: auth.TenantID,
-		Name:     name,
-		Color:    color,
-		Category: cat,
-		Position: int(req.GetPosition()),
+		TenantID:    auth.TenantID,
+		Name:        name,
+		DisplayName: display,
+		Color:       color,
+		Category:    cat,
+		Position:    int(req.GetPosition()),
 	})
 	if err != nil {
 		if errors.Is(err, workflowstate.ErrNameConflict) {
@@ -113,7 +108,7 @@ func (h *Handler) CreateState(
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,state_id:%s,name:%s", where, auth.TenantID, created.ID, created.Name)
 	if err := h.recordAudit(ctx, "workflow_state.create", "workflow_state", created.ID,
-		workflowSummary("Created workflow state", created.Name), nil, stateAuditSnapshot(ptrext.Indirect(created))); err != nil {
+		workflowSummary("Created workflow state", created.DisplayName.Resolve(nil)), nil, stateAuditSnapshot(ptrext.Indirect(created))); err != nil {
 		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,state_id:%s,err:%+v", where, auth.TenantID, created.ID, err.Error())
 		return dispatcher.Fail[*attunev1.CreateStateResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
@@ -138,9 +133,15 @@ func (h *Handler) UpdateState(
 	}
 	beforeSnapshot := stateAuditSnapshot(ptrext.Indirect(existing))
 
-	if req.Name != nil {
-		existing.Name = req.GetName()
+	if req.DisplayName != nil {
+		display := i18nFromProto(req.GetDisplayName())
+		if !display.NonEmpty() {
+			return dispatcher.Fail[*attunev1.UpdateStateResponse](
+				http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "display_name must have at least one non-empty entry")
+		}
+		existing.DisplayName = display
 	}
+	// req.Name (the machine key) is immutable; ignore it on update.
 	if req.Color != nil {
 		existing.Color = req.GetColor()
 	}
@@ -168,7 +169,7 @@ func (h *Handler) UpdateState(
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,state_id:%s", where, auth.TenantID, updated.ID)
 	if err := h.recordAudit(ctx, "workflow_state.update", "workflow_state", updated.ID,
-		workflowSummary("Updated workflow state", updated.Name), beforeSnapshot, stateAuditSnapshot(ptrext.Indirect(updated))); err != nil {
+		workflowSummary("Updated workflow state", updated.DisplayName.Resolve(nil)), beforeSnapshot, stateAuditSnapshot(ptrext.Indirect(updated))); err != nil {
 		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,state_id:%s,err:%+v", where, auth.TenantID, updated.ID, err.Error())
 		return dispatcher.Fail[*attunev1.UpdateStateResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
 	}
@@ -209,7 +210,7 @@ func (h *Handler) ArchiveState(
 	summary := "Archived workflow state"
 	if before != nil {
 		beforeSnapshot = stateAuditSnapshot(ptrext.Indirect(before))
-		summary = workflowSummary(summary, before.Name)
+		summary = workflowSummary(summary, before.DisplayName.Resolve(nil))
 	}
 	if err := h.recordAudit(ctx, "workflow_state.archive", "workflow_state", req.GetId(), summary, beforeSnapshot, map[string]any{
 		"id":       req.GetId(),

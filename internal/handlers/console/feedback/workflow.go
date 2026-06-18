@@ -13,20 +13,14 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/service/workflow"
+
+	workflowconsole "github.com/Phixsura/attune/internal/handlers/console/workflow"
 )
 
+// workflowStateToProto delegates to the workflow handler's single source of
+// the state→proto mapping (CLAUDE.md §6: don't keep a second copy).
 func workflowStateToProto(s workflowstate.WorkflowState) *attunev1.WorkflowState {
-	return ptrext.Of(attunev1.WorkflowState{
-		Id:        s.ID,
-		Name:      s.Name,
-		Color:     s.Color,
-		Category:  s.Category,
-		Position:  int32(s.Position),
-		IsDefault: s.IsDefault,
-		Archived:  s.ArchivedAt != nil,
-		CreatedAt: s.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt: s.UpdatedAt.UTC().Format(time.RFC3339),
-	})
+	return workflowconsole.StateToProto(s)
 }
 
 func (h *FeedbackHandler) TransitionState(

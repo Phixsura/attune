@@ -1,8 +1,7 @@
 // Package ratelimit is the per-tenant token bucket guarding the ingest
-// API. Phase 3.3 ships a single global default; per-SKU + per-tenant
-// overrides come at billing.
+// API. It applies a single global default rate to every tenant.
 //
-// Design：
+// Design:
 // - Token bucket via golang.org/x/time/rate (battle-tested algorithm
 // used by net/http2, grpc, kubernetes).
 // - One bucket per tenant_id, keyed in a sync.Map. Buckets never

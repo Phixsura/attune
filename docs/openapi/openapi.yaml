@@ -4603,6 +4603,7 @@ components:
             properties:
                 name:
                     type: string
+                    description: Stable machine key (slug); see WorkflowState.name.
                 color:
                     type: string
                 category:
@@ -4610,6 +4611,8 @@ components:
                 position:
                     type: integer
                     format: int32
+                displayName:
+                    $ref: '#/components/schemas/I18nString'
         CreateStateResponse:
             type: object
             properties:
@@ -7177,6 +7180,9 @@ components:
                     type: string
                 name:
                     type: string
+                    description: |-
+                        Deprecated: the machine key (name) is immutable; send display_name to
+                         relabel a state. Retained for wire compatibility; ignored by the server.
                 color:
                     type: string
                 position:
@@ -7184,6 +7190,8 @@ components:
                     format: int32
                 isDefault:
                     type: boolean
+                displayName:
+                    $ref: '#/components/schemas/I18nString'
         UpdateStateResponse:
             type: object
             properties:
@@ -7336,6 +7344,9 @@ components:
                     type: string
                 name:
                     type: string
+                    description: |-
+                        Stable machine key (slug, ^[a-z][a-z0-9_]{0,30}$), immutable after
+                         creation — mirrors Dimension.name. The SPA renders display_name.
                 color:
                     type: string
                 category:
@@ -7351,6 +7362,10 @@ components:
                     type: string
                 updatedAt:
                     type: string
+                displayName:
+                    allOf:
+                        - $ref: '#/components/schemas/I18nString'
+                    description: Per-locale display name; the SPA resolves, the backend never does.
         WorkflowTransition:
             type: object
             properties:

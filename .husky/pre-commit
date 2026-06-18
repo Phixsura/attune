@@ -30,6 +30,8 @@
 #   ④ scripts/lint-integration-layout.sh — keeps integration suites centralized
 #      under test/integration/** (blocks)
 #   ⑤ scripts/lint-rawptr.sh — bans bare *p / &x (blocks)
+#   ⑤b scripts/lint-artifacts.sh — shipped-artifact hygiene: no leaked roadmap
+#      markers / non-i18n CJK in *.go + openapi.yaml + *.md (--strict; blocks)
 #   ⑥ golangci-lint run — incremental on changed files (blocks). Caches under
 #      ~/.cache/golangci-lint so cached re-runs are sub-second on small diffs;
 #      this is the local source of truth for the depguard slog-facade rule
@@ -93,6 +95,13 @@ fi
 if [ -f scripts/lint-rawptr.sh ]; then
   say "lint-rawptr"
   bash scripts/lint-rawptr.sh || fail=1
+fi
+
+# ── ⑤b artifact hygiene — leaked roadmap markers / non-i18n CJK (#64) ────────
+# Whole-repo scan (git ls-files) like lint-slog; spans *.go + openapi.yaml + md.
+if [ -f scripts/lint-artifacts.sh ]; then
+  say "lint-artifacts (--strict)"
+  bash scripts/lint-artifacts.sh --strict || fail=1
 fi
 
 # ── ⑥ golangci-lint — depguard §5 layering + slog-facade ban (#48) ────────────

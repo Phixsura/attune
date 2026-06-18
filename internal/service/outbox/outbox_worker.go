@@ -164,8 +164,8 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 		logext.Warnf(ctx, "[%s] mark delivered failed,id:%d,inbound_trace_id:%s,err:%+v",
 			where, row.ID, row.TraceID, err.Error())
 	}
-	// Phase 3.2 · clear the alert state on first success after a
-	// failing streak. ClearFailure is no-op when last_failure_at IS NULL,
+	// Clear the alert state on first success after a failing streak.
+	// ClearFailure is no-op when last_failure_at IS NULL,
 	// so the common (always-green) path is one cheap UPDATE per delivery.
 	if err := w.targets.ClearFailure(
 		ctx,
@@ -205,7 +205,7 @@ func (w *OutboxWorker) failOrDead(
 // markDead is the terminal status. Always logs at warn — operators
 // should look at the dead queue periodically.
 //
-// Phase 3.2 side effects on the dead path:
+// Side effects on the dead path:
 // - mark the originating notify_target row as currently-failing so the
 // console UI surfaces "your webhook has been failing for X" badge;
 // - (Self-report card to an inline-notifier surface used to live here. Removed in #66 Plan T17;

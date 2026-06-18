@@ -9,7 +9,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
-// buildRateLimiter is the per-tenant ingest rate limiter (Phase 3.3).
+// buildRateLimiter is the per-tenant ingest rate limiter.
 // Logs at boot — WARN if disabled (test/migration), INFO otherwise.
 // onLimit hook increments the Prometheus counter so Grafana can show
 // who's hitting the wall.

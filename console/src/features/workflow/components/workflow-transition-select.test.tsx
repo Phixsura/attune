@@ -11,7 +11,8 @@ vi.mock('sonner', () => ({
 
 const openState: WorkflowState = {
   id: 'ws-1',
-  name: 'Open',
+  name: 'open',
+  displayName: { entries: { default: 'Open' } },
   color: '#3b82f6',
   category: 'open',
   position: 0,
@@ -23,7 +24,8 @@ const openState: WorkflowState = {
 
 const progressState: WorkflowState = {
   id: 'ws-2',
-  name: 'In Progress',
+  name: 'in_progress',
+  displayName: { entries: { default: 'In Progress' } },
   color: '#f59e0b',
   category: 'active',
   position: 1,
@@ -35,7 +37,8 @@ const progressState: WorkflowState = {
 
 const doneState: WorkflowState = {
   id: 'ws-3',
-  name: 'Done',
+  name: 'done',
+  displayName: { entries: { default: 'Done' } },
   color: '#22c55e',
   category: 'closed',
   position: 2,
@@ -56,6 +59,35 @@ describe('WorkflowTransitionSelect', () => {
     )
     expect(screen.getByText('Open')).toBeInTheDocument()
     expect(screen.getByText(/当前状态/)).toBeInTheDocument()
+  })
+
+  it('renders localized display names in the current badge and the option list', async () => {
+    const { user } = renderWithProviders(
+      <WorkflowTransitionSelect
+        feedbackId="42"
+        currentState={openState}
+        allowedNext={[progressState, doneState]}
+      />,
+    )
+    // Current-state badge resolves displayName, not the "open" slug.
+    expect(screen.getByText('Open')).toBeInTheDocument()
+    expect(screen.queryByText('open')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('combobox'))
+    // Options resolve displayName too.
+    expect(screen.getByRole('option', { name: /In Progress/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Done/ })).toBeInTheDocument()
+  })
+
+  it('falls back to the machine key when the current state has no displayName', () => {
+    renderWithProviders(
+      <WorkflowTransitionSelect
+        feedbackId="42"
+        currentState={{ ...openState, displayName: undefined }}
+        allowedNext={[]}
+      />,
+    )
+    expect(screen.getByText('open')).toBeInTheDocument()
   })
 
   it('shows no-states message when no current state and no allowed next', () => {

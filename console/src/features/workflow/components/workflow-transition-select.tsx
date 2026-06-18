@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/select'
 import { WorkflowStateBadge } from '@/components/workflow/workflow-state-badge'
 import { useTransitionFeedback } from '@/features/workflow/api/transition-feedback'
+import { useDisplayName } from '@/lib/i18n-resolve'
 import type { WorkflowState } from '@/proto/attune/v1/workflow'
 
 export function WorkflowTransitionSelect({
@@ -25,6 +26,7 @@ export function WorkflowTransitionSelect({
   allowedNext: WorkflowState[]
 }) {
   const { t } = useTranslation()
+  const displayOf = useDisplayName()
   const transition = useTransitionFeedback()
   const [toStateId, setToStateId] = useState<string>('')
   const [comment, setComment] = useState('')
@@ -49,11 +51,7 @@ export function WorkflowTransitionSelect({
       {currentState && (
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{t('workflow.current_state')}:</span>
-          <WorkflowStateBadge
-            name={currentState.name}
-            color={currentState.color}
-            category={currentState.category}
-          />
+          <WorkflowStateBadge state={currentState} />
         </div>
       )}
 
@@ -72,7 +70,7 @@ export function WorkflowTransitionSelect({
                         className="inline-block size-2 rounded-full"
                         style={{ backgroundColor: s.color }}
                       />
-                      {s.name}
+                      {displayOf(s.displayName) || s.name}
                     </span>
                   </SelectItem>
                 ))}

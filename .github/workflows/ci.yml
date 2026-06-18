@@ -203,6 +203,19 @@ jobs:
           persist-credentials: false
       - run: bash scripts/lint-slog.sh --strict
 
+  # ── lint-artifacts: shipped-artifact hygiene (CLAUDE.md §1; issue #64) ─────
+  # Pure bash/grep/perl — no Go toolchain. Runs UNCONDITIONALLY (no `changes`
+  # gate): leaked roadmap markers / CJK span *.go + openapi.yaml + *.md, so a
+  # docs-only or proto-only PR must be scanned too. --strict gates Check A/B.
+  lint-artifacts:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - run: bash scripts/lint-artifacts.sh --strict
+
   # ── lint-rawptr: bans bare *p / &x — funnel via internal/pkg/ptrext  ──────
   # AST-aware Go linter (cmd/lint-rawptr/). Type-position *T, &xs[i],
   # out-param &arg (json.Unmarshal / *Row.Scan / flag.*Var / errors.As / …),
@@ -828,7 +841,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, changelog, docker-build, compose-config, helm-chart, proto]
+    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-artifacts, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, changelog, docker-build, compose-config, helm-chart, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:

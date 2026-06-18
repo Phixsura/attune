@@ -44,13 +44,14 @@ func (h *Handler) recordAudit(
 
 func stateAuditSnapshot(s workflowstate.WorkflowState) map[string]any {
 	return map[string]any{
-		"id":         s.ID,
-		"name":       s.Name,
-		"color":      s.Color,
-		"category":   s.Category,
-		"position":   s.Position,
-		"is_default": s.IsDefault,
-		"archived":   s.ArchivedAt != nil,
+		"id":           s.ID,
+		"name":         s.Name,
+		"display_name": s.DisplayName,
+		"color":        s.Color,
+		"category":     s.Category,
+		"position":     s.Position,
+		"is_default":   s.IsDefault,
+		"archived":     s.ArchivedAt != nil,
 	}
 }
 
