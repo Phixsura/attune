@@ -21,6 +21,10 @@ func (s stubVerifier) Lookup(context.Context, string) (string, uuid.UUID, error)
 	return s.tenantID, uuid.New(), nil
 }
 
+func (s stubVerifier) LookupWithScopes(context.Context, string) (string, uuid.UUID, []domain.Scope, error) {
+	return s.tenantID, uuid.New(), domain.AllScopes, nil
+}
+
 func TestAllow_Burst(t *testing.T) {
 	l := New(60, 5, false, nil)
 	// First 5 are within burst, allowed.

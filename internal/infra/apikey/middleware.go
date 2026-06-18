@@ -26,6 +26,7 @@ import (
 // infra/apikey doesn't depend on internal/service (one-way arrows).
 type Verifier interface {
 	Lookup(ctx context.Context, raw string) (tenantID string, keyID uuid.UUID, err error)
+	LookupWithScopes(ctx context.Context, raw string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, err error)
 }
 
 // AuthCtx is the request-scoped API key identity populated by Middleware.
@@ -33,6 +34,7 @@ type Verifier interface {
 type AuthCtx struct {
 	TenantID string
 	KeyID    uuid.UUID
+	Scopes   []domain.Scope
 }
 
 type ctxKey int
@@ -68,7 +70,7 @@ func Middleware(v Verifier) func(http.Handler) http.Handler {
 					attunev1.ErrorCode_UNAUTHORIZED, "missing or malformed api key")
 				return
 			}
-			tid, kid, err := v.Lookup(r.Context(), raw)
+			tid, kid, scopes, err := v.LookupWithScopes(r.Context(), raw)
 			if err != nil {
 				status := http.StatusUnauthorized
 				code := attunev1.ErrorCode_UNAUTHORIZED
@@ -90,6 +92,7 @@ func Middleware(v Verifier) func(http.Handler) http.Handler {
 			newCtx = context.WithValue(newCtx, ctxAuth, ptrext.Of(AuthCtx{
 				TenantID: tid,
 				KeyID:    kid,
+				Scopes:   scopes,
 			}))
 			// hot path: success not logged (CLAUDE.md: tight-loop / hot-path silent)
 			next.ServeHTTP(w, r.WithContext(newCtx))
@@ -105,6 +108,24 @@ func FromContext(ctx context.Context) *AuthCtx {
 		panic("apikey: AuthCtx missing — handler not behind Middleware")
 	}
 	return v
+}
+
+// FromContextSafe returns the authenticated API key identity from ctx.
+// Returns nil, false if not present (session request).
+func FromContextSafe(ctx context.Context) (*AuthCtx, bool) {
+	v, ok := ctx.Value(ctxAuth).(*AuthCtx)
+	return v, ok && v != nil
+}
+
+// WithAuthForTest creates a context with API key auth for testing.
+// Only use in tests.
+func WithAuthForTest(ctx context.Context, tenantID string, keyID string, scopes []domain.Scope) context.Context {
+	id, _ := uuid.Parse(keyID)
+	return context.WithValue(ctx, ctxAuth, ptrext.Of(AuthCtx{
+		TenantID: tenantID,
+		KeyID:    id,
+		Scopes:   scopes,
+	}))
 }
 
 // TenantIDFromContext returns the authenticated tenant id, if any.

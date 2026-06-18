@@ -36,6 +36,10 @@ func (okVerifier) Lookup(_ context.Context, _ string) (string, uuid.UUID, error)
 	return "tenant-123", uuid.Nil, nil
 }
 
+func (okVerifier) LookupWithScopes(_ context.Context, _ string) (string, uuid.UUID, []domain.Scope, error) {
+	return "tenant-123", uuid.Nil, domain.AllScopes, nil
+}
+
 func ingestTestServer(ing *fakeIngestor) http.Handler {
 	r := chi.NewRouter()
 	r.Use(apikey.Middleware(okVerifier{}))

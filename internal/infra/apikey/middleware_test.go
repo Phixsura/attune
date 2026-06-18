@@ -18,13 +18,18 @@ import (
 // stubVerifier is the smallest Verifier that lets us drive every
 // branch of Middleware without spinning up a real service.APIKeys.
 type stubVerifier struct {
-	tid string
-	kid uuid.UUID
-	err error
+	tid    string
+	kid    uuid.UUID
+	scopes []domain.Scope
+	err    error
 }
 
 func (s stubVerifier) Lookup(ctx context.Context, raw string) (string, uuid.UUID, error) {
 	return s.tid, s.kid, s.err
+}
+
+func (s stubVerifier) LookupWithScopes(ctx context.Context, raw string) (string, uuid.UUID, []domain.Scope, error) {
+	return s.tid, s.kid, s.scopes, s.err
 }
 
 // decode is shared by the envelope assertions — keeps each test focused.
