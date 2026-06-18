@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/config"
@@ -87,6 +88,7 @@ func buildRouter(
 		}
 		r.Group(func(r chi.Router) {
 			r.Use(apikey.Middleware(apiKeys))
+			r.Use(apikey.RequireScope(domain.ScopeIngestWrite))
 			r.Use(rateLimiter.Middleware)
 			r.Mount("/feedback", ingestHandler.Routes())
 		})

@@ -203,3 +203,67 @@ func readAll(resp *http.Response) ([]byte, error) {
 	}
 	return buf, nil
 }
+
+// TestRequireScope_HasScope verifies that a request with the required scope passes.
+func TestRequireScope_HasScope(t *testing.T) {
+	kid := uuid.New()
+	mw := Middleware(stubVerifier{
+		tid:    "tenant-x",
+		kid:    kid,
+		scopes: []domain.Scope{domain.ScopeIngestWrite},
+	})
+	scope := RequireScope(domain.ScopeIngestWrite)
+
+	called := false
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(wrap(mw(scope(final))))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/feedback/ingest", nil)
+	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"deadbeef")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+	if !called {
+		t.Error("handler should be called when scope matches")
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// TestRequireScope_MissingScope verifies that a request without the required scope is rejected.
+func TestRequireScope_MissingScope(t *testing.T) {
+	kid := uuid.New()
+	mw := Middleware(stubVerifier{
+		tid:    "tenant-x",
+		kid:    kid,
+		scopes: []domain.Scope{domain.ScopeFeedbackRead},
+	})
+	scope := RequireScope(domain.ScopeIngestWrite)
+
+	srv := httptest.NewServer(wrap(mw(scope(next(t)))))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/feedback/ingest", nil)
+	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"deadbeef")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+	body, _ := readAll(resp)
+	m := decode(t, body)
+	if m["code"] != "FORBIDDEN" {
+		t.Errorf("code = %v, want FORBIDDEN; body=%s", m["code"], body)
+	}
+}

@@ -38,6 +38,12 @@ func (h *APIKeysHandler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx]
 			logext.Warnf(ctx, "[%s] reject: invalid scope,tenant_id:%s", where, auth.TenantID)
 			return dispatcher.Fail[*attunev1.CreateApiKeyResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid scope")
 		}
+		for _, s := range scopes {
+			if s == domain.ScopeAPIKeyAdmin {
+				logext.Warnf(ctx, "[%s] reject: apikey:admin not allowed,tenant_id:%s", where, auth.TenantID)
+				return dispatcher.Fail[*attunev1.CreateApiKeyResponse](http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "apikey:admin scope cannot be granted via Console")
+			}
+		}
 	} else {
 		scopes = GetFullAccessScopes()
 	}

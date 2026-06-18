@@ -146,6 +146,22 @@ func TestCreateRejectsMissingLabel(t *testing.T) {
 	require.Equal(t, attunev1.ErrorCode_MISSING_LABEL, got.Code)
 }
 
+func TestCreateRejectsAPIKeyAdminScope(t *testing.T) {
+	t.Parallel()
+
+	h := &APIKeysHandler{svc: &fakeAPIKeysService{}}
+
+	_, err := h.Create(testRequestContext(), &attunev1.CreateApiKeyRequest{
+		Label:  "Admin Key",
+		Scopes: []string{"apikey:admin", "ingest:write"},
+	})
+
+	var got *dispatcher.Error
+	require.ErrorAs(t, err, &got)
+	require.Equal(t, http.StatusForbidden, got.Status)
+	require.Equal(t, attunev1.ErrorCode_FORBIDDEN, got.Code)
+}
+
 func TestRevokeMapsBadIDAndNotFound(t *testing.T) {
 	t.Parallel()
 

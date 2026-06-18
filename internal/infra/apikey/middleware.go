@@ -9,6 +9,7 @@ package apikey
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -139,4 +141,24 @@ func TenantIDFromContext(ctx context.Context) (string, bool) {
 func KeyIDFromContext(ctx context.Context) (uuid.UUID, bool) {
 	v, ok := ctx.Value(ctxKeyID).(uuid.UUID)
 	return v, ok
+}
+
+// RequireScope returns middleware that checks API key scopes.
+// Must be used after Middleware. Rejects with 403 if scope missing.
+func RequireScope(required domain.Scope) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			auth := FromContext(ctx)
+			if !domain.HasScope(auth.Scopes, required) {
+				metrics.APIKeyScopeDeniedTotal.WithLabelValues(string(required)).Inc()
+				logext.Warnf(ctx, "[scope] deny,key_id:%s,required:%s", auth.KeyID, required)
+				dispatcher.Reject(ctx, w, http.StatusForbidden,
+					attunev1.ErrorCode_FORBIDDEN,
+					fmt.Sprintf("missing scope: %s", required))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
