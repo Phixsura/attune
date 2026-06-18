@@ -32,6 +32,7 @@ type Counts struct {
 	TagAssignmentCount int
 	FeedbackAuditCount int
 	LLMAuditCount      int
+	OutboxCount        int
 }
 
 type ExportData struct {
@@ -215,15 +216,24 @@ func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, feedba
 		SELECT
 			(SELECT COUNT(*) FROM feedback_tag_assignments WHERE feedback_id = ANY($1)),
 			(SELECT COUNT(*) FROM feedback_audit_log WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM llm_audit WHERE feedback_id = ANY($1))`,
+			(SELECT COUNT(*) FROM llm_audit WHERE feedback_id = ANY($1)),
+			(SELECT COUNT(*) FROM notify_outbox WHERE feedback_id = ANY($1))`,
 		feedbackIDs,
-	).Scan(&counts.TagAssignmentCount, &counts.FeedbackAuditCount, &counts.LLMAuditCount); err != nil {
+	).Scan(&counts.TagAssignmentCount, &counts.FeedbackAuditCount, &counts.LLMAuditCount, &counts.OutboxCount); err != nil {
 		return Counts{}, fmt.Errorf("count subject-linked rows: %w", err)
 	}
 	counts.FeedbackCount = len(feedbackIDs)
 
 	if _, err := tx.Exec(ctx, `DELETE FROM llm_audit WHERE feedback_id = ANY($1)`, feedbackIDs); err != nil {
 		return Counts{}, fmt.Errorf("delete llm_audit rows: %w", err)
+	}
+	// notify_outbox.feedback_id is a NOT NULL FK with no ON DELETE action and
+	// its payload JSONB holds the feedback content verbatim. Purge it before
+	// user_feedback, or the erasure aborts on an FK violation (and would leave
+	// PII behind even if it didn't). feedback_tag_assignments + feedback_audit_log
+	// cascade on the user_feedback delete; llm_audit + notify_outbox do not.
+	if _, err := tx.Exec(ctx, `DELETE FROM notify_outbox WHERE feedback_id = ANY($1)`, feedbackIDs); err != nil {
+		return Counts{}, fmt.Errorf("delete notify_outbox rows: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM user_feedback WHERE tenant_id = $1 AND id = ANY($2)`, tenantID, feedbackIDs); err != nil {
 		return Counts{}, fmt.Errorf("delete user_feedback rows: %w", err)

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Fixed
+
+- **GDPR erasure no longer aborts on subjects with deliveries (#131).** The
+  data-subject delete now purges `notify_outbox` (a `NOT NULL` FK to
+  `user_feedback` with no `ON DELETE` action, whose `payload` holds the feedback
+  PII) inside the erasure transaction. Previously, deleting any subject who had
+  ever had a notification raised a foreign-key violation that rolled back the
+  whole erasure (a GDPR Art.17 + availability bug); residual PII in the delivery
+  envelope is now removed too. The deletion record reports an `OutboxCount`.
+
 ### Changed
 
 - **Workflow state names are now localized (#64).** `WorkflowState.name` is now a
