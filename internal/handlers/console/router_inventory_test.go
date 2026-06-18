@@ -68,6 +68,8 @@ func TestRouterInventory(t *testing.T) {
 		"GET /api-keys/",
 		"POST /api-keys/",
 		"DELETE /api-keys/{id}",
+		"GET /api-keys/scopes",
+		"GET /api-keys/presets",
 		"GET /gdpr/requests",
 		"GET /gdpr/operations",
 		"POST /gdpr/step-up/verify",
