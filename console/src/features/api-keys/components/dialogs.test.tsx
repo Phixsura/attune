@@ -135,6 +135,20 @@ describe('CreateKeyDialog', () => {
       expect(screen.getByText('All permissions')).toBeInTheDocument()
     })
   })
+
+  it('handles empty scopes data gracefully', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json({ presets: [] })),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json({ scopes: [] })),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+    await user.type(screen.getByRole('textbox'), 'no-scopes-key')
+    await user.click(screen.getByTestId('create-key-submit'))
+    expect(onSubmit).toHaveBeenCalledWith({ label: 'no-scopes-key', scopes: [] })
+  })
 })
 
 describe('SecretKeyDialog', () => {
