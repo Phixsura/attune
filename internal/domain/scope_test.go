@@ -30,9 +30,11 @@ func TestHasScope_Hierarchy(t *testing.T) {
 	assert.False(t, HasScope(granted, ScopeLLMRead), "should not imply unrelated scope")
 }
 
-func TestHasScope_EmptyGranted(t *testing.T) {
-	assert.False(t, HasScope(nil, ScopeFeedbackRead))
-	assert.False(t, HasScope([]Scope{}, ScopeFeedbackRead))
+func TestHasScope_EmptyGranted_LegacyFullAccess(t *testing.T) {
+	// Backward compat: legacy keys without scopes have full access
+	assert.True(t, HasScope(nil, ScopeFeedbackRead), "nil scopes = legacy full access")
+	assert.True(t, HasScope([]Scope{}, ScopeFeedbackRead), "empty scopes = legacy full access")
+	assert.True(t, HasScope(nil, ScopeAPIKeyAdmin), "legacy keys can even access admin scopes")
 }
 
 func TestParseScope(t *testing.T) {

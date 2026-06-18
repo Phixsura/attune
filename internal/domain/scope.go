@@ -97,7 +97,11 @@ func (s Scope) String() string {
 
 // HasScope checks if the granted scopes satisfy the required scope,
 // respecting hierarchy (write implies read).
+// Backward compat: empty scopes (legacy keys) grant full access.
 func HasScope(granted []Scope, required Scope) bool {
+	if len(granted) == 0 {
+		return true // legacy key without scopes → full access
+	}
 	for _, s := range granted {
 		if s == required {
 			return true
