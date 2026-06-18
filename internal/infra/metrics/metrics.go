@@ -623,6 +623,21 @@ var AuditPruneDurationSeconds = prometheus.NewHistogram(
 	},
 )
 
+// ---------- Process health ----------
+
+// WorkerPanics counts recovered panics in supervised background workers, by
+// worker name. A bare `go X.Run(ctx)` would crash the whole process on a single
+// panic; the supervisor (cmd/attune.safego) recovers, increments this, and
+// restarts. Any non-zero value is operator-actionable — a worker is hitting an
+// unhandled bug and looping through restarts.
+var WorkerPanics = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_worker_panics_total",
+		Help: "Recovered panics in supervised background workers, by worker.",
+	},
+	[]string{"worker"},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -699,6 +714,7 @@ var allMetrics = []prometheus.Collector{
 	AuditRowsWrittenTotal,
 	AuditRowsPrunedTotal,
 	AuditPruneDurationSeconds,
+	WorkerPanics,
 }
 
 // RegisteredMetricNames returns the attune metric families registered by this
@@ -766,6 +782,7 @@ func RegisteredMetricNames() []string {
 		"attune_audit_rows_written_total",
 		"attune_audit_rows_pruned_total",
 		"attune_audit_prune_duration_seconds",
+		"attune_worker_panics_total",
 	}
 }
 

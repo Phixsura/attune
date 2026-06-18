@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **DB pool and HTTP server are now bounded (#84).** `database.NewPool` applies
+  defaults for `MaxConns` (20), `connect_timeout` (10s), and `statement_timeout`
+  (30s) unless the database URL already sets them, so a single stuck query can't
+  pin a connection or run unbounded past the request deadline. The HTTP server
+  gained `ReadTimeout` (60s), `WriteTimeout` (300s), and `IdleTimeout` (120s)
+  alongside the existing `ReadHeaderTimeout`, closing slow-loris and slow-reader
+  exposure.
+
+- **Background workers are panic-supervised (#84).** Every long-running worker
+  (outbox, enrichment runtime, embedding, reply-draft, digest, GDPR export, audit
+  pruner, queue/lag refreshers) now runs under a `safego` supervisor that recovers
+  panics, counts them in the new `attune_worker_panics_total` metric, and restarts
+  the worker with capped backoff. Previously a single panic in any worker crashed
+  the whole process — HTTP server and all other workers included.
+
 - **Workflow state names are now localized (#64).** `WorkflowState.name` is now a
   stable machine key (slug `^[a-z][a-z0-9_]{0,30}$`); the human-facing label moves
   to a new per-locale `display_name` (`I18nString`), mirroring how dimensions
