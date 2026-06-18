@@ -33,6 +33,10 @@ describe('useCreateApiKey', () => {
             createdAt: '2026-06-07T00:00:00Z',
             lastUsedAt: '',
             isActive: true,
+            scopes: [],
+            allowedCidrs: [],
+            usageCount: '0',
+            environment: '',
           },
           secret: 'sk_t_supersecret',
         })
@@ -40,7 +44,7 @@ describe('useCreateApiKey', () => {
     )
     const { qc, wrapper } = wrap()
     const { result } = renderHook(() => useCreateApiKey(), { wrapper })
-    result.current.mutate('ci/automation')
+    result.current.mutate({ label: 'ci/automation' })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(observedBody).toEqual({ label: 'ci/automation' })
     expect(result.current.data?.key?.id).toBe('k-42')
@@ -63,7 +67,7 @@ describe('useCreateApiKey', () => {
     const { qc, wrapper } = wrap()
     qc.setQueryData(['console', 'api-keys'], [{ id: 'old', label: 'old' }])
     const { result } = renderHook(() => useCreateApiKey(), { wrapper })
-    result.current.mutate('new')
+    result.current.mutate({ label: 'new' })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     // Invalidation marks the cached query stale — the next observer
     // refetches. With no active observer, isInvalidated stays true.

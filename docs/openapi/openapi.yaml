@@ -6,6 +6,51 @@ info:
     title: ""
     version: 0.0.1
 paths:
+    /fb/v1/console/ai-agents:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                AI agent configurations
+                 GET /fb/v1/console/ai-agents
+            operationId: ApiKeyService_ListAIAgentConfigs
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListAIAgentConfigsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/ai-agents
+            operationId: ApiKeyService_CreateAIAgentConfig
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateAIAgentConfigRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateAIAgentConfigResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys:
         get:
             tags:
@@ -49,6 +94,293 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/analytics:
+        get:
+            tags:
+                - ApiKeyService
+            description: GET /fb/v1/console/api-keys/analytics
+            operationId: ApiKeyService_GetTenantAnalytics
+            parameters:
+                - name: start
+                  in: query
+                  schema:
+                    type: string
+                - name: end
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetTenantAnalyticsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/approvals:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Approval workflows
+                 GET /fb/v1/console/api-keys/approvals
+            operationId: ApiKeyService_ListApprovalRequests
+            parameters:
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListApprovalRequestsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/api-keys/approvals
+            operationId: ApiKeyService_CreateApprovalRequest
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateApprovalRequestRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateApprovalRequestResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/approvals/{id}/review:
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/api-keys/approvals/{id}/review
+            operationId: ApiKeyService_ReviewApproval
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ReviewApprovalRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReviewApprovalResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/event-subscriptions:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Event subscriptions
+                 GET /fb/v1/console/api-keys/event-subscriptions
+            operationId: ApiKeyService_ListEventSubscriptions
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListEventSubscriptionsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/api-keys/event-subscriptions
+            operationId: ApiKeyService_CreateEventSubscription
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateEventSubscriptionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateEventSubscriptionResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/expiring:
+        get:
+            tags:
+                - ApiKeyService
+            description: GET /fb/v1/console/api-keys/expiring — keys expiring soon.
+            operationId: ApiKeyService_ListExpiringApiKeys
+            parameters:
+                - name: within
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExpiringApiKeysResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/leaks:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Leak detections
+                 GET /fb/v1/console/api-keys/leaks
+            operationId: ApiKeyService_ListLeakDetections
+            parameters:
+                - name: unresolvedOnly
+                  in: query
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListLeakDetectionsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/policy:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Org-level policies
+                 GET /fb/v1/console/api-keys/policy
+            operationId: ApiKeyService_GetPolicy
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetPolicyResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        put:
+            tags:
+                - ApiKeyService
+            description: PUT /fb/v1/console/api-keys/policy
+            operationId: ApiKeyService_UpdatePolicy
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdatePolicyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdatePolicyResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/presets:
+        get:
+            tags:
+                - ApiKeyService
+            description: GET /fb/v1/console/api-keys/presets — list scope preset templates.
+            operationId: ApiKeyService_ListScopePresets
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListScopePresetsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/scopes:
+        get:
+            tags:
+                - ApiKeyService
+            description: GET /fb/v1/console/api-keys/scopes — list available scopes.
+            operationId: ApiKeyService_ListScopes
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListScopesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}:
         delete:
             tags:
@@ -68,6 +400,455 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/DeleteApiKeyResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/analytics:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Analytics
+                 GET /fb/v1/console/api-keys/{id}/analytics
+            operationId: ApiKeyService_GetKeyAnalytics
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: start
+                  in: query
+                  schema:
+                    type: string
+                - name: end
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetKeyAnalyticsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/budget:
+        put:
+            tags:
+                - ApiKeyService
+            description: |-
+                Budget
+                 PUT /fb/v1/console/api-keys/{id}/budget
+            operationId: ApiKeyService_SetKeyBudget
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SetKeyBudgetRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SetKeyBudgetResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/environment:
+        patch:
+            tags:
+                - ApiKeyService
+            description: PATCH /fb/v1/console/api-keys/{id}/environment — update environment tag.
+            operationId: ApiKeyService_UpdateApiKeyEnvironment
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateApiKeyEnvironmentRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateApiKeyEnvironmentResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/health:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Key health score
+                 GET /fb/v1/console/api-keys/{id}/health
+            operationId: ApiKeyService_GetKeyHealth
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetKeyHealthResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/logs:
+        get:
+            tags:
+                - ApiKeyService
+            description: GET /fb/v1/console/api-keys/{id}/logs — request logs.
+            operationId: ApiKeyService_ListApiKeyLogs
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListApiKeyLogsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/project:
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/api-keys/{id}/project
+            operationId: ApiKeyService_BindKeyToProject
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/BindKeyToProjectRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/BindKeyToProjectResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/rotate:
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/api-keys/{id}/rotate — rotate with grace period.
+            operationId: ApiKeyService_RotateApiKey
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RotateApiKeyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RotateApiKeyResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/rotation-schedule:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Rotation schedules
+                 GET /fb/v1/console/api-keys/{id}/rotation-schedule
+            operationId: ApiKeyService_GetRotationSchedule
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetRotationScheduleResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/api-keys/{id}/rotation-schedule
+            operationId: ApiKeyService_CreateRotationSchedule
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateRotationScheduleRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateRotationScheduleResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/signing-keys:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Signing keys (PKCV)
+                 GET /fb/v1/console/api-keys/{id}/signing-keys
+            operationId: ApiKeyService_ListSigningKeys
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListSigningKeysResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/api-keys/{id}/signing-keys
+            operationId: ApiKeyService_CreateSigningKey
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateSigningKeyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateSigningKeyResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/tags:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Tags
+                 GET /fb/v1/console/api-keys/{id}/tags
+            operationId: ApiKeyService_GetKeyTags
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetKeyTagsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        put:
+            tags:
+                - ApiKeyService
+            description: PUT /fb/v1/console/api-keys/{id}/tags
+            operationId: ApiKeyService_SetKeyTags
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SetKeyTagsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SetKeyTagsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/temp-token:
+        post:
+            tags:
+                - ApiKeyService
+            description: |-
+                Temporary tokens
+                 POST /fb/v1/console/api-keys/{id}/temp-token
+            operationId: ApiKeyService_CreateTempToken
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateTempTokenRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateTempTokenResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/{id}/unused-scopes:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Unused scope detection
+                 GET /fb/v1/console/api-keys/{id}/unused-scopes
+            operationId: ApiKeyService_GetUnusedScopes
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetUnusedScopesResponse'
                 default:
                     description: Default error response
                     content:
@@ -1919,6 +2700,51 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/managed-identities:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Managed identities
+                 GET /fb/v1/console/managed-identities
+            operationId: ApiKeyService_ListManagedIdentities
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListManagedIdentitiesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/managed-identities
+            operationId: ApiKeyService_CreateManagedIdentity
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateManagedIdentityRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateManagedIdentityResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/me:
         get:
             tags:
@@ -2191,6 +3017,231 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/TestNotifyTargetResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/oauth2/clients:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                OAuth2 clients
+                 GET /fb/v1/console/oauth2/clients
+            operationId: ApiKeyService_ListOAuth2Clients
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListOAuth2ClientsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/oauth2/clients
+            operationId: ApiKeyService_CreateOAuth2Client
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateOAuth2ClientRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateOAuth2ClientResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/projects:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Projects
+                 GET /fb/v1/console/projects
+            operationId: ApiKeyService_ListProjects
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListProjectsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/projects
+            operationId: ApiKeyService_CreateProject
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateProjectRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateProjectResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/secret-managers:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Secret managers
+                 GET /fb/v1/console/secret-managers
+            operationId: ApiKeyService_ListSecretManagers
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListSecretManagersResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/secret-managers
+            operationId: ApiKeyService_CreateSecretManager
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateSecretManagerRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateSecretManagerResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/service-accounts:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                Service accounts
+                 GET /fb/v1/console/service-accounts
+            operationId: ApiKeyService_ListServiceAccounts
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListServiceAccountsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/service-accounts
+            operationId: ApiKeyService_CreateServiceAccount
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateServiceAccountRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateServiceAccountResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/siem-integrations:
+        get:
+            tags:
+                - ApiKeyService
+            description: |-
+                SIEM integrations
+                 GET /fb/v1/console/siem-integrations
+            operationId: ApiKeyService_ListSIEMIntegrations
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListSIEMIntegrationsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - ApiKeyService
+            description: POST /fb/v1/console/siem-integrations
+            operationId: ApiKeyService_CreateSIEMIntegration
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateSIEMIntegrationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateSIEMIntegrationResponse'
                 default:
                     description: Default error response
                     content:
@@ -2489,6 +3540,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /v1/auth/verify:
+        get:
+            tags:
+                - AuthService
+            description: GET /v1/auth/verify — verify current API key and return details.
+            operationId: AuthService_VerifyApiKey
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VerifyApiKeyResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /v1/feedback/ingest:
         post:
             tags:
@@ -2515,6 +3585,41 @@ paths:
                                 $ref: '#/components/schemas/Status'
 components:
     schemas:
+        AIAgentConfig:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                agentType:
+                    type: string
+                allowedScopes:
+                    type: array
+                    items:
+                        type: string
+                maxTokensPerRequest:
+                    type: integer
+                    format: int32
+                maxRequestsPerMinute:
+                    type: integer
+                    format: int32
+                allowedModels:
+                    type: array
+                    items:
+                        type: string
+                requireHumanApproval:
+                    type: boolean
+                approvalTimeoutSeconds:
+                    type: integer
+                    format: int32
+                auditAllRequests:
+                    type: boolean
+                isActive:
+                    type: boolean
+                createdAt:
+                    type: string
+            description: AI agent configurations
         AddFeedbackTagRequest:
             type: object
             properties:
@@ -2548,6 +3653,145 @@ components:
                     type: string
                 revokedAt:
                     type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+                description:
+                    type: string
+                expiresAt:
+                    type: string
+                allowedCidrs:
+                    type: array
+                    items:
+                        type: string
+                usageCount:
+                    type: string
+                rateLimitRpm:
+                    type: integer
+                    format: int32
+                environment:
+                    type: string
+                gracePeriodEndsAt:
+                    type: string
+                serviceAccountId:
+                    type: string
+                rotatedFromId:
+                    type: string
+        ApiKeyAnalytics:
+            type: object
+            properties:
+                hour:
+                    type: string
+                requestCount:
+                    type: string
+                errorCount:
+                    type: string
+                avgLatencyMs:
+                    type: string
+                status2xx:
+                    type: integer
+                    format: int32
+                status4xx:
+                    type: integer
+                    format: int32
+                status5xx:
+                    type: integer
+                    format: int32
+            description: Analytics
+        ApiKeyLogEntry:
+            type: object
+            properties:
+                timestamp:
+                    type: string
+                method:
+                    type: string
+                path:
+                    type: string
+                statusCode:
+                    type: integer
+                    format: int32
+                clientIp:
+                    type: string
+                userAgent:
+                    type: string
+                latencyMs:
+                    type: integer
+                    format: int32
+                requestId:
+                    type: string
+        ApiKeyPolicy:
+            type: object
+            properties:
+                maxExpiryDays:
+                    type: integer
+                    format: int32
+                requireExpiry:
+                    type: boolean
+                requireIpAllowlist:
+                    type: boolean
+                requireDescription:
+                    type: boolean
+                maxKeysPerServiceAccount:
+                    type: integer
+                    format: int32
+                allowedEnvironments:
+                    type: array
+                    items:
+                        type: string
+                requireMfaForCreate:
+                    type: boolean
+                requireApprovalForProd:
+                    type: boolean
+                autoRevokeUnusedDays:
+                    type: integer
+                    format: int32
+            description: Org-level policies
+        ApiKeyTag:
+            type: object
+            properties:
+                key:
+                    type: string
+                value:
+                    type: string
+            description: Tags
+        ApprovalRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                requesterId:
+                    type: string
+                requesterType:
+                    type: string
+                keyLabel:
+                    type: string
+                keyDescription:
+                    type: string
+                requestedScopes:
+                    type: array
+                    items:
+                        type: string
+                requestedEnvironment:
+                    type: string
+                requestedExpiryDays:
+                    type: integer
+                    format: int32
+                justification:
+                    type: string
+                status:
+                    type: string
+                reviewerId:
+                    type: string
+                reviewerNotes:
+                    type: string
+                createdAt:
+                    type: string
+                reviewedAt:
+                    type: string
+                expiresAt:
+                    type: string
+            description: Approval workflows
         ArchiveStateResponse:
             type: object
             properties: {}
@@ -2807,6 +4051,18 @@ components:
                     type: string
                     description: Optional audit comment for the transition.
             description: BatchWorkflowOp transitions selected rows to a new workflow state.
+        BindKeyToProjectRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                projectId:
+                    type: string
+        BindKeyToProjectResponse:
+            type: object
+            properties:
+                key:
+                    $ref: '#/components/schemas/ApiKey'
         CancelGdprRequestRequest:
             type: object
             properties:
@@ -2908,6 +4164,42 @@ components:
                 sampleTitle:
                     type: string
             description: ClusterSummary is a condensed view of a feedback cluster.
+        CreateAIAgentConfigRequest:
+            required:
+                - name
+                - agentType
+            type: object
+            properties:
+                name:
+                    type: string
+                agentType:
+                    type: string
+                allowedScopes:
+                    type: array
+                    items:
+                        type: string
+                maxTokensPerRequest:
+                    type: integer
+                    format: int32
+                maxRequestsPerMinute:
+                    type: integer
+                    format: int32
+                allowedModels:
+                    type: array
+                    items:
+                        type: string
+                requireHumanApproval:
+                    type: boolean
+                approvalTimeoutSeconds:
+                    type: integer
+                    format: int32
+                auditAllRequests:
+                    type: boolean
+        CreateAIAgentConfigResponse:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/AIAgentConfig'
         CreateApiKeyRequest:
             required:
                 - label
@@ -2915,6 +4207,21 @@ components:
             properties:
                 label:
                     type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+                description:
+                    type: string
+                expiresIn:
+                    type: string
+                allowedCidrs:
+                    type: array
+                    items:
+                        type: string
+                rateLimitRpm:
+                    type: integer
+                    format: int32
         CreateApiKeyResponse:
             type: object
             properties:
@@ -2923,6 +4230,50 @@ components:
                 secret:
                     type: string
                     description: The raw secret — returned only here, once, at creation.
+        CreateApprovalRequestRequest:
+            required:
+                - keyLabel
+            type: object
+            properties:
+                keyLabel:
+                    type: string
+                keyDescription:
+                    type: string
+                requestedScopes:
+                    type: array
+                    items:
+                        type: string
+                requestedEnvironment:
+                    type: string
+                requestedExpiryDays:
+                    type: integer
+                    format: int32
+                justification:
+                    type: string
+        CreateApprovalRequestResponse:
+            type: object
+            properties:
+                request:
+                    $ref: '#/components/schemas/ApprovalRequest'
+        CreateEventSubscriptionRequest:
+            required:
+                - eventTypes
+                - webhookUrl
+            type: object
+            properties:
+                eventTypes:
+                    type: array
+                    items:
+                        type: string
+                webhookUrl:
+                    type: string
+                secret:
+                    type: string
+        CreateEventSubscriptionResponse:
+            type: object
+            properties:
+                subscription:
+                    $ref: '#/components/schemas/EventSubscription'
         CreateGuardPolicyRequest:
             type: object
             properties:
@@ -2985,6 +4336,34 @@ components:
                 timeoutSeconds:
                     type: integer
                     format: int32
+        CreateManagedIdentityRequest:
+            required:
+                - name
+                - provider
+                - externalId
+            type: object
+            properties:
+                name:
+                    type: string
+                provider:
+                    type: string
+                externalId:
+                    type: string
+                audience:
+                    type: string
+                issuer:
+                    type: string
+                subjectPattern:
+                    type: string
+                allowedScopes:
+                    type: array
+                    items:
+                        type: string
+        CreateManagedIdentityResponse:
+            type: object
+            properties:
+                identity:
+                    $ref: '#/components/schemas/ManagedIdentity'
         CreateNotifyTargetRequest:
             required:
                 - destinationType
@@ -3004,6 +4383,151 @@ components:
                     format: int32
                 disabled:
                     type: boolean
+        CreateOAuth2ClientRequest:
+            required:
+                - name
+            type: object
+            properties:
+                name:
+                    type: string
+                description:
+                    type: string
+                redirectUris:
+                    type: array
+                    items:
+                        type: string
+                allowedScopes:
+                    type: array
+                    items:
+                        type: string
+        CreateOAuth2ClientResponse:
+            type: object
+            properties:
+                client:
+                    $ref: '#/components/schemas/OAuth2Client'
+                clientSecret:
+                    type: string
+        CreateProjectRequest:
+            required:
+                - name
+            type: object
+            properties:
+                name:
+                    type: string
+                description:
+                    type: string
+        CreateProjectResponse:
+            type: object
+            properties:
+                project:
+                    $ref: '#/components/schemas/Project'
+        CreateRotationScheduleRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                rotationIntervalDays:
+                    type: integer
+                    format: int32
+                gracePeriodHours:
+                    type: integer
+                    format: int32
+                autoNotify:
+                    type: boolean
+                notifyDaysBefore:
+                    type: array
+                    items:
+                        type: integer
+                        format: int32
+        CreateRotationScheduleResponse:
+            type: object
+            properties:
+                schedule:
+                    $ref: '#/components/schemas/RotationSchedule'
+        CreateSIEMIntegrationRequest:
+            required:
+                - provider
+                - name
+                - endpointUrl
+            type: object
+            properties:
+                provider:
+                    type: string
+                name:
+                    type: string
+                endpointUrl:
+                    type: string
+                authConfig:
+                    type: object
+                    additionalProperties:
+                        type: string
+                eventTypes:
+                    type: array
+                    items:
+                        type: string
+                batchSize:
+                    type: integer
+                    format: int32
+                flushIntervalSeconds:
+                    type: integer
+                    format: int32
+        CreateSIEMIntegrationResponse:
+            type: object
+            properties:
+                integration:
+                    $ref: '#/components/schemas/SIEMIntegration'
+        CreateSecretManagerRequest:
+            required:
+                - managerType
+                - name
+            type: object
+            properties:
+                managerType:
+                    type: string
+                name:
+                    type: string
+                config:
+                    type: object
+                    additionalProperties:
+                        type: string
+        CreateSecretManagerResponse:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/SecretManagerConfig'
+        CreateServiceAccountRequest:
+            required:
+                - name
+            type: object
+            properties:
+                name:
+                    type: string
+                description:
+                    type: string
+        CreateServiceAccountResponse:
+            type: object
+            properties:
+                serviceAccount:
+                    $ref: '#/components/schemas/ServiceAccount'
+        CreateSigningKeyRequest:
+            required:
+                - algorithm
+                - publicKeyPem
+            type: object
+            properties:
+                id:
+                    type: string
+                algorithm:
+                    type: string
+                publicKeyPem:
+                    type: string
+                expiresAt:
+                    type: string
+        CreateSigningKeyResponse:
+            type: object
+            properties:
+                key:
+                    $ref: '#/components/schemas/SigningKey'
         CreateStateRequest:
             type: object
             properties:
@@ -3032,6 +4556,31 @@ components:
                     type: string
                 exclusiveScope:
                     type: string
+        CreateTempTokenRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                expiresIn:
+                    type: string
+                maxUses:
+                    type: integer
+                    format: int32
+                purpose:
+                    type: string
+            description: Temporary tokens
+        CreateTempTokenResponse:
+            type: object
+            properties:
+                token:
+                    type: string
+                tokenPrefix:
+                    type: string
+                expiresAt:
+                    type: string
+                maxUses:
+                    type: integer
+                    format: int32
         DeleteApiKeyResponse:
             type: object
             properties: {}
@@ -3443,6 +4992,22 @@ components:
                     format: uint32
                 fullyConverged:
                     type: boolean
+        EventSubscription:
+            type: object
+            properties:
+                id:
+                    type: string
+                eventTypes:
+                    type: array
+                    items:
+                        type: string
+                webhookUrl:
+                    type: string
+                isActive:
+                    type: boolean
+                createdAt:
+                    type: string
+            description: Event subscriptions
         ExportGdprSubjectRequest:
             type: object
             properties:
@@ -3826,6 +5391,25 @@ components:
                 urgentCount:
                     type: string
                     description: Count of is_urgent = true rows within the window.
+        GetKeyAnalyticsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ApiKeyAnalytics'
+        GetKeyHealthResponse:
+            type: object
+            properties:
+                health:
+                    $ref: '#/components/schemas/KeyHealthScore'
+        GetKeyTagsResponse:
+            type: object
+            properties:
+                tags:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ApiKeyTag'
         GetLLMUsageResponse:
             type: object
             properties:
@@ -3859,6 +5443,34 @@ components:
                     $ref: '#/components/schemas/SessionUser'
                 csrfToken:
                     type: string
+        GetPolicyResponse:
+            type: object
+            properties:
+                policy:
+                    $ref: '#/components/schemas/ApiKeyPolicy'
+        GetRotationScheduleResponse:
+            type: object
+            properties:
+                schedule:
+                    $ref: '#/components/schemas/RotationSchedule'
+        GetTenantAnalyticsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ApiKeyAnalytics'
+        GetUnusedScopesResponse:
+            type: object
+            properties:
+                unusedScopes:
+                    type: array
+                    items:
+                        type: string
+                allUsage:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PermissionUsage'
         GetUsageResponse:
             type: object
             properties:
@@ -4098,6 +5710,25 @@ components:
                     description: Suggested poll interval in seconds (for long-running jobs).
                     format: int32
             description: JobStatusResponse is the full job status with progress and result.
+        KeyHealthScore:
+            type: object
+            properties:
+                score:
+                    type: integer
+                    format: int32
+                hasExpiry:
+                    type: boolean
+                hasIpRestriction:
+                    type: boolean
+                hasRateLimit:
+                    type: boolean
+                unusedScopeCount:
+                    type: integer
+                    format: int32
+                daysSinceRotation:
+                    type: integer
+                    format: int32
+            description: Key health score
         LLMChannel:
             type: object
             properties:
@@ -4208,6 +5839,38 @@ components:
                     type: string
                 errors:
                     type: string
+        LeakDetection:
+            type: object
+            properties:
+                id:
+                    type: string
+                keyId:
+                    type: string
+                source:
+                    type: string
+                sourceUrl:
+                    type: string
+                detectedAt:
+                    type: string
+                resolvedAt:
+                    type: string
+                resolution:
+                    type: string
+            description: Leak detections
+        ListAIAgentConfigsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/AIAgentConfig'
+        ListApiKeyLogsResponse:
+            type: object
+            properties:
+                logs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ApiKeyLogEntry'
         ListApiKeysResponse:
             type: object
             properties:
@@ -4215,6 +5878,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ApiKey'
+        ListApprovalRequestsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ApprovalRequest'
         ListAuditLogResponse:
             type: object
             properties:
@@ -4247,6 +5917,20 @@ components:
                 totalCount:
                     type: integer
                     format: int32
+        ListEventSubscriptionsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EventSubscription'
+        ListExpiringApiKeysResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ApiKey'
         ListFeedbackResponse:
             type: object
             properties:
@@ -4318,6 +6002,20 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/LLMRoute'
+        ListLeakDetectionsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/LeakDetection'
+        ListManagedIdentitiesResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ManagedIdentity'
         ListMembersResponse:
             type: object
             properties:
@@ -4332,6 +6030,62 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/NotifyTarget'
+        ListOAuth2ClientsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/OAuth2Client'
+        ListProjectsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Project'
+        ListSIEMIntegrationsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SIEMIntegration'
+        ListScopePresetsResponse:
+            type: object
+            properties:
+                presets:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ScopePreset'
+        ListScopesResponse:
+            type: object
+            properties:
+                scopes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ScopeInfo'
+        ListSecretManagersResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SecretManagerConfig'
+        ListServiceAccountsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ServiceAccount'
+        ListSigningKeysResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SigningKey'
         ListStatesResponse:
             type: object
             properties:
@@ -4376,6 +6130,34 @@ components:
         LogoutResponse:
             type: object
             properties: {}
+        ManagedIdentity:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                provider:
+                    type: string
+                externalId:
+                    type: string
+                audience:
+                    type: string
+                issuer:
+                    type: string
+                subjectPattern:
+                    type: string
+                allowedScopes:
+                    type: array
+                    items:
+                        type: string
+                isActive:
+                    type: boolean
+                lastUsedAt:
+                    type: string
+                createdAt:
+                    type: string
+            description: Managed identities
         Member:
             type: object
             properties:
@@ -4419,6 +6201,32 @@ components:
                 lastError:
                     type: string
             description: NotifyTarget never carries the secret — it is write-only once stored.
+        OAuth2Client:
+            type: object
+            properties:
+                id:
+                    type: string
+                clientId:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                redirectUris:
+                    type: array
+                    items:
+                        type: string
+                allowedScopes:
+                    type: array
+                    items:
+                        type: string
+                isActive:
+                    type: boolean
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+            description: OAuth2 clients
         PatchGuardPolicyRequest:
             type: object
             properties:
@@ -4431,6 +6239,18 @@ components:
             properties:
                 id:
                     type: string
+        PermissionUsage:
+            type: object
+            properties:
+                scope:
+                    type: string
+                firstUsedAt:
+                    type: string
+                lastUsedAt:
+                    type: string
+                usageCount:
+                    type: string
+            description: Permission usage / unused scope detection
         PreviewEnrichPromptRequest:
             required:
                 - sampleContent
@@ -4443,6 +6263,22 @@ components:
             properties:
                 renderedPrompt:
                     type: string
+        Project:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                isActive:
+                    type: boolean
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+            description: Projects
         RegenerateReplyDraftRequest:
             type: object
             properties:
@@ -4545,6 +6381,20 @@ components:
             properties:
                 id:
                     type: string
+        ReviewApprovalRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                approve:
+                    type: boolean
+                notes:
+                    type: string
+        ReviewApprovalResponse:
+            type: object
+            properties:
+                request:
+                    $ref: '#/components/schemas/ApprovalRequest'
         RevokeGdprExportRequest:
             type: object
             properties:
@@ -4595,6 +6445,25 @@ components:
             properties:
                 runtime:
                     $ref: '#/components/schemas/EnrichmentRuntimeReadModel'
+        RotateApiKeyRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                gracePeriod:
+                    type: string
+            description: Key rotation
+        RotateApiKeyResponse:
+            type: object
+            properties:
+                oldKey:
+                    $ref: '#/components/schemas/ApiKey'
+                newKey:
+                    $ref: '#/components/schemas/ApiKey'
+                secret:
+                    type: string
+                gracePeriodEndsAt:
+                    type: string
         RotateInboundSourceSecretRequest:
             type: object
             properties:
@@ -4607,6 +6476,113 @@ components:
                     type: string
                 nextEligibleAt:
                     type: string
+        RotationSchedule:
+            type: object
+            properties:
+                id:
+                    type: string
+                keyId:
+                    type: string
+                rotationIntervalDays:
+                    type: integer
+                    format: int32
+                nextRotationAt:
+                    type: string
+                lastRotatedAt:
+                    type: string
+                gracePeriodHours:
+                    type: integer
+                    format: int32
+                autoNotify:
+                    type: boolean
+                notifyDaysBefore:
+                    type: array
+                    items:
+                        type: integer
+                        format: int32
+                isActive:
+                    type: boolean
+                createdAt:
+                    type: string
+            description: Rotation schedules
+        SIEMIntegration:
+            type: object
+            properties:
+                id:
+                    type: string
+                provider:
+                    type: string
+                name:
+                    type: string
+                endpointUrl:
+                    type: string
+                eventTypes:
+                    type: array
+                    items:
+                        type: string
+                batchSize:
+                    type: integer
+                    format: int32
+                flushIntervalSeconds:
+                    type: integer
+                    format: int32
+                isActive:
+                    type: boolean
+                lastSentAt:
+                    type: string
+                lastError:
+                    type: string
+                createdAt:
+                    type: string
+            description: SIEM integrations
+        ScopeInfo:
+            type: object
+            properties:
+                scope:
+                    type: string
+                resource:
+                    type: string
+                action:
+                    type: string
+                description:
+                    type: string
+                implies:
+                    type: array
+                    items:
+                        type: string
+        ScopePreset:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+        SecretManagerConfig:
+            type: object
+            properties:
+                id:
+                    type: string
+                managerType:
+                    type: string
+                name:
+                    type: string
+                isActive:
+                    type: boolean
+                lastSyncAt:
+                    type: string
+                lastSyncStatus:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+            description: Secret managers
         SeedDefaultsRequest:
             type: object
             properties: {}
@@ -4678,6 +6654,22 @@ components:
                     type: boolean
                     description: True if semantic search was unavailable and results are keyword-only.
             description: SemanticSearchResponse contains the ranked search results.
+        ServiceAccount:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                isActive:
+                    type: boolean
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+            description: Service accounts
         SessionUser:
             type: object
             properties:
@@ -4693,6 +6685,57 @@ components:
                 SessionUser is the logged-in console user.
                  open_id is an opaque per-user identifier — historically carried an
                  upstream IM open_id but is now an attune-internal user id.
+        SetKeyBudgetRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                budgetLimitUsd:
+                    type: string
+                overageAction:
+                    type: string
+            description: Budget
+        SetKeyBudgetResponse:
+            type: object
+            properties:
+                key:
+                    $ref: '#/components/schemas/ApiKey'
+        SetKeyTagsRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                tags:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ApiKeyTag'
+        SetKeyTagsResponse:
+            type: object
+            properties:
+                tags:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ApiKeyTag'
+        SigningKey:
+            type: object
+            properties:
+                id:
+                    type: string
+                keyId:
+                    type: string
+                algorithm:
+                    type: string
+                publicKeyPem:
+                    type: string
+                keyFingerprint:
+                    type: string
+                isActive:
+                    type: boolean
+                createdAt:
+                    type: string
+                expiresAt:
+                    type: string
+            description: Signing keys for PKCV
         Status:
             type: object
             properties:
@@ -4852,6 +6895,19 @@ components:
                     $ref: '#/components/schemas/WorkflowState'
                 toState:
                     $ref: '#/components/schemas/WorkflowState'
+        UpdateApiKeyEnvironmentRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                environment:
+                    type: string
+            description: Environment update
+        UpdateApiKeyEnvironmentResponse:
+            type: object
+            properties:
+                key:
+                    $ref: '#/components/schemas/ApiKey'
         UpdateEnrichConfigRequest:
             type: object
             properties:
@@ -4954,6 +7010,18 @@ components:
                     format: int32
                 disabled:
                     type: boolean
+        UpdatePolicyRequest:
+            required:
+                - policy
+            type: object
+            properties:
+                policy:
+                    $ref: '#/components/schemas/ApiKeyPolicy'
+        UpdatePolicyResponse:
+            type: object
+            properties:
+                policy:
+                    $ref: '#/components/schemas/ApiKeyPolicy'
         UpdateStateRequest:
             type: object
             properties:
@@ -5062,6 +7130,24 @@ components:
                 count:
                     type: string
             description: ValueCount is one bucket of a per-dim distribution.
+        VerifyApiKeyResponse:
+            type: object
+            properties:
+                valid:
+                    type: boolean
+                keyPrefix:
+                    type: string
+                label:
+                    type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+                expiresAt:
+                    type: string
+                rateLimitRpm:
+                    type: integer
+                    format: int32
         VerifyGdprStepUpRequest:
             type: object
             properties:
@@ -5137,6 +7223,8 @@ tags:
     - name: ApiKeyService
       description: ApiKeyService manages a tenant's external ingest API keys (console).
     - name: AuditLogService
+    - name: AuthService
+      description: AuthService provides API key verification (public API).
     - name: BatchService
       description: |-
         BatchService provides batch operations on feedback rows (#30).

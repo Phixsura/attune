@@ -14,6 +14,10 @@ const keyFixture = {
   label: 'prod ingest',
   isActive: true,
   createdAt: '2026-06-07T00:00:00Z',
+  scopes: [],
+  allowedCidrs: [],
+  usageCount: '0',
+  environment: '',
 }
 
 describe('ApiKeysPage user flow', () => {
@@ -48,7 +52,7 @@ describe('ApiKeysPage user flow', () => {
     await user.type(within(createDialog).getByLabelText('用途备注'), 'ci ingest')
     await user.click(within(createDialog).getByTestId('create-key-submit'))
     await waitFor(() => {
-      expect(createBody).toEqual({ label: 'ci ingest' })
+      expect(createBody).toEqual({ label: 'ci ingest', scopes: [] })
       expect(screen.getByText('ak_live_the-secret')).toBeInTheDocument()
     })
 

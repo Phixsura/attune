@@ -552,6 +552,40 @@ var AuthzDeniedTotal = prometheus.NewCounterVec(
 	[]string{"role", "required"},
 )
 
+// APIKeyScopeDeniedTotal counts API key requests denied due to missing scope.
+var APIKeyScopeDeniedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_apikey_scope_denied_total",
+		Help: "API key requests denied due to missing scope.",
+	},
+	[]string{"scope"},
+)
+
+// APIKeyExpiredTotal counts API key requests denied due to expiration.
+var APIKeyExpiredTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "attune_apikey_expired_total",
+		Help: "API key requests denied due to key expiration.",
+	},
+)
+
+// APIKeyIPDeniedTotal counts API key requests denied due to IP not in allowlist.
+var APIKeyIPDeniedTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "attune_apikey_ip_denied_total",
+		Help: "API key requests denied due to IP not in allowlist.",
+	},
+)
+
+// APIKeyUsageTotal counts successful API key authentications.
+var APIKeyUsageTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_apikey_usage_total",
+		Help: "Successful API key authentications by key prefix.",
+	},
+	[]string{"tenant", "key_prefix"},
+)
+
 // AuditRowsWrittenTotal counts successful immutable audit-log writes by action.
 var AuditRowsWrittenTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -646,6 +680,10 @@ var allMetrics = []prometheus.Collector{
 	OIDCTokenExchangeDuration,
 	OIDCRoleMappingTotal,
 	AuthzDeniedTotal,
+	APIKeyScopeDeniedTotal,
+	APIKeyExpiredTotal,
+	APIKeyIPDeniedTotal,
+	APIKeyUsageTotal,
 	AuditRowsWrittenTotal,
 	AuditRowsPrunedTotal,
 	AuditPruneDurationSeconds,
@@ -708,6 +746,10 @@ func RegisteredMetricNames() []string {
 		"attune_oidc_token_exchange_duration_seconds",
 		"attune_oidc_role_mapping_total",
 		"attune_authz_denied_total",
+		"attune_apikey_scope_denied_total",
+		"attune_apikey_expired_total",
+		"attune_apikey_ip_denied_total",
+		"attune_apikey_usage_total",
 		"attune_audit_rows_written_total",
 		"attune_audit_rows_pruned_total",
 		"attune_audit_prune_duration_seconds",

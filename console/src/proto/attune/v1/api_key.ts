@@ -8,6 +8,26 @@
 
 export const protobufPackage = "attune.v1";
 
+export interface VerifyApiKeyRequest {
+}
+
+export interface VerifyApiKeyResponse {
+  /** always true if request succeeds */
+  valid: boolean;
+  /** for identification */
+  keyPrefix: string;
+  /** user-provided label */
+  label: string;
+  /** granted scopes */
+  scopes: string[];
+  /** RFC3339, null = never */
+  expiresAt?:
+    | string
+    | undefined;
+  /** per-key limit, null = global */
+  rateLimitRpm?: number | undefined;
+}
+
 export interface ApiKey {
   id: string;
   keyPrefix: string;
@@ -20,7 +40,39 @@ export interface ApiKey {
     | string
     | undefined;
   /** RFC3339, null if active */
-  revokedAt?: string | undefined;
+  revokedAt?:
+    | string
+    | undefined;
+  /** granted scopes */
+  scopes: string[];
+  /** user-provided description */
+  description?:
+    | string
+    | undefined;
+  /** RFC3339, null = never expires */
+  expiresAt?:
+    | string
+    | undefined;
+  /** IP allowlist (CIDR notation) */
+  allowedCidrs: string[];
+  /** total successful API calls */
+  usageCount: string;
+  /** per-key rate limit, null = global */
+  rateLimitRpm?:
+    | number
+    | undefined;
+  /** production, staging, development, test */
+  environment: string;
+  /** RFC3339, null if not in grace period */
+  gracePeriodEndsAt?:
+    | string
+    | undefined;
+  /** UUID of linked service account */
+  serviceAccountId?:
+    | string
+    | undefined;
+  /** UUID of key this was rotated from */
+  rotatedFromId?: string | undefined;
 }
 
 export interface ListApiKeysRequest {
@@ -32,6 +84,20 @@ export interface ListApiKeysResponse {
 
 export interface CreateApiKeyRequest {
   label: string;
+  /** optional, defaults to full_access preset */
+  scopes: string[];
+  /** optional description */
+  description?:
+    | string
+    | undefined;
+  /** "7d", "30d", "90d", "1y", "never", or RFC3339 */
+  expiresIn?:
+    | string
+    | undefined;
+  /** optional IP allowlist (CIDR notation) */
+  allowedCidrs: string[];
+  /** optional per-key rate limit */
+  rateLimitRpm?: number | undefined;
 }
 
 export interface CreateApiKeyResponse {
@@ -50,6 +116,770 @@ export interface DeleteApiKeyRequest {
 export interface DeleteApiKeyResponse {
 }
 
+/** Scope metadata */
+export interface ListScopesRequest {
+}
+
+export interface ListScopesResponse {
+  scopes: ScopeInfo[];
+}
+
+export interface ScopeInfo {
+  /** e.g., "feedback:read" */
+  scope: string;
+  /** e.g., "feedback" */
+  resource: string;
+  /** e.g., "read" */
+  action: string;
+  /** human-readable */
+  description: string;
+  /** scopes this one implies (hierarchy) */
+  implies: string[];
+}
+
+/** Preset templates */
+export interface ListScopePresetsRequest {
+}
+
+export interface ListScopePresetsResponse {
+  presets: ScopePreset[];
+}
+
+export interface ScopePreset {
+  /** e.g., "ingest_only" */
+  id: string;
+  /** e.g., "Ingest Only" */
+  name: string;
+  /** human-readable */
+  description: string;
+  scopes: string[];
+}
+
+/** Key rotation */
+export interface RotateApiKeyRequest {
+  /** path param — old key UUID */
+  id: string;
+  /** "1h", "24h", "7d" — how long old key stays valid */
+  gracePeriod?: string | undefined;
+}
+
+export interface RotateApiKeyResponse {
+  /** updated with grace_period_ends_at */
+  oldKey?:
+    | ApiKey
+    | undefined;
+  /** newly created key */
+  newKey?:
+    | ApiKey
+    | undefined;
+  /** raw secret for new key — one-time */
+  secret: string;
+  /** RFC3339 — when old key expires */
+  gracePeriodEndsAt: string;
+}
+
+/** Request logs */
+export interface ListApiKeyLogsRequest {
+  /** path param — key UUID */
+  id: string;
+  /** default 100, max 1000 */
+  limit?: number | undefined;
+}
+
+export interface ListApiKeyLogsResponse {
+  logs: ApiKeyLogEntry[];
+}
+
+export interface ApiKeyLogEntry {
+  /** RFC3339 */
+  timestamp: string;
+  /** GET, POST, etc. */
+  method: string;
+  path: string;
+  statusCode: number;
+  clientIp: string;
+  userAgent: string;
+  latencyMs: number;
+  requestId: string;
+}
+
+/** Environment update */
+export interface UpdateApiKeyEnvironmentRequest {
+  /** path param — key UUID */
+  id: string;
+  /** production, staging, development, test */
+  environment: string;
+}
+
+export interface UpdateApiKeyEnvironmentResponse {
+  key?: ApiKey | undefined;
+}
+
+/** Expiring keys */
+export interface ListExpiringApiKeysRequest {
+  /** "24h", "7d", "30d" — default "7d" */
+  within?: string | undefined;
+}
+
+export interface ListExpiringApiKeysResponse {
+  items: ApiKey[];
+}
+
+/** Service accounts */
+export interface ServiceAccount {
+  id: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+  /** RFC3339 */
+  createdAt: string;
+  /** RFC3339 */
+  updatedAt: string;
+}
+
+export interface ListServiceAccountsRequest {
+}
+
+export interface ListServiceAccountsResponse {
+  items: ServiceAccount[];
+}
+
+export interface CreateServiceAccountRequest {
+  name: string;
+  description?: string | undefined;
+}
+
+export interface CreateServiceAccountResponse {
+  serviceAccount?: ServiceAccount | undefined;
+}
+
+/** Event subscriptions */
+export interface EventSubscription {
+  id: string;
+  /** created, rotated, revoked, expired, expiring_soon */
+  eventTypes: string[];
+  webhookUrl: string;
+  isActive: boolean;
+  /** RFC3339 */
+  createdAt: string;
+}
+
+export interface ListEventSubscriptionsRequest {
+}
+
+export interface ListEventSubscriptionsResponse {
+  items: EventSubscription[];
+}
+
+export interface CreateEventSubscriptionRequest {
+  eventTypes: string[];
+  webhookUrl: string;
+  /** for HMAC signing */
+  secret?: string | undefined;
+}
+
+export interface CreateEventSubscriptionResponse {
+  subscription?: EventSubscription | undefined;
+}
+
+/** Leak detections */
+export interface LeakDetection {
+  id: string;
+  keyId: string;
+  /** github, gitlab, etc. */
+  source: string;
+  /** link to where leak was found */
+  sourceUrl: string;
+  /** RFC3339 */
+  detectedAt: string;
+  /** RFC3339, null if unresolved */
+  resolvedAt?:
+    | string
+    | undefined;
+  /** revoked, false_positive, etc. */
+  resolution: string;
+}
+
+export interface ListLeakDetectionsRequest {
+  /** default true */
+  unresolvedOnly?: boolean | undefined;
+}
+
+export interface ListLeakDetectionsResponse {
+  items: LeakDetection[];
+}
+
+/** Org-level policies */
+export interface ApiKeyPolicy {
+  maxExpiryDays?: number | undefined;
+  requireExpiry: boolean;
+  requireIpAllowlist: boolean;
+  requireDescription: boolean;
+  maxKeysPerServiceAccount?: number | undefined;
+  allowedEnvironments: string[];
+  requireMfaForCreate: boolean;
+  requireApprovalForProd: boolean;
+  autoRevokeUnusedDays?: number | undefined;
+}
+
+export interface GetPolicyRequest {
+}
+
+export interface GetPolicyResponse {
+  policy?: ApiKeyPolicy | undefined;
+}
+
+export interface UpdatePolicyRequest {
+  policy?: ApiKeyPolicy | undefined;
+}
+
+export interface UpdatePolicyResponse {
+  policy?: ApiKeyPolicy | undefined;
+}
+
+/** Projects */
+export interface Project {
+  id: string;
+  name: string;
+  description?: string | undefined;
+  isActive: boolean;
+  /** RFC3339 */
+  createdAt: string;
+  /** RFC3339 */
+  updatedAt: string;
+}
+
+export interface ListProjectsRequest {
+}
+
+export interface ListProjectsResponse {
+  items: Project[];
+}
+
+export interface CreateProjectRequest {
+  name: string;
+  description?: string | undefined;
+}
+
+export interface CreateProjectResponse {
+  project?: Project | undefined;
+}
+
+export interface BindKeyToProjectRequest {
+  /** path param — key UUID */
+  id: string;
+  /** project to bind */
+  projectId: string;
+}
+
+export interface BindKeyToProjectResponse {
+  key?: ApiKey | undefined;
+}
+
+/** Tags */
+export interface ApiKeyTag {
+  key: string;
+  value: string;
+}
+
+export interface GetKeyTagsRequest {
+  /** path param — key UUID */
+  id: string;
+}
+
+export interface GetKeyTagsResponse {
+  tags: ApiKeyTag[];
+}
+
+export interface SetKeyTagsRequest {
+  /** path param — key UUID */
+  id: string;
+  tags: ApiKeyTag[];
+}
+
+export interface SetKeyTagsResponse {
+  tags: ApiKeyTag[];
+}
+
+/** Budget */
+export interface SetKeyBudgetRequest {
+  /** path param — key UUID */
+  id: string;
+  /** decimal string, e.g. "100.00" */
+  budgetLimitUsd: string;
+  /** block, alert, none */
+  overageAction?: string | undefined;
+}
+
+export interface SetKeyBudgetResponse {
+  key?: ApiKey | undefined;
+}
+
+/** Temporary tokens */
+export interface CreateTempTokenRequest {
+  /** path param — parent key UUID */
+  id: string;
+  /** "1h", "24h", etc. */
+  expiresIn: string;
+  maxUses?:
+    | number
+    | undefined;
+  /** ci_job, one_time, session */
+  purpose?: string | undefined;
+}
+
+export interface CreateTempTokenResponse {
+  /** raw token — one-time */
+  token: string;
+  tokenPrefix: string;
+  /** RFC3339 */
+  expiresAt: string;
+  maxUses?: number | undefined;
+}
+
+/** Approval workflows */
+export interface ApprovalRequest {
+  id: string;
+  requesterId: string;
+  /** admin, member, service_account */
+  requesterType: string;
+  keyLabel: string;
+  keyDescription?: string | undefined;
+  requestedScopes: string[];
+  requestedEnvironment?: string | undefined;
+  requestedExpiryDays?: number | undefined;
+  justification?:
+    | string
+    | undefined;
+  /** pending, approved, rejected, expired */
+  status: string;
+  reviewerId?: string | undefined;
+  reviewerNotes?:
+    | string
+    | undefined;
+  /** RFC3339 */
+  createdAt: string;
+  /** RFC3339 */
+  reviewedAt?:
+    | string
+    | undefined;
+  /** RFC3339 */
+  expiresAt: string;
+}
+
+export interface ListApprovalRequestsRequest {
+  /** pending, approved, rejected, expired */
+  status?: string | undefined;
+}
+
+export interface ListApprovalRequestsResponse {
+  items: ApprovalRequest[];
+}
+
+export interface CreateApprovalRequestRequest {
+  keyLabel: string;
+  keyDescription?: string | undefined;
+  requestedScopes: string[];
+  requestedEnvironment?: string | undefined;
+  requestedExpiryDays?: number | undefined;
+  justification?: string | undefined;
+}
+
+export interface CreateApprovalRequestResponse {
+  request?: ApprovalRequest | undefined;
+}
+
+export interface ReviewApprovalRequest {
+  /** path param — approval request UUID */
+  id: string;
+  /** true = approve, false = reject */
+  approve: boolean;
+  notes?: string | undefined;
+}
+
+export interface ReviewApprovalResponse {
+  request?: ApprovalRequest | undefined;
+}
+
+/** OAuth2 clients */
+export interface OAuth2Client {
+  id: string;
+  clientId: string;
+  name: string;
+  description?: string | undefined;
+  redirectUris: string[];
+  allowedScopes: string[];
+  isActive: boolean;
+  /** RFC3339 */
+  createdAt: string;
+  /** RFC3339 */
+  updatedAt: string;
+}
+
+export interface ListOAuth2ClientsRequest {
+}
+
+export interface ListOAuth2ClientsResponse {
+  items: OAuth2Client[];
+}
+
+export interface CreateOAuth2ClientRequest {
+  name: string;
+  description?: string | undefined;
+  redirectUris: string[];
+  allowedScopes: string[];
+}
+
+export interface CreateOAuth2ClientResponse {
+  client?:
+    | OAuth2Client
+    | undefined;
+  /** raw secret — one-time */
+  clientSecret: string;
+}
+
+/** Analytics */
+export interface ApiKeyAnalytics {
+  /** RFC3339, truncated to hour */
+  hour: string;
+  requestCount: string;
+  errorCount: string;
+  avgLatencyMs: string;
+  status2xx: number;
+  status4xx: number;
+  status5xx: number;
+}
+
+export interface GetKeyAnalyticsRequest {
+  /** path param — key UUID */
+  id: string;
+  /** RFC3339 */
+  start?:
+    | string
+    | undefined;
+  /** RFC3339 */
+  end?: string | undefined;
+}
+
+export interface GetKeyAnalyticsResponse {
+  items: ApiKeyAnalytics[];
+}
+
+export interface GetTenantAnalyticsRequest {
+  /** RFC3339 */
+  start?:
+    | string
+    | undefined;
+  /** RFC3339 */
+  end?: string | undefined;
+}
+
+export interface GetTenantAnalyticsResponse {
+  items: ApiKeyAnalytics[];
+}
+
+/** Secret managers */
+export interface SecretManagerConfig {
+  id: string;
+  /** hashicorp_vault, aws_secrets_manager, etc. */
+  managerType: string;
+  name: string;
+  isActive: boolean;
+  /** RFC3339 */
+  lastSyncAt?: string | undefined;
+  lastSyncStatus?:
+    | string
+    | undefined;
+  /** RFC3339 */
+  createdAt: string;
+  /** RFC3339 */
+  updatedAt: string;
+}
+
+export interface ListSecretManagersRequest {
+}
+
+export interface ListSecretManagersResponse {
+  items: SecretManagerConfig[];
+}
+
+export interface CreateSecretManagerRequest {
+  managerType: string;
+  name: string;
+  /** connection details */
+  config: { [key: string]: string };
+}
+
+export interface CreateSecretManagerRequest_ConfigEntry {
+  key: string;
+  value: string;
+}
+
+export interface CreateSecretManagerResponse {
+  config?: SecretManagerConfig | undefined;
+}
+
+/** Rotation schedules */
+export interface RotationSchedule {
+  id: string;
+  keyId: string;
+  rotationIntervalDays: number;
+  /** RFC3339 */
+  nextRotationAt: string;
+  /** RFC3339 */
+  lastRotatedAt?: string | undefined;
+  gracePeriodHours: number;
+  autoNotify: boolean;
+  notifyDaysBefore: number[];
+  isActive: boolean;
+  /** RFC3339 */
+  createdAt: string;
+}
+
+export interface GetRotationScheduleRequest {
+  /** path param — key UUID */
+  id: string;
+}
+
+export interface GetRotationScheduleResponse {
+  schedule?: RotationSchedule | undefined;
+}
+
+export interface CreateRotationScheduleRequest {
+  /** path param — key UUID */
+  id: string;
+  /** default 90 */
+  rotationIntervalDays?:
+    | number
+    | undefined;
+  /** default 168 (7 days) */
+  gracePeriodHours?:
+    | number
+    | undefined;
+  /** default true */
+  autoNotify?:
+    | boolean
+    | undefined;
+  /** default [30, 7, 1] */
+  notifyDaysBefore: number[];
+}
+
+export interface CreateRotationScheduleResponse {
+  schedule?: RotationSchedule | undefined;
+}
+
+/** Permission usage / unused scope detection */
+export interface PermissionUsage {
+  scope: string;
+  /** RFC3339, null if never used */
+  firstUsedAt?:
+    | string
+    | undefined;
+  /** RFC3339 */
+  lastUsedAt?: string | undefined;
+  usageCount: string;
+}
+
+export interface GetUnusedScopesRequest {
+  /** path param — key UUID */
+  id: string;
+}
+
+export interface GetUnusedScopesResponse {
+  unusedScopes: string[];
+  allUsage: PermissionUsage[];
+}
+
+/** Signing keys for PKCV */
+export interface SigningKey {
+  id: string;
+  keyId: string;
+  /** RS256, ES256, etc. */
+  algorithm: string;
+  publicKeyPem: string;
+  keyFingerprint: string;
+  isActive: boolean;
+  /** RFC3339 */
+  createdAt: string;
+  /** RFC3339 */
+  expiresAt?: string | undefined;
+}
+
+export interface ListSigningKeysRequest {
+  /** path param — key UUID */
+  id: string;
+}
+
+export interface ListSigningKeysResponse {
+  items: SigningKey[];
+}
+
+export interface CreateSigningKeyRequest {
+  /** path param — key UUID */
+  id: string;
+  algorithm: string;
+  publicKeyPem: string;
+  /** RFC3339 */
+  expiresAt?: string | undefined;
+}
+
+export interface CreateSigningKeyResponse {
+  key?: SigningKey | undefined;
+}
+
+/** Managed identities */
+export interface ManagedIdentity {
+  id: string;
+  name: string;
+  /** aws_iam, azure_ad, etc. */
+  provider: string;
+  externalId: string;
+  audience?: string | undefined;
+  issuer?: string | undefined;
+  subjectPattern?: string | undefined;
+  allowedScopes: string[];
+  isActive: boolean;
+  /** RFC3339 */
+  lastUsedAt?:
+    | string
+    | undefined;
+  /** RFC3339 */
+  createdAt: string;
+}
+
+export interface ListManagedIdentitiesRequest {
+}
+
+export interface ListManagedIdentitiesResponse {
+  items: ManagedIdentity[];
+}
+
+export interface CreateManagedIdentityRequest {
+  name: string;
+  provider: string;
+  externalId: string;
+  audience?: string | undefined;
+  issuer?: string | undefined;
+  subjectPattern?: string | undefined;
+  allowedScopes: string[];
+}
+
+export interface CreateManagedIdentityResponse {
+  identity?: ManagedIdentity | undefined;
+}
+
+/** SIEM integrations */
+export interface SIEMIntegration {
+  id: string;
+  /** splunk, datadog, etc. */
+  provider: string;
+  name: string;
+  endpointUrl: string;
+  eventTypes: string[];
+  batchSize: number;
+  flushIntervalSeconds: number;
+  isActive: boolean;
+  /** RFC3339 */
+  lastSentAt?: string | undefined;
+  lastError?:
+    | string
+    | undefined;
+  /** RFC3339 */
+  createdAt: string;
+}
+
+export interface ListSIEMIntegrationsRequest {
+}
+
+export interface ListSIEMIntegrationsResponse {
+  items: SIEMIntegration[];
+}
+
+export interface CreateSIEMIntegrationRequest {
+  provider: string;
+  name: string;
+  endpointUrl: string;
+  /** credentials */
+  authConfig: { [key: string]: string };
+  eventTypes: string[];
+  /** default 100 */
+  batchSize?:
+    | number
+    | undefined;
+  /** default 60 */
+  flushIntervalSeconds?: number | undefined;
+}
+
+export interface CreateSIEMIntegrationRequest_AuthConfigEntry {
+  key: string;
+  value: string;
+}
+
+export interface CreateSIEMIntegrationResponse {
+  integration?: SIEMIntegration | undefined;
+}
+
+/** AI agent configurations */
+export interface AIAgentConfig {
+  id: string;
+  name: string;
+  /** mcp_server, langchain, etc. */
+  agentType: string;
+  allowedScopes: string[];
+  maxTokensPerRequest: number;
+  maxRequestsPerMinute: number;
+  allowedModels: string[];
+  requireHumanApproval: boolean;
+  approvalTimeoutSeconds: number;
+  auditAllRequests: boolean;
+  isActive: boolean;
+  /** RFC3339 */
+  createdAt: string;
+}
+
+export interface ListAIAgentConfigsRequest {
+}
+
+export interface ListAIAgentConfigsResponse {
+  items: AIAgentConfig[];
+}
+
+export interface CreateAIAgentConfigRequest {
+  name: string;
+  agentType: string;
+  allowedScopes: string[];
+  maxTokensPerRequest?: number | undefined;
+  maxRequestsPerMinute?: number | undefined;
+  allowedModels: string[];
+  requireHumanApproval?: boolean | undefined;
+  approvalTimeoutSeconds?: number | undefined;
+  auditAllRequests?: boolean | undefined;
+}
+
+export interface CreateAIAgentConfigResponse {
+  config?: AIAgentConfig | undefined;
+}
+
+/** Key health score */
+export interface KeyHealthScore {
+  /** 0-100 */
+  score: number;
+  hasExpiry: boolean;
+  hasIpRestriction: boolean;
+  hasRateLimit: boolean;
+  unusedScopeCount: number;
+  daysSinceRotation: number;
+}
+
+export interface GetKeyHealthRequest {
+  /** path param — key UUID */
+  id: string;
+}
+
+export interface GetKeyHealthResponse {
+  health?: KeyHealthScore | undefined;
+}
+
 /** ApiKeyService manages a tenant's external ingest API keys (console). */
 export interface ApiKeyService {
   /** GET /fb/v1/console/api-keys */
@@ -58,4 +888,149 @@ export interface ApiKeyService {
   CreateApiKey(request: CreateApiKeyRequest): Promise<CreateApiKeyResponse>;
   /** DELETE /fb/v1/console/api-keys/{id} — revoke (204). */
   DeleteApiKey(request: DeleteApiKeyRequest): Promise<DeleteApiKeyResponse>;
+  /** POST /fb/v1/console/api-keys/{id}/rotate — rotate with grace period. */
+  RotateApiKey(request: RotateApiKeyRequest): Promise<RotateApiKeyResponse>;
+  /** GET /fb/v1/console/api-keys/{id}/logs — request logs. */
+  ListApiKeyLogs(request: ListApiKeyLogsRequest): Promise<ListApiKeyLogsResponse>;
+  /** PATCH /fb/v1/console/api-keys/{id}/environment — update environment tag. */
+  UpdateApiKeyEnvironment(request: UpdateApiKeyEnvironmentRequest): Promise<UpdateApiKeyEnvironmentResponse>;
+  /** GET /fb/v1/console/api-keys/scopes — list available scopes. */
+  ListScopes(request: ListScopesRequest): Promise<ListScopesResponse>;
+  /** GET /fb/v1/console/api-keys/presets — list scope preset templates. */
+  ListScopePresets(request: ListScopePresetsRequest): Promise<ListScopePresetsResponse>;
+  /** GET /fb/v1/console/api-keys/expiring — keys expiring soon. */
+  ListExpiringApiKeys(request: ListExpiringApiKeysRequest): Promise<ListExpiringApiKeysResponse>;
+  /**
+   * Service accounts
+   * GET /fb/v1/console/service-accounts
+   */
+  ListServiceAccounts(request: ListServiceAccountsRequest): Promise<ListServiceAccountsResponse>;
+  /** POST /fb/v1/console/service-accounts */
+  CreateServiceAccount(request: CreateServiceAccountRequest): Promise<CreateServiceAccountResponse>;
+  /**
+   * Event subscriptions
+   * GET /fb/v1/console/api-keys/event-subscriptions
+   */
+  ListEventSubscriptions(request: ListEventSubscriptionsRequest): Promise<ListEventSubscriptionsResponse>;
+  /** POST /fb/v1/console/api-keys/event-subscriptions */
+  CreateEventSubscription(request: CreateEventSubscriptionRequest): Promise<CreateEventSubscriptionResponse>;
+  /**
+   * Leak detections
+   * GET /fb/v1/console/api-keys/leaks
+   */
+  ListLeakDetections(request: ListLeakDetectionsRequest): Promise<ListLeakDetectionsResponse>;
+  /**
+   * Org-level policies
+   * GET /fb/v1/console/api-keys/policy
+   */
+  GetPolicy(request: GetPolicyRequest): Promise<GetPolicyResponse>;
+  /** PUT /fb/v1/console/api-keys/policy */
+  UpdatePolicy(request: UpdatePolicyRequest): Promise<UpdatePolicyResponse>;
+  /**
+   * Projects
+   * GET /fb/v1/console/projects
+   */
+  ListProjects(request: ListProjectsRequest): Promise<ListProjectsResponse>;
+  /** POST /fb/v1/console/projects */
+  CreateProject(request: CreateProjectRequest): Promise<CreateProjectResponse>;
+  /** POST /fb/v1/console/api-keys/{id}/project */
+  BindKeyToProject(request: BindKeyToProjectRequest): Promise<BindKeyToProjectResponse>;
+  /**
+   * Tags
+   * GET /fb/v1/console/api-keys/{id}/tags
+   */
+  GetKeyTags(request: GetKeyTagsRequest): Promise<GetKeyTagsResponse>;
+  /** PUT /fb/v1/console/api-keys/{id}/tags */
+  SetKeyTags(request: SetKeyTagsRequest): Promise<SetKeyTagsResponse>;
+  /**
+   * Budget
+   * PUT /fb/v1/console/api-keys/{id}/budget
+   */
+  SetKeyBudget(request: SetKeyBudgetRequest): Promise<SetKeyBudgetResponse>;
+  /**
+   * Temporary tokens
+   * POST /fb/v1/console/api-keys/{id}/temp-token
+   */
+  CreateTempToken(request: CreateTempTokenRequest): Promise<CreateTempTokenResponse>;
+  /**
+   * Approval workflows
+   * GET /fb/v1/console/api-keys/approvals
+   */
+  ListApprovalRequests(request: ListApprovalRequestsRequest): Promise<ListApprovalRequestsResponse>;
+  /** POST /fb/v1/console/api-keys/approvals */
+  CreateApprovalRequest(request: CreateApprovalRequestRequest): Promise<CreateApprovalRequestResponse>;
+  /** POST /fb/v1/console/api-keys/approvals/{id}/review */
+  ReviewApproval(request: ReviewApprovalRequest): Promise<ReviewApprovalResponse>;
+  /**
+   * OAuth2 clients
+   * GET /fb/v1/console/oauth2/clients
+   */
+  ListOAuth2Clients(request: ListOAuth2ClientsRequest): Promise<ListOAuth2ClientsResponse>;
+  /** POST /fb/v1/console/oauth2/clients */
+  CreateOAuth2Client(request: CreateOAuth2ClientRequest): Promise<CreateOAuth2ClientResponse>;
+  /**
+   * Analytics
+   * GET /fb/v1/console/api-keys/{id}/analytics
+   */
+  GetKeyAnalytics(request: GetKeyAnalyticsRequest): Promise<GetKeyAnalyticsResponse>;
+  /** GET /fb/v1/console/api-keys/analytics */
+  GetTenantAnalytics(request: GetTenantAnalyticsRequest): Promise<GetTenantAnalyticsResponse>;
+  /**
+   * Secret managers
+   * GET /fb/v1/console/secret-managers
+   */
+  ListSecretManagers(request: ListSecretManagersRequest): Promise<ListSecretManagersResponse>;
+  /** POST /fb/v1/console/secret-managers */
+  CreateSecretManager(request: CreateSecretManagerRequest): Promise<CreateSecretManagerResponse>;
+  /**
+   * Rotation schedules
+   * GET /fb/v1/console/api-keys/{id}/rotation-schedule
+   */
+  GetRotationSchedule(request: GetRotationScheduleRequest): Promise<GetRotationScheduleResponse>;
+  /** POST /fb/v1/console/api-keys/{id}/rotation-schedule */
+  CreateRotationSchedule(request: CreateRotationScheduleRequest): Promise<CreateRotationScheduleResponse>;
+  /**
+   * Unused scope detection
+   * GET /fb/v1/console/api-keys/{id}/unused-scopes
+   */
+  GetUnusedScopes(request: GetUnusedScopesRequest): Promise<GetUnusedScopesResponse>;
+  /**
+   * Signing keys (PKCV)
+   * GET /fb/v1/console/api-keys/{id}/signing-keys
+   */
+  ListSigningKeys(request: ListSigningKeysRequest): Promise<ListSigningKeysResponse>;
+  /** POST /fb/v1/console/api-keys/{id}/signing-keys */
+  CreateSigningKey(request: CreateSigningKeyRequest): Promise<CreateSigningKeyResponse>;
+  /**
+   * Managed identities
+   * GET /fb/v1/console/managed-identities
+   */
+  ListManagedIdentities(request: ListManagedIdentitiesRequest): Promise<ListManagedIdentitiesResponse>;
+  /** POST /fb/v1/console/managed-identities */
+  CreateManagedIdentity(request: CreateManagedIdentityRequest): Promise<CreateManagedIdentityResponse>;
+  /**
+   * SIEM integrations
+   * GET /fb/v1/console/siem-integrations
+   */
+  ListSIEMIntegrations(request: ListSIEMIntegrationsRequest): Promise<ListSIEMIntegrationsResponse>;
+  /** POST /fb/v1/console/siem-integrations */
+  CreateSIEMIntegration(request: CreateSIEMIntegrationRequest): Promise<CreateSIEMIntegrationResponse>;
+  /**
+   * AI agent configurations
+   * GET /fb/v1/console/ai-agents
+   */
+  ListAIAgentConfigs(request: ListAIAgentConfigsRequest): Promise<ListAIAgentConfigsResponse>;
+  /** POST /fb/v1/console/ai-agents */
+  CreateAIAgentConfig(request: CreateAIAgentConfigRequest): Promise<CreateAIAgentConfigResponse>;
+  /**
+   * Key health score
+   * GET /fb/v1/console/api-keys/{id}/health
+   */
+  GetKeyHealth(request: GetKeyHealthRequest): Promise<GetKeyHealthResponse>;
+}
+
+/** AuthService provides API key verification (public API). */
+export interface AuthService {
+  /** GET /v1/auth/verify — verify current API key and return details. */
+  VerifyApiKey(request: VerifyApiKeyRequest): Promise<VerifyApiKeyResponse>;
 }

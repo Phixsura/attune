@@ -1,10 +1,12 @@
+import { HttpResponse, http } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import {
   CreateKeyDialog,
   RevokeKeyDialog,
   SecretKeyDialog,
 } from '@/features/api-keys/components/dialogs'
-import { renderWithProviders, screen } from '@/testing/test-utils'
+import { server } from '@/testing/mocks/server'
+import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 
 // Sonner uses React portals + animation; mock at module boundary so the
 // assertion is "toast was called", not "toast DOM eventually appears".
@@ -12,6 +14,30 @@ import { renderWithProviders, screen } from '@/testing/test-utils'
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
+
+const mockPresets = {
+  presets: [
+    {
+      id: 'full_access',
+      name: 'Full Access',
+      description: 'All permissions',
+      scopes: ['ingest:write', 'feedback:read'],
+    },
+    {
+      id: 'read_only',
+      name: 'Read Only',
+      description: 'Read-only access',
+      scopes: ['feedback:read'],
+    },
+  ],
+}
+
+const mockScopes = {
+  scopes: [
+    { id: 'ingest:write', resource: 'ingest', action: 'write', description: 'Write ingest' },
+    { id: 'feedback:read', resource: 'feedback', action: 'read', description: 'Read feedback' },
+  ],
+}
 
 describe('CreateKeyDialog', () => {
   it('submit button disabled when label is empty or whitespace', async () => {
@@ -34,7 +60,7 @@ describe('CreateKeyDialog', () => {
     const input = screen.getByRole('textbox') as HTMLInputElement
     await user.type(input, '  ci/automation  ')
     await user.click(screen.getByTestId('create-key-submit'))
-    expect(onSubmit).toHaveBeenCalledWith('ci/automation')
+    expect(onSubmit).toHaveBeenCalledWith({ label: 'ci/automation', scopes: [] })
     await vi.waitFor(() => expect(input.value).toBe(''))
   })
 
@@ -46,6 +72,83 @@ describe('CreateKeyDialog', () => {
     expect(screen.getByTestId('create-key-submit')).toBeDisabled()
     expect(screen.getByTestId('create-key-cancel')).toBeDisabled()
   })
+
+  it('submits with preset scopes when a preset is selected', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json(mockPresets)),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json(mockScopes)),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument()
+    })
+    await user.type(screen.getByRole('textbox'), 'test-key')
+    await user.click(screen.getByTestId('create-key-submit'))
+    expect(onSubmit).toHaveBeenCalledWith({
+      label: 'test-key',
+      scopes: ['ingest:write', 'feedback:read'],
+    })
+  })
+
+  it('renders scope preset selector', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json(mockPresets)),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json(mockScopes)),
+    )
+    renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={vi.fn()} pending={false} />,
+    )
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument()
+    })
+  })
+
+  it('submits empty scopes when preset not found', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json({ presets: [] })),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json(mockScopes)),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+    await user.type(screen.getByRole('textbox'), 'empty-preset-key')
+    await user.click(screen.getByTestId('create-key-submit'))
+    expect(onSubmit).toHaveBeenCalledWith({
+      label: 'empty-preset-key',
+      scopes: [],
+    })
+  })
+
+  it('shows preset description when preset selected', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json(mockPresets)),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json(mockScopes)),
+    )
+    renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={vi.fn()} pending={false} />,
+    )
+    await waitFor(() => {
+      expect(screen.getByText('All permissions')).toBeInTheDocument()
+    })
+  })
+
+  it('handles empty scopes data gracefully', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json({ presets: [] })),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json({ scopes: [] })),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+    await user.type(screen.getByRole('textbox'), 'no-scopes-key')
+    await user.click(screen.getByTestId('create-key-submit'))
+    expect(onSubmit).toHaveBeenCalledWith({ label: 'no-scopes-key', scopes: [] })
+  })
 })
 
 describe('SecretKeyDialog', () => {
@@ -56,6 +159,10 @@ describe('SecretKeyDialog', () => {
       keyPrefix: 'sk_t_',
       isActive: true,
       createdAt: '2026-06-07T00:00:00Z',
+      scopes: [],
+      allowedCidrs: [],
+      usageCount: '0',
+      environment: '',
     },
     secret: 'sk_t_the-secret-value',
   }
@@ -82,6 +189,10 @@ describe('RevokeKeyDialog', () => {
     keyPrefix: 'sk_p_',
     isActive: true,
     createdAt: '2026-06-07T00:00:00Z',
+    scopes: [],
+    allowedCidrs: [],
+    usageCount: '0',
+    environment: '',
   }
 
   it('confirm calls onConfirm', async () => {

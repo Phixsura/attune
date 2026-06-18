@@ -72,6 +72,10 @@ const defaultIssuedKey: ApiKey = {
   keyPrefix: 'sk_test_',
   isActive: true,
   createdAt: '2026-06-07T00:00:00Z',
+  scopes: [],
+  allowedCidrs: [],
+  usageCount: '0',
+  environment: '',
 }
 export const defaultCreateApiKey: CreateApiKeyResponse = {
   key: defaultIssuedKey,

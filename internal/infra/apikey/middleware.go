@@ -9,6 +9,7 @@ package apikey
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -26,6 +28,8 @@ import (
 // infra/apikey doesn't depend on internal/service (one-way arrows).
 type Verifier interface {
 	Lookup(ctx context.Context, raw string) (tenantID string, keyID uuid.UUID, err error)
+	LookupWithScopes(ctx context.Context, raw string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, err error)
+	LookupWithScopesAndIP(ctx context.Context, raw, clientIP string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, err error)
 }
 
 // AuthCtx is the request-scoped API key identity populated by Middleware.
@@ -33,6 +37,7 @@ type Verifier interface {
 type AuthCtx struct {
 	TenantID string
 	KeyID    uuid.UUID
+	Scopes   []domain.Scope
 }
 
 type ctxKey int
@@ -51,6 +56,8 @@ const (
 // {code, message, requestId}:
 // - missing / malformed header → 401 code=UNAUTHORIZED message="missing or malformed api key"
 // - unknown / revoked key → 401 code=UNAUTHORIZED message="invalid api key"
+// - expired key → 401 code=UNAUTHORIZED message="api key expired"
+// - IP not in allowlist → 403 code=FORBIDDEN message="ip not in allowlist"
 // - unexpected DB / IO failure → 500 code=INTERNAL message="api key lookup failed"
 //
 // The previous spelling `unauthenticated` was an outlier vs the console
@@ -68,19 +75,31 @@ func Middleware(v Verifier) func(http.Handler) http.Handler {
 					attunev1.ErrorCode_UNAUTHORIZED, "missing or malformed api key")
 				return
 			}
-			tid, kid, err := v.Lookup(r.Context(), raw)
+			clientIP := extractClientIP(r)
+			tid, kid, scopes, err := v.LookupWithScopesAndIP(ctx, raw, clientIP)
 			if err != nil {
 				status := http.StatusUnauthorized
 				code := attunev1.ErrorCode_UNAUTHORIZED
 				msg := "invalid api key"
-				if !errors.Is(err, domain.ErrInvalidAPIKey) {
+				switch {
+				case errors.Is(err, domain.ErrAPIKeyExpired):
+					msg = "api key expired"
+					metrics.APIKeyExpiredTotal.Inc()
+					logext.Warnf(ctx, "[%s] reject: expired key,path:%s", where, r.URL.Path)
+				case errors.Is(err, domain.ErrIPNotAllowed):
+					status = http.StatusForbidden
+					code = attunev1.ErrorCode_FORBIDDEN
+					msg = "ip not in allowlist"
+					metrics.APIKeyIPDeniedTotal.Inc()
+					logext.Warnf(ctx, "[%s] reject: IP not allowed,path:%s,ip:%s", where, r.URL.Path, clientIP)
+				case errors.Is(err, domain.ErrInvalidAPIKey):
+					logext.Warnf(ctx, "[%s] reject: invalid key,path:%s", where, r.URL.Path)
+				default:
 					status = http.StatusInternalServerError
 					code = attunev1.ErrorCode_INTERNAL
 					msg = "api key lookup failed"
 					logext.Errorf(ctx, "[%s] Lookup failed,path:%s,err:%+v",
 						where, r.URL.Path, err.Error())
-				} else {
-					logext.Warnf(ctx, "[%s] reject: invalid key,path:%s", where, r.URL.Path)
 				}
 				dispatcher.Reject(ctx, w, status, code, msg)
 				return
@@ -90,11 +109,52 @@ func Middleware(v Verifier) func(http.Handler) http.Handler {
 			newCtx = context.WithValue(newCtx, ctxAuth, ptrext.Of(AuthCtx{
 				TenantID: tid,
 				KeyID:    kid,
+				Scopes:   scopes,
 			}))
-			// hot path: success not logged (CLAUDE.md: tight-loop / hot-path silent)
 			next.ServeHTTP(w, r.WithContext(newCtx))
 		})
 	}
+}
+
+// IsBrowserUserAgent checks if the User-Agent indicates a browser.
+// Used to prevent secret keys from being used in frontend code.
+func IsBrowserUserAgent(ua string) bool {
+	ua = strings.ToLower(ua)
+	browserPatterns := []string{
+		"mozilla/",
+		"chrome/",
+		"safari/",
+		"firefox/",
+		"edge/",
+		"opera/",
+		"trident/",
+		"msie ",
+	}
+	for _, pattern := range browserPatterns {
+		if strings.Contains(ua, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractClientIP extracts the client IP from the request, checking
+// X-Forwarded-For, X-Real-IP headers, then falling back to RemoteAddr.
+func extractClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+	host, _, err := strings.Cut(r.RemoteAddr, ":")
+	if err {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // FromContext returns the authenticated API key identity from ctx.
@@ -105,6 +165,24 @@ func FromContext(ctx context.Context) *AuthCtx {
 		panic("apikey: AuthCtx missing — handler not behind Middleware")
 	}
 	return v
+}
+
+// FromContextSafe returns the authenticated API key identity from ctx.
+// Returns nil, false if not present (session request).
+func FromContextSafe(ctx context.Context) (*AuthCtx, bool) {
+	v, ok := ctx.Value(ctxAuth).(*AuthCtx)
+	return v, ok && v != nil
+}
+
+// WithAuthForTest creates a context with API key auth for testing.
+// Only use in tests.
+func WithAuthForTest(ctx context.Context, tenantID string, keyID string, scopes []domain.Scope) context.Context {
+	id, _ := uuid.Parse(keyID)
+	return context.WithValue(ctx, ctxAuth, ptrext.Of(AuthCtx{
+		TenantID: tenantID,
+		KeyID:    id,
+		Scopes:   scopes,
+	}))
 }
 
 // TenantIDFromContext returns the authenticated tenant id, if any.
@@ -118,4 +196,24 @@ func TenantIDFromContext(ctx context.Context) (string, bool) {
 func KeyIDFromContext(ctx context.Context) (uuid.UUID, bool) {
 	v, ok := ctx.Value(ctxKeyID).(uuid.UUID)
 	return v, ok
+}
+
+// RequireScope returns middleware that checks API key scopes.
+// Must be used after Middleware. Rejects with 403 if scope missing.
+func RequireScope(required domain.Scope) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			auth := FromContext(ctx)
+			if !domain.HasScope(auth.Scopes, required) {
+				metrics.APIKeyScopeDeniedTotal.WithLabelValues(string(required)).Inc()
+				logext.Warnf(ctx, "[scope] deny,key_id:%s,required:%s", auth.KeyID, required)
+				dispatcher.Reject(ctx, w, http.StatusForbidden,
+					attunev1.ErrorCode_FORBIDDEN,
+					fmt.Sprintf("missing scope: %s", required))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

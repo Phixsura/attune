@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -583,33 +584,533 @@ func (r *Router) mountLLMRoutes(l chi.Router) {
 
 func (r *Router) mountAPIKeys(m chi.Router) {
 	m.Route("/api-keys", func(k chi.Router) {
-		k.Use(r.requireAdminStrict) // API keys are admin-only
-		k.Get("/", dispatcher.Bind(
-			"console.APIKeysHandler.List",
-			dispatcher.Empty(func() *attunev1.ListApiKeysRequest { return ptrext.Of(attunev1.ListApiKeysRequest{}) }),
-			r.apiKeys.List,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListApiKeysRequest) (*session.AuthCtx, error) {
+		k.Use(r.requireAdminStrict)
+		r.mountAPIKeyCoreRoutes(k)
+		r.mountAPIKeyAdvancedRoutes(k)
+		r.mountAPIKeyPerKeyRoutes(k)
+	})
+	r.mountAPIKeyRelatedResources(m)
+}
+
+func (r *Router) mountAPIKeyCoreRoutes(k chi.Router) {
+	k.Get("/", dispatcher.Bind(
+		"console.APIKeysHandler.List",
+		dispatcher.Empty(func() *attunev1.ListApiKeysRequest { return ptrext.Of(attunev1.ListApiKeysRequest{}) }),
+		r.apiKeys.List,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListApiKeysRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Post("/", dispatcher.Bind(
+		"console.APIKeysHandler.Create",
+		dispatcher.JSON(func() *attunev1.CreateApiKeyRequest { return ptrext.Of(attunev1.CreateApiKeyRequest{}) }),
+		r.apiKeys.Create,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateApiKeyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Delete("/{id}", dispatcher.Bind(
+		"console.APIKeysHandler.Revoke",
+		dispatcher.Path(
+			func() *attunev1.DeleteApiKeyRequest { return ptrext.Of(attunev1.DeleteApiKeyRequest{}) },
+			dispatcher.Param("id", func(req *attunev1.DeleteApiKeyRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.apiKeys.Revoke,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteApiKeyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Get("/scopes", dispatcher.Bind(
+		"console.APIKeysHandler.ListScopes",
+		dispatcher.Empty(func() *attunev1.ListScopesRequest { return ptrext.Of(attunev1.ListScopesRequest{}) }),
+		r.apiKeys.ListScopes,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListScopesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Get("/presets", dispatcher.Bind(
+		"console.APIKeysHandler.ListScopePresets",
+		dispatcher.Empty(func() *attunev1.ListScopePresetsRequest { return ptrext.Of(attunev1.ListScopePresetsRequest{}) }),
+		r.apiKeys.ListScopePresets,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListScopePresetsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Get("/expiring", dispatcher.Bind(
+		"console.APIKeysHandler.ListExpiring",
+		dispatcher.Query(
+			func() *attunev1.ListExpiringApiKeysRequest { return ptrext.Of(attunev1.ListExpiringApiKeysRequest{}) },
+			func(r *http.Request, req *attunev1.ListExpiringApiKeysRequest) error {
+				if w := r.URL.Query().Get("within"); w != "" {
+					req.Within = ptrext.Of(w)
+				}
+				return nil
+			},
+		),
+		r.apiKeys.ListExpiring,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListExpiringApiKeysRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Get("/event-subscriptions", dispatcher.Bind(
+		"console.APIKeysHandler.ListEventSubscriptions",
+		dispatcher.Empty(func() *attunev1.ListEventSubscriptionsRequest {
+			return ptrext.Of(attunev1.ListEventSubscriptionsRequest{})
+		}),
+		r.apiKeys.ListEventSubscriptions,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListEventSubscriptionsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Post("/event-subscriptions", dispatcher.Bind(
+		"console.APIKeysHandler.CreateEventSubscription",
+		dispatcher.JSON(func() *attunev1.CreateEventSubscriptionRequest {
+			return ptrext.Of(attunev1.CreateEventSubscriptionRequest{})
+		}),
+		r.apiKeys.CreateEventSubscription,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateEventSubscriptionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Get("/leaks", dispatcher.Bind(
+		"console.APIKeysHandler.ListLeakDetections",
+		dispatcher.Empty(func() *attunev1.ListLeakDetectionsRequest { return ptrext.Of(attunev1.ListLeakDetectionsRequest{}) }),
+		r.apiKeys.ListLeakDetections,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListLeakDetectionsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountAPIKeyAdvancedRoutes(k chi.Router) {
+	k.Post("/{id}/rotate", dispatcher.Bind(
+		"console.APIKeysHandler.Rotate",
+		dispatcher.Combine(
+			func() *attunev1.RotateApiKeyRequest { return ptrext.Of(attunev1.RotateApiKeyRequest{}) },
+			dispatcher.JSONBody[*attunev1.RotateApiKeyRequest],
+			dispatcher.Param("id", func(req *attunev1.RotateApiKeyRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.Rotate,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RotateApiKeyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Get("/{id}/logs", dispatcher.Bind(
+		"console.APIKeysHandler.ListLogs",
+		dispatcher.Query(
+			func() *attunev1.ListApiKeyLogsRequest { return ptrext.Of(attunev1.ListApiKeyLogsRequest{}) },
+			func(r *http.Request, req *attunev1.ListApiKeyLogsRequest) error {
+				req.Id = chi.URLParam(r, "id")
+				if lim := r.URL.Query().Get("limit"); lim != "" {
+					var limit int32
+					if _, err := fmt.Sscanf(lim, "%d", &limit); err == nil {
+						req.Limit = ptrext.Of(limit)
+					}
+				}
+				return nil
+			},
+		),
+		r.apiKeys.ListLogs,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListApiKeyLogsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Patch("/{id}/environment", dispatcher.Bind(
+		"console.APIKeysHandler.UpdateEnvironment",
+		dispatcher.Combine(
+			func() *attunev1.UpdateApiKeyEnvironmentRequest {
+				return ptrext.Of(attunev1.UpdateApiKeyEnvironmentRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateApiKeyEnvironmentRequest],
+			dispatcher.Param("id", func(req *attunev1.UpdateApiKeyEnvironmentRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.UpdateEnvironment,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateApiKeyEnvironmentRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	// Policy
+	k.Get("/policy", dispatcher.Bind(
+		"console.APIKeysHandler.GetPolicy",
+		dispatcher.Empty(func() *attunev1.GetPolicyRequest { return ptrext.Of(attunev1.GetPolicyRequest{}) }),
+		r.apiKeys.GetPolicy,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetPolicyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Put("/policy", dispatcher.Bind(
+		"console.APIKeysHandler.UpdatePolicy",
+		dispatcher.JSON(func() *attunev1.UpdatePolicyRequest { return ptrext.Of(attunev1.UpdatePolicyRequest{}) }),
+		r.apiKeys.UpdatePolicy,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdatePolicyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	// Approvals
+	k.Get("/approvals", dispatcher.Bind(
+		"console.APIKeysHandler.ListApprovalRequests",
+		dispatcher.Query(
+			func() *attunev1.ListApprovalRequestsRequest { return ptrext.Of(attunev1.ListApprovalRequestsRequest{}) },
+			func(r *http.Request, req *attunev1.ListApprovalRequestsRequest) error {
+				if s := r.URL.Query().Get("status"); s != "" {
+					req.Status = ptrext.Of(s)
+				}
+				return nil
+			},
+		),
+		r.apiKeys.ListApprovalRequests,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListApprovalRequestsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Post("/approvals", dispatcher.Bind(
+		"console.APIKeysHandler.CreateApprovalRequest",
+		dispatcher.JSON(func() *attunev1.CreateApprovalRequestRequest {
+			return ptrext.Of(attunev1.CreateApprovalRequestRequest{})
+		}),
+		r.apiKeys.CreateApprovalRequest,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateApprovalRequestRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Post("/approvals/{id}/review", dispatcher.Bind(
+		"console.APIKeysHandler.ReviewApproval",
+		dispatcher.Combine(
+			func() *attunev1.ReviewApprovalRequest { return ptrext.Of(attunev1.ReviewApprovalRequest{}) },
+			dispatcher.JSONBody[*attunev1.ReviewApprovalRequest],
+			dispatcher.Param("id", func(req *attunev1.ReviewApprovalRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.ReviewApproval,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ReviewApprovalRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	// Analytics
+	k.Get("/analytics", dispatcher.Bind(
+		"console.APIKeysHandler.GetTenantAnalytics",
+		dispatcher.Query(
+			func() *attunev1.GetTenantAnalyticsRequest { return ptrext.Of(attunev1.GetTenantAnalyticsRequest{}) },
+			func(r *http.Request, req *attunev1.GetTenantAnalyticsRequest) error {
+				if s := r.URL.Query().Get("start"); s != "" {
+					req.Start = ptrext.Of(s)
+				}
+				if e := r.URL.Query().Get("end"); e != "" {
+					req.End = ptrext.Of(e)
+				}
+				return nil
+			},
+		),
+		r.apiKeys.GetTenantAnalytics,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetTenantAnalyticsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountAPIKeyPerKeyRoutes(k chi.Router) {
+	r.mountAPIKeyPerKeyBasicRoutes(k)
+	r.mountAPIKeyPerKeySecurityRoutes(k)
+}
+
+func (r *Router) mountAPIKeyPerKeyBasicRoutes(k chi.Router) {
+	k.Get("/{id}/tags", dispatcher.Bind(
+		"console.APIKeysHandler.GetKeyTags",
+		dispatcher.Path(
+			func() *attunev1.GetKeyTagsRequest { return ptrext.Of(attunev1.GetKeyTagsRequest{}) },
+			dispatcher.Param("id", func(req *attunev1.GetKeyTagsRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.GetKeyTags,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetKeyTagsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Put("/{id}/tags", dispatcher.Bind(
+		"console.APIKeysHandler.SetKeyTags",
+		dispatcher.Combine(
+			func() *attunev1.SetKeyTagsRequest { return ptrext.Of(attunev1.SetKeyTagsRequest{}) },
+			dispatcher.JSONBody[*attunev1.SetKeyTagsRequest],
+			dispatcher.Param("id", func(req *attunev1.SetKeyTagsRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.SetKeyTags,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SetKeyTagsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Put("/{id}/budget", dispatcher.Bind(
+		"console.APIKeysHandler.SetKeyBudget",
+		dispatcher.Combine(
+			func() *attunev1.SetKeyBudgetRequest { return ptrext.Of(attunev1.SetKeyBudgetRequest{}) },
+			dispatcher.JSONBody[*attunev1.SetKeyBudgetRequest],
+			dispatcher.Param("id", func(req *attunev1.SetKeyBudgetRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.SetKeyBudget,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SetKeyBudgetRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Post("/{id}/temp-token", dispatcher.Bind(
+		"console.APIKeysHandler.CreateTempToken",
+		dispatcher.Combine(
+			func() *attunev1.CreateTempTokenRequest { return ptrext.Of(attunev1.CreateTempTokenRequest{}) },
+			dispatcher.JSONBody[*attunev1.CreateTempTokenRequest],
+			dispatcher.Param("id", func(req *attunev1.CreateTempTokenRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.CreateTempToken,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateTempTokenRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Post("/{id}/project", dispatcher.Bind(
+		"console.APIKeysHandler.BindKeyToProject",
+		dispatcher.Combine(
+			func() *attunev1.BindKeyToProjectRequest { return ptrext.Of(attunev1.BindKeyToProjectRequest{}) },
+			dispatcher.JSONBody[*attunev1.BindKeyToProjectRequest],
+			dispatcher.Param("id", func(req *attunev1.BindKeyToProjectRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.BindKeyToProject,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BindKeyToProjectRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Get("/{id}/analytics", dispatcher.Bind(
+		"console.APIKeysHandler.GetKeyAnalytics",
+		dispatcher.Query(
+			func() *attunev1.GetKeyAnalyticsRequest { return ptrext.Of(attunev1.GetKeyAnalyticsRequest{}) },
+			func(r *http.Request, req *attunev1.GetKeyAnalyticsRequest) error {
+				req.Id = chi.URLParam(r, "id")
+				if s := r.URL.Query().Get("start"); s != "" {
+					req.Start = ptrext.Of(s)
+				}
+				if e := r.URL.Query().Get("end"); e != "" {
+					req.End = ptrext.Of(e)
+				}
+				return nil
+			},
+		),
+		r.apiKeys.GetKeyAnalytics,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetKeyAnalyticsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountAPIKeyPerKeySecurityRoutes(k chi.Router) {
+	k.Get("/{id}/rotation-schedule", dispatcher.Bind(
+		"console.APIKeysHandler.GetRotationSchedule",
+		dispatcher.Path(
+			func() *attunev1.GetRotationScheduleRequest { return ptrext.Of(attunev1.GetRotationScheduleRequest{}) },
+			dispatcher.Param("id", func(req *attunev1.GetRotationScheduleRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.GetRotationSchedule,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetRotationScheduleRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Post("/{id}/rotation-schedule", dispatcher.Bind(
+		"console.APIKeysHandler.CreateRotationSchedule",
+		dispatcher.Combine(
+			func() *attunev1.CreateRotationScheduleRequest {
+				return ptrext.Of(attunev1.CreateRotationScheduleRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.CreateRotationScheduleRequest],
+			dispatcher.Param("id", func(req *attunev1.CreateRotationScheduleRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.CreateRotationSchedule,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateRotationScheduleRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Get("/{id}/unused-scopes", dispatcher.Bind(
+		"console.APIKeysHandler.GetUnusedScopes",
+		dispatcher.Path(
+			func() *attunev1.GetUnusedScopesRequest { return ptrext.Of(attunev1.GetUnusedScopesRequest{}) },
+			dispatcher.Param("id", func(req *attunev1.GetUnusedScopesRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.GetUnusedScopes,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetUnusedScopesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Get("/{id}/signing-keys", dispatcher.Bind(
+		"console.APIKeysHandler.ListSigningKeys",
+		dispatcher.Path(
+			func() *attunev1.ListSigningKeysRequest { return ptrext.Of(attunev1.ListSigningKeysRequest{}) },
+			dispatcher.Param("id", func(req *attunev1.ListSigningKeysRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.ListSigningKeys,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListSigningKeysRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Post("/{id}/signing-keys", dispatcher.Bind(
+		"console.APIKeysHandler.CreateSigningKey",
+		dispatcher.Combine(
+			func() *attunev1.CreateSigningKeyRequest { return ptrext.Of(attunev1.CreateSigningKeyRequest{}) },
+			dispatcher.JSONBody[*attunev1.CreateSigningKeyRequest],
+			dispatcher.Param("id", func(req *attunev1.CreateSigningKeyRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.CreateSigningKey,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateSigningKeyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	k.Get("/{id}/health", dispatcher.Bind(
+		"console.APIKeysHandler.GetKeyHealth",
+		dispatcher.Path(
+			func() *attunev1.GetKeyHealthRequest { return ptrext.Of(attunev1.GetKeyHealthRequest{}) },
+			dispatcher.Param("id", func(req *attunev1.GetKeyHealthRequest, id string) { req.Id = id }),
+		),
+		r.apiKeys.GetKeyHealth,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetKeyHealthRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountAPIKeyRelatedResources(m chi.Router) {
+	m.Route("/service-accounts", func(s chi.Router) {
+		s.Use(r.requireAdminStrict)
+		s.Get("/", dispatcher.Bind(
+			"console.APIKeysHandler.ListServiceAccounts",
+			dispatcher.Empty(func() *attunev1.ListServiceAccountsRequest { return ptrext.Of(attunev1.ListServiceAccountsRequest{}) }),
+			r.apiKeys.ListServiceAccounts,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListServiceAccountsRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		k.Post("/", dispatcher.Bind(
-			"console.APIKeysHandler.Create",
-			dispatcher.JSON(func() *attunev1.CreateApiKeyRequest { return ptrext.Of(attunev1.CreateApiKeyRequest{}) }),
-			r.apiKeys.Create,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateApiKeyRequest) (*session.AuthCtx, error) {
+		s.Post("/", dispatcher.Bind(
+			"console.APIKeysHandler.CreateServiceAccount",
+			dispatcher.JSON(func() *attunev1.CreateServiceAccountRequest { return ptrext.Of(attunev1.CreateServiceAccountRequest{}) }),
+			r.apiKeys.CreateServiceAccount,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateServiceAccountRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		k.Delete("/{id}", dispatcher.Bind(
-			"console.APIKeysHandler.Revoke",
-			dispatcher.Path(
-				func() *attunev1.DeleteApiKeyRequest { return ptrext.Of(attunev1.DeleteApiKeyRequest{}) },
-				dispatcher.Param("id", func(req *attunev1.DeleteApiKeyRequest, id string) {
-					req.Id = id
-				}),
-			),
-			r.apiKeys.Revoke,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteApiKeyRequest) (*session.AuthCtx, error) {
+	})
+
+	m.Route("/projects", func(p chi.Router) {
+		p.Use(r.requireAdminStrict)
+		p.Get("/", dispatcher.Bind(
+			"console.APIKeysHandler.ListProjects",
+			dispatcher.Empty(func() *attunev1.ListProjectsRequest { return ptrext.Of(attunev1.ListProjectsRequest{}) }),
+			r.apiKeys.ListProjects,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListProjectsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		p.Post("/", dispatcher.Bind(
+			"console.APIKeysHandler.CreateProject",
+			dispatcher.JSON(func() *attunev1.CreateProjectRequest { return ptrext.Of(attunev1.CreateProjectRequest{}) }),
+			r.apiKeys.CreateProject,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateProjectRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+
+	m.Route("/oauth2/clients", func(o chi.Router) {
+		o.Use(r.requireAdminStrict)
+		o.Get("/", dispatcher.Bind(
+			"console.APIKeysHandler.ListOAuth2Clients",
+			dispatcher.Empty(func() *attunev1.ListOAuth2ClientsRequest { return ptrext.Of(attunev1.ListOAuth2ClientsRequest{}) }),
+			r.apiKeys.ListOAuth2Clients,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListOAuth2ClientsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		o.Post("/", dispatcher.Bind(
+			"console.APIKeysHandler.CreateOAuth2Client",
+			dispatcher.JSON(func() *attunev1.CreateOAuth2ClientRequest { return ptrext.Of(attunev1.CreateOAuth2ClientRequest{}) }),
+			r.apiKeys.CreateOAuth2Client,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateOAuth2ClientRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+
+	m.Route("/secret-managers", func(s chi.Router) {
+		s.Use(r.requireAdminStrict)
+		s.Get("/", dispatcher.Bind(
+			"console.APIKeysHandler.ListSecretManagers",
+			dispatcher.Empty(func() *attunev1.ListSecretManagersRequest { return ptrext.Of(attunev1.ListSecretManagersRequest{}) }),
+			r.apiKeys.ListSecretManagers,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListSecretManagersRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		s.Post("/", dispatcher.Bind(
+			"console.APIKeysHandler.CreateSecretManager",
+			dispatcher.JSON(func() *attunev1.CreateSecretManagerRequest { return ptrext.Of(attunev1.CreateSecretManagerRequest{}) }),
+			r.apiKeys.CreateSecretManager,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateSecretManagerRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+
+	m.Route("/managed-identities", func(mi chi.Router) {
+		mi.Use(r.requireAdminStrict)
+		mi.Get("/", dispatcher.Bind(
+			"console.APIKeysHandler.ListManagedIdentities",
+			dispatcher.Empty(func() *attunev1.ListManagedIdentitiesRequest {
+				return ptrext.Of(attunev1.ListManagedIdentitiesRequest{})
+			}),
+			r.apiKeys.ListManagedIdentities,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListManagedIdentitiesRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		mi.Post("/", dispatcher.Bind(
+			"console.APIKeysHandler.CreateManagedIdentity",
+			dispatcher.JSON(func() *attunev1.CreateManagedIdentityRequest {
+				return ptrext.Of(attunev1.CreateManagedIdentityRequest{})
+			}),
+			r.apiKeys.CreateManagedIdentity,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateManagedIdentityRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+
+	m.Route("/siem-integrations", func(si chi.Router) {
+		si.Use(r.requireAdminStrict)
+		si.Get("/", dispatcher.Bind(
+			"console.APIKeysHandler.ListSIEMIntegrations",
+			dispatcher.Empty(func() *attunev1.ListSIEMIntegrationsRequest { return ptrext.Of(attunev1.ListSIEMIntegrationsRequest{}) }),
+			r.apiKeys.ListSIEMIntegrations,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListSIEMIntegrationsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		si.Post("/", dispatcher.Bind(
+			"console.APIKeysHandler.CreateSIEMIntegration",
+			dispatcher.JSON(func() *attunev1.CreateSIEMIntegrationRequest {
+				return ptrext.Of(attunev1.CreateSIEMIntegrationRequest{})
+			}),
+			r.apiKeys.CreateSIEMIntegration,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateSIEMIntegrationRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+
+	m.Route("/ai-agents", func(ai chi.Router) {
+		ai.Use(r.requireAdminStrict)
+		ai.Get("/", dispatcher.Bind(
+			"console.APIKeysHandler.ListAIAgentConfigs",
+			dispatcher.Empty(func() *attunev1.ListAIAgentConfigsRequest { return ptrext.Of(attunev1.ListAIAgentConfigsRequest{}) }),
+			r.apiKeys.ListAIAgentConfigs,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListAIAgentConfigsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		ai.Post("/", dispatcher.Bind(
+			"console.APIKeysHandler.CreateAIAgentConfig",
+			dispatcher.JSON(func() *attunev1.CreateAIAgentConfigRequest { return ptrext.Of(attunev1.CreateAIAgentConfigRequest{}) }),
+			r.apiKeys.CreateAIAgentConfig,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateAIAgentConfigRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))

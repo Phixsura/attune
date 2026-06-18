@@ -16,7 +16,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { type NewApiKey, useCreateApiKey } from '@/features/api-keys/api/create-api-key'
+import {
+  type CreateApiKeyParams,
+  type NewApiKey,
+  useCreateApiKey,
+} from '@/features/api-keys/api/create-api-key'
 import { type ApiKey, apiKeysQuery } from '@/features/api-keys/api/list-api-keys'
 import { useRevokeApiKey } from '@/features/api-keys/api/revoke-api-key'
 import {
@@ -38,8 +42,8 @@ export function ApiKeysPage() {
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
   const [issued, setIssued] = useState<NewApiKey | null>(null)
 
-  const handleCreate = (label: string) => {
-    return create.mutateAsync(label, {
+  const handleCreate = (params: CreateApiKeyParams) => {
+    return create.mutateAsync(params, {
       onSuccess: (newKey) => {
         setCreateOpen(false)
         setIssued(newKey)
