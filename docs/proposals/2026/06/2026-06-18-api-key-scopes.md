@@ -71,12 +71,12 @@ Surveyed 10 top projects for API key scope design:
 | **Backend** | `RequireScope(scope)` middleware for endpoint protection |
 | | Dual auth: Console endpoints accept both session AND API key |
 | | Session users bypass scope checks (handled by RBAC) |
-| **Frontend** | Preset templates: Ingest Only, Read Only, Integration, Full Access |
+| **Frontend** | Preset templates: Ingest Only, Read Only, Developer, Integration, Full Access |
 | | Custom scope selection via grouped checkboxes |
 | | Scopes displayed on key list page |
 | **Observability** | Scope-denied requests logged with key/scope context |
-| | Metrics: `attune_apikey_denied_total{scope}` |
-| **Testing** | Table-driven: every endpoint × scope combination |
+| | Metrics: `attune_apikey_scope_denied_total{scope}` |
+| **Testing** | Group coverage: one endpoint per scope category + explicit negative tests for admin scopes |
 | | Integration: migration seeds existing keys correctly |
 | | E2E: read-only key can list but not ingest |
 
@@ -175,7 +175,8 @@ CREATE TABLE IF NOT EXISTS api_key_scopes (
 CREATE INDEX IF NOT EXISTS idx_api_key_scopes_key
   ON api_key_scopes (key_id);
 
--- Seed existing keys with all scopes
+-- Seed existing keys with all scopes EXCEPT apikey:admin (security: prevent
+-- migrated keys from managing other keys without explicit re-creation)
 INSERT INTO api_key_scopes (key_id, scope)
 SELECT k.id, s.scope
 FROM external_api_keys k
@@ -192,7 +193,8 @@ CROSS JOIN (
     ('digest:read'), ('digest:write'),
     ('tags:read'), ('tags:write'),
     ('workflow:read'), ('workflow:write'),
-    ('gdpr:admin'), ('members:admin'), ('apikey:admin')
+    ('gdpr:admin'), ('members:admin')
+    -- NOTE: 'apikey:admin' intentionally excluded from migration
 ) AS s(scope)
 WHERE k.revoked_at IS NULL;
 
@@ -239,76 +241,80 @@ func HasScope(granted []Scope, required Scope) bool {
 }
 ```
 
-### Dual Auth Middleware
+### Middleware Design (Composition Pattern)
 
-Console endpoints accept both session auth AND API key auth:
+**Design principle**: Compose orthogonal middlewares rather than merge into monolithic `DualAuthMiddleware`. This avoids duplicating CSRF/expiry/HMAC logic from existing session and apikey middlewares.
+
+#### Extended API Key Auth Context
+
+Extend existing `apikey.AuthCtx` to include scopes (loaded atomically with key lookup):
 
 ```go
-// internal/handlers/console/internal/auth/dual_auth.go
+// internal/infra/apikey/middleware.go (extended)
 
-type DualAuthCtx struct {
-    TenantID   string
-    UserID     string
-    UserType   string           // "admin" | "oidc" | "apikey"
-    Scopes     []domain.Scope   // Only for API keys
-    IsAPIKey   bool
+// AuthCtx is the request-scoped API key identity populated by Middleware.
+type AuthCtx struct {
+    TenantID string
+    KeyID    uuid.UUID
+    Scopes   []domain.Scope  // NEW: loaded atomically with key lookup
 }
 
-// DualAuthMiddleware: try session first, then API key
-func DualAuthMiddleware(sessionSigner, apiKeyVerifier, scopeLoader) func(http.Handler) http.Handler {
+// Verifier now returns scopes atomically with key lookup (fail-closed).
+type Verifier interface {
+    // LookupWithScopes returns tenant, key ID, and scopes in one atomic call.
+    // Returns domain.ErrInvalidAPIKey if key invalid or scope load fails.
+    LookupWithScopes(ctx context.Context, raw string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, err error)
+}
+```
+
+#### Console Dual Auth Wrapper
+
+For Console routes that accept both session AND API key, use a simple wrapper:
+
+```go
+// internal/handlers/console/internal/dualauth/middleware.go
+
+// TrySessionOrAPIKey tries session auth first, falls back to API key.
+// Does NOT duplicate auth logic — delegates to existing middlewares.
+func TrySessionOrAPIKey(sessionMW, apikeyMW func(http.Handler) http.Handler) func(http.Handler) http.Handler {
     return func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            // 1. Try session auth
-            if auth, err := sessionSigner.VerifySession(r); err == nil {
-                ctx := WithDualAuth(ctx, &DualAuthCtx{
-                    TenantID: auth.TenantID,
-                    UserID:   auth.UserID,
-                    UserType: auth.UserType,
-                    IsAPIKey: false,
-                })
-                next.ServeHTTP(w, r.WithContext(ctx))
+            // Try session first (check cookie presence)
+            if r.Header.Get("Cookie") != "" && !hasAPIKeyHeader(r) {
+                sessionMW(next).ServeHTTP(w, r)
                 return
             }
-            
-            // 2. Try API key auth
-            raw := r.Header.Get("X-API-Key")
-            if raw != "" {
-                tenantID, keyID, err := apiKeyVerifier.Lookup(ctx, raw)
-                if err == nil {
-                    scopes, _ := scopeLoader.LoadScopes(ctx, keyID)
-                    ctx := WithDualAuth(ctx, &DualAuthCtx{
-                        TenantID: tenantID,
-                        UserID:   keyID.String(),
-                        UserType: "apikey",
-                        Scopes:   scopes,
-                        IsAPIKey: true,
-                    })
-                    next.ServeHTTP(w, r.WithContext(ctx))
-                    return
-                }
-            }
-            
-            // 3. Both failed
-            dispatcher.Reject(ctx, w, 401, UNAUTHORIZED, "authentication required")
+            // Fall back to API key
+            apikeyMW(next).ServeHTTP(w, r)
         })
     }
 }
+```
 
-// RequireScope: check scope for API key requests, pass-through for sessions
+#### Scope Check Middleware
+
+Parallel to `rbac.RequireRole`, add `scope.RequireScope`:
+
+```go
+// internal/handlers/console/internal/scope/middleware.go
+
+// RequireScope checks API key scopes; sessions pass through (handled by RBAC).
 func RequireScope(required domain.Scope) func(http.Handler) http.Handler {
     return func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            auth := FromDualAuth(r.Context())
-            
-            // Session users bypass scope checks (handled by RBAC)
-            if !auth.IsAPIKey {
+            // Check if this is an API key request
+            auth, ok := apikey.FromContextSafe(r.Context())
+            if !ok {
+                // Session request — bypass scope check, RBAC handles it
                 next.ServeHTTP(w, r)
                 return
             }
             
-            // API key: check scope
+            // API key: check scope (fail-closed)
             if !domain.HasScope(auth.Scopes, required) {
-                dispatcher.Reject(ctx, w, 403, FORBIDDEN, 
+                metrics.APIKeyScopeDeniedTotal.WithLabelValues(string(required)).Inc()
+                logext.Warnf(r.Context(), "[scope] deny,key_id:%s,required:%s", auth.KeyID, required)
+                dispatcher.Reject(r.Context(), w, 403, FORBIDDEN,
                     fmt.Sprintf("missing scope: %s", required))
                 return
             }
@@ -318,6 +324,33 @@ func RequireScope(required domain.Scope) func(http.Handler) http.Handler {
     }
 }
 ```
+
+#### Usage in Router
+
+```go
+// Console route with dual auth + scope check
+m.Route("/feedback", func(f chi.Router) {
+    f.Use(dualauth.TrySessionOrAPIKey(r.signer.RequireSession, apikey.Middleware(apiKeys)))
+    f.Use(r.requireViewer)                        // RBAC for sessions
+    f.Use(scope.RequireScope(domain.ScopeFeedbackRead))  // Scope for API keys
+    f.Get("/", ...)
+})
+```
+
+### RBAC ↔ Scope Equivalence
+
+Session auth uses RBAC roles (`admin`, `member`, `viewer`). API key auth uses scopes. The two systems are **orthogonal** but must agree on access semantics:
+
+| RBAC Role | Equivalent Scopes | Notes |
+|-----------|-------------------|-------|
+| `viewer` | `*:read` scopes | Read-only access to data |
+| `member` | `*:read` + `*:write` (non-admin) | Operate on data but not manage settings |
+| `admin` | All scopes | Full access including admin scopes |
+
+**Divergence prevention**:
+1. Every route that uses `requireViewer` also uses `RequireScope(...:read)`
+2. Every route that uses `requireAdmin` also uses `RequireScope(...:write)` or `(...:admin)`
+3. The scope audit test (`router_scope_test.go`) verifies all routes have matching RBAC + scope declarations
 
 ### Proto Changes
 
@@ -337,7 +370,8 @@ message ApiKey {
 
 message CreateApiKeyRequest {
   string label = 1 [(google.api.field_behavior) = REQUIRED];
-  repeated string scopes = 2 [(google.api.field_behavior) = REQUIRED];  // NEW
+  // Optional: defaults to full_access preset if omitted (backward compatible)
+  repeated string scopes = 2;  // NEW
 }
 
 // NEW: scope metadata
@@ -346,7 +380,7 @@ message ListScopesResponse {
   repeated ScopeInfo scopes = 1;
 }
 message ScopeInfo {
-  string id = 1;           // "feedback:read"
+  string scope = 1;        // "feedback:read" (renamed from 'id' for clarity)
   string resource = 2;     // "feedback"
   string action = 3;       // "read"
   string description = 4;
@@ -366,14 +400,19 @@ message ScopePreset {
 }
 ```
 
+**Backward compatibility**: `CreateApiKeyRequest.scopes` is optional. If omitted, server defaults to `full_access` preset, preserving existing client behavior.
+
 ### Preset Templates
 
-| ID | Name | Scopes |
-|----|------|--------|
-| `ingest_only` | Ingest Only | `ingest:write` |
-| `read_only` | Read Only | `feedback:read`, `usage:read`, `audit:read` |
-| `integration` | Integration | `ingest:write`, `feedback:read`, `notify:read`, `inbound:read` |
-| `full_access` | Full Access | All 22 scopes |
+| ID | Name | Scopes | Use Case |
+|----|------|--------|----------|
+| `ingest_only` | Ingest Only | `ingest:write` | SDK/webhook submission |
+| `read_only` | Read Only | `feedback:read`, `usage:read`, `audit:read` | Monitoring dashboards |
+| `developer` | Developer | `ingest:write`, `feedback:read`, `feedback:write`, `usage:read` | Typical SDK integration |
+| `integration` | Integration | `ingest:write`, `feedback:read`, `notify:read`, `inbound:read` | External system sync |
+| `full_access` | Full Access | All 22 scopes (except `apikey:admin`*) | Automation scripts |
+
+*`apikey:admin` is excluded from `full_access` by default — must be explicitly requested. This prevents accidentally granting key-management privileges.
 
 ### Console UI
 
@@ -402,30 +441,50 @@ Key list page:
 
 ## Risks / Tradeoffs
 
-| Risk | Mitigation |
-|------|------------|
-| **Scope explosion** | 22 scopes is manageable; presets simplify common cases |
-| **Dual-auth complexity** | Clear precedence (session > apikey); well-tested middleware |
-| **Migration disruption** | All existing keys get full scopes; zero breaking change |
-| **UI complexity** | Presets for 80% case; custom for power users |
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| **Scope loading failure** | HIGH | Atomic `LookupWithScopes` — fail-closed if scope load fails |
+| **Migration grants `apikey:admin`** | MEDIUM | Exclude `apikey:admin` from migration seed; existing keys must be re-created to manage other keys |
+| **RBAC/scope mapping divergence** | MEDIUM | Document explicit RBAC↔scope equivalence; add audit test to verify |
+| **Scope explosion** | LOW | 22 scopes is manageable; presets simplify common cases |
+| **Dual-auth complexity** | LOW | Composition pattern delegates to existing middlewares; no logic duplication |
+| **UI complexity** | LOW | Presets for 80% case; custom for power users |
+| **Missing endpoint coverage** | LOW | Table-driven audit test enumerates all routes vs required scopes |
+
+**Security note**: API key requests skip CSRF checks (bearer tokens don't need CSRF). This is intentional and documented.
 
 ---
 
 ## Implementation Plan
 
-| Phase | Work |
-|-------|------|
-| **1. Schema** | Migration 046 with `api_key_scopes` table + seed |
-| **2. Domain** | `internal/domain/scope.go` with types, hierarchy, `HasScope` |
-| **3. Repo** | `internal/repo/apikeyScope/` for scope CRUD |
-| **4. Service** | Update `apikey.Issue` to accept scopes; add `LoadScopes` |
-| **5. Middleware** | `DualAuthMiddleware`, `RequireScope` |
-| **6. Handlers** | Add `RequireScope` to all Console endpoints |
-| **7. Proto** | Update `api_key.proto`, run `make proto` |
-| **8. Console handlers** | Pass scopes to service; add preset/scope list endpoints |
-| **9. Console UI** | New create dialog, scope display on list page |
-| **10. Tests** | Unit, integration, handler table-driven, E2E |
-| **11. Docs** | README, private-deploy.md scope documentation |
+Split into **3 PRs** for reviewability and rollback isolation:
+
+### PR1: Backend Core (~460 LOC)
+
+| Phase | Work | Location |
+|-------|------|----------|
+| **1. Schema** | Migration 046 with `api_key_scopes` table + seed (exclude `apikey:admin`) | `internal/infra/database/migrations/` |
+| **2. Domain** | `scope.go` with types, hierarchy, `HasScope` | `internal/domain/` |
+| **3. Repo** | Scope CRUD in same package as apikey | `internal/repo/apikey/scope.go` |
+| **4. Service** | `LookupWithScopes` atomic call; update `Issue` to accept scopes | `internal/service/apikey/` |
+| **5. Middleware** | `scope.RequireScope`, `dualauth.TrySessionOrAPIKey` | `internal/handlers/console/internal/scope/`, `internal/handlers/console/internal/dualauth/` |
+
+### PR2: Endpoint Protection (~300 LOC)
+
+| Phase | Work | Location |
+|-------|------|----------|
+| **6. Handlers** | Add `RequireScope` to all ~25 mount functions in router | `internal/handlers/console/router.go` |
+| **6b. Audit test** | Table-driven: enumerate all routes vs required scopes | `internal/handlers/console/router_scope_test.go` |
+
+### PR3: User-Facing (~1140 LOC)
+
+| Phase | Work | Location |
+|-------|------|----------|
+| **7. Proto** | Update `api_key.proto`, run `make proto` | `proto/attune/v1/` |
+| **8. Console handlers** | Pass scopes to service; add preset/scope list endpoints | `internal/handlers/console/apikey/` |
+| **9. Console UI** | New create dialog with presets, scope display on list | `console/src/features/api-keys/` |
+| **10. Tests** | Unit (domain), integration (repo), component (UI), E2E | various |
+| **11. Docs** | README scope section, private-deploy.md update | `docs/` |
 
 ---
 
@@ -434,11 +493,15 @@ Key list page:
 | Check | Method |
 |-------|--------|
 | **Unit tests pass** | `go test ./internal/domain/... ./internal/service/apikey/...` |
-| **Integration tests** | `make test-integration` — scope repo + migration |
-| **Handler tests** | Table-driven: every endpoint × scope × allow/deny |
-| **Console tests** | `pnpm vitest` — dialog interaction, preset selection |
-| **E2E** | Create read-only key → can GET feedback → cannot POST ingest |
-| **Existing keys work** | Verify migrated keys have all scopes |
+| **Integration tests** | `make test-integration` — scope repo + migration seed |
+| **Scope audit test** | Table-driven: enumerate all routes → verify scope declared (compile-time coverage) |
+| **Group coverage** | One endpoint per scope category (not 134×22 exhaustive); explicit negative tests for admin scopes |
+| **Console tests** | `pnpm vitest` — dialog interaction, preset selection, scope display |
+| **E2E critical paths** | Create `read_only` key → can GET feedback → cannot POST ingest; Create `ingest_only` → can ingest → cannot list feedback |
+| **Migration verification** | Verify migrated keys have all scopes except `apikey:admin` |
+| **Down-migration** | `api_key_scopes` table drop is safe (no FK from other tables) |
+
+**Test strategy rationale**: Exhaustive 134 endpoints × 22 scopes = 2,948 test cases is unrealistic. Use group coverage (test one endpoint per scope) + explicit negative tests for privileged scopes + E2E for critical paths.
 
 ---
 
