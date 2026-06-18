@@ -20,7 +20,84 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   expose scope metadata and templates. The `attune_apikey_scope_denied_total`
   metric tracks scope enforcement denials by required scope.
 
+- **Enterprise API key features.** Comprehensive API key management matching
+  industry leaders (Stripe, Cloudflare, GitHub):
+  - **Key rotation with grace period** — `POST /fb/v1/console/api-keys/{id}/rotate`
+    creates a new key while keeping the old key valid during a configurable grace
+    period (default 24h), enabling zero-downtime credential rotation.
+  - **Request logs** — `GET /fb/v1/console/api-keys/{id}/logs` returns recent
+    requests made with a key (method, path, status, latency, client IP).
+    Partitioned monthly for performance.
+  - **Environment tags** — Keys can be tagged as production/staging/development/test
+    via `PATCH /fb/v1/console/api-keys/{id}/environment`.
+  - **Service accounts** — Non-human identities for CI/CD and automation via
+    `GET/POST /fb/v1/console/service-accounts`.
+  - **Event webhooks** — Subscribe to key lifecycle events (created, rotated,
+    revoked, expired, expiring_soon) via `POST /fb/v1/console/api-keys/event-subscriptions`.
+  - **Expiry alerts** — `GET /fb/v1/console/api-keys/expiring` returns keys
+    expiring within a time window (default 7d).
+  - **Leak detection** — Framework for tracking leaked keys from external sources
+    (GitHub secret scanning integration ready).
+  - **Resource binding** — Database schema ready for restricting keys to specific
+    resource subsets (API endpoints TBD).
+  - **Org-level policies** — Tenant-wide API key policies via `GET/PUT
+    /fb/v1/console/api-keys/policy` control max expiry, require IP allowlist,
+    require description, limit keys per service account, restrict environments,
+    require MFA for create, require approval for production keys, auto-revoke
+    after N days unused.
+  - **Project/workspace binding** — Isolate API keys by project via `GET/POST
+    /fb/v1/console/projects` and `POST /fb/v1/console/api-keys/{id}/project`.
+  - **Budget/spend limits** — Per-key budget controls via `PUT
+    /fb/v1/console/api-keys/{id}/budget` with block/alert/none overage actions.
+  - **Custom metadata tags** — Key-value labels via `GET/PUT
+    /fb/v1/console/api-keys/{id}/tags` for team ownership, cost center, etc.
+  - **Temporary tokens** — Short-lived tokens derived from parent keys via
+    `POST /fb/v1/console/api-keys/{id}/temp-token` with expiration and max-uses.
+  - **Approval workflows** — Require approval for production key creation via
+    `GET/POST /fb/v1/console/api-keys/approvals` and review via
+    `POST /fb/v1/console/api-keys/approvals/{id}/review`.
+  - **OAuth2 client credentials** — M2M authentication via `GET/POST
+    /fb/v1/console/oauth2/clients` for service-to-service flows.
+  - **Analytics dashboard** — Hourly aggregated key usage metrics via `GET
+    /fb/v1/console/api-keys/analytics` and `GET /fb/v1/console/api-keys/{id}/analytics`.
+  - **Secret manager integration** — External secret manager configs (Vault,
+    AWS, GCP, Azure) via `GET/POST /fb/v1/console/secret-managers`.
+
+- **Advanced API key security features.** Additional enterprise security controls
+  matching AWS IAM, Twilio, and Azure best practices:
+  - **Browser detection** — `IsBrowserUserAgent()` helper detects browser User-Agent
+    patterns to prevent secret key exposure in frontend code (Supabase pattern).
+  - **Scheduled auto-rotation** — `GET/POST /fb/v1/console/api-keys/{id}/rotation-schedule`
+    configures automatic key rotation intervals with grace periods and notifications
+    (AWS Config 90-day pattern).
+  - **Unused permission detection** — `GET /fb/v1/console/api-keys/{id}/unused-scopes`
+    identifies scopes granted but never used, enabling least-privilege refinement
+    (AWS Access Analyzer pattern).
+  - **Public key cryptography verification (PKCV)** — `GET/POST
+    /fb/v1/console/api-keys/{id}/signing-keys` enables request signing with
+    asymmetric keys (Twilio pattern).
+  - **Managed identities** — `GET/POST /fb/v1/console/managed-identities` for
+    secretless authentication via cloud provider workload identity (Azure/GCP pattern).
+  - **SIEM integration** — `GET/POST /fb/v1/console/siem-integrations` for streaming
+    API key events to Splunk, Datadog, Elastic, and other SIEM providers.
+  - **AI agent configurations** — `GET/POST /fb/v1/console/ai-agents` for LLM-based
+    API access patterns with scope restrictions (Okta AI agent pattern).
+  - **Key health score** — `GET /fb/v1/console/api-keys/{id}/health` returns a
+    composite security score (0-100) based on expiry, IP restrictions, rate limits,
+    unused scopes, and rotation age.
+
 ### Security
+
+- **API key security enhancements.** Added industry-standard security controls
+  for API keys: expiration (`expires_at`), IP allowlist (`allowed_cidrs` with
+  CIDR notation), usage tracking (`usage_count`), and per-key rate limits
+  (`rate_limit_rpm`). The middleware now validates expiration and IP before
+  allowing access. New metrics `attune_apikey_expired_total` and
+  `attune_apikey_ip_denied_total` track denied requests, while
+  `attune_apikey_usage_total` tracks successful authentications by key prefix.
+  Added `GET /v1/auth/verify` endpoint for token verification. The Security &
+  Compliance dashboard now includes an API Key Security section showing access
+  denials and usage patterns.
 
 - **GDPR subject export/delete controls (#43).** Added canonical
   `user_feedback.subject_key` identity tracking plus admin-only

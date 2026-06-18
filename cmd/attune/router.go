@@ -33,6 +33,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
@@ -86,6 +87,21 @@ func buildRouter(
 		if inboundMux != nil {
 			r.Mount("/inbound", inboundMux)
 		}
+
+		// Auth verify endpoint - requires valid API key but no specific scope.
+		r.Group(func(r chi.Router) {
+			r.Use(apikey.Middleware(apiKeys))
+			authVerify := handlers.NewAuthVerifyHandler(apikeyrepo.NewAPIKey(pool))
+			r.Get("/auth/verify", dispatcher.Bind(
+				"handlers.AuthVerifyHandler.Verify",
+				dispatcher.Custom(func() *attunev1.VerifyApiKeyRequest { return ptrext.Of(attunev1.VerifyApiKeyRequest{}) }, nil),
+				authVerify.Verify,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.VerifyApiKeyRequest) (*apikey.AuthCtx, error) {
+					return apikey.FromContext(r.Context()), nil
+				}),
+			))
+		})
+
 		r.Group(func(r chi.Router) {
 			r.Use(apikey.Middleware(apiKeys))
 			r.Use(apikey.RequireScope(domain.ScopeIngestWrite))

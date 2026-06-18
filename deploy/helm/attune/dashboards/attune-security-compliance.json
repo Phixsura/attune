@@ -594,7 +594,7 @@
     {
       "id": 15,
       "type": "row",
-      "title": "Audit and guardrails",
+      "title": "API key security",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -605,13 +605,119 @@
     {
       "id": 16,
       "type": "timeseries",
+      "title": "API key access denials",
+      "description": "API key requests denied due to expiration or IP restrictions. Spikes may indicate credential rotation issues or misconfigured allowlists.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(attune_apikey_expired_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "expired",
+          "refId": "A"
+        },
+        {
+          "expr": "(sum(rate(attune_apikey_ip_denied_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "IP denied",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "reqps"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "API key usage",
+      "description": "Successful API key authentications by key prefix. Use this to track active keys and detect unusual usage patterns.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "targets": [
+        {
+          "expr": "(sum by (key_prefix) (rate(attune_apikey_usage_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "{{key_prefix}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "reqps"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "row",
+      "title": "Audit and guardrails",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
       "title": "Audit log",
       "description": "Audit writes, pruning, and prune latency. This proves security-relevant actions remain observable.",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 33
+        "y": 42
       },
       "targets": [
         {
@@ -658,7 +764,7 @@
       }
     },
     {
-      "id": 17,
+      "id": 20,
       "type": "timeseries",
       "title": "Guard policy activity",
       "description": "Guard actions and blocks by stage, guard, entity, action, and reason. Use this as compliance evidence for policy behavior.",
@@ -666,7 +772,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 42
       },
       "targets": [
         {

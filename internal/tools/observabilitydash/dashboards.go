@@ -269,16 +269,24 @@ func securityDashboard() dashboard {
 			targetExpr("A", `sum by (role, required) (rate(attune_authz_denied_total[$__rate_interval]))`, "{{role}} needs {{required}}"),
 			targetExpr("B", `sum by (scope) (rate(attune_apikey_scope_denied_total[$__rate_interval]))`, "apikey scope {{scope}}"),
 		}, "reqps", gp(12, 17, 12, 8)),
-		rowPanel(15, "Audit and guardrails", 25),
-		seriesDesc(16, "Audit log", "Audit writes, pruning, and prune latency. This proves security-relevant actions remain observable.", []target{
+		rowPanel(15, "API key security", 25),
+		seriesDesc(16, "API key access denials", "API key requests denied due to expiration or IP restrictions. Spikes may indicate credential rotation issues or misconfigured allowlists.", []target{
+			targetExpr("A", `sum(rate(attune_apikey_expired_total[$__rate_interval]))`, "expired"),
+			targetExpr("B", `sum(rate(attune_apikey_ip_denied_total[$__rate_interval]))`, "IP denied"),
+		}, "reqps", gp(0, 26, 12, 8)),
+		seriesDesc(17, "API key usage", "Successful API key authentications by key prefix. Use this to track active keys and detect unusual usage patterns.", []target{
+			targetExpr("A", `sum by (key_prefix) (rate(attune_apikey_usage_total[$__rate_interval]))`, "{{key_prefix}}"),
+		}, "reqps", gp(12, 26, 12, 8)),
+		rowPanel(18, "Audit and guardrails", 34),
+		seriesDesc(19, "Audit log", "Audit writes, pruning, and prune latency. This proves security-relevant actions remain observable.", []target{
 			targetExpr("A", `sum by (action) (rate(attune_audit_rows_written_total[$__rate_interval]))`, "written / {{action}}"),
 			targetExpr("B", `rate(attune_audit_rows_pruned_total[$__rate_interval])`, "pruned"),
 			targetExpr("C", `histogram_quantile(0.95, sum by (le) (rate(attune_audit_prune_duration_seconds_bucket[$__rate_interval])))`, "prune p95"),
-		}, "short", gp(0, 26, 12, 8)),
-		seriesDesc(17, "Guard policy activity", "Guard actions and blocks by stage, guard, entity, action, and reason. Use this as compliance evidence for policy behavior.", []target{
+		}, "short", gp(0, 35, 12, 8)),
+		seriesDesc(20, "Guard policy activity", "Guard actions and blocks by stage, guard, entity, action, and reason. Use this as compliance evidence for policy behavior.", []target{
 			targetExpr("A", `sum by (stage, guard, entity, action) (rate(attune_guard_actions_total[$__rate_interval]))`, "{{stage}} / {{guard}} / {{entity}} / {{action}}"),
 			targetExpr("B", `sum by (stage, guard, reason) (rate(attune_guard_blocked_total[$__rate_interval]))`, "blocked / {{stage}} / {{guard}} / {{reason}}"),
-		}, "reqps", gp(12, 26, 12, 8)),
+		}, "reqps", gp(12, 35, 12, 8)),
 	}
 	d.Panels = layoutSixCardDashboard(d.Panels, 7, 7)
 	return d

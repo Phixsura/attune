@@ -82,6 +82,9 @@ exposition plus the portable assets in this directory.
 | `attune_oidc_role_mapping_total` | counter | `role` | OIDC role mappings by assigned role (#40) |
 | `attune_authz_denied_total` | counter | `role`, `required` | Authorization denials by user role and required role (#38) |
 | `attune_apikey_scope_denied_total` | counter | `scope` | API key scope enforcement denials by required scope (#41) |
+| `attune_apikey_expired_total` | counter | — | API key requests denied due to key expiration |
+| `attune_apikey_ip_denied_total` | counter | — | API key requests denied due to IP not in allowlist |
+| `attune_apikey_usage_total` | counter | `tenant`, `key_prefix` | Successful API key authentications by key prefix |
 | `attune_audit_rows_written_total` | counter | `action` | immutable audit-log rows written by action (#39) |
 | `attune_audit_rows_pruned_total` | counter | — | immutable audit-log rows pruned by retention policy (#39) |
 | `attune_audit_prune_duration_seconds` | histogram | — | audit-log retention prune latency (#39) |

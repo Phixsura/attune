@@ -32,6 +32,10 @@ func (s stubVerifier) LookupWithScopes(ctx context.Context, raw string) (string,
 	return s.tid, s.kid, s.scopes, s.err
 }
 
+func (s stubVerifier) LookupWithScopesAndIP(ctx context.Context, raw, clientIP string) (string, uuid.UUID, []domain.Scope, error) {
+	return s.tid, s.kid, s.scopes, s.err
+}
+
 // decode is shared by the envelope assertions — keeps each test focused.
 func decode(t *testing.T, body []byte) map[string]any {
 	t.Helper()

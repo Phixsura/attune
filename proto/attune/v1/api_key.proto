@@ -22,6 +22,24 @@ service ApiKeyService {
   rpc DeleteApiKey(DeleteApiKeyRequest) returns (DeleteApiKeyResponse) {
     option (google.api.http) = {delete: "/fb/v1/console/api-keys/{id}"};
   }
+  // POST /fb/v1/console/api-keys/{id}/rotate — rotate with grace period.
+  rpc RotateApiKey(RotateApiKeyRequest) returns (RotateApiKeyResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/api-keys/{id}/rotate"
+      body: "*"
+    };
+  }
+  // GET /fb/v1/console/api-keys/{id}/logs — request logs.
+  rpc ListApiKeyLogs(ListApiKeyLogsRequest) returns (ListApiKeyLogsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/{id}/logs"};
+  }
+  // PATCH /fb/v1/console/api-keys/{id}/environment — update environment tag.
+  rpc UpdateApiKeyEnvironment(UpdateApiKeyEnvironmentRequest) returns (UpdateApiKeyEnvironmentResponse) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/api-keys/{id}/environment"
+      body: "*"
+    };
+  }
   // GET /fb/v1/console/api-keys/scopes — list available scopes.
   rpc ListScopes(ListScopesRequest) returns (ListScopesResponse) {
     option (google.api.http) = {get: "/fb/v1/console/api-keys/scopes"};
@@ -30,6 +48,258 @@ service ApiKeyService {
   rpc ListScopePresets(ListScopePresetsRequest) returns (ListScopePresetsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/api-keys/presets"};
   }
+  // GET /fb/v1/console/api-keys/expiring — keys expiring soon.
+  rpc ListExpiringApiKeys(ListExpiringApiKeysRequest) returns (ListExpiringApiKeysResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/expiring"};
+  }
+
+  // Service accounts
+  // GET /fb/v1/console/service-accounts
+  rpc ListServiceAccounts(ListServiceAccountsRequest) returns (ListServiceAccountsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/service-accounts"};
+  }
+  // POST /fb/v1/console/service-accounts
+  rpc CreateServiceAccount(CreateServiceAccountRequest) returns (CreateServiceAccountResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/service-accounts"
+      body: "*"
+    };
+  }
+
+  // Event subscriptions
+  // GET /fb/v1/console/api-keys/event-subscriptions
+  rpc ListEventSubscriptions(ListEventSubscriptionsRequest) returns (ListEventSubscriptionsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/event-subscriptions"};
+  }
+  // POST /fb/v1/console/api-keys/event-subscriptions
+  rpc CreateEventSubscription(CreateEventSubscriptionRequest) returns (CreateEventSubscriptionResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/api-keys/event-subscriptions"
+      body: "*"
+    };
+  }
+
+  // Leak detections
+  // GET /fb/v1/console/api-keys/leaks
+  rpc ListLeakDetections(ListLeakDetectionsRequest) returns (ListLeakDetectionsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/leaks"};
+  }
+
+  // Org-level policies
+  // GET /fb/v1/console/api-keys/policy
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/policy"};
+  }
+  // PUT /fb/v1/console/api-keys/policy
+  rpc UpdatePolicy(UpdatePolicyRequest) returns (UpdatePolicyResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/api-keys/policy"
+      body: "*"
+    };
+  }
+
+  // Projects
+  // GET /fb/v1/console/projects
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/projects"};
+  }
+  // POST /fb/v1/console/projects
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/projects"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/api-keys/{id}/project
+  rpc BindKeyToProject(BindKeyToProjectRequest) returns (BindKeyToProjectResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/api-keys/{id}/project"
+      body: "*"
+    };
+  }
+
+  // Tags
+  // GET /fb/v1/console/api-keys/{id}/tags
+  rpc GetKeyTags(GetKeyTagsRequest) returns (GetKeyTagsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/{id}/tags"};
+  }
+  // PUT /fb/v1/console/api-keys/{id}/tags
+  rpc SetKeyTags(SetKeyTagsRequest) returns (SetKeyTagsResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/api-keys/{id}/tags"
+      body: "*"
+    };
+  }
+
+  // Budget
+  // PUT /fb/v1/console/api-keys/{id}/budget
+  rpc SetKeyBudget(SetKeyBudgetRequest) returns (SetKeyBudgetResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/api-keys/{id}/budget"
+      body: "*"
+    };
+  }
+
+  // Temporary tokens
+  // POST /fb/v1/console/api-keys/{id}/temp-token
+  rpc CreateTempToken(CreateTempTokenRequest) returns (CreateTempTokenResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/api-keys/{id}/temp-token"
+      body: "*"
+    };
+  }
+
+  // Approval workflows
+  // GET /fb/v1/console/api-keys/approvals
+  rpc ListApprovalRequests(ListApprovalRequestsRequest) returns (ListApprovalRequestsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/approvals"};
+  }
+  // POST /fb/v1/console/api-keys/approvals
+  rpc CreateApprovalRequest(CreateApprovalRequestRequest) returns (CreateApprovalRequestResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/api-keys/approvals"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/api-keys/approvals/{id}/review
+  rpc ReviewApproval(ReviewApprovalRequest) returns (ReviewApprovalResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/api-keys/approvals/{id}/review"
+      body: "*"
+    };
+  }
+
+  // OAuth2 clients
+  // GET /fb/v1/console/oauth2/clients
+  rpc ListOAuth2Clients(ListOAuth2ClientsRequest) returns (ListOAuth2ClientsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/oauth2/clients"};
+  }
+  // POST /fb/v1/console/oauth2/clients
+  rpc CreateOAuth2Client(CreateOAuth2ClientRequest) returns (CreateOAuth2ClientResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/oauth2/clients"
+      body: "*"
+    };
+  }
+
+  // Analytics
+  // GET /fb/v1/console/api-keys/{id}/analytics
+  rpc GetKeyAnalytics(GetKeyAnalyticsRequest) returns (GetKeyAnalyticsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/{id}/analytics"};
+  }
+  // GET /fb/v1/console/api-keys/analytics
+  rpc GetTenantAnalytics(GetTenantAnalyticsRequest) returns (GetTenantAnalyticsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/analytics"};
+  }
+
+  // Secret managers
+  // GET /fb/v1/console/secret-managers
+  rpc ListSecretManagers(ListSecretManagersRequest) returns (ListSecretManagersResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/secret-managers"};
+  }
+  // POST /fb/v1/console/secret-managers
+  rpc CreateSecretManager(CreateSecretManagerRequest) returns (CreateSecretManagerResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/secret-managers"
+      body: "*"
+    };
+  }
+
+  // Rotation schedules
+  // GET /fb/v1/console/api-keys/{id}/rotation-schedule
+  rpc GetRotationSchedule(GetRotationScheduleRequest) returns (GetRotationScheduleResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/{id}/rotation-schedule"};
+  }
+  // POST /fb/v1/console/api-keys/{id}/rotation-schedule
+  rpc CreateRotationSchedule(CreateRotationScheduleRequest) returns (CreateRotationScheduleResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/api-keys/{id}/rotation-schedule"
+      body: "*"
+    };
+  }
+
+  // Unused scope detection
+  // GET /fb/v1/console/api-keys/{id}/unused-scopes
+  rpc GetUnusedScopes(GetUnusedScopesRequest) returns (GetUnusedScopesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/{id}/unused-scopes"};
+  }
+
+  // Signing keys (PKCV)
+  // GET /fb/v1/console/api-keys/{id}/signing-keys
+  rpc ListSigningKeys(ListSigningKeysRequest) returns (ListSigningKeysResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/{id}/signing-keys"};
+  }
+  // POST /fb/v1/console/api-keys/{id}/signing-keys
+  rpc CreateSigningKey(CreateSigningKeyRequest) returns (CreateSigningKeyResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/api-keys/{id}/signing-keys"
+      body: "*"
+    };
+  }
+
+  // Managed identities
+  // GET /fb/v1/console/managed-identities
+  rpc ListManagedIdentities(ListManagedIdentitiesRequest) returns (ListManagedIdentitiesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/managed-identities"};
+  }
+  // POST /fb/v1/console/managed-identities
+  rpc CreateManagedIdentity(CreateManagedIdentityRequest) returns (CreateManagedIdentityResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/managed-identities"
+      body: "*"
+    };
+  }
+
+  // SIEM integrations
+  // GET /fb/v1/console/siem-integrations
+  rpc ListSIEMIntegrations(ListSIEMIntegrationsRequest) returns (ListSIEMIntegrationsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/siem-integrations"};
+  }
+  // POST /fb/v1/console/siem-integrations
+  rpc CreateSIEMIntegration(CreateSIEMIntegrationRequest) returns (CreateSIEMIntegrationResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/siem-integrations"
+      body: "*"
+    };
+  }
+
+  // AI agent configurations
+  // GET /fb/v1/console/ai-agents
+  rpc ListAIAgentConfigs(ListAIAgentConfigsRequest) returns (ListAIAgentConfigsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/ai-agents"};
+  }
+  // POST /fb/v1/console/ai-agents
+  rpc CreateAIAgentConfig(CreateAIAgentConfigRequest) returns (CreateAIAgentConfigResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/ai-agents"
+      body: "*"
+    };
+  }
+
+  // Key health score
+  // GET /fb/v1/console/api-keys/{id}/health
+  rpc GetKeyHealth(GetKeyHealthRequest) returns (GetKeyHealthResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/{id}/health"};
+  }
+}
+
+// AuthService provides API key verification (public API).
+service AuthService {
+  // GET /v1/auth/verify — verify current API key and return details.
+  rpc VerifyApiKey(VerifyApiKeyRequest) returns (VerifyApiKeyResponse) {
+    option (google.api.http) = {get: "/v1/auth/verify"};
+  }
+}
+
+message VerifyApiKeyRequest {}
+
+message VerifyApiKeyResponse {
+  bool valid = 1;                       // always true if request succeeds
+  string key_prefix = 2;                // for identification
+  string label = 3;                     // user-provided label
+  repeated string scopes = 4;           // granted scopes
+  optional string expires_at = 5;       // RFC3339, null = never
+  optional int32 rate_limit_rpm = 6;    // per-key limit, null = global
 }
 
 message ApiKey {
@@ -37,10 +307,19 @@ message ApiKey {
   string key_prefix = 2;
   string label = 3;
   bool is_active = 4;
-  string created_at = 5;             // RFC3339
-  optional string last_used_at = 6;  // RFC3339, null if never used
-  optional string revoked_at = 7;    // RFC3339, null if active
-  repeated string scopes = 8;        // granted scopes
+  string created_at = 5;                // RFC3339
+  optional string last_used_at = 6;     // RFC3339, null if never used
+  optional string revoked_at = 7;       // RFC3339, null if active
+  repeated string scopes = 8;           // granted scopes
+  optional string description = 9;      // user-provided description
+  optional string expires_at = 10;      // RFC3339, null = never expires
+  repeated string allowed_cidrs = 11;   // IP allowlist (CIDR notation)
+  int64 usage_count = 12;               // total successful API calls
+  optional int32 rate_limit_rpm = 13;   // per-key rate limit, null = global
+  string environment = 14;              // production, staging, development, test
+  optional string grace_period_ends_at = 15;  // RFC3339, null if not in grace period
+  optional string service_account_id = 16;    // UUID of linked service account
+  optional string rotated_from_id = 17;       // UUID of key this was rotated from
 }
 
 message ListApiKeysRequest {}
@@ -51,7 +330,11 @@ message ListApiKeysResponse {
 
 message CreateApiKeyRequest {
   string label = 1 [(google.api.field_behavior) = REQUIRED];
-  repeated string scopes = 2;  // optional, defaults to full_access preset
+  repeated string scopes = 2;           // optional, defaults to full_access preset
+  optional string description = 3;      // optional description
+  optional string expires_in = 4;       // "7d", "30d", "90d", "1y", "never", or RFC3339
+  repeated string allowed_cidrs = 5;    // optional IP allowlist (CIDR notation)
+  optional int32 rate_limit_rpm = 6;    // optional per-key rate limit
 }
 
 message CreateApiKeyResponse {
@@ -93,4 +376,583 @@ message ScopePreset {
   string name = 2;         // e.g., "Ingest Only"
   string description = 3;  // human-readable
   repeated string scopes = 4;
+}
+
+// Key rotation
+message RotateApiKeyRequest {
+  string id = 1;                         // path param — old key UUID
+  optional string grace_period = 2;      // "1h", "24h", "7d" — how long old key stays valid
+}
+
+message RotateApiKeyResponse {
+  ApiKey old_key = 1;                    // updated with grace_period_ends_at
+  ApiKey new_key = 2;                    // newly created key
+  string secret = 3;                     // raw secret for new key — one-time
+  string grace_period_ends_at = 4;       // RFC3339 — when old key expires
+}
+
+// Request logs
+message ListApiKeyLogsRequest {
+  string id = 1;                         // path param — key UUID
+  optional int32 limit = 2;              // default 100, max 1000
+}
+
+message ListApiKeyLogsResponse {
+  repeated ApiKeyLogEntry logs = 1;
+}
+
+message ApiKeyLogEntry {
+  string timestamp = 1;                  // RFC3339
+  string method = 2;                     // GET, POST, etc.
+  string path = 3;
+  int32 status_code = 4;
+  string client_ip = 5;
+  string user_agent = 6;
+  int32 latency_ms = 7;
+  string request_id = 8;
+}
+
+// Environment update
+message UpdateApiKeyEnvironmentRequest {
+  string id = 1;                         // path param — key UUID
+  string environment = 2;                // production, staging, development, test
+}
+
+message UpdateApiKeyEnvironmentResponse {
+  ApiKey key = 1;
+}
+
+// Expiring keys
+message ListExpiringApiKeysRequest {
+  optional string within = 1;            // "24h", "7d", "30d" — default "7d"
+}
+
+message ListExpiringApiKeysResponse {
+  repeated ApiKey items = 1;
+}
+
+// Service accounts
+message ServiceAccount {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  bool is_active = 4;
+  string created_at = 5;                 // RFC3339
+  string updated_at = 6;                 // RFC3339
+}
+
+message ListServiceAccountsRequest {}
+
+message ListServiceAccountsResponse {
+  repeated ServiceAccount items = 1;
+}
+
+message CreateServiceAccountRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string description = 2;
+}
+
+message CreateServiceAccountResponse {
+  ServiceAccount service_account = 1;
+}
+
+// Event subscriptions
+message EventSubscription {
+  string id = 1;
+  repeated string event_types = 2;       // created, rotated, revoked, expired, expiring_soon
+  string webhook_url = 3;
+  bool is_active = 4;
+  string created_at = 5;                 // RFC3339
+}
+
+message ListEventSubscriptionsRequest {}
+
+message ListEventSubscriptionsResponse {
+  repeated EventSubscription items = 1;
+}
+
+message CreateEventSubscriptionRequest {
+  repeated string event_types = 1 [(google.api.field_behavior) = REQUIRED];
+  string webhook_url = 2 [(google.api.field_behavior) = REQUIRED];
+  optional string secret = 3;            // for HMAC signing
+}
+
+message CreateEventSubscriptionResponse {
+  EventSubscription subscription = 1;
+}
+
+// Leak detections
+message LeakDetection {
+  string id = 1;
+  string key_id = 2;
+  string source = 3;                     // github, gitlab, etc.
+  string source_url = 4;                 // link to where leak was found
+  string detected_at = 5;                // RFC3339
+  optional string resolved_at = 6;       // RFC3339, null if unresolved
+  string resolution = 7;                 // revoked, false_positive, etc.
+}
+
+message ListLeakDetectionsRequest {
+  optional bool unresolved_only = 1;     // default true
+}
+
+message ListLeakDetectionsResponse {
+  repeated LeakDetection items = 1;
+}
+
+// Org-level policies
+message ApiKeyPolicy {
+  optional int32 max_expiry_days = 1;
+  bool require_expiry = 2;
+  bool require_ip_allowlist = 3;
+  bool require_description = 4;
+  optional int32 max_keys_per_service_account = 5;
+  repeated string allowed_environments = 6;
+  bool require_mfa_for_create = 7;
+  bool require_approval_for_prod = 8;
+  optional int32 auto_revoke_unused_days = 9;
+}
+
+message GetPolicyRequest {}
+
+message GetPolicyResponse {
+  ApiKeyPolicy policy = 1;
+}
+
+message UpdatePolicyRequest {
+  ApiKeyPolicy policy = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message UpdatePolicyResponse {
+  ApiKeyPolicy policy = 1;
+}
+
+// Projects
+message Project {
+  string id = 1;
+  string name = 2;
+  optional string description = 3;
+  bool is_active = 4;
+  string created_at = 5;  // RFC3339
+  string updated_at = 6;  // RFC3339
+}
+
+message ListProjectsRequest {}
+
+message ListProjectsResponse {
+  repeated Project items = 1;
+}
+
+message CreateProjectRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string description = 2;
+}
+
+message CreateProjectResponse {
+  Project project = 1;
+}
+
+message BindKeyToProjectRequest {
+  string id = 1;             // path param — key UUID
+  string project_id = 2;     // project to bind
+}
+
+message BindKeyToProjectResponse {
+  ApiKey key = 1;
+}
+
+// Tags
+message ApiKeyTag {
+  string key = 1;
+  string value = 2;
+}
+
+message GetKeyTagsRequest {
+  string id = 1;             // path param — key UUID
+}
+
+message GetKeyTagsResponse {
+  repeated ApiKeyTag tags = 1;
+}
+
+message SetKeyTagsRequest {
+  string id = 1;             // path param — key UUID
+  repeated ApiKeyTag tags = 2;
+}
+
+message SetKeyTagsResponse {
+  repeated ApiKeyTag tags = 1;
+}
+
+// Budget
+message SetKeyBudgetRequest {
+  string id = 1;                         // path param — key UUID
+  string budget_limit_usd = 2;           // decimal string, e.g. "100.00"
+  optional string overage_action = 3;    // block, alert, none
+}
+
+message SetKeyBudgetResponse {
+  ApiKey key = 1;
+}
+
+// Temporary tokens
+message CreateTempTokenRequest {
+  string id = 1;                         // path param — parent key UUID
+  string expires_in = 2;                 // "1h", "24h", etc.
+  optional int32 max_uses = 3;
+  optional string purpose = 4;           // ci_job, one_time, session
+}
+
+message CreateTempTokenResponse {
+  string token = 1;                      // raw token — one-time
+  string token_prefix = 2;
+  string expires_at = 3;                 // RFC3339
+  optional int32 max_uses = 4;
+}
+
+// Approval workflows
+message ApprovalRequest {
+  string id = 1;
+  string requester_id = 2;
+  string requester_type = 3;             // admin, member, service_account
+  string key_label = 4;
+  optional string key_description = 5;
+  repeated string requested_scopes = 6;
+  optional string requested_environment = 7;
+  optional int32 requested_expiry_days = 8;
+  optional string justification = 9;
+  string status = 10;                    // pending, approved, rejected, expired
+  optional string reviewer_id = 11;
+  optional string reviewer_notes = 12;
+  string created_at = 13;                // RFC3339
+  optional string reviewed_at = 14;      // RFC3339
+  string expires_at = 15;                // RFC3339
+}
+
+message ListApprovalRequestsRequest {
+  optional string status = 1;            // pending, approved, rejected, expired
+}
+
+message ListApprovalRequestsResponse {
+  repeated ApprovalRequest items = 1;
+}
+
+message CreateApprovalRequestRequest {
+  string key_label = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string key_description = 2;
+  repeated string requested_scopes = 3;
+  optional string requested_environment = 4;
+  optional int32 requested_expiry_days = 5;
+  optional string justification = 6;
+}
+
+message CreateApprovalRequestResponse {
+  ApprovalRequest request = 1;
+}
+
+message ReviewApprovalRequest {
+  string id = 1;                         // path param — approval request UUID
+  bool approve = 2;                      // true = approve, false = reject
+  optional string notes = 3;
+}
+
+message ReviewApprovalResponse {
+  ApprovalRequest request = 1;
+}
+
+// OAuth2 clients
+message OAuth2Client {
+  string id = 1;
+  string client_id = 2;
+  string name = 3;
+  optional string description = 4;
+  repeated string redirect_uris = 5;
+  repeated string allowed_scopes = 6;
+  bool is_active = 7;
+  string created_at = 8;                 // RFC3339
+  string updated_at = 9;                 // RFC3339
+}
+
+message ListOAuth2ClientsRequest {}
+
+message ListOAuth2ClientsResponse {
+  repeated OAuth2Client items = 1;
+}
+
+message CreateOAuth2ClientRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string description = 2;
+  repeated string redirect_uris = 3;
+  repeated string allowed_scopes = 4;
+}
+
+message CreateOAuth2ClientResponse {
+  OAuth2Client client = 1;
+  string client_secret = 2;              // raw secret — one-time
+}
+
+// Analytics
+message ApiKeyAnalytics {
+  string hour = 1;                       // RFC3339, truncated to hour
+  int64 request_count = 2;
+  int64 error_count = 3;
+  int64 avg_latency_ms = 4;
+  int32 status_2xx = 5;
+  int32 status_4xx = 6;
+  int32 status_5xx = 7;
+}
+
+message GetKeyAnalyticsRequest {
+  string id = 1;                         // path param — key UUID
+  optional string start = 2;             // RFC3339
+  optional string end = 3;               // RFC3339
+}
+
+message GetKeyAnalyticsResponse {
+  repeated ApiKeyAnalytics items = 1;
+}
+
+message GetTenantAnalyticsRequest {
+  optional string start = 1;             // RFC3339
+  optional string end = 2;               // RFC3339
+}
+
+message GetTenantAnalyticsResponse {
+  repeated ApiKeyAnalytics items = 1;
+}
+
+// Secret managers
+message SecretManagerConfig {
+  string id = 1;
+  string manager_type = 2;               // hashicorp_vault, aws_secrets_manager, etc.
+  string name = 3;
+  bool is_active = 4;
+  optional string last_sync_at = 5;      // RFC3339
+  optional string last_sync_status = 6;
+  string created_at = 7;                 // RFC3339
+  string updated_at = 8;                 // RFC3339
+}
+
+message ListSecretManagersRequest {}
+
+message ListSecretManagersResponse {
+  repeated SecretManagerConfig items = 1;
+}
+
+message CreateSecretManagerRequest {
+  string manager_type = 1 [(google.api.field_behavior) = REQUIRED];
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  map<string, string> config = 3;        // connection details
+}
+
+message CreateSecretManagerResponse {
+  SecretManagerConfig config = 1;
+}
+
+// Rotation schedules
+message RotationSchedule {
+  string id = 1;
+  string key_id = 2;
+  int32 rotation_interval_days = 3;
+  string next_rotation_at = 4;               // RFC3339
+  optional string last_rotated_at = 5;       // RFC3339
+  int32 grace_period_hours = 6;
+  bool auto_notify = 7;
+  repeated int32 notify_days_before = 8;
+  bool is_active = 9;
+  string created_at = 10;                    // RFC3339
+}
+
+message GetRotationScheduleRequest {
+  string id = 1;                             // path param — key UUID
+}
+
+message GetRotationScheduleResponse {
+  RotationSchedule schedule = 1;
+}
+
+message CreateRotationScheduleRequest {
+  string id = 1;                             // path param — key UUID
+  optional int32 rotation_interval_days = 2; // default 90
+  optional int32 grace_period_hours = 3;     // default 168 (7 days)
+  optional bool auto_notify = 4;             // default true
+  repeated int32 notify_days_before = 5;     // default [30, 7, 1]
+}
+
+message CreateRotationScheduleResponse {
+  RotationSchedule schedule = 1;
+}
+
+// Permission usage / unused scope detection
+message PermissionUsage {
+  string scope = 1;
+  optional string first_used_at = 2;         // RFC3339, null if never used
+  optional string last_used_at = 3;          // RFC3339
+  int64 usage_count = 4;
+}
+
+message GetUnusedScopesRequest {
+  string id = 1;                             // path param — key UUID
+}
+
+message GetUnusedScopesResponse {
+  repeated string unused_scopes = 1;
+  repeated PermissionUsage all_usage = 2;
+}
+
+// Signing keys for PKCV
+message SigningKey {
+  string id = 1;
+  string key_id = 2;
+  string algorithm = 3;                      // RS256, ES256, etc.
+  string public_key_pem = 4;
+  string key_fingerprint = 5;
+  bool is_active = 6;
+  string created_at = 7;                     // RFC3339
+  optional string expires_at = 8;            // RFC3339
+}
+
+message ListSigningKeysRequest {
+  string id = 1;                             // path param — key UUID
+}
+
+message ListSigningKeysResponse {
+  repeated SigningKey items = 1;
+}
+
+message CreateSigningKeyRequest {
+  string id = 1;                             // path param — key UUID
+  string algorithm = 2 [(google.api.field_behavior) = REQUIRED];
+  string public_key_pem = 3 [(google.api.field_behavior) = REQUIRED];
+  optional string expires_at = 4;            // RFC3339
+}
+
+message CreateSigningKeyResponse {
+  SigningKey key = 1;
+}
+
+// Managed identities
+message ManagedIdentity {
+  string id = 1;
+  string name = 2;
+  string provider = 3;                       // aws_iam, azure_ad, etc.
+  string external_id = 4;
+  optional string audience = 5;
+  optional string issuer = 6;
+  optional string subject_pattern = 7;
+  repeated string allowed_scopes = 8;
+  bool is_active = 9;
+  optional string last_used_at = 10;         // RFC3339
+  string created_at = 11;                    // RFC3339
+}
+
+message ListManagedIdentitiesRequest {}
+
+message ListManagedIdentitiesResponse {
+  repeated ManagedIdentity items = 1;
+}
+
+message CreateManagedIdentityRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  string provider = 2 [(google.api.field_behavior) = REQUIRED];
+  string external_id = 3 [(google.api.field_behavior) = REQUIRED];
+  optional string audience = 4;
+  optional string issuer = 5;
+  optional string subject_pattern = 6;
+  repeated string allowed_scopes = 7;
+}
+
+message CreateManagedIdentityResponse {
+  ManagedIdentity identity = 1;
+}
+
+// SIEM integrations
+message SIEMIntegration {
+  string id = 1;
+  string provider = 2;                       // splunk, datadog, etc.
+  string name = 3;
+  string endpoint_url = 4;
+  repeated string event_types = 5;
+  int32 batch_size = 6;
+  int32 flush_interval_seconds = 7;
+  bool is_active = 8;
+  optional string last_sent_at = 9;          // RFC3339
+  optional string last_error = 10;
+  string created_at = 11;                    // RFC3339
+}
+
+message ListSIEMIntegrationsRequest {}
+
+message ListSIEMIntegrationsResponse {
+  repeated SIEMIntegration items = 1;
+}
+
+message CreateSIEMIntegrationRequest {
+  string provider = 1 [(google.api.field_behavior) = REQUIRED];
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  string endpoint_url = 3 [(google.api.field_behavior) = REQUIRED];
+  map<string, string> auth_config = 4;       // credentials
+  repeated string event_types = 5;
+  optional int32 batch_size = 6;             // default 100
+  optional int32 flush_interval_seconds = 7; // default 60
+}
+
+message CreateSIEMIntegrationResponse {
+  SIEMIntegration integration = 1;
+}
+
+// AI agent configurations
+message AIAgentConfig {
+  string id = 1;
+  string name = 2;
+  string agent_type = 3;                     // mcp_server, langchain, etc.
+  repeated string allowed_scopes = 4;
+  int32 max_tokens_per_request = 5;
+  int32 max_requests_per_minute = 6;
+  repeated string allowed_models = 7;
+  bool require_human_approval = 8;
+  int32 approval_timeout_seconds = 9;
+  bool audit_all_requests = 10;
+  bool is_active = 11;
+  string created_at = 12;                    // RFC3339
+}
+
+message ListAIAgentConfigsRequest {}
+
+message ListAIAgentConfigsResponse {
+  repeated AIAgentConfig items = 1;
+}
+
+message CreateAIAgentConfigRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  string agent_type = 2 [(google.api.field_behavior) = REQUIRED];
+  repeated string allowed_scopes = 3;
+  optional int32 max_tokens_per_request = 4;
+  optional int32 max_requests_per_minute = 5;
+  repeated string allowed_models = 6;
+  optional bool require_human_approval = 7;
+  optional int32 approval_timeout_seconds = 8;
+  optional bool audit_all_requests = 9;
+}
+
+message CreateAIAgentConfigResponse {
+  AIAgentConfig config = 1;
+}
+
+// Key health score
+message KeyHealthScore {
+  int32 score = 1;                           // 0-100
+  bool has_expiry = 2;
+  bool has_ip_restriction = 3;
+  bool has_rate_limit = 4;
+  int32 unused_scope_count = 5;
+  int32 days_since_rotation = 6;
+}
+
+message GetKeyHealthRequest {
+  string id = 1;                             // path param — key UUID
+}
+
+message GetKeyHealthResponse {
+  KeyHealthScore health = 1;
 }
