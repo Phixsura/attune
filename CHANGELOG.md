@@ -11,9 +11,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 - **SSRF-resistant outbound egress (#84).** A new `internal/pkg/nethardening`
   guard enforces an egress policy at dial time (after DNS resolution, so it
-  defeats DNS rebinding) on outbound webhook delivery, every LLM provider call,
-  and the inbound email IMAP dial (closing its prior fail-open-on-DNS gap).
-  Cloud-metadata (e.g. `169.254.169.254`), link-local, unspecified, and
+  defeats DNS rebinding) on outbound webhook delivery (including the console
+  "test webhook" path), every LLM provider call, and the inbound email IMAP dial
+  (closing its prior fail-open-on-DNS gap). Blocked IPv4 targets wrapped in IPv6
+  transition formats (6to4, NAT64, Teredo, IPv4-compatible `::a.b.c.d`) are
+  unwrapped and re-checked. Cloud-metadata (e.g. `169.254.169.254`), link-local,
+  unspecified, and
   multicast destinations are always blocked; loopback and RFC1918 are blocked by
   default and re-permitted only via `security.allow_loopback_egress` /
   `security.allow_private_egress`. LLM `base_url` validation rejects literal
@@ -47,7 +50,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   defaults for `MaxConns` (20), `connect_timeout` (10s), and `statement_timeout`
   (30s) unless the database URL already sets them, so a single stuck query can't
   pin a connection or run unbounded past the request deadline. The HTTP server
-  gained `ReadTimeout` (60s), `WriteTimeout` (300s), and `IdleTimeout` (120s)
+  gained `ReadTimeout` (60s), `WriteTimeout` (315s, above the in-handler 305s
+  timeout), and `IdleTimeout` (120s)
   alongside the existing `ReadHeaderTimeout`, closing slow-loris and slow-reader
   exposure.
 
@@ -70,9 +74,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   excludes rows claimed within a 10-minute window, so a second outbox worker
   replica can't re-claim an in-flight row and double-deliver (FOR UPDATE SKIP
   LOCKED only guards the lock window). While a worker drains a batch it renews
-  the claims (lease heartbeat) so a long, slow batch can't age its tail rows past
-  the window mid-flight regardless of batch size. A worker that crashes
-  mid-delivery still has its rows retried after the window.
+  the claims (owner-scoped lease heartbeat, new `claimed_by` column) so a long,
+  slow batch can't age its tail rows past the window mid-flight regardless of
+  batch size, and one replica never renews a row another replica re-claimed. A
+  worker that crashes mid-delivery still has its rows retried after the window.
 
 - **Workflow state names are now localized (#64).** `WorkflowState.name` is now a
   stable machine key (slug `^[a-z][a-z0-9_]{0,30}$`); the human-facing label moves

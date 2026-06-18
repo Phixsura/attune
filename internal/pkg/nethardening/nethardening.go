@@ -73,6 +73,7 @@ var (
 	sixToFourNet = mustCIDR("2002::/16")      // 6to4: embedded v4 in bytes 2..5
 	nat64Net     = mustCIDR("64:ff9b::/96")   // NAT64 well-known: embedded v4 in bytes 12..15
 	teredoNet    = mustCIDR("2001:0000::/32") // Teredo: embedded v4 in bytes 12..15, bit-inverted
+	v4CompatNet  = mustCIDR("::/96")          // deprecated IPv4-compatible ::a.b.c.d: embedded v4 in bytes 12..15
 )
 
 // embeddedIPv4 extracts the IPv4 address embedded in a transition-mechanism IPv6
@@ -92,6 +93,10 @@ func embeddedIPv4(ip net.IP) net.IP {
 		return net.IPv4(b[12], b[13], b[14], b[15])
 	case teredoNet.Contains(ip):
 		return net.IPv4(^b[12], ^b[13], ^b[14], ^b[15])
+	case v4CompatNet.Contains(ip) && (b[12] != 0 || b[13] != 0):
+		// ::a.b.c.d (deprecated IPv4-compatible). The b[12]|b[13] guard excludes
+		// ::/::1 and the ::0.0.0.x low range (handled as unspecified/loopback).
+		return net.IPv4(b[12], b[13], b[14], b[15])
 	}
 	return nil
 }
@@ -196,6 +201,18 @@ func (p Policy) ValidateURL(raw string) error {
 		return ptrext.Of(BlockedError{Host: host, Reason: "internal / DNS-rebinding domain"})
 	}
 	return nil
+}
+
+// RedactURL returns scheme://host for safe logging. Customer webhook URLs
+// routinely carry secret tokens in userinfo, query, AND the path
+// (Slack/Discord-style /services/.../<secret>), so anything past the host risks
+// leaking a credential (CLAUDE.md §7). The host is enough to debug targeting.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "<redacted-url>"
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func isDNSRebindingService(host string) bool {

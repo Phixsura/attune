@@ -133,10 +133,10 @@ func (r *OutboxRepo) Insert(
 // Returns the claimed rows; len(0) means nothing to send right now.
 // Caller must call MarkDelivered / MarkFailed / MarkDead per row after
 // the delivery attempt.
-func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int) ([]OutboxRow, error) {
+func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int, owner string) ([]OutboxRow, error) {
 	rows, err := r.pool.Query(ctx, `
 		UPDATE notify_outbox
-		 SET claimed_at = NOW()
+		 SET claimed_at = NOW(), claimed_by = $2
 		 WHERE id IN (
 		 SELECT id FROM notify_outbox
 		 WHERE status IN ('pending', 'failed')
@@ -149,7 +149,7 @@ func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int) ([]OutboxRow, error)
 		 RETURNING id, feedback_id, tenant_id, destination_type,
 		 destination_target, audience, payload, status,
 		 attempts, trace_id, COALESCE(last_error, '')`,
-		n)
+		n, owner)
 	if err != nil {
 		return nil, fmt.Errorf("claim outbox batch: %w", err)
 	}
@@ -277,12 +277,14 @@ func (r *OutboxRepo) PruneStalePending(ctx context.Context, before time.Time, re
 	return tag.RowsAffected(), nil
 }
 
-// RefreshClaims re-stamps claimed_at = NOW() for the still-unsent rows in ids,
-// renewing the lease so a long-running batch can't age past the ClaimBatch
-// 10-minute window (which would let a second replica re-claim an in-flight row).
-// The status filter means already-delivered/dead rows in the batch are left
-// alone. Called periodically by the outbox worker while it drains a batch.
-func (r *OutboxRepo) RefreshClaims(ctx context.Context, ids []int64) (int64, error) {
+// RefreshClaims re-stamps claimed_at = NOW() for the still-unsent rows in ids
+// that THIS worker (owner) still holds, renewing the lease so a long-running
+// batch can't age past the ClaimBatch 10-minute window (which would let a second
+// replica re-claim an in-flight row). The claimed_by = owner filter means a
+// worker never renews a row another replica has since re-claimed; the status
+// filter leaves already-delivered/dead rows alone. Called periodically by the
+// outbox worker while it drains a batch.
+func (r *OutboxRepo) RefreshClaims(ctx context.Context, ids []int64, owner string) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
@@ -290,8 +292,9 @@ func (r *OutboxRepo) RefreshClaims(ctx context.Context, ids []int64) (int64, err
 		UPDATE notify_outbox
 		 SET claimed_at = NOW()
 		 WHERE id = ANY($1)
+		 AND claimed_by = $2
 		 AND claimed_at IS NOT NULL
-		 AND status IN ('pending', 'failed')`, ids)
+		 AND status IN ('pending', 'failed')`, ids, owner)
 	if err != nil {
 		return 0, fmt.Errorf("refresh claims: %w", err)
 	}

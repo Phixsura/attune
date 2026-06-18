@@ -41,6 +41,13 @@ func TestCheckIP(t *testing.T) {
 		// Teredo 2001:0000::/32 embeds the client v4 (bit-inverted) in the last 32
 		// bits. ^0x56015601 = 0xa9fea9fe = 169.254.169.254 (metadata).
 		{"teredo wraps metadata", "2001:0:0:0:0:0:5601:5601", Policy{AllowLoopback: true, AllowPrivate: true}, true},
+		// IPv4-compatible ::a.b.c.d (deprecated) — embedded v4 must be re-checked.
+		{"v4-compat wraps metadata", "::169.254.169.254", Policy{AllowLoopback: true, AllowPrivate: true}, true},
+		{"v4-compat wraps private blocked", "::10.0.0.1", Policy{}, true},
+		{"v4-compat wraps private allowed", "::10.0.0.1", Policy{AllowPrivate: true}, false},
+		{"v4-compat wraps public allowed", "::8.8.8.8", Policy{}, false},
+		{"ipv6 loopback ::1 still blocked", "::1", Policy{}, true},
+		{"ipv6 loopback ::1 allowed when opted in", "::1", Policy{AllowLoopback: true}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -85,6 +92,15 @@ func TestValidateURL(t *testing.T) {
 				t.Fatalf("ValidateURL(%s) blocked=%v, want %v (err=%v)", tt.url, err != nil, tt.blocked, err)
 			}
 		})
+	}
+}
+
+// TestNewHTTPTransportDisablesProxy locks the SSRF-critical invariant that the
+// guarded transport does NOT honor HTTP(S)_PROXY — a proxy would make the dialer
+// connect to the proxy IP, hiding the real destination from the dial-time guard.
+func TestNewHTTPTransportDisablesProxy(t *testing.T) {
+	if tr := (Policy{}).NewHTTPTransport(); tr.Proxy != nil {
+		t.Fatal("guarded transport must have Proxy == nil so the dial guard sees the real target IP")
 	}
 }
 

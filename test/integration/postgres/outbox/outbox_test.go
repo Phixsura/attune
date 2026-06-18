@@ -328,7 +328,7 @@ func TestClaimBatch_SecondReplicaSkipsInFlightRows(t *testing.T) {
 		e.insert(t, tid, seed{status: "pending"})
 	}
 
-	first, err := e.repo.ClaimBatch(e.ctx, 10)
+	first, err := e.repo.ClaimBatch(e.ctx, 10, "replica-a")
 	if err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestClaimBatch_SecondReplicaSkipsInFlightRows(t *testing.T) {
 	}
 
 	// Simulate a second replica claiming immediately, before delivery completes.
-	second, err := e.repo.ClaimBatch(e.ctx, 10)
+	second, err := e.repo.ClaimBatch(e.ctx, 10, "replica-b")
 	if err != nil {
 		t.Fatalf("second claim: %v", err)
 	}
@@ -351,6 +351,31 @@ func TestClaimBatch_SecondReplicaSkipsInFlightRows(t *testing.T) {
 		if r.TenantID == tid {
 			t.Fatalf("second replica re-claimed in-flight row %d — double delivery", r.ID)
 		}
+	}
+}
+
+// TestRefreshClaims_OwnerScoped proves a worker can't renew a claim another
+// replica owns: replica B's RefreshClaims must not touch a row replica A claimed
+// (otherwise A-vs-B heartbeats fight and a re-claimed row gets stranded).
+func TestRefreshClaims_OwnerScoped(t *testing.T) {
+	e := setup(t)
+	tid := e.newTenant(t, "refresh-owner")
+	id := e.insert(t, tid, seed{status: "pending"})
+	if _, err := e.repo.ClaimBatch(e.ctx, 10, "replica-a"); err != nil {
+		t.Fatalf("claim by A: %v", err)
+	}
+
+	// Replica B tries to renew A's row — must refresh nothing.
+	n, err := e.repo.RefreshClaims(e.ctx, []int64{id}, "replica-b")
+	if err != nil {
+		t.Fatalf("refresh by B: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("replica B renewed %d rows it doesn't own, want 0", n)
+	}
+	// Replica A renews its own row fine.
+	if n, err := e.repo.RefreshClaims(e.ctx, []int64{id}, "replica-a"); err != nil || n != 1 {
+		t.Fatalf("replica A renew own row: n=%d err=%v, want 1/nil", n, err)
 	}
 }
 
@@ -364,14 +389,14 @@ func TestRefreshClaims_RenewsInFlightSkipsDone(t *testing.T) {
 	inflight := e.insert(t, tid, seed{status: "pending", claimed: true})
 	delivered := e.insert(t, tid, seed{status: "delivered", claimed: true})
 
-	// Backdate both claims to 9 minutes ago.
+	// Backdate both claims to 9 minutes ago, owned by this worker.
 	if _, err := e.pool.Exec(e.ctx,
-		`UPDATE notify_outbox SET claimed_at = NOW() - INTERVAL '9 minutes' WHERE id = ANY($1)`,
+		`UPDATE notify_outbox SET claimed_at = NOW() - INTERVAL '9 minutes', claimed_by = 'replica-a' WHERE id = ANY($1)`,
 		[]int64{inflight, delivered}); err != nil {
 		t.Fatalf("backdate claims: %v", err)
 	}
 
-	n, err := e.repo.RefreshClaims(e.ctx, []int64{inflight, delivered})
+	n, err := e.repo.RefreshClaims(e.ctx, []int64{inflight, delivered}, "replica-a")
 	if err != nil {
 		t.Fatalf("refresh claims: %v", err)
 	}
@@ -421,7 +446,7 @@ func TestClaimBatch_SkipsRowsLockedByAnotherTx(t *testing.T) {
 	// block until the lock releases.
 	done := make(chan []outboxrepo.OutboxRow, 1)
 	go func() {
-		batch, claimErr := e.repo.ClaimBatch(e.ctx, 10)
+		batch, claimErr := e.repo.ClaimBatch(e.ctx, 10, "replica-skiplock")
 		if claimErr != nil {
 			t.Errorf("claim batch: %v", claimErr)
 		}

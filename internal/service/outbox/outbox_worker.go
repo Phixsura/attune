@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/outbound"
@@ -27,6 +29,11 @@ type OutboxWorker struct {
 	targets   *notifytarget.NotifyTargetRepo
 	transport *notify.Transport
 
+	// owner uniquely identifies this worker instance so claim renewal
+	// (RefreshClaims) only ever touches rows this instance still holds — a
+	// different replica that re-claimed a stale row keeps it.
+	owner string
+
 	pollInterval time.Duration
 	batchSize    int
 	maxAttempts  int
@@ -43,6 +50,7 @@ func NewOutboxWorker(
 		outbox:       outbox,
 		targets:      targets,
 		transport:    transport,
+		owner:        "outbox-" + uuid.NewString(),
 		pollInterval: 5 * time.Second,
 		batchSize:    10,
 		maxAttempts:  5,
@@ -106,7 +114,7 @@ const claimHeartbeatInterval = 3 * time.Minute
 // per-row delivery latency (multi-replica double-claim safety).
 func (w *OutboxWorker) processBatch(ctx context.Context) {
 	const where = "service.OutboxWorker.processBatch"
-	rows, err := w.outbox.ClaimBatch(ctx, w.batchSize)
+	rows, err := w.outbox.ClaimBatch(ctx, w.batchSize, w.owner)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] claim batch failed,err:%+v", where, err.Error())
 		return
@@ -140,7 +148,7 @@ func (w *OutboxWorker) heartbeatClaims(ctx context.Context, ids []int64) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			if _, err := w.outbox.RefreshClaims(ctx, ids); err != nil {
+			if _, err := w.outbox.RefreshClaims(ctx, ids, w.owner); err != nil {
 				logext.Warnf(ctx, "[%s] refresh claims failed,err:%+v", where, err.Error())
 			}
 		}

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -215,12 +214,4 @@ func marshalJSON(value any) (json.RawMessage, error) {
 		}
 		return b, nil
 	}
-}
-
-func remoteAddrIP(remoteAddr string) string {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddr))
-	if err == nil {
-		return host
-	}
-	return strings.TrimSpace(remoteAddr)
 }

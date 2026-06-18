@@ -10,11 +10,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -206,14 +206,6 @@ func renderDigestMarkdown(dv map[string]any) string {
 	return b.String()
 }
 
-// redactURL returns scheme://host only. Customer webhook URLs routinely carry
-// secret tokens in userinfo, query, AND the path (Slack/Discord-style
-// /services/T000/B000/<secret>), so logging anything past the host risks leaking
-// a credential (CLAUDE.md §7). The host is enough to debug delivery targeting.
-func redactURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "<redacted-url>"
-	}
-	return u.Scheme + "://" + u.Host
-}
+// redactURL is nethardening.RedactURL — scheme://host only, stripping any
+// secret-bearing userinfo/path/query (CLAUDE.md §7).
+func redactURL(raw string) string { return nethardening.RedactURL(raw) }
