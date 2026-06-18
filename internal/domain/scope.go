@@ -6,7 +6,7 @@ import "errors"
 // Format: "resource:action" (e.g., "feedback:read").
 type Scope string
 
-// Scope constants — 22 total.
+// Scope constants — 24 total.
 const (
 	// Core resources
 	ScopeIngestWrite   Scope = "ingest:write"
