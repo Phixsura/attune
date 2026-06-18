@@ -56,6 +56,10 @@ describe('SecretKeyDialog', () => {
       keyPrefix: 'sk_t_',
       isActive: true,
       createdAt: '2026-06-07T00:00:00Z',
+      scopes: [],
+      allowedCidrs: [],
+      usageCount: '0',
+      environment: '',
     },
     secret: 'sk_t_the-secret-value',
   }
@@ -82,6 +86,10 @@ describe('RevokeKeyDialog', () => {
     keyPrefix: 'sk_p_',
     isActive: true,
     createdAt: '2026-06-07T00:00:00Z',
+    scopes: [],
+    allowedCidrs: [],
+    usageCount: '0',
+    environment: '',
   }
 
   it('confirm calls onConfirm', async () => {
