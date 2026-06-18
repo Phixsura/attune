@@ -59,7 +59,7 @@ type OpenAIEmbeddingClient struct {
 func NewOpenAIEmbeddingClient(baseURL, apiKey string) *OpenAIEmbeddingClient {
 	return ptrext.Of(OpenAIEmbeddingClient{
 		httpClient: ptrext.Of(http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: otelhttp.NewTransport(guardedEgressTransport()),
 			Timeout:   60 * time.Second,
 		}),
 		baseURL: baseURL,

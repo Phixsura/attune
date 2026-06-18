@@ -90,7 +90,7 @@ func buildRouter(
 
 		// Auth verify endpoint - requires valid API key but no specific scope.
 		r.Group(func(r chi.Router) {
-			r.Use(apikey.Middleware(apiKeys))
+			r.Use(apikey.MiddlewareWithProxies(apiKeys, cfg.Security.TrustedProxyHops))
 			authVerify := handlers.NewAuthVerifyHandler(apikeyrepo.NewAPIKey(pool))
 			r.Get("/auth/verify", dispatcher.Bind(
 				"handlers.AuthVerifyHandler.Verify",
@@ -103,7 +103,7 @@ func buildRouter(
 		})
 
 		r.Group(func(r chi.Router) {
-			r.Use(apikey.Middleware(apiKeys))
+			r.Use(apikey.MiddlewareWithProxies(apiKeys, cfg.Security.TrustedProxyHops))
 			r.Use(apikey.RequireScope(domain.ScopeIngestWrite))
 			r.Use(rateLimiter.Middleware)
 			r.Mount("/feedback", ingestHandler.Routes())

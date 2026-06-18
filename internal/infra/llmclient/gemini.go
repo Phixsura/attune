@@ -33,7 +33,7 @@ func NewGemini(baseURL, apiKey string) (*GeminiBackend, error) {
 		return nil, fmt.Errorf("gemini backend: api_key is required")
 	}
 	httpClient := ptrext.Of(http.Client{
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Transport: otelhttp.NewTransport(guardedEgressTransport()),
 		Timeout:   chatHTTPTimeout,
 	})
 	cfg := ptrext.Of(genai.ClientConfig{

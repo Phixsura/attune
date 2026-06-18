@@ -17,6 +17,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -84,7 +85,14 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		return
 	}
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
-	options := ptrext.Of(imapclient.Options{})
+	// Enforce the SSRF guard at dial time as well as the ValidateOutboundHost
+	// pre-check: this is rebinding-proof (it sees the resolved IP) and closes the
+	// pre-check's fail-open-on-DNS-error path. Loopback + RFC1918 stay allowed for
+	// co-located on-prem IMAP, matching ValidateOutboundHost; metadata/link-local
+	// are always refused.
+	options := ptrext.Of(imapclient.Options{
+		Dialer: nethardening.Policy{AllowLoopback: true, AllowPrivate: true}.Dialer(),
+	})
 	cli, err := dialIMAP(ctx, addr, options)
 	if err != nil {
 		a.transientError(ctx, src, "dial: imap server unreachable")

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Security
+
+- **SSRF-resistant outbound egress (#84).** A new `internal/pkg/nethardening`
+  guard enforces an egress policy at dial time (after DNS resolution, so it
+  defeats DNS rebinding) on outbound webhook delivery, every LLM provider call,
+  and the inbound email IMAP dial (closing its prior fail-open-on-DNS gap).
+  Cloud-metadata (e.g. `169.254.169.254`), link-local, unspecified, and
+  multicast destinations are always blocked; loopback and RFC1918 are blocked by
+  default and re-permitted only via `security.allow_loopback_egress` /
+  `security.allow_private_egress`. LLM `base_url` validation rejects literal
+  metadata/link-local IPs at config time. Previously a tenant-controlled webhook
+  or LLM base URL could reach the cloud metadata endpoint or internal services.
+
+- **X-Forwarded-For spoofing fixed for the API-key IP allowlist (#84).** The
+  client IP behind the per-key IP allowlist is now resolved using the new
+  `security.trusted_proxy_hops` setting: with no trusted proxy (default)
+  `X-Forwarded-For` is ignored and the direct peer is used, so a client on a
+  direct connection can no longer forge an allowlisted source IP by setting the
+  header. Behind N reverse proxies, set `trusted_proxy_hops: N`.
+
 ### Changed
 
 - **DB pool and HTTP server are now bounded (#84).** `database.NewPool` applies

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -51,6 +52,7 @@ type Config struct {
 	Observability ObservabilityConfig
 	RateLimit     RateLimitConfig
 	OIDC          OIDCConfig
+	Security      SecurityConfig
 
 	CustomWebhooks []CustomWebhookDest
 
@@ -126,6 +128,32 @@ type BootstrapAdminConfig struct {
 type SecretsConfig struct {
 	TinkKeyset             string `yaml:"tink_keyset"`
 	LegacyInboundMasterKey string `yaml:"legacy_inbound_master_key"`
+}
+
+// SecurityConfig holds deploy-level egress + proxy hardening knobs.
+type SecurityConfig struct {
+	// AllowLoopbackEgress permits outbound webhook / LLM dials to loopback
+	// (127.0.0.0/8, ::1, localhost). Off by default — production treats it as an
+	// SSRF vector. Local dev and the loopback reverse-proxy e2e set it true.
+	AllowLoopbackEgress bool `yaml:"allow_loopback_egress"`
+	// AllowPrivateEgress permits outbound dials to RFC1918 / unique-local
+	// networks. On-prem deployments co-located with an internal IMAP/LLM host set
+	// this. Cloud-metadata, link-local, unspecified, and multicast targets are
+	// always blocked regardless of these flags.
+	AllowPrivateEgress bool `yaml:"allow_private_egress"`
+	// TrustedProxyHops is the number of reverse proxies in front of attune that
+	// append to X-Forwarded-For. The API-key IP allowlist reads the client IP
+	// that many hops from the right of XFF. 0 (default) ignores XFF entirely and
+	// uses the direct peer, so a direct client cannot spoof an allowlisted IP.
+	TrustedProxyHops int `yaml:"trusted_proxy_hops"`
+}
+
+// EgressPolicy builds the nethardening policy from the security config.
+func (c *Config) EgressPolicy() nethardening.Policy {
+	return nethardening.Policy{
+		AllowLoopback: c.Security.AllowLoopbackEgress,
+		AllowPrivate:  c.Security.AllowPrivateEgress,
+	}
 }
 
 type ObservabilityConfig struct {
