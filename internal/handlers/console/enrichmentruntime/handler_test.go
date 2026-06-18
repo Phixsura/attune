@@ -3,6 +3,7 @@ package enrichmentruntime
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
@@ -453,4 +455,133 @@ func TestSpecFromProtoRejectsNilAndToProtoStatusHandlesUnknown(t *testing.T) {
 
 	zero := time.Time{}
 	require.Nil(t, ts(ptrext.Of(zero)))
+}
+
+func TestNewHandlerDefaultsStepUpTTLAndGetPropagatesServiceError(t *testing.T) {
+	t.Parallel()
+
+	h := NewHandler(ptrext.Of(fakeService{getErr: errors.New("boom")}), 0)
+	require.Equal(t, 15*time.Minute, h.stepUpTTL)
+
+	_, err := h.Get(runtimeCtx(false), ptrext.Of(attunev1.GetEnrichmentRuntimeRequest{}))
+	require.EqualError(t, err, "boom")
+}
+
+func TestUpdateResetRollbackRequireFreshStepUp(t *testing.T) {
+	t.Parallel()
+
+	h := NewHandler(ptrext.Of(fakeService{}), 15*time.Minute)
+	ctx := runtimeCtx(false)
+
+	_, err := h.Update(ctx, ptrext.Of(attunev1.UpdateEnrichmentRuntimeRequest{}))
+	require.Error(t, err)
+
+	_, err = h.Reset(ctx, ptrext.Of(attunev1.ResetEnrichmentRuntimeRequest{}))
+	require.Error(t, err)
+
+	_, err = h.Rollback(ctx, ptrext.Of(attunev1.RollbackEnrichmentRuntimeRequest{}))
+	require.Error(t, err)
+}
+
+func TestUpdateRejectsNilSpecAndResetRollbackPropagateServiceErrors(t *testing.T) {
+	t.Parallel()
+
+	svc := ptrext.Of(fakeService{
+		resetErr:    errors.New("reset failed"),
+		rollbackErr: errors.New("rollback failed"),
+	})
+	h := NewHandler(svc, 15*time.Minute)
+	ctx := runtimeCtx(true)
+
+	_, err := h.Update(ctx, ptrext.Of(attunev1.UpdateEnrichmentRuntimeRequest{}))
+	require.Error(t, err)
+
+	resetHandler := dispatcher.Bind(
+		"test.enrichmentruntime.reset.error",
+		dispatcher.JSON(func() *attunev1.ResetEnrichmentRuntimeRequest {
+			return ptrext.Of(attunev1.ResetEnrichmentRuntimeRequest{})
+		}),
+		h.Reset,
+		dispatcher.WithAuth(runtimeAuth[*attunev1.ResetEnrichmentRuntimeRequest](true)),
+	)
+	resetReq := httptest.NewRequest(http.MethodPost, "/fb/v1/console/enrichment-runtime/reset", bytes.NewReader([]byte(`{}`)))
+	resetReq.Header.Set("Content-Type", "application/json")
+	resetReq.Header.Set("User-Agent", "attune-test")
+	resetReq.RemoteAddr = "203.0.113.5:4123"
+	resetRecorder := httptest.NewRecorder()
+	resetHandler.ServeHTTP(resetRecorder, resetReq)
+	require.Equal(t, http.StatusInternalServerError, resetRecorder.Code)
+
+	rollbackHandler := dispatcher.Bind(
+		"test.enrichmentruntime.rollback.error",
+		dispatcher.JSON(func() *attunev1.RollbackEnrichmentRuntimeRequest {
+			return ptrext.Of(attunev1.RollbackEnrichmentRuntimeRequest{})
+		}),
+		h.Rollback,
+		dispatcher.WithAuth(runtimeAuth[*attunev1.RollbackEnrichmentRuntimeRequest](true)),
+	)
+	rollbackReq := httptest.NewRequest(http.MethodPost, "/fb/v1/console/enrichment-runtime/rollback", bytes.NewReader([]byte(`{}`)))
+	rollbackReq.Header.Set("Content-Type", "application/json")
+	rollbackReq.Header.Set("User-Agent", "attune-test")
+	rollbackReq.RemoteAddr = "203.0.113.5:4123"
+	rollbackRecorder := httptest.NewRecorder()
+	rollbackHandler.ServeHTTP(rollbackRecorder, rollbackReq)
+	require.Equal(t, http.StatusInternalServerError, rollbackRecorder.Code)
+}
+
+func TestActorFromRequestUsesProvidedUserTypeAndToProtoHelpersCoverRemainingBranches(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "", actorID(nil))
+
+	svc := ptrext.Of(fakeService{
+		getRM:    runtimeReadModel(3, 48),
+		updateRM: runtimeReadModel(4, 64),
+	})
+	h := NewHandler(svc, 15*time.Minute)
+	httpHandler := dispatcher.Bind(
+		"test.enrichmentruntime.update.member",
+		dispatcher.JSON(func() *attunev1.UpdateEnrichmentRuntimeRequest {
+			return ptrext.Of(attunev1.UpdateEnrichmentRuntimeRequest{})
+		}),
+		h.Update,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateEnrichmentRuntimeRequest) (*session.AuthCtx, error) {
+			return ptrext.Of(session.AuthCtx{
+				UserID:   "member-1",
+				TenantID: "tenant-1",
+				UserType: "member",
+				StepUpAt: ptrext.Of(time.Now().Add(-time.Minute)),
+			}), nil
+		}),
+	)
+	body, err := protojson.Marshal(ptrext.Of(attunev1.UpdateEnrichmentRuntimeRequest{
+		ExpectedVersion: 3,
+		UpdateReason:    "member update",
+		Spec:            toProtoSpec(runtimeReadModel(4, 64).DesiredSpec),
+	}))
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPut, "/fb/v1/console/enrichment-runtime", bytes.NewReader(body))
+	req.RemoteAddr = "198.51.100.10:1234"
+	req.Header.Set("User-Agent", "attune-browser")
+	recorder := httptest.NewRecorder()
+	httpHandler.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "member", svc.updateActor.ActorType)
+	require.Equal(t, "member-1", svc.updateActor.ID)
+	require.Equal(t, "198.51.100.10:1234", svc.updateActor.ActorIP)
+	require.Equal(t, "attune-browser", svc.updateActor.ActorUserAgent)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	rm := runtimeReadModel(3, 48)
+	rm.Instances[0].RunnerApplyStatus = "pending"
+	rm.Instances[0].LimiterApplyStatus = "stale"
+	rm.Instances[0].LastAppliedAt = ptrext.Of(now)
+	got := toProtoReadModel(rm)
+	require.Equal(t, attunev1.RuntimeApplyStatus_RUNTIME_APPLY_STATUS_PENDING, got.GetInstances()[0].GetRunnerApplyStatus())
+	require.Equal(t, attunev1.RuntimeApplyStatus_RUNTIME_APPLY_STATUS_STALE, got.GetInstances()[0].GetLimiterApplyStatus())
+	require.Equal(t, attunev1.RuntimeApplyStatus_RUNTIME_APPLY_STATUS_APPLYING, toProtoStatus("applying"))
+	require.Equal(t, attunev1.RuntimeApplyStatus_RUNTIME_APPLY_STATUS_FAILED, toProtoStatus("failed"))
+	require.Equal(t, timestamppb.New(now), got.GetInstances()[0].GetLastAppliedAt())
+	require.Equal(t, timestamppb.New(now), ts(ptrext.Of(now)))
 }

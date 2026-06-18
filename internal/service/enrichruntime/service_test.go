@@ -228,6 +228,66 @@ func TestApplyResetFieldSupportsKnownFieldsAndRejectsUnknown(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnknownResetField)
 }
 
+func TestApplyResetFieldCoversAllSupportedFields(t *testing.T) {
+	t.Parallel()
+
+	current := enrichrepo.Spec{
+		QueueLen:            100,
+		Workers:             8,
+		BatchSize:           16,
+		BatchWindow:         2 * time.Second,
+		SweepInterval:       5 * time.Second,
+		LLMRateLimitEnabled: true,
+		LLMMaxQPS:           3.5,
+		LLMBurst:            9,
+	}
+	bootstrap := enrichrepo.Spec{
+		QueueLen:            64,
+		Workers:             4,
+		BatchSize:           8,
+		BatchWindow:         time.Second,
+		SweepInterval:       3 * time.Second,
+		LLMRateLimitEnabled: false,
+		LLMMaxQPS:           1.5,
+		LLMBurst:            2,
+	}
+
+	fields := []string{
+		"queue_len",
+		"workers",
+		"batch_size",
+		"batch_window",
+		"sweep_interval",
+		"llm_rate_limit_enabled",
+		"llm_max_qps",
+		"llm_burst",
+	}
+	for _, field := range fields {
+		t.Run(field, func(t *testing.T) {
+			next, err := applyResetField(current, bootstrap, field)
+			require.NoError(t, err)
+			switch field {
+			case "queue_len":
+				require.Equal(t, bootstrap.QueueLen, next.QueueLen)
+			case "workers":
+				require.Equal(t, bootstrap.Workers, next.Workers)
+			case "batch_size":
+				require.Equal(t, bootstrap.BatchSize, next.BatchSize)
+			case "batch_window":
+				require.Equal(t, bootstrap.BatchWindow, next.BatchWindow)
+			case "sweep_interval":
+				require.Equal(t, bootstrap.SweepInterval, next.SweepInterval)
+			case "llm_rate_limit_enabled":
+				require.Equal(t, bootstrap.LLMRateLimitEnabled, next.LLMRateLimitEnabled)
+			case "llm_max_qps":
+				require.Equal(t, bootstrap.LLMMaxQPS, next.LLMMaxQPS)
+			case "llm_burst":
+				require.Equal(t, bootstrap.LLMBurst, next.LLMBurst)
+			}
+		})
+	}
+}
+
 func TestValidateSpecAndHelpersCoverErrorBranches(t *testing.T) {
 	t.Parallel()
 
@@ -355,6 +415,26 @@ func TestServiceGetUsesBootstrapWhenPolicyMissing(t *testing.T) {
 	require.Equal(t, bootstrap, rm.DesiredSpec)
 	require.Equal(t, uint64(0), rm.DesiredRevision.Version)
 	require.Equal(t, "bootstrap-v1", rm.DesiredRevision.BootstrapSnapshotVersion)
+}
+
+func TestServiceGetPropagatesListErrors(t *testing.T) {
+	t.Parallel()
+
+	bootstrap := enrichrepo.Spec{
+		QueueLen:      64,
+		Workers:       4,
+		BatchSize:     8,
+		BatchWindow:   time.Second,
+		SweepInterval: 3 * time.Second,
+	}
+	repo := ptrext.Of(fakeRepo{
+		policy:  enrichrepo.Policy{Version: 1, Spec: bootstrap},
+		listErr: errors.New("list failed"),
+	})
+	svc := New(repo, ptrext.Of(fakeRunner{}), ptrext.Of(fakeLimiter{}), bootstrap, "bootstrap-v1", "instance-1", "boot-1")
+
+	_, err := svc.Get(context.Background())
+	require.EqualError(t, err, "list failed")
 }
 
 func TestServiceUpdatePersistsRiskAndTrimmedReason(t *testing.T) {
