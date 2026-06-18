@@ -57,6 +57,15 @@ func acquireMigrationLock(ctx context.Context, pool *pgxpool.Pool) (*pgxpool.Con
 		logext.Errorf(ctx, "[%s] lock failed,err:%+v", where, err.Error())
 		return nil, fmt.Errorf("acquire migration lock: %w", err)
 	}
+	// The pool sets a 30s statement_timeout default (database.NewPool, #84), but
+	// migrations can legitimately run long (large backfills, index builds). Clear
+	// it on this dedicated, soon-released migration connection so a slow migration
+	// can't be killed mid-statement and leave the schema half-applied.
+	if _, err := conn.Exec(ctx, `SET statement_timeout = 0`); err != nil {
+		conn.Release()
+		logext.Errorf(ctx, "[%s] clear statement_timeout failed,err:%+v", where, err.Error())
+		return nil, fmt.Errorf("clear migration statement_timeout: %w", err)
+	}
 	logext.Infof(ctx, "[%s] OK", where)
 	return conn, nil
 }
