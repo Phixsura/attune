@@ -20,7 +20,11 @@ export interface ApiKey {
     | string
     | undefined;
   /** RFC3339, null if active */
-  revokedAt?: string | undefined;
+  revokedAt?:
+    | string
+    | undefined;
+  /** granted scopes */
+  scopes: string[];
 }
 
 export interface ListApiKeysRequest {
@@ -32,6 +36,8 @@ export interface ListApiKeysResponse {
 
 export interface CreateApiKeyRequest {
   label: string;
+  /** optional, defaults to full_access preset */
+  scopes: string[];
 }
 
 export interface CreateApiKeyResponse {
@@ -50,6 +56,45 @@ export interface DeleteApiKeyRequest {
 export interface DeleteApiKeyResponse {
 }
 
+/** Scope metadata */
+export interface ListScopesRequest {
+}
+
+export interface ListScopesResponse {
+  scopes: ScopeInfo[];
+}
+
+export interface ScopeInfo {
+  /** e.g., "feedback:read" */
+  scope: string;
+  /** e.g., "feedback" */
+  resource: string;
+  /** e.g., "read" */
+  action: string;
+  /** human-readable */
+  description: string;
+  /** scopes this one implies (hierarchy) */
+  implies: string[];
+}
+
+/** Preset templates */
+export interface ListScopePresetsRequest {
+}
+
+export interface ListScopePresetsResponse {
+  presets: ScopePreset[];
+}
+
+export interface ScopePreset {
+  /** e.g., "ingest_only" */
+  id: string;
+  /** e.g., "Ingest Only" */
+  name: string;
+  /** human-readable */
+  description: string;
+  scopes: string[];
+}
+
 /** ApiKeyService manages a tenant's external ingest API keys (console). */
 export interface ApiKeyService {
   /** GET /fb/v1/console/api-keys */
@@ -58,4 +103,8 @@ export interface ApiKeyService {
   CreateApiKey(request: CreateApiKeyRequest): Promise<CreateApiKeyResponse>;
   /** DELETE /fb/v1/console/api-keys/{id} — revoke (204). */
   DeleteApiKey(request: DeleteApiKeyRequest): Promise<DeleteApiKeyResponse>;
+  /** GET /fb/v1/console/api-keys/scopes — list available scopes. */
+  ListScopes(request: ListScopesRequest): Promise<ListScopesResponse>;
+  /** GET /fb/v1/console/api-keys/presets — list scope preset templates. */
+  ListScopePresets(request: ListScopePresetsRequest): Promise<ListScopePresetsResponse>;
 }

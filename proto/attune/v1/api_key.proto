@@ -22,6 +22,14 @@ service ApiKeyService {
   rpc DeleteApiKey(DeleteApiKeyRequest) returns (DeleteApiKeyResponse) {
     option (google.api.http) = {delete: "/fb/v1/console/api-keys/{id}"};
   }
+  // GET /fb/v1/console/api-keys/scopes — list available scopes.
+  rpc ListScopes(ListScopesRequest) returns (ListScopesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/scopes"};
+  }
+  // GET /fb/v1/console/api-keys/presets — list scope preset templates.
+  rpc ListScopePresets(ListScopePresetsRequest) returns (ListScopePresetsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/api-keys/presets"};
+  }
 }
 
 message ApiKey {
@@ -32,6 +40,7 @@ message ApiKey {
   string created_at = 5;             // RFC3339
   optional string last_used_at = 6;  // RFC3339, null if never used
   optional string revoked_at = 7;    // RFC3339, null if active
+  repeated string scopes = 8;        // granted scopes
 }
 
 message ListApiKeysRequest {}
@@ -42,6 +51,7 @@ message ListApiKeysResponse {
 
 message CreateApiKeyRequest {
   string label = 1 [(google.api.field_behavior) = REQUIRED];
+  repeated string scopes = 2;  // optional, defaults to full_access preset
 }
 
 message CreateApiKeyResponse {
@@ -55,3 +65,32 @@ message DeleteApiKeyRequest {
 }
 
 message DeleteApiKeyResponse {}
+
+// Scope metadata
+message ListScopesRequest {}
+
+message ListScopesResponse {
+  repeated ScopeInfo scopes = 1;
+}
+
+message ScopeInfo {
+  string scope = 1;        // e.g., "feedback:read"
+  string resource = 2;     // e.g., "feedback"
+  string action = 3;       // e.g., "read"
+  string description = 4;  // human-readable
+  repeated string implies = 5;  // scopes this one implies (hierarchy)
+}
+
+// Preset templates
+message ListScopePresetsRequest {}
+
+message ListScopePresetsResponse {
+  repeated ScopePreset presets = 1;
+}
+
+message ScopePreset {
+  string id = 1;           // e.g., "ingest_only"
+  string name = 2;         // e.g., "Ingest Only"
+  string description = 3;  // human-readable
+  repeated string scopes = 4;
+}

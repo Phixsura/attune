@@ -49,6 +49,44 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/presets:
+        get:
+            tags:
+                - ApiKeyService
+            description: GET /fb/v1/console/api-keys/presets — list scope preset templates.
+            operationId: ApiKeyService_ListScopePresets
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListScopePresetsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/api-keys/scopes:
+        get:
+            tags:
+                - ApiKeyService
+            description: GET /fb/v1/console/api-keys/scopes — list available scopes.
+            operationId: ApiKeyService_ListScopes
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListScopesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}:
         delete:
             tags:
@@ -2548,6 +2586,10 @@ components:
                     type: string
                 revokedAt:
                     type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
         ArchiveStateResponse:
             type: object
             properties: {}
@@ -2915,6 +2957,10 @@ components:
             properties:
                 label:
                     type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
         CreateApiKeyResponse:
             type: object
             properties:
@@ -4332,6 +4378,20 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/NotifyTarget'
+        ListScopePresetsResponse:
+            type: object
+            properties:
+                presets:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ScopePreset'
+        ListScopesResponse:
+            type: object
+            properties:
+                scopes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ScopeInfo'
         ListStatesResponse:
             type: object
             properties:
@@ -4607,6 +4667,34 @@ components:
                     type: string
                 nextEligibleAt:
                     type: string
+        ScopeInfo:
+            type: object
+            properties:
+                scope:
+                    type: string
+                resource:
+                    type: string
+                action:
+                    type: string
+                description:
+                    type: string
+                implies:
+                    type: array
+                    items:
+                        type: string
+        ScopePreset:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
         SeedDefaultsRequest:
             type: object
             properties: {}
