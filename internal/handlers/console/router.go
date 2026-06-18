@@ -613,6 +613,22 @@ func (r *Router) mountAPIKeys(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		k.Get("/scopes", dispatcher.Bind(
+			"console.APIKeysHandler.ListScopes",
+			dispatcher.Empty(func() *attunev1.ListScopesRequest { return ptrext.Of(attunev1.ListScopesRequest{}) }),
+			r.apiKeys.ListScopes,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListScopesRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		k.Get("/presets", dispatcher.Bind(
+			"console.APIKeysHandler.ListScopePresets",
+			dispatcher.Empty(func() *attunev1.ListScopePresetsRequest { return ptrext.Of(attunev1.ListScopePresetsRequest{}) }),
+			r.apiKeys.ListScopePresets,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListScopePresetsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 	})
 }
 
