@@ -71,7 +71,11 @@ func buildRouter(
 	// API contract does not require it.
 	r.Use(traceIDResponseHeader)
 	r.Use(middleware.RequestID) // chi's own X-Request-ID — kept alongside X-Trace-Id for back-compat
-	r.Use(middleware.RealIP)
+	// NOTE: chi's middleware.RealIP is intentionally NOT used. It unconditionally
+	// rewrites r.RemoteAddr from X-Forwarded-For / X-Real-IP, which a client on a
+	// direct connection can forge — defeating the API-key IP allowlist. Client-IP
+	// resolution is done by nethardening.ClientIP honoring security.trusted_proxy_hops
+	// (see apikey.MiddlewareWithProxies), so RemoteAddr must stay the true peer.
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(305 * time.Second))
 	mountHealth(r, ready)

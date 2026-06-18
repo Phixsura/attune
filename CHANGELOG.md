@@ -25,7 +25,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `security.trusted_proxy_hops` setting: with no trusted proxy (default)
   `X-Forwarded-For` is ignored and the direct peer is used, so a client on a
   direct connection can no longer forge an allowlisted source IP by setting the
-  header. Behind N reverse proxies, set `trusted_proxy_hops: N`.
+  header. Behind N reverse proxies, set `trusted_proxy_hops: N`. Also **removed
+  chi's `middleware.RealIP`** from the router — it unconditionally rewrote
+  `RemoteAddr` from `X-Forwarded-For`/`X-Real-IP`, which by itself made the
+  allowlist spoofable regardless of the setting above.
 
 ### Changed
 

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // stubVerifier is the smallest Verifier that lets us drive every
@@ -34,6 +35,63 @@ func (s stubVerifier) LookupWithScopes(ctx context.Context, raw string) (string,
 
 func (s stubVerifier) LookupWithScopesAndIP(ctx context.Context, raw, clientIP string) (string, uuid.UUID, []domain.Scope, error) {
 	return s.tid, s.kid, s.scopes, s.err
+}
+
+// ipCapturingVerifier records the client IP the middleware resolved and passed
+// to LookupWithScopesAndIP — lets the XFF tests assert on the actual value.
+type ipCapturingVerifier struct {
+	gotIP string
+}
+
+func (v *ipCapturingVerifier) Lookup(context.Context, string) (string, uuid.UUID, error) {
+	return "t", uuid.Nil, nil
+}
+
+func (v *ipCapturingVerifier) LookupWithScopes(context.Context, string) (string, uuid.UUID, []domain.Scope, error) {
+	return "t", uuid.Nil, nil, nil
+}
+
+func (v *ipCapturingVerifier) LookupWithScopesAndIP(_ context.Context, _, clientIP string) (string, uuid.UUID, []domain.Scope, error) {
+	v.gotIP = clientIP
+	return "t", uuid.Nil, nil, nil
+}
+
+// TestMiddlewareWithProxies_ResolvesClientIP locks the XFF trust model: with no
+// trusted proxy a forged X-Forwarded-For must NOT change the resolved client IP
+// (it stays the direct peer), and with N trusted proxies the IP comes from N
+// entries in from the right. Regression guard for the IP-allowlist bypass: the
+// router must also NOT run chi's middleware.RealIP, which would rewrite
+// RemoteAddr from these same headers upstream and defeat this.
+func TestMiddlewareWithProxies_ResolvesClientIP(t *testing.T) {
+	tests := []struct {
+		name string
+		hops int
+		xff  string
+		want string
+	}{
+		{"no proxy ignores forged xff", 0, "203.0.113.50", "198.51.100.7"},
+		{"no proxy no xff uses peer", 0, "", "198.51.100.7"},
+		{"one trusted proxy honored", 1, "203.0.113.50", "203.0.113.50"},
+		{"attacker prepend ignored", 1, "9.9.9.9, 203.0.113.50", "203.0.113.50"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := ptrext.Of(ipCapturingVerifier{})
+			h := MiddlewareWithProxies(v, tt.hops)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			req := httptest.NewRequest(http.MethodPost, "/v1/feedback/ingest", nil)
+			req.Header.Set("X-API-Key", domain.APIKeyPrefix+"abc")
+			req.RemoteAddr = "198.51.100.7:54321"
+			if tt.xff != "" {
+				req.Header.Set("X-Forwarded-For", tt.xff)
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			if v.gotIP != tt.want {
+				t.Fatalf("resolved client IP = %q, want %q", v.gotIP, tt.want)
+			}
+		})
+	}
 }
 
 // decode is shared by the envelope assertions — keeps each test focused.
