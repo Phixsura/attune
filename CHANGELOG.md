@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- **Fine-grained API key scopes (#41).** API keys now support 24 resource:action
+  scopes for least-privilege access control. Scopes are stored in a normalized
+  `api_key_scopes` table and loaded atomically with key lookup (fail-closed).
+  Five preset templates (Ingest Only, Read Only, Developer, Integration, Full
+  Access) simplify common configurations. The `apikey:admin` scope is excluded
+  from migration seeding and the Full Access preset, preventing existing or new
+  keys from managing other keys by default. New Console endpoints `GET
+  /fb/v1/console/api-keys/scopes` and `GET /fb/v1/console/api-keys/presets`
+  expose scope metadata and templates. The `attune_apikey_scope_denied_total`
+  metric tracks scope enforcement denials by required scope.
+
 ### Security
 
 - **GDPR subject export/delete controls (#43).** Added canonical
