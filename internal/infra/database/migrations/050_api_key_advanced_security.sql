@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS ai_agent_configs (
 
 -- AI agent request audit
 CREATE TABLE IF NOT EXISTS ai_agent_requests (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
     tenant_id TEXT NOT NULL,
     agent_config_id UUID NOT NULL REFERENCES ai_agent_configs(id) ON DELETE CASCADE,
     key_id UUID REFERENCES external_api_keys(id) ON DELETE SET NULL,
@@ -244,7 +244,8 @@ CREATE TABLE IF NOT EXISTS ai_agent_requests (
     approved_at TIMESTAMPTZ,
     error_message TEXT,
     duration_ms INT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
 CREATE TABLE ai_agent_requests_2026_06 PARTITION OF ai_agent_requests
