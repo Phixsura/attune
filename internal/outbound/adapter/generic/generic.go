@@ -206,16 +206,14 @@ func renderDigestMarkdown(dv map[string]any) string {
 	return b.String()
 }
 
-// redactURL returns scheme://host/path with userinfo and query stripped — the
-// query/userinfo of a customer webhook URL can carry secret tokens that must not
-// land in logs (CLAUDE.md §7).
+// redactURL returns scheme://host only. Customer webhook URLs routinely carry
+// secret tokens in userinfo, query, AND the path (Slack/Discord-style
+// /services/T000/B000/<secret>), so logging anything past the host risks leaking
+// a credential (CLAUDE.md §7). The host is enough to debug delivery targeting.
 func redactURL(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil {
-		return "<unparseable-url>"
+	if err != nil || u.Host == "" {
+		return "<redacted-url>"
 	}
-	u.User = nil
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String()
+	return u.Scheme + "://" + u.Host
 }

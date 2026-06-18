@@ -354,6 +354,48 @@ func TestClaimBatch_SecondReplicaSkipsInFlightRows(t *testing.T) {
 	}
 }
 
+// TestRefreshClaims_RenewsInFlightSkipsDone proves the lease-heartbeat: a
+// still-pending claimed row gets its claimed_at pushed forward (so a long batch
+// stays within the claim window), while a delivered row in the same id set is
+// left alone.
+func TestRefreshClaims_RenewsInFlightSkipsDone(t *testing.T) {
+	e := setup(t)
+	tid := e.newTenant(t, "refresh-claims")
+	inflight := e.insert(t, tid, seed{status: "pending", claimed: true})
+	delivered := e.insert(t, tid, seed{status: "delivered", claimed: true})
+
+	// Backdate both claims to 9 minutes ago.
+	if _, err := e.pool.Exec(e.ctx,
+		`UPDATE notify_outbox SET claimed_at = NOW() - INTERVAL '9 minutes' WHERE id = ANY($1)`,
+		[]int64{inflight, delivered}); err != nil {
+		t.Fatalf("backdate claims: %v", err)
+	}
+
+	n, err := e.repo.RefreshClaims(e.ctx, []int64{inflight, delivered})
+	if err != nil {
+		t.Fatalf("refresh claims: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("refreshed %d rows, want 1 (only the pending one)", n)
+	}
+
+	var inflightAge, deliveredAge float64
+	if err := e.pool.QueryRow(e.ctx,
+		`SELECT EXTRACT(EPOCH FROM (NOW() - claimed_at)) FROM notify_outbox WHERE id = $1`, inflight).Scan(&inflightAge); err != nil {
+		t.Fatalf("read inflight claimed_at: %v", err)
+	}
+	if inflightAge > 60 {
+		t.Fatalf("in-flight claim not renewed: age=%.0fs, want < 60s", inflightAge)
+	}
+	if err := e.pool.QueryRow(e.ctx,
+		`SELECT EXTRACT(EPOCH FROM (NOW() - claimed_at)) FROM notify_outbox WHERE id = $1`, delivered).Scan(&deliveredAge); err != nil {
+		t.Fatalf("read delivered claimed_at: %v", err)
+	}
+	if deliveredAge < 300 {
+		t.Fatalf("delivered claim was wrongly renewed: age=%.0fs, want ~540s", deliveredAge)
+	}
+}
+
 // TestClaimBatch_SkipsRowsLockedByAnotherTx verifies the FOR UPDATE SKIP LOCKED
 // contract: a row already locked by an in-flight transaction is skipped by a
 // concurrent ClaimBatch rather than blocking on it. This is what lets a second

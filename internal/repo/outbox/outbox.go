@@ -125,8 +125,10 @@ func (r *OutboxRepo) Insert(
 // released once this UPDATE commits, before the delivery attempt finishes) —
 // without it, running >1 outbox worker would double-deliver. The 10-minute
 // window matches ResetStaleClaims so a worker that crashes mid-delivery still
-// gets its row retried. Mark{Delivered,Failed,Dead} all clear claimed_at, so a
-// row's own retry is never blocked by this predicate.
+// gets its row retried. The active worker calls RefreshClaims periodically while
+// draining a batch, so a long batch (serial sends to slow destinations) keeps
+// its lease fresh and never ages past the window mid-flight. Mark{Delivered,
+// Failed,Dead} all clear claimed_at, so a row's own retry is never blocked.
 //
 // Returns the claimed rows; len(0) means nothing to send right now.
 // Caller must call MarkDelivered / MarkFailed / MarkDead per row after
@@ -271,6 +273,27 @@ func (r *OutboxRepo) PruneStalePending(ctx context.Context, before time.Time, re
 	)
 	if err != nil {
 		return 0, fmt.Errorf("prune stale pending: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// RefreshClaims re-stamps claimed_at = NOW() for the still-unsent rows in ids,
+// renewing the lease so a long-running batch can't age past the ClaimBatch
+// 10-minute window (which would let a second replica re-claim an in-flight row).
+// The status filter means already-delivered/dead rows in the batch are left
+// alone. Called periodically by the outbox worker while it drains a batch.
+func (r *OutboxRepo) RefreshClaims(ctx context.Context, ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE notify_outbox
+		 SET claimed_at = NOW()
+		 WHERE id = ANY($1)
+		 AND claimed_at IS NOT NULL
+		 AND status IN ('pending', 'failed')`, ids)
+	if err != nil {
+		return 0, fmt.Errorf("refresh claims: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

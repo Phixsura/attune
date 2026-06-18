@@ -35,6 +35,20 @@ func TestRenderEvent_SetsDeliveryIDHeader(t *testing.T) {
 	}
 }
 
+func TestRedactURL_StripsSecrets(t *testing.T) {
+	cases := map[string]string{
+		"https://u:p@hooks.example.com/services/T0/B0/SECRET?tok=abc#frag": "https://hooks.example.com",
+		"https://hooks.example.com/path/with/SECRET":                       "https://hooks.example.com",
+		"https://host:8443/x": "https://host:8443",
+		"::::not a url":       "<redacted-url>",
+	}
+	for in, want := range cases {
+		if got := redactURL(in); got != want {
+			t.Errorf("redactURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestRenderEvent_OmitsDeliveryIDHeaderWhenUnset(t *testing.T) {
 	c := channel{}
 	env := ptrext.Of(outbound.Envelope{Version: "2", TenantID: "t1", Feedback: map[string]any{}})

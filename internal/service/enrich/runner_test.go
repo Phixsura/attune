@@ -129,8 +129,10 @@ func TestRunnerProcessBatchRecoversPanic(t *testing.T) {
 	if got := ok.Load(); got != 2 {
 		t.Fatalf("non-panicking jobs executed = %d, want 2", got)
 	}
-	if delta := counterValue(t, metrics.WorkerPanics.WithLabelValues("enrich_job")) - before; delta != 1 {
-		t.Fatalf("WorkerPanics delta = %v, want 1", delta)
+	// >= 1 (not == 1): the counter is process-global and this test runs in
+	// parallel, so another test panicking with the same label could bump it too.
+	if delta := counterValue(t, metrics.WorkerPanics.WithLabelValues("enrich_job")) - before; delta < 1 {
+		t.Fatalf("WorkerPanics delta = %v, want >= 1", delta)
 	}
 }
 

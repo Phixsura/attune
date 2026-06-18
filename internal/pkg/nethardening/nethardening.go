@@ -61,32 +61,37 @@ var extraMetadataIPs = map[string]struct{}{
 	"100.100.100.200": {}, // Alibaba Cloud metadata (100.64/10 CGNAT — not IsPrivate)
 }
 
+func mustCIDR(s string) *net.IPNet {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		panic("nethardening: bad CIDR " + s + ": " + err.Error())
+	}
+	return n
+}
+
+var (
+	sixToFourNet = mustCIDR("2002::/16")      // 6to4: embedded v4 in bytes 2..5
+	nat64Net     = mustCIDR("64:ff9b::/96")   // NAT64 well-known: embedded v4 in bytes 12..15
+	teredoNet    = mustCIDR("2001:0000::/32") // Teredo: embedded v4 in bytes 12..15, bit-inverted
+)
+
 // embeddedIPv4 extracts the IPv4 address embedded in a transition-mechanism IPv6
-// address — 6to4 (2002::/16) and the NAT64 well-known prefix (64:ff9b::/96) —
-// or nil if there is none. These wrap an IPv4 destination (potentially metadata
-// or RFC1918) in an IPv6 address that none of the stdlib classifiers flag, so
-// CheckIP must re-examine the embedded address.
+// address (6to4, NAT64 well-known prefix, Teredo), or nil if there is none.
+// These wrap an IPv4 destination (potentially metadata or RFC1918) in an IPv6
+// address that none of the stdlib classifiers flag, so CheckIP must re-examine
+// the embedded address.
 func embeddedIPv4(ip net.IP) net.IP {
 	b := ip.To16()
 	if b == nil || ip.To4() != nil {
 		return nil
 	}
-	// 6to4: 2002:V4::/16 — embedded IPv4 in bytes 2..5.
-	if b[0] == 0x20 && b[1] == 0x02 {
+	switch {
+	case sixToFourNet.Contains(ip):
 		return net.IPv4(b[2], b[3], b[4], b[5])
-	}
-	// NAT64 well-known prefix 64:ff9b::/96 — embedded IPv4 in the last 4 bytes.
-	if b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b {
-		allZero := true
-		for _, x := range b[4:12] {
-			if x != 0 {
-				allZero = false
-				break
-			}
-		}
-		if allZero {
-			return net.IPv4(b[12], b[13], b[14], b[15])
-		}
+	case nat64Net.Contains(ip):
+		return net.IPv4(b[12], b[13], b[14], b[15])
+	case teredoNet.Contains(ip):
+		return net.IPv4(^b[12], ^b[13], ^b[14], ^b[15])
 	}
 	return nil
 }

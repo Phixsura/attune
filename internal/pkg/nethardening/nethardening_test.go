@@ -38,6 +38,9 @@ func TestCheckIP(t *testing.T) {
 		{"nat64 wraps private blocked by default", "64:ff9b::0a00:0001", Policy{}, true},
 		{"nat64 wraps private allowed when opted in", "64:ff9b::0a00:0001", Policy{AllowPrivate: true}, false},
 		{"nat64 wraps public allowed", "64:ff9b::0808:0808", Policy{}, false},
+		// Teredo 2001:0000::/32 embeds the client v4 (bit-inverted) in the last 32
+		// bits. ^0x56015601 = 0xa9fea9fe = 169.254.169.254 (metadata).
+		{"teredo wraps metadata", "2001:0:0:0:0:0:5601:5601", Policy{AllowLoopback: true, AllowPrivate: true}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

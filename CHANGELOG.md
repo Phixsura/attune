@@ -69,8 +69,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - **Outbox is safe under multiple worker replicas (#84).** `ClaimBatch` now
   excludes rows claimed within a 10-minute window, so a second outbox worker
   replica can't re-claim an in-flight row and double-deliver (FOR UPDATE SKIP
-  LOCKED only guards the lock window). A worker that crashes mid-delivery still
-  has its row retried after the window.
+  LOCKED only guards the lock window). While a worker drains a batch it renews
+  the claims (lease heartbeat) so a long, slow batch can't age its tail rows past
+  the window mid-flight regardless of batch size. A worker that crashes
+  mid-delivery still has its rows retried after the window.
 
 - **Workflow state names are now localized (#64).** `WorkflowState.name` is now a
   stable machine key (slug `^[a-z][a-z0-9_]{0,30}$`); the human-facing label moves

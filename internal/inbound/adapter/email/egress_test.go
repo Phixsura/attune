@@ -10,13 +10,10 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/nethardening"
 )
 
-// imapEgressPolicy mirrors the policy imap.go wires into the IMAP dialer:
-// loopback + RFC1918 are allowed (on-prem co-located IMAP is the documented
-// case), but cloud-metadata / link-local are always refused. This test pins
-// that deliberate choice and the dial-time, rebinding-proof enforcement that
-// replaced the old fail-open-on-DNS host_guard.
-var imapEgressPolicy = nethardening.Policy{AllowLoopback: true, AllowPrivate: true}
-
+// TestIMAPEgressPolicy pins the deliberate IMAP egress policy (the actual
+// package var imap.go wires into the dialer): loopback + RFC1918 allowed
+// (on-prem co-located IMAP), cloud-metadata / link-local always refused, with
+// dial-time rebinding-proof enforcement.
 func TestIMAPEgressPolicy(t *testing.T) {
 	cases := []struct {
 		ip      string
