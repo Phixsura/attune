@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func TestNewRateLimitedClientReturnsOriginalWhenDisabled(t *testing.T) {
@@ -73,6 +75,53 @@ func TestMutableRateLimitedClientSameConfigDoesNotResetTokens(t *testing.T) {
 	}
 }
 
+func TestMutableRateLimitedClientSnapshotAndBurstNormalization(t *testing.T) {
+	t.Parallel()
+
+	client := NewMutableRateLimitedClient(fakeLLMClient{}, RateLimitConfig{
+		Enabled: true,
+		QPS:     0.4,
+		Burst:   0,
+	})
+
+	snap := client.Snapshot()
+	if !snap.Enabled {
+		t.Fatal("expected limiter snapshot enabled")
+	}
+	if snap.QPS != 0.4 {
+		t.Fatalf("snapshot qps = %v, want 0.4", snap.QPS)
+	}
+	if snap.Burst != 1 {
+		t.Fatalf("snapshot burst = %d, want normalized 1", snap.Burst)
+	}
+}
+
+func TestMutableRateLimitedClientCloseDelegatesAndNilIsSafe(t *testing.T) {
+	t.Parallel()
+
+	base := ptrext.Of(closingLLMClient{})
+	client := NewMutableRateLimitedClient(base, RateLimitConfig{
+		Enabled: true,
+		QPS:     2,
+		Burst:   2,
+	})
+
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close err = %v", err)
+	}
+	if base.closed != 1 {
+		t.Fatalf("close count = %d, want 1", base.closed)
+	}
+
+	var nilClient *MutableRateLimitedClient
+	if err := nilClient.Close(); err != nil {
+		t.Fatalf("nil Close err = %v", err)
+	}
+	if err := nilClient.Configure(RateLimitConfig{}); err != nil {
+		t.Fatalf("nil Configure err = %v", err)
+	}
+}
+
 type fakeLLMClient struct{}
 
 func (fakeLLMClient) Complete(context.Context, CompletionRequest) (CompletionResponse, error) {
@@ -80,3 +129,14 @@ func (fakeLLMClient) Complete(context.Context, CompletionRequest) (CompletionRes
 }
 
 func (fakeLLMClient) Close() error { return nil }
+
+type closingLLMClient struct{ closed int }
+
+func (c *closingLLMClient) Complete(context.Context, CompletionRequest) (CompletionResponse, error) {
+	return CompletionResponse{}, nil
+}
+
+func (c *closingLLMClient) Close() error {
+	c.closed++
+	return nil
+}

@@ -309,3 +309,121 @@ func TestCurrentPolicyAndResetValidation(t *testing.T) {
 	_, err = svc.Reset(context.Background(), 0, nil, false, "noop", MutationActor{})
 	require.ErrorIs(t, err, ErrInvalidReset)
 }
+
+func TestServiceGetUsesBootstrapWhenPolicyMissing(t *testing.T) {
+	t.Parallel()
+
+	bootstrap := enrichrepo.Spec{
+		QueueLen:      64,
+		Workers:       4,
+		BatchSize:     8,
+		BatchWindow:   time.Second,
+		SweepInterval: 3 * time.Second,
+	}
+	repo := ptrext.Of(fakeRepo{err: enrichrepo.ErrPolicyNotFound})
+	svc := New(repo, fakeRunner{}, fakeLimiter{}, bootstrap, "bootstrap-v1", "instance-1", "boot-1")
+
+	rm, err := svc.Get(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, bootstrap, rm.DesiredSpec)
+	require.Equal(t, uint64(0), rm.DesiredRevision.Version)
+	require.Equal(t, "bootstrap-v1", rm.DesiredRevision.BootstrapSnapshotVersion)
+}
+
+func TestServiceUpdatePersistsRiskAndTrimmedReason(t *testing.T) {
+	t.Parallel()
+
+	repo := ptrext.Of(fakeRepo{
+		policy: enrichrepo.Policy{
+			Version: 5,
+			Spec: enrichrepo.Spec{
+				QueueLen:            64,
+				Workers:             4,
+				BatchSize:           8,
+				BatchWindow:         time.Second,
+				SweepInterval:       3 * time.Second,
+				LLMRateLimitEnabled: true,
+				LLMMaxQPS:           10,
+				LLMBurst:            6,
+			},
+		},
+	})
+	svc := New(
+		repo,
+		fakeRunner{snapshot: enrich.RunnerSnapshot{QueueDepth: 40, QueueCapacityTarget: 64, QueueCapacityEffective: 64, Workers: 4, BatchSize: 8, BatchWindow: time.Second, SweepInterval: 3 * time.Second}},
+		fakeLimiter{snapshot: llmclient.RateLimitSnapshot{Enabled: true, QPS: 1, Burst: 1}},
+		repo.policy.Spec,
+		"bootstrap-v1",
+		"instance-1",
+		"boot-1",
+	)
+
+	nextSpec := repo.policy.Spec
+	nextSpec.QueueLen = 32
+	nextSpec.LLMMaxQPS = 1
+
+	_, err := svc.Update(context.Background(), 5, nextSpec, "  tighten runtime  ", MutationActor{
+		ID:             "admin-1",
+		UpdatedBy:      "admin-1",
+		ActorType:      "admin",
+		ActorIP:        "127.0.0.1",
+		ActorUserAgent: "test",
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), repo.saveExpected)
+	require.Equal(t, "tighten runtime", repo.savePolicy.UpdateReason)
+	require.Equal(t, uint64(5), repo.savePolicy.LastKnownGoodVersion)
+	require.Equal(t, "high", repo.saveMeta.RiskLevel)
+	require.Equal(t, "update", repo.saveMeta.Operation)
+}
+
+func TestServiceRollbackBuildsLineage(t *testing.T) {
+	t.Parallel()
+
+	current := enrichrepo.Policy{
+		Version: 9,
+		Spec: enrichrepo.Spec{
+			QueueLen:      64,
+			Workers:       4,
+			BatchSize:     8,
+			BatchWindow:   time.Second,
+			SweepInterval: 3 * time.Second,
+		},
+	}
+	target := enrichrepo.Policy{
+		Version: 7,
+		Spec: enrichrepo.Spec{
+			QueueLen:      48,
+			Workers:       3,
+			BatchSize:     6,
+			BatchWindow:   2 * time.Second,
+			SweepInterval: 5 * time.Second,
+		},
+		BootstrapSnapshotVersion: "bootstrap-v0",
+		SpecVersion:              1,
+	}
+	repo := ptrext.Of(fakeRepo{policy: current, history: target})
+	svc := New(
+		repo,
+		fakeRunner{snapshot: enrich.RunnerSnapshot{QueueCapacityTarget: 48, QueueCapacityEffective: 48, Workers: 3, BatchSize: 6, BatchWindow: 2 * time.Second, SweepInterval: 5 * time.Second}},
+		fakeLimiter{snapshot: llmclient.RateLimitSnapshot{}},
+		current.Spec,
+		"bootstrap-v1",
+		"instance-1",
+		"boot-1",
+	)
+
+	_, err := svc.Rollback(context.Background(), 9, 7, "  rollback  ", MutationActor{
+		ID:        "admin-1",
+		UpdatedBy: "admin-1",
+		ActorType: "admin",
+	})
+	require.NoError(t, err)
+	require.Equal(t, target.Spec, repo.savePolicy.Spec)
+	require.Equal(t, "rollback", repo.savePolicy.UpdateReason)
+	require.Equal(t, uint64(9), repo.savePolicy.LastKnownGoodVersion)
+	require.Equal(t, "rollback", repo.saveMeta.Operation)
+	require.Equal(t, "high", repo.saveMeta.RiskLevel)
+	require.Equal(t, uint64(7), repo.saveMeta.TargetVersion)
+	require.Equal(t, "9->7", repo.saveMeta.RollbackLineage)
+}
