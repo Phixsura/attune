@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -33,7 +34,11 @@ func TestCreateStateRecordsAudit(t *testing.T) {
 	_, err := h.CreateState(ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
 		Context: context.Background(),
 		Auth:    ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}),
-	}), ptrext.Of(attunev1.CreateStateRequest{Name: "Open", Category: "open"}))
+	}), ptrext.Of(attunev1.CreateStateRequest{
+		Name:        "open",
+		DisplayName: ptrext.Of(attunev1.I18NString{Entries: map[string]string{"default": "Open"}}),
+		Category:    "open",
+	}))
 
 	require.NoError(t, err)
 	require.Len(t, audit.events, 1)
@@ -79,13 +84,14 @@ func TestUpdateStateRecordsDistinctBeforeAndAfter(t *testing.T) {
 	audit := ptrext.Of(fakeAuditRecorder{})
 	h := ptrext.Of(Handler{
 		states: ptrext.Of(fakeStateStore{states: []workflowstate.WorkflowState{{
-			ID:        "s-1",
-			TenantID:  "tenant-1",
-			Name:      "Open",
-			Color:     "#3b82f6",
-			Category:  "open",
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:          "s-1",
+			TenantID:    "tenant-1",
+			Name:        "open",
+			DisplayName: domain.I18nString{"default": "Open"},
+			Color:       "#3b82f6",
+			Category:    "open",
+			CreatedAt:   now,
+			UpdatedAt:   now,
 		}}}),
 		service: ptrext.Of(fakeWorkflowService{}),
 		audit:   audit,
@@ -95,16 +101,18 @@ func TestUpdateStateRecordsDistinctBeforeAndAfter(t *testing.T) {
 		Context: context.Background(),
 		Auth:    ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}),
 	}), ptrext.Of(attunev1.UpdateStateRequest{
-		Id:   "s-1",
-		Name: ptrext.Of("Renamed"),
+		Id:          "s-1",
+		DisplayName: ptrext.Of(attunev1.I18NString{Entries: map[string]string{"default": "Renamed"}}),
 	}))
 
 	require.NoError(t, err)
 	require.Len(t, audit.events, 1)
 	before := audit.events[0].Before.(map[string]any)
 	after := audit.events[0].After.(map[string]any)
-	require.Equal(t, "Open", before["name"])
-	require.Equal(t, "Renamed", after["name"])
+	require.Equal(t, "open", before["name"]) // stable key, unchanged by rename
+	require.Equal(t, "open", after["name"])
+	require.Equal(t, "Open", before["display_name"].(domain.I18nString)["default"])
+	require.Equal(t, "Renamed", after["display_name"].(domain.I18nString)["default"])
 }
 
 func TestSeedDefaultsRecordsAudit(t *testing.T) {

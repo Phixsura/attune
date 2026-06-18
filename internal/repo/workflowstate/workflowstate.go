@@ -2,6 +2,7 @@ package workflowstate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
@@ -21,16 +23,19 @@ var (
 )
 
 type WorkflowState struct {
-	ID         string
-	TenantID   string
-	Name       string
-	Color      string
-	Category   string
-	Position   int
-	IsDefault  bool
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	ArchivedAt *time.Time
+	ID       string
+	TenantID string
+	// Name is the stable machine key (slug, ^[a-z][a-z0-9_]{0,30}$); the
+	// human-facing label lives in DisplayName (i18n). Mirrors Dimension.
+	Name        string
+	DisplayName domain.I18nString
+	Color       string
+	Category    string
+	Position    int
+	IsDefault   bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	ArchivedAt  *time.Time
 }
 
 type Transition struct {
@@ -54,17 +59,44 @@ func New(pool *pgxpool.Pool) *Repo {
 	return ptrext.Of(Repo{pool: pool})
 }
 
-const selectStateCols = `id, tenant_id, name, color, category, position,
+const selectStateCols = `id, tenant_id, name, display_name, color, category, position,
 	is_default, created_at, updated_at, archived_at`
 
-const selectStateColsQualified = `s.id, s.tenant_id, s.name, s.color, s.category, s.position,
+const selectStateColsQualified = `s.id, s.tenant_id, s.name, s.display_name, s.color, s.category, s.position,
 	s.is_default, s.created_at, s.updated_at, s.archived_at`
+
+func marshalDisplayName(d domain.I18nString) ([]byte, error) {
+	if d == nil {
+		d = domain.I18nString{}
+	}
+	b, err := json.Marshal(d)
+	if err != nil {
+		return nil, fmt.Errorf("marshal display_name: %w", err)
+	}
+	return b, nil
+}
+
+func unmarshalDisplayName(raw []byte) (domain.I18nString, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var d domain.I18nString
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return nil, fmt.Errorf("unmarshal display_name: %w", err)
+	}
+	return d, nil
+}
 
 func scanState(row pgx.Row) (WorkflowState, error) {
 	var s WorkflowState
+	var displayRaw []byte
 	// ptrext:allow scan-target
-	err := row.Scan(&s.ID, &s.TenantID, &s.Name, &s.Color, &s.Category,
+	err := row.Scan(&s.ID, &s.TenantID, &s.Name, &displayRaw, &s.Color, &s.Category,
 		&s.Position, &s.IsDefault, &s.CreatedAt, &s.UpdatedAt, &s.ArchivedAt)
+	if err != nil {
+		return s, err
+	}
+	s.DisplayName, err = unmarshalDisplayName(displayRaw)
 	return s, err
 }
 
@@ -73,11 +105,17 @@ func scanStateRows(rows pgx.Rows) ([]WorkflowState, error) {
 	var out []WorkflowState
 	for rows.Next() {
 		var s WorkflowState
+		var displayRaw []byte
 		// ptrext:allow scan-target
-		if err := rows.Scan(&s.ID, &s.TenantID, &s.Name, &s.Color, &s.Category,
+		if err := rows.Scan(&s.ID, &s.TenantID, &s.Name, &displayRaw, &s.Color, &s.Category,
 			&s.Position, &s.IsDefault, &s.CreatedAt, &s.UpdatedAt, &s.ArchivedAt); err != nil {
 			return nil, fmt.Errorf("scan workflow state: %w", err)
 		}
+		display, err := unmarshalDisplayName(displayRaw)
+		if err != nil {
+			return nil, err
+		}
+		s.DisplayName = display
 		out = append(out, s)
 	}
 	return out, rows.Err()
@@ -130,11 +168,15 @@ func (r *Repo) Create(ctx context.Context, s WorkflowState) (*WorkflowState, err
 	if s.ID == "" {
 		s.ID = uuid.NewString()
 	}
+	dn, mErr := marshalDisplayName(s.DisplayName)
+	if mErr != nil {
+		return nil, mErr
+	}
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO tenant_workflow_states (id, tenant_id, name, color, category, position, is_default)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO tenant_workflow_states (id, tenant_id, name, display_name, color, category, position, is_default)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING `+selectStateCols,
-		s.ID, s.TenantID, s.Name, s.Color, s.Category, s.Position, s.IsDefault)
+		s.ID, s.TenantID, s.Name, dn, s.Color, s.Category, s.Position, s.IsDefault)
 	created, err := scanState(row)
 	if err != nil {
 		if pgxutil.IsUniqueViolation(err) {
@@ -147,12 +189,16 @@ func (r *Repo) Create(ctx context.Context, s WorkflowState) (*WorkflowState, err
 }
 
 func (r *Repo) Update(ctx context.Context, s WorkflowState) (*WorkflowState, error) {
+	dn, mErr := marshalDisplayName(s.DisplayName)
+	if mErr != nil {
+		return nil, mErr
+	}
 	row := r.pool.QueryRow(ctx, `
 		UPDATE tenant_workflow_states
-		SET name = $2, color = $3, position = $4, is_default = $5, updated_at = NOW()
+		SET display_name = $2, color = $3, position = $4, is_default = $5, updated_at = NOW()
 		WHERE id = $1 AND tenant_id = $6 AND archived_at IS NULL
 		RETURNING `+selectStateCols,
-		s.ID, s.Name, s.Color, s.Position, s.IsDefault, s.TenantID)
+		s.ID, dn, s.Color, s.Position, s.IsDefault, s.TenantID)
 	updated, err := scanState(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -349,14 +395,18 @@ func (r *Repo) UpsertStateReturningID(ctx context.Context, tx pgx.Tx, s Workflow
 	if s.ID == "" {
 		s.ID = uuid.NewString()
 	}
+	dn, mErr := marshalDisplayName(s.DisplayName)
+	if mErr != nil {
+		return "", mErr
+	}
 	var id string
 	err := tx.QueryRow(ctx, `
-		INSERT INTO tenant_workflow_states (id, tenant_id, name, color, category, position, is_default)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO tenant_workflow_states (id, tenant_id, name, display_name, color, category, position, is_default)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (tenant_id, name) WHERE archived_at IS NULL
-		DO UPDATE SET name = EXCLUDED.name
+		DO UPDATE SET display_name = EXCLUDED.display_name
 		RETURNING id`,
-		s.ID, s.TenantID, s.Name, s.Color, s.Category, s.Position, s.IsDefault,
+		s.ID, s.TenantID, s.Name, dn, s.Color, s.Category, s.Position, s.IsDefault,
 	).Scan(&id) // ptrext:allow scan-target
 	if err != nil {
 		return "", fmt.Errorf("upsert state: %w", err)

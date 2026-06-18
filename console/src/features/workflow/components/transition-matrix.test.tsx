@@ -6,7 +6,8 @@ import { TransitionMatrix } from './transition-matrix'
 const states: WorkflowState[] = [
   {
     id: 'ws-1',
-    name: 'Open',
+    name: 'open',
+    displayName: { entries: { default: 'Open' } },
     color: '#3b82f6',
     category: 'open',
     position: 0,
@@ -17,7 +18,8 @@ const states: WorkflowState[] = [
   },
   {
     id: 'ws-2',
-    name: 'In Progress',
+    name: 'in_progress',
+    displayName: { entries: { default: 'In Progress' } },
     color: '#f59e0b',
     category: 'active',
     position: 1,
@@ -28,7 +30,8 @@ const states: WorkflowState[] = [
   },
   {
     id: 'ws-3',
-    name: 'Done',
+    name: 'done',
+    displayName: { entries: { default: 'Done' } },
     color: '#22c55e',
     category: 'closed',
     position: 2,
@@ -41,7 +44,8 @@ const states: WorkflowState[] = [
 
 const archivedState: WorkflowState = {
   id: 'ws-4',
-  name: 'Archived State',
+  name: 'archived_state',
+  displayName: { entries: { default: 'Archived State' } },
   color: '#6b7280',
   category: 'closed',
   position: 3,
@@ -78,6 +82,26 @@ describe('TransitionMatrix', () => {
     expect(openBadges.length).toBeGreaterThanOrEqual(2)
     const progressBadges = screen.getAllByText('In Progress')
     expect(progressBadges.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('renders localized display names, not the machine keys', () => {
+    renderWithProviders(
+      <TransitionMatrix states={states} transitions={[]} saving={false} onSave={vi.fn()} />,
+    )
+    // Header + row badges resolve displayName ("Open"), never the slug.
+    expect(screen.getAllByText('Open').length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByText('open')).not.toBeInTheDocument()
+    // Checkbox accessible names also use the resolved display name.
+    expect(screen.getByRole('checkbox', { name: 'Open → In Progress' })).toBeInTheDocument()
+  })
+
+  it('falls back to the machine key when a state has no displayName', () => {
+    const noDisplay: WorkflowState[] = [{ ...states[0], displayName: undefined }, states[1]]
+    renderWithProviders(
+      <TransitionMatrix states={noDisplay} transitions={[]} saving={false} onSave={vi.fn()} />,
+    )
+    expect(screen.getAllByText('open').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByRole('checkbox', { name: 'open → In Progress' })).toBeInTheDocument()
   })
 
   it('renders dashes on the diagonal (self-transitions)', () => {

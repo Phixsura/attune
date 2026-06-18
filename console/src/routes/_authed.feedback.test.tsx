@@ -143,6 +143,70 @@ describe('_authed.feedback route — user flow smoke', () => {
     expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
   })
 
+  it('renders the workflow-state badge on a row via the displayName resolver', async () => {
+    // A feedback row carrying a workflowState whose human label lives in
+    // displayName (machine key is the "open" slug). The badge must show
+    // the resolved label, not the slug.
+    const workflowState = {
+      id: 'ws-1',
+      name: 'open',
+      displayName: { entries: { default: 'Open', zh: '待处理' } },
+      color: '#3b82f6',
+      category: 'open',
+      position: 0,
+      isDefault: true,
+      archived: false,
+      createdAt: '2026-06-07T00:00:00Z',
+      updatedAt: '2026-06-07T00:00:00Z',
+    }
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: [] },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({
+          items: [{ ...itemFixture, workflowState }],
+          nextCursor: undefined,
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [],
+          urgentCount: '0',
+        }),
+      ),
+      // The filter dropdown lists active states; resolves displayName too.
+      http.get('/fb/v1/console/workflow/states', () =>
+        HttpResponse.json({ states: [workflowState] }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const FeedbackPage = FeedbackRoute.options.component as React.ComponentType & {
+      preload?: () => Promise<unknown>
+    }
+    if (FeedbackPage.preload) await FeedbackPage.preload()
+    renderWithProviders(
+      <Suspense fallback={null}>
+        <FeedbackPage />
+      </Suspense>,
+    )
+
+    // The row badge resolves the zh display name ("待处理"), never "open".
+    await waitFor(() => {
+      expect(screen.getByText('待处理')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('open')).not.toBeInTheDocument()
+  })
+
   it('500 from /feedback → empty state (not crash) — documents current behavior', async () => {
     // Backend errors currently render as "no feedback" rather than a
     // distinct error UI — debatable UX, but it's the actual behavior

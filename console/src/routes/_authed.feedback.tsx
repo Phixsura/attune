@@ -348,7 +348,7 @@ function FilterBar({
                     className="inline-block size-2 rounded-full"
                     style={{ backgroundColor: s.color }}
                   />
-                  {s.name}
+                  {displayOf(s.displayName) || s.name}
                 </span>
               </SelectItem>
             ))}
@@ -435,13 +435,7 @@ function FeedbackTable({
                 <div className="truncate text-xs text-muted-foreground">{f.content}</div>
                 {(f.tags.length > 0 || f.workflowState) && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
-                    {f.workflowState && (
-                      <WorkflowStateBadge
-                        name={f.workflowState.name}
-                        color={f.workflowState.color}
-                        category={f.workflowState.category}
-                      />
-                    )}
+                    {f.workflowState && <WorkflowStateBadge state={f.workflowState} />}
                     {f.tags.map((tag) => (
                       <TagBadgeTooltip key={tag.id} tag={tagLookup.get(tag.id) ?? tag} />
                     ))}

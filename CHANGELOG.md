@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Changed
+
+- **Workflow state names are now localized (#64).** `WorkflowState.name` is now a
+  stable machine key (slug `^[a-z][a-z0-9_]{0,30}$`); the human-facing label moves
+  to a new per-locale `display_name` (`I18nString`), mirroring how dimensions
+  already separate a stable key from an editable localized display. Default seed
+  states ship `default`/`en`/`zh` labels. **Behavioral break (pre-1.0):** API
+  clients that read `WorkflowState.name` as a display string should read
+  `display_name`; create/update payloads carry `display_name`. Migration 053
+  backfills existing rows (label preserved in `display_name`, key slugged).
+
 ### Added
+
+- **Shipped-artifact hygiene CI guard (#64).** New `scripts/lint-artifacts.sh`
+  (wired into `ci-gate`, the pre-commit hook, and `make ci-check`) fails on leaked
+  intermediate-state scaffolding in shipped artifacts: internal `Phase N` roadmap
+  markers and non-i18n CJK in `*.go` / `openapi.yaml` / shipped `*.md` (i18n
+  files, localized product data, and test fixtures are allow-listed via
+  `// lint-artifacts:[file-]allow`). The accompanying one-time sweep removed the
+  residual `Phase` markers and two leaked Chinese Console labels. `CLAUDE.md` and
+  `AGENTS.md` now carry the English-canonical policy and a "run `make ci-check`
+  before claiming done" rule.
+
+- **AI-collaboration skills directory (#64).** New `.agents/skills/` ships
+  reusable, tool-neutral Agent-Skills (Anthropic `SKILL.md` format) for attune's
+  conventions — `/attune:proposal`, `/attune:create-pr`, `/attune:preflight` — so
+  AI assistants follow the proposal/changelog/preflight rules consistently.
 
 - **Notify outbox dead-queue operator surface (#33).** Operators can now inspect
   and recover failed webhook deliveries from the Console/API instead of querying

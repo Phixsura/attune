@@ -105,6 +105,10 @@ ci-check: ## Run all CI checks locally before push.
 	@bash scripts/lint-slog.sh --strict
 	@echo "✓ lint-slog"
 	@echo
+	@echo "▸ scripts/lint-artifacts.sh"
+	@bash scripts/lint-artifacts.sh --strict
+	@echo "✓ lint-artifacts"
+	@echo
 	@echo "▸ scripts/lint-rawptr.sh"
 	@bash scripts/lint-rawptr.sh
 	@echo "✓ lint-rawptr"

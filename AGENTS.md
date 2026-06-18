@@ -27,6 +27,7 @@ AI assistants (Codex, Cursor, etc.) working on this repository.
 | Raw pointer ops | 0 bare `*p` deref / `&x` address-of (use `internal/pkg/ptrext`) | `scripts/lint-rawptr.sh` |
 | Error response codes | `ErrorResponse.code` comes from the enum | `scripts/lint-errorcode.sh` |
 | Integration layout | 0 misplaced integration-tagged tests | `scripts/lint-integration-layout.sh` |
+| Shipped-artifact hygiene | 0 leaked CJK / roadmap markers (allow-list aside) | `scripts/lint-artifacts.sh --strict` |
 | PostgreSQL integration tests | All pass on Go changes | `make test-integration` in CI |
 | **Console (TS / React)** | | |
 | `pnpm tsc -b --noEmit` | 0 errors | CI |
@@ -233,6 +234,31 @@ When Codex / Cursor / similar tooling is editing this repo:
 - Never bypass pre-commit hooks or CI gates to "make red go green." Fix the
   underlying issue.
 - **Every issue gets a proposal** (§11) written before/with the code.
+- **Cite verification, don't assert it.** Before claiming a task complete, run
+  `make ci-check` (or the relevant subset) and cite the output — never assert a
+  gate is green without evidence.
+- `agent-skills/` holds attune's reusable agent skills (namespaced `/attune:*`
+  commands); see that directory's README.
+
+### Shipped-artifact hygiene
+
+attune is an English, Apache-2.0 OSS project built collaboratively in Chinese and
+in phases. Keep the intermediate state out of what ships:
+
+- **English is canonical** in shipped code, comments, and API docs.
+- **No internal phase/stage/roadmap markers** (`Phase N`) or transitional language
+  ("for now", "coming in a follow-up", "deferred") in shipped artifacts.
+- **Sweep intermediate-state scaffolding as part of every change** — don't leave
+  half-migrated TODOs or "will wire later" stubs behind.
+- **Allowed CJK** = i18n locale files (`console/src/i18n/`), localized product data
+  (`internal/domain/semantic_pack.go`, workflow seed states), language-aware prompts
+  (`enricher_prompt.go`), and test fixtures (`test/**`, `*_test.go`). Silence genuine
+  exceptions with `// lint-artifacts:allow <reason>` (one line) or
+  `// lint-artifacts:file-allow <reason>` (whole file).
+
+`scripts/lint-artifacts.sh --strict` enforces the roadmap-marker (Check A) and
+non-i18n-CJK (Check B) rules in pre-commit + CI; transitional-language (Check C) is
+advisory.
 
 ---
 

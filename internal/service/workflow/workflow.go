@@ -1,3 +1,5 @@
+// lint-artifacts:file-allow localized workflow seed-state display names (zh/en)
+
 package workflow
 
 import (
@@ -7,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -138,8 +141,8 @@ func (s *Service) Transition(ctx context.Context, tenantID string, feedbackID in
 		FeedbackID: feedbackID,
 		EntityType: "workflow_state",
 		FieldName:  "workflow_state_id",
-		OldValue:   ptrext.Of(fromState.Name),
-		NewValue:   ptrext.Of(toState.Name),
+		OldValue:   ptrext.Of(fromState.DisplayName.Resolve(nil)),
+		NewValue:   ptrext.Of(toState.DisplayName.Resolve(nil)),
 		Comment:    comment,
 		ChangedBy:  byUser,
 	}); err != nil {
@@ -230,11 +233,12 @@ func (s *Service) ArchiveState(ctx context.Context, tenantID, stateID string) er
 }
 
 type seedState struct {
-	Name      string
-	Color     string
-	Category  string
-	Position  int
-	IsDefault bool
+	Name        string // stable machine key (slug)
+	DisplayName domain.I18nString
+	Color       string
+	Category    string
+	Position    int
+	IsDefault   bool
 }
 
 type seedTransition struct {
@@ -246,23 +250,23 @@ func (s *Service) SeedDefaults(ctx context.Context, tenantID string) error {
 	const where = "service.workflow.SeedDefaults"
 
 	states := []seedState{
-		{Name: "待处理", Color: "#6b7280", Category: "open", Position: 0, IsDefault: true},
-		{Name: "已分拣", Color: "#3b82f6", Category: "open", Position: 1},
-		{Name: "处理中", Color: "#f59e0b", Category: "active", Position: 2},
-		{Name: "已修复", Color: "#10b981", Category: "closed", Position: 3},
-		{Name: "不处理", Color: "#ef4444", Category: "closed", Position: 4},
+		{Name: "pending", DisplayName: domain.I18nString{"default": "Pending", "en": "Pending", "zh": "待处理"}, Color: "#6b7280", Category: "open", Position: 0, IsDefault: true},
+		{Name: "triaged", DisplayName: domain.I18nString{"default": "Triaged", "en": "Triaged", "zh": "已分拣"}, Color: "#3b82f6", Category: "open", Position: 1},
+		{Name: "in_progress", DisplayName: domain.I18nString{"default": "In progress", "en": "In progress", "zh": "处理中"}, Color: "#f59e0b", Category: "active", Position: 2},
+		{Name: "fixed", DisplayName: domain.I18nString{"default": "Fixed", "en": "Fixed", "zh": "已修复"}, Color: "#10b981", Category: "closed", Position: 3},
+		{Name: "wont_fix", DisplayName: domain.I18nString{"default": "Won't fix", "en": "Won't fix", "zh": "不处理"}, Color: "#ef4444", Category: "closed", Position: 4},
 	}
 	transitions := []seedTransition{
-		{"待处理", "已分拣"},
-		{"待处理", "处理中"},
-		{"待处理", "不处理"},
-		{"已分拣", "处理中"},
-		{"已分拣", "不处理"},
-		{"处理中", "已修复"},
-		{"处理中", "不处理"},
-		{"处理中", "待处理"},
-		{"已修复", "待处理"},
-		{"不处理", "待处理"},
+		{"pending", "triaged"},
+		{"pending", "in_progress"},
+		{"pending", "wont_fix"},
+		{"triaged", "in_progress"},
+		{"triaged", "wont_fix"},
+		{"in_progress", "fixed"},
+		{"in_progress", "wont_fix"},
+		{"in_progress", "pending"},
+		{"fixed", "pending"},
+		{"wont_fix", "pending"},
 	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
@@ -274,12 +278,13 @@ func (s *Service) SeedDefaults(ctx context.Context, tenantID string) error {
 	nameToID := make(map[string]string, len(states))
 	for _, st := range states {
 		id, err := s.states.UpsertStateReturningID(ctx, tx, workflowstate.WorkflowState{
-			TenantID:  tenantID,
-			Name:      st.Name,
-			Color:     st.Color,
-			Category:  st.Category,
-			Position:  st.Position,
-			IsDefault: st.IsDefault,
+			TenantID:    tenantID,
+			Name:        st.Name,
+			DisplayName: st.DisplayName,
+			Color:       st.Color,
+			Category:    st.Category,
+			Position:    st.Position,
+			IsDefault:   st.IsDefault,
 		})
 		if err != nil {
 			return fmt.Errorf("seed state %q: %w", st.Name, err)

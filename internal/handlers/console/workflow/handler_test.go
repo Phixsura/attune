@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
 )
@@ -13,15 +14,16 @@ import (
 func stateFixture() workflowstate.WorkflowState {
 	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 	return workflowstate.WorkflowState{
-		ID:        "s-1",
-		TenantID:  "t-1",
-		Name:      "Open",
-		Color:     "#3b82f6",
-		Category:  "open",
-		Position:  0,
-		IsDefault: true,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          "s-1",
+		TenantID:    "t-1",
+		Name:        "open",
+		DisplayName: domain.I18nString{"default": "Open"},
+		Color:       "#3b82f6",
+		Category:    "open",
+		Position:    0,
+		IsDefault:   true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 }
 
@@ -35,8 +37,11 @@ func TestStateToProto(t *testing.T) {
 		if p.GetId() != "s-1" {
 			t.Fatalf("id = %q", p.GetId())
 		}
-		if p.GetName() != "Open" {
-			t.Fatalf("name = %q", p.GetName())
+		if p.GetName() != "open" {
+			t.Fatalf("name (key) = %q", p.GetName())
+		}
+		if got := p.GetDisplayName().GetEntries()["default"]; got != "Open" {
+			t.Fatalf("display_name[default] = %q", got)
 		}
 		if p.GetColor() != "#3b82f6" {
 			t.Fatalf("color = %q", p.GetColor())

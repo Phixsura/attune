@@ -30,8 +30,8 @@ const MaxContentLen = 5000
 // vocabulary to validate against.)
 var ValidSources = map[string]bool{
 	"api":     true, // generic API client (default for /v1/feedback/ingest)
-	"webhook": true, // generic inbound HTTP webhook (#66 Phase 1)
-	"email":   true, // mailbox poller / inbound IMAP (#66 Phase 1)
+	"webhook": true, // generic inbound HTTP webhook
+	"email":   true, // mailbox poller / inbound IMAP
 	"web":     true, // in-app JS feedback widget
 	"other":   true, // catch-all for misc integrations
 }

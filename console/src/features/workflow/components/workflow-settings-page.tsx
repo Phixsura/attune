@@ -30,12 +30,14 @@ import { workflowTransitionsQuery } from '@/features/workflow/api/list-transitio
 import { useReplaceTransitions } from '@/features/workflow/api/replace-transitions'
 import { useSeedDefaults } from '@/features/workflow/api/seed-defaults'
 import { useUpdateState } from '@/features/workflow/api/update-state'
+import { useDisplayName } from '@/lib/i18n-resolve'
 import type { WorkflowTransitionEdge } from '@/proto/attune/v1/workflow'
-import { StateFormDialog } from './state-form-dialog'
+import { type StateFormData, StateFormDialog } from './state-form-dialog'
 import { TransitionMatrix } from './transition-matrix'
 
 export function WorkflowSettingsPage() {
   const { t } = useTranslation()
+  const displayOf = useDisplayName()
   const statesQ = useQuery(workflowStatesQuery())
   const transitionsQ = useQuery(workflowTransitionsQuery())
   const createState = useCreateState()
@@ -62,9 +64,15 @@ export function WorkflowSettingsPage() {
   const transitions = transitionsQ.data ?? []
   const active = items.filter((s) => !s.archived)
 
-  const handleCreate = (data: { name: string; color: string; category: string }) => {
+  const handleCreate = (data: StateFormData) => {
     createState.mutate(
-      { name: data.name, color: data.color, category: data.category, position: active.length },
+      {
+        name: data.name,
+        displayName: { entries: data.displayName },
+        color: data.color,
+        category: data.category,
+        position: active.length,
+      },
       {
         onSuccess: () => {
           setCreateOpen(false)
@@ -75,10 +83,11 @@ export function WorkflowSettingsPage() {
     )
   }
 
-  const handleUpdate = (data: { name: string; color: string; category: string }) => {
+  const handleUpdate = (data: StateFormData) => {
     if (!editState) return
+    // The machine key (name) is immutable — send displayName to relabel.
     updateState.mutate(
-      { id: editState.id, name: data.name, color: data.color },
+      { id: editState.id, displayName: { entries: data.displayName }, color: data.color },
       {
         onSuccess: () => {
           setEditState(undefined)
@@ -146,7 +155,7 @@ export function WorkflowSettingsPage() {
                   {items.map((s) => (
                     <TableRow key={s.id} className={s.archived ? 'opacity-50' : ''}>
                       <TableCell>
-                        <WorkflowStateBadge name={s.name} color={s.color} category={s.category} />
+                        <WorkflowStateBadge state={s} />
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {t(`workflow.categories.${s.category}`)}
@@ -231,7 +240,11 @@ export function WorkflowSettingsPage() {
           <DialogHeader>
             <DialogTitle>{t('workflow.archive_label')}</DialogTitle>
             <DialogDescription>
-              {t('workflow.archive_confirm', { name: archiveTarget?.name })}
+              {t('workflow.archive_confirm', {
+                name: archiveTarget
+                  ? displayOf(archiveTarget.displayName) || archiveTarget.name
+                  : '',
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

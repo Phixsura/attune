@@ -17,7 +17,8 @@ import { useUpdateState } from './update-state'
 
 const stateFixture: WorkflowState = {
   id: 'ws-1',
-  name: 'Open',
+  name: 'open',
+  displayName: { entries: { default: 'Open' } },
   color: '#3b82f6',
   category: 'open',
   position: 0,
@@ -154,10 +155,23 @@ describe('workflow API hooks', () => {
       const invalidate = vi.spyOn(qc, 'invalidateQueries')
       const { result } = renderHook(() => useCreateState(), { wrapper: wrapperFor(qc) })
 
-      result.current.mutate({ name: 'New', color: '#3b82f6', category: 'open', position: 0 })
+      result.current.mutate({
+        name: 'new',
+        displayName: { entries: { default: 'New', zh: '新建' } },
+        color: '#3b82f6',
+        category: 'open',
+        position: 0,
+      })
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
-      expect(body).toEqual({ name: 'New', color: '#3b82f6', category: 'open', position: 0 })
+      // The body carries the machine key + the per-locale displayName envelope.
+      expect(body).toEqual({
+        name: 'new',
+        displayName: { entries: { default: 'New', zh: '新建' } },
+        color: '#3b82f6',
+        category: 'open',
+        position: 0,
+      })
       expect(invalidate).toHaveBeenCalledWith({ queryKey: workflowStatesQueryKey })
     })
 
@@ -168,18 +182,29 @@ describe('workflow API hooks', () => {
         http.patch('/fb/v1/console/workflow/states/:id', async ({ request }) => {
           patchUrl = new URL(request.url).pathname
           body = await request.json()
-          return HttpResponse.json({ state: { ...stateFixture, name: 'Renamed' } })
+          return HttpResponse.json({
+            state: { ...stateFixture, displayName: { entries: { default: 'Renamed' } } },
+          })
         }),
       )
       const qc = makeQueryClient()
       const invalidate = vi.spyOn(qc, 'invalidateQueries')
       const { result } = renderHook(() => useUpdateState(), { wrapper: wrapperFor(qc) })
 
-      result.current.mutate({ id: 'ws-1', name: 'Renamed', color: '#ef4444' })
+      // The machine key is immutable — relabel by sending displayName only.
+      result.current.mutate({
+        id: 'ws-1',
+        displayName: { entries: { default: 'Renamed' } },
+        color: '#ef4444',
+      })
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
       expect(patchUrl).toBe('/fb/v1/console/workflow/states/ws-1')
-      expect(body).toEqual({ id: 'ws-1', name: 'Renamed', color: '#ef4444' })
+      expect(body).toEqual({
+        id: 'ws-1',
+        displayName: { entries: { default: 'Renamed' } },
+        color: '#ef4444',
+      })
       expect(invalidate).toHaveBeenCalledWith({ queryKey: workflowStatesQueryKey })
     })
 

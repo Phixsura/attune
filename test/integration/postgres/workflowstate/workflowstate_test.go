@@ -7,6 +7,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/testdb"
@@ -27,18 +28,22 @@ func TestPG_StateCRUD(t *testing.T) {
 	ctx, repo, tenantID := setup(t)
 
 	created, err := repo.Create(ctx, workflowstate.WorkflowState{
-		TenantID:  tenantID,
-		Name:      "New",
-		Color:     "#3b82f6",
-		Category:  "open",
-		Position:  0,
-		IsDefault: true,
+		TenantID:    tenantID,
+		Name:        "new",
+		DisplayName: domain.I18nString{"default": "New", "zh": "新建"},
+		Color:       "#3b82f6",
+		Category:    "open",
+		Position:    0,
+		IsDefault:   true,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created.Name != "New" || created.Category != "open" || !created.IsDefault {
+	if created.Name != "new" || created.Category != "open" || !created.IsDefault {
 		t.Fatalf("unexpected state: %+v", created)
+	}
+	if created.DisplayName["default"] != "New" || created.DisplayName["zh"] != "新建" {
+		t.Fatalf("display_name round-trip failed: %v", created.DisplayName)
 	}
 	if created.ArchivedAt != nil {
 		t.Fatal("new state should not be archived")
@@ -49,22 +54,28 @@ func TestPG_StateCRUD(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetByTenantAndID: %v", err)
 		}
-		if got.Name != "New" {
-			t.Fatalf("name = %q want %q", got.Name, "New")
+		if got.Name != "new" {
+			t.Fatalf("name (key) = %q want %q", got.Name, "new")
+		}
+		if got.DisplayName["zh"] != "新建" {
+			t.Fatalf("display_name[zh] = %q want %q", got.DisplayName["zh"], "新建")
 		}
 	})
 
-	t.Run("Update", func(t *testing.T) {
+	t.Run("Update_changes_display_not_key", func(t *testing.T) {
 		updated, err := repo.Update(ctx, workflowstate.WorkflowState{
-			ID:       created.ID,
-			TenantID: tenantID,
-			Name:     "Open",
-			Color:    "#22c55e",
+			ID:          created.ID,
+			TenantID:    tenantID,
+			DisplayName: domain.I18nString{"default": "Open"},
+			Color:       "#22c55e",
 		})
 		if err != nil {
 			t.Fatalf("Update: %v", err)
 		}
-		if updated.Name != "Open" || updated.Color != "#22c55e" {
+		if updated.Name != "new" { // key is immutable
+			t.Fatalf("key changed on update: %q", updated.Name)
+		}
+		if updated.DisplayName["default"] != "Open" || updated.Color != "#22c55e" {
 			t.Fatalf("unexpected update: %+v", updated)
 		}
 	})
@@ -79,12 +90,13 @@ func TestPG_StateCRUD(t *testing.T) {
 		}
 	})
 
-	t.Run("NameConflict", func(t *testing.T) {
+	t.Run("KeyConflict", func(t *testing.T) {
 		_, err := repo.Create(ctx, workflowstate.WorkflowState{
-			TenantID: tenantID,
-			Name:     "Open",
-			Color:    "#000000",
-			Category: "open",
+			TenantID:    tenantID,
+			Name:        "new", // same machine key
+			DisplayName: domain.I18nString{"default": "Dup"},
+			Color:       "#000000",
+			Category:    "open",
 		})
 		if !errors.Is(err, workflowstate.ErrNameConflict) {
 			t.Fatalf("expected ErrNameConflict, got %v", err)

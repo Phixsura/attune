@@ -1,5 +1,7 @@
 package domain
 
+// lint-artifacts:file-allow localized semantic-pack display data (zh/en/ja)
+
 const (
 	CustomerFeedbackPackName      = "customer_feedback"
 	CustomerFeedbackSchemaVersion = "customer_feedback.v1"

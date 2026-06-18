@@ -18,6 +18,8 @@ package enrich
 // gate (2) is what makes "attrs ⊆ configured taxonomy per dim" a
 // property independent of which provider answered.
 
+// lint-artifacts:file-allow language-aware enrichment prompt template (zh)
+
 import (
 	"fmt"
 	"strings"

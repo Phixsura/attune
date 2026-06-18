@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Tag } from '@/proto/attune/v1/tag'
 import type { WorkflowState } from '@/proto/attune/v1/workflow'
 
@@ -42,6 +43,7 @@ export function SelectionActionBar({
   onSelectAll?: () => void
 }) {
   const { t } = useTranslation()
+  const displayOf = useDisplayName()
 
   if (count === 0) return null
 
@@ -116,7 +118,7 @@ export function SelectionActionBar({
                     className="inline-block size-2 rounded-full"
                     style={{ backgroundColor: s.color }}
                   />
-                  {s.name}
+                  {displayOf(s.displayName) || s.name}
                 </span>
               </SelectItem>
             ))}
