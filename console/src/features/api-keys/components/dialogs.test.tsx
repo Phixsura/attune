@@ -105,6 +105,36 @@ describe('CreateKeyDialog', () => {
       expect(screen.getByRole('combobox')).toBeInTheDocument()
     })
   })
+
+  it('submits empty scopes when preset not found', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json({ presets: [] })),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json(mockScopes)),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+    await user.type(screen.getByRole('textbox'), 'empty-preset-key')
+    await user.click(screen.getByTestId('create-key-submit'))
+    expect(onSubmit).toHaveBeenCalledWith({
+      label: 'empty-preset-key',
+      scopes: [],
+    })
+  })
+
+  it('shows preset description when preset selected', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json(mockPresets)),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json(mockScopes)),
+    )
+    renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={vi.fn()} pending={false} />,
+    )
+    await waitFor(() => {
+      expect(screen.getByText('All permissions')).toBeInTheDocument()
+    })
+  })
 })
 
 describe('SecretKeyDialog', () => {
