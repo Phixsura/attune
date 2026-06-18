@@ -457,34 +457,21 @@ Key list page:
 
 ## Implementation Plan
 
-Split into **3 PRs** for reviewability and rollback isolation:
+Single PR (~1900 LOC), phases executed sequentially:
 
-### PR1: Backend Core (~460 LOC)
-
-| Phase | Work | Location |
-|-------|------|----------|
-| **1. Schema** | Migration 046 with `api_key_scopes` table + seed (exclude `apikey:admin`) | `internal/infra/database/migrations/` |
-| **2. Domain** | `scope.go` with types, hierarchy, `HasScope` | `internal/domain/` |
-| **3. Repo** | Scope CRUD in same package as apikey | `internal/repo/apikey/scope.go` |
-| **4. Service** | `LookupWithScopes` atomic call; update `Issue` to accept scopes | `internal/service/apikey/` |
-| **5. Middleware** | `scope.RequireScope`, `dualauth.TrySessionOrAPIKey` | `internal/handlers/console/internal/scope/`, `internal/handlers/console/internal/dualauth/` |
-
-### PR2: Endpoint Protection (~300 LOC)
-
-| Phase | Work | Location |
-|-------|------|----------|
-| **6. Handlers** | Add `RequireScope` to all ~25 mount functions in router | `internal/handlers/console/router.go` |
-| **6b. Audit test** | Table-driven: enumerate all routes vs required scopes | `internal/handlers/console/router_scope_test.go` |
-
-### PR3: User-Facing (~1140 LOC)
-
-| Phase | Work | Location |
-|-------|------|----------|
-| **7. Proto** | Update `api_key.proto`, run `make proto` | `proto/attune/v1/` |
-| **8. Console handlers** | Pass scopes to service; add preset/scope list endpoints | `internal/handlers/console/apikey/` |
-| **9. Console UI** | New create dialog with presets, scope display on list | `console/src/features/api-keys/` |
-| **10. Tests** | Unit (domain), integration (repo), component (UI), E2E | various |
-| **11. Docs** | README scope section, private-deploy.md update | `docs/` |
+| Phase | Work | Location | LOC |
+|-------|------|----------|-----|
+| **1. Schema** | Migration 046 with `api_key_scopes` table + seed (exclude `apikey:admin`) | `internal/infra/database/migrations/` | ~30 |
+| **2. Domain** | `scope.go` with types, hierarchy, `HasScope` | `internal/domain/` | ~100 |
+| **3. Repo** | Scope CRUD in same package as apikey | `internal/repo/apikey/scope.go` | ~80 |
+| **4. Service** | `LookupWithScopes` atomic call; update `Issue` to accept scopes | `internal/service/apikey/` | ~50 |
+| **5. Middleware** | `scope.RequireScope`, `dualauth.TrySessionOrAPIKey` | `internal/handlers/console/internal/scope/`, `internal/handlers/console/internal/dualauth/` | ~200 |
+| **6. Handlers** | Add `RequireScope` to all ~25 mount functions in router | `internal/handlers/console/router.go` | ~300 |
+| **7. Proto** | Update `api_key.proto`, run `make proto` | `proto/attune/v1/` | ~60 |
+| **8. Console handlers** | Pass scopes to service; add preset/scope list endpoints | `internal/handlers/console/apikey/` | ~80 |
+| **9. Console UI** | New create dialog with presets, scope display on list | `console/src/features/api-keys/` | ~350 |
+| **10. Tests** | Unit (domain), integration (repo), handler audit, component (UI) | various | ~600 |
+| **11. Docs** | README scope section, private-deploy.md update, CHANGELOG | `docs/` | ~50 |
 
 ---
 
