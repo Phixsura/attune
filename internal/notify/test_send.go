@@ -13,6 +13,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/notify/sig"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
@@ -20,13 +21,6 @@ import (
 // canonical raw-webhook signing format is shared verbatim across notify
 // root, every adapter, and service/outbox — no "must-stay-in-sync"
 // comments, no drift.
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
-}
 
 // TestResult is the outcome of a one-shot connectivity ping.
 // Returned by TestSend; the console /notify-targets/{id}/test endpoint
@@ -51,7 +45,7 @@ type TestResult struct {
 func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult {
 	const where = "notify.TestSend"
 	logext.Infof(ctx, "[%s] start,target_id:%s,dest_type:%s,url:%s",
-		where, target.ID, target.DestinationType, target.URL)
+		where, target.ID, target.DestinationType, nethardening.RedactURL(target.URL))
 	if target.URL == "" {
 		logext.Warnf(ctx, "[%s] reject: empty url,target_id:%s", where, target.ID)
 		return TestResult{Err: fmt.Errorf("target.url is empty")}
@@ -91,7 +85,7 @@ func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.URL, bytes.NewReader(body))
 	if err != nil {
 		logext.Errorf(ctx, "[%s] build request failed,url:%s,err:%+v",
-			where, target.URL, err.Error())
+			where, nethardening.RedactURL(target.URL), err.Error())
 		return TestResult{Err: fmt.Errorf("build request: %w", err)}
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
@@ -99,13 +93,15 @@ func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult 
 	for k, v := range extraHeaders {
 		req.Header.Set(k, v)
 	}
-	// Upstream request body — truncated at 1024 bytes; signature
-	// headers (X-Attune-Signature, etc.) are intentionally not logged.
-	logext.Infof(ctx, "[%s] upstream req,dest_type:%s,url:%s,body:%s",
-		where, target.DestinationType, target.URL, truncate(string(body), 1024))
+	// Redacted URL + body size only — the URL can carry secrets in its path/query
+	// and the body is customer content; signature headers are never logged.
+	logext.Infof(ctx, "[%s] upstream req,dest_type:%s,url:%s,body_bytes:%d",
+		where, target.DestinationType, nethardening.RedactURL(target.URL), len(body))
 
 	httpClient := http.Client{
-		Transport: otelhttp.NewTransport(clonedDefaultTransport()),
+		// egressPolicy guards the dial (SSRF): the test URL is tenant-pasted, so
+		// this MUST go through the same guard as real delivery, not a raw client.
+		Transport: otelhttp.NewTransport(egressPolicy.NewHTTPTransport()),
 		Timeout:   timeout,
 	}
 	start := time.Now()
@@ -113,29 +109,21 @@ func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult 
 	latencyMs := time.Since(start).Milliseconds()
 	if doErr != nil {
 		logext.Errorf(ctx, "[%s] http do failed,url:%s,latency_ms:%d,err:%+v",
-			where, target.URL, latencyMs, doErr.Error())
+			where, nethardening.RedactURL(target.URL), latencyMs, doErr.Error())
 		return TestResult{LatencyMs: latencyMs, Err: doErr}
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
-	// Upstream response body — truncated at 1024 bytes.
-	logext.Infof(ctx, "[%s] upstream resp,url:%s,status:%d,latency_ms:%d,body:%s",
-		where, target.URL, resp.StatusCode, latencyMs, truncate(string(raw), 1024))
+	logext.Infof(ctx, "[%s] upstream resp,url:%s,status:%d,latency_ms:%d,body_bytes:%d",
+		where, nethardening.RedactURL(target.URL), resp.StatusCode, latencyMs, len(raw))
 	if checkErr := checkResponse(resp.StatusCode, raw); checkErr != nil {
 		logext.Warnf(ctx, "[%s] check failed,url:%s,status:%d,err:%s",
-			where, target.URL, resp.StatusCode, checkErr.Error())
+			where, nethardening.RedactURL(target.URL), resp.StatusCode, checkErr.Error())
 		return TestResult{StatusCode: resp.StatusCode, LatencyMs: latencyMs, Err: checkErr}
 	}
 	logext.Infof(ctx, "[%s] OK,target_id:%s,status:%d,latency_ms:%d",
 		where, target.ID, resp.StatusCode, latencyMs)
 	return TestResult{OK: true, StatusCode: resp.StatusCode, LatencyMs: latencyMs}
-}
-
-func clonedDefaultTransport() http.RoundTripper {
-	if tr, ok := http.DefaultTransport.(*http.Transport); ok {
-		return tr.Clone()
-	}
-	return http.DefaultTransport
 }
 
 // buildRawTestBody constructs a minimal envelope marked event_type="test"

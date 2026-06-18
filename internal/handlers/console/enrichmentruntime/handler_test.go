@@ -305,7 +305,7 @@ func TestUpdateMapsProtoToServiceAndRecordsAudit(t *testing.T) {
 	require.Equal(t, "raise queue", svc.updateReason)
 	require.Equal(t, "admin-1", svc.updateActor.ID)
 	require.Equal(t, "admin", svc.updateActor.ActorType)
-	require.Equal(t, "203.0.113.5:4123", svc.updateActor.ActorIP)
+	require.Equal(t, "203.0.113.5", svc.updateActor.ActorIP) // host only (trusted-proxy client-IP resolution strips the port)
 	require.Equal(t, "attune-test", svc.updateActor.ActorUserAgent)
 	require.Equal(t, uint64(8), resp.GetRuntime().GetDesiredRevision().GetVersion())
 	require.Equal(t, 1, audit.calls)
@@ -569,7 +569,7 @@ func TestActorFromRequestUsesProvidedUserTypeAndToProtoHelpersCoverRemainingBran
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, "member", svc.updateActor.ActorType)
 	require.Equal(t, "member-1", svc.updateActor.ID)
-	require.Equal(t, "198.51.100.10:1234", svc.updateActor.ActorIP)
+	require.Equal(t, "198.51.100.10", svc.updateActor.ActorIP) // host only (trusted-proxy client-IP resolution strips the port)
 	require.Equal(t, "attune-browser", svc.updateActor.ActorUserAgent)
 
 	now := time.Now().UTC().Truncate(time.Second)

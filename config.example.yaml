@@ -88,6 +88,23 @@ rate_limit:
   burst: 300
   disabled: false
 
+# Outbound egress + reverse-proxy hardening. Cloud-metadata, link-local,
+# unspecified, and multicast targets are ALWAYS blocked for outbound webhook /
+# LLM dials regardless of these flags.
+security:
+  # Allow outbound dials to loopback (127.0.0.1, ::1, localhost). Off in
+  # production; turn on for local dev or a loopback reverse-proxy in front of an
+  # LLM gateway.
+  allow_loopback_egress: false
+  # Allow outbound dials to RFC1918 / unique-local networks. Turn on for on-prem
+  # deployments co-located with an internal IMAP or LLM host.
+  allow_private_egress: false
+  # Number of trusted reverse proxies in front of attune that append to
+  # X-Forwarded-For. The API-key IP allowlist reads the client IP that many hops
+  # from the right of the header. 0 ignores X-Forwarded-For entirely (use the
+  # direct peer) so a direct client cannot spoof an allowlisted source IP.
+  trusted_proxy_hops: 0
+
 # Optional bootstrap raw-webhook destinations. The console/API can manage
 # runtime targets after startup.
 custom_webhooks: []

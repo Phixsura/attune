@@ -3,6 +3,7 @@ package enrich
 import (
 	"context"
 	"errors"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +13,21 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
+
+// recoverWorker recovers a panic in an enrichment goroutine so a single bad job
+// (e.g. a malformed LLM response tripping a nil-deref deep in EnrichOne) can't
+// unwind to the top of the goroutine and crash the whole process — which a bare
+// `go` launch would. It counts the panic in attune_worker_panics_total{worker}
+// and logs a stack. The enrich runner is NOT wrapped by cmd/attune.safego
+// (its Run does `defer close(r.done)`, so a restart would double-close); these
+// per-goroutine recovers are the equivalent protection for the enrich path.
+func recoverWorker(ctx context.Context, worker string) {
+	if rec := recover(); rec != nil {
+		metrics.WorkerPanics.WithLabelValues(worker).Inc()
+		logext.Errorf(ctx, "[service.enrich] worker panicked — recovered,worker:%s,panic:%v,stack:%s",
+			worker, rec, string(debug.Stack()))
+	}
+}
 
 type enrichExecutor interface {
 	EnrichOne(ctx context.Context, id int64) error
@@ -137,10 +153,12 @@ func (r *Runner) Run(ctx context.Context) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
+		defer recoverWorker(ctx, "enrich_processor")
 		r.runProcessor(ctx)
 	}()
 	go func() {
 		defer wg.Done()
+		defer recoverWorker(ctx, "enrich_sweeper")
 		r.runSweeper(ctx)
 	}()
 	<-ctx.Done()
@@ -250,6 +268,10 @@ func (r *Runner) processBatch(ctx context.Context, batch []Job) {
 				<-sem
 				wg.Done()
 			}()
+			// Per-job recover: a panic enriching one row (the documented
+			// malformed-LLM-response risk) must not crash the process or the
+			// processor — count it, log it, and move on to the next job.
+			defer recoverWorker(ctx, "enrich_job")
 			if err := r.execute(ctx, job); err != nil {
 				logext.Warnf(ctx, "[service.enrich.Runner.processBatch] enrich failed,id:%d,err:%+v", job.ID, err.Error())
 			}

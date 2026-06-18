@@ -315,3 +315,157 @@ func TestDeadCount(t *testing.T) {
 		t.Fatalf("dead count delta = %d, want 2", after-before)
 	}
 }
+
+// TestClaimBatch_SecondReplicaSkipsInFlightRows is the multi-replica
+// double-delivery guard: once one worker claims a row (sets claimed_at and
+// commits, before it has finished delivering), a second worker's ClaimBatch must
+// NOT re-claim it. Before the claimed_at predicate this returned the same rows
+// to both workers → duplicate webhook deliveries under horizontal scaling.
+func TestClaimBatch_SecondReplicaSkipsInFlightRows(t *testing.T) {
+	e := setup(t)
+	tid := e.newTenant(t, "claim-replica")
+	for range 3 {
+		e.insert(t, tid, seed{status: "pending"})
+	}
+
+	first, err := e.repo.ClaimBatch(e.ctx, 10, "replica-a")
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	mine := 0
+	for _, r := range first {
+		if r.TenantID == tid {
+			mine++
+		}
+	}
+	if mine != 3 {
+		t.Fatalf("first claim got %d rows for tenant, want 3", mine)
+	}
+
+	// Simulate a second replica claiming immediately, before delivery completes.
+	second, err := e.repo.ClaimBatch(e.ctx, 10, "replica-b")
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	for _, r := range second {
+		if r.TenantID == tid {
+			t.Fatalf("second replica re-claimed in-flight row %d — double delivery", r.ID)
+		}
+	}
+}
+
+// TestRefreshClaims_OwnerScoped proves a worker can't renew a claim another
+// replica owns: replica B's RefreshClaims must not touch a row replica A claimed
+// (otherwise A-vs-B heartbeats fight and a re-claimed row gets stranded).
+func TestRefreshClaims_OwnerScoped(t *testing.T) {
+	e := setup(t)
+	tid := e.newTenant(t, "refresh-owner")
+	id := e.insert(t, tid, seed{status: "pending"})
+	if _, err := e.repo.ClaimBatch(e.ctx, 10, "replica-a"); err != nil {
+		t.Fatalf("claim by A: %v", err)
+	}
+
+	// Replica B tries to renew A's row — must refresh nothing.
+	n, err := e.repo.RefreshClaims(e.ctx, []int64{id}, "replica-b")
+	if err != nil {
+		t.Fatalf("refresh by B: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("replica B renewed %d rows it doesn't own, want 0", n)
+	}
+	// Replica A renews its own row fine.
+	if n, err := e.repo.RefreshClaims(e.ctx, []int64{id}, "replica-a"); err != nil || n != 1 {
+		t.Fatalf("replica A renew own row: n=%d err=%v, want 1/nil", n, err)
+	}
+}
+
+// TestRefreshClaims_RenewsInFlightSkipsDone proves the lease-heartbeat: a
+// still-pending claimed row gets its claimed_at pushed forward (so a long batch
+// stays within the claim window), while a delivered row in the same id set is
+// left alone.
+func TestRefreshClaims_RenewsInFlightSkipsDone(t *testing.T) {
+	e := setup(t)
+	tid := e.newTenant(t, "refresh-claims")
+	inflight := e.insert(t, tid, seed{status: "pending", claimed: true})
+	delivered := e.insert(t, tid, seed{status: "delivered", claimed: true})
+
+	// Backdate both claims to 9 minutes ago, owned by this worker.
+	if _, err := e.pool.Exec(e.ctx,
+		`UPDATE notify_outbox SET claimed_at = NOW() - INTERVAL '9 minutes', claimed_by = 'replica-a' WHERE id = ANY($1)`,
+		[]int64{inflight, delivered}); err != nil {
+		t.Fatalf("backdate claims: %v", err)
+	}
+
+	n, err := e.repo.RefreshClaims(e.ctx, []int64{inflight, delivered}, "replica-a")
+	if err != nil {
+		t.Fatalf("refresh claims: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("refreshed %d rows, want 1 (only the pending one)", n)
+	}
+
+	var inflightAge, deliveredAge float64
+	if err := e.pool.QueryRow(e.ctx,
+		`SELECT EXTRACT(EPOCH FROM (NOW() - claimed_at)) FROM notify_outbox WHERE id = $1`, inflight).Scan(&inflightAge); err != nil {
+		t.Fatalf("read inflight claimed_at: %v", err)
+	}
+	if inflightAge > 60 {
+		t.Fatalf("in-flight claim not renewed: age=%.0fs, want < 60s", inflightAge)
+	}
+	if err := e.pool.QueryRow(e.ctx,
+		`SELECT EXTRACT(EPOCH FROM (NOW() - claimed_at)) FROM notify_outbox WHERE id = $1`, delivered).Scan(&deliveredAge); err != nil {
+		t.Fatalf("read delivered claimed_at: %v", err)
+	}
+	if deliveredAge < 300 {
+		t.Fatalf("delivered claim was wrongly renewed: age=%.0fs, want ~540s", deliveredAge)
+	}
+}
+
+// TestClaimBatch_SkipsRowsLockedByAnotherTx verifies the FOR UPDATE SKIP LOCKED
+// contract: a row already locked by an in-flight transaction is skipped by a
+// concurrent ClaimBatch rather than blocking on it. This is what lets a second
+// worker make progress instead of stalling on rows the first is mid-claim on.
+func TestClaimBatch_SkipsRowsLockedByAnotherTx(t *testing.T) {
+	e := setup(t)
+	tid := e.newTenant(t, "claim-skip")
+
+	locked := e.insert(t, tid, seed{status: "pending"})
+	free := e.insert(t, tid, seed{status: "pending"})
+
+	// Hold an explicit row lock on `locked` in a separate transaction.
+	tx, err := e.pool.Begin(e.ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(e.ctx) }()
+	if _, err := tx.Exec(e.ctx, `SELECT id FROM notify_outbox WHERE id = $1 FOR UPDATE`, locked); err != nil {
+		t.Fatalf("lock row: %v", err)
+	}
+
+	// ClaimBatch must skip the locked row and still return the free one — not
+	// block until the lock releases.
+	done := make(chan []outboxrepo.OutboxRow, 1)
+	go func() {
+		batch, claimErr := e.repo.ClaimBatch(e.ctx, 10, "replica-skiplock")
+		if claimErr != nil {
+			t.Errorf("claim batch: %v", claimErr)
+		}
+		done <- batch
+	}()
+
+	select {
+	case batch := <-done:
+		ids := map[int64]bool{}
+		for _, r := range batch {
+			ids[r.ID] = true
+		}
+		if ids[locked] {
+			t.Fatalf("locked row %d should have been skipped", locked)
+		}
+		if !ids[free] {
+			t.Fatalf("free row %d should have been claimed (got %v)", free, ids)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ClaimBatch blocked on a locked row — SKIP LOCKED not honored")
+	}
+}

@@ -118,20 +118,30 @@ func (r *OutboxRepo) Insert(
 }
 
 // ClaimBatch atomically pulls up to n rows that are ready to send and
-// marks them with claimed_at = NOW(). Uses FOR UPDATE SKIP LOCKED so
-// multiple workers (in one process or many) never grab the same row.
+// marks them with claimed_at = NOW(). FOR UPDATE SKIP LOCKED prevents two
+// concurrent claims from grabbing the same row within the lock window, and the
+// `claimed_at IS NULL OR claimed_at < NOW() - 10m` predicate prevents a SECOND
+// worker replica from re-claiming a row that is already in-flight (the lock is
+// released once this UPDATE commits, before the delivery attempt finishes) —
+// without it, running >1 outbox worker would double-deliver. The 10-minute
+// window matches ResetStaleClaims so a worker that crashes mid-delivery still
+// gets its row retried. The active worker calls RefreshClaims periodically while
+// draining a batch, so a long batch (serial sends to slow destinations) keeps
+// its lease fresh and never ages past the window mid-flight. Mark{Delivered,
+// Failed,Dead} all clear claimed_at, so a row's own retry is never blocked.
 //
 // Returns the claimed rows; len(0) means nothing to send right now.
 // Caller must call MarkDelivered / MarkFailed / MarkDead per row after
 // the delivery attempt.
-func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int) ([]OutboxRow, error) {
+func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int, owner string) ([]OutboxRow, error) {
 	rows, err := r.pool.Query(ctx, `
 		UPDATE notify_outbox
-		 SET claimed_at = NOW()
+		 SET claimed_at = NOW(), claimed_by = $2
 		 WHERE id IN (
 		 SELECT id FROM notify_outbox
 		 WHERE status IN ('pending', 'failed')
 		 AND next_retry_at <= NOW()
+		 AND (claimed_at IS NULL OR claimed_at < NOW() - INTERVAL '10 minutes')
 		 ORDER BY next_retry_at ASC
 		 LIMIT $1
 		 FOR UPDATE SKIP LOCKED
@@ -139,7 +149,7 @@ func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int) ([]OutboxRow, error)
 		 RETURNING id, feedback_id, tenant_id, destination_type,
 		 destination_target, audience, payload, status,
 		 attempts, trace_id, COALESCE(last_error, '')`,
-		n)
+		n, owner)
 	if err != nil {
 		return nil, fmt.Errorf("claim outbox batch: %w", err)
 	}
@@ -263,6 +273,30 @@ func (r *OutboxRepo) PruneStalePending(ctx context.Context, before time.Time, re
 	)
 	if err != nil {
 		return 0, fmt.Errorf("prune stale pending: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// RefreshClaims re-stamps claimed_at = NOW() for the still-unsent rows in ids
+// that THIS worker (owner) still holds, renewing the lease so a long-running
+// batch can't age past the ClaimBatch 10-minute window (which would let a second
+// replica re-claim an in-flight row). The claimed_by = owner filter means a
+// worker never renews a row another replica has since re-claimed; the status
+// filter leaves already-delivered/dead rows alone. Called periodically by the
+// outbox worker while it drains a batch.
+func (r *OutboxRepo) RefreshClaims(ctx context.Context, ids []int64, owner string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE notify_outbox
+		 SET claimed_at = NOW()
+		 WHERE id = ANY($1)
+		 AND claimed_by = $2
+		 AND claimed_at IS NOT NULL
+		 AND status IN ('pending', 'failed')`, ids, owner)
+	if err != nil {
+		return 0, fmt.Errorf("refresh claims: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

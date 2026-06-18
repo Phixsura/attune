@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/outbound"
@@ -27,6 +29,11 @@ type OutboxWorker struct {
 	targets   *notifytarget.NotifyTargetRepo
 	transport *notify.Transport
 
+	// owner uniquely identifies this worker instance so claim renewal
+	// (RefreshClaims) only ever touches rows this instance still holds — a
+	// different replica that re-claimed a stale row keeps it.
+	owner string
+
 	pollInterval time.Duration
 	batchSize    int
 	maxAttempts  int
@@ -43,6 +50,7 @@ func NewOutboxWorker(
 		outbox:       outbox,
 		targets:      targets,
 		transport:    transport,
+		owner:        "outbox-" + uuid.NewString(),
 		pollInterval: 5 * time.Second,
 		batchSize:    10,
 		maxAttempts:  5,
@@ -95,17 +103,55 @@ func (w *OutboxWorker) ProcessOnce(ctx context.Context) {
 	w.processBatch(ctx)
 }
 
+// claimHeartbeatInterval renews in-flight claims well within the ClaimBatch
+// 10-minute window so a slow batch (serial sends, retrying destinations) can't
+// age its tail rows past the window and let another replica re-claim them.
+const claimHeartbeatInterval = 3 * time.Minute
+
 // processBatch claims and sends one batch. Per-row failures don't
-// short-circuit the batch.
+// short-circuit the batch. While the batch drains, a heartbeat renews the
+// claims so the whole batch's lease stays fresh regardless of batch size or
+// per-row delivery latency (multi-replica double-claim safety).
 func (w *OutboxWorker) processBatch(ctx context.Context) {
 	const where = "service.OutboxWorker.processBatch"
-	rows, err := w.outbox.ClaimBatch(ctx, w.batchSize)
+	rows, err := w.outbox.ClaimBatch(ctx, w.batchSize, w.owner)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] claim batch failed,err:%+v", where, err.Error())
 		return
 	}
+	if len(rows) == 0 {
+		return
+	}
+
+	ids := make([]int64, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	hbCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go w.heartbeatClaims(hbCtx, ids)
+
 	for _, row := range rows {
 		w.processRow(ctx, row)
+	}
+}
+
+// heartbeatClaims periodically renews the claims for the rows still in-flight
+// in the current batch until the batch finishes (ctx cancelled). Already
+// delivered/dead rows are skipped by RefreshClaims's status filter.
+func (w *OutboxWorker) heartbeatClaims(ctx context.Context, ids []int64) {
+	const where = "service.OutboxWorker.heartbeatClaims"
+	tick := time.NewTicker(claimHeartbeatInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			if _, err := w.outbox.RefreshClaims(ctx, ids, w.owner); err != nil {
+				logext.Warnf(ctx, "[%s] refresh claims failed,err:%+v", where, err.Error())
+			}
+		}
 	}
 }
 

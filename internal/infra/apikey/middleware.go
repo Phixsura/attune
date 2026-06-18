@@ -19,6 +19,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
@@ -63,7 +64,19 @@ const (
 // The previous spelling `unauthenticated` was an outlier vs the console
 // envelope's `unauthorized` — normalized to the proto-defined UNAUTHORIZED
 // during the dispatcher migration (proposal 2026-06-09-http-dispatcher.md Commit 5 audit).
+// Middleware authenticates with no trusted reverse proxy in front of attune:
+// X-Forwarded-For is ignored and the IP allowlist matches the direct peer. Use
+// MiddlewareWithProxies when attune sits behind a known proxy tier.
 func Middleware(v Verifier) func(http.Handler) http.Handler {
+	return MiddlewareWithProxies(v, 0)
+}
+
+// MiddlewareWithProxies is Middleware parameterized by the number of trusted
+// reverse proxies (security.trusted_proxy_hops). The client IP used for the API
+// key IP allowlist is resolved from X-Forwarded-For only that many hops in;
+// trustedProxyHops <= 0 ignores the header entirely so a client on a direct
+// connection cannot spoof an allowlisted source IP.
+func MiddlewareWithProxies(v Verifier, trustedProxyHops int) func(http.Handler) http.Handler {
 	const where = "apikey.Middleware"
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +88,7 @@ func Middleware(v Verifier) func(http.Handler) http.Handler {
 					attunev1.ErrorCode_UNAUTHORIZED, "missing or malformed api key")
 				return
 			}
-			clientIP := extractClientIP(r)
+			clientIP := nethardening.ClientIP(r, trustedProxyHops)
 			tid, kid, scopes, err := v.LookupWithScopesAndIP(ctx, raw, clientIP)
 			if err != nil {
 				status := http.StatusUnauthorized
@@ -136,25 +149,6 @@ func IsBrowserUserAgent(ua string) bool {
 		}
 	}
 	return false
-}
-
-// extractClientIP extracts the client IP from the request, checking
-// X-Forwarded-For, X-Real-IP headers, then falling back to RemoteAddr.
-func extractClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
-		}
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-	host, _, err := strings.Cut(r.RemoteAddr, ":")
-	if err {
-		return host
-	}
-	return r.RemoteAddr
 }
 
 // FromContext returns the authenticated API key identity from ctx.

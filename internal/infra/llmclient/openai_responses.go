@@ -43,7 +43,7 @@ func NewOpenAIResponses(baseURL, apiKey string) (*OpenAIResponsesBackend, error)
 		return nil, fmt.Errorf("openai-responses backend: api_key is required")
 	}
 	httpClient := ptrext.Of(http.Client{
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Transport: otelhttp.NewTransport(guardedEgressTransport()),
 		Timeout:   chatHTTPTimeout,
 	})
 	opts := []option.RequestOption{

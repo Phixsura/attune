@@ -60,6 +60,34 @@ func TestLoadPathNewConfig(t *testing.T) {
 	}
 }
 
+func TestLoadPathParsesSecurityBlock(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nsecurity:\n  allow_loopback_egress: true\n  allow_private_egress: true\n  trusted_proxy_hops: 2\n"
+	cfg, err := LoadPath(writeConfig(t, raw))
+	if err != nil {
+		t.Fatalf("load with security block: %v", err)
+	}
+	if !cfg.Security.AllowLoopbackEgress || !cfg.Security.AllowPrivateEgress {
+		t.Fatalf("egress flags not parsed: %+v", cfg.Security)
+	}
+	if cfg.Security.TrustedProxyHops != 2 {
+		t.Fatalf("TrustedProxyHops = %d, want 2", cfg.Security.TrustedProxyHops)
+	}
+	p := cfg.EgressPolicy()
+	if !p.AllowLoopback || !p.AllowPrivate {
+		t.Fatalf("EgressPolicy() did not reflect config: %+v", p)
+	}
+}
+
+func TestLoadPathSecurityDefaultsAreSafe(t *testing.T) {
+	cfg, err := LoadPath(writeConfig(t, validConfigYAML(t, validTinkKeyset(t))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Security.AllowLoopbackEgress || cfg.Security.AllowPrivateEgress || cfg.Security.TrustedProxyHops != 0 {
+		t.Fatalf("security defaults should be locked down, got %+v", cfg.Security)
+	}
+}
+
 func TestLoadPathRejectsOldLLMFields(t *testing.T) {
 	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nllm_openai_api_key: sk-test\n"
 	_, err := LoadPath(writeConfig(t, raw))

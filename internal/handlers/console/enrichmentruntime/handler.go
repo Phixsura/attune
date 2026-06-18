@@ -11,6 +11,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	enrichrepo "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
@@ -120,7 +121,7 @@ func actorFromRequest(ctx *dispatcher.RequestContext[*session.AuthCtx]) enrichru
 		ID:             auth.UserID,
 		UpdatedBy:      auth.UserID,
 		ActorType:      actorType,
-		ActorIP:        ctx.Request().RemoteAddr,
+		ActorIP:        nethardening.ClientIPDefault(ctx.Request()),
 		ActorUserAgent: ctx.Request().UserAgent(),
 	}
 }
@@ -134,7 +135,8 @@ func (h *Handler) recordAudit(
 		return nil
 	}
 	if ctx.Auth == nil || ctx.Auth.TenantID == "" {
-		logext.Warnf(ctx,
+		logext.Warnf(
+			ctx,
 			"[console.enrichmentruntime.Handler.recordAudit] skip audit: tenant scope missing,action:%s,user_id:%s",
 			action, actorID(ctx.Auth),
 		)

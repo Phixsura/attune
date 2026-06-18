@@ -173,7 +173,7 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 		}
 		metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "db_err").
 			Observe(time.Since(start).Seconds())
-		e.repo.MarkFailed(ctx, id, err.Error())
+		e.markFailed(ctx, id, err.Error())
 		return err
 	}
 	metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "ok").
@@ -270,7 +270,7 @@ func (e *Enricher) classify(ctx context.Context, id int64, content string, cfg C
 	parsed, err := e.classifyWithDiagnostics(ctx, content, cfg)
 	if err != nil {
 		if shouldMarkEnrichFailed(err) {
-			e.repo.MarkFailed(ctx, id, err.Error())
+			e.markFailed(ctx, id, err.Error())
 		}
 		return classifyResult{}, err
 	}
