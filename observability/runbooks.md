@@ -164,6 +164,27 @@ changing retry behavior.
 Recovery: provider error ratio is below 1% for 10 minutes and affected model
 traffic has resumed normal success volume.
 
+## AttuneEnrichmentTerminalFailures
+
+Impact: feedback rows have exhausted all enrichment retries and are stranded in
+the `failed` state with no further retry scheduled. Those rows never get an AI
+title, classification, or downstream fan-out until an operator intervenes.
+
+Confirm:
+
+```promql
+sum by (tenant) (increase(attune_enrichment_terminal_failures_total[15m]))
+```
+
+Inspect `Attune AI Pipeline > Enrich duration` and sample the stranded rows'
+`enrichment_error` column. Determine whether the cause is a provider outage, a
+prompt/schema mismatch producing parse errors, or malformed input. Fix the root
+cause, then clear `enrichment_status`/`enrichment_attempts` (or re-enqueue) so
+the sweeper retries the affected rows.
+
+Recovery: no new terminal failures for 15 minutes and re-enqueued rows reach
+`done`.
+
 ## AttuneOutboxLagHigh
 
 Impact: notification delivery is delayed. Users may not receive outbound

@@ -55,6 +55,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Terminal enrichment-failure observability (#81).** New metric
+  `attune_enrichment_terminal_failures_total{tenant}` counts feedback rows that
+  exhaust all enrichment retries and stop in `failed`, plus an
+  `AttuneEnrichmentTerminalFailures` Prometheus alert + runbook and an AI Pipeline
+  dashboard series. Previously a row could silently stop enriching with no signal.
+
 - **`X-Attune-Delivery-Id` header on outbound webhook deliveries (#84).** Raw
   webhook deliveries now carry the outbox row id, which is stable across the
   at-least-once retries of that delivery, so consumers can dedup replays (a

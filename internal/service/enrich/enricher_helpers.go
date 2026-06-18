@@ -11,10 +11,20 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 )
+
+// markFailed records an enrichment failure on the row and, when the row has
+// exhausted its retries, counts it in attune_enrichment_terminal_failures_total
+// so terminal failures are no longer invisible (#81).
+func (e *Enricher) markFailed(ctx context.Context, id int64, msg string) {
+	if terminal, tenant := e.repo.MarkFailed(ctx, id, msg); terminal {
+		metrics.EnrichmentTerminalFailuresTotal.WithLabelValues(tenant).Inc()
+	}
+}
 
 // persistIgnored marks the row done with a sentinel "ignored" Enriched
 // so downstream queries can filter it out. Does NOT fan out — silence
@@ -36,7 +46,7 @@ func (e *Enricher) persistIgnored(ctx context.Context, id int64, row *feedback.E
 		Language:      row.Language,
 		DisplayLocale: row.DisplayLocale,
 	}); err != nil {
-		e.repo.MarkFailed(ctx, id, err.Error())
+		e.markFailed(ctx, id, err.Error())
 		return fmt.Errorf("mark ignored row done: %w", err)
 	}
 	logext.Infof(ctx,
@@ -56,7 +66,7 @@ func (e *Enricher) persistFromTriage(ctx context.Context, id int64, row *feedbac
 	enriched = normalizeEnrichedDisplay(enriched, row.Language, row.DisplayLocale)
 	snapshot := buildSnapshot(id, row, enriched, time.Now())
 	if err := e.persistEnriched(ctx, snapshot, enriched, nil); err != nil {
-		e.repo.MarkFailed(ctx, id, err.Error())
+		e.markFailed(ctx, id, err.Error())
 		return err
 	}
 	logext.Infof(ctx,

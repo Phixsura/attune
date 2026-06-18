@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #84 (DB statement_timeout) + 2026-06-18 defect audit |
-| **Status** | Accepted |
+| **Status** | Implemented |
 | **Started** | 2026-06-19 |
 | **Related** | #131 (GDPR erasure — shipped separately in #132), #81 (terminal enrichment failures), #91 (mutation testing). Large features + design-heavy items get their own proposals (see Non-goals). |
 
@@ -88,10 +88,17 @@ Verified findings addressed here:
      `Idempotency-Key` is the safer Stripe-style design. Both need a migration +
      a semantics decision — its own proposal.
 5. **Observability + worker tests.** Add `attune_enrichment_terminal_failures_total`
-   (+ alert, #81) and `attune_worker_panics_total` in **one** metric-drift-gate-
-   compliant change (register + catalog + dashboard + README). Unit tests for the
-   outbox + embedding workers (delivered/failed/dead/disabled paths) and an
-   integration test asserting two concurrent `ClaimBatch` calls never double-claim.
+   (+ `AttuneEnrichmentTerminalFailures` alert + runbook, #81) through the metric-
+   drift gate (catalog + AI Pipeline dashboard + Helm + README).
+   `attune_worker_panics_total` landed with commit 2. Added an outbox SKIP-LOCKED
+   integration test (a row locked by another tx is skipped, not blocked on) and
+   the generic-adapter delivery-id unit test from commit 4.
+   - **Observation surfaced while testing:** `OutboxRepo.ClaimBatch` stamps
+     `claimed_at` but doesn't filter on it, so a *second* outbox worker replica
+     could re-claim an in-flight row (SKIP LOCKED only guards the lock window).
+     Safe for today's single-worker deployment; the new `X-Attune-Delivery-Id`
+     header is consumer-side defense-in-depth. Filed as a follow-up to either
+     document the singleton requirement or exclude recently-claimed rows.
 
 ## Alternatives considered
 - **`statement_timeout`: pool-wide vs per-request context timeout.** Chose

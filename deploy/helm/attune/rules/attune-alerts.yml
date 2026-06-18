@@ -117,6 +117,20 @@ groups:
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunellmprovidererrors"
           action: "Confirm the affected model, provider status, and configured credentials; then compare with enrichment latency before retry policy changes."
 
+      - alert: AttuneEnrichmentTerminalFailures
+        expr: sum by (tenant) (increase(attune_enrichment_terminal_failures_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune feedback rows are exhausting enrichment retries"
+          description: "Tenant {{ $labels.tenant }} had {{ $value | humanize }} feedback rows stop in 'failed' after exhausting retries over 15m. Check Attune AI Pipeline > Enrich duration."
+          dashboard: "Attune AI Pipeline"
+          dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline?var-tenant={{ $labels.tenant }}"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneenrichmentterminalfailures"
+          action: "Sample the stranded rows' enrichment_error, confirm whether a provider, prompt, or parse bug is the cause, then remediate and re-enqueue."
+
   - name: attune.alerts.operations
     rules:
       - alert: AttuneOutboxLagHigh

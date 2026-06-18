@@ -306,9 +306,13 @@ func (r *FeedbackRepo) BeginTx(ctx context.Context) (pgx.Tx, error) {
 // Attempts stop after maxEnrichmentAttempts; the row remains visible as
 // status=failed with no next retry so operators can inspect/remediate.
 // Best-effort: errors here only surface in logs.
-func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) {
+//
+// It returns whether this attempt was terminal (retries now exhausted) and the
+// row's tenant, so the caller can record attune_enrichment_terminal_failures_total
+// (#81). On a DB error it returns (false, "").
+func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) (terminal bool, tenant string) {
 	const where = "repo.FeedbackRepo.MarkFailed"
-	if _, err := r.pool.Exec(ctx,
+	if err := r.pool.QueryRow(ctx,
 		`UPDATE user_feedback
 		    SET enrichment_status = 'failed',
 		        enrichment_error = $1,
@@ -321,11 +325,15 @@ func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) 
 		          ))
 		        END,
 		        enrichment_claimed_at = NULL
-		  WHERE id = $2`,
+		  WHERE id = $2
+		  RETURNING enrichment_attempts >= $3, tenant_id`,
 		pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
-		int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds())); err != nil {
+		int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()),
+	).Scan(&terminal, &tenant); err != nil {
 		logext.Errorf(ctx, "[%s] update failed,id:%d,err:%+v", where, id, err.Error())
+		return false, ""
 	}
+	return terminal, tenant
 }
 
 // ListPending returns up to n ids that need enrichment, ordered by

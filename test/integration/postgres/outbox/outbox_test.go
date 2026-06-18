@@ -315,3 +315,52 @@ func TestDeadCount(t *testing.T) {
 		t.Fatalf("dead count delta = %d, want 2", after-before)
 	}
 }
+
+// TestClaimBatch_SkipsRowsLockedByAnotherTx verifies the FOR UPDATE SKIP LOCKED
+// contract: a row already locked by an in-flight transaction is skipped by a
+// concurrent ClaimBatch rather than blocking on it. This is what lets a second
+// worker make progress instead of stalling on rows the first is mid-claim on.
+func TestClaimBatch_SkipsRowsLockedByAnotherTx(t *testing.T) {
+	e := setup(t)
+	tid := e.newTenant(t, "claim-skip")
+
+	locked := e.insert(t, tid, seed{status: "pending"})
+	free := e.insert(t, tid, seed{status: "pending"})
+
+	// Hold an explicit row lock on `locked` in a separate transaction.
+	tx, err := e.pool.Begin(e.ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(e.ctx) }()
+	if _, err := tx.Exec(e.ctx, `SELECT id FROM notify_outbox WHERE id = $1 FOR UPDATE`, locked); err != nil {
+		t.Fatalf("lock row: %v", err)
+	}
+
+	// ClaimBatch must skip the locked row and still return the free one — not
+	// block until the lock releases.
+	done := make(chan []outboxrepo.OutboxRow, 1)
+	go func() {
+		batch, claimErr := e.repo.ClaimBatch(e.ctx, 10)
+		if claimErr != nil {
+			t.Errorf("claim batch: %v", claimErr)
+		}
+		done <- batch
+	}()
+
+	select {
+	case batch := <-done:
+		ids := map[int64]bool{}
+		for _, r := range batch {
+			ids[r.ID] = true
+		}
+		if ids[locked] {
+			t.Fatalf("locked row %d should have been skipped", locked)
+		}
+		if !ids[free] {
+			t.Fatalf("free row %d should have been claimed (got %v)", free, ids)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ClaimBatch blocked on a locked row — SKIP LOCKED not honored")
+	}
+}

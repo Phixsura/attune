@@ -123,6 +123,19 @@ var EnrichSweepSubmittedTotal = prometheus.NewCounter(
 	},
 )
 
+// EnrichmentTerminalFailuresTotal counts feedback rows that exhausted all
+// enrichment retries and were left in the terminal 'failed' state (no further
+// retry scheduled). Previously this was invisible (#81): a row would silently
+// stop enriching with no signal. Any sustained non-zero value is
+// operator-actionable — a provider, prompt, or parse bug is stranding rows.
+var EnrichmentTerminalFailuresTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_enrichment_terminal_failures_total",
+		Help: "Feedback rows that exhausted enrichment retries and stopped in 'failed'.",
+	},
+	[]string{"tenant"},
+)
+
 // NotifyFailuresTotal increments on every notifier push that didn't
 // return nil. destination_type ∈ {raw-webhook, github-issue};
 // reason is the error class (transport | terminal).
@@ -664,6 +677,7 @@ var allMetrics = []prometheus.Collector{
 	EnrichQueueFullTotal,
 	EnrichBatchSize,
 	EnrichSweepSubmittedTotal,
+	EnrichmentTerminalFailuresTotal,
 	NotifyFailuresTotal,
 	OutboxLagSeconds,
 	OutboxDeadRows,
@@ -732,6 +746,7 @@ func RegisteredMetricNames() []string {
 		"attune_enrich_queue_full_total",
 		"attune_enrich_batch_size",
 		"attune_enrich_sweep_submitted_total",
+		"attune_enrichment_terminal_failures_total",
 		"attune_notify_failures_total",
 		"attune_outbox_lag_seconds",
 		"attune_outbox_dead_rows",

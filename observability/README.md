@@ -39,6 +39,7 @@ exposition plus the portable assets in this directory.
 | `attune_enrich_queue_full_total` | counter | — | non-blocking enrichment queue submit rejections caused by a full queue |
 | `attune_enrich_batch_size` | histogram | — | actual jobs executed per enrichment processor batch |
 | `attune_enrich_sweep_submitted_total` | counter | — | pending DB rows successfully resubmitted by the enrich sweeper |
+| `attune_enrichment_terminal_failures_total` | counter | `tenant` | feedback rows that exhausted enrichment retries and stopped in `failed` (#81) |
 | `attune_notify_failures_total` | counter | `destination_type`, `reason` | notifier push failures |
 | `attune_outbox_lag_seconds` | gauge | — | age of the oldest pending outbox row (0 = empty) |
 | `attune_outbox_dead_rows` | gauge | — | notify_outbox rows in the terminal `dead` state (dead-letter depth) |

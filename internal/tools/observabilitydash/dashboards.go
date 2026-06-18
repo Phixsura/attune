@@ -143,6 +143,7 @@ func aiPipelineDashboard() dashboard {
 			targetExpr("A", `histogram_quantile(0.50, sum by (le, result) (rate(attune_enrich_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "p50 / {{result}}"),
 			targetExpr("B", `histogram_quantile(0.95, sum by (le, result) (rate(attune_enrich_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "p95 / {{result}}"),
 			targetExpr("C", `histogram_quantile(0.95, sum by (le) (rate(attune_llm_rate_limit_wait_seconds_bucket[$__rate_interval])))`, "llm wait p95"),
+			targetExpr("D", zero(`sum(increase(attune_enrichment_terminal_failures_total{tenant=~"$tenant"}[$__range]))`), "terminal failures"),
 		}, "s", gp(12, 8, 12, 8)),
 		rowPanel(11, "Guardrails and attributes", 16),
 		seriesDesc(12, "Enrich attr controls", "Attribute control rates. Dropped, suggested, and rejected attributes help separate data shape issues from model behavior.", []target{
