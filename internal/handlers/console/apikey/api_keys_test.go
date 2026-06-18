@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
@@ -32,6 +33,8 @@ type fakeAPIKeysService struct {
 	listTenant   string
 	issueTenant  string
 	revokeTenant string
+
+	scopes []domain.Scope
 }
 
 func (f *fakeAPIKeysService) List(_ context.Context, tenantID string) ([]apikeyrepo.APIKeyListRow, error) {
@@ -43,6 +46,17 @@ func (f *fakeAPIKeysService) Issue(_ context.Context, tenantID, label string) (s
 	f.issueTenant = tenantID
 	f.issueLabel = label
 	return f.issueRaw, f.issueID, f.issueErr
+}
+
+func (f *fakeAPIKeysService) IssueWithScopes(_ context.Context, tenantID, label string, scopes []domain.Scope) (string, uuid.UUID, error) {
+	f.issueTenant = tenantID
+	f.issueLabel = label
+	f.scopes = scopes
+	return f.issueRaw, f.issueID, f.issueErr
+}
+
+func (f *fakeAPIKeysService) GetScopes(_ context.Context, _ uuid.UUID) ([]domain.Scope, error) {
+	return f.scopes, nil
 }
 
 func (f *fakeAPIKeysService) Revoke(_ context.Context, tenantID string, id uuid.UUID) error {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -23,7 +24,18 @@ func (h *APIKeysHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 	}
 	items := make([]*attunev1.ApiKey, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, toProtoAPIKey(row))
+		var scopes []domain.Scope
+		if !row.IsActive || row.RevokedAt != nil {
+			scopes = nil
+		} else {
+			scopes, err = h.svc.GetScopes(ctx, row.ID)
+			if err != nil {
+				logext.Warnf(ctx, "[%s] GetScopes failed,key_id:%s,err:%s",
+					where, row.ID, err.Error())
+				scopes = nil
+			}
+		}
+		items = append(items, toProtoAPIKey(row, scopes))
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,count:%d", where, auth.TenantID, len(items))
 	return dispatcher.OK(ptrext.Of(attunev1.ListApiKeysResponse{Items: items}))

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -29,11 +30,22 @@ func (h *APIKeysHandler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx]
 			where, auth.TenantID, len(label))
 		return dispatcher.Fail[*attunev1.CreateApiKeyResponse](http.StatusBadRequest, attunev1.ErrorCode_LABEL_TOO_LONG, "label must not exceed 200 characters")
 	}
-	logext.Infof(ctx, "[%s] start,tenant_id:%s,label:%s", where, auth.TenantID, label)
+	var scopes []domain.Scope
+	if len(req.GetScopes()) > 0 {
+		var err error
+		scopes, err = domain.ParseScopes(req.GetScopes())
+		if err != nil {
+			logext.Warnf(ctx, "[%s] reject: invalid scope,tenant_id:%s", where, auth.TenantID)
+			return dispatcher.Fail[*attunev1.CreateApiKeyResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid scope")
+		}
+	} else {
+		scopes = GetFullAccessScopes()
+	}
+	logext.Infof(ctx, "[%s] start,tenant_id:%s,label:%s,scopes:%d", where, auth.TenantID, label, len(scopes))
 
-	raw, id, err := h.svc.Issue(ctx, auth.TenantID, label)
+	raw, id, err := h.svc.IssueWithScopes(ctx, auth.TenantID, label, scopes)
 	if err != nil {
-		logext.Errorf(ctx, "[%s] svc.Issue failed,tenant_id:%s,err:%+v",
+		logext.Errorf(ctx, "[%s] svc.IssueWithScopes failed,tenant_id:%s,err:%+v",
 			where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.CreateApiKeyResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to issue API key")
 	}
@@ -53,7 +65,7 @@ func (h *APIKeysHandler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx]
 	}
 
 	resp := ptrext.Of(attunev1.CreateApiKeyResponse{
-		Key:    toProtoAPIKey(newRow),
+		Key:    toProtoAPIKey(newRow, scopes),
 		Secret: raw,
 	})
 	if h.audit != nil {

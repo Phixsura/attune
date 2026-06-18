@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -18,6 +19,8 @@ import (
 type apiKeysService interface {
 	List(ctx context.Context, tenantID string) ([]apikeyrepo.APIKeyListRow, error)
 	Issue(ctx context.Context, tenantID, label string) (raw string, keyID uuid.UUID, err error)
+	IssueWithScopes(ctx context.Context, tenantID, label string, scopes []domain.Scope) (raw string, keyID uuid.UUID, err error)
+	GetScopes(ctx context.Context, keyID uuid.UUID) ([]domain.Scope, error)
 	Revoke(ctx context.Context, tenantID string, id uuid.UUID) error
 }
 
@@ -41,13 +44,18 @@ func (h *APIKeysHandler) SetAuditLogger(audit auditRecorder) {
 	h.audit = audit
 }
 
-func toProtoAPIKey(row apikeyrepo.APIKeyListRow) *attunev1.ApiKey {
+func toProtoAPIKey(row apikeyrepo.APIKeyListRow, scopes []domain.Scope) *attunev1.ApiKey {
+	scopeStrs := make([]string, len(scopes))
+	for i, s := range scopes {
+		scopeStrs[i] = string(s)
+	}
 	k := ptrext.Of(attunev1.ApiKey{
 		Id:        row.ID.String(),
 		KeyPrefix: row.KeyPrefix,
 		Label:     row.Label,
 		IsActive:  row.IsActive,
 		CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
+		Scopes:    scopeStrs,
 	})
 	if row.LastUsedAt != nil {
 		k.LastUsedAt = ptrext.Of(row.LastUsedAt.UTC().Format(time.RFC3339))
