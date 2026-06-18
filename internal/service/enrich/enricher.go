@@ -269,10 +269,16 @@ func (e *Enricher) classify(ctx context.Context, id int64, content string, cfg C
 	cfg.FeedbackID = id
 	parsed, err := e.classifyWithDiagnostics(ctx, content, cfg)
 	if err != nil {
-		e.repo.MarkFailed(ctx, id, err.Error())
+		if shouldMarkEnrichFailed(err) {
+			e.repo.MarkFailed(ctx, id, err.Error())
+		}
 		return classifyResult{}, err
 	}
 	return parsed, nil
+}
+
+func shouldMarkEnrichFailed(err error) bool {
+	return !errors.Is(err, llmclient.ErrRateLimitWaitCanceled)
 }
 
 func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {

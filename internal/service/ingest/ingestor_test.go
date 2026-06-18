@@ -1,11 +1,15 @@
 package ingest
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
 func TestScrubUntrustedSourceMeta_StripsReservedInboundSourceKeys(t *testing.T) {
@@ -42,4 +46,69 @@ func TestScrubUntrustedSourceMeta_PreservesAdapterSourceKeys(t *testing.T) {
 	if got.SourceMeta[domain.SourceMetaInboundSourceID] != "source-1" {
 		t.Fatalf("adapter source id was stripped: %+v", got.SourceMeta)
 	}
+}
+
+func TestIngestRowSubmitsEnrichmentJob(t *testing.T) {
+	repo := ptrext.Of(fakeFeedbackRepo{insertID: 7})
+	submitter := ptrext.Of(fakeSubmitter{})
+	ingestor := NewIngestor(repo, submitter)
+
+	id, err := ingestor.IngestRow(context.Background(), "tenant-1", uuid.Nil, domain.IngestInput{
+		Content: "checkout is broken",
+		Source:  "api",
+	})
+	if err != nil {
+		t.Fatalf("IngestRow err = %v", err)
+	}
+	if id != 7 {
+		t.Fatalf("id = %d, want 7", id)
+	}
+	if len(submitter.jobs) != 1 {
+		t.Fatalf("submitted jobs = %d, want 1", len(submitter.jobs))
+	}
+	if submitter.jobs[0].ID != 7 {
+		t.Fatalf("submitted job id = %d, want 7", submitter.jobs[0].ID)
+	}
+}
+
+func TestIngestRowQueueSubmitFailureDoesNotFailRequest(t *testing.T) {
+	repo := ptrext.Of(fakeFeedbackRepo{insertID: 11})
+	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{err: errors.New("queue full")}))
+
+	id, err := ingestor.IngestRow(context.Background(), "tenant-1", uuid.Nil, domain.IngestInput{
+		Content: "search is slow",
+		Source:  "api",
+	})
+	if err != nil {
+		t.Fatalf("IngestRow err = %v", err)
+	}
+	if id != 11 {
+		t.Fatalf("id = %d, want 11", id)
+	}
+}
+
+type fakeFeedbackRepo struct {
+	insertID int64
+}
+
+func (f *fakeFeedbackRepo) Insert(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+	string,
+	domain.IngestInput,
+) (int64, error) {
+	return f.insertID, nil
+}
+
+type fakeSubmitter struct {
+	jobs []enrich.Job
+	err  error
+}
+
+func (f *fakeSubmitter) Submit(_ context.Context, job enrich.Job) error {
+	f.jobs = append(f.jobs, job)
+	return f.err
 }

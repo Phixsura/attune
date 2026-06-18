@@ -90,6 +90,39 @@ var EnrichAttrsRejectedTotal = prometheus.NewCounterVec(
 	[]string{"tenant"},
 )
 
+// EnrichQueueDepth gauges the current in-process enrichment queue depth.
+var EnrichQueueDepth = prometheus.NewGauge(
+	prometheus.GaugeOpts{
+		Name: "attune_enrich_queue_depth",
+		Help: "Current in-process enrichment queue depth.",
+	},
+)
+
+// EnrichQueueFullTotal counts non-blocking submit rejections caused by a full queue.
+var EnrichQueueFullTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "attune_enrich_queue_full_total",
+		Help: "Non-blocking enrichment queue submit rejections caused by a full queue.",
+	},
+)
+
+// EnrichBatchSize tracks the actual number of jobs executed per processor batch.
+var EnrichBatchSize = prometheus.NewHistogram(
+	prometheus.HistogramOpts{
+		Name:    "attune_enrich_batch_size",
+		Help:    "Actual number of jobs executed per enrichment processor batch.",
+		Buckets: []float64{1, 2, 5, 10, 20, 50},
+	},
+)
+
+// EnrichSweepSubmittedTotal counts pending DB rows successfully resubmitted by the sweeper.
+var EnrichSweepSubmittedTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "attune_enrich_sweep_submitted_total",
+		Help: "Pending DB rows successfully resubmitted to the enrichment queue by the sweeper.",
+	},
+)
+
 // NotifyFailuresTotal increments on every notifier push that didn't
 // return nil. destination_type ∈ {raw-webhook, github-issue};
 // reason is the error class (transport | terminal).
@@ -201,6 +234,15 @@ var LLMCostUSDTotal = prometheus.NewCounterVec(
 		Help: "Estimated LLM provider cost in USD by tenant and model.",
 	},
 	[]string{"tenant", "model"},
+)
+
+// LLMRateLimitWaitSeconds tracks time spent waiting for the local outbound LLM rate limiter.
+var LLMRateLimitWaitSeconds = prometheus.NewHistogram(
+	prometheus.HistogramOpts{
+		Name:    "attune_llm_rate_limit_wait_seconds",
+		Help:    "Time spent waiting for the local outbound LLM rate limiter.",
+		Buckets: []float64{0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
+	},
 )
 
 // EmbedClusterAssignments counts cluster assignments by type.
@@ -558,6 +600,10 @@ var allMetrics = []prometheus.Collector{
 	EnrichSuggestedAttrsTotal,
 	EnrichAttrsSizeBytes,
 	EnrichAttrsRejectedTotal,
+	EnrichQueueDepth,
+	EnrichQueueFullTotal,
+	EnrichBatchSize,
+	EnrichSweepSubmittedTotal,
 	NotifyFailuresTotal,
 	OutboxLagSeconds,
 	ClaimContentionTotal,
@@ -568,6 +614,7 @@ var allMetrics = []prometheus.Collector{
 	LLMCallsTotal,
 	LLMTokensTotal,
 	LLMCostUSDTotal,
+	LLMRateLimitWaitSeconds,
 	EmbedClusterAssignments,
 	EmbedErrors,
 	EmbedDuration,
@@ -615,6 +662,10 @@ func RegisteredMetricNames() []string {
 		"attune_enrich_suggested_attrs_total",
 		"attune_enrich_attrs_size_bytes",
 		"attune_enrich_attrs_rejected_total",
+		"attune_enrich_queue_depth",
+		"attune_enrich_queue_full_total",
+		"attune_enrich_batch_size",
+		"attune_enrich_sweep_submitted_total",
 		"attune_notify_failures_total",
 		"attune_outbox_lag_seconds",
 		"attune_claim_contention_total",
@@ -625,6 +676,7 @@ func RegisteredMetricNames() []string {
 		"attune_llm_calls_total",
 		"attune_llm_tokens_total",
 		"attune_llm_cost_usd_total",
+		"attune_llm_rate_limit_wait_seconds",
 		"attune_embed_cluster_assignments_total",
 		"attune_embed_errors_total",
 		"attune_embed_duration_seconds",

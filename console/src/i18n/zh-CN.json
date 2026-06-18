@@ -349,6 +349,10 @@
         "title": "AI 分类",
         "body": "提示词、维度、分类值与分类预览。"
       },
+      "enrichment_runtime": {
+        "title": "富化运行时",
+        "body": "队列、并发、批处理、限流、实例状态与回滚。"
+      },
       "guardrails": {
         "title": "防护策略",
         "body": "PII、来源标签、渠道与生效规则。"
@@ -405,7 +409,249 @@
     "preview_sample_placeholder": "粘贴一段用户反馈…",
     "preview_sample_default": "结账页一直转圈，付不了款",
     "preview_button": "生成预览",
-    "saved": "已保存"
+    "saved": "已保存",
+    "enrichment_runtime": {
+      "title": "富化运行时控制面",
+      "help": "面向运营和平台管理员的实时控制面。修改会以 CAS 版本写入，并由各实例持续收敛到目标配置。",
+      "value_title": "这不是参数页，而是富化运行时的在线控制台",
+      "value_body": "这里用来平衡吞吐、延迟和风险。你可以在不重启服务的前提下实时调整富化处理能力，并持续观察各实例是否已经按目标收敛。",
+      "value_cards": {
+        "capacity": {
+          "title": "应对流量波峰",
+          "body": "当积压增长、等待时间拉长时，提升队列容量、协程数或批处理策略。"
+        },
+        "stability": {
+          "title": "收紧外部调用风险",
+          "body": "当 LLM 提供商限流、错误率上升或成本失控时，快速收紧本页策略。"
+        },
+        "rollback": {
+          "title": "异常时快速回退",
+          "body": "所有变更都会形成版本历史，出现退化时可以回到最近已知良好版本。"
+        }
+      },
+      "playbook_title": "推荐操作路径",
+      "playbook_body": "把这页当成一条完整闭环：先判断是否值得改，再做小步变更，最后看实例是否稳定收敛。",
+      "playbook_steps": {
+        "review": {
+          "title": "先判断是不是运行时问题",
+          "body": "先看实例状态、积压、过期实例和退化原因，确认问题来自容量或限流，而不是上游故障。"
+        },
+        "change": {
+          "title": "一次只改一组关键参数",
+          "body": "优先小步调整队列、并发、批窗口或限流，并填写本次变更原因，方便团队回溯。"
+        },
+        "observe": {
+          "title": "看实例有没有真正收敛",
+          "body": "保存后重点观察实例表、未收敛告警和版本观测值，确认所有在线实例都应用到了目标版本。"
+        },
+        "rollback": {
+          "title": "异常时立即回滚",
+          "body": "如果出现退化、积压失控或实例长时间不收敛，优先回到最后已知良好版本。"
+        }
+      },
+      "refresh": "刷新状态",
+      "seconds_suffix": "秒",
+      "conditions_title": "运行条件",
+      "conditions_help": "用接近 operator / rollout 控制面的方式展示收敛、退化、过期和限流拓扑风险。",
+      "policy_title": "目标策略",
+      "policy_help": "完整配置富化队列、工作协程、批处理窗口和 LLM 速率限制。保存后会实时下发到运行实例。",
+      "field_hints": {
+        "queue_len": "控制本地富化队列最多能暂存多少条待处理任务，适合用来吸收输入波峰。",
+        "workers": "控制并行执行的富化工作协程数量，直接影响吞吐和对下游依赖的压力。",
+        "batch_size": "控制每次扫队列时最多抓取多少条任务，通常用于平衡效率和单批耗时。",
+        "batch_window": "控制批处理聚合等待时间，窗口更大通常更省调用，但会增加单条等待延迟。",
+        "sweep_interval": "控制后台从积压中补充任务的节奏，间隔越短，恢复 backlog 越积极。",
+        "llm_rate_limit_enabled": "开启后会在每个运行节点本地执行限流，适合在外部模型服务不稳定或成本敏感时使用。",
+        "llm_max_qps": "限制每个节点对 LLM 的稳定请求速率上限，用来控制供应商压力和费用。",
+        "llm_burst": "限制短时间内允许突发的请求量，适合给短峰值留缓冲，但不改变长期平均速率。"
+      },
+      "form_sections": {
+        "throughput_title": "吞吐与缓冲",
+        "throughput_body": "先决定系统能同时承受多少待处理任务，以及要用多激进的并行度去消化它们。",
+        "batch_title": "批处理与恢复节奏",
+        "batch_body": "这组参数决定任务是更快开始处理，还是先聚合以换取更好的整体效率。",
+        "llm_title": "模型调用约束",
+        "llm_body": "这组参数只影响运行时对外部模型调用的释放节奏，适合在供应商限流或成本压力下做控制。"
+      },
+      "operator_guidance_title": "直接操作说明",
+      "operator_guidance_body": "这部分回答两个最重要的问题：什么时候该改，以及改完后该看哪里。",
+      "when_change_title": "什么时候应该来改这里",
+      "when_change_items": {
+        "backlog": "积压持续上升，说明当前吞吐跟不上输入速率，需要提高处理能力或延长缓冲空间。",
+        "latency": "处理延迟明显拉长，但实例并未报错，通常意味着队列、批窗口或协程配置不再适合当前流量。",
+        "provider": "LLM 提供商开始限流、报错或成本过高时，需要主动收紧 QPS、Burst 或直接关闭限流能力。"
+      },
+      "after_change_title": "改完之后重点看什么",
+      "after_change_items": {
+        "instances": "实例表里的观测版本、应用状态和最后上报时间，确认每个在线节点都追上了目标版本。",
+        "degraded": "是否出现 degraded、stale、expired 或 queue resize pending，避免把一次小改动放大成线上故障。",
+        "history": "版本历史中的风险等级、说明和回滚入口，确保团队成员能理解这次变更的目的和后果。"
+      },
+      "guardrail_title": "变更保护",
+      "guardrail_help": "高风险改动要求近期二次验证；页面会持续显示当前策略版本和验证有效期。",
+      "guardrail_warning_title": "这是在线控制面",
+      "guardrail_warning_body": "缩小队列、提高并发或放宽限流都会直接影响线上吞吐、延迟和错误面。建议每次变更附带原因，并观察实例收敛状态后再进行下一步操作。",
+      "desired_title": "当前目标配置",
+      "bootstrap_title": "启动默认配置",
+      "reason_label": "变更说明",
+      "reason_placeholder": "例如：活动峰值前提高并发，或回滚异常限流配置",
+      "revision_meta": "目标版本 {{version}} · schema v{{specVersion}}",
+      "last_updated_meta": "最近更新：{{by}} · {{at}}",
+      "bootstrap_meta": "启动快照：{{value}}",
+      "last_known_good_meta": "最后已知良好版本：{{value}}",
+      "convergence_warning_title": "实例尚未完全收敛",
+      "convergence_warning_body": "至少一个实例仍处于 stale、expired、failed 或 degraded 状态。请先观察实例表和错误原因，再继续变更。",
+      "convergence_ok_title": "集群已收敛",
+      "convergence_ok_body": "在线实例都已应用当前目标版本，控制面与运行态保持一致。",
+      "local_limiter_title": "当前限流仍是本地模式",
+      "local_limiter_body": "当前有 {{count}} 个在线实例。开启 LLM 限流后，每个实例都会各自执行本地限流，这会限制单实例流量，但不代表整个部署共享一份全局 QPS 配额。",
+      "reset_all_button": "恢复全部默认",
+      "reset_partial_button": "按字段重置",
+      "reset_dialog_title": "重置运行时配置",
+      "reset_dialog_body": "可选择恢复部分字段到进程启动默认值，或整体恢复全部默认值。",
+      "reset_all_toggle": "恢复全部字段到启动默认值",
+      "reset_confirm": "执行重置",
+      "rollback_button": "回滚",
+      "rollback_dialog_title": "回滚到历史版本",
+      "rollback_dialog_body": "将当前目标配置回滚到历史版本 {{version}}，并生成一个新的目标版本。",
+      "rollback_reason_placeholder": "例如：上一版 worker / qps 调整导致实例退化",
+      "rollback_confirm": "确认回滚",
+      "current_badge": "当前版本",
+      "reason_empty": "未填写变更说明",
+      "pending_diff_title": "待保存变更",
+      "change_impact_title": "这次改动可能带来的影响",
+      "last_known_good_title": "快速回到已知良好版本",
+      "last_known_good_body": "最近一次完全收敛且无退化的版本是 {{version}}。当当前版本出现异常时，可优先回退到这个版本。",
+      "rollback_last_known_good": "回滚到已知良好版本",
+      "instances_title": "实例收敛状态",
+      "instances_help": "每 5 秒刷新一次，展示各实例对目标版本的观测、应用结果和运行队列快照。",
+      "instances_empty": "当前还没有实例上报运行时状态。",
+      "active_instances_title": "当前在线节点（{{count}}）",
+      "active_instances_body": "这里优先展示当前仍参与处理的节点，帮助你判断这次变更是否已经真正生效。",
+      "historical_instances_title": "历史 / 非活跃节点（{{count}}）",
+      "historical_instances_help": "这些节点是较早的运行实例或近期未继续上报的节点，保留用于排障和回溯，不应主导当前决策。",
+      "historical_instances_toggle": "展开历史节点详情",
+      "historical_instances_toggle_collapse": "收起历史节点详情",
+      "technical_details": "查看技术详情",
+      "instance_id_label": "实例 ID：",
+      "instance_boot_id_label": "启动 ID：",
+      "instance_identity_hint": "底层实例标识仅在技术详情中显示。",
+      "history_title": "版本历史",
+      "history_help": "保留最近的策略版本历史，可用于审查变更、查看风险等级，以及一键回滚到历史版本。",
+      "history_empty": "当前还没有历史版本。",
+      "history_actor_hint": "已隐藏底层标识",
+      "runner_status_label": "执行器：",
+      "limiter_status_label": "限流器：",
+      "status_labels": {
+        "applied": "已应用",
+        "reconciling": "收敛中",
+        "failed": "失败"
+      },
+      "condition_labels": {
+        "converged": "已收敛",
+        "reconciling": "收敛中",
+        "applied": "已应用",
+        "pending_resize": "队列调整待生效",
+        "observed_lag": "观测版本落后",
+        "degraded": "已退化",
+        "limiter_active": "限流生效",
+        "local_limiter_mode": "本地限流模式",
+        "degraded_count": "退化 {{count}}",
+        "stale_count": "陈旧 {{count}}",
+        "expired_count": "过期 {{count}}",
+        "applied_ratio": "已应用 {{value}}"
+      },
+      "operation_labels": {
+        "update": "更新",
+        "reset": "重置",
+        "rollback": "回滚"
+      },
+      "risk_labels": {
+        "normal": "常规",
+        "high": "高风险",
+        "critical": "严重"
+      },
+      "instance_cols": {
+        "instance": "实例",
+        "status": "状态",
+        "version": "版本",
+        "queue": "队列",
+        "rate_limit": "限流",
+        "last_seen": "最后上报"
+      },
+      "history_cols": {
+        "version": "版本",
+        "operation": "操作",
+        "risk": "风险",
+        "actor": "操作者",
+        "reason": "说明",
+        "updated": "更新时间",
+        "actions": "操作"
+      },
+      "history_source_target": "源 {{from}} -> 目标 {{to}}",
+      "version_runner": "runner v{{value}}",
+      "version_limiter": "limiter v{{value}}",
+      "version_observed": "observed v{{value}}",
+      "instance_queue": "深度 {{depth}} / 容量 {{capacity}}",
+      "instance_inflight": "处理中 {{count}}",
+      "instance_resize_pending": "队列缩放等待生效",
+      "instance_qps_burst": "QPS {{qps}} / Burst {{burst}}",
+      "rate_limit_toggle": "启用 LLM 速率限制",
+      "bootstrap_diff_title": "与启动默认值的差异",
+      "bootstrap_diff_empty": "当前目标配置与启动默认值一致。",
+      "metrics": {
+        "desired_version": "目标版本",
+        "live_instances": "在线实例",
+        "stale_instances": "陈旧实例",
+        "degraded_instances": "退化实例",
+        "fully_applied_hint": "已完全应用 {{count}} 台",
+        "expired_hint": "已过期 {{count}} 台",
+        "converged": "全部实例已收敛",
+        "not_converged": "仍有实例未收敛"
+      },
+      "fields": {
+        "queue_len": "队列容量",
+        "workers": "工作协程数",
+        "batch_size": "批处理大小",
+        "batch_window": "批处理窗口",
+        "sweep_interval": "扫队列间隔",
+        "llm_rate_limit_enabled": "启用 LLM 限流",
+        "llm_max_qps": "LLM 最大 QPS",
+        "llm_burst": "LLM Burst"
+      },
+      "toasts": {
+        "updated": "运行时目标配置已更新",
+        "reset": "运行时配置已重置",
+        "rollback": "运行时配置已回滚"
+      },
+      "step_up": {
+        "needed": "保存、重置和回滚前都需要先完成近期二次验证。",
+        "required": "请先完成运行时二次验证",
+        "success": "运行时二次验证已完成",
+        "failed": "运行时二次验证失败",
+        "dialog_title": "确认运行时敏感操作",
+        "dialog_body": "请再次输入当前管理员密码，解锁接下来一段时间内的运行时保存、重置和回滚操作。",
+        "dialog_hint": "验证成功后，这个控制面的高风险操作会在一个短时间窗口内被视为“近期已验证”。",
+        "password_label": "当前密码",
+        "password_placeholder": "输入当前控制台密码",
+        "confirm": "验证并继续"
+      },
+      "errors": {
+        "invalid_number": "请填写合法的数字配置",
+        "reset_empty": "请至少选择一个要重置的字段",
+        "queue_len_positive": "队列容量必须大于 0",
+        "workers_positive": "工作协程数必须大于 0",
+        "batch_size_positive": "批处理大小必须大于 0",
+        "batch_window_positive": "批处理窗口必须大于 0 秒",
+        "sweep_interval_positive": "扫队列间隔必须大于 0 秒",
+        "workers_lte_queue": "工作协程数不能超过队列容量",
+        "batch_size_lte_queue": "批处理大小不能超过队列容量",
+        "llm_max_qps_non_negative": "LLM 最大 QPS 不能为负数",
+        "llm_burst_non_negative": "LLM Burst 不能为负数",
+        "llm_max_qps_required": "启用 LLM 限流后，LLM 最大 QPS 必须大于 0",
+        "llm_burst_required": "启用 LLM 限流后，LLM Burst 至少为 1"
+      }
+    }
   },
   "dim": {
     "editor": {

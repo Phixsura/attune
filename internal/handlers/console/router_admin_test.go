@@ -2,17 +2,25 @@ package console
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/domain"
+	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/rbac"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	enrichrepo "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
+	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 )
 
 func TestRequireAdminRejectsNonAdminRole(t *testing.T) {
@@ -35,16 +43,19 @@ func TestRequireAdminAllowsAdminRole(t *testing.T) {
 	t.Parallel()
 	router := ptrext.Of(Router{admins: roleAdminReader{row: admin.Admin{ID: "user-1", Role: "admin"}}})
 	called := false
+	seenRole := domain.Role("")
 	req := httptest.NewRequest(http.MethodGet, "/llm/channels", nil)
 	req = req.WithContext(session.WithAuthCtx(req.Context(), ptrext.Of(session.AuthCtx{UserID: "user-1"})))
 	w := httptest.NewRecorder()
 
-	router.requireAdmin(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	router.requireAdmin(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
 		called = true
+		seenRole = rbac.FromContext(req.Context())
 	})).ServeHTTP(w, req)
 
 	require.True(t, called)
 	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, domain.RoleAdmin, seenRole)
 }
 
 type roleAdminReader struct {
@@ -177,4 +188,103 @@ func TestRequireViewer_RBACRouterFallsBackToLegacyAdminSession(t *testing.T) {
 
 	require.True(t, called)
 	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequireAdminLegacyInjectsAdminRoleIntoContext(t *testing.T) {
+	t.Parallel()
+	router := ptrext.Of(Router{admins: roleAdminReader{row: admin.Admin{ID: "user-1", Role: "admin"}}})
+	seenRole := domain.Role("")
+	w := httptest.NewRecorder()
+
+	router.requireAdmin(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+		seenRole = rbac.FromContext(req.Context())
+	})).ServeHTTP(w, legacyAdminReq())
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, domain.RoleAdmin, seenRole)
+}
+
+type fakeRuntimeService struct {
+	resetCalled    bool
+	rollbackCalled bool
+}
+
+func (f *fakeRuntimeService) Get(context.Context) (enrichruntimesvc.ReadModel, error) {
+	return enrichruntimesvc.ReadModel{}, nil
+}
+
+func (f *fakeRuntimeService) Update(context.Context, uint64, enrichrepo.Spec, string, enrichruntimesvc.MutationActor) (enrichruntimesvc.ReadModel, error) {
+	return enrichruntimesvc.ReadModel{}, nil
+}
+
+func (f *fakeRuntimeService) Reset(context.Context, uint64, []string, bool, string, enrichruntimesvc.MutationActor) (enrichruntimesvc.ReadModel, error) {
+	f.resetCalled = true
+	return enrichruntimesvc.ReadModel{}, nil
+}
+
+func (f *fakeRuntimeService) Rollback(context.Context, uint64, uint64, string, enrichruntimesvc.MutationActor) (enrichruntimesvc.ReadModel, error) {
+	f.rollbackCalled = true
+	return enrichruntimesvc.ReadModel{}, nil
+}
+
+func runtimeAuthedReq(method, path string, body any, role domain.Role) *http.Request {
+	var reader *strings.Reader
+	if body == nil {
+		reader = strings.NewReader("")
+	} else {
+		raw, _ := json.Marshal(body)
+		reader = strings.NewReader(string(raw))
+	}
+	req := httptest.NewRequest(method, path, reader)
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(session.WithAuthCtx(req.Context(), ptrext.Of(session.AuthCtx{
+		TenantID: "tenant-1",
+		UserID:   "user-1",
+		UserType: "oidc_user",
+		StepUpAt: ptrext.Of(time.Now()),
+	})))
+	if role != "" {
+		req = req.WithContext(rbac.WithRole(req.Context(), role))
+	}
+	return req
+}
+
+func TestEnrichmentRuntimeLegacyResetRouteRequiresAdmin(t *testing.T) {
+	t.Parallel()
+	svc := ptrext.Of(fakeRuntimeService{})
+	router := ptrext.Of(Router{
+		rbac:              rbac.NewMiddleware(fakeRoleStore{role: domain.RoleViewer}),
+		enrichmentRuntime: consoleenrichmentruntime.NewHandler(svc, 15*time.Minute),
+	})
+	mux := chi.NewRouter()
+	router.mountEnrichmentRuntime(mux)
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, runtimeAuthedReq(http.MethodPost, "/enrichment-runtime:reset", attunev1.ResetEnrichmentRuntimeRequest{
+		ExpectedVersion: 1,
+		ResetAll:        true,
+	}, domain.RoleViewer))
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.False(t, svc.resetCalled)
+}
+
+func TestEnrichmentRuntimeLegacyResetRouteAllowsAdmin(t *testing.T) {
+	t.Parallel()
+	svc := ptrext.Of(fakeRuntimeService{})
+	router := ptrext.Of(Router{
+		rbac:              rbac.NewMiddleware(fakeRoleStore{role: domain.RoleAdmin}),
+		enrichmentRuntime: consoleenrichmentruntime.NewHandler(svc, 15*time.Minute),
+	})
+	mux := chi.NewRouter()
+	router.mountEnrichmentRuntime(mux)
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, runtimeAuthedReq(http.MethodPost, "/enrichment-runtime:reset", attunev1.ResetEnrichmentRuntimeRequest{
+		ExpectedVersion: 1,
+		ResetAll:        true,
+	}, domain.RoleAdmin))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, svc.resetCalled)
 }

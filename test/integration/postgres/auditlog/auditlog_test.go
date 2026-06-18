@@ -286,6 +286,7 @@ func newAuditRouter(t *testing.T, pool *pgxpool.Pool) (http.Handler, *console.Si
 		nil,
 		nil,
 		nil,
+		nil,
 		tenantmember.NewRepo(pool),
 	)
 	return router.Mount(), signer
@@ -306,6 +307,7 @@ func newMemberRouter(t *testing.T, pool *pgxpool.Pool) (http.Handler, *console.S
 		nil,
 		nil,
 		console.NewAuditLogHandler(auditlogsvc.New(auditlogrepo.New(pool))),
+		nil,
 		nil,
 		nil,
 		nil,

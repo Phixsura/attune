@@ -20,12 +20,14 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
 	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/clusters"
 	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
+	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
@@ -74,6 +76,7 @@ var (
 	NewGDPRHandler               = consolegdpr.NewHandler
 	NewUsageHandler              = usage.NewUsageHandler
 	NewEnrichConfigHandler       = enrichconfig.NewHandler
+	NewEnrichmentRuntimeHandler  = consoleenrichmentruntime.NewHandler
 	NewGuardPolicyHandler        = consoleguardpolicy.NewHandler
 	NewInboundHandler            = consoleinbound.NewHandler
 	NewLLMConfigHandler          = consolellmconfig.NewHandler
@@ -148,6 +151,7 @@ type Router struct {
 	gdpr               *consolegdpr.Handler
 	usage              *usage.UsageHandler
 	enrichConfig       *enrichconfig.Handler
+	enrichmentRuntime  *consoleenrichmentruntime.Handler
 	guardPolicies      *consoleguardpolicy.Handler
 	inbound            *consoleinbound.Handler
 	llmConfig          *consolellmconfig.Handler
@@ -181,6 +185,7 @@ func NewRouter(
 	gdprHandler *consolegdpr.Handler,
 	usage *usage.UsageHandler,
 	enrichConfig *enrichconfig.Handler,
+	enrichmentRuntime *consoleenrichmentruntime.Handler,
 	guardPolicies *consoleguardpolicy.Handler,
 	inbound *consoleinbound.Handler,
 	llmConfig *consolellmconfig.Handler,
@@ -213,6 +218,7 @@ func NewRouter(
 		gdpr:               gdprHandler,
 		usage:              usage,
 		enrichConfig:       enrichConfig,
+		enrichmentRuntime:  enrichmentRuntime,
 		guardPolicies:      guardPolicies,
 		inbound:            inbound,
 		llmConfig:          llmConfig,
@@ -322,6 +328,7 @@ func (r *Router) mountSession(m chi.Router) {
 		))
 	})
 	r.mountEnrichConfig(m)
+	r.mountEnrichmentRuntime(m)
 	r.mountGuardPolicies(m)
 	r.mountInbound(m)
 	r.mountJobs(m)
@@ -493,7 +500,7 @@ func (r *Router) requireAdminLegacy(next http.Handler) http.Handler {
 			dispatcher.Reject(req.Context(), w, http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "admin session required")
 			return
 		}
-		next.ServeHTTP(w, req)
+		next.ServeHTTP(w, req.WithContext(rbac.WithRole(req.Context(), domain.RoleAdmin)))
 	})
 }
 
@@ -1053,6 +1060,74 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 			}),
 		))
 	})
+}
+
+func (r *Router) mountEnrichmentRuntime(m chi.Router) {
+	if r.enrichmentRuntime == nil {
+		return
+	}
+	adminOnly := r.requireAdmin
+	m.Route("/enrichment-runtime", func(e chi.Router) {
+		e.Use(adminOnly)
+		e.Get("/", dispatcher.Bind(
+			"console.EnrichmentRuntimeHandler.Get",
+			dispatcher.Empty(func() *attunev1.GetEnrichmentRuntimeRequest { return ptrext.Of(attunev1.GetEnrichmentRuntimeRequest{}) }),
+			r.enrichmentRuntime.Get,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetEnrichmentRuntimeRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		e.Put("/", dispatcher.Bind(
+			"console.EnrichmentRuntimeHandler.Update",
+			dispatcher.JSON(func() *attunev1.UpdateEnrichmentRuntimeRequest {
+				return ptrext.Of(attunev1.UpdateEnrichmentRuntimeRequest{})
+			}),
+			r.enrichmentRuntime.Update,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateEnrichmentRuntimeRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		e.Post("/reset", dispatcher.Bind(
+			"console.EnrichmentRuntimeHandler.Reset",
+			dispatcher.JSON(func() *attunev1.ResetEnrichmentRuntimeRequest {
+				return ptrext.Of(attunev1.ResetEnrichmentRuntimeRequest{})
+			}),
+			r.enrichmentRuntime.Reset,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ResetEnrichmentRuntimeRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		e.Post("/rollback", dispatcher.Bind(
+			"console.EnrichmentRuntimeHandler.Rollback",
+			dispatcher.JSON(func() *attunev1.RollbackEnrichmentRuntimeRequest {
+				return ptrext.Of(attunev1.RollbackEnrichmentRuntimeRequest{})
+			}),
+			r.enrichmentRuntime.Rollback,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RollbackEnrichmentRuntimeRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+	m.With(adminOnly).Post("/enrichment-runtime:reset", dispatcher.Bind(
+		"console.EnrichmentRuntimeHandler.ResetLegacy",
+		dispatcher.JSON(func() *attunev1.ResetEnrichmentRuntimeRequest {
+			return ptrext.Of(attunev1.ResetEnrichmentRuntimeRequest{})
+		}),
+		r.enrichmentRuntime.Reset,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ResetEnrichmentRuntimeRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.With(adminOnly).Post("/enrichment-runtime:rollback", dispatcher.Bind(
+		"console.EnrichmentRuntimeHandler.RollbackLegacy",
+		dispatcher.JSON(func() *attunev1.RollbackEnrichmentRuntimeRequest {
+			return ptrext.Of(attunev1.RollbackEnrichmentRuntimeRequest{})
+		}),
+		r.enrichmentRuntime.Rollback,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RollbackEnrichmentRuntimeRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountGuardPolicies(m chi.Router) {

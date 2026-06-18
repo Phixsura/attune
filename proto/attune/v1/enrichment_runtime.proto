@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+service EnrichmentRuntimeService {
+  rpc GetEnrichmentRuntime(GetEnrichmentRuntimeRequest) returns (GetEnrichmentRuntimeResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/enrichment-runtime"};
+  }
+
+  rpc UpdateEnrichmentRuntime(UpdateEnrichmentRuntimeRequest) returns (UpdateEnrichmentRuntimeResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/enrichment-runtime"
+      body: "*"
+    };
+  }
+
+  rpc ResetEnrichmentRuntime(ResetEnrichmentRuntimeRequest) returns (ResetEnrichmentRuntimeResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/enrichment-runtime:reset"
+      body: "*"
+    };
+  }
+
+  rpc RollbackEnrichmentRuntime(RollbackEnrichmentRuntimeRequest) returns (RollbackEnrichmentRuntimeResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/enrichment-runtime:rollback"
+      body: "*"
+    };
+  }
+}
+
+enum RuntimeApplyStatus {
+  RUNTIME_APPLY_STATUS_UNSPECIFIED = 0;
+  RUNTIME_APPLY_STATUS_PENDING = 1;
+  RUNTIME_APPLY_STATUS_APPLYING = 2;
+  RUNTIME_APPLY_STATUS_APPLIED = 3;
+  RUNTIME_APPLY_STATUS_FAILED = 4;
+  RUNTIME_APPLY_STATUS_STALE = 5;
+  RUNTIME_APPLY_STATUS_DEGRADED = 6;
+}
+
+message EnrichmentRuntimeSpec {
+  int32 queue_len = 1;
+  int32 workers = 2;
+  int32 batch_size = 3;
+  google.protobuf.Duration batch_window = 4;
+  google.protobuf.Duration sweep_interval = 5;
+  bool llm_rate_limit_enabled = 6;
+  double llm_max_qps = 7;
+  int32 llm_burst = 8;
+}
+
+message EnrichmentRuntimeRevision {
+  uint64 version = 1;
+  google.protobuf.Timestamp updated_at = 2;
+  string updated_by = 3;
+  string update_reason = 4;
+  string bootstrap_snapshot_version = 5;
+  uint32 spec_version = 6;
+  uint64 last_known_good_version = 7;
+}
+
+message EnrichmentRuntimeHistoryEntry {
+  EnrichmentRuntimeRevision revision = 1;
+  string operation_type = 2;
+  string risk_level = 3;
+  uint64 source_version = 4;
+  uint64 target_version = 5;
+  string rollback_lineage = 6;
+}
+
+message EnrichmentRuntimeInstanceStatus {
+  string instance_id = 1;
+  string boot_id = 2;
+  uint64 desired_version = 3;
+  uint64 observed_desired_version = 4;
+  uint64 runner_effective_version = 5;
+  uint64 limiter_effective_version = 6;
+  uint64 attempted_runner_version = 7;
+  uint64 attempted_limiter_version = 8;
+  RuntimeApplyStatus runner_apply_status = 9;
+  RuntimeApplyStatus limiter_apply_status = 10;
+  string runner_last_apply_error = 11;
+  string limiter_last_apply_error = 12;
+  int32 queue_depth = 13;
+  int32 queue_capacity_target = 14;
+  int32 queue_capacity_effective = 15;
+  bool queue_resize_pending = 16;
+  int32 in_flight = 17;
+  string degraded_reason = 18;
+  google.protobuf.Timestamp last_applied_at = 19;
+  google.protobuf.Timestamp last_reconciled_at = 20;
+  google.protobuf.Timestamp last_seen_at = 21;
+  EnrichmentRuntimeSpec applied_spec = 22;
+}
+
+message EnrichmentRuntimeSummary {
+  uint64 desired_version = 1;
+  uint32 live_instances = 2;
+  uint32 stale_instances = 3;
+  uint32 expired_instances = 4;
+  uint32 degraded_instances = 5;
+  uint32 fully_applied_instances = 6;
+  bool fully_converged = 7;
+}
+
+message EnrichmentRuntimeReadModel {
+  EnrichmentRuntimeSpec bootstrap_default = 1;
+  EnrichmentRuntimeSpec desired_spec = 2;
+  EnrichmentRuntimeRevision desired_revision = 3;
+  EnrichmentRuntimeSummary summary = 4;
+  repeated EnrichmentRuntimeInstanceStatus instances = 5;
+  repeated EnrichmentRuntimeHistoryEntry history = 6;
+}
+
+message GetEnrichmentRuntimeRequest {}
+
+message GetEnrichmentRuntimeResponse {
+  EnrichmentRuntimeReadModel runtime = 1;
+}
+
+message UpdateEnrichmentRuntimeRequest {
+  uint64 expected_version = 1;
+  EnrichmentRuntimeSpec spec = 2;
+  string update_reason = 3;
+}
+
+message UpdateEnrichmentRuntimeResponse {
+  EnrichmentRuntimeReadModel runtime = 1;
+}
+
+message ResetEnrichmentRuntimeRequest {
+  uint64 expected_version = 1;
+  repeated string fields = 2;
+  bool reset_all = 3;
+  string update_reason = 4;
+}
+
+message ResetEnrichmentRuntimeResponse {
+  EnrichmentRuntimeReadModel runtime = 1;
+}
+
+message RollbackEnrichmentRuntimeRequest {
+  uint64 expected_version = 1;
+  uint64 target_version = 2;
+  string update_reason = 3;
+}
+
+message RollbackEnrichmentRuntimeResponse {
+  EnrichmentRuntimeReadModel runtime = 1;
+}

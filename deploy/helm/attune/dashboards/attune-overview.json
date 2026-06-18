@@ -720,7 +720,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Queue pressure",
-      "description": "Outbox lag trend. Rising lag with flat delivery failures points to worker capacity; rising failures points to destination/API issues.",
+      "description": "Outbox lag plus local enrichment queue signals. Rising enrichment queue depth or full submits point to worker pressure before provider failures appear.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -730,8 +730,18 @@
       "targets": [
         {
           "expr": "(attune_outbox_lag_seconds) or vector(0)",
-          "legendFormat": "lag",
+          "legendFormat": "outbox lag",
           "refId": "A"
+        },
+        {
+          "expr": "(attune_enrich_queue_depth) or vector(0)",
+          "legendFormat": "enrich queue depth",
+          "refId": "B"
+        },
+        {
+          "expr": "((increase(attune_enrich_queue_full_total[$__range])) or vector(0)) or vector(0)",
+          "legendFormat": "enrich queue full",
+          "refId": "C"
         }
       ],
       "fieldConfig": {

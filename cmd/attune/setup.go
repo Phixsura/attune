@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/handlers/console"
+	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
@@ -25,6 +26,7 @@ import (
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
+	enrichruntime "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	feedbackauditrepo "github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	feedbackjobrepo "github.com/Phixsura/attune/internal/repo/feedbackjob"
@@ -46,6 +48,7 @@ import (
 	"github.com/Phixsura/attune/internal/service/apikey"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	"github.com/Phixsura/attune/internal/service/enrich"
+	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	"github.com/Phixsura/attune/internal/service/feedbackbatch"
 	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
@@ -159,6 +162,7 @@ func buildConsoleRouter(
 	sourceRepo *inboundsourcerepo.Repo,
 	adminRepo *admin.Repo,
 	llm llmclient.LLMClient,
+	enrichRuntime *enrichruntimesvc.Service,
 ) (chi.Router, error) {
 	if cfg.ConsoleBaseURL == "" {
 		return nil, fmt.Errorf("console requires console.base_url")
@@ -175,7 +179,7 @@ func buildConsoleRouter(
 	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
 	feedbackRepo := feedback.NewFeedback(pool)
 
-	authHandler := console.NewAuthHandler(signer, adminRepo, tenantRepo, cfg.ConsoleBaseURL)
+	authHandler := console.NewAuthHandler(signer, adminRepo, tenantRepo, tenantmember.NewRepo(pool), cfg.ConsoleBaseURL)
 	changePasswordHandler := console.NewChangePasswordHandler(adminRepo, signer)
 	oidcUserRepo := oidcuserrepo.NewRepo(pool)
 	me := console.NewMeHandler(signer, tenantRepo, userRepo, adminRepo, oidcUserRepo)
@@ -191,6 +195,10 @@ func buildConsoleRouter(
 	usage := console.NewUsageHandler(feedbackRepo, llmauditrepo.New(pool))
 	gdprHandler := buildGDPRHandler(cfg, pool, auditLogSvc, signer, adminRepo)
 	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
+	var enrichmentRuntimeHandler *consoleenrichmentruntime.Handler
+	if enrichRuntime != nil {
+		enrichmentRuntimeHandler = console.NewEnrichmentRuntimeHandler(enrichRuntime, cfg.GDPRStepUpTTL)
+	}
 	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool)))
 	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
 	llmConfig := console.NewLLMConfigHandler(
@@ -242,6 +250,9 @@ func buildConsoleRouter(
 	memberHandler.SetAuditLogger(auditLogSvc)
 	guardPolicies.SetAuditLogger(auditLogSvc)
 	enrichConfig.SetAuditLogger(auditLogSvc)
+	if enrichmentRuntimeHandler != nil {
+		enrichmentRuntimeHandler.SetAuditLogger(auditLogSvc)
+	}
 	jobHandler.SetAuditLogger(auditLogSvc)
 	llmConfig.SetAuditLogger(auditLogSvc)
 	workflowHandler.SetAuditLogger(auditLogSvc)
@@ -255,7 +266,7 @@ func buildConsoleRouter(
 		searchHandler,
 		jobHandler,
 		gdprHandler,
-		usage, enrichConfig, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
+		usage, enrichConfig, enrichmentRuntimeHandler, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
 		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	).Mount(), nil
 }
@@ -316,4 +327,30 @@ func buildOIDCHandler(
 	}
 
 	return consoleoidc.NewHandler(oidcSvc, signer, aead, cfg.ConsoleBaseURL)
+}
+
+func enrichmentRuntimeBootstrapSpec(cfg *config.Config) enrichruntime.Spec {
+	return enrichruntime.Spec{
+		QueueLen:            int32(cfg.EnricherQueueLen),
+		Workers:             int32(cfg.EnricherWorkers),
+		BatchSize:           int32(cfg.EnricherBatch),
+		BatchWindow:         cfg.EnricherBatchWindow,
+		SweepInterval:       cfg.EnricherInterval,
+		LLMRateLimitEnabled: cfg.EnricherLLMMaxQPS > 0,
+		LLMMaxQPS:           cfg.EnricherLLMMaxQPS,
+		LLMBurst:            int32(cfg.EnricherLLMBurst),
+	}
+}
+
+func enrichmentRuntimeBootstrapVersion(cfg *config.Config) string {
+	return fmt.Sprintf(
+		"enricher:%d:%d:%d:%s:%s:%g:%d",
+		cfg.EnricherQueueLen,
+		cfg.EnricherWorkers,
+		cfg.EnricherBatch,
+		cfg.EnricherBatchWindow,
+		cfg.EnricherInterval,
+		cfg.EnricherLLMMaxQPS,
+		cfg.EnricherLLMBurst,
+	)
 }

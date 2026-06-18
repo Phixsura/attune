@@ -356,7 +356,7 @@
       "id": 8,
       "type": "stat",
       "title": "AI queues",
-      "description": "Combined embedding and reply-draft queue depth. A sustained non-zero value means workers are falling behind.",
+      "description": "Combined enrich, embedding, and reply-draft queue depth. A sustained non-zero value means workers are falling behind.",
       "gridPos": {
         "h": 4,
         "w": 8,
@@ -365,7 +365,7 @@
       },
       "targets": [
         {
-          "expr": "((sum(attune_embed_queue_depth{tenant=~\"$tenant\"}) + sum(attune_reply_draft_queue_depth{tenant=~\"$tenant\"})) or vector(0)) or vector(0)",
+          "expr": "((attune_enrich_queue_depth + sum(attune_embed_queue_depth{tenant=~\"$tenant\"}) + sum(attune_reply_draft_queue_depth{tenant=~\"$tenant\"})) or vector(0)) or vector(0)",
           "legendFormat": "AI queues",
           "refId": "A"
         }
@@ -466,7 +466,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Enrich duration",
-      "description": "Enrichment latency percentiles split by result. Spikes with normal traffic usually point to provider or queue pressure.",
+      "description": "Enrichment latency percentiles split by result. Spikes with normal traffic usually point to provider, limiter, or queue pressure.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -483,6 +483,11 @@
           "expr": "(histogram_quantile(0.95, sum by (le, result) (rate(attune_enrich_duration_seconds_bucket{tenant=~\"$tenant\"}[$__rate_interval])))) or vector(0)",
           "legendFormat": "p95 / {{result}}",
           "refId": "B"
+        },
+        {
+          "expr": "(histogram_quantile(0.95, sum by (le) (rate(attune_llm_rate_limit_wait_seconds_bucket[$__rate_interval])))) or vector(0)",
+          "legendFormat": "llm wait p95",
+          "refId": "C"
         }
       ],
       "fieldConfig": {
@@ -693,7 +698,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "Embedding",
-      "description": "Embedding worker health: assignments, errors, p95 duration, and queue depth. Queue growth is the leading saturation signal.",
+      "description": "Embedding worker health plus enrichment queue depth. Queue growth is the leading saturation signal across the AI pipeline.",
       "gridPos": {
         "h": 8,
         "w": 24,
@@ -720,6 +725,11 @@
           "expr": "(sum(attune_embed_queue_depth{tenant=~\"$tenant\"})) or vector(0)",
           "legendFormat": "queue depth",
           "refId": "D"
+        },
+        {
+          "expr": "(attune_enrich_queue_depth) or vector(0)",
+          "legendFormat": "enrich queue depth",
+          "refId": "E"
         }
       ],
       "fieldConfig": {
@@ -753,7 +763,7 @@
       "id": 17,
       "type": "timeseries",
       "title": "Reply draft generation",
-      "description": "Reply draft path health: generation rate, errors, duration, and queue depth.",
+      "description": "Reply draft path health plus enrichment batch and sweep signals. Use this to separate upstream enrich starvation from draft worker lag.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -780,6 +790,16 @@
           "expr": "(sum(attune_reply_draft_queue_depth{tenant=~\"$tenant\"})) or vector(0)",
           "legendFormat": "queue depth",
           "refId": "D"
+        },
+        {
+          "expr": "(histogram_quantile(0.95, sum by (le) (rate(attune_enrich_batch_size_bucket[$__rate_interval])))) or vector(0)",
+          "legendFormat": "enrich batch p95",
+          "refId": "E"
+        },
+        {
+          "expr": "(sum(rate(attune_enrich_sweep_submitted_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "enrich sweep submit",
+          "refId": "F"
         }
       ],
       "fieldConfig": {

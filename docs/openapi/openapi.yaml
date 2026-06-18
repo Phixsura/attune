@@ -397,6 +397,95 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrichment-runtime:
+        get:
+            tags:
+                - EnrichmentRuntimeService
+            operationId: EnrichmentRuntimeService_GetEnrichmentRuntime
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetEnrichmentRuntimeResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        put:
+            tags:
+                - EnrichmentRuntimeService
+            operationId: EnrichmentRuntimeService_UpdateEnrichmentRuntime
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateEnrichmentRuntimeRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateEnrichmentRuntimeResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrichment-runtime:reset:
+        post:
+            tags:
+                - EnrichmentRuntimeService
+            operationId: EnrichmentRuntimeService_ResetEnrichmentRuntime
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ResetEnrichmentRuntimeRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ResetEnrichmentRuntimeResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrichment-runtime:rollback:
+        post:
+            tags:
+                - EnrichmentRuntimeService
+            operationId: EnrichmentRuntimeService_RollbackEnrichmentRuntime
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RollbackEnrichmentRuntimeRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RollbackEnrichmentRuntimeResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback:
         get:
             tags:
@@ -3181,6 +3270,179 @@ components:
                         Per-tenant Dimension set. Migration 014 seeds 3 dims (type +
                          severity + labels) on every fresh tenant; operators may add /
                          remove / edit any dim from here.
+        EnrichmentRuntimeHistoryEntry:
+            type: object
+            properties:
+                revision:
+                    $ref: '#/components/schemas/EnrichmentRuntimeRevision'
+                operationType:
+                    type: string
+                riskLevel:
+                    type: string
+                sourceVersion:
+                    type: string
+                targetVersion:
+                    type: string
+                rollbackLineage:
+                    type: string
+        EnrichmentRuntimeInstanceStatus:
+            type: object
+            properties:
+                instanceId:
+                    type: string
+                bootId:
+                    type: string
+                desiredVersion:
+                    type: string
+                observedDesiredVersion:
+                    type: string
+                runnerEffectiveVersion:
+                    type: string
+                limiterEffectiveVersion:
+                    type: string
+                attemptedRunnerVersion:
+                    type: string
+                attemptedLimiterVersion:
+                    type: string
+                runnerApplyStatus:
+                    enum:
+                        - RUNTIME_APPLY_STATUS_UNSPECIFIED
+                        - RUNTIME_APPLY_STATUS_PENDING
+                        - RUNTIME_APPLY_STATUS_APPLYING
+                        - RUNTIME_APPLY_STATUS_APPLIED
+                        - RUNTIME_APPLY_STATUS_FAILED
+                        - RUNTIME_APPLY_STATUS_STALE
+                        - RUNTIME_APPLY_STATUS_DEGRADED
+                    type: string
+                    format: enum
+                limiterApplyStatus:
+                    enum:
+                        - RUNTIME_APPLY_STATUS_UNSPECIFIED
+                        - RUNTIME_APPLY_STATUS_PENDING
+                        - RUNTIME_APPLY_STATUS_APPLYING
+                        - RUNTIME_APPLY_STATUS_APPLIED
+                        - RUNTIME_APPLY_STATUS_FAILED
+                        - RUNTIME_APPLY_STATUS_STALE
+                        - RUNTIME_APPLY_STATUS_DEGRADED
+                    type: string
+                    format: enum
+                runnerLastApplyError:
+                    type: string
+                limiterLastApplyError:
+                    type: string
+                queueDepth:
+                    type: integer
+                    format: int32
+                queueCapacityTarget:
+                    type: integer
+                    format: int32
+                queueCapacityEffective:
+                    type: integer
+                    format: int32
+                queueResizePending:
+                    type: boolean
+                inFlight:
+                    type: integer
+                    format: int32
+                degradedReason:
+                    type: string
+                lastAppliedAt:
+                    type: string
+                    format: date-time
+                lastReconciledAt:
+                    type: string
+                    format: date-time
+                lastSeenAt:
+                    type: string
+                    format: date-time
+                appliedSpec:
+                    $ref: '#/components/schemas/EnrichmentRuntimeSpec'
+        EnrichmentRuntimeReadModel:
+            type: object
+            properties:
+                bootstrapDefault:
+                    $ref: '#/components/schemas/EnrichmentRuntimeSpec'
+                desiredSpec:
+                    $ref: '#/components/schemas/EnrichmentRuntimeSpec'
+                desiredRevision:
+                    $ref: '#/components/schemas/EnrichmentRuntimeRevision'
+                summary:
+                    $ref: '#/components/schemas/EnrichmentRuntimeSummary'
+                instances:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EnrichmentRuntimeInstanceStatus'
+                history:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EnrichmentRuntimeHistoryEntry'
+        EnrichmentRuntimeRevision:
+            type: object
+            properties:
+                version:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                updatedBy:
+                    type: string
+                updateReason:
+                    type: string
+                bootstrapSnapshotVersion:
+                    type: string
+                specVersion:
+                    type: integer
+                    format: uint32
+                lastKnownGoodVersion:
+                    type: string
+        EnrichmentRuntimeSpec:
+            type: object
+            properties:
+                queueLen:
+                    type: integer
+                    format: int32
+                workers:
+                    type: integer
+                    format: int32
+                batchSize:
+                    type: integer
+                    format: int32
+                batchWindow:
+                    pattern: ^-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?s$
+                    type: string
+                sweepInterval:
+                    pattern: ^-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?s$
+                    type: string
+                llmRateLimitEnabled:
+                    type: boolean
+                llmMaxQps:
+                    type: number
+                    format: double
+                llmBurst:
+                    type: integer
+                    format: int32
+        EnrichmentRuntimeSummary:
+            type: object
+            properties:
+                desiredVersion:
+                    type: string
+                liveInstances:
+                    type: integer
+                    format: uint32
+                staleInstances:
+                    type: integer
+                    format: uint32
+                expiredInstances:
+                    type: integer
+                    format: uint32
+                degradedInstances:
+                    type: integer
+                    format: uint32
+                fullyAppliedInstances:
+                    type: integer
+                    format: uint32
+                fullyConverged:
+                    type: boolean
         ExportGdprSubjectRequest:
             type: object
             properties:
@@ -3542,6 +3804,11 @@ components:
             properties:
                 config:
                     $ref: '#/components/schemas/EnrichConfig'
+        GetEnrichmentRuntimeResponse:
+            type: object
+            properties:
+                runtime:
+                    $ref: '#/components/schemas/EnrichmentRuntimeReadModel'
         GetFeedbackStatsResponse:
             type: object
             properties:
@@ -4233,6 +4500,24 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/WorkflowTransition'
+        ResetEnrichmentRuntimeRequest:
+            type: object
+            properties:
+                expectedVersion:
+                    type: string
+                fields:
+                    type: array
+                    items:
+                        type: string
+                resetAll:
+                    type: boolean
+                updateReason:
+                    type: string
+        ResetEnrichmentRuntimeResponse:
+            type: object
+            properties:
+                runtime:
+                    $ref: '#/components/schemas/EnrichmentRuntimeReadModel'
         ResolveGuardPolicyRequest:
             type: object
             properties:
@@ -4296,6 +4581,20 @@ components:
                         - GDPR_REQUEST_STATUS_REVOKED
                     type: string
                     format: enum
+        RollbackEnrichmentRuntimeRequest:
+            type: object
+            properties:
+                expectedVersion:
+                    type: string
+                targetVersion:
+                    type: string
+                updateReason:
+                    type: string
+        RollbackEnrichmentRuntimeResponse:
+            type: object
+            properties:
+                runtime:
+                    $ref: '#/components/schemas/EnrichmentRuntimeReadModel'
         RotateInboundSourceSecretRequest:
             type: object
             properties:
@@ -4569,6 +4868,20 @@ components:
             properties:
                 config:
                     $ref: '#/components/schemas/EnrichConfig'
+        UpdateEnrichmentRuntimeRequest:
+            type: object
+            properties:
+                expectedVersion:
+                    type: string
+                spec:
+                    $ref: '#/components/schemas/EnrichmentRuntimeSpec'
+                updateReason:
+                    type: string
+        UpdateEnrichmentRuntimeResponse:
+            type: object
+            properties:
+                runtime:
+                    $ref: '#/components/schemas/EnrichmentRuntimeReadModel'
         UpdateGuardPoliciesRequest:
             type: object
             properties:
@@ -4840,6 +5153,7 @@ tags:
         EnrichConfigService manages per-tenant enricher prompt + the
          metadata-driven Dimension set (#10 → E3 proposal
          docs/proposals/2026/06/2026-06-07-flat-labels.md).
+    - name: EnrichmentRuntimeService
     - name: FeedbackService
       description: |-
         FeedbackService is attune's feedback API. Today it exposes Ingest

@@ -3,6 +3,7 @@ import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import {
   Bell,
   Bot,
+  Gauge,
   GitBranch,
   History,
   KeyRound,
@@ -37,12 +38,14 @@ import { type Permission, usePermissions } from '@/features/session/hooks/use-pe
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
+import { EnrichmentRuntimePage } from '@/features/settings/components/enrichment-runtime-page'
 import { TagsPage } from '@/features/tags/components/tags-page'
 import { WorkflowSettingsPage } from '@/features/workflow/components/workflow-settings-page'
 import type { Dimension } from '@/proto/attune/v1/common'
 
 type SettingsSection =
   | 'classification'
+  | 'enrichment_runtime'
   | 'guard_policies'
   | 'inbound_sources'
   | 'notify_targets'
@@ -56,6 +59,7 @@ type SettingsSection =
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'classification',
+  'enrichment_runtime',
   'guard_policies',
   'inbound_sources',
   'notify_targets',
@@ -197,6 +201,8 @@ function SettingsPage() {
             onSampleChange={setSample}
             onSave={handleSave}
           />
+        ) : activeSection === 'enrichment_runtime' ? (
+          <EnrichmentRuntimePage canEdit={can('settings:enrichment_runtime:edit')} />
         ) : (
           <SettingsSectionContent section={activeSection} />
         )}
@@ -363,6 +369,13 @@ function SettingsSidebar({
       body: t('settings.areas.classification.body'),
     },
     {
+      section: 'enrichment_runtime',
+      icon: Gauge,
+      title: t('settings.areas.enrichment_runtime.title'),
+      body: t('settings.areas.enrichment_runtime.body'),
+      permission: 'settings:enrichment_runtime:view',
+    },
+    {
       section: 'guard_policies',
       icon: ShieldCheck,
       title: t('settings.areas.guardrails.title'),
@@ -470,6 +483,8 @@ function sectionVisible(section: SettingsSection, can: (permission: Permission) 
   switch (section) {
     case 'classification':
       return can('settings:enrich_config:view')
+    case 'enrichment_runtime':
+      return can('settings:enrichment_runtime:view')
     case 'guard_policies':
       return can('settings:guard_policies:view')
     case 'inbound_sources':

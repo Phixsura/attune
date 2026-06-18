@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/clusters"
 	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
+	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
@@ -53,6 +54,7 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 		feedbackJob:        &feedbackjob.Handler{},
 		usage:              &usage.UsageHandler{},
 		enrichConfig:       &enrichconfig.Handler{},
+		enrichmentRuntime:  &consoleenrichmentruntime.Handler{},
 		guardPolicies:      &consoleguardpolicy.Handler{},
 		inbound:            &consoleinbound.Handler{},
 		llmConfig:          &consolellmconfig.Handler{},
@@ -73,7 +75,18 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	coverage := map[string]string{
+	coverage := expectedMutatingRouteCoverage()
+
+	for route := range got {
+		require.Containsf(t, coverage, route, "missing audit coverage decision for mutating route %s", route)
+	}
+	for route := range coverage {
+		require.Truef(t, got[route], "stale audit coverage decision for missing route %s; got:\n%s", route, strings.Join(sortedKeys(got), "\n"))
+	}
+}
+
+func expectedMutatingRouteCoverage() map[string]string {
+	return map[string]string{
 		"POST /install/login":                              "exempt: login flow creates a session but is not a tenant-scoped unified audit event",
 		"POST /logout":                                     "exempt: logout tears down a session only",
 		"POST /me/change-password":                         "exempt: self-service auth flow outside the tenant-scoped unified audit stream",
@@ -100,6 +113,11 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 		"POST /feedback/{id}/transition":                   "exempt: per-feedback workflow audit path, not unified control-plane audit",
 		"PUT /enrich-config/":                              "audited: enrich_config.update",
 		"POST /enrich-config/preview":                      "exempt: preview-only, does not persist config",
+		"PUT /enrichment-runtime/":                         "audited: enrichment_runtime.update",
+		"POST /enrichment-runtime/reset":                   "audited: enrichment_runtime.reset",
+		"POST /enrichment-runtime/rollback":                "audited: enrichment_runtime.rollback",
+		"POST /enrichment-runtime:reset":                   "audited: enrichment_runtime.reset (legacy compatibility route)",
+		"POST /enrichment-runtime:rollback":                "audited: enrichment_runtime.rollback (legacy compatibility route)",
 		"POST /guard-policies/":                            "audited: guard_policy.create",
 		"PUT /guard-policies/":                             "audited: guard_policy.update",
 		"PATCH /guard-policies/{id}":                       "audited: guard_policy.update",
@@ -131,12 +149,5 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 		"POST /members/":                                   "audited: member.invite",
 		"PATCH /members/{id}":                              "audited: member.update_role",
 		"DELETE /members/{id}":                             "audited: member.remove",
-	}
-
-	for route := range got {
-		require.Containsf(t, coverage, route, "missing audit coverage decision for mutating route %s", route)
-	}
-	for route := range coverage {
-		require.Truef(t, got[route], "stale audit coverage decision for missing route %s; got:\n%s", route, strings.Join(sortedKeys(got), "\n"))
 	}
 }
