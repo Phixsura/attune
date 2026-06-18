@@ -184,6 +184,7 @@ type yamlConfig struct {
 	Observability  ObservabilityConfig `yaml:"observability"`
 	RateLimit      RateLimitConfig     `yaml:"rate_limit"`
 	OIDC           OIDCConfig          `yaml:"oidc"`
+	Security       SecurityConfig      `yaml:"security"`
 	CustomWebhooks []CustomWebhookDest `yaml:"custom_webhooks"`
 }
 
@@ -251,6 +252,7 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 		Observability:  yc.Observability,
 		RateLimit:      yc.RateLimit,
 		OIDC:           yc.OIDC,
+		Security:       yc.Security,
 		CustomWebhooks: yc.CustomWebhooks,
 	})
 	c.applyDefaults()
