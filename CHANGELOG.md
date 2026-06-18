@@ -55,6 +55,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **`X-Attune-Delivery-Id` header on outbound webhook deliveries (#84).** Raw
+  webhook deliveries now carry the outbox row id, which is stable across the
+  at-least-once retries of that delivery, so consumers can dedup replays (a
+  delivery that succeeds downstream but crashes before `MarkDelivered` is retried
+  with the same id). Signature and payload are unchanged.
+
 - **Shipped-artifact hygiene CI guard (#64).** New `scripts/lint-artifacts.sh`
   (wired into `ci-gate`, the pre-commit hook, and `make ci-check`) fails on leaked
   intermediate-state scaffolding in shipped artifacts: internal `Phase N` roadmap

@@ -54,6 +54,10 @@ func (c *channel) RenderEvent(env *outbound.Envelope, dst outbound.Target) (outb
 			}
 			req.Header.Set("Content-Type", "application/json; charset=utf-8")
 			req.Header.Set("X-Attune-Signature", signature)
+			if env.DeliveryID != "" {
+				// Stable across retries — consumers dedup at-least-once replays on it.
+				req.Header.Set("X-Attune-Delivery-Id", env.DeliveryID)
+			}
 			req.Header.Set("User-Agent", "attune/1.0")
 			logext.Infof(ctx, "[outbound.generic] upstream req,label:%s,url:%s,body:%s",
 				label, dst.URL, truncate(string(body), 1024))

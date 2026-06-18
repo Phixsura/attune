@@ -51,6 +51,11 @@ type Envelope struct {
 	EventType string         `json:"event_type"`
 	TenantID  string         `json:"tenant_id"`
 	Feedback  map[string]any `json:"feedback"`
+
+	// DeliveryID identifies one outbox row. It is stable across the at-least-once
+	// retries of that row, so a webhook consumer can dedup replays on it. Set at
+	// send time (the row id isn't known at enqueue), not persisted in the payload.
+	DeliveryID string `json:"-"`
 }
 
 // Rendered — what an adapter returns after rendering. The driver calls

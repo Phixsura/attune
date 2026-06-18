@@ -37,6 +37,9 @@ func (w *OutboxWorker) sendByDestType(
 		logext.Warnf(ctx, "[%s] reject: bad payload,id:%d,err:%s", where, row.ID, err.Error())
 		return fmt.Errorf("%w: unmarshal envelope: %w", notify.ErrTerminal, err)
 	}
+	// Stamp the stable per-row delivery id so adapters can emit it as a dedup
+	// header — the row id is constant across at-least-once retries.
+	env.DeliveryID = fmt.Sprintf("%d", row.ID)
 
 	dst := toOutboundTarget(target)
 	rendered, err := ch.RenderEvent(env, dst)

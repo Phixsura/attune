@@ -73,12 +73,20 @@ Verified findings addressed here:
    transport + email dial through it and validate the LLM `base_url` host with
    it; **fail-closed** on DNS error. XFF: a configured trusted-proxy/hop-count;
    parse right-to-left skipping trusted hops, else use `RemoteAddr`.
-4. **Dedup + idempotency.** Emit `X-Attune-Delivery-Id` (the `notify_outbox.id`)
-   on every delivery for consumer dedup; the GitHub adapter searches
-   `is:issue "<marker> #N"` before creating (GitHub has no idempotency key — the
-   marker already exists in the adapter); `ingest` accepts an optional client
-   idempotency key and/or dedups on a new `(tenant_id, source, source_user,
-   content_hash)` unique index (`ON CONFLICT DO NOTHING RETURNING`).
+4. **Delivery dedup.** Emit `X-Attune-Delivery-Id` (the `notify_outbox.id`,
+   stable across at-least-once retries) on raw-webhook deliveries so consumers
+   can dedup replays. **Implemented.**
+   - **Deferred (own follow-up): GitHub search-before-create.** The outbound
+     framework's single-request `Build` model has no pre-flight hook, and GitHub
+     issue search is rate-limited + eventually-consistent (a just-created issue
+     isn't immediately searchable), so search-before-create is neither a clean
+     fit nor reliable against rapid replay. Doing it right needs a framework
+     `Preflight` hook — its own proposal.
+   - **Deferred (own follow-up): ingest idempotency.** A `(tenant_id, source,
+     source_user, content_hash)` unique index changes write semantics (a user
+     legitimately resending identical text becomes a silent no-op); an opt-in
+     `Idempotency-Key` is the safer Stripe-style design. Both need a migration +
+     a semantics decision — its own proposal.
 5. **Observability + worker tests.** Add `attune_enrichment_terminal_failures_total`
    (+ alert, #81) and `attune_worker_panics_total` in **one** metric-drift-gate-
    compliant change (register + catalog + dashboard + README). Unit tests for the
