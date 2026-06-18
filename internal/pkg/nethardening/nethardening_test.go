@@ -32,6 +32,12 @@ func TestCheckIP(t *testing.T) {
 		{"public v6 allowed", "2606:4700:4700::1111", Policy{}, false},
 		// metadata wins even with private+loopback allowed
 		{"metadata not unblocked by allow-private", "169.254.169.254", Policy{AllowLoopback: true, AllowPrivate: true}, true},
+		// 6to4 / NAT64 wrapping a blocked IPv4 must be caught via the embedded address
+		{"6to4 wraps metadata", "2002:a9fe:a9fe::", Policy{AllowLoopback: true, AllowPrivate: true}, true},
+		{"nat64 wraps metadata", "64:ff9b::a9fe:a9fe", Policy{AllowLoopback: true, AllowPrivate: true}, true},
+		{"nat64 wraps private blocked by default", "64:ff9b::0a00:0001", Policy{}, true},
+		{"nat64 wraps private allowed when opted in", "64:ff9b::0a00:0001", Policy{AllowPrivate: true}, false},
+		{"nat64 wraps public allowed", "64:ff9b::0808:0808", Policy{}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,6 +69,11 @@ func TestValidateURL(t *testing.T) {
 		{"internal domain", "https://gw.cluster.local", Policy{}, true},
 		{"dns rebinding suffix", "https://10.0.0.5.nip.io", Policy{}, true},
 		{"public host with private flag", "https://example.com", Policy{AllowPrivate: true}, false},
+		{"ipv6 loopback literal blocked", "http://[::1]:8080", Policy{}, true},
+		{"ipv6 loopback literal allowed", "http://[::1]:8080", Policy{AllowLoopback: true}, false},
+		{"ipv6 ula literal blocked", "https://[fd00::1]", Policy{}, true},
+		{"ipv6 public literal allowed", "https://[2606:4700::1111]", Policy{}, false},
+		{"nat64 metadata literal blocked", "https://[64:ff9b::a9fe:a9fe]", Policy{AllowLoopback: true, AllowPrivate: true}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -102,6 +113,10 @@ func TestClientIP(t *testing.T) {
 		{"one hop with spoofed prefix", "10.0.0.1:1234", "9.9.9.9, 1.2.3.4", 1, "1.2.3.4"},
 		{"hop count exceeds header falls left", "10.0.0.1:1234", "1.2.3.4", 5, "1.2.3.4"},
 		{"empty xff falls back to peer", "203.0.113.9:1234", "", 2, "203.0.113.9"},
+		{"ipv6 peer no proxy", "[2001:db8::1]:443", "", 0, "2001:db8::1"},
+		{"empty selected segment falls back to peer", "203.0.113.9:1234", "1.2.3.4, ,5.6.7.8", 2, "203.0.113.9"},
+		{"garbage selected segment falls back to peer", "203.0.113.9:1234", "not-an-ip", 1, "203.0.113.9"},
+		{"trailing comma falls back to peer", "203.0.113.9:1234", "1.2.3.4,", 1, "203.0.113.9"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

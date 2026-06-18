@@ -19,16 +19,27 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `security.allow_private_egress`. LLM `base_url` validation rejects literal
   metadata/link-local IPs at config time. Previously a tenant-controlled webhook
   or LLM base URL could reach the cloud metadata endpoint or internal services.
+  The guard also blocks 6to4 (`2002::/16`) and NAT64 (`64:ff9b::/96`) IPv6
+  addresses that wrap a blocked IPv4 target, refuses to honor `HTTP(S)_PROXY` on
+  these egress paths (a proxy would hide the real destination IP from the
+  dial-time check), and validates that any trusted `X-Forwarded-For` hop is a
+  parseable IP (falling back to the direct peer otherwise).
 
 - **X-Forwarded-For spoofing fixed for the API-key IP allowlist (#84).** The
   client IP behind the per-key IP allowlist is now resolved using the new
   `security.trusted_proxy_hops` setting: with no trusted proxy (default)
   `X-Forwarded-For` is ignored and the direct peer is used, so a client on a
   direct connection can no longer forge an allowlisted source IP by setting the
-  header. Behind N reverse proxies, set `trusted_proxy_hops: N`. Also **removed
-  chi's `middleware.RealIP`** from the router — it unconditionally rewrote
-  `RemoteAddr` from `X-Forwarded-For`/`X-Real-IP`, which by itself made the
-  allowlist spoofable regardless of the setting above.
+  header (only `X-Forwarded-For` is consulted — single-header model; deployments
+  whose proxy emits only `X-Real-IP` must also append XFF). Behind N reverse
+  proxies, set `trusted_proxy_hops: N`. Also **removed chi's `middleware.RealIP`**
+  from the router — it unconditionally rewrote `RemoteAddr` from
+  `X-Forwarded-For`/`X-Real-IP`, which by itself made the allowlist spoofable
+  regardless of the setting above. **Behavioral note:** with `RealIP` gone,
+  `audit_log.actor_ip` and the enrichment-runtime actor IP now resolve through
+  the same `trusted_proxy_hops` model, so behind a proxy they record the real
+  client IP (set `trusted_proxy_hops`) rather than — as a side effect of `RealIP`
+  — the leftmost `X-Forwarded-For` value.
 
 ### Changed
 

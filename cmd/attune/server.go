@@ -34,6 +34,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
@@ -109,6 +110,9 @@ func runServer() error {
 	egress := cfg.EgressPolicy()
 	notify.SetEgressPolicy(egress)
 	llmclient.SetEgressPolicy(egress)
+	// Trusted-proxy hop count for client-IP resolution outside the API-key
+	// middleware (audit actor IP, etc.).
+	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)
 
 	// OpenTelemetry tracer. Empty endpoint = noop; configure
 	// observability.otlp_endpoint to ship spans to a real collector.

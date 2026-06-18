@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 )
@@ -184,7 +185,11 @@ func ActorFromRequest(actorType, actorID string, req *http.Request) Actor {
 		return actor
 	}
 	actor.UserAgent = strings.TrimSpace(req.UserAgent())
-	actor.IP = remoteAddrIP(req.RemoteAddr)
+	// Resolve via the trusted-proxy model (security.trusted_proxy_hops) rather
+	// than raw RemoteAddr: with chi's RealIP removed (#84), RemoteAddr is the
+	// direct peer, so behind a reverse proxy this keeps audit actor attribution
+	// the real client IP instead of the proxy's.
+	actor.IP = nethardening.ClientIPDefault(req)
 	return actor
 }
 
