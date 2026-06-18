@@ -203,12 +203,13 @@ func runServer() error {
 		Handler: r,
 		// Hardening: ReadHeaderTimeout alone leaves the request body (slow-loris)
 		// and slow response readers unbounded. ReadTimeout caps the full request;
-		// WriteTimeout is a generous backstop above the in-handler timeout so it
-		// never cuts a legitimate (e.g. LLM-backed) response; IdleTimeout bounds
-		// keep-alive sockets.
+		// WriteTimeout sits ABOVE the in-handler middleware.Timeout (305s) so the
+		// handler's clean 503 wins and WriteTimeout never cuts a legitimate
+		// (e.g. LLM-backed) response mid-flight; IdleTimeout bounds keep-alive
+		// sockets.
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      300 * time.Second,
+		WriteTimeout:      315 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	})
 	logext.Infof(ctx, "[%s] attune server listening,addr:%s", where, srv.Addr)

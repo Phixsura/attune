@@ -185,6 +185,28 @@ the sweeper retries the affected rows.
 Recovery: no new terminal failures for 15 minutes and re-enqueued rows reach
 `done`.
 
+## AttuneWorkerPanics
+
+Impact: a supervised background worker (outbox, enrichment, embedding,
+reply-draft, digest, GDPR export, audit pruner, queue/lag refreshers) is hitting
+an unhandled panic. The `safego` / enrich-runner supervisor recovers it and
+restarts with capped backoff, so the process stays up — but a worker stuck in a
+panic→restart loop silently stops making progress on its subsystem.
+
+Confirm:
+
+```promql
+sum by (worker) (increase(attune_worker_panics_total[10m]))
+```
+
+Identify the panicking worker from the `worker` label, then grep logs for the
+recovered-panic stack (`worker panicked — recovered`, same `worker` value). A
+single panic may be a transient poison input; a sustained count means a
+persistent bug (nil-deref, malformed upstream payload). Fix the root cause; if a
+specific row/message is poison, quarantine or drop it.
+
+Recovery: no new panics for the worker over 10 minutes.
+
 ## AttuneOutboxLagHigh
 
 Impact: notification delivery is delayed. Users may not receive outbound

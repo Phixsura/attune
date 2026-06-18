@@ -118,8 +118,15 @@ func (r *OutboxRepo) Insert(
 }
 
 // ClaimBatch atomically pulls up to n rows that are ready to send and
-// marks them with claimed_at = NOW(). Uses FOR UPDATE SKIP LOCKED so
-// multiple workers (in one process or many) never grab the same row.
+// marks them with claimed_at = NOW(). FOR UPDATE SKIP LOCKED prevents two
+// concurrent claims from grabbing the same row within the lock window, and the
+// `claimed_at IS NULL OR claimed_at < NOW() - 10m` predicate prevents a SECOND
+// worker replica from re-claiming a row that is already in-flight (the lock is
+// released once this UPDATE commits, before the delivery attempt finishes) —
+// without it, running >1 outbox worker would double-deliver. The 10-minute
+// window matches ResetStaleClaims so a worker that crashes mid-delivery still
+// gets its row retried. Mark{Delivered,Failed,Dead} all clear claimed_at, so a
+// row's own retry is never blocked by this predicate.
 //
 // Returns the claimed rows; len(0) means nothing to send right now.
 // Caller must call MarkDelivered / MarkFailed / MarkDead per row after
@@ -132,6 +139,7 @@ func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int) ([]OutboxRow, error)
 		 SELECT id FROM notify_outbox
 		 WHERE status IN ('pending', 'failed')
 		 AND next_retry_at <= NOW()
+		 AND (claimed_at IS NULL OR claimed_at < NOW() - INTERVAL '10 minutes')
 		 ORDER BY next_retry_at ASC
 		 LIMIT $1
 		 FOR UPDATE SKIP LOCKED

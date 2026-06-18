@@ -490,7 +490,7 @@
           "refId": "C"
         },
         {
-          "expr": "((sum(increase(attune_enrichment_terminal_failures_total{tenant=~\"$tenant\"}[$__range]))) or vector(0)) or vector(0)",
+          "expr": "(sum(increase(attune_enrichment_terminal_failures_total{tenant=~\"$tenant\"}[$__range]))) or vector(0)",
           "legendFormat": "terminal failures",
           "refId": "D"
         }

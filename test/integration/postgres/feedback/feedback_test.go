@@ -119,7 +119,7 @@ func TestPG_MarkFailedSchedulesRetryAndStopsAfterMaxAttempts(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("claim before failure: ok=%v err=%v", ok, err)
 	}
-	repo.MarkFailed(ctx, id, "provider unavailable")
+	repo.MarkFailed(ctx, id, "provider unavailable") // terminal-flag boundary covered by TestPG_MarkFailedReturnsTerminalAndTenant
 
 	var (
 		status    string
@@ -174,6 +174,35 @@ func TestPG_MarkFailedSchedulesRetryAndStopsAfterMaxAttempts(t *testing.T) {
 		t.Fatal("row should not be claimable after max attempts")
 	}
 	assertPendingListExcludes(t, repo, id)
+}
+
+// TestPG_MarkFailedReturnsTerminalAndTenant pins the #81 signal: MarkFailed's
+// RETURNING (enrichment_attempts >= max), tenant_id must report terminal=false
+// until the final attempt, then terminal=true with the row's tenant — this is
+// what feeds attune_enrichment_terminal_failures_total, and an off-by-one in the
+// SQL comparison would silently break the metric.
+func TestPG_MarkFailedReturnsTerminalAndTenant(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, id := seedTenantAndRow(t, pool, "exhaust me")
+	repo := feedback.NewFeedback(pool)
+	ctx := context.Background()
+
+	const maxAttempts = 5 // feedback.maxEnrichmentAttempts
+	for i := 1; i <= maxAttempts; i++ {
+		terminal, tenant := repo.MarkFailed(ctx, id, "boom")
+		if tenant != tenantID {
+			t.Fatalf("attempt %d: tenant = %q, want %q", i, tenant, tenantID)
+		}
+		wantTerminal := i >= maxAttempts
+		if terminal != wantTerminal {
+			t.Fatalf("attempt %d: terminal = %v, want %v", i, terminal, wantTerminal)
+		}
+	}
+
+	// A no-rows update (row gone) returns (false, "") without a terminal count.
+	if terminal, tenant := repo.MarkFailed(ctx, 999999999, "missing"); terminal || tenant != "" {
+		t.Fatalf("missing row: terminal=%v tenant=%q, want false/empty", terminal, tenant)
+	}
 }
 
 func TestPG_MarkDoneAndContainmentQuery(t *testing.T) {

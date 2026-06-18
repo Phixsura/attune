@@ -7,6 +7,7 @@ package feedback
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -312,7 +313,8 @@ func (r *FeedbackRepo) BeginTx(ctx context.Context) (pgx.Tx, error) {
 // (#81). On a DB error it returns (false, "").
 func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) (terminal bool, tenant string) {
 	const where = "repo.FeedbackRepo.MarkFailed"
-	if err := r.pool.QueryRow(ctx,
+	if err := r.pool.QueryRow(
+		ctx,
 		`UPDATE user_feedback
 		    SET enrichment_status = 'failed',
 		        enrichment_error = $1,
@@ -330,7 +332,11 @@ func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) 
 		pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
 		int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()),
 	).Scan(&terminal, &tenant); err != nil {
-		logext.Errorf(ctx, "[%s] update failed,id:%d,err:%+v", where, id, err.Error())
+		// Row gone (concurrent erase / terminal transition) is benign — don't
+		// log it as an error; only real DB failures are error-worthy.
+		if !errors.Is(err, pgx.ErrNoRows) {
+			logext.Errorf(ctx, "[%s] update failed,id:%d,err:%+v", where, id, err.Error())
+		}
 		return false, ""
 	}
 	return terminal, tenant

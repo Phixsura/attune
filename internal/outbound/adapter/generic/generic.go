@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Phixsura/attune/internal/outbound"
@@ -59,8 +60,11 @@ func (c *channel) RenderEvent(env *outbound.Envelope, dst outbound.Target) (outb
 				req.Header.Set("X-Attune-Delivery-Id", env.DeliveryID)
 			}
 			req.Header.Set("User-Agent", "attune/1.0")
-			logext.Infof(ctx, "[outbound.generic] upstream req,label:%s,url:%s,body:%s",
-				label, dst.URL, truncate(string(body), 1024))
+			// Log a redacted URL (no userinfo/query — they can carry secret
+			// tokens) and only the body size, not the body (it can hold PII
+			// feedback content and is already persisted in the outbox row).
+			logext.Infof(ctx, "[outbound.generic] upstream req,label:%s,url:%s,body_bytes:%d",
+				label, redactURL(dst.URL), len(body))
 			return req, nil
 		},
 		Check: outbound.CheckWebhook(label),
@@ -85,7 +89,7 @@ func (c *channel) RenderDigest(view any, dst outbound.Target) (outbound.Rendered
 			req.Header.Set("Content-Type", "application/json; charset=utf-8")
 			req.Header.Set("X-Attune-Signature", signature)
 			req.Header.Set("User-Agent", "attune/1.0")
-			logext.Infof(ctx, "[outbound.generic] digest req,label:%s,url:%s", label, dst.URL)
+			logext.Infof(ctx, "[outbound.generic] digest req,label:%s,url:%s", label, redactURL(dst.URL))
 			return req, nil
 		},
 		Check: outbound.CheckWebhook(label),
@@ -202,9 +206,16 @@ func renderDigestMarkdown(dv map[string]any) string {
 	return b.String()
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+// redactURL returns scheme://host/path with userinfo and query stripped — the
+// query/userinfo of a customer webhook URL can carry secret tokens that must not
+// land in logs (CLAUDE.md §7).
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<unparseable-url>"
 	}
-	return s[:n]
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }

@@ -118,18 +118,33 @@ groups:
           action: "Confirm the affected model, provider status, and configured credentials; then compare with enrichment latency before retry policy changes."
 
       - alert: AttuneEnrichmentTerminalFailures
-        expr: sum by (tenant) (increase(attune_enrichment_terminal_failures_total[15m])) > 0
-        for: 15m
+        # No `for`: the 5m increase window is itself the debounce. Stacking `for`
+        # on a windowed increase delays paging and can miss a lone failure that
+        # ages out of the window before `for` elapses.
+        expr: sum by (tenant) (increase(attune_enrichment_terminal_failures_total[5m])) > 0
         labels:
           severity: warning
           service: attune
         annotations:
           summary: "Attune feedback rows are exhausting enrichment retries"
-          description: "Tenant {{ $labels.tenant }} had {{ $value | humanize }} feedback rows stop in 'failed' after exhausting retries over 15m. Check Attune AI Pipeline > Enrich duration."
+          description: "Tenant {{ $labels.tenant }} had {{ $value | humanize }} feedback rows stop in 'failed' after exhausting retries over 5m. Check Attune AI Pipeline > Enrich duration."
           dashboard: "Attune AI Pipeline"
           dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline?var-tenant={{ $labels.tenant }}"
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneenrichmentterminalfailures"
           action: "Sample the stranded rows' enrichment_error, confirm whether a provider, prompt, or parse bug is the cause, then remediate and re-enqueue."
+
+      - alert: AttuneWorkerPanics
+        expr: sum by (worker) (increase(attune_worker_panics_total[10m])) > 0
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune background worker is panicking"
+          description: "Worker {{ $labels.worker }} recovered {{ $value | humanize }} panic(s) over 10m. The supervisor restarts it, but a sustained panic→restart loop silently degrades that subsystem."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneworkerpanics"
+          action: "Find the panicking worker in logs (grep the worker label for the recovered-panic stack), fix the underlying bug; a tight loop means a poison input or a persistent nil-deref."
 
   - name: attune.alerts.operations
     rules:

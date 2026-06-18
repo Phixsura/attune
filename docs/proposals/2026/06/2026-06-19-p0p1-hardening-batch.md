@@ -93,12 +93,12 @@ Verified findings addressed here:
    `attune_worker_panics_total` landed with commit 2. Added an outbox SKIP-LOCKED
    integration test (a row locked by another tx is skipped, not blocked on) and
    the generic-adapter delivery-id unit test from commit 4.
-   - **Observation surfaced while testing:** `OutboxRepo.ClaimBatch` stamps
-     `claimed_at` but doesn't filter on it, so a *second* outbox worker replica
-     could re-claim an in-flight row (SKIP LOCKED only guards the lock window).
-     Safe for today's single-worker deployment; the new `X-Attune-Delivery-Id`
-     header is consumer-side defense-in-depth. Filed as a follow-up to either
-     document the singleton requirement or exclude recently-claimed rows.
+   - **Fixed (multi-replica claim safety):** `ClaimBatch` now excludes rows
+     claimed within a 10-minute window (`claimed_at IS NULL OR claimed_at <
+     NOW() - 10m`, matching `ResetStaleClaims`), so a second outbox worker
+     replica can't re-claim an in-flight row (SKIP LOCKED alone only guards the
+     lock window). A crashed-mid-delivery row still recovers after 10m; the
+     `X-Attune-Delivery-Id` header remains consumer-side defense-in-depth.
 
 ## Alternatives considered
 - **`statement_timeout`: pool-wide vs per-request context timeout.** Chose

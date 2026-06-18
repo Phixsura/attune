@@ -55,8 +55,22 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   (outbox, enrichment runtime, embedding, reply-draft, digest, GDPR export, audit
   pruner, queue/lag refreshers) now runs under a `safego` supervisor that recovers
   panics, counts them in the new `attune_worker_panics_total` metric, and restarts
-  the worker with capped backoff. Previously a single panic in any worker crashed
-  the whole process — HTTP server and all other workers included.
+  the worker with capped backoff. The enrichment runner — the highest-panic-risk
+  path, since it parses LLM responses — additionally recovers panics at each of
+  its goroutine boundaries (per-job, processor, sweeper). Previously a single
+  panic in any worker crashed the whole process — HTTP server and all other
+  workers included. Added `AttuneWorkerPanics` and `AttuneEnrichmentTerminalFailures`
+  Prometheus alerts + runbooks.
+
+- **Migrations are exempt from the `statement_timeout` default (#84).** The new
+  30s `statement_timeout` (above) is cleared on the dedicated migration
+  connection so a legitimately long migration can't be killed mid-statement.
+
+- **Outbox is safe under multiple worker replicas (#84).** `ClaimBatch` now
+  excludes rows claimed within a 10-minute window, so a second outbox worker
+  replica can't re-claim an in-flight row and double-deliver (FOR UPDATE SKIP
+  LOCKED only guards the lock window). A worker that crashes mid-delivery still
+  has its row retried after the window.
 
 - **Workflow state names are now localized (#64).** `WorkflowState.name` is now a
   stable machine key (slug `^[a-z][a-z0-9_]{0,30}$`); the human-facing label moves

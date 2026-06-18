@@ -316,6 +316,44 @@ func TestDeadCount(t *testing.T) {
 	}
 }
 
+// TestClaimBatch_SecondReplicaSkipsInFlightRows is the multi-replica
+// double-delivery guard: once one worker claims a row (sets claimed_at and
+// commits, before it has finished delivering), a second worker's ClaimBatch must
+// NOT re-claim it. Before the claimed_at predicate this returned the same rows
+// to both workers → duplicate webhook deliveries under horizontal scaling.
+func TestClaimBatch_SecondReplicaSkipsInFlightRows(t *testing.T) {
+	e := setup(t)
+	tid := e.newTenant(t, "claim-replica")
+	for range 3 {
+		e.insert(t, tid, seed{status: "pending"})
+	}
+
+	first, err := e.repo.ClaimBatch(e.ctx, 10)
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	mine := 0
+	for _, r := range first {
+		if r.TenantID == tid {
+			mine++
+		}
+	}
+	if mine != 3 {
+		t.Fatalf("first claim got %d rows for tenant, want 3", mine)
+	}
+
+	// Simulate a second replica claiming immediately, before delivery completes.
+	second, err := e.repo.ClaimBatch(e.ctx, 10)
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	for _, r := range second {
+		if r.TenantID == tid {
+			t.Fatalf("second replica re-claimed in-flight row %d — double delivery", r.ID)
+		}
+	}
+}
+
 // TestClaimBatch_SkipsRowsLockedByAnotherTx verifies the FOR UPDATE SKIP LOCKED
 // contract: a row already locked by an in-flight transaction is skipped by a
 // concurrent ClaimBatch rather than blocking on it. This is what lets a second
