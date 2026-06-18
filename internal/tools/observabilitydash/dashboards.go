@@ -265,8 +265,9 @@ func securityDashboard() dashboard {
 		barDesc(13, "OIDC role mapping", "Role mapping outcomes in the selected range. Changes here often explain later authorization denials.", []target{
 			targetExprSparse("A", `sum by (role) (increase(attune_oidc_role_mapping_total[$__range]))`, "{{role}}"),
 		}, "short", gp(0, 17, 12, 8)),
-		seriesDesc(14, "Authorization denials", "Authorization denials by role and required permission. This is the fastest path to role-policy fixes.", []target{
+		seriesDesc(14, "Authorization denials", "Authorization denials by role and required permission, plus API key scope denials. This is the fastest path to role-policy fixes.", []target{
 			targetExpr("A", `sum by (role, required) (rate(attune_authz_denied_total[$__rate_interval]))`, "{{role}} needs {{required}}"),
+			targetExpr("B", `sum by (scope) (rate(attune_apikey_scope_denied_total[$__rate_interval]))`, "apikey scope {{scope}}"),
 		}, "reqps", gp(12, 17, 12, 8)),
 		rowPanel(15, "Audit and guardrails", 25),
 		seriesDesc(16, "Audit log", "Audit writes, pruning, and prune latency. This proves security-relevant actions remain observable.", []target{
