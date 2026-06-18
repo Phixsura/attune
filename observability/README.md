@@ -41,6 +41,7 @@ exposition plus the portable assets in this directory.
 | `attune_enrich_sweep_submitted_total` | counter | — | pending DB rows successfully resubmitted by the enrich sweeper |
 | `attune_notify_failures_total` | counter | `destination_type`, `reason` | notifier push failures |
 | `attune_outbox_lag_seconds` | gauge | — | age of the oldest pending outbox row (0 = empty) |
+| `attune_outbox_dead_rows` | gauge | — | notify_outbox rows in the terminal `dead` state (dead-letter depth) |
 | `attune_claim_contention_total` | counter | — | enricher `tryClaim` lost to another worker |
 | `attune_ingest_rate_limit_total` | counter | `tenant` | ingest requests rejected (429) by the rate limiter |
 | `attune_triage_decisions_total` | counter | `tenant`, `decision` | triage-stage routing decisions |

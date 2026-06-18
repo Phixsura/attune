@@ -41,6 +41,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/member"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
+	consoleoutbox "github.com/Phixsura/attune/internal/handlers/console/outbox"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
@@ -83,6 +84,7 @@ var (
 	NewLLMConfigHandler          = consolellmconfig.NewHandler
 	NewClustersHandler           = clusters.NewClustersHandler
 	NewDigestSubscriptionHandler = digestsubscription.NewHandler
+	NewOutboxHandler             = consoleoutbox.NewHandler
 	NewTagHandler                = consoletag.NewHandler
 	NewTagAssignmentHandler      = consoletagassignment.NewHandler
 	NewWorkflowHandler           = consoleworkflow.NewHandler
@@ -158,6 +160,7 @@ type Router struct {
 	llmConfig          *consolellmconfig.Handler
 	clusters           *clusters.ClustersHandler
 	digestSubscription *digestsubscription.Handler
+	outbox             *consoleoutbox.Handler
 	tags               *consoletag.Handler
 	tagAssignments     *consoletagassignment.Handler
 	workflow           *consoleworkflow.Handler
@@ -304,6 +307,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountAuditLog(m)
 	r.mountGDPR(m)
 	r.mountNotifyTargets(m)
+	r.mountOutbox(m)
 	r.mountDigestSubscription(m)
 	r.mountFeedback(m)
 	m.Group(func(u chi.Router) {
@@ -1832,6 +1836,69 @@ func (r *Router) mountClusters(m chi.Router) {
 			}),
 		))
 	})
+}
+
+// SetOutboxHandler injects the notify dead-queue handler (#33). Optional, so
+// callers of NewRouter that don't wire it (tests) simply don't expose /outbox.
+func (r *Router) SetOutboxHandler(h *consoleoutbox.Handler) {
+	r.outbox = h
+}
+
+func (r *Router) mountOutbox(m chi.Router) {
+	if r.outbox == nil {
+		return
+	}
+	m.Route("/outbox", func(o chi.Router) {
+		o.Use(r.requireAdmin) // dead-queue inspection + manual retry is admin-only
+		o.Get("/deliveries", dispatcher.Bind(
+			"console.OutboxHandler.List",
+			dispatcher.Query(
+				func() *attunev1.ListDeliveriesRequest { return ptrext.Of(attunev1.ListDeliveriesRequest{}) },
+				bindListDeliveriesRequest,
+			),
+			r.outbox.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListDeliveriesRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		o.Post("/{id}/retry", dispatcher.Bind(
+			"console.OutboxHandler.Retry",
+			dispatcher.Combine(
+				func() *attunev1.RetryDeliveryRequest { return ptrext.Of(attunev1.RetryDeliveryRequest{}) },
+				dispatcher.ParamInt64("id", func(req *attunev1.RetryDeliveryRequest, id int64) {
+					req.Id = id
+				}, "invalid delivery id"),
+			),
+			r.outbox.Retry,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RetryDeliveryRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+}
+
+// bindListDeliveriesRequest fills the list request from query params:
+// ?status=dead&status=failed&limit=50&before_id=123
+func bindListDeliveriesRequest(r *http.Request, req *attunev1.ListDeliveriesRequest) error {
+	q := r.URL.Query()
+	req.Status = q["status"]
+	if v := q.Get("limit"); v != "" {
+		// ParseInt with bitSize=32 rejects values that don't fit int32, so the
+		// conversion below can't overflow (the repo clamps the value anyway).
+		n, err := strconv.ParseInt(v, 10, 32)
+		if err != nil {
+			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid limit")
+		}
+		req.Limit = int32(n)
+	}
+	if v := q.Get("before_id"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid before_id")
+		}
+		req.BeforeId = n
+	}
+	return nil
 }
 
 func (r *Router) mountTags(m chi.Router) {

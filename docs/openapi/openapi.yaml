@@ -3068,6 +3068,76 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/outbox/deliveries:
+        get:
+            tags:
+                - NotifyOutboxService
+            description: |-
+                List deliveries for the caller's tenant, filtered by status (defaults to
+                 dead when none given), newest first, keyset-paginated on id.
+            operationId: NotifyOutboxService_ListDeliveries
+            parameters:
+                - name: status
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: beforeId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListDeliveriesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/outbox/{id}/retry:
+        post:
+            tags:
+                - NotifyOutboxService
+            description: |-
+                Manually re-arm one dead/failed delivery (retry-in-place). Asynchronous:
+                 the worker redelivers on its next poll, so a successful call is 202.
+            operationId: NotifyOutboxService_RetryDelivery
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RetryDeliveryRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RetryDeliveryResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/projects:
         get:
             tags:
@@ -5917,6 +5987,15 @@ components:
                 totalCount:
                     type: integer
                     format: int32
+        ListDeliveriesResponse:
+            type: object
+            properties:
+                deliveries:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/OutboxDelivery'
+                nextBeforeId:
+                    type: string
         ListEventSubscriptionsResponse:
             type: object
             properties:
@@ -6227,6 +6306,65 @@ components:
                 updatedAt:
                     type: string
             description: OAuth2 clients
+        OutboxDelivery:
+            type: object
+            properties:
+                id:
+                    type: string
+                feedbackId:
+                    type: string
+                destinationType:
+                    type: string
+                destinationTarget:
+                    type: string
+                audience:
+                    type: string
+                status:
+                    type: string
+                attempts:
+                    type: integer
+                    format: int32
+                failureKind:
+                    enum:
+                        - OUTBOX_FAILURE_KIND_UNSPECIFIED
+                        - OUTBOX_FAILURE_KIND_HTTP_4XX
+                        - OUTBOX_FAILURE_KIND_HTTP_5XX
+                        - OUTBOX_FAILURE_KIND_TIMEOUT
+                        - OUTBOX_FAILURE_KIND_DNS
+                        - OUTBOX_FAILURE_KIND_CONNECTION
+                        - OUTBOX_FAILURE_KIND_TLS
+                        - OUTBOX_FAILURE_KIND_TERMINAL
+                        - OUTBOX_FAILURE_KIND_OTHER
+                    type: string
+                    format: enum
+                httpStatus:
+                    type: integer
+                    format: int32
+                lastError:
+                    type: string
+                deadReason:
+                    type: string
+                traceId:
+                    type: string
+                nextRetryAt:
+                    type: string
+                createdAt:
+                    type: string
+                deliveredAt:
+                    type: string
+                lastManualRetryAt:
+                    type: string
+                retriedBy:
+                    type: string
+                manualRetryCount:
+                    type: integer
+                    format: int32
+                inFlight:
+                    type: boolean
+            description: |-
+                OutboxDelivery is one queued (feedback × destination) delivery row. Timestamps
+                 are RFC3339 strings ("" when unset), matching the rest of the console
+                 contract.
         PatchGuardPolicyRequest:
             type: object
             properties:
@@ -6381,6 +6519,16 @@ components:
             properties:
                 id:
                     type: string
+        RetryDeliveryRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        RetryDeliveryResponse:
+            type: object
+            properties:
+                delivery:
+                    $ref: '#/components/schemas/OutboxDelivery'
         ReviewApprovalRequest:
             type: object
             properties:
@@ -7271,6 +7419,12 @@ tags:
       description: LLMConfigService manages DB-backed provider channels and routes.
     - name: MemberService
       description: MemberService manages tenant membership for RBAC (#38).
+    - name: NotifyOutboxService
+      description: |-
+        NotifyOutboxService is the operator surface over the notify_outbox delivery
+         queue (#33): list dead / in-flight-failed deliveries and manually retry one
+         in place. The retry/backoff/dead engine itself lives in the worker; this
+         contract only exposes visibility + manual re-arm.
     - name: NotifyTargetService
       description: NotifyTargetService manages a tenant's outbound notification destinations.
     - name: SearchService

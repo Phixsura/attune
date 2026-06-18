@@ -140,12 +140,16 @@ func runOutboxLagRefresher(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 
 func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 	const where = "main.refreshOutboxLag"
-	age, err := outbox.OldestPendingAge(ctx)
-	if err != nil {
-		logext.Warnf(ctx, "[%s] failed,err:%+v", where, err.Error())
-		return
+	if age, err := outbox.OldestPendingAge(ctx); err != nil {
+		logext.Warnf(ctx, "[%s] lag failed,err:%+v", where, err.Error())
+	} else {
+		metrics.OutboxLagSeconds.Set(age.Seconds())
 	}
-	metrics.OutboxLagSeconds.Set(age.Seconds())
+	if dead, err := outbox.DeadCount(ctx); err != nil {
+		logext.Warnf(ctx, "[%s] dead count failed,err:%+v", where, err.Error())
+	} else {
+		metrics.OutboxDeadRows.Set(float64(dead))
+	}
 }
 
 // buildConsoleRouter wires the Console (auth + /me + /logout + resource
@@ -231,11 +235,9 @@ func buildConsoleRouter(
 	batchHandler := console.NewBatchHandler(batchSvc)
 
 	// Semantic search service dependencies.
-	llmConfigRepo := llmconfigrepo.New(pool)
-	searchRouter := llmrouter.New(llmConfigRepo, secrets)
-	searchRateLimiter := ratelimit.NewMemorySlidingLimiter()
-	searchCache := semanticsearch.NewPGCache(pool)
-	searchSvc := semanticsearch.New(feedbackRepo, searchRouter, searchRateLimiter, searchCache)
+	searchRouter := llmrouter.New(llmconfigrepo.New(pool), secrets)
+	searchSvc := semanticsearch.New(feedbackRepo, searchRouter,
+		ratelimit.NewMemorySlidingLimiter(), semanticsearch.NewPGCache(pool))
 	searchHandler := console.NewSearchHandler(searchSvc)
 
 	// Job handler uses batch service (implements jobService interface).
@@ -260,7 +262,7 @@ func buildConsoleRouter(
 	digestSub.SetAuditLogger(auditLogSvc)
 	tagHandler.SetAuditLogger(auditLogSvc)
 
-	return console.NewRouter(
+	router := console.NewRouter(
 		signer, authHandler, changePasswordHandler, me, auditLog, apiKeys, notifyTargets, feedback,
 		batchHandler,
 		searchHandler,
@@ -268,7 +270,18 @@ func buildConsoleRouter(
 		gdprHandler,
 		usage, enrichConfig, enrichmentRuntimeHandler, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
 		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
-	).Mount(), nil
+	)
+	attachOutboxHandler(router, pool, auditLogSvc)
+	return router.Mount(), nil
+}
+
+// attachOutboxHandler wires the notify dead-queue console handler (#33). Kept
+// out of buildConsoleRouter (and off the already-large NewRouter signature) via
+// a setter.
+func attachOutboxHandler(router *console.Router, pool *pgxpool.Pool, audit *auditlogsvc.Service) {
+	h := console.NewOutboxHandler(outboxrepo.NewOutbox(pool))
+	h.SetAuditLogger(audit)
+	router.SetOutboxHandler(h)
 }
 
 func buildGDPRHandler(

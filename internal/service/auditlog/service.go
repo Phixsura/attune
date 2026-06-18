@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
@@ -18,6 +20,7 @@ import (
 
 type writerRepo interface {
 	Insert(ctx context.Context, entry auditlogrepo.Entry) error
+	InsertTx(ctx context.Context, tx pgx.Tx, entry auditlogrepo.Entry) error
 	List(ctx context.Context, filter auditlogrepo.ListFilter) (auditlogrepo.ListResult, error)
 	PruneBefore(ctx context.Context, cutoff time.Time) (int64, error)
 }
@@ -64,13 +67,42 @@ type ListFilter struct {
 }
 
 func (s *Service) Record(ctx context.Context, event Event) error {
+	entry, err := buildEntry(event)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.Insert(ctx, entry); err != nil {
+		return err
+	}
+	metrics.AuditRowsWrittenTotal.WithLabelValues(entry.Action).Inc()
+	return nil
+}
+
+// RecordTx writes the audit row inside an existing transaction so the audited
+// mutation and its trail commit or roll back atomically. Use it for
+// destructive actions where a missing audit trail is unacceptable (e.g. the
+// notify dead-queue manual retry, #33); plain Record stays the post-commit
+// default for everything else.
+func (s *Service) RecordTx(ctx context.Context, tx pgx.Tx, event Event) error {
+	entry, err := buildEntry(event)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.InsertTx(ctx, tx, entry); err != nil {
+		return err
+	}
+	metrics.AuditRowsWrittenTotal.WithLabelValues(entry.Action).Inc()
+	return nil
+}
+
+func buildEntry(event Event) (auditlogrepo.Entry, error) {
 	beforeJSON, err := marshalJSON(event.Before)
 	if err != nil {
-		return fmt.Errorf("marshal before: %w", err)
+		return auditlogrepo.Entry{}, fmt.Errorf("marshal before: %w", err)
 	}
 	afterJSON, err := marshalJSON(event.After)
 	if err != nil {
-		return fmt.Errorf("marshal after: %w", err)
+		return auditlogrepo.Entry{}, fmt.Errorf("marshal after: %w", err)
 	}
 	entry := auditlogrepo.Entry{
 		TenantID:       strings.TrimSpace(event.TenantID),
@@ -87,16 +119,12 @@ func (s *Service) Record(ctx context.Context, event Event) error {
 		AfterJSON:      afterJSON,
 	}
 	if entry.TenantID == "" || entry.ActorType == "" || entry.ActorID == "" || entry.Action == "" || entry.TargetType == "" {
-		return fmt.Errorf("audit log event is missing required fields")
+		return auditlogrepo.Entry{}, fmt.Errorf("audit log event is missing required fields")
 	}
 	if !isKnownAction(entry.Action) {
-		return fmt.Errorf("audit log event has unsupported action %q", entry.Action)
+		return auditlogrepo.Entry{}, fmt.Errorf("audit log event has unsupported action %q", entry.Action)
 	}
-	if err := s.repo.Insert(ctx, entry); err != nil {
-		return err
-	}
-	metrics.AuditRowsWrittenTotal.WithLabelValues(entry.Action).Inc()
-	return nil
+	return entry, nil
 }
 
 func (s *Service) List(ctx context.Context, filter ListFilter) (auditlogrepo.ListResult, error) {

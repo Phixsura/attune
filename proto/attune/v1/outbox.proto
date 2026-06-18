@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+// NotifyOutboxService is the operator surface over the notify_outbox delivery
+// queue (#33): list dead / in-flight-failed deliveries and manually retry one
+// in place. The retry/backoff/dead engine itself lives in the worker; this
+// contract only exposes visibility + manual re-arm.
+service NotifyOutboxService {
+  // List deliveries for the caller's tenant, filtered by status (defaults to
+  // dead when none given), newest first, keyset-paginated on id.
+  rpc ListDeliveries(ListDeliveriesRequest) returns (ListDeliveriesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/outbox/deliveries"};
+  }
+  // Manually re-arm one dead/failed delivery (retry-in-place). Asynchronous:
+  // the worker redelivers on its next poll, so a successful call is 202.
+  rpc RetryDelivery(RetryDeliveryRequest) returns (RetryDeliveryResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/outbox/{id}/retry"
+      body: "*"
+    };
+  }
+}
+
+// OutboxFailureKind is the structured failure classification. Mirrors
+// notify.FailureKind and the notify_outbox.failure_kind CHECK constraint.
+enum OutboxFailureKind {
+  OUTBOX_FAILURE_KIND_UNSPECIFIED = 0;
+  OUTBOX_FAILURE_KIND_HTTP_4XX = 1;
+  OUTBOX_FAILURE_KIND_HTTP_5XX = 2;
+  OUTBOX_FAILURE_KIND_TIMEOUT = 3;
+  OUTBOX_FAILURE_KIND_DNS = 4;
+  OUTBOX_FAILURE_KIND_CONNECTION = 5;
+  OUTBOX_FAILURE_KIND_TLS = 6;
+  OUTBOX_FAILURE_KIND_TERMINAL = 7;
+  OUTBOX_FAILURE_KIND_OTHER = 8;
+}
+
+// OutboxDelivery is one queued (feedback × destination) delivery row. Timestamps
+// are RFC3339 strings ("" when unset), matching the rest of the console
+// contract.
+message OutboxDelivery {
+  int64 id = 1;
+  int64 feedback_id = 2;
+  string destination_type = 3;
+  string destination_target = 4;
+  string audience = 5;
+  string status = 6; // pending | delivered | failed | dead
+  int32 attempts = 7;
+  OutboxFailureKind failure_kind = 8;
+  int32 http_status = 9; // 0 = no response
+  string last_error = 10;
+  string dead_reason = 11;
+  string trace_id = 12;
+  string next_retry_at = 13;
+  string created_at = 14;
+  string delivered_at = 15;
+  string last_manual_retry_at = 16;
+  string retried_by = 17;
+  int32 manual_retry_count = 18;
+  bool in_flight = 19; // a worker currently holds the row (claimed_at set)
+}
+
+message ListDeliveriesRequest {
+  repeated string status = 1; // empty → ["dead"]
+  int32 limit = 2; // clamped server-side to [1,200]
+  int64 before_id = 3; // keyset cursor; 0 = first page
+}
+message ListDeliveriesResponse {
+  repeated OutboxDelivery deliveries = 1;
+  int64 next_before_id = 2; // 0 when there are no more pages
+}
+
+message RetryDeliveryRequest {
+  int64 id = 1;
+}
+message RetryDeliveryResponse {
+  OutboxDelivery delivery = 1;
+}

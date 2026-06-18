@@ -116,7 +116,8 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 	logext.Infof(ctx, "[%s] start,id:%d,tenant:%s,dest_type:%s,audience:%s,attempts:%d",
 		where, row.ID, row.TenantID, row.DestinationType, row.Audience, row.Attempts)
 	if outbound.LookupEvent(row.DestinationType) == nil {
-		w.markDead(ctx, row, "unsupported destination_type "+row.DestinationType)
+		w.markDead(ctx, row, "unsupported destination_type "+row.DestinationType,
+			notify.KindTerminal, 0)
 		return
 	}
 
@@ -126,34 +127,35 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 	if errors.Is(err, notifytarget.ErrNotifyTargetNotFound) {
 		// Customer's webhook destination was removed mid-flight.
 		w.markDead(ctx, row, fmt.Sprintf("destination not found (tenant=%s aud=%s)",
-			row.TenantID, row.Audience))
+			row.TenantID, row.Audience), notify.KindTerminal, 0)
 		return
 	}
 	if err != nil {
 		logext.Errorf(ctx, "[%s] lookup destination failed,id:%d,err:%+v",
 			where, row.ID, err.Error())
-		w.failOrDead(ctx, row, fmt.Sprintf("lookup destination: %v", err))
+		w.failOrDead(ctx, row, fmt.Sprintf("lookup destination: %v", err), notify.KindOther, 0)
 		return
 	}
 	if target.Disabled {
-		w.markDead(ctx, row, "destination disabled by ops/customer")
+		w.markDead(ctx, row, "destination disabled by ops/customer", notify.KindTerminal, 0)
 		return
 	}
 
 	if err := w.sendByDestType(ctx, row, target); err != nil {
+		de := notify.AsDeliveryError(err)
 		if errors.Is(err, notify.ErrTerminal) {
 			metrics.NotifyFailuresTotal.
 				WithLabelValues(row.DestinationType, "terminal").Inc()
-			logext.Warnf(ctx, "[%s] terminal failure,id:%d,err:%s",
-				where, row.ID, err.Error())
-			w.markDead(ctx, row, err.Error())
+			logext.Warnf(ctx, "[%s] terminal failure,id:%d,kind:%s,status:%d,err:%s",
+				where, row.ID, de.Kind, de.HTTPStatus, err.Error())
+			w.markDead(ctx, row, err.Error(), de.Kind, de.HTTPStatus)
 			return
 		}
 		metrics.NotifyFailuresTotal.
 			WithLabelValues(row.DestinationType, "retryable").Inc()
-		logext.Warnf(ctx, "[%s] retryable failure,id:%d,attempts:%d,err:%s",
-			where, row.ID, row.Attempts, err.Error())
-		w.failOrDead(ctx, row, err.Error())
+		logext.Warnf(ctx, "[%s] retryable failure,id:%d,attempts:%d,kind:%s,status:%d,err:%s",
+			where, row.ID, row.Attempts, de.Kind, de.HTTPStatus, err.Error())
+		w.failOrDead(ctx, row, err.Error(), de.Kind, de.HTTPStatus)
 		return
 	}
 	logext.Infof(ctx, "[%s] OK,id:%d,tenant:%s,dest_type:%s",
@@ -179,15 +181,22 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 
 // failOrDead promotes a row to dead once attempts exceeds max.
 // Otherwise schedules the next retry per the backoff table.
-func (w *OutboxWorker) failOrDead(ctx context.Context, row outboxrepo.OutboxRow, msg string) {
+func (w *OutboxWorker) failOrDead(
+	ctx context.Context,
+	row outboxrepo.OutboxRow,
+	msg string,
+	kind notify.FailureKind,
+	httpStatus int,
+) {
 	const where = "service.OutboxWorker.failOrDead"
 	next := row.Attempts + 1
 	if next >= w.maxAttempts {
-		w.markDead(ctx, row, fmt.Sprintf("exceeded %d attempts: %s", w.maxAttempts, msg))
+		w.markDead(ctx, row,
+			fmt.Sprintf("exceeded %d attempts: %s", w.maxAttempts, msg), kind, httpStatus)
 		return
 	}
 	delay := outboxBackoff(next)
-	if err := w.outbox.MarkFailed(ctx, row.ID, msg, delay); err != nil {
+	if err := w.outbox.MarkFailed(ctx, row.ID, msg, string(kind), httpStatus, delay); err != nil {
 		logext.Warnf(ctx, "[%s] mark failed errored,id:%d,inbound_trace_id:%s,err:%+v",
 			where, row.ID, row.TraceID, err.Error())
 	}
@@ -204,9 +213,15 @@ func (w *OutboxWorker) failOrDead(ctx context.Context, row outboxrepo.OutboxRow,
 //
 // Self-report failures are logged but never propagated — we don't want
 // the future #34 outbound adapter SDK will re-add a channel-agnostic alert path.)
-func (w *OutboxWorker) markDead(ctx context.Context, row outboxrepo.OutboxRow, reason string) {
+func (w *OutboxWorker) markDead(
+	ctx context.Context,
+	row outboxrepo.OutboxRow,
+	reason string,
+	kind notify.FailureKind,
+	httpStatus int,
+) {
 	const where = "service.OutboxWorker.markDead"
-	if err := w.outbox.MarkDead(ctx, row.ID, reason); err != nil {
+	if err := w.outbox.MarkDead(ctx, row.ID, reason, string(kind), httpStatus); err != nil {
 		logext.Warnf(ctx, "[%s] mark dead errored,id:%d,inbound_trace_id:%s,err:%+v",
 			where, row.ID, row.TraceID, err.Error())
 		return

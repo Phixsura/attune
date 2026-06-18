@@ -44,6 +44,7 @@ var validActions = map[string]struct{}{
 	"notify_target.delete":           {},
 	"notify_target.test":             {},
 	"notify_target.update":           {},
+	"outbox.retry":                   {},
 	"tag.archive":                    {},
 	"tag.create":                     {},
 	"tag.update":                     {},

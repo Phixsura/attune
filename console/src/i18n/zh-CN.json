@@ -89,7 +89,8 @@
     "usage": "用量",
     "llm_usage": "LLM 成本",
     "llm_config": "LLM 配置",
-    "members": "成员"
+    "members": "成员",
+    "outbox_dead": "死信投递"
   },
   "members": {
     "title": "团队成员",
@@ -945,6 +946,44 @@
     },
     "empty_title": "还没有通知目标",
     "empty_body": "加一个自定义 webhook，反馈来了就推送过去。"
+  },
+  "outbox_dead": {
+    "subtitle": "投递队列里进入死信或失败状态的反馈推送，可逐条手动重试。",
+    "retry_button": "重试",
+    "retry_inflight": "正在投递中，无法重试",
+    "retry_queued": "已重新排队，worker 将在下次轮询时投递。",
+    "retry_failed": "重试失败",
+    "inflight": "投递中",
+    "filter": {
+      "dead": "死信",
+      "failed": "失败"
+    },
+    "table": {
+      "destination": "目标",
+      "audience": "受众",
+      "status": "状态",
+      "attempts": "尝试次数",
+      "failure": "失败类型",
+      "reason": "原因 / 最近错误",
+      "last_attempt": "最近一次",
+      "actions": "操作"
+    },
+    "failure_kind": {
+      "unspecified": "未知",
+      "http_4xx": "HTTP 4xx",
+      "http_5xx": "HTTP 5xx",
+      "timeout": "超时",
+      "dns": "DNS",
+      "connection": "连接",
+      "tls": "TLS",
+      "terminal": "终止",
+      "other": "其他"
+    },
+    "empty_title": {
+      "dead": "没有死信投递",
+      "failed": "没有失败投递"
+    },
+    "empty_body": "投递失败或彻底放弃的反馈推送会出现在这里，可手动重新排队。"
   },
   "inbound_sources": {
     "subtitle": "管理用户反馈的入口。webhook 接收应用内推送，email 通过 IMAP 拉取邮件反馈。",
