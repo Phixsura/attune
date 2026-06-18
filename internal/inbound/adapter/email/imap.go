@@ -17,8 +17,16 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
+
+// imapEgressPolicy is the SSRF policy for the IMAP dialer. Loopback + RFC1918
+// are deliberately allowed (on-prem deployments co-locate attune and the IMAP
+// server); cloud-metadata / link-local / unspecified / multicast are always
+// refused. Enforced at dial time (rebinding-proof) in addition to the
+// ValidateOutboundHost pre-check.
+var imapEgressPolicy = nethardening.Policy{AllowLoopback: true, AllowPrivate: true}
 
 // maxBatchUIDs caps how many messages a single pollSource tick handles
 // so a backlogged mailbox does not stall the loop for tens of minutes.
@@ -84,7 +92,14 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		return
 	}
 	addr := cfg.Host + ":" + strconv.Itoa(cfg.Port)
-	options := ptrext.Of(imapclient.Options{})
+	// Enforce the SSRF guard at dial time as well as the ValidateOutboundHost
+	// pre-check: this is rebinding-proof (it sees the resolved IP) and closes the
+	// pre-check's fail-open-on-DNS-error path. Loopback + RFC1918 stay allowed for
+	// co-located on-prem IMAP, matching ValidateOutboundHost; metadata/link-local
+	// are always refused.
+	options := ptrext.Of(imapclient.Options{
+		Dialer: imapEgressPolicy.Dialer(),
+	})
 	cli, err := dialIMAP(ctx, addr, options)
 	if err != nil {
 		a.transientError(ctx, src, "dial: imap server unreachable")

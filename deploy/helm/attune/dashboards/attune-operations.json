@@ -875,6 +875,11 @@
           "expr": "(attune_outbox_dead_rows) or vector(0)",
           "legendFormat": "dead deliveries",
           "refId": "D"
+        },
+        {
+          "expr": "(sum by (worker) (increase(attune_worker_panics_total[$__range]))) or vector(0)",
+          "legendFormat": "worker panics / {{worker}}",
+          "refId": "E"
         }
       ],
       "fieldConfig": {

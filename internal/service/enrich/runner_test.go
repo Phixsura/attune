@@ -7,7 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/Phixsura/attune/internal/infra/llmclient"
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -78,6 +82,67 @@ func TestRunnerProcessBatchHonorsWorkerLimit(t *testing.T) {
 	if got := maxSeen.Load(); got != 3 {
 		t.Fatalf("max concurrency = %d, want 3", got)
 	}
+}
+
+// TestRunnerProcessBatchRecoversPanic proves a panic enriching one job (the
+// documented malformed-LLM-response risk) is recovered: the processor survives,
+// the panic is counted, and the other jobs in the batch still execute. A bare
+// `go` launch would have crashed the whole test binary instead.
+func TestRunnerProcessBatchRecoversPanic(t *testing.T) {
+	t.Parallel()
+	var ok atomic.Int32
+	before := counterValue(t, metrics.WorkerPanics.WithLabelValues("enrich_job"))
+
+	runner := ptrext.Of(Runner{
+		queue: NewMemoryQueue(10),
+		cfg: RunnerConfig{
+			QueueLen: 10, Workers: 2, BatchSize: 10,
+			BatchWindow: time.Millisecond, SweepInterval: time.Second,
+		},
+		execute: func(_ context.Context, job Job) error {
+			if job.ID == 1 {
+				panic("boom: malformed LLM response")
+			}
+			ok.Add(1)
+			return nil
+		},
+	})
+
+	for i := 1; i <= 3; i++ {
+		if err := runner.Submit(context.Background(), Job{ID: int64(i)}); err != nil {
+			t.Fatalf("submit %d: %v", i, err)
+		}
+	}
+	_ = runner.queue.Close()
+
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		runner.runProcessor(context.Background())
+	}()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("processor did not finish — a panic likely escaped recovery")
+	}
+
+	if got := ok.Load(); got != 2 {
+		t.Fatalf("non-panicking jobs executed = %d, want 2", got)
+	}
+	// >= 1 (not == 1): the counter is process-global and this test runs in
+	// parallel, so another test panicking with the same label could bump it too.
+	if delta := counterValue(t, metrics.WorkerPanics.WithLabelValues("enrich_job")) - before; delta < 1 {
+		t.Fatalf("WorkerPanics delta = %v, want >= 1", delta)
+	}
+}
+
+func counterValue(t *testing.T, c prometheus.Counter) float64 {
+	t.Helper()
+	var m dto.Metric
+	if err := c.Write(&m); err != nil { // ptrext:allow out-param prometheus Collector.Write
+		t.Fatalf("write metric: %v", err)
+	}
+	return m.GetCounter().GetValue()
 }
 
 func TestClassifySkipsMarkFailedForRateLimitWaitCancellation(t *testing.T) {

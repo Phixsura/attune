@@ -123,6 +123,19 @@ var EnrichSweepSubmittedTotal = prometheus.NewCounter(
 	},
 )
 
+// EnrichmentTerminalFailuresTotal counts feedback rows that exhausted all
+// enrichment retries and were left in the terminal 'failed' state (no further
+// retry scheduled). Previously this was invisible (#64): a row would silently
+// stop enriching with no signal. Any sustained non-zero value is
+// operator-actionable — a provider, prompt, or parse bug is stranding rows.
+var EnrichmentTerminalFailuresTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_enrichment_terminal_failures_total",
+		Help: "Feedback rows that exhausted enrichment retries and stopped in 'failed'.",
+	},
+	[]string{"tenant"},
+)
+
 // NotifyFailuresTotal increments on every notifier push that didn't
 // return nil. destination_type ∈ {raw-webhook, github-issue};
 // reason is the error class (transport | terminal).
@@ -623,6 +636,21 @@ var AuditPruneDurationSeconds = prometheus.NewHistogram(
 	},
 )
 
+// ---------- Process health ----------
+
+// WorkerPanics counts recovered panics in supervised background workers, by
+// worker name. A bare `go X.Run(ctx)` would crash the whole process on a single
+// panic; the supervisor (cmd/attune.safego) recovers, increments this, and
+// restarts. Any non-zero value is operator-actionable — a worker is hitting an
+// unhandled bug and looping through restarts.
+var WorkerPanics = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_worker_panics_total",
+		Help: "Recovered panics in supervised background workers, by worker.",
+	},
+	[]string{"worker"},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -649,6 +677,7 @@ var allMetrics = []prometheus.Collector{
 	EnrichQueueFullTotal,
 	EnrichBatchSize,
 	EnrichSweepSubmittedTotal,
+	EnrichmentTerminalFailuresTotal,
 	NotifyFailuresTotal,
 	OutboxLagSeconds,
 	OutboxDeadRows,
@@ -699,6 +728,7 @@ var allMetrics = []prometheus.Collector{
 	AuditRowsWrittenTotal,
 	AuditRowsPrunedTotal,
 	AuditPruneDurationSeconds,
+	WorkerPanics,
 }
 
 // RegisteredMetricNames returns the attune metric families registered by this
@@ -716,6 +746,7 @@ func RegisteredMetricNames() []string {
 		"attune_enrich_queue_full_total",
 		"attune_enrich_batch_size",
 		"attune_enrich_sweep_submitted_total",
+		"attune_enrichment_terminal_failures_total",
 		"attune_notify_failures_total",
 		"attune_outbox_lag_seconds",
 		"attune_outbox_dead_rows",
@@ -766,6 +797,7 @@ func RegisteredMetricNames() []string {
 		"attune_audit_rows_written_total",
 		"attune_audit_rows_pruned_total",
 		"attune_audit_prune_duration_seconds",
+		"attune_worker_panics_total",
 	}
 }
 

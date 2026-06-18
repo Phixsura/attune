@@ -34,6 +34,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
@@ -103,6 +104,16 @@ func runServer() error {
 	defer cancel()
 	logext.Infof(ctx, "[%s] start,port:%d", where, cfg.Port)
 
+	// Install the SSRF egress policy before any outbound transport is built.
+	// Default blocks loopback + private networks (always blocks cloud-metadata /
+	// link-local); config relaxes loopback/private for dev / on-prem.
+	egress := cfg.EgressPolicy()
+	notify.SetEgressPolicy(egress)
+	llmclient.SetEgressPolicy(egress)
+	// Trusted-proxy hop count for client-IP resolution outside the API-key
+	// middleware (audit actor IP, etc.).
+	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)
+
 	// OpenTelemetry tracer. Empty endpoint = noop; configure
 	// observability.otlp_endpoint to ship spans to a real collector.
 	// Details: docs/observability-trace-design.md.
@@ -152,11 +163,13 @@ func runServer() error {
 		runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo,
 		notify.NewTransport(nil, notify.DefaultRetry()),
 	)
-	go outboxWorker.Run(ctx)
+	safego(ctx, "outbox", func() { outboxWorker.Run(ctx) })
 	// attune_outbox_lag_seconds is refreshed on a 30s ticker rather than
 	// on every Prometheus scrape — avoids hammering the DB.
-	go runOutboxLagRefresher(ctx, runtimeDeps.outboxRepo)
-	go runAuditPruner(ctx, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
+	safego(ctx, "outbox_lag_refresher", func() { runOutboxLagRefresher(ctx, runtimeDeps.outboxRepo) })
+	safego(ctx, "audit_pruner", func() {
+		runAuditPruner(ctx, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
+	})
 
 	batchJobWorker := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, cfg.ConsoleBaseURL, cfg.GDPRExportTTL)
 	defer batchJobWorker.Stop()
@@ -186,9 +199,18 @@ func runServer() error {
 	}
 
 	srv := ptrext.Of(http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           r,
+		Addr:    fmt.Sprintf(":%d", cfg.Port),
+		Handler: r,
+		// Hardening: ReadHeaderTimeout alone leaves the request body (slow-loris)
+		// and slow response readers unbounded. ReadTimeout caps the full request;
+		// WriteTimeout sits ABOVE the in-handler middleware.Timeout (305s) so the
+		// handler's clean 503 wins and WriteTimeout never cuts a legitimate
+		// (e.g. LLM-backed) response mid-flight; IdleTimeout bounds keep-alive
+		// sockets.
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      315 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	})
 	logext.Infof(ctx, "[%s] attune server listening,addr:%s", where, srv.Addr)
 
@@ -252,7 +274,7 @@ func setupRuntimeServices(
 		instanceID,
 		uuid.NewString(),
 	)
-	go enrichRuntime.Run(ctx)
+	safego(ctx, "enrich_runtime", func() { enrichRuntime.Run(ctx) })
 
 	return runtimeServices{
 		llm:              llm,
@@ -372,9 +394,11 @@ func startEmbeddingWorker(ctx context.Context, pool *pgxpool.Pool, enricher *enr
 	taskRepo := embeddingrepo.NewTaskRepo(pool)
 	enricher.SetEmbeddingTask(taskRepo)
 	worker := embeddingsvc.NewWorker(taskRepo, rawLLM, llm, llmauditrepo.New(pool))
-	go worker.Run(ctx)
-	go runQueueDepthRefresher(ctx, "embed", taskRepo.QueueDepthByTenant, func(d map[string]int64) {
-		metrics.RefreshQueueDepth(metrics.EmbedQueueDepth, d)
+	safego(ctx, "embedding", func() { worker.Run(ctx) })
+	safego(ctx, "embed_queue_refresher", func() {
+		runQueueDepthRefresher(ctx, "embed", taskRepo.QueueDepthByTenant, func(d map[string]int64) {
+			metrics.RefreshQueueDepth(metrics.EmbedQueueDepth, d)
+		})
 	})
 }
 
@@ -385,9 +409,11 @@ func startReplyDraftWorker(ctx context.Context, pool *pgxpool.Pool, enricher *en
 	repo := replydraftrepo.NewDraftTaskRepo(pool)
 	enricher.SetDraftTask(repo)
 	worker := replydraftsvc.NewWorker(repo, llm)
-	go worker.Run(ctx)
-	go runQueueDepthRefresher(ctx, "reply_draft", repo.QueueDepthByTenant, func(d map[string]int64) {
-		metrics.RefreshQueueDepth(metrics.ReplyDraftQueueDepth, d)
+	safego(ctx, "reply_draft", func() { worker.Run(ctx) })
+	safego(ctx, "reply_draft_queue_refresher", func() {
+		runQueueDepthRefresher(ctx, "reply_draft", repo.QueueDepthByTenant, func(d map[string]int64) {
+			metrics.RefreshQueueDepth(metrics.ReplyDraftQueueDepth, d)
+		})
 	})
 }
 
@@ -420,7 +446,7 @@ func startBackgroundWorkers(
 func startGDPRExportWorker(ctx context.Context, pool *pgxpool.Pool, exportTTL time.Duration) {
 	repo := gdprrepo.New(pool)
 	worker := gdprsvc.NewWorker(repo, repo, auditlogsvc.New(auditlogrepo.New(pool)), gdprsvc.WithWorkerExportTTL(exportTTL))
-	go worker.Run(ctx)
+	safego(ctx, "gdpr_export", func() { worker.Run(ctx) })
 }
 
 // startDigestWorker wires the daily digest scheduler + worker (#27). llm is the
@@ -438,7 +464,7 @@ func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LL
 		notify.NewTransport(nil, notify.DefaultRetry()),
 		consoleBaseURL,
 	)
-	go worker.Run(ctx)
+	safego(ctx, "digest", func() { worker.Run(ctx) })
 }
 
 // runQueueDepthRefresher feeds a per-tenant queue-depth gauge on a 30s tick — a

@@ -52,7 +52,7 @@ func NewOpenAICompat(baseURL, apiKey string) (*OpenAICompatBackend, error) {
 		baseURL: trimmed,
 		apiKey:  apiKey,
 		client: ptrext.Of(http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: otelhttp.NewTransport(guardedEgressTransport()),
 			Timeout:   chatHTTPTimeout,
 		}),
 	}), nil

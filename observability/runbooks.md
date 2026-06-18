@@ -164,6 +164,49 @@ changing retry behavior.
 Recovery: provider error ratio is below 1% for 10 minutes and affected model
 traffic has resumed normal success volume.
 
+## AttuneEnrichmentTerminalFailures
+
+Impact: feedback rows have exhausted all enrichment retries and are stranded in
+the `failed` state with no further retry scheduled. Those rows never get an AI
+title, classification, or downstream fan-out until an operator intervenes.
+
+Confirm:
+
+```promql
+sum by (tenant) (increase(attune_enrichment_terminal_failures_total[15m]))
+```
+
+Inspect `Attune AI Pipeline > Enrich duration` and sample the stranded rows'
+`enrichment_error` column. Determine whether the cause is a provider outage, a
+prompt/schema mismatch producing parse errors, or malformed input. Fix the root
+cause, then clear `enrichment_status`/`enrichment_attempts` (or re-enqueue) so
+the sweeper retries the affected rows.
+
+Recovery: no new terminal failures for 15 minutes and re-enqueued rows reach
+`done`.
+
+## AttuneWorkerPanics
+
+Impact: a supervised background worker (outbox, enrichment, embedding,
+reply-draft, digest, GDPR export, audit pruner, queue/lag refreshers) is hitting
+an unhandled panic. The `safego` / enrich-runner supervisor recovers it and
+restarts with capped backoff, so the process stays up — but a worker stuck in a
+panic→restart loop silently stops making progress on its subsystem.
+
+Confirm:
+
+```promql
+sum by (worker) (increase(attune_worker_panics_total[10m]))
+```
+
+Identify the panicking worker from the `worker` label, then grep logs for the
+recovered-panic stack (`worker panicked — recovered`, same `worker` value). A
+single panic may be a transient poison input; a sustained count means a
+persistent bug (nil-deref, malformed upstream payload). Fix the root cause; if a
+specific row/message is poison, quarantine or drop it.
+
+Recovery: no new panics for the worker over 10 minutes.
+
 ## AttuneOutboxLagHigh
 
 Impact: notification delivery is delayed. Users may not receive outbound

@@ -150,7 +150,7 @@ func geminiModelsURL(baseURL string) (string, error) {
 func doModelRequest(req *http.Request) ([]byte, error) {
 	const where = "llmclient.ListProviderModels"
 	client := http.Client{
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Transport: otelhttp.NewTransport(guardedEgressTransport()),
 	}
 	logext.Infof(req.Context(), "[%s] upstream REQUEST,url:%s", where, logext.SafeURLForLog(req.URL.String()))
 	resp, err := client.Do(req)

@@ -207,6 +207,24 @@ func TestCreateChannelRejectsPublicHTTPBaseURL(t *testing.T) {
 	}
 }
 
+func TestCreateChannelRejectsMetadataBaseURL(t *testing.T) {
+	svc := NewService(ptrext.Of(fakeRepo{}), ptrext.Of(fakeStore{}))
+	apiKey := "sk-test"
+	_, err := svc.CreateChannel(context.Background(), ChannelInput{
+		Name:           "metadata-ssrf",
+		Protocol:       llmrepo.ProtocolOpenAICompat,
+		BaseURL:        "https://169.254.169.254/v1",
+		AuthMode:       llmrepo.AuthModeBearer,
+		APIKey:         ptrext.Of(apiKey),
+		Status:         llmrepo.ChannelStatusEnabled,
+		Weight:         intPtr(1),
+		TimeoutSeconds: intPtr(60),
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v; want validation (metadata IP base_url must be rejected)", err)
+	}
+}
+
 func TestUpdateChannelPreservesCredentialWhenAPIKeyOmitted(t *testing.T) {
 	channelID := uuid.New()
 	repo := ptrext.Of(fakeRepo{

@@ -7,7 +7,77 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Security
+
+- **SSRF-resistant outbound egress (#64).** A new `internal/pkg/nethardening`
+  guard enforces an egress policy at dial time (after DNS resolution, so it
+  defeats DNS rebinding) on outbound webhook delivery (including the console
+  "test webhook" path), every LLM provider call, and the inbound email IMAP dial
+  (closing its prior fail-open-on-DNS gap). Blocked IPv4 targets wrapped in IPv6
+  transition formats (6to4, NAT64, Teredo, IPv4-compatible `::a.b.c.d`) are
+  unwrapped and re-checked. Cloud-metadata (e.g. `169.254.169.254`), link-local,
+  unspecified, and
+  multicast destinations are always blocked; loopback and RFC1918 are blocked by
+  default and re-permitted only via `security.allow_loopback_egress` /
+  `security.allow_private_egress`. LLM `base_url` validation rejects literal
+  metadata/link-local IPs at config time. Previously a tenant-controlled webhook
+  or LLM base URL could reach the cloud metadata endpoint or internal services.
+  The guard also blocks 6to4 (`2002::/16`) and NAT64 (`64:ff9b::/96`) IPv6
+  addresses that wrap a blocked IPv4 target, refuses to honor `HTTP(S)_PROXY` on
+  these egress paths (a proxy would hide the real destination IP from the
+  dial-time check), and validates that any trusted `X-Forwarded-For` hop is a
+  parseable IP (falling back to the direct peer otherwise).
+
+- **X-Forwarded-For spoofing fixed for the API-key IP allowlist (#64).** The
+  client IP behind the per-key IP allowlist is now resolved using the new
+  `security.trusted_proxy_hops` setting: with no trusted proxy (default)
+  `X-Forwarded-For` is ignored and the direct peer is used, so a client on a
+  direct connection can no longer forge an allowlisted source IP by setting the
+  header (only `X-Forwarded-For` is consulted — single-header model; deployments
+  whose proxy emits only `X-Real-IP` must also append XFF). Behind N reverse
+  proxies, set `trusted_proxy_hops: N`. Also **removed chi's `middleware.RealIP`**
+  from the router — it unconditionally rewrote `RemoteAddr` from
+  `X-Forwarded-For`/`X-Real-IP`, which by itself made the allowlist spoofable
+  regardless of the setting above. **Behavioral note:** with `RealIP` gone,
+  `audit_log.actor_ip` and the enrichment-runtime actor IP now resolve through
+  the same `trusted_proxy_hops` model, so behind a proxy they record the real
+  client IP (set `trusted_proxy_hops`) rather than — as a side effect of `RealIP`
+  — the leftmost `X-Forwarded-For` value.
+
 ### Changed
+
+- **DB pool and HTTP server are now bounded (#64).** `database.NewPool` applies
+  defaults for `MaxConns` (20), `connect_timeout` (10s), and `statement_timeout`
+  (30s) unless the database URL already sets them, so a single stuck query can't
+  pin a connection or run unbounded past the request deadline. The HTTP server
+  gained `ReadTimeout` (60s), `WriteTimeout` (315s, above the in-handler 305s
+  timeout), and `IdleTimeout` (120s)
+  alongside the existing `ReadHeaderTimeout`, closing slow-loris and slow-reader
+  exposure.
+
+- **Background workers are panic-supervised (#64).** Every long-running worker
+  (outbox, enrichment runtime, embedding, reply-draft, digest, GDPR export, audit
+  pruner, queue/lag refreshers) now runs under a `safego` supervisor that recovers
+  panics, counts them in the new `attune_worker_panics_total` metric, and restarts
+  the worker with capped backoff. The enrichment runner — the highest-panic-risk
+  path, since it parses LLM responses — additionally recovers panics at each of
+  its goroutine boundaries (per-job, processor, sweeper). Previously a single
+  panic in any worker crashed the whole process — HTTP server and all other
+  workers included. Added `AttuneWorkerPanics` and `AttuneEnrichmentTerminalFailures`
+  Prometheus alerts + runbooks.
+
+- **Migrations are exempt from the `statement_timeout` default (#64).** The new
+  30s `statement_timeout` (above) is cleared on the dedicated migration
+  connection so a legitimately long migration can't be killed mid-statement.
+
+- **Outbox is safe under multiple worker replicas (#64).** `ClaimBatch` now
+  excludes rows claimed within a 10-minute window, so a second outbox worker
+  replica can't re-claim an in-flight row and double-deliver (FOR UPDATE SKIP
+  LOCKED only guards the lock window). While a worker drains a batch it renews
+  the claims (owner-scoped lease heartbeat, new `claimed_by` column) so a long,
+  slow batch can't age its tail rows past the window mid-flight regardless of
+  batch size, and one replica never renews a row another replica re-claimed. A
+  worker that crashes mid-delivery still has its rows retried after the window.
 
 - **Workflow state names are now localized (#64).** `WorkflowState.name` is now a
   stable machine key (slug `^[a-z][a-z0-9_]{0,30}$`); the human-facing label moves
@@ -19,6 +89,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   backfills existing rows (label preserved in `display_name`, key slugged).
 
 ### Added
+
+- **Terminal enrichment-failure observability (#64).** New metric
+  `attune_enrichment_terminal_failures_total{tenant}` counts feedback rows that
+  exhaust all enrichment retries and stop in `failed`, plus an
+  `AttuneEnrichmentTerminalFailures` Prometheus alert + runbook and an AI Pipeline
+  dashboard series. Previously a row could silently stop enriching with no signal.
+
+- **`X-Attune-Delivery-Id` header on outbound webhook deliveries (#64).** Raw
+  webhook deliveries now carry the outbox row id, which is stable across the
+  at-least-once retries of that delivery, so consumers can dedup replays (a
+  delivery that succeeds downstream but crashes before `MarkDelivered` is retried
+  with the same id). Signature and payload are unchanged.
 
 - **Shipped-artifact hygiene CI guard (#64).** New `scripts/lint-artifacts.sh`
   (wired into `ci-gate`, the pre-commit hook, and `make ci-check`) fails on leaked

@@ -17,6 +17,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	llmrepo "github.com/Phixsura/attune/internal/repo/llmconfig"
 )
@@ -711,6 +712,17 @@ func validateBaseURL(raw string) error {
 	}
 	if parsed.User != nil {
 		return validation("base_url must not include userinfo")
+	}
+	// SSRF: reject a literal cloud-metadata / link-local / unspecified IP host
+	// outright at config time. Loopback + private literals are allowed here
+	// (self-hosted gateways are commonly internal); the dial-time egress guard in
+	// llmclient enforces the deploy's actual loopback/private policy, including
+	// against DNS-rebinding hostnames.
+	if ip := net.ParseIP(parsed.Hostname()); ip != nil {
+		permissive := nethardening.Policy{AllowLoopback: true, AllowPrivate: true}
+		if err := permissive.CheckIP(ip); err != nil {
+			return validation("base_url host not allowed: " + err.Error())
+		}
 	}
 	switch parsed.Scheme {
 	case "https":

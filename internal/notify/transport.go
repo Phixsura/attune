@@ -11,8 +11,19 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
+
+// egressPolicy is the SSRF guard applied to transports built with a nil
+// http.Client. The zero value blocks loopback and private networks (and always
+// blocks cloud-metadata / link-local); cmd/attune relaxes loopback/private from
+// config via SetEgressPolicy at startup, before any worker is constructed.
+var egressPolicy = nethardening.Policy{}
+
+// SetEgressPolicy installs the outbound SSRF egress policy. Call once at
+// startup, before constructing any Transport.
+func SetEgressPolicy(p nethardening.Policy) { egressPolicy = p }
 
 // Transport is the common outbound POST mechanism shared by every
 // notify destination (raw HTTPS webhook today; future Slack / Discord /
@@ -80,7 +91,10 @@ var ErrTerminal = errors.New("terminal failure")
 // nil httpClient falls back to a sensible default (10s per-call timeout).
 func NewTransport(httpClient *http.Client, retry RetryPolicy) *Transport {
 	if httpClient == nil {
-		httpClient = ptrext.Of(http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport), Timeout: 10 * time.Second})
+		httpClient = ptrext.Of(http.Client{
+			Transport: otelhttp.NewTransport(egressPolicy.NewHTTPTransport()),
+			Timeout:   10 * time.Second,
+		})
 	}
 	if retry.MaxAttempts < 1 {
 		retry.MaxAttempts = 1

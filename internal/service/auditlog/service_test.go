@@ -271,10 +271,4 @@ func TestMarshalJSONAndRemoteAddrIP(t *testing.T) {
 	if _, err := marshalJSON(badJSON{Ch: make(chan int)}); err == nil {
 		t.Fatal("marshalJSON(badJSON) err = nil")
 	}
-	if got := remoteAddrIP("10.0.0.8:443"); got != "10.0.0.8" {
-		t.Fatalf("remoteAddrIP() = %q", got)
-	}
-	if got := remoteAddrIP(" plain-host "); got != "plain-host" {
-		t.Fatalf("remoteAddrIP() plain = %q", got)
-	}
 }
