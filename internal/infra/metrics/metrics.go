@@ -145,6 +145,17 @@ var OutboxLagSeconds = prometheus.NewGauge(
 	},
 )
 
+// OutboxDeadRows gauges the number of outbox rows in the terminal 'dead'
+// state — the dead-letter depth operators alert on (#33). Refreshed by the
+// same 30s ticker as OutboxLagSeconds. Not named *_count: that suffix is
+// reserved for histogram/summary sample counts.
+var OutboxDeadRows = prometheus.NewGauge(
+	prometheus.GaugeOpts{
+		Name: "attune_outbox_dead_rows",
+		Help: "Number of notify_outbox rows in the terminal 'dead' state.",
+	},
+)
+
 // ClaimContentionTotal counts when an enricher tryClaim hit a row that
 // another worker had already claimed. Useful health signal — high
 // contention = consider tuning enricher_batch / interval.
@@ -640,6 +651,7 @@ var allMetrics = []prometheus.Collector{
 	EnrichSweepSubmittedTotal,
 	NotifyFailuresTotal,
 	OutboxLagSeconds,
+	OutboxDeadRows,
 	ClaimContentionTotal,
 	IngestRateLimitTotal,
 	TriageDecisionsTotal,
@@ -706,6 +718,7 @@ func RegisteredMetricNames() []string {
 		"attune_enrich_sweep_submitted_total",
 		"attune_notify_failures_total",
 		"attune_outbox_lag_seconds",
+		"attune_outbox_dead_rows",
 		"attune_claim_contention_total",
 		"attune_ingest_rate_limit_total",
 		"attune_triage_decisions_total",

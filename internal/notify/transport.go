@@ -132,18 +132,23 @@ func (t *Transport) attempt(
 ) error {
 	req, err := build(ctx)
 	if err != nil {
-		return fmt.Errorf("build request: %w", err)
+		return Classify(fmt.Errorf("build request: %w", err), 0)
 	}
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("http do: %w", err)
+		return Classify(fmt.Errorf("http do: %w", err), 0)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("read body: %w", err)
+		return Classify(fmt.Errorf("read body: %w", err), 0)
 	}
-	return check(ctx, resp.StatusCode, body)
+	// check owns the success/retry/terminal decision; pair its verdict with the
+	// status code so the dead-queue surface can report a structured failure_kind.
+	if cErr := check(ctx, resp.StatusCode, body); cErr != nil {
+		return Classify(cErr, resp.StatusCode)
+	}
+	return nil
 }
 
 // backoff returns the delay before retry n (1-indexed: n=1 is between

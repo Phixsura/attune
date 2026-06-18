@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Notify outbox dead-queue operator surface (#33).** Operators can now inspect
+  and recover failed webhook deliveries from the Console/API instead of querying
+  Postgres directly. New admin-only endpoints `GET
+  /fb/v1/console/outbox/deliveries` (tenant-scoped, status-filtered, keyset
+  paginated) and `POST /fb/v1/console/outbox/{id}/retry` (re-arm one dead/failed
+  row in place — resets to pending; the worker redelivers on its next poll;
+  returns 202). Retry is concurrency-safe (a row a worker is currently sending is
+  rejected with 409, never double-delivered) and the `outbox.retry` audit row is
+  written inside the same transaction as the re-arm (via a new
+  `auditlog.Service.RecordTx`), so a retry can never commit without its audit
+  trail. Failures are now classified into a structured `failure_kind`
+  (`http_4xx`/`http_5xx`/`timeout`/`dns`/`connection`/`tls`/`terminal`/`other`)
+  with the upstream `http_status` stored separately, so operators can triage by
+  failure type. New `attune_outbox_dead_rows` gauge surfaces dead-letter depth
+  for alerting. Standalone "Dead deliveries" Console view lists deliveries with
+  per-row retry. Migration 051 adds the `failure_kind`, `http_status`, and
+  manual-retry bookkeeping columns; migration 052 registers the `outbox.retry`
+  audit action.
+
 - **Fine-grained API key scopes (#41).** API keys now support 24 resource:action
   scopes for least-privilege access control. Scopes are stored in a normalized
   `api_key_scopes` table and loaded atomically with key lookup (fail-closed).

@@ -35,7 +35,9 @@ const (
 	OutboxStatusDead      = "dead"
 )
 
-// OutboxRow is one queued (feedback × destination) entry.
+// OutboxRow is one queued (feedback × destination) entry. The dead-queue
+// display fields (#33) are populated by ListByStatus / GetByID; the worker's
+// ClaimBatch only fills the send-path fields and leaves the rest zero.
 type OutboxRow struct {
 	ID                int64
 	FeedbackID        int64
@@ -48,6 +50,34 @@ type OutboxRow struct {
 	Attempts          int
 	TraceID           string
 	LastError         string
+
+	// Dead-queue display fields (#33). Zero values when not loaded.
+	DeadReason        string
+	FailureKind       string // notify.FailureKind value; "" when unknown
+	HTTPStatus        int    // upstream HTTP status; 0 = no response
+	NextRetryAt       time.Time
+	CreatedAt         time.Time
+	DeliveredAt       *time.Time // nil until delivered
+	ClaimedAt         *time.Time // non-nil = a worker holds the row in-flight
+	LastManualRetryAt *time.Time
+	RetriedBy         string // actor of the last manual retry; "" if never
+	ManualRetryCount  int
+}
+
+// MaxListLimit caps ListByStatus page size. Exported so the handler can size
+// its keyset cursor consistently.
+const MaxListLimit = 200
+
+// RetryOutcome is the result of a manual RetryOne. The handler maps it to
+// 202 (Retried), 404 (!Found), or 409 (Found && !Retried — already
+// delivered/pending, or InFlight).
+type RetryOutcome struct {
+	Found    bool
+	Retried  bool
+	InFlight bool      // claimed_at set: a worker is delivering it right now
+	Status   string    // the row's status at decision time (for the 409 message)
+	Snapshot OutboxRow // pre-retry state (audit "before" + full row for display)
+	Updated  OutboxRow // post-retry re-armed state (audit "after" + the response body)
 }
 
 // ErrOutboxNotFound — used by tests / single-row lookups.
@@ -156,17 +186,26 @@ func (r *OutboxRepo) MarkDelivered(ctx context.Context, id int64) error {
 // and outbox rows accumulated forever in 'pending' state (see
 // memory/feedback_outbox_lag_stale.md). make_interval(secs => $3)
 // binds int natively, no string concat.
-func (r *OutboxRepo) MarkFailed(ctx context.Context, id int64, errMsg string, nextDelay time.Duration) error {
+func (r *OutboxRepo) MarkFailed(
+	ctx context.Context,
+	id int64,
+	errMsg, failureKind string,
+	httpStatus int,
+	nextDelay time.Duration,
+) error {
 	const where = "repo.OutboxRepo.MarkFailed"
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notify_outbox
 		 SET status = 'failed',
 		 attempts = attempts + 1,
 		 last_error = $2,
+		 failure_kind = $4,
+		 http_status = $5,
 		 next_retry_at = NOW() + make_interval(secs => $3),
 		 claimed_at = NULL
 		 WHERE id = $1`,
-		id, pgxutil.Truncate(errMsg, 1000), int(nextDelay.Seconds()))
+		id, pgxutil.Truncate(errMsg, 1000), int(nextDelay.Seconds()),
+		nullStr(failureKind), nullInt(httpStatus))
 	if err != nil {
 		logext.Errorf(ctx, "[%s] mark failed,id:%d,err:%+v", where, id, err.Error())
 		return fmt.Errorf("mark failed %d: %w", id, err)
@@ -177,14 +216,22 @@ func (r *OutboxRepo) MarkFailed(ctx context.Context, id int64, errMsg string, ne
 // MarkDead writes a terminal failure: status='dead', stores the reason
 // so the console can review. Caller invokes this on
 // ErrTerminal from the notifier OR when attempts exceeds the max.
-func (r *OutboxRepo) MarkDead(ctx context.Context, id int64, reason string) error {
+func (r *OutboxRepo) MarkDead(
+	ctx context.Context,
+	id int64,
+	reason, failureKind string,
+	httpStatus int,
+) error {
 	const where = "repo.OutboxRepo.MarkDead"
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notify_outbox
 		 SET status = 'dead',
 		 dead_reason = $2,
+		 failure_kind = $3,
+		 http_status = $4,
 		 claimed_at = NULL
-		 WHERE id = $1`, id, pgxutil.Truncate(reason, 1000))
+		 WHERE id = $1`, id, pgxutil.Truncate(reason, 1000),
+		nullStr(failureKind), nullInt(httpStatus))
 	if err != nil {
 		logext.Errorf(ctx, "[%s] mark dead failed,id:%d,err:%+v", where, id, err.Error())
 		return fmt.Errorf("mark dead %d: %w", id, err)
@@ -253,4 +300,210 @@ func (r *OutboxRepo) OldestPendingAge(ctx context.Context) (time.Duration, error
 		return 0, nil
 	}
 	return time.Duration(ptrext.Indirect(ageSec) * float64(time.Second)), nil
+}
+
+// DeadCount returns the number of rows currently in the terminal 'dead' state.
+// Feeds the attune_outbox_dead_rows gauge sampled in cmd/attune.
+func (r *OutboxRepo) DeadCount(ctx context.Context) (int64, error) {
+	var n int64
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM notify_outbox WHERE status = 'dead'`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("dead count: %w", err)
+	}
+	return n, nil
+}
+
+// deadCols is the shared SELECT list for the dead-queue display rows. Note:
+// payload is intentionally omitted — the list view doesn't need the full
+// envelope, only the metadata.
+const deadCols = `id, feedback_id, tenant_id, destination_type, destination_target,
+	audience, status, attempts, trace_id,
+	COALESCE(last_error, ''), COALESCE(dead_reason, ''), COALESCE(failure_kind, ''),
+	http_status, next_retry_at, created_at, delivered_at, claimed_at,
+	last_manual_retry_at, COALESCE(retried_by, ''), manual_retry_count`
+
+// rowScanner is satisfied by both pgx.Row and pgx.Rows.
+type rowScanner interface{ Scan(dest ...any) error }
+
+func scanDeadRow(s rowScanner) (OutboxRow, error) {
+	var row OutboxRow
+	var httpStatus *int16
+	var deliveredAt, claimedAt, lastManualRetryAt *time.Time
+	if err := s.Scan(
+		&row.ID, &row.FeedbackID, &row.TenantID, &row.DestinationType, &row.DestinationTarget,
+		&row.Audience, &row.Status, &row.Attempts, &row.TraceID,
+		&row.LastError, &row.DeadReason, &row.FailureKind,
+		&httpStatus, &row.NextRetryAt, &row.CreatedAt, &deliveredAt, &claimedAt,
+		&lastManualRetryAt, &row.RetriedBy, &row.ManualRetryCount,
+	); err != nil {
+		return OutboxRow{}, err
+	}
+	row.HTTPStatus = int(ptrext.Indirect(httpStatus))
+	row.DeliveredAt = deliveredAt
+	row.ClaimedAt = claimedAt
+	row.LastManualRetryAt = lastManualRetryAt
+	return row, nil
+}
+
+// ListByStatus returns dead-queue display rows for one tenant filtered by
+// status, newest first, keyset-paginated on id (beforeID == 0 → first page).
+// limit is clamped to [1, 200].
+func (r *OutboxRepo) ListByStatus(
+	ctx context.Context,
+	tenantID string,
+	statuses []string,
+	limit int,
+	beforeID int64,
+) ([]OutboxRow, error) {
+	if limit <= 0 || limit > MaxListLimit {
+		limit = MaxListLimit
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+deadCols+`
+		 FROM notify_outbox
+		 WHERE tenant_id = $1 AND status = ANY($2)
+		 AND ($3 = 0 OR id < $3)
+		 ORDER BY id DESC
+		 LIMIT $4`,
+		tenantID, statuses, beforeID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list outbox by status: %w", err)
+	}
+	defer rows.Close()
+
+	var out []OutboxRow
+	for rows.Next() {
+		row, err := scanDeadRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan dead row: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// GetByID loads one dead-queue display row scoped to the tenant. Returns
+// ErrOutboxNotFound when the row is missing or owned by another tenant.
+func (r *OutboxRepo) GetByID(ctx context.Context, tenantID string, id int64) (*OutboxRow, error) {
+	row, err := scanDeadRow(r.pool.QueryRow(ctx,
+		`SELECT `+deadCols+` FROM notify_outbox WHERE id = $1 AND tenant_id = $2`,
+		id, tenantID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrOutboxNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get outbox row %d: %w", id, err)
+	}
+	return ptrext.Of(row), nil
+}
+
+// RetryOne re-arms a single dead/failed row for redelivery (retry-in-place):
+// reset to pending, attempts=0, clear the terminal/failure fields, and stamp
+// the manual-retry bookkeeping. Concurrency-safe: the row is SELECT-ed
+// FOR UPDATE so a worker's SKIP-LOCKED claim can't race it, and only
+// dead/failed rows with no live claim are eligible — anything else comes back
+// as a non-retried outcome for the handler to turn into 404/409.
+//
+// auditFn (optional) runs inside the same transaction after the re-arm, before
+// commit, with the before/after rows. If it returns an error the whole retry
+// rolls back — so a destructive retry can never commit without its audit trail
+// (#33). The before (Snapshot) and after (Updated) rows are returned for the
+// response and audit.
+func (r *OutboxRepo) RetryOne(
+	ctx context.Context,
+	tenantID string,
+	id int64,
+	actor string,
+	auditFn func(ctx context.Context, tx pgx.Tx, before, after OutboxRow) error,
+) (RetryOutcome, error) {
+	const where = "repo.OutboxRepo.RetryOne"
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return RetryOutcome{}, fmt.Errorf("begin retry tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	before, err := scanDeadRow(tx.QueryRow(ctx,
+		`SELECT `+deadCols+` FROM notify_outbox WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+		id, tenantID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RetryOutcome{Found: false}, nil
+	}
+	if err != nil {
+		return RetryOutcome{}, fmt.Errorf("select for retry %d: %w", id, err)
+	}
+
+	retryable := (before.Status == OutboxStatusDead || before.Status == OutboxStatusFailed) &&
+		before.ClaimedAt == nil
+	if !retryable {
+		return RetryOutcome{
+			Found: true, Retried: false, InFlight: before.ClaimedAt != nil, Status: before.Status,
+		}, nil
+	}
+
+	var nextRetryAt time.Time
+	var lastManualRetryAt *time.Time
+	if err := tx.QueryRow(ctx, `
+		UPDATE notify_outbox
+		 SET status = 'pending', attempts = 0, next_retry_at = NOW(), claimed_at = NULL,
+		 last_error = NULL, dead_reason = NULL, failure_kind = NULL, http_status = NULL,
+		 last_manual_retry_at = NOW(), retried_by = $2,
+		 manual_retry_count = manual_retry_count + 1
+		 WHERE id = $1
+		 RETURNING next_retry_at, last_manual_retry_at`,
+		id, nullStr(actor)).Scan(&nextRetryAt, &lastManualRetryAt); err != nil {
+		return RetryOutcome{}, fmt.Errorf("reset for retry %d: %w", id, err)
+	}
+
+	after := reArm(before, actor, nextRetryAt, lastManualRetryAt)
+	if auditFn != nil {
+		if err := auditFn(ctx, tx, before, after); err != nil {
+			// Deferred rollback undoes the re-arm: retry + audit are atomic.
+			return RetryOutcome{}, fmt.Errorf("retry audit %d: %w", id, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return RetryOutcome{}, fmt.Errorf("commit retry %d: %w", id, err)
+	}
+	logext.Infof(ctx, "[%s] re-armed,id:%d,tenant:%s,prev_status:%s,actor:%s",
+		where, id, tenantID, before.Status, actor)
+	return RetryOutcome{
+		Found: true, Retried: true, Status: before.Status, Snapshot: before, Updated: after,
+	}, nil
+}
+
+// reArm returns the post-retry state of a row: pending with a fresh attempt
+// budget, terminal/failure fields cleared, manual-retry bookkeeping stamped. The
+// timestamps come from the UPDATE's RETURNING (the authoritative DB NOW()), so
+// the returned row exactly matches what was persisted.
+func reArm(before OutboxRow, actor string, nextRetryAt time.Time, lastManualRetryAt *time.Time) OutboxRow {
+	after := before
+	after.Status = OutboxStatusPending
+	after.Attempts = 0
+	after.LastError = ""
+	after.DeadReason = ""
+	after.FailureKind = ""
+	after.HTTPStatus = 0
+	after.ClaimedAt = nil
+	after.NextRetryAt = nextRetryAt
+	after.LastManualRetryAt = lastManualRetryAt
+	after.RetriedBy = actor
+	after.ManualRetryCount = before.ManualRetryCount + 1
+	return after
+}
+
+// nullStr / nullInt map Go zero values to SQL NULL so empty failure_kind and
+// a 0 http_status (no response) are stored as NULL rather than ” / 0.
+func nullStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func nullInt(n int) any {
+	if n == 0 {
+		return nil
+	}
+	return n
 }

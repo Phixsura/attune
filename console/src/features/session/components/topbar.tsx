@@ -54,6 +54,7 @@ export function TopBar({ me }: TopBarProps) {
           <NavLink to="/llm-usage">{t('nav.llm_usage')}</NavLink>
           {can('nav:llm_config') && <NavLink to="/llm-config">{t('nav.llm_config')}</NavLink>}
           {can('nav:settings') && <NavLink to="/settings">{t('nav.settings')}</NavLink>}
+          {isAdmin && <NavLink to="/outbox-dead">{t('nav.outbox_dead')}</NavLink>}
         </nav>
         <div className="ml-auto flex items-center gap-3">
           <RoleBadge role={role} />

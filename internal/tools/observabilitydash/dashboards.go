@@ -236,6 +236,7 @@ func operationsDashboard() dashboard {
 			targetExpr("A", `sum by (destination_type, reason) (rate(attune_notify_failures_total[$__rate_interval]))`, "notify / {{destination_type}} / {{reason}}"),
 			targetExpr("B", `attune_outbox_lag_seconds`, "outbox lag"),
 			targetExpr("C", `rate(attune_claim_contention_total[$__rate_interval])`, "claim contention"),
+			targetExpr("D", `attune_outbox_dead_rows`, "dead deliveries"),
 		}, "short", gp(0, 43, 24, 8)),
 	}
 	d.Panels = layoutSixCardDashboard(d.Panels, 7, 7)

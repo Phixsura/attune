@@ -28,6 +28,11 @@ import type {
   NotifyTarget,
   TestNotifyTargetResponse,
 } from '@/proto/attune/v1/notify_target'
+import {
+  type ListDeliveriesResponse,
+  OutboxFailureKind,
+  type RetryDeliveryResponse,
+} from '@/proto/attune/v1/outbox'
 import type { GetMeResponse } from '@/proto/attune/v1/session'
 import type { GetLLMUsageResponse } from '@/proto/attune/v1/usage'
 import type { ListAuditResponse, ListStatesResponse } from '@/proto/attune/v1/workflow'
@@ -95,6 +100,36 @@ const sampleNotifyTarget: NotifyTarget = {
   lastError: '',
 }
 const defaultTestNotifyTargetResponse: TestNotifyTargetResponse = { ok: true, statusCode: 200 }
+
+// Outbox dead-letter queue --------------------------------------------------
+export const defaultDeliveriesList: ListDeliveriesResponse = {
+  deliveries: [],
+  nextBeforeId: '0',
+}
+const sampleDelivery = {
+  id: '101',
+  feedbackId: 'f-9',
+  destinationType: 'raw-webhook',
+  destinationTarget: 'https://example.com/hook',
+  audience: 'all',
+  status: 'dead',
+  attempts: 6,
+  failureKind: OutboxFailureKind.OUTBOX_FAILURE_KIND_HTTP_5XX,
+  httpStatus: 503,
+  lastError: 'upstream returned 503',
+  deadReason: 'max attempts exhausted',
+  traceId: 'trace-9',
+  nextRetryAt: '',
+  createdAt: '2026-06-18T00:00:00Z',
+  deliveredAt: '',
+  lastManualRetryAt: '',
+  retriedBy: '',
+  manualRetryCount: 0,
+  inFlight: false,
+}
+const defaultRetryDeliveryResponse: RetryDeliveryResponse = {
+  delivery: { ...sampleDelivery, status: 'pending', attempts: 0 },
+}
 
 // LLM config ---------------------------------------------------------------
 const sampleLLMChannel: LLMChannel = {
@@ -247,6 +282,11 @@ export const handlers = [
   http.delete(`${BASE}/digest-subscription`, () => new HttpResponse(null, { status: 204 })),
   http.post(`${BASE}/notify-targets/:id/test`, () =>
     HttpResponse.json(defaultTestNotifyTargetResponse),
+  ),
+
+  http.get(`${BASE}/outbox/deliveries`, () => HttpResponse.json(defaultDeliveriesList)),
+  http.post(`${BASE}/outbox/:id/retry`, () =>
+    HttpResponse.json(defaultRetryDeliveryResponse, { status: 202 }),
   ),
 
   http.get(`${BASE}/llm/channels`, () => HttpResponse.json(defaultLLMChannelsList)),

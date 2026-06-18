@@ -870,6 +870,11 @@
           "expr": "(rate(attune_claim_contention_total[$__rate_interval])) or vector(0)",
           "legendFormat": "claim contention",
           "refId": "C"
+        },
+        {
+          "expr": "(attune_outbox_dead_rows) or vector(0)",
+          "legendFormat": "dead deliveries",
+          "refId": "D"
         }
       ],
       "fieldConfig": {

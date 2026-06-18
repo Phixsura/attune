@@ -10,10 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
+
+// execer is satisfied by both *pgxpool.Pool and pgx.Tx, letting Insert and
+// InsertTx share one INSERT.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
 
 type Repo struct {
 	pool *pgxpool.Pool
@@ -59,13 +67,24 @@ type ListResult struct {
 	NextCursor string
 }
 
+// Insert writes one audit row using the pool (its own implicit transaction).
 func (r *Repo) Insert(ctx context.Context, entry Entry) error {
+	return insertEntry(ctx, r.pool, entry)
+}
+
+// InsertTx writes one audit row inside an existing transaction, so the audit
+// record and the mutation it describes commit or roll back together.
+func (r *Repo) InsertTx(ctx context.Context, tx pgx.Tx, entry Entry) error {
+	return insertEntry(ctx, tx, entry)
+}
+
+func insertEntry(ctx context.Context, db execer, entry Entry) error {
 	const q = `
 		INSERT INTO audit_log (
 			tenant_id, actor_type, actor_id, actor_email, actor_ip, actor_user_agent,
 			action, target_type, target_id, summary, before_json, after_json
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
-	_, err := r.pool.Exec(
+	_, err := db.Exec(
 		ctx,
 		q,
 		entry.TenantID,

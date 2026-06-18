@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 )
@@ -23,6 +25,12 @@ type stubRepo struct {
 }
 
 func (s *stubRepo) Insert(_ context.Context, entry auditlogrepo.Entry) error {
+	s.insertCalled = true
+	s.insertEntry = entry
+	return s.insertErr
+}
+
+func (s *stubRepo) InsertTx(_ context.Context, _ pgx.Tx, entry auditlogrepo.Entry) error {
 	s.insertCalled = true
 	s.insertEntry = entry
 	return s.insertErr
@@ -55,6 +63,53 @@ func TestRecordRejectsUnknownAction(t *testing.T) {
 	}
 	if repo.insertCalled {
 		t.Fatal("Record called repo.Insert for unsupported action")
+	}
+}
+
+// TestRecordAcceptsOutboxRetry guards the action emitted by the notify
+// dead-queue retry handler (console/outbox). Regression: it was missing from
+// the allow-list, so every manual retry failed the audit write with 500.
+func TestRecordAcceptsOutboxRetry(t *testing.T) {
+	t.Parallel()
+
+	repo := ptrext.Of(stubRepo{})
+	svc := New(repo)
+
+	err := svc.Record(context.Background(), Event{
+		TenantID:   "tenant-1",
+		Actor:      Actor{Type: "admin", ID: "user-1"},
+		Action:     "outbox.retry",
+		TargetType: "outbox_delivery",
+		TargetID:   "7",
+	})
+	if err != nil {
+		t.Fatalf("Record(outbox.retry) err = %v, want nil (action must be registered)", err)
+	}
+	if !repo.insertCalled {
+		t.Fatal("Record did not persist outbox.retry")
+	}
+}
+
+// TestRecordTxAcceptsOutboxRetry covers the transactional audit path used by
+// the dead-queue retry (#33): it validates the action and persists via InsertTx.
+func TestRecordTxAcceptsOutboxRetry(t *testing.T) {
+	t.Parallel()
+
+	repo := ptrext.Of(stubRepo{})
+	svc := New(repo)
+
+	err := svc.RecordTx(context.Background(), nil, Event{
+		TenantID:   "tenant-1",
+		Actor:      Actor{Type: "admin", ID: "user-1"},
+		Action:     "outbox.retry",
+		TargetType: "outbox_delivery",
+		TargetID:   "7",
+	})
+	if err != nil {
+		t.Fatalf("RecordTx(outbox.retry) err = %v, want nil", err)
+	}
+	if !repo.insertCalled {
+		t.Fatal("RecordTx did not persist via InsertTx")
 	}
 }
 
