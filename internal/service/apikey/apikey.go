@@ -107,6 +107,72 @@ func (s *APIKeys) Lookup(ctx context.Context, raw string) (tenantID string, keyI
 	return row.TenantID, row.ID, nil
 }
 
+// LookupWithScopes verifies the raw key and returns tenant, key ID, and scopes
+// atomically. If scope loading fails, returns domain.ErrInvalidAPIKey (fail-closed).
+func (s *APIKeys) LookupWithScopes(ctx context.Context, raw string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, err error) {
+	const where = "service.APIKeys.LookupWithScopes"
+	if len(raw) != len(domain.APIKeyPrefix)+rawKeyHexLen {
+		logext.Warnf(ctx, "[%s] reject: bad key length,len:%d", where, len(raw))
+		return "", uuid.Nil, nil, domain.ErrInvalidAPIKey
+	}
+	digest := apiKeyLookupDigest(raw)
+	row, err := s.repo.LookupByHash(ctx, digest)
+	if errors.Is(err, apikeyrepo.ErrAPIKeyNotFound) {
+		logext.Warnf(ctx, "[%s] reject: hash not found", where)
+		return "", uuid.Nil, nil, domain.ErrInvalidAPIKey
+	}
+	if err != nil {
+		logext.Errorf(ctx, "[%s] LookupByHash failed,err:%+v", where, err.Error())
+		return "", uuid.Nil, nil, err
+	}
+	if !hmac.Equal(row.StoredHash, digest) {
+		logext.Warnf(ctx, "[%s] reject: hmac mismatch,key_id:%s", where, row.ID)
+		return "", uuid.Nil, nil, domain.ErrInvalidAPIKey
+	}
+
+	scopes, err = s.repo.GetScopes(ctx, row.ID)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] GetScopes failed,key_id:%s,err:%+v", where, row.ID, err.Error())
+		return "", uuid.Nil, nil, domain.ErrInvalidAPIKey
+	}
+
+	s.touchAsync(row.ID)
+	return row.TenantID, row.ID, scopes, nil
+}
+
+// IssueWithScopes mints a key with specific scopes.
+func (s *APIKeys) IssueWithScopes(ctx context.Context, tenantID, label string, scopes []domain.Scope) (raw string, keyID uuid.UUID, err error) {
+	const where = "service.APIKeys.IssueWithScopes"
+	logext.Infof(ctx, "[%s] start,tenant_id:%s,label:%s,scopes:%d", where, tenantID, label, len(scopes))
+
+	raw, hash, prefix, err := generate()
+	if err != nil {
+		logext.Errorf(ctx, "[%s] generate failed,err:%+v", where, err.Error())
+		return "", uuid.Nil, err
+	}
+	keyID, err = s.repo.Insert(ctx, tenantID, hash, prefix, label)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] repo.Insert failed,tenant_id:%s,err:%+v",
+			where, tenantID, err.Error())
+		return "", uuid.Nil, err
+	}
+
+	if err := s.repo.InsertScopes(ctx, keyID, scopes); err != nil {
+		logext.Errorf(ctx, "[%s] InsertScopes failed,key_id:%s,err:%+v",
+			where, keyID, err.Error())
+		return "", uuid.Nil, err
+	}
+
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,key_id:%s,prefix:%s,scopes:%d",
+		where, tenantID, keyID, prefix, len(scopes))
+	return raw, keyID, nil
+}
+
+// GetScopes returns scopes for a given key ID.
+func (s *APIKeys) GetScopes(ctx context.Context, keyID uuid.UUID) ([]domain.Scope, error) {
+	return s.repo.GetScopes(ctx, keyID)
+}
+
 // touchAsync debounces s.repo.TouchLastUsed: skips the goroutine if this
 // key was touched within touchInterval (30s). Trades small accuracy on
 // last_used_at for bounded fan-out under heavy auth load.
