@@ -186,9 +186,17 @@ func runServer() error {
 	}
 
 	srv := ptrext.Of(http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           r,
+		Addr:    fmt.Sprintf(":%d", cfg.Port),
+		Handler: r,
+		// Hardening: ReadHeaderTimeout alone leaves the request body (slow-loris)
+		// and slow response readers unbounded. ReadTimeout caps the full request;
+		// WriteTimeout is a generous backstop above the in-handler timeout so it
+		// never cuts a legitimate (e.g. LLM-backed) response; IdleTimeout bounds
+		// keep-alive sockets.
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      300 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	})
 	logext.Infof(ctx, "[%s] attune server listening,addr:%s", where, srv.Addr)
 
