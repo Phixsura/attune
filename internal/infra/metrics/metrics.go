@@ -552,6 +552,15 @@ var AuthzDeniedTotal = prometheus.NewCounterVec(
 	[]string{"role", "required"},
 )
 
+// APIKeyScopeDeniedTotal counts API key requests denied due to missing scope.
+var APIKeyScopeDeniedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_apikey_scope_denied_total",
+		Help: "API key requests denied due to missing scope.",
+	},
+	[]string{"scope"},
+)
+
 // AuditRowsWrittenTotal counts successful immutable audit-log writes by action.
 var AuditRowsWrittenTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -646,6 +655,7 @@ var allMetrics = []prometheus.Collector{
 	OIDCTokenExchangeDuration,
 	OIDCRoleMappingTotal,
 	AuthzDeniedTotal,
+	APIKeyScopeDeniedTotal,
 	AuditRowsWrittenTotal,
 	AuditRowsPrunedTotal,
 	AuditPruneDurationSeconds,
@@ -708,6 +718,7 @@ func RegisteredMetricNames() []string {
 		"attune_oidc_token_exchange_duration_seconds",
 		"attune_oidc_role_mapping_total",
 		"attune_authz_denied_total",
+		"attune_apikey_scope_denied_total",
 		"attune_audit_rows_written_total",
 		"attune_audit_rows_pruned_total",
 		"attune_audit_prune_duration_seconds",
