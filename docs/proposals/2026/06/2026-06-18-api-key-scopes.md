@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #41 |
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Started** | 2026-06-18 |
 | **Related** | #38 (RBAC — similar permission model for sessions), #39 (audit log — scope changes logged) |
 
