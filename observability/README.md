@@ -39,7 +39,7 @@ exposition plus the portable assets in this directory.
 | `attune_enrich_queue_full_total` | counter | — | non-blocking enrichment queue submit rejections caused by a full queue |
 | `attune_enrich_batch_size` | histogram | — | actual jobs executed per enrichment processor batch |
 | `attune_enrich_sweep_submitted_total` | counter | — | pending DB rows successfully resubmitted by the enrich sweeper |
-| `attune_enrichment_terminal_failures_total` | counter | `tenant` | feedback rows that exhausted enrichment retries and stopped in `failed` (#81) |
+| `attune_enrichment_terminal_failures_total` | counter | `tenant` | feedback rows that exhausted enrichment retries and stopped in `failed` (#64) |
 | `attune_notify_failures_total` | counter | `destination_type`, `reason` | notifier push failures |
 | `attune_outbox_lag_seconds` | gauge | — | age of the oldest pending outbox row (0 = empty) |
 | `attune_outbox_dead_rows` | gauge | — | notify_outbox rows in the terminal `dead` state (dead-letter depth) |
@@ -90,7 +90,7 @@ exposition plus the portable assets in this directory.
 | `attune_audit_rows_written_total` | counter | `action` | immutable audit-log rows written by action (#39) |
 | `attune_audit_rows_pruned_total` | counter | — | immutable audit-log rows pruned by retention policy (#39) |
 | `attune_audit_prune_duration_seconds` | histogram | — | audit-log retention prune latency (#39) |
-| `attune_worker_panics_total` | counter | `worker` | recovered panics in supervised background workers (#84) |
+| `attune_worker_panics_total` | counter | `worker` | recovered panics in supervised background workers (#64) |
 | `attune_inbound_total` | counter | `channel`, `tenant`, `source_slug`, `result` | channel-agnostic inbound events by source (#66) |
 | `attune_inbound_latency_seconds` | histogram | `channel`, `tenant`, `source_slug` | end-to-end inbound processing latency (#66) |
 | `attune_inbound_source_state` | gauge | `channel`, `tenant`, `source_slug`, `state` | inbound source state, 1 when active (#66) |

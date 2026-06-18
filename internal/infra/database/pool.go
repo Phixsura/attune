@@ -32,7 +32,7 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	}
 	cfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
-	// Hardening (#84): bound the pool and fail slow connects/queries so a single
+	// Hardening (#64): bound the pool and fail slow connects/queries so a single
 	// stuck query can't pin a connection or run unbounded past the HTTP timeout.
 	// URL params (pool_max_conns / connect_timeout / statement_timeout) win — these
 	// are only applied when the caller didn't already set them.

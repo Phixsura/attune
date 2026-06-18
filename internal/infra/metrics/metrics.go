@@ -125,7 +125,7 @@ var EnrichSweepSubmittedTotal = prometheus.NewCounter(
 
 // EnrichmentTerminalFailuresTotal counts feedback rows that exhausted all
 // enrichment retries and were left in the terminal 'failed' state (no further
-// retry scheduled). Previously this was invisible (#81): a row would silently
+// retry scheduled). Previously this was invisible (#64): a row would silently
 // stop enriching with no signal. Any sustained non-zero value is
 // operator-actionable — a provider, prompt, or parse bug is stranding rows.
 var EnrichmentTerminalFailuresTotal = prometheus.NewCounterVec(

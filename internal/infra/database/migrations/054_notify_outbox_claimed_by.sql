@@ -1,4 +1,4 @@
--- Migration 054: owner-scope outbox claim renewal (#84).
+-- Migration 054: owner-scope outbox claim renewal (#64).
 --
 -- ClaimBatch stamps claimed_by with the worker instance's id; the lease
 -- heartbeat (RefreshClaims) only renews rows it still owns. Without this, under

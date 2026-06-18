@@ -185,7 +185,7 @@ func ActorFromRequest(actorType, actorID string, req *http.Request) Actor {
 	}
 	actor.UserAgent = strings.TrimSpace(req.UserAgent())
 	// Resolve via the trusted-proxy model (security.trusted_proxy_hops) rather
-	// than raw RemoteAddr: with chi's RealIP removed (#84), RemoteAddr is the
+	// than raw RemoteAddr: with chi's RealIP removed (#64), RemoteAddr is the
 	// direct peer, so behind a reverse proxy this keeps audit actor attribution
 	// the real client IP instead of the proxy's.
 	actor.IP = nethardening.ClientIPDefault(req)

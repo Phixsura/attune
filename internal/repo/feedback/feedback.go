@@ -310,7 +310,7 @@ func (r *FeedbackRepo) BeginTx(ctx context.Context) (pgx.Tx, error) {
 //
 // It returns whether this attempt was terminal (retries now exhausted) and the
 // row's tenant, so the caller can record attune_enrichment_terminal_failures_total
-// (#81). On a DB error it returns (false, "").
+// (#64). On a DB error it returns (false, "").
 func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) (terminal bool, tenant string) {
 	const where = "repo.FeedbackRepo.MarkFailed"
 	if err := r.pool.QueryRow(

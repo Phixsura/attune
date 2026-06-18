@@ -1,8 +1,7 @@
 # Security & Reliability Hardening — Operator & Integrator Guide
 
 This guide covers the production hardening shipped in the P0/P1 batch
-([#84](https://github.com/Phixsura/attune/issues/84),
-[#81](https://github.com/Phixsura/attune/issues/81)): outbound SSRF protection,
+([#64](https://github.com/Phixsura/attune/issues/64)): outbound SSRF protection,
 trusted-proxy client-IP resolution, worker panic supervision, request/query
 timeouts, at-least-once webhook delivery with consumer dedup, and the new
 observability signals.
@@ -199,7 +198,7 @@ New signals (all under the `attune_` Prometheus namespace, documented in
 
 | Metric | Meaning |
 |---|---|
-| `attune_enrichment_terminal_failures_total{tenant}` | feedback rows that exhausted enrichment retries and stopped in `failed` (#81) |
+| `attune_enrichment_terminal_failures_total{tenant}` | feedback rows that exhausted enrichment retries and stopped in `failed` (#64) |
 | `attune_worker_panics_total{worker}` | recovered panics in supervised workers |
 
 Alerts (with runbooks in [`observability/runbooks.md`](../observability/runbooks.md)):

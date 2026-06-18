@@ -19,7 +19,7 @@ import (
 
 // markFailed records an enrichment failure on the row and, when the row has
 // exhausted its retries, counts it in attune_enrichment_terminal_failures_total
-// so terminal failures are no longer invisible (#81).
+// so terminal failures are no longer invisible (#64).
 func (e *Enricher) markFailed(ctx context.Context, id int64, msg string) {
 	if terminal, tenant := e.repo.MarkFailed(ctx, id, msg); terminal {
 		metrics.EnrichmentTerminalFailuresTotal.WithLabelValues(tenant).Inc()

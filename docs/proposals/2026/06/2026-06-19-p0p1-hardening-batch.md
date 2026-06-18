@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Issue** | #84 (DB statement_timeout) + 2026-06-18 defect audit |
+| **Issue** | #64 (DB statement_timeout) + 2026-06-18 defect audit |
 | **Status** | Implemented |
 | **Started** | 2026-06-19 |
-| **Related** | #131 (GDPR erasure — shipped separately in #132), #81 (terminal enrichment failures), #91 (mutation testing). Large features + design-heavy items get their own proposals (see Non-goals). |
+| **Related** | #131 (GDPR erasure — shipped separately in #132), #64 (terminal enrichment failures), #91 (mutation testing). Large features + design-heavy items get their own proposals (see Non-goals). |
 
 ## Problem
 
@@ -16,7 +16,7 @@ Verified findings addressed here:
 
 - **DB pool unbounded** — `internal/infra/database/pool.go` set no `MaxConns`,
   `connect_timeout`, or `statement_timeout`; a slow query pins a connection past
-  the HTTP timeout (#84). *(commit 1, done)*
+  the HTTP timeout (#64). *(commit 1, done)*
 - **HTTP server** set only `ReadHeaderTimeout` (`cmd/attune/server.go:188`) —
   slow-loris on body + slow readers unbounded. *(commit 1, done)*
 - **Worker panic crashes the pod** — every background worker is launched as a
@@ -33,7 +33,7 @@ Verified findings addressed here:
 - **Duplicate delivery** — GitHub-issue delivery is non-idempotent (crash after
   HTTP-200 before `MarkDelivered` re-creates the issue), the envelope carries no
   per-delivery id, and `ingest` has no idempotency key (re-ingest dupes feedback).
-- **Terminal enrichment failures invisible (#81)** — no metric/alert when a row
+- **Terminal enrichment failures invisible (#64)** — no metric/alert when a row
   exhausts retries; worker panics likewise unobserved.
 - **outbox + embedding workers have zero tests**; no SKIP-LOCKED concurrency test.
 
@@ -59,7 +59,7 @@ Verified findings addressed here:
 - **P2 cleanups** — CSRF token rotation, audit hash-chain, down-migrations, etc.
 
 ## Proposal (per commit)
-1. **Timeouts (#84) — DONE (`23627a1a`).** Pool `MaxConns`/`connect_timeout`/
+1. **Timeouts (#64) — DONE (`23627a1a`).** Pool `MaxConns`/`connect_timeout`/
    `statement_timeout` (30s, URL overrides win); server `ReadTimeout`/
    `WriteTimeout`/`IdleTimeout`.
 2. **Worker panic recovery.** Add `safego(ctx, name, fn)` in `cmd/attune`:
@@ -88,7 +88,7 @@ Verified findings addressed here:
      `Idempotency-Key` is the safer Stripe-style design. Both need a migration +
      a semantics decision — its own proposal.
 5. **Observability + worker tests.** Add `attune_enrichment_terminal_failures_total`
-   (+ `AttuneEnrichmentTerminalFailures` alert + runbook, #81) through the metric-
+   (+ `AttuneEnrichmentTerminalFailures` alert + runbook, #64) through the metric-
    drift gate (catalog + AI Pipeline dashboard + Helm + README).
    `attune_worker_panics_total` landed with commit 2. Added an outbox SKIP-LOCKED
    integration test (a row locked by another tx is skipped, not blocked on) and
@@ -102,7 +102,7 @@ Verified findings addressed here:
 
 ## Alternatives considered
 - **`statement_timeout`: pool-wide vs per-request context timeout.** Chose
-  pool-wide per #84 (also covers background workers); migrations run well under
+  pool-wide per #64 (also covers background workers); migrations run well under
   30s today (a future long backfill should `SET LOCAL statement_timeout = 0`).
 - **SSRF: dial-time resolve-and-block vs config allowlist.** Chose resolve-and-
   block (reuse the existing oidc guard) — covers DNS-rebinding/redirects.
@@ -125,8 +125,8 @@ Verified findings addressed here:
   intended, but a behavior change to document in the changelog.
 
 ## Implementation plan
-Commits 1–5 above on `fix/p0p1-hardening-batch`; one PR (`Closes #84`, references
-#81 + the audit), **stop at ready-to-merge** for review + merge. Sub-issues per
+Commits 1–5 above on `fix/p0p1-hardening-batch`; one PR (`Closes #64`, references
+#64 + the audit), **stop at ready-to-merge** for review + merge. Sub-issues per
 fix can be filed on acceptance if you want finer tracking.
 
 ## Verification
@@ -137,5 +137,5 @@ ingest-idempotency tests (no dupes); outbox/embedding worker unit + SKIP-LOCKED
 concurrency tests. `make ci-check` + `make test-integration` green.
 
 ## References
-- Defect audit 2026-06-18 (verified); #84; `internal/infra/config/oidc.go`
+- Defect audit 2026-06-18 (verified); #64; `internal/infra/config/oidc.go`
   (existing SSRF guard to reuse); OWASP SSRF / "real client IP" (adam-p).

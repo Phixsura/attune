@@ -176,7 +176,7 @@ func TestPG_MarkFailedSchedulesRetryAndStopsAfterMaxAttempts(t *testing.T) {
 	assertPendingListExcludes(t, repo, id)
 }
 
-// TestPG_MarkFailedReturnsTerminalAndTenant pins the #81 signal: MarkFailed's
+// TestPG_MarkFailedReturnsTerminalAndTenant pins the #64 signal: MarkFailed's
 // RETURNING (enrichment_attempts >= max), tenant_id must report terminal=false
 // until the final attempt, then terminal=true with the row's tenant — this is
 // what feeds attune_enrichment_terminal_failures_total, and an off-by-one in the

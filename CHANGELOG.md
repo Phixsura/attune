@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Security
 
-- **SSRF-resistant outbound egress (#84).** A new `internal/pkg/nethardening`
+- **SSRF-resistant outbound egress (#64).** A new `internal/pkg/nethardening`
   guard enforces an egress policy at dial time (after DNS resolution, so it
   defeats DNS rebinding) on outbound webhook delivery (including the console
   "test webhook" path), every LLM provider call, and the inbound email IMAP dial
@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   dial-time check), and validates that any trusted `X-Forwarded-For` hop is a
   parseable IP (falling back to the direct peer otherwise).
 
-- **X-Forwarded-For spoofing fixed for the API-key IP allowlist (#84).** The
+- **X-Forwarded-For spoofing fixed for the API-key IP allowlist (#64).** The
   client IP behind the per-key IP allowlist is now resolved using the new
   `security.trusted_proxy_hops` setting: with no trusted proxy (default)
   `X-Forwarded-For` is ignored and the direct peer is used, so a client on a
@@ -46,7 +46,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
-- **DB pool and HTTP server are now bounded (#84).** `database.NewPool` applies
+- **DB pool and HTTP server are now bounded (#64).** `database.NewPool` applies
   defaults for `MaxConns` (20), `connect_timeout` (10s), and `statement_timeout`
   (30s) unless the database URL already sets them, so a single stuck query can't
   pin a connection or run unbounded past the request deadline. The HTTP server
@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   alongside the existing `ReadHeaderTimeout`, closing slow-loris and slow-reader
   exposure.
 
-- **Background workers are panic-supervised (#84).** Every long-running worker
+- **Background workers are panic-supervised (#64).** Every long-running worker
   (outbox, enrichment runtime, embedding, reply-draft, digest, GDPR export, audit
   pruner, queue/lag refreshers) now runs under a `safego` supervisor that recovers
   panics, counts them in the new `attune_worker_panics_total` metric, and restarts
@@ -66,11 +66,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   workers included. Added `AttuneWorkerPanics` and `AttuneEnrichmentTerminalFailures`
   Prometheus alerts + runbooks.
 
-- **Migrations are exempt from the `statement_timeout` default (#84).** The new
+- **Migrations are exempt from the `statement_timeout` default (#64).** The new
   30s `statement_timeout` (above) is cleared on the dedicated migration
   connection so a legitimately long migration can't be killed mid-statement.
 
-- **Outbox is safe under multiple worker replicas (#84).** `ClaimBatch` now
+- **Outbox is safe under multiple worker replicas (#64).** `ClaimBatch` now
   excludes rows claimed within a 10-minute window, so a second outbox worker
   replica can't re-claim an in-flight row and double-deliver (FOR UPDATE SKIP
   LOCKED only guards the lock window). While a worker drains a batch it renews
@@ -90,13 +90,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
-- **Terminal enrichment-failure observability (#81).** New metric
+- **Terminal enrichment-failure observability (#64).** New metric
   `attune_enrichment_terminal_failures_total{tenant}` counts feedback rows that
   exhaust all enrichment retries and stop in `failed`, plus an
   `AttuneEnrichmentTerminalFailures` Prometheus alert + runbook and an AI Pipeline
   dashboard series. Previously a row could silently stop enriching with no signal.
 
-- **`X-Attune-Delivery-Id` header on outbound webhook deliveries (#84).** Raw
+- **`X-Attune-Delivery-Id` header on outbound webhook deliveries (#64).** Raw
   webhook deliveries now carry the outbox row id, which is stable across the
   at-least-once retries of that delivery, so consumers can dedup replays (a
   delivery that succeeds downstream but crashes before `MarkDelivered` is retried
