@@ -73,6 +73,8 @@ export class Client {
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'baseURL is required' })
     if (!options.apiKey)
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'apiKey is required' })
+    if (hasHeaderControlChar(options.apiKey))
+      throw new AttuneError({ code: 'BAD_REQUEST', message: 'apiKey contains invalid characters' })
 
     const fetchImpl = options.fetch ?? (globalThis.fetch as FetchLike | undefined)
     if (!fetchImpl) {
@@ -97,6 +99,14 @@ export class Client {
     // One key per call, reused across this call's retries — that is what makes
     // a retry safe against the non-idempotent ingest POST.
     const idempotencyKey = options?.idempotencyKey ?? randomIdempotencyKey()
+    if (hasHeaderControlChar(idempotencyKey)) {
+      return Promise.reject(
+        new AttuneError({
+          code: 'BAD_REQUEST',
+          message: 'idempotencyKey contains invalid characters',
+        }),
+      )
+    }
     return this.#request<IngestResponse>(INGEST_PATH, input, idempotencyKey, options?.signal)
   }
 
@@ -209,10 +219,13 @@ export class Client {
       // Read the body under the SAME timeout/abort scope: fetch() resolves on
       // headers, so a slow or truncated body would otherwise hang forever (the
       // timer is cleared once this method returns). Reading here keeps the whole
-      // request — headers AND body — under one deadline.
-      const text = await response.text()
+      // request — headers AND body — under one deadline. Capped so a hostile
+      // server can't OOM the client with a huge body.
+      const text = await readCappedText(response)
       return { status: response.status, headers: response.headers, text }
     } catch (cause) {
+      // A typed error from the read (e.g. the size cap) passes through unchanged.
+      if (cause instanceof AttuneError) throw cause
       if (userSignal?.aborted) {
         throw new AttuneError({
           code: TransportErrorCode.Aborted,
@@ -250,6 +263,53 @@ function parseErrorBody(text: string): ErrorResponse | undefined {
   } catch {
     return undefined
   }
+}
+
+// 1 MiB — an ingest response is < 1 KiB; the cap stops a hostile/runaway server
+// from OOM-ing the client by streaming an unbounded body.
+const MAX_RESPONSE_BYTES = 1024 * 1024
+
+// Read a response body to text under a hard byte cap. Falls back to
+// response.text() when the body isn't a readable stream (some test doubles).
+async function readCappedText(response: Response): Promise<string> {
+  const body = response.body
+  if (!body || typeof body.getReader !== 'function') return response.text()
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    let chunk = await reader.read()
+    while (!chunk.done) {
+      if (chunk.value) {
+        total += chunk.value.byteLength
+        if (total > MAX_RESPONSE_BYTES) {
+          throw new AttuneError({
+            code: 'INTERNAL',
+            status: response.status,
+            message: `response body exceeds the ${MAX_RESPONSE_BYTES}-byte cap`,
+          })
+        }
+        chunks.push(chunk.value)
+      }
+      chunk = await reader.read()
+    }
+  } finally {
+    await reader.cancel().catch(() => {})
+  }
+  const buf = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    buf.set(c, offset)
+    offset += c.byteLength
+  }
+  return new TextDecoder().decode(buf)
+}
+
+// CR/LF in a header value enables header injection; fetch would reject it as an
+// opaque (retryable-looking) network error, so reject it up front as a clear
+// non-retryable client error.
+function hasHeaderControlChar(s: string): boolean {
+  return s.includes('\r') || s.includes('\n')
 }
 
 // A dedup token valid against the server's key format ([A-Za-z0-9_-]{8,64}).

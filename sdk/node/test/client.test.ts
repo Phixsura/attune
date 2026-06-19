@@ -309,3 +309,28 @@ describe('security: redirects are not followed (no API-key leak)', () => {
     expect((calls[0]?.init as RequestInit).redirect).toBe('manual')
   })
 })
+
+describe('security: header & response-size hardening', () => {
+  it('rejects CR/LF in apiKey at construction (header injection)', () => {
+    expect(() => new Client({ baseURL: BASE, apiKey: 'k\r\nX-Evil: 1' })).toThrow(AttuneError)
+  })
+
+  it('rejects CR/LF in a caller idempotencyKey with BAD_REQUEST, no request made', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    await expect(
+      newClient(fetch).ingest({ content: 'x' }, { idempotencyKey: 'k\r\nX-Evil: 1' }),
+    ).rejects.toMatchObject({ name: 'AttuneError', code: 'BAD_REQUEST' })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('caps an oversized response body instead of buffering it all (OOM guard)', async () => {
+    const huge = 'x'.repeat(1024 * 1024 + 16) // > 1 MiB cap
+    const { fetch } = stubFetch([() => new Response(huge, { status: 200 })])
+    await expect(
+      newClient(fetch, { maxRetries: 0 }).ingest({ content: 'x' }),
+    ).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'INTERNAL',
+    })
+  })
+})

@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `X-API-Key` header to an attacker host (credential leak). A 3xx now surfaces as
   an `AttuneError` instead of being followed.
 
+- **Node SDK input/response hardening (#37).** CR/LF in `apiKey` or a caller
+  `idempotencyKey` is rejected up front as `BAD_REQUEST` (header-injection guard,
+  and avoids retrying a deterministic config error); the response body is read
+  under a 1 MiB cap so a hostile server can't OOM the client with an unbounded
+  body.
+
 - **SSRF-resistant outbound egress (#64).** A new `internal/pkg/nethardening`
   guard enforces an egress policy at dial time (after DNS resolution, so it
   defeats DNS rebinding) on outbound webhook delivery (including the console
