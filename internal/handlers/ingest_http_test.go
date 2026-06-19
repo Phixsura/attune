@@ -167,6 +167,19 @@ func TestIngestHTTP_IdempotencyConflict(t *testing.T) {
 	}
 }
 
+// A body over the 64 KiB cap → 413 BODY_TOO_LARGE (matches the rest of the API,
+// not 400).
+func TestIngestHTTP_BodyTooLarge(t *testing.T) {
+	big := `{"content":"` + strings.Repeat("a", 64*1024+10) + `"}`
+	rec := doIngest(t, ingestTestServer(ptrext.Of(fakeIngestor{})), big)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 (%s)", rec.Code, rec.Body)
+	}
+	if got := decodeBody(t, rec)["code"]; got != "BODY_TOO_LARGE" {
+		t.Errorf("code = %v, want BODY_TOO_LARGE (%s)", got, rec.Body)
+	}
+}
+
 // No API key → the middleware rejects before the handler (proves the wiring).
 func TestIngestHTTP_NoAPIKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(`{"content":"x"}`))

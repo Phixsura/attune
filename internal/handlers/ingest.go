@@ -61,10 +61,17 @@ func BindIngestRequest(r *http.Request, req *attunev1.IngestRequest) error {
 	if !ok {
 		tenantID = "unknown"
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, (64*1024)+1))
-	if err != nil || len(body) > 64*1024 {
+	const maxBody = 64 * 1024
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	if err != nil {
 		metrics.IngestTotal.WithLabelValues(tenantID, "unknown", "validate_err").Inc()
 		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
+	}
+	if len(body) > maxBody {
+		// Mirror the dispatcher's standard decode path (bind.go), which returns
+		// 413 BODY_TOO_LARGE for an over-limit body — not 400.
+		metrics.IngestTotal.WithLabelValues(tenantID, "unknown", "validate_err").Inc()
+		return dispatcher.NewError(http.StatusRequestEntityTooLarge, attunev1.ErrorCode_BODY_TOO_LARGE, "request body too large")
 	}
 	if err := ingestUnmarshal.Unmarshal(body, req); err != nil {
 		metrics.IngestTotal.WithLabelValues(tenantID, "unknown", "validate_err").Inc()

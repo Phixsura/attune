@@ -113,49 +113,60 @@ func (r *FeedbackRepo) InsertIdempotent(
 	}
 	inboundSourceID := inboundSourceIDFromMeta(in.SourceMeta)
 
-	var id int64
-	err := r.pool.QueryRow(
-		ctx, `
-		INSERT INTO user_feedback
-		 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id, idempotency_key, idempotency_hash)
-		VALUES
-		 ($1, $2, $3, $4, $5, 'other', $6, $7, '[]'::jsonb, $8, $9,
-		  (SELECT id FROM inbound_sources WHERE id = $10 AND tenant_id = $2 AND channel = $8),
-		  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1),
-		  $11, $12)
-		ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL
-		DO NOTHING
-		RETURNING id`,
-		userID, tenantID, subjectKey, subjectDisplay, subjectHash,
-		in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
-		in.IdempotencyKey, idemHash,
-	).Scan(&id)
-	if err == nil {
-		return id, false, nil // fresh insert
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,source:%s,err:%+v",
-			where, tenantID, in.Source, err.Error())
-		return 0, false, fmt.Errorf("insert feedback (idempotent): %w", err)
-	}
+	// Bounded retry: the read-back after a conflict can race with a concurrent
+	// delete of the conflicting row (e.g. GDPR erasure), which frees the key —
+	// re-attempt the insert rather than misreporting a vanished row.
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		var id int64
+		err := r.pool.QueryRow(
+			ctx, `
+			INSERT INTO user_feedback
+			 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id, idempotency_key, idempotency_hash)
+			VALUES
+			 ($1, $2, $3, $4, $5, 'other', $6, $7, '[]'::jsonb, $8, $9,
+			  (SELECT id FROM inbound_sources WHERE id = $10 AND tenant_id = $2 AND channel = $8),
+			  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1),
+			  $11, $12)
+			ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+			DO NOTHING
+			RETURNING id`,
+			userID, tenantID, subjectKey, subjectDisplay, subjectHash,
+			in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
+			in.IdempotencyKey, idemHash,
+		).Scan(&id)
+		if err == nil {
+			return id, false, nil // fresh insert
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,source:%s,err:%+v",
+				where, tenantID, in.Source, err.Error())
+			return 0, false, fmt.Errorf("insert feedback (idempotent): %w", err)
+		}
 
-	// Conflict: a row with this key already exists. Read it back and compare the
-	// request fingerprint to tell a true replay from a key reuse.
-	var existingHash []byte
-	if err := r.pool.QueryRow(
-		ctx, `
-		SELECT id, idempotency_hash FROM user_feedback
-		WHERE tenant_id = $1 AND idempotency_key = $2`,
-		tenantID, in.IdempotencyKey,
-	).Scan(&id, &existingHash); err != nil {
-		logext.Errorf(ctx, "[%s] read existing failed,tenant_id:%s,err:%+v",
-			where, tenantID, err.Error())
-		return 0, false, fmt.Errorf("read idempotent feedback: %w", err)
+		// Conflict: a row with this key already exists. Read it back and compare
+		// the request fingerprint to tell a true replay from a key reuse.
+		var existingHash []byte
+		err = r.pool.QueryRow(
+			ctx, `
+			SELECT id, idempotency_hash FROM user_feedback
+			WHERE tenant_id = $1 AND idempotency_key = $2`,
+			tenantID, in.IdempotencyKey,
+		).Scan(&id, &existingHash)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue // conflicting row vanished between insert and read — retry
+		}
+		if err != nil {
+			logext.Errorf(ctx, "[%s] read existing failed,tenant_id:%s,err:%+v",
+				where, tenantID, err.Error())
+			return 0, false, fmt.Errorf("read idempotent feedback: %w", err)
+		}
+		if subtle.ConstantTimeCompare(existingHash, idemHash) != 1 {
+			return 0, false, ErrIdempotencyConflict
+		}
+		return id, true, nil // replay → existing row, no new insert
 	}
-	if subtle.ConstantTimeCompare(existingHash, idemHash) != 1 {
-		return 0, false, ErrIdempotencyConflict
-	}
-	return id, true, nil // replay → existing row, no new insert
+	return 0, false, fmt.Errorf("insert feedback (idempotent): key contention exceeded %d attempts,tenant_id:%s", maxAttempts, tenantID)
 }
 
 // TryClaim atomically transitions a row into 'enriching' if it's eligible:
