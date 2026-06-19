@@ -144,9 +144,12 @@ func (s *APIKeys) LookupWithScopesAndIP(ctx context.Context, raw, clientIP strin
 		return "", uuid.Nil, nil, domain.ErrAPIKeyExpired
 	}
 
-	if len(row.AllowedCIDRs) > 0 && clientIP != "" {
-		if !domain.IPAllowedStrings(row.AllowedCIDRs, clientIP) {
-			logext.Warnf(ctx, "[%s] reject: IP not allowed,key_id:%s,client_ip:%s", where, row.ID, clientIP)
+	// IP allowlist fails CLOSED: when CIDRs are configured but the client IP is
+	// empty/unresolvable, reject rather than skip the check (a restriction that
+	// silently fails open is worse than no restriction).
+	if len(row.AllowedCIDRs) > 0 {
+		if clientIP == "" || !domain.IPAllowedStrings(row.AllowedCIDRs, clientIP) {
+			logext.Warnf(ctx, "[%s] reject: IP not allowed,key_id:%s,client_ip:%q", where, row.ID, clientIP)
 			return "", uuid.Nil, nil, domain.ErrIPNotAllowed
 		}
 	}
@@ -197,9 +200,11 @@ func (s *APIKeys) LookupFull(ctx context.Context, raw, clientIP string) (*Lookup
 		return nil, domain.ErrAPIKeyExpired
 	}
 
-	if len(row.AllowedCIDRs) > 0 && clientIP != "" {
-		if !domain.IPAllowedStrings(row.AllowedCIDRs, clientIP) {
-			logext.Warnf(ctx, "[%s] reject: IP not allowed,key_id:%s,client_ip:%s", where, row.ID, clientIP)
+	// Fails CLOSED (see LookupWithScopesAndIP): empty/unresolvable client IP with
+	// an allowlist configured is a rejection, not a bypass.
+	if len(row.AllowedCIDRs) > 0 {
+		if clientIP == "" || !domain.IPAllowedStrings(row.AllowedCIDRs, clientIP) {
+			logext.Warnf(ctx, "[%s] reject: IP not allowed,key_id:%s,client_ip:%q", where, row.ID, clientIP)
 			return nil, domain.ErrIPNotAllowed
 		}
 	}

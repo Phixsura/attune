@@ -162,7 +162,7 @@ func (r *APIKeyRepo) LookupByHash(ctx context.Context, hash []byte) (*APIKeyRow,
 	var allowedCIDRs []string
 	err := r.pool.QueryRow(
 		ctx, `
-		SELECT id, tenant_id, key_hash, expires_at, allowed_cidrs, rate_limit_rpm
+		SELECT id, tenant_id, key_hash, expires_at, allowed_cidrs::text[], rate_limit_rpm
 		 FROM external_api_keys
 		 WHERE key_hash = $1
 		 AND is_active = TRUE
@@ -201,7 +201,7 @@ func (r *APIKeyRepo) GetByID(ctx context.Context, tenantID string, id uuid.UUID)
 		ctx, `
 		SELECT id, key_prefix, label, COALESCE(description, ''), is_active,
 		       created_at, last_used_at, revoked_at, expires_at,
-		       allowed_cidrs, usage_count, rate_limit_rpm
+		       allowed_cidrs::text[], usage_count, rate_limit_rpm
 		 FROM external_api_keys
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
@@ -244,7 +244,7 @@ func (r *APIKeyRepo) ListByTenant(ctx context.Context, tenantID string) ([]APIKe
 		ctx, `
 		SELECT id, key_prefix, label, COALESCE(description, ''), is_active,
 		       created_at, last_used_at, revoked_at, expires_at,
-		       allowed_cidrs, usage_count, rate_limit_rpm
+		       allowed_cidrs::text[], usage_count, rate_limit_rpm
 		 FROM external_api_keys
 		 WHERE tenant_id = $1
 		 ORDER BY created_at DESC`,
@@ -328,7 +328,7 @@ func (r *APIKeyRepo) Rotate(ctx context.Context, tenantID string, p RotateParams
 	}
 	err = tx.QueryRow(
 		ctx, `
-		SELECT label, COALESCE(description, ''), expires_at, allowed_cidrs, rate_limit_rpm,
+		SELECT label, COALESCE(description, ''), expires_at, allowed_cidrs::text[], rate_limit_rpm,
 		       COALESCE(environment::text, 'production')
 		FROM external_api_keys
 		WHERE id = $1 AND tenant_id = $2 AND is_active = TRUE`,
@@ -746,7 +746,7 @@ func (r *APIKeyRepo) GetExpiringKeys(ctx context.Context, within time.Duration) 
 		ctx, `
 		SELECT id, key_prefix, label, COALESCE(description, ''), is_active,
 		       created_at, last_used_at, revoked_at, expires_at,
-		       allowed_cidrs, usage_count, rate_limit_rpm
+		       allowed_cidrs::text[], usage_count, rate_limit_rpm
 		FROM external_api_keys
 		WHERE expires_at IS NOT NULL
 		  AND expires_at > NOW()

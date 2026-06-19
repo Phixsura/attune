@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   
 ### Security
 
+- **API-key IP allowlist now works and fails closed (#41).** Two bugs: (1) any
+  key with a non-empty `allowed_cidrs` failed every lookup — pgx couldn't scan
+  the `inet[]` column into `[]string` (`cannot scan _inet`), so the allowlist
+  feature was effectively non-functional; fixed by selecting
+  `allowed_cidrs::text[]`. (2) the allowlist check was skipped when the resolved
+  client IP was empty (fail-open); it now fails closed — an empty/unresolvable
+  client IP with an allowlist configured is rejected (`ErrIPNotAllowed`), not
+  bypassed. Covered by a Postgres integration test (in-range accepted;
+  out-of-range / empty / unparseable rejected).
+
 - **Node SDK does not follow HTTP redirects (#37).** `@phixsura/attune` issues
   ingest requests with `redirect: "manual"`, so a compromised or misconfigured
   endpoint can't 3xx-redirect the request and have `fetch` re-send the
