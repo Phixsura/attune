@@ -169,6 +169,27 @@ func (r *FeedbackRepo) InsertIdempotent(
 	return 0, false, fmt.Errorf("insert feedback (idempotent): key contention exceeded %d attempts,tenant_id:%s", maxAttempts, tenantID)
 }
 
+// PurgeExpiredIdempotencyKeys clears idempotency_key/idempotency_hash on rows
+// older than retention, releasing them from the partial unique index so it stays
+// bounded to the recent dedup window (a key is only useful for the brief retry
+// window of one ingest). The feedback rows themselves are kept — only the dedup
+// tokens are dropped. Returns the number of rows cleared.
+func (r *FeedbackRepo) PurgeExpiredIdempotencyKeys(ctx context.Context, retention time.Duration) (int64, error) {
+	const where = "repo.FeedbackRepo.PurgeExpiredIdempotencyKeys"
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE user_feedback
+		SET idempotency_key = NULL, idempotency_hash = NULL
+		WHERE idempotency_key IS NOT NULL
+		  AND created_at < NOW() - make_interval(secs => $1)`,
+		retention.Seconds(),
+	)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] purge failed,err:%+v", where, err.Error())
+		return 0, fmt.Errorf("purge idempotency keys: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // TryClaim atomically transitions a row into 'enriching' if it's eligible:
 // pending, retryable failed after backoff, or stuck in 'enriching' past the
 // stale claim window.

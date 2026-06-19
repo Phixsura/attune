@@ -170,6 +170,10 @@ mechanism that is correct under concurrency (a check-then-insert, or reusing the
   on `domain.IngestInput`, so inbound adapters (#66) pass none → unchanged path.
 - **SDK:** every `ingest()` call sends a UUID `Idempotency-Key`, **held stable
   across that call's retries**; callers can pass their own `idempotencyKey`.
+- **Retention:** a background pruner NULLs `idempotency_key`/`idempotency_hash`
+  on rows older than 48h, so the partial index stays bounded to the recent retry
+  window (the old `idempotency_keys` table had a 24h TTL; this restores that
+  bound, since the SDK keys every ingest by default).
 
 This expands #37 from "SDK only" to "SDK + ingest idempotency" — the only way to
 keep the resilient retry contract above without risking duplicate rows, verified

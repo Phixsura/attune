@@ -128,7 +128,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   migration support) so deploying it does not lock ingest on a large table.
   Ingest now feeds `attune_idempotency_key_usage_total{outcome}`
   (new/cache_hit/conflict), so the Operations "Idempotency" dashboard covers
-  single-row ingest, not just batch. The Node SDK sends a per-call key automatically, held stable across retries, so a
+  single-row ingest, not just batch. A background pruner releases idempotency
+  keys older than 48h (NULLing the columns) so the partial index stays bounded
+  to the recent retry window. The Node SDK sends a per-call key automatically, held stable across retries, so a
   retried at-least-once delivery cannot create a duplicate feedback row.
 
 - **Terminal enrichment-failure observability (#64).** New metric
