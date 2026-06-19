@@ -42,12 +42,19 @@ export function parseRetryAfter(headers: Headers, now: number = Date.now()): num
   const raw = headers.get('retry-after')?.trim()
   if (!raw) return undefined // absent, empty, or whitespace-only (Number("") is 0)
 
-  const seconds = Number(raw)
-  if (Number.isFinite(seconds)) {
+  // Integer delta-seconds only — per RFC 9110 (delta-seconds = 1*DIGIT) and to
+  // stay in lockstep with the Go SDK (strconv.Atoi rejects "1.5"). A fractional
+  // or otherwise non-integer value falls through to the HTTP-date branch.
+  if (/^[+-]?\d+$/.test(raw)) {
+    const seconds = Number(raw)
     if (seconds < 0) return undefined
-    return Math.min(MAX_RETRY_AFTER_MS, Math.round(seconds * 1000))
+    return Math.min(MAX_RETRY_AFTER_MS, seconds * 1000)
   }
 
+  // HTTP-date branch — every valid HTTP-date contains letters (day/month names),
+  // so require one. This keeps Date.parse from leniently coercing a non-integer
+  // numeric like "1.5" into a bogus past date (Go's http.ParseTime rejects it too).
+  if (!/[a-zA-Z]/.test(raw)) return undefined
   const dateMs = Date.parse(raw)
   if (Number.isNaN(dateMs)) return undefined
   return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, dateMs - now))

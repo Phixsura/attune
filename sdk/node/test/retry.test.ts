@@ -41,4 +41,11 @@ describe('parseRetryAfter', () => {
     expect(parseRetryAfter(new Headers({ 'retry-after': 'soon' }))).toBeUndefined()
     expect(parseRetryAfter(new Headers({ 'retry-after': '-3' }))).toBeUndefined()
   })
+  it('ignores a fractional delta-seconds (integer-only, lockstep with the Go SDK)', () => {
+    // "1.5" is not RFC 9110 delta-seconds and Go's strconv.Atoi rejects it; it is
+    // also not an HTTP-date, so both SDKs fall back to backoff (undefined here).
+    expect(parseRetryAfter(new Headers({ 'retry-after': '1.5' }))).toBeUndefined()
+    // a plain integer is still honored
+    expect(parseRetryAfter(new Headers({ 'retry-after': '3' }))).toBe(3000)
+  })
 })

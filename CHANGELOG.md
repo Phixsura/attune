@@ -15,6 +15,33 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   whole erasure (a GDPR Art.17 + availability bug); residual PII in the delivery
   envelope is now removed too. The deletion record reports an `OutboxCount`.
   
+### Fixed
+
+- **Malformed workflow-state id now returns 400, not 500 (#36).** `PATCH`/`DELETE
+  /v1/workflow/states/{id}` passed the raw id straight to a UUID-typed column, so a
+  non-UUID id (reachable via the SDK admin surface) produced a Postgres 22P02 →
+  opaque `500 INTERNAL` that the SDKs then retried (PATCH/DELETE are idempotent).
+  Both `UpdateState` and `ArchiveState` now `uuid.Parse`-guard the id and return
+  `400 BAD_ID`, mirroring the tag handler.
+
+- **Node SDK: reserved headers can no longer be overridden via `defaultHeaders`
+  casing (#37).** A `defaultHeaders` entry whose key was a case-variant of a
+  reserved header (e.g. `content-type` vs the canonical `Content-Type`, or
+  `x-api-key`) survived as a distinct object key and got *concatenated* by the
+  WHATWG `Headers` constructor into a malformed header — silently overriding the
+  documented "reserved headers always take precedence". Reserved keys are now
+  stripped case-insensitively at construction.
+
+- **Node SDK: baseURL is validated at construction (#37).** A malformed or
+  non-`http(s)` `baseURL` now throws `BAD_REQUEST` immediately (parity with the Go
+  SDK), instead of constructing successfully and failing later as a transport
+  error on the first request.
+
+- **SDK retry parity: fractional `Retry-After` (#37).** The Node SDK accepted a
+  fractional `Retry-After: 1.5` (→1500 ms) while the Go SDK rejected it and fell
+  back to backoff; Node now treats only integer delta-seconds (RFC 9110) as a
+  delay, keeping the two SDKs in lockstep.
+
 ### Security
 
 - **Per-API-key rate limit now also covers the tag/workflow admin surface (#36).**

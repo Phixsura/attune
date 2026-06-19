@@ -53,6 +53,13 @@ func apikeyToSession(r *http.Request) (*session.AuthCtx, error) {
 // key's overall request budget, not an ingest-only limit, so these admin writes
 // must count against it (else a capped key could mutate tags/workflow without
 // bound). Mounted after the api-key middleware so AuthCtx is on the context.
+//
+// The per-tenant ingest Limiter is deliberately NOT mounted here: it is an
+// ingest-sized bucket "guarding the ingest API", and sharing it would couple two
+// unrelated budgets (admin writes eating the ingest rate and vice-versa). A key
+// with no rate_limit_rpm is therefore unthrottled on this low-volume admin
+// surface — the same posture as a console-session admin on the identical
+// handlers. Operators cap machine keys by setting rate_limit_rpm.
 func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Verifier, trustedProxyHops int, perKeyLimiter *ratelimit.PerKeyLimiter) {
 	audit := auditlogsvc.New(auditlogrepo.New(pool))
 

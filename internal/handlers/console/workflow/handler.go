@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/google/uuid"
+
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -121,6 +123,14 @@ func (h *Handler) UpdateState(
 	const where = "console.WorkflowHandler.UpdateState"
 	auth := ctx.Auth
 
+	// Guard the id before it reaches the UUID-typed column: a non-UUID would
+	// otherwise surface as a Postgres 22P02 → opaque 500 (and a retried request),
+	// instead of a clean 400. Mirrors the tag handler. Reachable by SDK callers.
+	if _, err := uuid.Parse(req.GetId()); err != nil {
+		return dispatcher.Fail[*attunev1.UpdateStateResponse](
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid workflow state id")
+	}
+
 	existing, err := h.states.GetByTenantAndID(ctx, auth.TenantID, req.GetId())
 	if err != nil {
 		if errors.Is(err, workflowstate.ErrNotFound) {
@@ -181,6 +191,10 @@ func (h *Handler) ArchiveState(
 ) (dispatcher.Result[*attunev1.ArchiveStateResponse], error) {
 	const where = "console.WorkflowHandler.ArchiveState"
 	auth := ctx.Auth
+	if _, err := uuid.Parse(req.GetId()); err != nil {
+		return dispatcher.Fail[*attunev1.ArchiveStateResponse](
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid workflow state id")
+	}
 	before, beforeErr := h.states.GetByTenantAndID(ctx, auth.TenantID, req.GetId())
 	if beforeErr != nil && !errors.Is(beforeErr, workflowstate.ErrNotFound) {
 		logext.Warnf(ctx, "[%s] prefetch failed,id:%s,err:%+v", where, req.GetId(), beforeErr.Error())

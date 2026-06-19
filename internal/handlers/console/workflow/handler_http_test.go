@@ -208,10 +208,30 @@ func TestArchiveState_HTTP(t *testing.T) {
 		)
 
 		w := httptest.NewRecorder()
-		handler(w, dispatchtest.Request(http.MethodDelete, "/workflow/states/s-1", "",
-			dispatchtest.Param{Name: "id", Value: "s-1"}))
+		handler(w, dispatchtest.Request(http.MethodDelete, "/workflow/states/11111111-1111-1111-1111-111111111111", "",
+			dispatchtest.Param{Name: "id", Value: "11111111-1111-1111-1111-111111111111"}))
 
 		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 invalid id (not a uuid)", func(t *testing.T) {
+		h := NewHandler(&fakeStateStore{}, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.ArchiveState",
+			dispatcher.Path(
+				func() *attunev1.ArchiveStateRequest { return ptrext.Of(attunev1.ArchiveStateRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.ArchiveStateRequest, id string) { req.Id = id }),
+			),
+			h.ArchiveState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ArchiveStateRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodDelete, "/workflow/states/abc", "",
+			dispatchtest.Param{Name: "id", Value: "abc"}))
+		// Without the guard this is a Postgres 22P02 → 500; the guard makes it 400.
+		require.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("404 not found", func(t *testing.T) {
@@ -229,8 +249,8 @@ func TestArchiveState_HTTP(t *testing.T) {
 		)
 
 		w := httptest.NewRecorder()
-		handler(w, dispatchtest.Request(http.MethodDelete, "/workflow/states/missing", "",
-			dispatchtest.Param{Name: "id", Value: "missing"}))
+		handler(w, dispatchtest.Request(http.MethodDelete, "/workflow/states/22222222-2222-2222-2222-222222222222", "",
+			dispatchtest.Param{Name: "id", Value: "22222222-2222-2222-2222-222222222222"}))
 
 		require.Equal(t, http.StatusNotFound, w.Code)
 	})
@@ -250,8 +270,8 @@ func TestArchiveState_HTTP(t *testing.T) {
 		)
 
 		w := httptest.NewRecorder()
-		handler(w, dispatchtest.Request(http.MethodDelete, "/workflow/states/busy", "",
-			dispatchtest.Param{Name: "id", Value: "busy"}))
+		handler(w, dispatchtest.Request(http.MethodDelete, "/workflow/states/33333333-3333-3333-3333-333333333333", "",
+			dispatchtest.Param{Name: "id", Value: "33333333-3333-3333-3333-333333333333"}))
 
 		require.Equal(t, http.StatusConflict, w.Code)
 	})
@@ -271,8 +291,8 @@ func TestArchiveState_HTTP(t *testing.T) {
 		)
 
 		w := httptest.NewRecorder()
-		handler(w, dispatchtest.Request(http.MethodDelete, "/workflow/states/last", "",
-			dispatchtest.Param{Name: "id", Value: "last"}))
+		handler(w, dispatchtest.Request(http.MethodDelete, "/workflow/states/44444444-4444-4444-4444-444444444444", "",
+			dispatchtest.Param{Name: "id", Value: "44444444-4444-4444-4444-444444444444"}))
 
 		require.Equal(t, http.StatusConflict, w.Code)
 	})
@@ -329,8 +349,8 @@ func TestUpdateState_HTTP(t *testing.T) {
 		)
 
 		w := httptest.NewRecorder()
-		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/s-1",
-			`{"id":"s-1","displayName":{"entries":{"default":"Renamed"}},"color":"#ef4444","position":2,"isDefault":true}`))
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/11111111-1111-1111-1111-111111111111",
+			`{"id":"11111111-1111-1111-1111-111111111111","displayName":{"entries":{"default":"Renamed"}},"color":"#ef4444","position":2,"isDefault":true}`))
 
 		require.Equal(t, http.StatusOK, w.Code)
 		body, err := dispatchtest.DecodeJSON(w.Body)
@@ -353,8 +373,8 @@ func TestUpdateState_HTTP(t *testing.T) {
 		)
 
 		w := httptest.NewRecorder()
-		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/missing",
-			`{"id":"missing","name":"X"}`))
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/22222222-2222-2222-2222-222222222222",
+			`{"id":"22222222-2222-2222-2222-222222222222","name":"X"}`))
 
 		require.Equal(t, http.StatusNotFound, w.Code)
 	})
@@ -374,8 +394,8 @@ func TestUpdateState_HTTP(t *testing.T) {
 		)
 
 		w := httptest.NewRecorder()
-		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/s-1",
-			`{"id":"s-1","name":"Dup"}`))
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/11111111-1111-1111-1111-111111111111",
+			`{"id":"11111111-1111-1111-1111-111111111111","name":"Dup"}`))
 
 		require.Equal(t, http.StatusConflict, w.Code)
 	})

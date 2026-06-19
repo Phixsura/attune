@@ -81,6 +81,12 @@ export interface RequestOptions {
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_RETRIES = 2
 const API_KEY_HEADER = 'X-API-Key'
+// Reserved headers the client always controls. A consumer's `defaultHeaders`
+// must never override these — matched case-INSENSITIVELY, since the WHATWG
+// `Headers` constructor lowercases names and would otherwise *concatenate* a
+// case-variant duplicate (e.g. `content-type` + `Content-Type`) into one
+// malformed header. Keys are stored lowercased for comparison.
+const RESERVED_HEADERS = new Set(['content-type', 'x-api-key', 'idempotency-key', 'user-agent'])
 const INGEST_PATH = '/v1/feedback/ingest'
 
 const defaultSleep = (ms: number): Promise<void> =>
@@ -114,6 +120,15 @@ export class Client {
     }
     if (!options.baseURL)
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'baseURL is required' })
+    // Validate at construction (parity with the Go SDK), not lazily at fetch time.
+    let parsedBase: URL
+    try {
+      parsedBase = new URL(options.baseURL)
+    } catch {
+      throw new AttuneError({ code: 'BAD_REQUEST', message: 'invalid baseURL' })
+    }
+    if (parsedBase.protocol !== 'http:' && parsedBase.protocol !== 'https:')
+      throw new AttuneError({ code: 'BAD_REQUEST', message: 'baseURL must be http or https' })
     if (!options.apiKey)
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'apiKey is required' })
     if (hasHeaderControlChar(options.apiKey))
@@ -134,7 +149,12 @@ export class Client {
     // than aborting instantly; negative maxRetries clamps to 0 (one attempt).
     this.#timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
     this.#maxRetries = Math.max(0, options.maxRetries ?? DEFAULT_MAX_RETRIES)
-    this.#defaultHeaders = { ...options.defaultHeaders }
+    // Drop any reserved header (case-insensitively) so a consumer's casing
+    // variant can't slip past and get concatenated by `Headers` at fetch time.
+    this.#defaultHeaders = {}
+    for (const [k, v] of Object.entries(options.defaultHeaders ?? {})) {
+      if (!RESERVED_HEADERS.has(k.toLowerCase())) this.#defaultHeaders[k] = v
+    }
     this.#sleep = options.sleep ?? defaultSleep
   }
 
