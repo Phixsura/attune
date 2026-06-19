@@ -29,6 +29,19 @@ plugins:
       # safe but opaque against logs and grep. Load-bearing for the
       # ErrorCode contract introduced in 2026-06-09-http-dispatcher.md.
       - stringEnums=true
+  # TypeScript interfaces for the published Node SDK (@phixsura/attune, #37).
+  # Same ts-proto options as the console target so the SDK's wire types are
+  # byte-identical to the console's and to the contract. `onlyTypes=true` means
+  # these compile to pure type declarations (no runtime JS), so generating the
+  # full message set into the package adds zero runtime weight. The SDK's public
+  # surface re-exports only IngestRequest/IngestResponse + ErrorResponse/ErrorCode.
+  - remote: buf.build/community/stephenh-ts-proto:v2.6.1
+    out: sdk/node/src/proto
+    opt:
+      - onlyTypes=true
+      - forceLong=string
+      - useOptionals=messages
+      - stringEnums=true
   # OpenAPI v3 (gnostic) — REST paths come from the google.api.http annotations.
   - remote: buf.build/community/google-gnostic-openapi:v0.7.0
     out: docs/openapi

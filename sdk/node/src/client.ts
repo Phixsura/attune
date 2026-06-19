@@ -1,0 +1,161 @@
+import { AttuneError, TransportErrorCode } from './errors'
+import type { ErrorResponse } from './proto/attune/v1/common'
+import type { IngestRequest, IngestResponse } from './proto/attune/v1/ingest'
+import { backoffDelay, isRetryableStatus, parseRetryAfter } from './retry'
+
+/**
+ * Caller-facing ingest payload. Derived from the proto-generated
+ * {@link IngestRequest} (no hand-written fields): `content` is required, every
+ * other wire field is optional — the server fills defaults (e.g. `source` →
+ * "api"). Sent verbatim as the JSON body.
+ */
+export type IngestInput = Pick<IngestRequest, 'content'> & Partial<Omit<IngestRequest, 'content'>>
+
+/** A `fetch`-compatible function. Defaults to the runtime's global `fetch`. */
+export type FetchLike = (input: string, init: RequestInit) => Promise<Response>
+
+export interface ClientOptions {
+  /** Base URL of the attune deployment, e.g. `https://attune.example.com`. */
+  baseURL: string
+  /**
+   * API key with the `ingest:write` scope. Sent as the `X-API-Key` header.
+   * `ingest:write` keys are publishable (browser-safe) — see the package README.
+   */
+  apiKey: string
+  /** Inject a custom `fetch` (older runtimes, tests). Defaults to `globalThis.fetch`. */
+  fetch?: FetchLike
+  /** Per-attempt timeout in milliseconds. Default 30000. A timeout is retryable. */
+  timeout?: number
+  /** Max retries on transient failures (1 initial try + N retries). Default 2. */
+  maxRetries?: number
+  /** @internal Override the inter-attempt sleep (tests). */
+  sleep?: (ms: number) => Promise<void>
+}
+
+export interface RequestOptions {
+  /** Caller cancellation. An aborted request throws `AttuneError` code "ABORTED". */
+  signal?: AbortSignal
+}
+
+const DEFAULT_TIMEOUT_MS = 30_000
+const DEFAULT_MAX_RETRIES = 2
+const API_KEY_HEADER = 'X-API-Key'
+const INGEST_PATH = '/v1/feedback/ingest'
+
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Client for the attune ingest API.
+ *
+ * ```ts
+ * const client = new Client({ baseURL, apiKey });
+ * const { id } = await client.ingest({ content: "love it" });
+ * ```
+ */
+export class Client {
+  readonly #baseURL: string
+  readonly #apiKey: string
+  readonly #fetch: FetchLike
+  readonly #timeout: number
+  readonly #maxRetries: number
+  readonly #sleep: (ms: number) => Promise<void>
+
+  constructor(options: ClientOptions) {
+    if (!options.baseURL)
+      throw new AttuneError({ code: 'BAD_REQUEST', message: 'baseURL is required' })
+    if (!options.apiKey)
+      throw new AttuneError({ code: 'BAD_REQUEST', message: 'apiKey is required' })
+
+    const fetchImpl = options.fetch ?? (globalThis.fetch as FetchLike | undefined)
+    if (!fetchImpl) {
+      throw new AttuneError({
+        code: 'BAD_REQUEST',
+        message: 'no global fetch available; pass a `fetch` implementation in ClientOptions',
+      })
+    }
+
+    this.#baseURL = options.baseURL.replace(/\/+$/, '')
+    this.#apiKey = options.apiKey
+    this.#fetch = fetchImpl
+    this.#timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
+    this.#maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES
+    this.#sleep = options.sleep ?? defaultSleep
+  }
+
+  /** Ingest one feedback item. Resolves with the stored row id, or throws `AttuneError`. */
+  ingest(input: IngestInput, options?: RequestOptions): Promise<IngestResponse> {
+    return this.#request<IngestResponse>(INGEST_PATH, input, options)
+  }
+
+  async #request<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
+    const url = this.#baseURL + path
+    const userSignal = options?.signal
+    let lastError: AttuneError | undefined
+
+    for (let attempt = 0; attempt <= this.#maxRetries; attempt++) {
+      if (userSignal?.aborted) {
+        throw new AttuneError({ code: TransportErrorCode.Aborted, message: 'request aborted' })
+      }
+
+      const timeoutSignal = AbortSignal.timeout(this.#timeout)
+      const signal = userSignal ? AbortSignal.any([userSignal, timeoutSignal]) : timeoutSignal
+
+      let response: Response
+      try {
+        response = await this.#fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', [API_KEY_HEADER]: this.#apiKey },
+          body: JSON.stringify(body),
+          signal,
+        })
+      } catch (cause) {
+        if (userSignal?.aborted) {
+          throw new AttuneError({
+            code: TransportErrorCode.Aborted,
+            message: 'request aborted',
+            cause,
+          })
+        }
+        const timedOut = timeoutSignal.aborted
+        lastError = new AttuneError({
+          code: timedOut ? TransportErrorCode.Timeout : TransportErrorCode.Network,
+          message: timedOut ? 'request timed out' : 'network error',
+          cause,
+        })
+        if (attempt < this.#maxRetries) {
+          await this.#sleep(backoffDelay(attempt))
+          continue
+        }
+        throw lastError
+      }
+
+      if (response.ok) {
+        return (await response.json()) as T
+      }
+
+      const error = AttuneError.fromResponse(
+        response.status,
+        await readErrorBody(response),
+        response.headers,
+      )
+      if (isRetryableStatus(response.status) && attempt < this.#maxRetries) {
+        lastError = error
+        await this.#sleep(parseRetryAfter(response.headers) ?? backoffDelay(attempt))
+        continue
+      }
+      throw error
+    }
+
+    throw lastError ?? new AttuneError({ code: 'INTERNAL', message: 'request failed' })
+  }
+}
+
+/** Best-effort parse of the unified ErrorResponse envelope; undefined on any failure. */
+async function readErrorBody(response: Response): Promise<ErrorResponse | undefined> {
+  try {
+    return (await response.json()) as ErrorResponse
+  } catch {
+    return undefined
+  }
+}

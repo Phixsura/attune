@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>attune feedback widget</title>
+  </head>
+  <body>
+    <main>
+      <h1>Send feedback</h1>
+      <form id="feedback-form">
+        <textarea id="feedback-text" rows="4" placeholder="Tell us what you think…" required></textarea>
+        <button type="submit">Send</button>
+      </form>
+      <p id="status" aria-live="polite"></p>
+    </main>
+    <!-- A bundler (Vite/esbuild) compiles main.ts and the @phixsura/attune import. -->
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

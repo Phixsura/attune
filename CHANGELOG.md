@@ -98,6 +98,19 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Node/TypeScript client SDK `@phixsura/attune` (#37).** Published client for
+  the ingest API under `sdk/node/`: `new Client({ baseURL, apiKey })` →
+  `await client.ingest({ content, … })` returning the stored row `id`. ESM + CJS
+  (tsdown), zero runtime dependencies, native `fetch`, Node 20+ and browsers.
+  Request/response types are generated from the proto contract (a new ts-proto
+  `buf.gen` target → `sdk/node/src/proto/`, guarded by the `proto-sync` gate) —
+  never hand-written. Transactional await-throw model with a typed `AttuneError`
+  (`code`/`status`/`requestId`) and a shared retry contract (408/409/429/5xx +
+  network/timeout, never 400/422, `Retry-After`-aware, default 2 retries) that
+  the Go SDK (#36) will adopt. Ships `examples/node-ingest` and
+  `examples/browser-ingest`; `ingest:write` keys are documented as publishable
+  browser-safe credentials.
+
 - **Terminal enrichment-failure observability (#64).** New metric
   `attune_enrichment_terminal_failures_total{tenant}` counts feedback rows that
   exhaust all enrichment retries and stop in `failed`, plus an
