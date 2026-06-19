@@ -100,8 +100,17 @@ fi
 # ── files: tracked *.go (vendor-free; git ls-files skips untracked junk) ──────
 # while-read (not mapfile) so this runs on macOS's stock bash 3.2 — the
 # pre-commit hook (#3) executes locally. Go paths never contain newlines.
+#
+# `sdk/go/` is excluded: it is a separate, published client module that
+# intentionally does not use the server's slog facade or wrap its transport in
+# otelhttp (that would drag the OTel tree onto SDK consumers).
+# Callers who want spans pass their own otelhttp-wrapped client via
+# WithHTTPClient. The rules here govern attune's server business code only.
 files=()
-while IFS= read -r f; do files+=("$f"); done < <(git ls-files '*.go' 2>/dev/null)
+while IFS= read -r f; do
+  [[ "$f" == sdk/go/* ]] && continue
+  files+=("$f")
+done < <(git ls-files '*.go' 2>/dev/null)
 if [[ "${#files[@]}" -eq 0 ]]; then
   echo "lint-slog: no tracked *.go files (not a git work tree?)" >&2
   exit 2

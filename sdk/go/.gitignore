@@ -1,0 +1,7 @@
+# Built example binaries (go build ./examples/ingest-cli drops one here / in cwd)
+/ingest-cli
+/examples/ingest-cli/ingest-cli
+
+# Coverage / profiling scratch
+*.out
+*.test

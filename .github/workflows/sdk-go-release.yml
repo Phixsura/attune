@@ -1,0 +1,91 @@
+# Release the Go SDK (github.com/Phixsura/attune/sdk/go) on a `sdk/go/v*` tag.
+#
+# Unlike the Node SDK there is no registry to publish to: `go get` reads the tag
+# directly via the Go module proxy. A nested module is versioned with a tag whose
+# prefix is the module subdirectory, so the tag MUST be `sdk/go/vX.Y.Z` and
+# `go get github.com/Phixsura/attune/sdk/go@vX.Y.Z` resolves it. This workflow
+# verifies the tag matches version.go, re-runs the gates, warms the module proxy,
+# and cuts a GitHub Release.
+#
+# workflow_dispatch runs a dry-run (verify + gates, no Release) so the path can be
+# exercised without cutting a tag.
+name: SDK Go Release
+
+on:
+  push:
+    tags: ["sdk/go/v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-go-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/go
+    permissions:
+      contents: write # create the GitHub Release on a tag push
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: sdk/go/go.mod
+          cache: false
+
+      # On a tag, sdk/go/vX.Y.Z must match the Version constant in version.go.
+      - name: Verify tag matches version.go
+        if: github.event_name == 'push'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag_version="${REF_NAME#sdk/go/v}"
+          src_version="$(sed -n 's/.*Version = "\(.*\)".*/\1/p' version.go)"
+          if [ "$tag_version" != "$src_version" ]; then
+            echo "::error::tag $REF_NAME ($tag_version) != version.go ($src_version)"
+            exit 1
+          fi
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { echo '::error::gofmt found unformatted files'; gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -race ./...
+
+      - name: Warm the Go module proxy
+        if: github.event_name == 'push'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          GOPROXY: https://proxy.golang.org
+        run: |
+          ver="v${REF_NAME#sdk/go/v}"
+          # Best-effort: prompt the proxy to fetch the freshly-pushed tag. Never
+          # fail the release if the proxy is briefly behind the tag push.
+          for _ in 1 2 3; do
+            GOFLAGS=-mod=mod go list -m "github.com/Phixsura/attune/sdk/go@${ver}" && break
+            sleep 10
+          done || echo "::warning::proxy not warmed yet; it will fetch on first go get"
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="v${REF_NAME#sdk/go/v}"
+          gh release create "$REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Go SDK ${ver}" \
+            --notes "Install:
+          \`\`\`
+          go get github.com/Phixsura/attune/sdk/go@${ver}
+          \`\`\`
+          See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md) for details."

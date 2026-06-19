@@ -1,0 +1,28 @@
+# Second codegen template: Go message types for the published Go SDK
+# (github.com/Phixsura/attune/sdk/go, #36). It must use a different
+# go_package_prefix than the server's internal/proto, and buf v2 managed config
+# is global per invocation — so the SDK gets its own template, run alongside the
+# default one by `make proto` and the CI proto-sync gate.
+#
+# Output lands in sdk/go/attune/v1 — a PUBLIC, importable package
+# (github.com/Phixsura/attune/sdk/go/attune/v1), mirroring the Node SDK which
+# also exposes its proto-generated wire types. The root `attune` package
+# re-exports the headline types (IngestRequest/IngestResponse/ErrorResponse/
+# ErrorCode) for single-import convenience. The googleapis/gnostic overrides
+# mirror buf.gen.yaml so the google.api / gnostic annotation imports resolve to
+# their upstream modules, not our tree.
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/Phixsura/attune/sdk/go
+    - file_option: go_package
+      module: buf.build/gnostic/gnostic
+      value: github.com/google/gnostic-models/openapiv3
+  disable:
+    - module: buf.build/googleapis/googleapis
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.5
+    out: sdk/go
+    opt: paths=source_relative
