@@ -153,18 +153,22 @@ artifact is exercised, not just the source.
 
 ## Publishing
 
-The package is publish-ready: `publishConfig` forces public access to the public
-npm registry, and `prepack` builds `dist/` before packing — so neither a scoped
-private default nor a missing build can ship a broken release.
+Releases are automated by the `SDK Release` workflow
+(`.github/workflows/sdk-release.yml`) on an `sdk-vX.Y.Z` tag, authenticated by
+npm **Trusted Publishing (OIDC)** — no `NPM_TOKEN` secret. The workflow verifies
+the tag matches `package.json`'s `version`, runs the type check + tests, and
+publishes with provenance (a signed SLSA attestation). `publishConfig` forces
+public access to the public registry and `prepack` builds `dist/` before packing.
 
 ```bash
-# one-time: npm login with publish rights to the @phixsura org
-npm version <patch|minor|major>   # bump + git tag
-npm publish                        # prepack builds dist; publishes @phixsura/attune
-npm pack --dry-run                 # inspect tarball contents without publishing
+# cut a release: bump the version, commit, then tag to trigger publish
+npm version <patch|minor|major>      # bump package.json + create git commit/tag
+git push && git push --tags          # or: git tag sdk-v0.1.1 <sha> && git push origin sdk-v0.1.1
 ```
 
-The first publish is manual; wiring it into the release workflow is a follow-up.
+`workflow_dispatch` runs the same path as a publish dry-run (build + pack, no
+publish) to exercise it without cutting a tag. To inspect the tarball locally:
+`npm pack --dry-run`.
 
 ## License
 
