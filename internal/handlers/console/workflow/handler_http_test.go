@@ -36,8 +36,20 @@ type fakeStateStore struct {
 	listTransErr error
 }
 
-func (f *fakeStateStore) List(_ context.Context, _ string, _ bool) ([]workflowstate.WorkflowState, error) {
-	return f.states, f.listErr
+func (f *fakeStateStore) List(_ context.Context, _ string, includeArchived bool) ([]workflowstate.WorkflowState, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if includeArchived {
+		return f.states, nil
+	}
+	active := make([]workflowstate.WorkflowState, 0, len(f.states))
+	for _, s := range f.states {
+		if s.ArchivedAt == nil {
+			active = append(active, s)
+		}
+	}
+	return active, nil
 }
 
 func (f *fakeStateStore) Create(_ context.Context, s workflowstate.WorkflowState) (*workflowstate.WorkflowState, error) {
@@ -447,6 +459,35 @@ func TestReplaceTransitions_HTTP(t *testing.T) {
 		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/transitions",
 			`{"transitions":[{"fromStateId":"s-1","toStateId":"s-other"}]}`))
 		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("200 OK transition to an owned ARCHIVED state", func(t *testing.T) {
+		// The validation guard is "is this state owned by this tenant", not "is it
+		// active": an owned-but-archived state must validate so a config round-trip
+		// after archiving a referenced state doesn't 400. (Runtime Transition() still
+		// refuses to move feedback INTO an archived state.) This pins that intent —
+		// flipping the handler's List(...) to includeArchived=false would 400 here.
+		archived := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+		h := NewHandler(&fakeStateStore{
+			states: []workflowstate.WorkflowState{{ID: "s-1"}, {ID: "s-2", ArchivedAt: ptrext.Of(archived)}},
+			transitions: []workflowstate.Transition{
+				{ID: "t-arch", TenantID: "tenant-1", FromStateID: "s-1", ToStateID: "s-2"},
+			},
+		}, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.ReplaceTransitions",
+			dispatcher.JSON(func() *attunev1.ReplaceTransitionsRequest {
+				return ptrext.Of(attunev1.ReplaceTransitionsRequest{})
+			}),
+			h.ReplaceTransitions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ReplaceTransitionsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/transitions",
+			`{"transitions":[{"fromStateId":"s-1","toStateId":"s-2"}]}`))
+		require.Equal(t, http.StatusOK, w.Code)
 	})
 
 	t.Run("500 replace error", func(t *testing.T) {

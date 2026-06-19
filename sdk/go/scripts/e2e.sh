@@ -89,8 +89,10 @@ KEY="$("$BIN" --config "$CONFIG" keys issue --tenant sdkgoe2e --label "$MARKER" 
 RKEY_OUT="$("$BIN" --config "$CONFIG" keys issue --tenant sdkgoe2e --label "$MARKER-restricted" 2>/dev/null)"
 RKEY="$(echo "$RKEY_OUT" | awk '/ key:/{print $2}')"
 RKEY_ID="$(echo "$RKEY_OUT" | awk '/ id:/{print $2}')"
+# Guard BOTH before the insert: a missing RKEY_ID would otherwise INSERT an empty
+# key_id and the scope restriction would silently never apply (or fail opaquely).
+[ -n "$RKEY" ] && [ -n "$RKEY_ID" ] || { echo "failed to issue/parse restricted key"; exit 1; }
 pg "insert into api_key_scopes (key_id, scope) values ('${RKEY_ID}', 'ingest:write');" >/dev/null
-[ -n "$RKEY" ] || { echo "failed to issue restricted key"; exit 1; }
 
 # A second tenant + key, to verify cross-tenant isolation.
 "$BIN" --config "$CONFIG" tenant create --slug sdkgoe2e2 --name "SDK Go E2E 2" >/dev/null

@@ -3,12 +3,14 @@ package console
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -102,6 +104,57 @@ func TestAPIKeyAdminRoutesScopeGated(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 			require.Equal(t, "FORBIDDEN", body.Code)
+		})
+	}
+}
+
+// TestAPIKeyAdminRoutesBindAndAuthorize drives every mounted route with a
+// full-scope key so each request passes the scope gate and runs the route's
+// request-binding + WithAuth (apikeyToSession) closures before the endpoint
+// handler. With a nil pool the data-access handlers panic; middleware.Recoverer
+// turns that into a 500 — by which point the binder + auth closures have already
+// executed. We assert only that the request got PAST auth (not 401/403),
+// proving every route decodes its input and authorizes via the apikey adapter.
+func TestAPIKeyAdminRoutesBindAndAuthorize(t *testing.T) {
+	t.Parallel()
+	v := scopedVerifier{tenant: "tenant-1", key: uuid.Nil, scopes: domain.AllScopes}
+	r := chi.NewRouter()
+	r.Use(middleware.Recoverer)
+	MountAPIKeyAdminRoutes(r, nil, v, 0)
+
+	cases := []struct {
+		name, method, path, body string
+	}{
+		{"list tags", http.MethodGet, "/tags?include_archived=true", ""},
+		{"create tag", http.MethodPost, "/tags", `{"name":"x"}`},
+		{"update tag", http.MethodPatch, "/tags/t1", `{"name":"x","color":"#3b82f6"}`},
+		{"archive tag", http.MethodDelete, "/tags/t1", ""},
+		{"list states", http.MethodGet, "/workflow/states?include_archived=1", ""},
+		{"create state", http.MethodPost, "/workflow/states", `{"name":"s","color":"#3b82f6","category":"active","position":1}`},
+		{"update state", http.MethodPatch, "/workflow/states/s1", `{"color":"#22c55e"}`},
+		{"archive state", http.MethodDelete, "/workflow/states/s1", ""},
+		{"list transitions", http.MethodGet, "/workflow/transitions", ""},
+		{"replace transitions", http.MethodPut, "/workflow/transitions", `{"transitions":[]}`},
+		{"seed defaults", http.MethodPost, "/workflow/seed", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var bodyReader io.Reader
+			if tc.body != "" {
+				bodyReader = strings.NewReader(tc.body)
+			}
+			req := httptest.NewRequest(tc.method, tc.path, bodyReader)
+			req.Header.Set("X-API-Key", domain.APIKeyPrefix+"full")
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			// Got past the scope gate + auth adapter into binding/handler.
+			require.NotEqual(t, http.StatusUnauthorized, w.Code)
+			require.NotEqual(t, http.StatusForbidden, w.Code)
 		})
 	}
 }

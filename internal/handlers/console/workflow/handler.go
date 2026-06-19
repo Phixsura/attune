@@ -260,6 +260,11 @@ func (h *Handler) ReplaceTransitions(
 	// The transitions FK only checks global state-id existence, so without this a
 	// caller could reference another tenant's state ids (cross-tenant). Also turns
 	// an unknown-state reference into a clear 400 instead of an opaque 500.
+	// includeArchived=true on purpose: the guard is "is this state owned by this
+	// tenant", not "is it active". Owned-but-archived states must validate so a
+	// config round-trip after archiving a referenced state doesn't 400; the
+	// runtime Transition() still refuses to move a feedback item into an archived
+	// state (service/workflow.go), so a dangling edge to one is inert.
 	owned, ownErr := h.states.List(ctx, auth.TenantID, true)
 	if ownErr != nil {
 		logext.Errorf(ctx, "[%s] state prefetch failed,tenant_id:%s,err:%+v", where, auth.TenantID, ownErr.Error())
