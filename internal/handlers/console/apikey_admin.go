@@ -29,10 +29,12 @@ import (
 // apikeyToSession adapts the API-key auth context to the session.AuthCtx the
 // console handlers consume, so the same handlers serve API-key callers. The
 // actor is recorded as "apikey:<keyID>" for audit. apikey.RequireScope has
-// already run by the time a handler is reached, so FromContext is non-nil.
+// already run by the time a handler is reached, so the auth context is present;
+// FromContextSafe is used (rather than the panicking FromContext) so a handler
+// ever reached off the middleware fails closed with 401 instead of panicking.
 func apikeyToSession(r *http.Request) (*session.AuthCtx, error) {
-	ak := apikey.FromContext(r.Context())
-	if ak == nil {
+	ak, ok := apikey.FromContextSafe(r.Context())
+	if !ok {
 		return nil, dispatcher.NewError(http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "missing api key")
 	}
 	return ptrext.Of(session.AuthCtx{
