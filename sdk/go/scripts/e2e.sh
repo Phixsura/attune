@@ -83,10 +83,20 @@ KEY="$("$BIN" --config "$CONFIG" keys issue --tenant sdkgoe2e --label "$MARKER" 
   | awk '/ key:/{print $2}')"
 [ -n "$KEY" ] || { echo "failed to issue key"; exit 1; }
 
+# A second key restricted to ingest:write ONLY, so the e2e can verify scope
+# denial (tag/workflow write → 403). The CLI issues unrestricted keys; we pin a
+# scope row directly, which restricts the key to that scope.
+RKEY_OUT="$("$BIN" --config "$CONFIG" keys issue --tenant sdkgoe2e --label "$MARKER-restricted" 2>/dev/null)"
+RKEY="$(echo "$RKEY_OUT" | awk '/ key:/{print $2}')"
+RKEY_ID="$(echo "$RKEY_OUT" | awk '/ id:/{print $2}')"
+pg "insert into api_key_scopes (key_id, scope) values ('${RKEY_ID}', 'ingest:write');" >/dev/null
+[ -n "$RKEY" ] || { echo "failed to issue restricted key"; exit 1; }
+
 log "run live Go e2e suite (go test -tags e2e ./test/e2e) against ${BASE_URL}"
 (
   cd "$SDK_DIR"
-  ATTUNE_E2E_BASE_URL="$BASE_URL" ATTUNE_E2E_API_KEY="$KEY" ATTUNE_E2E_MARKER="$MARKER" \
+  ATTUNE_E2E_BASE_URL="$BASE_URL" ATTUNE_E2E_API_KEY="$KEY" \
+    ATTUNE_E2E_RESTRICTED_KEY="$RKEY" ATTUNE_E2E_MARKER="$MARKER" \
     go test -tags e2e -count=1 -v ./test/e2e
 )
 

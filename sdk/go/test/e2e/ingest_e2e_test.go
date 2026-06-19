@@ -242,6 +242,54 @@ func TestE2EWorkflowCRUD(t *testing.T) {
 	}
 }
 
+// TestE2EScopeDenied verifies scope gating actually works: a key restricted to
+// ingest:write only is FORBIDDEN on tag/workflow writes, but can still ingest.
+func TestE2EScopeDenied(t *testing.T) {
+	base := os.Getenv("ATTUNE_E2E_BASE_URL")
+	rkey := os.Getenv("ATTUNE_E2E_RESTRICTED_KEY")
+	if base == "" || rkey == "" {
+		t.Skip("ATTUNE_E2E_RESTRICTED_KEY not set")
+	}
+	c, err := attune.New(base, rkey)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := context.Background()
+
+	_, err = c.CreateTag(ctx, &attune.CreateTagRequest{Name: "should-be-denied"})
+	var ae *attune.AttuneError
+	if !errors.As(err, &ae) || ae.Status != 403 || ae.Code != attune.CodeForbidden {
+		t.Errorf("CreateTag with ingest-only key = %v, want 403 FORBIDDEN", err)
+	}
+
+	_, err = c.SeedWorkflowDefaults(ctx)
+	if !errors.As(err, &ae) || ae.Status != 403 {
+		t.Errorf("SeedWorkflowDefaults with ingest-only key = %v, want 403", err)
+	}
+
+	// The same key CAN still ingest — its actual scope works.
+	if _, err := c.Ingest(ctx, attune.IngestInput{Content: "restricted-key-can-ingest"}); err != nil {
+		t.Errorf("ingest:write key should still ingest: %v", err)
+	}
+}
+
+// TestE2ETagValidationError verifies a real validation error envelope over the
+// tag route (empty name → 4xx with code/requestId parsed).
+func TestE2ETagValidationError(t *testing.T) {
+	c, _ := newClient(t)
+	_, err := c.CreateTag(context.Background(), &attune.CreateTagRequest{Name: ""})
+	var ae *attune.AttuneError
+	if !errors.As(err, &ae) {
+		t.Fatalf("want *AttuneError, got %v", err)
+	}
+	if ae.Status < 400 || ae.Status >= 500 {
+		t.Errorf("empty-name CreateTag status = %d, want 4xx", ae.Status)
+	}
+	if ae.Code == "" {
+		t.Error("expected a non-empty error code")
+	}
+}
+
 func TestE2EConcurrentDedup(t *testing.T) {
 	c, marker := newClient(t)
 	key := "concurrent-" + marker
