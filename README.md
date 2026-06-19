@@ -76,6 +76,30 @@ go build ./cmd/attune
 go run ./cmd/attune server                                  # start HTTP server
 ```
 
+### Sending feedback
+
+Ingest is `POST /v1/feedback/ingest` with an `X-API-Key` (`ingest:write` scope).
+Use the official Node/TypeScript client, [`@phixsura/attune`](sdk/node/) (ESM +
+CJS, zero deps, browser-safe), which handles retries and idempotency for you:
+
+```ts
+import { Client } from '@phixsura/attune'
+const client = new Client({ baseURL: 'https://attune.example.com', apiKey })
+const { id } = await client.ingest({ content: 'the export button is broken' })
+```
+
+…or any HTTP client:
+
+```bash
+curl -X POST https://attune.example.com/v1/feedback/ingest \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"content":"the export button is broken"}'
+```
+
+Repeated delivery is safe: pass an `Idempotency-Key` header (the SDK sends one
+per call) and a replay returns the original id instead of a duplicate row. See
+the [SDK README](sdk/node/README.md) for retries, errors, and browser use.
+
 Attune is config-first: process config is loaded from one private YAML file
 (`--config ./config.yaml`) and env-var overrides are intentionally unsupported.
 LLM provider channels and routes are runtime state managed in Postgres through
@@ -138,6 +162,7 @@ internal/
     llmclient/               Multi-protocol LLM client (OpenAI / Anthropic / Gemini)
     observability/           Vendored OTel + slog helpers
 console/                     React triage UI (feature-based: src/features/*)
+sdk/node/                    Node/TypeScript ingest client (@phixsura/attune)
 ```
 
 **Layering rule** — handlers never write SQL; service never writes HTTP; notify never imports service; infra never imports service or repo. A reverse import is a rejection-grade lint.
@@ -152,7 +177,7 @@ We ship monthly. Six milestones to v1.0 (full plan: [GitHub milestones](https://
 | [v0.3](https://github.com/Phixsura/attune/milestone/2) | 2026-08-04 | **Deployable** — docker-compose, observability overlay, PII redaction |
 | [v0.4](https://github.com/Phixsura/attune/milestone/3) | 2026-09-04 | **AI Depth** — sentiment, multi-language, multi-LLM backend, confidence + cost |
 | [v0.5](https://github.com/Phixsura/attune/milestone/4) | 2026-10-04 | **Operator Power** — clustering, daily digest, reply draft, batch ops |
-| [v0.6](https://github.com/Phixsura/attune/milestone/5) | 2026-11-04 | **Multi-channel** — Slack, Discord, email ingest, Adapter SDK, Go + Node SDK |
+| [v0.6](https://github.com/Phixsura/attune/milestone/5) | 2026-11-04 | **Multi-channel** — Slack, Discord, email ingest, Adapter SDK, Go SDK; Node SDK [`@phixsura/attune`](sdk/node/) shipped early (#37) |
 | [v1.0](https://github.com/Phixsura/attune/milestone/6) | 2026-12-04 | **Enterprise-ready** — RBAC, audit log, SSO, Helm chart, GDPR |
 
 ### Pillars
