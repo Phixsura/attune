@@ -2,6 +2,15 @@ import { AttuneError, TransportErrorCode } from './errors'
 import type { ErrorResponse } from './proto/attune/v1/common'
 import type { IngestRequest, IngestResponse } from './proto/attune/v1/ingest'
 import { backoffDelay, isRetryable, parseRetryAfter } from './retry'
+import { VERSION } from './version'
+
+// Versioned client identifier, sent as User-Agent so the server can attribute
+// SDK traffic by version (support, deprecation, abuse triage). Includes the
+// Node version when running on Node; browsers ignore a custom User-Agent.
+const USER_AGENT =
+  typeof process !== 'undefined' && process.versions?.node
+    ? `attune-node/${VERSION} node/${process.versions.node}`
+    : `attune-node/${VERSION}`
 
 /**
  * Caller-facing ingest payload. Derived from the proto-generated
@@ -28,6 +37,12 @@ export interface ClientOptions {
   timeout?: number
   /** Max retries on transient failures (1 initial try + N retries). Default 2. */
   maxRetries?: number
+  /**
+   * Extra headers added to every request (e.g. a proxy token or a trace header).
+   * Reserved headers (`content-type`, `X-API-Key`, `Idempotency-Key`,
+   * `User-Agent`) take precedence and cannot be overridden here.
+   */
+  defaultHeaders?: Record<string, string>
   /** @internal Override the inter-attempt sleep (tests). */
   sleep?: (ms: number) => Promise<void>
 }
@@ -66,6 +81,7 @@ export class Client {
   readonly #fetch: FetchLike
   readonly #timeout: number
   readonly #maxRetries: number
+  readonly #defaultHeaders: Record<string, string>
   readonly #sleep: (ms: number) => Promise<void>
 
   constructor(options: ClientOptions) {
@@ -99,6 +115,7 @@ export class Client {
     // than aborting instantly; negative maxRetries clamps to 0 (one attempt).
     this.#timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
     this.#maxRetries = Math.max(0, options.maxRetries ?? DEFAULT_MAX_RETRIES)
+    this.#defaultHeaders = { ...options.defaultHeaders }
     this.#sleep = options.sleep ?? defaultSleep
   }
 
@@ -213,7 +230,9 @@ export class Client {
       const response = await this.#fetch(url, {
         method: 'POST',
         headers: {
+          ...this.#defaultHeaders,
           'content-type': 'application/json',
+          'user-agent': USER_AGENT,
           [API_KEY_HEADER]: this.#apiKey,
           'Idempotency-Key': idempotencyKey,
         },

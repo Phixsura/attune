@@ -126,7 +126,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   network/timeout, never 400/409/422, `Retry-After`-aware, default 2 retries)
   that the Go SDK (#36) will adopt. Ships `examples/node-ingest` and
   `examples/browser-ingest`; `ingest:write` keys are documented as publishable
-  browser-safe credentials. The package is publish-ready (`publishConfig` public
+  browser-safe credentials. Follows SDK conventions: a versioned `User-Agent`
+  (`attune-node/<version>`), a `defaultHeaders` option, a shipped `LICENSE`, and
+  sourcemaps in `dist`. The package is publish-ready (`publishConfig` public
   access to npmjs + `prepack` build) and the e2e harness installs the packed
   tarball into a fresh project to verify ESM + CJS consumption against a live
   server.

@@ -19,7 +19,11 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "sideEffects": false,
   "engines": {
     "node": ">=20"
@@ -40,7 +44,13 @@
     "e2e": "bash scripts/e2e.sh",
     "gen:proto": "cd ../.. && make proto"
   },
-  "keywords": ["attune", "feedback", "ingest", "sdk", "client"],
+  "keywords": [
+    "attune",
+    "feedback",
+    "ingest",
+    "sdk",
+    "client"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/Phixsura/attune.git",

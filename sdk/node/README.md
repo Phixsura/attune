@@ -43,8 +43,14 @@ new Client({
   timeout: 30_000,  // per-attempt timeout (ms); default 30s
   maxRetries: 2,    // transient-failure retries; default 2
   fetch,            // inject a custom fetch (older runtimes / tests)
+  defaultHeaders: { 'x-trace-id': '…' }, // extra headers on every request
 })
 ```
+
+Every request carries a versioned `User-Agent` (`attune-node/<version> node/<ver>`)
+so the server can attribute SDK traffic. `defaultHeaders` are added to every
+request; reserved headers (`X-API-Key`, `Idempotency-Key`, `User-Agent`,
+`content-type`) always take precedence and can't be overridden.
 
 Per-call cancellation:
 

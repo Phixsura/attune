@@ -8,5 +8,6 @@ export default defineConfig({
   dts: true,
   clean: true,
   treeshake: true,
+  sourcemap: true, // ship .map files so stack traces point at SDK source
   target: 'node20',
 })

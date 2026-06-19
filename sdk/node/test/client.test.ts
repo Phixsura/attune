@@ -345,3 +345,28 @@ describe('constructor: JS-caller misuse (no type checking)', () => {
     expect(() => new C(42)).toThrow(AttuneError)
   })
 })
+
+describe('headers: User-Agent + defaultHeaders', () => {
+  it('sends a versioned User-Agent header', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    await newClient(fetch).ingest({ content: 'x' })
+    const ua = new Headers(calls[0]?.init.headers).get('user-agent')
+    expect(ua).toMatch(/^attune-node\/\d+\.\d+\.\d+/)
+  })
+
+  it('merges defaultHeaders but never lets them override reserved headers', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    const client = new Client({
+      baseURL: BASE,
+      apiKey: KEY,
+      fetch,
+      sleep: noSleep,
+      defaultHeaders: { 'x-trace': 'abc', 'X-API-Key': 'HACKED', 'user-agent': 'evil' },
+    })
+    await client.ingest({ content: 'x' })
+    const h = new Headers(calls[0]?.init.headers)
+    expect(h.get('x-trace')).toBe('abc') // custom header added
+    expect(h.get('x-api-key')).toBe(KEY) // reserved: not overridden
+    expect(h.get('user-agent')).toMatch(/^attune-node\//) // reserved: not overridden
+  })
+})

@@ -7,3 +7,4 @@ export { ErrorCode } from './proto/attune/v1/common'
 // Wire types, generated from proto/attune/v1 (DO NOT EDIT the proto/ output).
 export type { IngestRequest, IngestResponse } from './proto/attune/v1/ingest'
 export { backoffDelay, isRetryable, parseRetryAfter } from './retry'
+export { VERSION } from './version'
