@@ -150,9 +150,13 @@ mechanism that is correct under concurrency (a check-then-insert, or reusing the
 `idempotency_keys`/`Acquire` machinery whose pending state returns
 `acquired=true`, both let two simultaneous retries each insert a row).
 
-- **Schema (migration 055):** `user_feedback` gains nullable `idempotency_key`
-  + `idempotency_hash` columns and a partial unique index
-  `(tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL`.
+- **Schema (migrations 055–056):** `user_feedback` gains nullable
+  `idempotency_key` + `idempotency_hash` columns (055, metadata-only) and a
+  partial unique index `(tenant_id, idempotency_key) WHERE idempotency_key IS
+  NOT NULL` built `CONCURRENTLY` (056), so deploying it does not lock ingest on a
+  large table. CONCURRENTLY cannot run in a transaction, so the migration runner
+  gained a `-- migrate:no-transaction` directive for single-statement,
+  idempotent migrations.
 - **Server (`repo/feedback.InsertIdempotent`):** `INSERT … ON CONFLICT
   (tenant_id, idempotency_key) DO NOTHING RETURNING id`. A fresh insert returns
   its id. On conflict it reads the existing row back and compares

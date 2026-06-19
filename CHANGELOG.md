@@ -122,8 +122,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   inserting again; the same key with a different body is `409
   IDEMPOTENCY_CONFLICT`; a malformed key is `400 VALIDATION`. Dedup is enforced
   by a partial unique index on `user_feedback (tenant_id, idempotency_key)`
-  (migration 055) with `INSERT … ON CONFLICT`, so it is atomic even under
+  (migrations 055–056) with `INSERT … ON CONFLICT`, so it is atomic even under
   concurrent retries (N simultaneous same-key requests collapse to one row). The
+  index is built `CONCURRENTLY` (migration 056, via new non-transactional
+  migration support) so deploying it does not lock ingest on a large table. The
   Node SDK sends a per-call key automatically, held stable across retries, so a
   retried at-least-once delivery cannot create a duplicate feedback row.
 

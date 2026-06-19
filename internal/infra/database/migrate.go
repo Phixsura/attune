@@ -15,6 +15,7 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"fmt"
@@ -25,6 +26,13 @@ import (
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
 )
+
+// noTxDirective marks a migration that must run OUTSIDE a transaction (e.g.
+// CREATE INDEX CONCURRENTLY, which Postgres forbids inside a transaction
+// block). Such a migration MUST be a single statement and MUST be idempotent
+// (IF NOT EXISTS), because a non-transactional apply is not atomic with its
+// tracker insert — a crash between them re-runs the body on the next deploy.
+const noTxDirective = "migrate:no-transaction"
 
 //go:embed migrations/*.sql
 var migrationFS embed.FS
@@ -128,33 +136,62 @@ func runMigrationsLocked(ctx context.Context, conn *pgxpool.Conn) error {
 			logext.Errorf(ctx, "[%s] read file failed,file:%s,err:%+v", where, name, err.Error())
 			return fmt.Errorf("read %s: %w", name, err)
 		}
-		tx, err := conn.Begin(ctx)
-		if err != nil {
-			logext.Errorf(ctx, "[%s] begin tx failed,version:%d,err:%+v",
-				where, version, err.Error())
-			return fmt.Errorf("begin tx for %d: %w", version, err)
-		}
-		if _, err := tx.Exec(ctx, string(body)); err != nil {
-			_ = tx.Rollback(ctx)
-			logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
-			return fmt.Errorf("apply %s: %w", name, err)
-		}
-		if _, err := tx.Exec(
-			ctx,
-			fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable),
-			version, name,
-		); err != nil {
-			_ = tx.Rollback(ctx)
-			logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, err.Error())
-			return fmt.Errorf("record %s: %w", name, err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			logext.Errorf(ctx, "[%s] commit failed,version:%d,err:%+v",
-				where, version, err.Error())
-			return fmt.Errorf("commit %d: %w", version, err)
+		if bytes.Contains(body, []byte(noTxDirective)) {
+			if err := applyMigrationNoTx(ctx, conn, version, name, body); err != nil {
+				return err
+			}
+		} else if err := applyMigrationTx(ctx, conn, version, name, body); err != nil {
+			return err
 		}
 		logext.Infof(ctx, "[%s] applied,version:%d,file:%s", where, version, name)
 	}
 	logext.Infof(ctx, "[%s] OK", where)
 	return nil
+}
+
+// applyMigrationTx runs a migration and records it atomically in one transaction.
+func applyMigrationTx(ctx context.Context, conn *pgxpool.Conn, version int, name string, body []byte) error {
+	const where = "database.applyMigrationTx"
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] begin tx failed,version:%d,err:%+v", where, version, err.Error())
+		return fmt.Errorf("begin tx for %d: %w", version, err)
+	}
+	if _, err := tx.Exec(ctx, string(body)); err != nil {
+		_ = tx.Rollback(ctx)
+		logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
+		return fmt.Errorf("apply %s: %w", name, err)
+	}
+	if _, err := tx.Exec(ctx, recordMigrationSQL(), version, name); err != nil {
+		_ = tx.Rollback(ctx)
+		logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, err.Error())
+		return fmt.Errorf("record %s: %w", name, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		logext.Errorf(ctx, "[%s] commit failed,version:%d,err:%+v", where, version, err.Error())
+		return fmt.Errorf("commit %d: %w", version, err)
+	}
+	return nil
+}
+
+// applyMigrationNoTx runs a single-statement migration OUTSIDE a transaction
+// (for CREATE INDEX CONCURRENTLY et al.) then records it. The two steps are not
+// atomic, so the body must be idempotent (see noTxDirective). conn.Exec with no
+// args uses the simple protocol, which does not open an implicit transaction
+// block — required for CONCURRENTLY.
+func applyMigrationNoTx(ctx context.Context, conn *pgxpool.Conn, version int, name string, body []byte) error {
+	const where = "database.applyMigrationNoTx"
+	if _, err := conn.Exec(ctx, string(body)); err != nil {
+		logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
+		return fmt.Errorf("apply %s (no-tx): %w", name, err)
+	}
+	if _, err := conn.Exec(ctx, recordMigrationSQL(), version, name); err != nil {
+		logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, err.Error())
+		return fmt.Errorf("record %s (no-tx): %w", name, err)
+	}
+	return nil
+}
+
+func recordMigrationSQL() string {
+	return fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable)
 }
