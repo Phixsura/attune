@@ -85,8 +85,10 @@ export class Client {
     this.#baseURL = stripTrailingSlashes(options.baseURL)
     this.#apiKey = options.apiKey
     this.#fetch = fetchImpl
+    // timeout <= 0 disables the per-attempt timeout (treat as "no limit") rather
+    // than aborting instantly; negative maxRetries clamps to 0 (one attempt).
     this.#timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
-    this.#maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES
+    this.#maxRetries = Math.max(0, options.maxRetries ?? DEFAULT_MAX_RETRIES)
     this.#sleep = options.sleep ?? defaultSleep
   }
 
@@ -105,7 +107,18 @@ export class Client {
     userSignal?: AbortSignal,
   ): Promise<T> {
     const url = this.#baseURL + path
-    const payload = JSON.stringify(body) // serialize once, reused across retries
+    // Serialize once, reused across retries. A non-serializable body (BigInt,
+    // circular ref, …) surfaces as a typed AttuneError, not a raw TypeError.
+    let payload: string
+    try {
+      payload = JSON.stringify(body)
+    } catch (cause) {
+      throw new AttuneError({
+        code: 'BAD_REQUEST',
+        message: 'request body is not JSON-serializable',
+        cause,
+      })
+    }
     let lastError: AttuneError | undefined
 
     for (let attempt = 0; attempt <= this.#maxRetries; attempt++) {
@@ -160,10 +173,14 @@ export class Client {
   ): Promise<Response> {
     const controller = new AbortController()
     let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      controller.abort()
-    }, this.#timeout)
+    // timeout <= 0 → no per-attempt deadline (don't arm the timer).
+    const timer =
+      this.#timeout > 0
+        ? setTimeout(() => {
+            timedOut = true
+            controller.abort()
+          }, this.#timeout)
+        : undefined
     const onUserAbort = () => controller.abort()
     if (userSignal) userSignal.addEventListener('abort', onUserAbort, { once: true })
 
@@ -195,7 +212,7 @@ export class Client {
       }
       throw new AttuneError({ code: TransportErrorCode.Network, message: 'network error', cause })
     } finally {
-      clearTimeout(timer)
+      if (timer) clearTimeout(timer)
       if (userSignal) userSignal.removeEventListener('abort', onUserAbort)
     }
   }

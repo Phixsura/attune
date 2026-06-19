@@ -8,6 +8,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -91,6 +92,11 @@ func (in IngestInput) Validate() error {
 	}
 	if len(in.Content) > MaxContentLen {
 		return fmt.Errorf("content too long (max %d chars)", MaxContentLen)
+	}
+	// PostgreSQL TEXT cannot store a NUL byte; reject it as a clean validation
+	// error rather than letting it fail at INSERT time as an opaque DB error.
+	if strings.ContainsRune(in.Content, '\x00') {
+		return fmt.Errorf("content contains a null byte")
 	}
 	if !ValidSources[in.Source] {
 		return fmt.Errorf("invalid source %q", in.Source)

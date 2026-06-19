@@ -136,6 +136,52 @@ live('ingest against a live attune server', () => {
     })
   })
 
+  describe('adversarial inputs (live)', () => {
+    // String.fromCharCode(0) builds a real NUL at runtime without putting a NUL
+    // (or escape) in this source file. PostgreSQL TEXT cannot store it.
+    const nul = String.fromCharCode(0)
+
+    it('rejects a NUL byte in content with VALIDATION / 400 (no server 500)', async () => {
+      await expect(client().ingest({ content: `${E2E_MARKER} a${nul}b` })).rejects.toMatchObject({
+        code: 'VALIDATION',
+        status: 400,
+      })
+    })
+
+    it('stores an SQL-injection-looking string literally (parameterized)', async () => {
+      const res = await client().ingest({
+        content: `${E2E_MARKER} '; DROP TABLE user_feedback;-- `,
+      })
+      expect(res.id).toMatch(/^\d+$/)
+    })
+
+    it('accepts a unicode/emoji-heavy payload', async () => {
+      const res = await client().ingest({ content: `${E2E_MARKER} \u{1F468}\u{1F469} café 😀` })
+      expect(res.id).toMatch(/^\d+$/)
+    })
+
+    it('enforces idempotency-key length bounds (8..64) server-side', async () => {
+      await expect(
+        client().ingest({ content: `${E2E_MARKER} k7` }, { idempotencyKey: '1234567' }),
+      ).rejects.toMatchObject({ code: 'VALIDATION', status: 400 })
+      await expect(
+        client().ingest({ content: `${E2E_MARKER} k65` }, { idempotencyKey: 'a'.repeat(65) }),
+      ).rejects.toMatchObject({ code: 'VALIDATION', status: 400 })
+      const ok = await client().ingest(
+        { content: `${E2E_MARKER} k8` },
+        { idempotencyKey: '12345678' },
+      )
+      expect(ok.id).toMatch(/^\d+$/)
+    })
+
+    it('wraps a non-serializable sourceMeta as AttuneError before any request', async () => {
+      await expect(
+        // biome-ignore lint/suspicious/noExplicitAny: deliberately invalid payload
+        client().ingest({ content: `${E2E_MARKER} bigint`, sourceMeta: { big: 1n } as any }),
+      ).rejects.toMatchObject({ name: 'AttuneError', code: 'BAD_REQUEST' })
+    })
+  })
+
   describe('transport failures', () => {
     it('surfaces a connection failure as code NETWORK', async () => {
       const dead = new Client({ baseURL: 'http://127.0.0.1:1', apiKey: KEY, maxRetries: 0 })

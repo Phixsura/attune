@@ -53,6 +53,39 @@ describe('constructor', () => {
   })
 })
 
+describe('adversarial inputs / config edges', () => {
+  it('wraps a non-JSON-serializable body as AttuneError, never a raw TypeError', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    const client = newClient(fetch)
+    // biome-ignore lint/suspicious/noExplicitAny: deliberately invalid payload
+    const circular: any = {}
+    circular.self = circular
+    await expect(client.ingest({ content: 'x', sourceMeta: circular })).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+    })
+    // biome-ignore lint/suspicious/noExplicitAny: BigInt is not serializable
+    await expect(
+      client.ingest({ content: 'x', sourceMeta: { big: 1n } as any }),
+    ).rejects.toBeInstanceOf(AttuneError)
+    expect(calls).toHaveLength(0) // never hit the network
+  })
+
+  it('clamps a negative maxRetries to 0 (still makes one real attempt)', async () => {
+    const { fetch, calls } = stubFetch([() => json(503, { code: 'BAD_GATEWAY', message: 'down' })])
+    const client = newClient(fetch, { maxRetries: -1 })
+    await expect(client.ingest({ content: 'x' })).rejects.toMatchObject({ status: 503 })
+    expect(calls).toHaveLength(1) // one attempt, not zero
+  })
+
+  it('treats timeout <= 0 as no per-attempt deadline (does not instant-abort)', async () => {
+    const { fetch } = stubFetch([() => json(200, { id: '7', enrichmentStatus: 'pending' })])
+    const client = new Client({ baseURL: BASE, apiKey: KEY, fetch, sleep: noSleep, timeout: 0 })
+    const res = await client.ingest({ content: 'x' })
+    expect(res.id).toBe('7')
+  })
+})
+
 describe('ingest — happy path', () => {
   it('posts to /v1/feedback/ingest with the X-API-Key header and returns the body', async () => {
     const { fetch, calls } = stubFetch([
