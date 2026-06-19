@@ -86,6 +86,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **OpenAPI now documents the ingest idempotency contract (#37).** The generated
+  `docs/openapi/openapi.yaml` for `POST /v1/feedback/ingest` now declares the
+  optional `Idempotency-Key` request header and the `409 IDEMPOTENCY_CONFLICT`,
+  `413 BODY_TOO_LARGE`, and `429 RATE_LIMITED` responses — header-driven behavior
+  the proto request/response types can't express. Done via `gnostic.openapi.v3`
+  operation annotations on the proto (still generated, never hand-edited); adds
+  the build-only `github.com/google/gnostic-models` dependency (blank-imported by
+  generated Go to register the extension; no runtime use).
+
 - **Oversized ingest body now returns `413 BODY_TOO_LARGE` (#37).** `POST
   /v1/feedback/ingest` previously returned `400 BAD_REQUEST` for a body over the
   64 KiB cap; it now returns `413` with code `BODY_TOO_LARGE`, matching the rest

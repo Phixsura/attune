@@ -251,6 +251,14 @@ export interface GetFeedbackStatsResponse {
  * into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
  */
 export interface FeedbackService {
+  /**
+   * Ingest stores one feedback item and queues it for enrichment.
+   *
+   * Idempotency: send an `Idempotency-Key` header to make retries safe — a
+   * replay with the same key + body returns the original id; the same key with
+   * a different body fails 409. Errors use the shared ErrorResponse envelope
+   * (`code` from the ErrorCode enum).
+   */
   Ingest(request: IngestRequest): Promise<IngestResponse>;
   /** GET /fb/v1/console/feedback (console; session auth) */
   ListFeedback(request: ListFeedbackRequest): Promise<ListFeedbackResponse>;

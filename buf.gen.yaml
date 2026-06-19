@@ -4,6 +4,13 @@ managed:
   override:
     - file_option: go_package_prefix
       value: github.com/Phixsura/attune/internal/proto
+    # The gnostic openapi annotations drive the OpenAPI generator only; Go never
+    # reads them, but protoc-gen-go still emits a blank import to register the
+    # extension. Point that import at the upstream lightweight gnostic-models
+    # module instead of our internal/proto tree (which doesn't generate it).
+    - file_option: go_package
+      module: buf.build/gnostic/gnostic
+      value: github.com/google/gnostic-models/openapiv3
   disable:
     - module: buf.build/googleapis/googleapis
 plugins:
