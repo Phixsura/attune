@@ -3,6 +3,7 @@ package attune
 import (
 	"context"
 	"net/http"
+	"net/url"
 
 	attunev1 "github.com/Phixsura/attune/sdk/go/attune/v1"
 )
@@ -56,7 +57,7 @@ func (c *Client) UpdateTag(ctx context.Context, req *UpdateTagRequest) (*Tag, er
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "invalid request body", cause: err}
 	}
 	var out attunev1.Tag
-	if err := c.do(ctx, http.MethodPatch, "/v1/tags/"+req.GetId(), payload, &out, ""); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/tags/"+url.PathEscape(req.GetId()), payload, &out, ""); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -68,7 +69,7 @@ func (c *Client) ArchiveTag(ctx context.Context, id string) (*ArchiveTagResponse
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "tag id is required"}
 	}
 	var out attunev1.ArchiveTagResponse
-	if err := c.do(ctx, http.MethodDelete, "/v1/tags/"+id, nil, &out, ""); err != nil {
+	if err := c.do(ctx, http.MethodDelete, "/v1/tags/"+url.PathEscape(id), nil, &out, ""); err != nil {
 		return nil, err
 	}
 	return &out, nil

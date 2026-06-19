@@ -133,6 +133,11 @@ func (c *Client) Ingest(ctx context.Context, in IngestInput, opts ...RequestOpti
 // key, when non-empty, is sent as the Idempotency-Key. It returns nil on success
 // or an *AttuneError.
 func (c *Client) do(ctx context.Context, method, path string, payload []byte, out proto.Message, key string) error {
+	// A non-idempotent POST without a server-honored idempotency key must NOT be
+	// retried: a retry after a lost response could create a duplicate resource.
+	// (Ingest's POST carries an Idempotency-Key the server dedups on, so it stays
+	// retryable; GET/PUT/PATCH/DELETE are idempotent.)
+	retrySafe := method != http.MethodPost || key != ""
 	var last *attemptError
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
@@ -149,7 +154,7 @@ func (c *Client) do(ctx context.Context, method, path string, payload []byte, ou
 			return nil
 		}
 		last = ae
-		if !ae.retryable {
+		if !ae.retryable || !retrySafe {
 			return ae.err
 		}
 	}

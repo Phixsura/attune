@@ -176,6 +176,62 @@ func TestWorkflowMethodsPathsAndMethods(t *testing.T) {
 	}
 }
 
+// TestCreateTagNotRetried: a non-idempotent POST without an idempotency key must
+// not be retried (a retry after a lost response could create a duplicate).
+func TestCreateTagNotRetried(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv) // default maxRetries 2
+	if _, err := c.CreateTag(context.Background(), &CreateTagRequest{Name: "x"}); err == nil {
+		t.Fatal("expected error")
+	}
+	if hits != 1 {
+		t.Errorf("CreateTag hit the server %d times, want 1 (non-idempotent POST must not retry)", hits)
+	}
+}
+
+// TestArchiveTagRetriesIdempotent: DELETE is idempotent, so it IS retried.
+func TestArchiveTagRetriesIdempotent(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if hits < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+	if _, err := c.ArchiveTag(context.Background(), "t1"); err != nil {
+		t.Fatalf("ArchiveTag: %v", err)
+	}
+	if hits != 3 {
+		t.Errorf("ArchiveTag (idempotent DELETE) hits=%d, want 3 (retried)", hits)
+	}
+}
+
+// TestArchiveTagEscapesID: an id with a slash must be path-escaped, not break routing.
+func TestArchiveTagEscapesID(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+	if _, err := c.ArchiveTag(context.Background(), "a/b"); err != nil {
+		t.Fatalf("ArchiveTag: %v", err)
+	}
+	if gotPath != "/v1/tags/a%2Fb" {
+		t.Errorf("escaped path = %q, want /v1/tags/a%%2Fb", gotPath)
+	}
+}
+
 func TestWorkflowEmptyIDGuards(t *testing.T) {
 	c, _ := New("https://x.example", "k")
 	if _, err := c.UpdateWorkflowState(context.Background(), &UpdateStateRequest{}); err == nil {

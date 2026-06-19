@@ -3,6 +3,7 @@ package attune
 import (
 	"context"
 	"net/http"
+	"net/url"
 
 	attunev1 "github.com/Phixsura/attune/sdk/go/attune/v1"
 )
@@ -59,7 +60,7 @@ func (c *Client) UpdateWorkflowState(ctx context.Context, req *UpdateStateReques
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "invalid request body", cause: err}
 	}
 	var out attunev1.UpdateStateResponse
-	if err := c.do(ctx, http.MethodPatch, "/v1/workflow/states/"+req.GetId(), payload, &out, ""); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/workflow/states/"+url.PathEscape(req.GetId()), payload, &out, ""); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -71,7 +72,7 @@ func (c *Client) ArchiveWorkflowState(ctx context.Context, id string) (*ArchiveS
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "state id is required"}
 	}
 	var out attunev1.ArchiveStateResponse
-	if err := c.do(ctx, http.MethodDelete, "/v1/workflow/states/"+id, nil, &out, ""); err != nil {
+	if err := c.do(ctx, http.MethodDelete, "/v1/workflow/states/"+url.PathEscape(id), nil, &out, ""); err != nil {
 		return nil, err
 	}
 	return &out, nil
