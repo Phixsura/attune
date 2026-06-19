@@ -25,8 +25,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Manual build (not autobuild) so CodeQL traces BOTH the main module
+          # and the nested sdk/go module — autobuild only builds the main one.
           - language: go
-            build-mode: autobuild
+            build-mode: manual
           - language: javascript-typescript
             build-mode: none
     steps:
@@ -43,6 +45,13 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
           queries: security-and-quality
+      # Build both Go modules so CodeQL extracts the SDK too (the root toolchain
+      # satisfies sdk/go's 1.25 floor).
+      - if: matrix.language == 'go'
+        name: Build Go modules
+        run: |
+          go build ./...
+          (cd sdk/go && go build ./...)
       - name: Analyze
         uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
