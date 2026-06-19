@@ -166,6 +166,24 @@ proto-generated wire types and the retry policy (mirroring `@phixsura/attune`):
 - **Retry policy** — `IsRetryable(status)`, `BackoffDelay(attempt)`,
   `ParseRetryAfter(headers, now)`, for callers building their own loop.
 
+## Tags & workflow
+
+Beyond ingest, the client manages tag and workflow-state config (needs a key
+with the `tags:*` / `workflow:*` scopes):
+
+```go
+tag, _ := client.CreateTag(ctx, &attune.CreateTagRequest{Name: "bug", Color: ptr("#ef4444")})
+tags, _ := client.ListTags(ctx, false)
+_, _ = client.SeedWorkflowDefaults(ctx)
+states, _ := client.ListWorkflowStates(ctx, false)
+```
+
+Tags: `ListTags` / `CreateTag` / `UpdateTag` / `ArchiveTag`. Workflow:
+`ListWorkflowStates` / `CreateWorkflowState` / `UpdateWorkflowState` /
+`ArchiveWorkflowState` / `ListWorkflowTransitions` / `ReplaceWorkflowTransitions`
+/ `SeedWorkflowDefaults`. Update is replace-semantics — send the full desired
+state, not just changed fields.
+
 ## Example CLI
 
 [`examples/ingest-cli`](examples/ingest-cli) is a small, real CLI built on the

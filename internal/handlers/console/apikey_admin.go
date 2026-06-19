@@ -14,12 +14,16 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
+	consoleworkflow "github.com/Phixsura/attune/internal/handlers/console/workflow"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
+	feedbackauditrepo "github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	feedbacktagrepo "github.com/Phixsura/attune/internal/repo/feedbacktag"
+	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
 )
 
 // apikeyToSession adapts the API-key auth context to the session.AuthCtx the
@@ -47,9 +51,14 @@ func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Ver
 	tags := consoletag.NewHandler(feedbacktagrepo.New(pool))
 	tags.SetAuditLogger(audit)
 
+	wfStateRepo := workflowstaterepo.New(pool)
+	wf := consoleworkflow.NewHandler(wfStateRepo, workflowsvc.NewService(wfStateRepo, feedbackauditrepo.New(pool), pool))
+	wf.SetAuditLogger(audit)
+
 	r.Group(func(g chi.Router) {
 		g.Use(apikey.MiddlewareWithProxies(apiKeys, trustedProxyHops))
 		mountAPIKeyTags(g, tags)
+		mountAPIKeyWorkflow(g, wf)
 	})
 }
 
@@ -99,6 +108,82 @@ func mountAPIKeyTags(g chi.Router, tags *consoletag.Handler) {
 			),
 			tags.Archive,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ArchiveTagRequest) (*session.AuthCtx, error) {
+				return apikeyToSession(r)
+			}),
+		))
+	})
+}
+
+func mountAPIKeyWorkflow(g chi.Router, wf *consoleworkflow.Handler) {
+	g.Route("/workflow", func(w chi.Router) {
+		w.With(apikey.RequireScope(domain.ScopeWorkflowRead)).Get("/states", dispatcher.Bind(
+			"apikey.WorkflowHandler.ListStates",
+			dispatcher.Query(
+				func() *attunev1.ListStatesRequest { return ptrext.Of(attunev1.ListStatesRequest{}) },
+				func(r *http.Request, req *attunev1.ListStatesRequest) error {
+					if v := r.URL.Query().Get("include_archived"); v == "true" || v == "1" {
+						req.IncludeArchived = true
+					}
+					return nil
+				},
+			),
+			wf.ListStates,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListStatesRequest) (*session.AuthCtx, error) {
+				return apikeyToSession(r)
+			}),
+		))
+		w.With(apikey.RequireScope(domain.ScopeWorkflowWrite)).Post("/states", dispatcher.Bind(
+			"apikey.WorkflowHandler.CreateState",
+			dispatcher.JSON(func() *attunev1.CreateStateRequest { return ptrext.Of(attunev1.CreateStateRequest{}) }),
+			wf.CreateState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateStateRequest) (*session.AuthCtx, error) {
+				return apikeyToSession(r)
+			}),
+		))
+		w.With(apikey.RequireScope(domain.ScopeWorkflowWrite)).Patch("/states/{id}", dispatcher.Bind(
+			"apikey.WorkflowHandler.UpdateState",
+			dispatcher.Combine(
+				func() *attunev1.UpdateStateRequest { return ptrext.Of(attunev1.UpdateStateRequest{}) },
+				dispatcher.JSONBody[*attunev1.UpdateStateRequest],
+				dispatcher.Param("id", func(req *attunev1.UpdateStateRequest, id string) { req.Id = id }),
+			),
+			wf.UpdateState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateStateRequest) (*session.AuthCtx, error) {
+				return apikeyToSession(r)
+			}),
+		))
+		w.With(apikey.RequireScope(domain.ScopeWorkflowWrite)).Delete("/states/{id}", dispatcher.Bind(
+			"apikey.WorkflowHandler.ArchiveState",
+			dispatcher.Path(
+				func() *attunev1.ArchiveStateRequest { return ptrext.Of(attunev1.ArchiveStateRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.ArchiveStateRequest, id string) { req.Id = id }),
+			),
+			wf.ArchiveState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ArchiveStateRequest) (*session.AuthCtx, error) {
+				return apikeyToSession(r)
+			}),
+		))
+		w.With(apikey.RequireScope(domain.ScopeWorkflowRead)).Get("/transitions", dispatcher.Bind(
+			"apikey.WorkflowHandler.ListTransitions",
+			dispatcher.Empty(func() *attunev1.ListTransitionsRequest { return ptrext.Of(attunev1.ListTransitionsRequest{}) }),
+			wf.ListTransitions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListTransitionsRequest) (*session.AuthCtx, error) {
+				return apikeyToSession(r)
+			}),
+		))
+		w.With(apikey.RequireScope(domain.ScopeWorkflowWrite)).Put("/transitions", dispatcher.Bind(
+			"apikey.WorkflowHandler.ReplaceTransitions",
+			dispatcher.JSON(func() *attunev1.ReplaceTransitionsRequest { return ptrext.Of(attunev1.ReplaceTransitionsRequest{}) }),
+			wf.ReplaceTransitions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ReplaceTransitionsRequest) (*session.AuthCtx, error) {
+				return apikeyToSession(r)
+			}),
+		))
+		w.With(apikey.RequireScope(domain.ScopeWorkflowWrite)).Post("/seed", dispatcher.Bind(
+			"apikey.WorkflowHandler.SeedDefaults",
+			dispatcher.Empty(func() *attunev1.SeedDefaultsRequest { return ptrext.Of(attunev1.SeedDefaultsRequest{}) }),
+			wf.SeedDefaults,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SeedDefaultsRequest) (*session.AuthCtx, error) {
 				return apikeyToSession(r)
 			}),
 		))

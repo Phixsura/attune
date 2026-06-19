@@ -221,6 +221,27 @@ func TestE2ETagCRUD(t *testing.T) {
 	}
 }
 
+// TestE2EWorkflowCRUD exercises workflow config over the API-key surface against
+// the real server: seed defaults (write), then read states + transitions.
+func TestE2EWorkflowCRUD(t *testing.T) {
+	c, _ := newClient(t)
+	ctx := context.Background()
+
+	if _, err := c.SeedWorkflowDefaults(ctx); err != nil {
+		t.Fatalf("SeedWorkflowDefaults: %v", err)
+	}
+	states, err := c.ListWorkflowStates(ctx, false)
+	if err != nil {
+		t.Fatalf("ListWorkflowStates: %v", err)
+	}
+	if len(states.GetStates()) == 0 {
+		t.Error("expected non-empty workflow states after seeding defaults")
+	}
+	if _, err := c.ListWorkflowTransitions(ctx); err != nil {
+		t.Fatalf("ListWorkflowTransitions: %v", err)
+	}
+}
+
 func TestE2EConcurrentDedup(t *testing.T) {
 	c, marker := newClient(t)
 	key := "concurrent-" + marker
