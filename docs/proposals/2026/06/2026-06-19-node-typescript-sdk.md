@@ -207,8 +207,14 @@ is tracked as a follow-up (API-key security, #41 area), not part of #37.
   passes.
 - **CI:** a new job builds the SDK, runs `tsc` + vitest, and builds both
   examples; hung off the existing `ci-gate` aggregation.
-- **Publish:** first `npm publish @phixsura/attune` is manual (org + token
-  bootstrap); a follow-up wires it into the release workflow.
+- **Publish:** `publishConfig` forces `access: public` to the public npm registry
+  (a scoped package defaults to restricted, and the dev machine may point npm at a
+  mirror) and `prepack` builds `dist/` before packing (it is gitignored, so a
+  clean checkout would otherwise publish an empty package). The packed tarball is
+  validated end-to-end: the e2e harness `npm pack`s it, installs it into a fresh
+  external project, and ingests through it via ESM and CJS against the live
+  server — the published artifact is exercised, not just `src`. First
+  `npm publish` is manual; wiring it into the release workflow is a follow-up.
 - **Changelog:** one `### Added` entry under `[Unreleased]`.
 
 ## Alternatives considered

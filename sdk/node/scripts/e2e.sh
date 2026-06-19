@@ -117,13 +117,47 @@ CONC="$(docker exec "$CONTAINER" psql -U attune -d attune -tAc \
 echo "  rows for concurrent idempotency key: ${CONC}"
 [ "$CONC" = "1" ] || { echo "expected exactly 1 row for concurrent key, got ${CONC}"; exit 1; }
 
-log "verify CommonJS interop (require the CJS build)"
-node --input-type=commonjs -e "
-const { Client, AttuneError, ErrorCode } = require('${SDK_DIR}/dist/index.cjs');
-if (typeof Client !== 'function' || typeof AttuneError !== 'function' || ErrorCode.VALIDATION !== 'VALIDATION') {
-  throw new Error('CJS interop broken');
-}
-console.log('  CJS require OK');
-"
+log "integration: pack the published artifact, install it in a fresh external project, ingest (ESM + CJS)"
+# npm pack runs prepack (tsdown) and writes the real publishable tarball — the
+# same bytes `npm publish` would upload. We install it into a throwaway project
+# with plain npm (no src, no workspace link) so this exercises the package
+# exactly as an external consumer would: exports map, dist, types, zero deps.
+( cd "$SDK_DIR" && npm pack --silent --pack-destination "$WORK" >/dev/null 2>&1 )
+TARBALL="$(ls "$WORK"/*.tgz | head -1)"
+[ -n "$TARBALL" ] || { echo "npm pack produced no tarball"; exit 1; }
+echo "  packed: $(basename "$TARBALL")"
+CONSUMER="$WORK/consumer"
+mkdir -p "$CONSUMER"
+(
+  cd "$CONSUMER"
+  npm init -y >/dev/null 2>&1
+  npm install --silent --no-audit --no-fund "$TARBALL" >/dev/null 2>&1
+)
+cat > "$CONSUMER/esm.mjs" <<'JS'
+import { Client } from '@phixsura/attune'
+const { id } = await new Client({ baseURL: process.env.B, apiKey: process.env.K })
+  .ingest({ content: process.env.MARK + ' consumer-esm' })
+if (!/^\d+$/.test(id)) { console.error('ESM: bad id', id); process.exit(1) }
+console.log('  ESM consumer id=' + id)
+JS
+cat > "$CONSUMER/cjs.cjs" <<'JS'
+const { Client, ErrorCode } = require('@phixsura/attune')
+if (ErrorCode.VALIDATION !== 'VALIDATION') { console.error('CJS: enum missing'); process.exit(1) }
+new Client({ baseURL: process.env.B, apiKey: process.env.K })
+  .ingest({ content: process.env.MARK + ' consumer-cjs' })
+  .then(({ id }) => {
+    if (!/^\d+$/.test(id)) { console.error('CJS: bad id', id); process.exit(1) }
+    console.log('  CJS consumer id=' + id)
+  })
+  .catch((e) => { console.error('CJS:', e); process.exit(1) })
+JS
+B="$BASE_URL" K="$KEY" MARK="$MARKER" node "$CONSUMER/esm.mjs"
+B="$BASE_URL" K="$KEY" MARK="$MARKER" node "$CONSUMER/cjs.cjs"
 
-log "E2E PASSED — SDK ↔ live server fully verified"
+log "verify the external-consumer ingests landed in Postgres (ESM + CJS → 2 rows)"
+CONS="$(docker exec "$CONTAINER" psql -U attune -d attune -tAc \
+  "select count(*) from user_feedback where content like '${MARKER} consumer-%';")"
+echo "  rows from the packed-tarball consumer: ${CONS}"
+[ "$CONS" = "2" ] || { echo "expected 2 consumer rows (esm+cjs), got ${CONS}"; exit 1; }
+
+log "E2E PASSED — SDK ↔ live server fully verified (incl. packed-artifact consumer)"

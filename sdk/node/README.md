@@ -139,7 +139,25 @@ pnpm e2e          # full e2e: boots Postgres + a real attune server, runs the
 ```
 
 `pnpm test:e2e` runs the env-driven live suite (`test/e2e`) against any existing
-deployment: set `ATTUNE_E2E_BASE_URL` and `ATTUNE_E2E_API_KEY` first.
+deployment: set `ATTUNE_E2E_BASE_URL` and `ATTUNE_E2E_API_KEY` first. `pnpm e2e`
+additionally packs the publishable tarball, installs it into a throwaway project,
+and ingests through it via both ESM and CJS — so the real artifact is exercised,
+not just the source.
+
+## Publishing
+
+The package is publish-ready: `publishConfig` forces public access to the public
+npm registry, and `prepack` builds `dist/` before packing — so neither a scoped
+private default nor a missing build can ship a broken release.
+
+```bash
+# one-time: npm login with publish rights to the @phixsura org
+npm version <patch|minor|major>   # bump + git tag
+npm publish                        # prepack builds dist; publishes @phixsura/attune
+npm pack --dry-run                 # inspect tarball contents without publishing
+```
+
+The first publish is manual; wiring it into the release workflow is a follow-up.
 
 ## License
 
