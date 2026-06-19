@@ -122,7 +122,11 @@ This section is the normative contract both SDKs implement.
 - **Retry on:** network/connection errors, request timeout, HTTP `408`, `409`,
   `429`, and `5xx`.
 - **Never retry:** `400`, `401`, `403`, `404`, `422`, and other non-listed 4xx —
-  these are deterministic client errors; retrying wastes calls and risks dupes.
+  these are deterministic client errors; retrying wastes calls.
+- **Retry safety:** ingest is a non-idempotent POST, so retrying a request that
+  the server already processed (lost response, timeout, proxy 5xx) would
+  duplicate a feedback row. The SDK makes retries safe with an idempotency key —
+  see the Idempotency section below; the retry policy above depends on it.
 - **Attempts:** `maxRetries` default **2** (1 initial + 2 retries). Matches the
   OpenAI/Anthropic TS SDKs, whose Go counterparts attune already depends on.
 - **Backoff:** exponential, base 200ms, cap 2s, with ±25% jitter. If the
@@ -135,6 +139,29 @@ This section is the normative contract both SDKs implement.
   error envelope), and `headers`. Network/timeout failures surface as
   `AttuneError` with a synthetic code (e.g. `NETWORK` / `TIMEOUT`). Non-2xx
   responses parse the unified `{ code, message, requestId }` envelope.
+
+### Idempotency (server + SDK)
+
+Because ingest is a non-idempotent POST, safe retries require server cooperation
+— a header-keyed dedup. attune already has the machinery (`idempotency_keys`
+table + `repo/idempotency`, used by `/batch`); this reuses it on the ingest path:
+
+- **SDK:** every `ingest()` call generates a UUID and sends it as the
+  `Idempotency-Key` header, **held stable across that call's retries**. Callers
+  can pass their own `idempotencyKey` to dedup across separate calls.
+- **Server (`internal/service/ingest`):** when the header is present, the
+  Ingestor `Acquire`s the key (hashing the canonical request), inserts, then
+  `Complete`s with the row id. A replay with the same key + body returns the
+  original id without re-inserting; the same key with a **different** body is a
+  `409 IDEMPOTENCY_CONFLICT`; a still-pending concurrent request is a
+  `409 REQUEST_IN_PROGRESS`; a malformed key is `400 VALIDATION`. The
+  `Idempotency-Key` is read from the header (not the proto body) and carried on
+  `domain.IngestInput`, so the inbound adapters (#66) are unaffected (they pass
+  none → the plain insert path, unchanged).
+
+This expands #37 from "SDK only" to "SDK + ingest idempotency". It is the
+Stripe-style design and the only way to keep the resilient retry contract above
+without risking duplicate rows.
 
 ### Browser support — publishable write-key model
 
@@ -197,6 +224,16 @@ browser. `examples/browser-ingest/` demonstrates the widget pattern.
 
 ## Risks / tradeoffs
 
+- **Retrying a non-idempotent POST.** Found during verification: without server
+  cooperation, a retry of a request the server already processed duplicates a
+  feedback row. Mitigation: the Idempotency-Key mechanism above (SDK sends a
+  per-call key stable across retries; server dedups via `repo/idempotency`).
+  Residual: an **expired** (>24h) or previously **failed** key falls through to a
+  fresh insert — matches the batch path's lenient handling and is acceptable
+  since a 24h-late retry of the same call is not a realistic duplication vector.
+- **Scope expansion.** #37 now also touches the ingest handler/service. Mitigation:
+  reuses existing idempotency infra; the inbound adapters are untouched (empty
+  key → unchanged insert path); covered by new unit + live e2e tests.
 - **Publishable write-key messaging.** If users ship a broad-scope key to the
   browser thinking it is safe, that is a leak. Mitigation: README is explicit
   that only `ingest:write` keys are publishable and must be rate-limited /
@@ -219,12 +256,19 @@ browser. `examples/browser-ingest/` demonstrates the widget pattern.
 2. **Package skeleton.** `sdk/node/` with `package.json`, `tsconfig.json`,
    `tsdown.config.ts`, exports map.
 3. **Core.** `errors.ts` (AttuneError + ErrorCode mapping), `retry.ts` (the
-   contract above), `client.ts` (`ingest`), `index.ts` (public surface).
-4. **Tests.** Vitest: happy / 401 / validation-no-retry / 429-retry; `tsc
-   --strict`.
-5. **Examples.** `examples/node-ingest/` and `examples/browser-ingest/`.
-6. **CI.** New job: build + tsc + vitest + example builds, under `ci-gate`.
-7. **Docs.** SDK `README.md` (incl. write-key publishability note); root
+   contract above), `client.ts` (`ingest`, portable timeout/abort via
+   AbortController, auto `Idempotency-Key`), `index.ts` (public surface).
+4. **Ingest idempotency (server).** `domain.IngestInput.IdempotencyKey` (from the
+   header); `service.Ingestor` Acquire/Complete around the insert; handler maps
+   conflict/in-progress to 409; wire `repo/idempotency` in `cmd/attune`.
+5. **Tests.** Vitest unit (happy / 401 / validation-no-retry / 429-retry /
+   network / timeout / abort / idempotency-key) + Go unit (ingestor dedup /
+   conflict / in-progress / malformed-key; handler 409 mapping); `tsc --strict`.
+6. **Examples.** `examples/node-ingest/` and `examples/browser-ingest/`.
+7. **CI.** New job: build + tsc + vitest + example builds, under `ci-gate`.
+8. **Live e2e.** `test/e2e` + `scripts/e2e.sh` (boots Postgres + server, runs the
+   suite incl. idempotency, asserts DB dedup).
+9. **Docs.** SDK `README.md` (write-key publishability + idempotency note); root
    `CHANGELOG.md` `### Added`.
 
 ## Verification

@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/service/ingest"
 )
 
 // fakeIngestor records the mapped input and returns a canned (id, err) so the
@@ -133,6 +134,48 @@ func TestIngestHTTP_IngestError(t *testing.T) {
 	}
 	if got := decodeBody(t, rec)["message"]; got != "content is required" {
 		t.Errorf("error message = %v (%s)", got, rec.Body)
+	}
+}
+
+// The optional Idempotency-Key request header is mapped into the domain input.
+func TestIngestHTTP_IdempotencyKeyHeaderMapped(t *testing.T) {
+	fake := ptrext.Of(fakeIngestor{id: 5})
+	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(`{"content":"x"}`))
+	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "abcd1234efgh5678")
+	rec := httptest.NewRecorder()
+	ingestTestServer(fake).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if fake.gotIn.IdempotencyKey != "abcd1234efgh5678" {
+		t.Errorf("IdempotencyKey = %q, want abcd1234efgh5678", fake.gotIn.IdempotencyKey)
+	}
+}
+
+// An idempotency conflict from the service → 409 IDEMPOTENCY_CONFLICT.
+func TestIngestHTTP_IdempotencyConflict(t *testing.T) {
+	fake := ptrext.Of(fakeIngestor{err: ingest.ErrIdempotencyConflict})
+	rec := doIngest(t, ingestTestServer(fake), `{"content":"x"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%s)", rec.Code, rec.Body)
+	}
+	if got := decodeBody(t, rec)["code"]; got != "IDEMPOTENCY_CONFLICT" {
+		t.Errorf("code = %v, want IDEMPOTENCY_CONFLICT (%s)", got, rec.Body)
+	}
+}
+
+// A still-pending request with the same key → 409 REQUEST_IN_PROGRESS.
+func TestIngestHTTP_RequestInProgress(t *testing.T) {
+	fake := ptrext.Of(fakeIngestor{err: ingest.ErrRequestInProgress})
+	rec := doIngest(t, ingestTestServer(fake), `{"content":"x"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%s)", rec.Code, rec.Body)
+	}
+	if got := decodeBody(t, rec)["code"]; got != "REQUEST_IN_PROGRESS" {
+		t.Errorf("code = %v, want REQUEST_IN_PROGRESS (%s)", got, rec.Body)
 	}
 }
 

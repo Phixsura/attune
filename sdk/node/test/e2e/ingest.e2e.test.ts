@@ -44,7 +44,8 @@ live('ingest against a live attune server', () => {
     it('assigns distinct, increasing ids to sequential ingests', async () => {
       const a = await client().ingest({ content: `${E2E_MARKER} seq-a` })
       const b = await client().ingest({ content: `${E2E_MARKER} seq-b` })
-      expect(Number(b.id)).toBeGreaterThan(Number(a.id))
+      // Compare as BigInt — id is an int64 string; Number() would lose precision.
+      expect(BigInt(b.id) > BigInt(a.id)).toBe(true)
     })
 
     it('accepts unicode content', async () => {
@@ -95,6 +96,31 @@ live('ingest against a live attune server', () => {
       expect(err).toBeInstanceOf(AttuneError)
       expect(err).toMatchObject({ code: 'UNAUTHORIZED', status: 401 })
       expect((err as AttuneError).requestId).toBeTruthy()
+    })
+  })
+
+  describe('idempotency', () => {
+    it('replaying the same Idempotency-Key returns the same id (no duplicate row)', async () => {
+      const key = `e2e-idem-${E2E_MARKER}-replay`
+      const c = client()
+      const first = await c.ingest(
+        { content: `${E2E_MARKER} idem-replay` },
+        { idempotencyKey: key },
+      )
+      const second = await c.ingest(
+        { content: `${E2E_MARKER} idem-replay` },
+        { idempotencyKey: key },
+      )
+      expect(second.id).toBe(first.id)
+    })
+
+    it('same key with a different body → 409 IDEMPOTENCY_CONFLICT', async () => {
+      const key = `e2e-idem-${E2E_MARKER}-conflict`
+      const c = client()
+      await c.ingest({ content: `${E2E_MARKER} idem-A` }, { idempotencyKey: key })
+      await expect(
+        c.ingest({ content: `${E2E_MARKER} idem-B-different` }, { idempotencyKey: key }),
+      ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', status: 409 })
     })
   })
 

@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/service/ingest"
 )
 
 // ingestRower is the business-layer dependency the handler needs: validate +
@@ -81,6 +83,9 @@ func (h *IngestHandler) Ingest(ctx *dispatcher.RequestContext[*apikey.AuthCtx], 
 		Source:     req.GetSource(),
 		SourceUser: req.GetSourceUser(),
 		PageURL:    req.GetPageUrl(),
+		// Optional client-supplied dedup token (header, not body) so a retry of
+		// an at-least-once delivery cannot create a duplicate row.
+		IdempotencyKey: ctx.Request().Header.Get("Idempotency-Key"),
 	}
 	if m := req.GetSourceMeta(); m != nil {
 		in.SourceMeta = m.AsMap()
@@ -91,8 +96,7 @@ func (h *IngestHandler) Ingest(ctx *dispatcher.RequestContext[*apikey.AuthCtx], 
 
 	id, err := h.ingestor.IngestRow(ctx, tenantID, keyID, in)
 	if err != nil {
-		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(in.Source), "validate_err").Inc()
-		return dispatcher.Fail[*attunev1.IngestResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
+		return h.ingestError(ctx, tenantID, in.Source, err)
 	}
 
 	metrics.IngestTotal.WithLabelValues(tenantID, in.Source, "ok").Inc()
@@ -102,6 +106,27 @@ func (h *IngestHandler) Ingest(ctx *dispatcher.RequestContext[*apikey.AuthCtx], 
 		Id:               id,
 		EnrichmentStatus: "pending",
 	}))
+}
+
+// ingestError maps an IngestRow failure to the right HTTP status + error code.
+// Idempotency outcomes are 409s; everything else is a 400 validation error.
+func (h *IngestHandler) ingestError(
+	ctx *dispatcher.RequestContext[*apikey.AuthCtx], tenantID, source string, err error,
+) (dispatcher.Result[*attunev1.IngestResponse], error) {
+	switch {
+	case errors.Is(err, ingest.ErrIdempotencyConflict):
+		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(source), "conflict").Inc()
+		return dispatcher.Fail[*attunev1.IngestResponse](
+			http.StatusConflict, attunev1.ErrorCode_IDEMPOTENCY_CONFLICT, err.Error())
+	case errors.Is(err, ingest.ErrRequestInProgress):
+		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(source), "conflict").Inc()
+		return dispatcher.Fail[*attunev1.IngestResponse](
+			http.StatusConflict, attunev1.ErrorCode_REQUEST_IN_PROGRESS, err.Error())
+	default:
+		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(source), "validate_err").Inc()
+		return dispatcher.Fail[*attunev1.IngestResponse](
+			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
+	}
 }
 
 // boundedSource keeps attune_ingest_total's `source` label bounded to known

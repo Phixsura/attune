@@ -96,13 +96,20 @@ ROWS="$(docker exec "$CONTAINER" psql -U attune -d attune -tAc \
 echo "  rows tagged '${MARKER}': ${ROWS}"
 [ "$ROWS" -ge 9 ] || { echo "expected >=9 persisted rows, got ${ROWS}"; exit 1; }
 
-log "verify the full-fields row (source=web, sourceUser, sourceMeta)"
+log "verify the full-fields row (source=web, sourceUser, pageUrl, sourceMeta)"
 docker exec "$CONTAINER" psql -U attune -d attune -tAc \
-  "select source, user_id, source_meta->>'plan' from user_feedback
+  "select source, user_id, page_url, source_meta->>'plan' from user_feedback
    where content = '${MARKER} full-fields';" | tee "$WORK/full.txt"
 grep -q '^web|' "$WORK/full.txt" || { echo "source not persisted as web"; exit 1; }
 grep -q 'e2e-user-42' "$WORK/full.txt" || { echo "sourceUser not persisted"; exit 1; }
+grep -q 'https://app.example.com/settings' "$WORK/full.txt" || { echo "pageUrl not persisted"; exit 1; }
 grep -q 'pro' "$WORK/full.txt" || { echo "sourceMeta not persisted"; exit 1; }
+
+log "verify idempotency dedup at the DB level (replay must NOT duplicate)"
+DUP="$(docker exec "$CONTAINER" psql -U attune -d attune -tAc \
+  "select count(*) from user_feedback where content = '${MARKER} idem-replay';")"
+echo "  rows for replayed idempotency key: ${DUP}"
+[ "$DUP" = "1" ] || { echo "expected exactly 1 row for replayed key, got ${DUP}"; exit 1; }
 
 log "verify CommonJS interop (require the CJS build)"
 node --input-type=commonjs -e "

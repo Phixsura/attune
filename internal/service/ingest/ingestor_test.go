@@ -51,7 +51,7 @@ func TestScrubUntrustedSourceMeta_PreservesAdapterSourceKeys(t *testing.T) {
 func TestIngestRowSubmitsEnrichmentJob(t *testing.T) {
 	repo := ptrext.Of(fakeFeedbackRepo{insertID: 7})
 	submitter := ptrext.Of(fakeSubmitter{})
-	ingestor := NewIngestor(repo, submitter)
+	ingestor := NewIngestor(repo, submitter, nil)
 
 	id, err := ingestor.IngestRow(context.Background(), "tenant-1", uuid.Nil, domain.IngestInput{
 		Content: "checkout is broken",
@@ -73,7 +73,7 @@ func TestIngestRowSubmitsEnrichmentJob(t *testing.T) {
 
 func TestIngestRowQueueSubmitFailureDoesNotFailRequest(t *testing.T) {
 	repo := ptrext.Of(fakeFeedbackRepo{insertID: 11})
-	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{err: errors.New("queue full")}))
+	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{err: errors.New("queue full")}), nil)
 
 	id, err := ingestor.IngestRow(context.Background(), "tenant-1", uuid.Nil, domain.IngestInput{
 		Content: "search is slow",
@@ -89,6 +89,7 @@ func TestIngestRowQueueSubmitFailureDoesNotFailRequest(t *testing.T) {
 
 type fakeFeedbackRepo struct {
 	insertID int64
+	inserts  int
 }
 
 func (f *fakeFeedbackRepo) Insert(
@@ -100,6 +101,7 @@ func (f *fakeFeedbackRepo) Insert(
 	string,
 	domain.IngestInput,
 ) (int64, error) {
+	f.inserts++
 	return f.insertID, nil
 }
 

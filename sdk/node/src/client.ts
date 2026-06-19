@@ -35,6 +35,13 @@ export interface ClientOptions {
 export interface RequestOptions {
   /** Caller cancellation. An aborted request throws `AttuneError` code "ABORTED". */
   signal?: AbortSignal
+  /**
+   * Dedup token sent as the `Idempotency-Key` header. Defaults to a fresh UUID
+   * per call, held stable across that call's retries so a retried at-least-once
+   * delivery cannot create a duplicate feedback row. Pass your own to make an
+   * ingest idempotent across separate `ingest()` calls.
+   */
+  idempotencyKey?: string
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -85,12 +92,19 @@ export class Client {
 
   /** Ingest one feedback item. Resolves with the stored row id, or throws `AttuneError`. */
   ingest(input: IngestInput, options?: RequestOptions): Promise<IngestResponse> {
-    return this.#request<IngestResponse>(INGEST_PATH, input, options)
+    // One key per call, reused across this call's retries — that is what makes
+    // a retry safe against the non-idempotent ingest POST.
+    const idempotencyKey = options?.idempotencyKey ?? globalThis.crypto.randomUUID()
+    return this.#request<IngestResponse>(INGEST_PATH, input, idempotencyKey, options?.signal)
   }
 
-  async #request<T>(path: string, body: unknown, options?: RequestOptions): Promise<T> {
+  async #request<T>(
+    path: string,
+    body: unknown,
+    idempotencyKey: string,
+    userSignal?: AbortSignal,
+  ): Promise<T> {
     const url = this.#baseURL + path
-    const userSignal = options?.signal
     let lastError: AttuneError | undefined
 
     for (let attempt = 0; attempt <= this.#maxRetries; attempt++) {
@@ -98,36 +112,19 @@ export class Client {
         throw new AttuneError({ code: TransportErrorCode.Aborted, message: 'request aborted' })
       }
 
-      const timeoutSignal = AbortSignal.timeout(this.#timeout)
-      const signal = userSignal ? AbortSignal.any([userSignal, timeoutSignal]) : timeoutSignal
-
       let response: Response
       try {
-        response = await this.#fetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', [API_KEY_HEADER]: this.#apiKey },
-          body: JSON.stringify(body),
-          signal,
-        })
-      } catch (cause) {
-        if (userSignal?.aborted) {
-          throw new AttuneError({
-            code: TransportErrorCode.Aborted,
-            message: 'request aborted',
-            cause,
-          })
-        }
-        const timedOut = timeoutSignal.aborted
-        lastError = new AttuneError({
-          code: timedOut ? TransportErrorCode.Timeout : TransportErrorCode.Network,
-          message: timedOut ? 'request timed out' : 'network error',
-          cause,
-        })
+        response = await this.#fetchOnce(url, body, idempotencyKey, userSignal)
+      } catch (err) {
+        const transportError = err as AttuneError
+        // A caller-initiated abort is intentional — never retry it.
+        if (transportError.code === TransportErrorCode.Aborted) throw transportError
+        lastError = transportError
         if (attempt < this.#maxRetries) {
           await this.#sleep(backoffDelay(attempt))
           continue
         }
-        throw lastError
+        throw transportError
       }
 
       if (response.ok) {
@@ -148,6 +145,58 @@ export class Client {
     }
 
     throw lastError ?? new AttuneError({ code: 'INTERNAL', message: 'request failed' })
+  }
+
+  // One fetch attempt with a per-attempt timeout and caller-abort forwarding,
+  // built on AbortController only (portable across Node 20+ and every browser
+  // with AbortController — avoids AbortSignal.any/.timeout, which need Node 20.3
+  // and very recent browsers). Throws a typed transport AttuneError on failure.
+  async #fetchOnce(
+    url: string,
+    body: unknown,
+    idempotencyKey: string,
+    userSignal?: AbortSignal,
+  ): Promise<Response> {
+    const controller = new AbortController()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, this.#timeout)
+    const onUserAbort = () => controller.abort()
+    if (userSignal) userSignal.addEventListener('abort', onUserAbort, { once: true })
+
+    try {
+      return await this.#fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          [API_KEY_HEADER]: this.#apiKey,
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+    } catch (cause) {
+      if (userSignal?.aborted) {
+        throw new AttuneError({
+          code: TransportErrorCode.Aborted,
+          message: 'request aborted',
+          cause,
+        })
+      }
+      if (timedOut) {
+        throw new AttuneError({
+          code: TransportErrorCode.Timeout,
+          message: 'request timed out',
+          cause,
+        })
+      }
+      throw new AttuneError({ code: TransportErrorCode.Network, message: 'network error', cause })
+    } finally {
+      clearTimeout(timer)
+      if (userSignal) userSignal.removeEventListener('abort', onUserAbort)
+    }
   }
 }
 

@@ -82,6 +82,21 @@ network errors, and timeouts — up to `maxRetries`, with exponential backoff
 errors (`400`, `401`, `403`, `404`, `422`, …) are never retried. This policy is
 shared verbatim with the Go SDK.
 
+## Idempotency
+
+Ingest creates a row, so a blind retry of a request the server already processed
+would duplicate it. The client prevents that: every `ingest()` call sends an
+`Idempotency-Key` header (a fresh UUID by default), **held stable across that
+call's retries**, and the server returns the original id instead of inserting
+again. Pass your own key to dedup across separate calls:
+
+```ts
+await client.ingest({ content: 'x' }, { idempotencyKey: 'order-4242-feedback' })
+```
+
+Replaying a key with a different body throws `AttuneError` `IDEMPOTENCY_CONFLICT`
+(409).
+
 ## Browser use & key safety
 
 The SDK runs in the browser with no special flag, so you can ingest directly

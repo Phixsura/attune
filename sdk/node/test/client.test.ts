@@ -155,6 +155,36 @@ describe('ingest — retry policy', () => {
   })
 })
 
+describe('ingest — idempotency', () => {
+  const keyOf = (call?: { init: RequestInit }) =>
+    new Headers(call?.init.headers).get('idempotency-key')
+
+  it('sends a UUID Idempotency-Key header by default', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    await newClient(fetch).ingest({ content: 'x' })
+    expect(keyOf(calls[0])).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    )
+  })
+
+  it('reuses the SAME key across retries of one call (safe retry)', async () => {
+    const { fetch, calls } = stubFetch([
+      () => json(503, { code: 'BAD_GATEWAY', message: 'down' }),
+      () => json(200, { id: '1', enrichmentStatus: 'pending' }),
+    ])
+    await newClient(fetch, { maxRetries: 1 }).ingest({ content: 'x' })
+    expect(calls).toHaveLength(2)
+    expect(keyOf(calls[0])).toBeTruthy()
+    expect(keyOf(calls[0])).toBe(keyOf(calls[1]))
+  })
+
+  it('honors a caller-supplied idempotencyKey', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    await newClient(fetch).ingest({ content: 'x' }, { idempotencyKey: 'my-fixed-key-123' })
+    expect(keyOf(calls[0])).toBe('my-fixed-key-123')
+  })
+})
+
 describe('ingest — cancellation', () => {
   it('throws code ABORTED and does not retry when the caller signal is aborted', async () => {
     const { fetch, calls } = stubFetch([
