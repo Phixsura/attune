@@ -141,7 +141,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   sourcemaps in `dist`. The package is publish-ready (`publishConfig` public
   access to npmjs + `prepack` build) and the e2e harness installs the packed
   tarball into a fresh project to verify ESM + CJS consumption against a live
-  server.
+  server. A `SDK Release` workflow publishes to npm on an `sdk-v*` tag with npm
+  provenance (signed SLSA attestation via OIDC).
 
 - **Idempotent ingest via the `Idempotency-Key` header (#37).** `POST
   /v1/feedback/ingest` now honors an optional `Idempotency-Key` request header:
