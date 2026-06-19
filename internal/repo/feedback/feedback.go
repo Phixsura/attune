@@ -87,7 +87,7 @@ func (r *FeedbackRepo) Insert(
 }
 
 // InsertIdempotent inserts the row keyed by in.IdempotencyKey, deduping under
-// the partial unique index ux_user_feedback_idempotency (migration 055). A
+// the partial unique index ux_user_feedback_idempotency (migration 056). A
 // concurrent retry's INSERT blocks on the index until the first commits, then
 // hits the conflict and reads back the original id — so concurrent retries can
 // never create a duplicate row. Returns (id, deduped, err): deduped=true means

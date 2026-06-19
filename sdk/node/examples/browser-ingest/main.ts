@@ -1,10 +1,11 @@
 // Minimal browser widget: ingest feedback straight from the page.
 //
 // IMPORTANT: the API key here is an `ingest:write` key, which is a *publishable*
-// credential (like a Segment write key or a Sentry DSN). It is safe to ship to
-// the browser ONLY because it is narrowly scoped — never put a broader-scope key
-// in client-side code. Protect it server-side with a per-key rate limit and,
-// where you can, an IP/origin allowlist.
+// credential (like a Segment write key or a Sentry DSN). Ship ONLY this narrow,
+// write-only scope to the browser, over HTTPS — never a broader-scope key. A
+// scraped key can still spam ingest, so treat it as low-trust: set the key's
+// IP/CIDR allowlist where the origin is predictable, rely on the tenant ingest
+// rate limit to cap volume, and rotate/revoke the key if it leaks.
 import { AttuneError, Client } from '@phixsura/attune'
 
 // In a real app these come from your build-time public config.

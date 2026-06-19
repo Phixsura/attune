@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -78,6 +79,9 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 		return 0, err
 	}
 	if in.IdempotencyKey != "" && !idempotencyKeyRe.MatchString(in.IdempotencyKey) {
+		// Don't log the raw key (attacker-controlled); length is enough to debug.
+		logext.Warnf(ctx, "[%s] reject: malformed idempotency key,tenant_id:%s,key_len:%d",
+			where, tenantID, len(in.IdempotencyKey))
 		return 0, ErrInvalidIdempotencyKey
 	}
 
@@ -92,10 +96,21 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 	id, deduped, err := i.persist(ctx, tenantID, keyID, userID, subjectKey, subjectDisplay, subjectHash, in)
 	if err != nil {
 		if errors.Is(err, feedbackrepo.ErrIdempotencyConflict) {
+			metrics.IdempotencyKeyUsage.WithLabelValues(tenantID, "conflict").Inc()
 			return 0, ErrIdempotencyConflict
 		}
 		logext.Errorf(ctx, "[%s] repo.Insert failed,tenant_id:%s,err:%+v", where, tenantID, err.Error())
 		return 0, fmt.Errorf("repo insert: %w", err)
+	}
+
+	// Feed the same idempotency-usage metric the batch path does, so the
+	// Operations "Idempotency" dashboard panel covers single-row ingest too.
+	if in.IdempotencyKey != "" {
+		outcome := "new"
+		if deduped {
+			outcome = "cache_hit"
+		}
+		metrics.IdempotencyKeyUsage.WithLabelValues(tenantID, outcome).Inc()
 	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d,deduped:%t", where, tenantID, id, deduped)

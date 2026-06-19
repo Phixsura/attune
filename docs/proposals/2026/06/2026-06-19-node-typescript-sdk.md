@@ -180,12 +180,18 @@ by a live 8-way-concurrent e2e that asserts exactly one row.
 The ingest endpoint backs an in-app web widget (`source: "web"`, `pageUrl`), so
 browser use is a first-class case. `ingest:write` API keys are treated as
 **publishable credentials** — like a Segment write key, a Sentry DSN, or a
-Supabase anon key — relying on attune's existing per-key controls (rate limits,
-IP allowlist, narrow scope) rather than a secrecy assumption. The SDK therefore
-works in the browser with no `dangerouslyAllowBrowser`-style gate; the README
-states plainly that an `ingest:write` key is public and must be rate-limited /
-IP-scoped, and that secret-grade keys (broader scopes) must never ship to a
-browser. `examples/browser-ingest/` demonstrates the widget pattern.
+Supabase anon key — narrowly scoped to one write-only action rather than relying
+on secrecy. The SDK works in the browser with no `dangerouslyAllowBrowser`-style
+gate. The real controls a leaked key is bounded by today are: the key's IP/CIDR
+allowlist, a **tenant-wide** ingest rate limit (shared across the tenant's keys),
+narrow scope, and rotation/revocation — the README states this accurately and
+notes the key must travel over HTTPS. `examples/browser-ingest/` demonstrates
+the pattern.
+
+Note (surfaced in review): a *per-key* rate limit is stored on api keys but is
+NOT yet enforced on the request path — only the tenant-wide limit applies. The
+docs were corrected to not claim per-key throttling; wiring per-key enforcement
+is tracked as a follow-up (API-key security, #41 area), not part of #37.
 
 ### Build / test / CI / publish
 

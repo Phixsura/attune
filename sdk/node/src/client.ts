@@ -105,6 +105,7 @@ export class Client {
     userSignal?: AbortSignal,
   ): Promise<T> {
     const url = this.#baseURL + path
+    const payload = JSON.stringify(body) // serialize once, reused across retries
     let lastError: AttuneError | undefined
 
     for (let attempt = 0; attempt <= this.#maxRetries; attempt++) {
@@ -114,7 +115,7 @@ export class Client {
 
       let response: Response
       try {
-        response = await this.#fetchOnce(url, body, idempotencyKey, userSignal)
+        response = await this.#fetchOnce(url, payload, idempotencyKey, userSignal)
       } catch (err) {
         const transportError = err as AttuneError
         // A caller-initiated abort is intentional — never retry it.
@@ -153,7 +154,7 @@ export class Client {
   // and very recent browsers). Throws a typed transport AttuneError on failure.
   async #fetchOnce(
     url: string,
-    body: unknown,
+    payload: string,
     idempotencyKey: string,
     userSignal?: AbortSignal,
   ): Promise<Response> {
@@ -174,7 +175,7 @@ export class Client {
           [API_KEY_HEADER]: this.#apiKey,
           'Idempotency-Key': idempotencyKey,
         },
-        body: JSON.stringify(body),
+        body: payload,
         signal: controller.signal,
       })
     } catch (cause) {

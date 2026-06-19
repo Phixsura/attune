@@ -103,10 +103,18 @@ Replaying a key with a different body throws `AttuneError` `IDEMPOTENCY_CONFLICT
 
 The SDK runs in the browser with no special flag, so you can ingest directly
 from a web widget (`source: 'web'`, `pageUrl`). **Only ship an `ingest:write`
-key to the browser.** Such a key is a *publishable* credential — like a Segment
-write key or a Sentry DSN — and is safe in client code precisely because it is
-narrowly scoped. Protect it with the per-key rate limit and IP/origin allowlist
-in the attune console. Never put a broader-scope key in client-side code.
+key to the browser**, and only over HTTPS. Such a key is a *publishable*
+credential — like a Segment write key or a Sentry DSN — safe in client code
+because it is narrowly scoped to one write-only action. A scraped key can still
+spam ingest, so treat it as low-trust:
+
+- restrict it with the key's **IP/CIDR allowlist** in the console where the
+  origin is predictable;
+- a tenant-wide ingest **rate limit** caps total ingest volume (note: this is
+  per-tenant, shared by all keys — not per-key today);
+- **rotate/revoke** the key if it leaks.
+
+Never put a broader-scope key in client-side code.
 
 ## Examples
 

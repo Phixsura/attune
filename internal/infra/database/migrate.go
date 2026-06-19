@@ -60,19 +60,21 @@ func acquireMigrationLock(ctx context.Context, pool *pgxpool.Pool) (*pgxpool.Con
 	if err != nil {
 		return nil, fmt.Errorf("acquire migration connection: %w", err)
 	}
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
-		conn.Release()
-		logext.Errorf(ctx, "[%s] lock failed,err:%+v", where, err.Error())
-		return nil, fmt.Errorf("acquire migration lock: %w", err)
-	}
 	// The pool sets a 30s statement_timeout default (database.NewPool, #64), but
 	// migrations can legitimately run long (large backfills, index builds). Clear
-	// it on this dedicated, soon-released migration connection so a slow migration
-	// can't be killed mid-statement and leave the schema half-applied.
+	// it BEFORE acquiring the advisory lock: a CONCURRENTLY index build on one
+	// replica can hold the lock for minutes, and the lock wait itself is a
+	// statement — under the 30s default a second replica's pg_advisory_lock would
+	// time out and fail startup instead of waiting its turn.
 	if _, err := conn.Exec(ctx, `SET statement_timeout = 0`); err != nil {
 		conn.Release()
 		logext.Errorf(ctx, "[%s] clear statement_timeout failed,err:%+v", where, err.Error())
 		return nil, fmt.Errorf("clear migration statement_timeout: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		conn.Release()
+		logext.Errorf(ctx, "[%s] lock failed,err:%+v", where, err.Error())
+		return nil, fmt.Errorf("acquire migration lock: %w", err)
 	}
 	logext.Infof(ctx, "[%s] OK", where)
 	return conn, nil
@@ -136,7 +138,7 @@ func runMigrationsLocked(ctx context.Context, conn *pgxpool.Conn) error {
 			logext.Errorf(ctx, "[%s] read file failed,file:%s,err:%+v", where, name, err.Error())
 			return fmt.Errorf("read %s: %w", name, err)
 		}
-		if bytes.Contains(body, []byte(noTxDirective)) {
+		if isNoTxMigration(body) {
 			if err := applyMigrationNoTx(ctx, conn, version, name, body); err != nil {
 				return err
 			}
@@ -194,4 +196,15 @@ func applyMigrationNoTx(ctx context.Context, conn *pgxpool.Conn, version int, na
 
 func recordMigrationSQL() string {
 	return fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable)
+}
+
+// isNoTxMigration reports whether a migration must run outside a transaction.
+// The directive must be on the FIRST line (as a SQL comment) so a stray mention
+// of the string inside another migration's body can't silently flip it.
+func isNoTxMigration(body []byte) bool {
+	first := body
+	if i := bytes.IndexByte(body, '\n'); i >= 0 {
+		first = body[:i]
+	}
+	return bytes.Contains(first, []byte(noTxDirective))
 }

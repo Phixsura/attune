@@ -125,8 +125,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   (migrations 055–056) with `INSERT … ON CONFLICT`, so it is atomic even under
   concurrent retries (N simultaneous same-key requests collapse to one row). The
   index is built `CONCURRENTLY` (migration 056, via new non-transactional
-  migration support) so deploying it does not lock ingest on a large table. The
-  Node SDK sends a per-call key automatically, held stable across retries, so a
+  migration support) so deploying it does not lock ingest on a large table.
+  Ingest now feeds `attune_idempotency_key_usage_total{outcome}`
+  (new/cache_hit/conflict), so the Operations "Idempotency" dashboard covers
+  single-row ingest, not just batch. The Node SDK sends a per-call key automatically, held stable across retries, so a
   retried at-least-once delivery cannot create a duplicate feedback row.
 
 - **Terminal enrichment-failure observability (#64).** New metric
