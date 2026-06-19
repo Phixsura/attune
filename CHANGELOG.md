@@ -144,18 +144,25 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
-- **Tag + workflow CRUD over the API-key surface, with Go SDK methods (#36).**
+- **Tag + workflow CRUD over the API-key surface, with Go + Node SDK methods (#36, #37).**
   The tag and workflow-state config endpoints — previously console-session-only —
   are now also mounted under the API-key group (`/v1/tags`, `/v1/workflow/...`),
   scope-gated by `tags:read`/`tags:write` and `workflow:read`/`workflow:write`
   (scopes that were defined but enforced nowhere). The existing console handlers
   are reused via an apikey→AuthCtx adapter (`console.MountAPIKeyAdminRoutes`),
-  with the actor audited as `apikey:<keyID>`. The Go SDK gains
-  `ListTags`/`CreateTag`/`UpdateTag`/`ArchiveTag` and
-  `ListWorkflowStates`/`CreateWorkflowState`/`UpdateWorkflowState`/
-  `ArchiveWorkflowState`/`ListWorkflowTransitions`/`ReplaceWorkflowTransitions`/
-  `SeedWorkflowDefaults`, built on a generalized request core; both are verified
-  by real-server e2e. Note: tag/state update is replace-semantics (send full
+  with the actor audited as `apikey:<keyID>`. Both SDKs gain the matching
+  methods — `listTags`/`createTag`/`updateTag`/`archiveTag` and
+  `listWorkflowStates`/`createWorkflowState`/`updateWorkflowState`/
+  `archiveWorkflowState`/`listWorkflowTransitions`/`replaceWorkflowTransitions`/
+  `seedWorkflowDefaults` (Go uses the `Ingest*`-style PascalCase) — built on a
+  generalized request core shared with `ingest`. The core preserves ingest's
+  retry-safety contract: idempotent `GET`/`PUT`/`PATCH`/`DELETE` are retried on
+  transient failure, but the non-idempotent `create*`/`seed*` `POST`s are not, so
+  a lost response can't create a duplicate resource; path ids are URL-escaped.
+  Both surfaces are verified by real-server e2e, including scope-denied (403) and
+  cross-tenant isolation. The server also now rejects a transition referencing a
+  state outside the tenant with `400 VALIDATION` (was a potential cross-tenant
+  reference / 500). Note: tag/state update is replace-semantics (send full
   state), and these endpoints expose admin config to scoped API keys.
 
 - **Node/TypeScript client SDK `@phixsura/attune` (#37).** Published client for

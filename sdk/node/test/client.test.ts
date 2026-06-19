@@ -65,9 +65,8 @@ describe('adversarial inputs / config edges', () => {
       code: 'BAD_REQUEST',
     })
     // biome-ignore lint/suspicious/noExplicitAny: BigInt is not serializable
-    await expect(
-      client.ingest({ content: 'x', sourceMeta: { big: 1n } as any }),
-    ).rejects.toBeInstanceOf(AttuneError)
+    const bad = { content: 'x', sourceMeta: { big: 1n } as any }
+    await expect(client.ingest(bad)).rejects.toBeInstanceOf(AttuneError)
     expect(calls).toHaveLength(0) // never hit the network
   })
 

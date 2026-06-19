@@ -25,6 +25,7 @@ SRV_LOG="$WORK/server.log"
 SRV_PID=""
 
 log() { printf '\n\033[1;36m▸ %s\033[0m\n' "$*"; }
+pg() { docker exec "$CONTAINER" psql -U attune -d attune -tAc "$1"; }
 
 cleanup() {
   log "teardown"
@@ -80,13 +81,29 @@ KEY="$("$BIN" --config "$CONFIG" keys issue --tenant sdke2e --label "$MARKER" 2>
   | awk '/ key:/{print $2}')"
 [ -n "$KEY" ] || { echo "failed to issue key"; exit 1; }
 
+# A second key restricted to ingest:write ONLY, so the e2e can verify scope
+# denial (tag/workflow write → 403). The CLI issues unrestricted keys; we pin a
+# scope row directly, which restricts the key to that single scope.
+RKEY_OUT="$("$BIN" --config "$CONFIG" keys issue --tenant sdke2e --label "$MARKER-restricted" 2>/dev/null)"
+RKEY="$(echo "$RKEY_OUT" | awk '/ key:/{print $2}')"
+RKEY_ID="$(echo "$RKEY_OUT" | awk '/ id:/{print $2}')"
+pg "insert into api_key_scopes (key_id, scope) values ('${RKEY_ID}', 'ingest:write');" >/dev/null
+[ -n "$RKEY" ] || { echo "failed to issue restricted key"; exit 1; }
+
+# A second tenant + key, to verify cross-tenant isolation.
+"$BIN" --config "$CONFIG" tenant create --slug sdke2e2 --name "SDK E2E 2" >/dev/null
+TKEY="$("$BIN" --config "$CONFIG" keys issue --tenant sdke2e2 --label "$MARKER-t2" 2>/dev/null \
+  | awk '/ key:/{print $2}')"
+[ -n "$TKEY" ] || { echo "failed to issue tenant-2 key"; exit 1; }
+
 log "build the SDK package (dist/)"
 ( cd "$SDK_DIR" && pnpm exec tsdown >/dev/null )
 
 log "run live vitest e2e suite against ${BASE_URL}"
 (
   cd "$SDK_DIR"
-  ATTUNE_E2E_BASE_URL="$BASE_URL" ATTUNE_E2E_API_KEY="$KEY" ATTUNE_E2E_MARKER="$MARKER" \
+  ATTUNE_E2E_BASE_URL="$BASE_URL" ATTUNE_E2E_API_KEY="$KEY" \
+    ATTUNE_E2E_RESTRICTED_KEY="$RKEY" ATTUNE_E2E_TENANT2_KEY="$TKEY" ATTUNE_E2E_MARKER="$MARKER" \
     pnpm exec vitest run test/e2e
 )
 
