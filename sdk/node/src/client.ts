@@ -69,6 +69,14 @@ export class Client {
   readonly #sleep: (ms: number) => Promise<void>
 
   constructor(options: ClientOptions) {
+    // Guard against JS callers (no type-checking) doing `new Client()` /
+    // `new Client(null)` — give a clear AttuneError, not a raw TypeError.
+    if (options == null || typeof options !== 'object') {
+      throw new AttuneError({
+        code: 'BAD_REQUEST',
+        message: 'Client requires an options object: { baseURL, apiKey }',
+      })
+    }
     if (!options.baseURL)
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'baseURL is required' })
     if (!options.apiKey)

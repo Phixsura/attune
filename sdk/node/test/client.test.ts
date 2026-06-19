@@ -334,3 +334,14 @@ describe('security: header & response-size hardening', () => {
     })
   })
 })
+
+describe('constructor: JS-caller misuse (no type checking)', () => {
+  it('throws AttuneError (not a raw TypeError) for missing/non-object options', () => {
+    // biome-ignore lint/suspicious/noExplicitAny: simulating an untyped JS caller
+    const C = Client as any
+    expect(() => new C()).toThrow(AttuneError)
+    expect(() => new C(null)).toThrow(AttuneError)
+    expect(() => new C('nope')).toThrow(AttuneError)
+    expect(() => new C(42)).toThrow(AttuneError)
+  })
+})
