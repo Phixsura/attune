@@ -404,6 +404,7 @@ func TestReplaceTransitions_HTTP(t *testing.T) {
 	t.Run("200 OK", func(t *testing.T) {
 		now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
 		h := NewHandler(&fakeStateStore{
+			states: []workflowstate.WorkflowState{{ID: "s-1"}, {ID: "s-2"}}, // referenced states must belong to the tenant
 			transitions: []workflowstate.Transition{
 				{ID: "t-new", TenantID: "tenant-1", FromStateID: "s-1", ToStateID: "s-2", CreatedAt: now},
 			},
@@ -427,8 +428,32 @@ func TestReplaceTransitions_HTTP(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 	})
 
+	t.Run("400 unknown state (cross-tenant guard)", func(t *testing.T) {
+		// states the tenant owns do NOT include "s-other" → reject, not 500.
+		h := NewHandler(&fakeStateStore{
+			states: []workflowstate.WorkflowState{{ID: "s-1"}},
+		}, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.ReplaceTransitions",
+			dispatcher.JSON(func() *attunev1.ReplaceTransitionsRequest {
+				return ptrext.Of(attunev1.ReplaceTransitionsRequest{})
+			}),
+			h.ReplaceTransitions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ReplaceTransitionsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/transitions",
+			`{"transitions":[{"fromStateId":"s-1","toStateId":"s-other"}]}`))
+		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
 	t.Run("500 replace error", func(t *testing.T) {
-		h := NewHandler(&fakeStateStore{replaceErr: errors.New("replace fail")}, &fakeWorkflowService{})
+		h := NewHandler(&fakeStateStore{
+			states:     []workflowstate.WorkflowState{{ID: "s-1"}, {ID: "s-2"}},
+			replaceErr: errors.New("replace fail"),
+		}, &fakeWorkflowService{})
 		handler := dispatcher.Bind(
 			"console.WorkflowHandler.ReplaceTransitions",
 			dispatcher.JSON(func() *attunev1.ReplaceTransitionsRequest {

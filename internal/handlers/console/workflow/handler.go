@@ -256,8 +256,27 @@ func (h *Handler) ReplaceTransitions(
 		logext.Warnf(ctx, "[%s] prefetch transitions failed,tenant_id:%s,err:%+v", where, auth.TenantID, beforeErr.Error())
 	}
 
+	// Validate every referenced state belongs to this tenant before inserting.
+	// The transitions FK only checks global state-id existence, so without this a
+	// caller could reference another tenant's state ids (cross-tenant). Also turns
+	// an unknown-state reference into a clear 400 instead of an opaque 500.
+	owned, ownErr := h.states.List(ctx, auth.TenantID, true)
+	if ownErr != nil {
+		logext.Errorf(ctx, "[%s] state prefetch failed,tenant_id:%s,err:%+v", where, auth.TenantID, ownErr.Error())
+		return dispatcher.Fail[*attunev1.ReplaceTransitionsResponse](
+			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to validate states")
+	}
+	valid := make(map[string]bool, len(owned))
+	for _, s := range owned {
+		valid[s.ID] = true
+	}
 	edges := make([]workflowstate.TransitionEdge, len(req.GetTransitions()))
 	for i, e := range req.GetTransitions() {
+		if !valid[e.GetFromStateId()] || !valid[e.GetToStateId()] {
+			return dispatcher.Fail[*attunev1.ReplaceTransitionsResponse](
+				http.StatusBadRequest, attunev1.ErrorCode_VALIDATION,
+				"transition references a workflow state that does not exist in this tenant")
+		}
 		edges[i] = workflowstate.TransitionEdge{
 			FromStateID: e.GetFromStateId(),
 			ToStateID:   e.GetToStateId(),

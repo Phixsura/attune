@@ -25,6 +25,7 @@ import (
 	"time"
 
 	attune "github.com/Phixsura/attune/sdk/go"
+	attunev1 "github.com/Phixsura/attune/sdk/go/attune/v1"
 )
 
 // TestE2ERetryAgainstRealServer exercises the SDK's retry path end-to-end: a
@@ -240,7 +241,105 @@ func TestE2EWorkflowCRUD(t *testing.T) {
 	if _, err := c.ListWorkflowTransitions(ctx); err != nil {
 		t.Fatalf("ListWorkflowTransitions: %v", err)
 	}
+
+	// A transition referencing a state that doesn't exist in this tenant must be
+	// rejected with 400 (the cross-tenant / unknown-state guard), not a 500.
+	_, err = c.ReplaceWorkflowTransitions(ctx, &attune.ReplaceTransitionsRequest{
+		Transitions: []*attunev1.WorkflowTransitionEdge{
+			{FromStateId: "00000000-0000-0000-0000-000000000000", ToStateId: "00000000-0000-0000-0000-000000000001"},
+		},
+	})
+	var ae *attune.AttuneError
+	if !errors.As(err, &ae) || ae.Status != 400 {
+		t.Errorf("ReplaceWorkflowTransitions with unknown state = %v, want 400", err)
+	}
 }
+
+// TestE2EWorkflowStateCRUD drives a real Create→Update→Archive of a workflow
+// state over the API-key surface (the full state config path, not just seed).
+func TestE2EWorkflowStateCRUD(t *testing.T) {
+	c, _ := newClient(t)
+	ctx := context.Background()
+
+	created, err := c.CreateWorkflowState(ctx, &attune.CreateStateRequest{
+		Name:        "sdk_state",
+		Color:       "#3b82f6",
+		Category:    "active",
+		Position:    99,
+		DisplayName: &attunev1.I18NString{Entries: map[string]string{"en": "SDK State"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkflowState: %v", err)
+	}
+	id := created.GetState().GetId()
+	if id == "" {
+		t.Fatalf("created state has no id: %+v", created.GetState())
+	}
+
+	if _, err := c.UpdateWorkflowState(ctx, &attune.UpdateStateRequest{
+		Id:          id,
+		Color:       strptr("#22c55e"),
+		Position:    int32ptr(98),
+		DisplayName: &attunev1.I18NString{Entries: map[string]string{"en": "SDK State v2"}},
+	}); err != nil {
+		t.Fatalf("UpdateWorkflowState: %v", err)
+	}
+
+	if _, err := c.ArchiveWorkflowState(ctx, id); err != nil {
+		t.Fatalf("ArchiveWorkflowState: %v", err)
+	}
+}
+
+// TestE2ECrossTenantIsolation verifies a tenant-2 key cannot see or modify
+// tenant-1's tags — a core multi-tenant security property.
+func TestE2ECrossTenantIsolation(t *testing.T) {
+	base := os.Getenv("ATTUNE_E2E_BASE_URL")
+	k1 := os.Getenv("ATTUNE_E2E_API_KEY")
+	k2 := os.Getenv("ATTUNE_E2E_TENANT2_KEY")
+	marker := os.Getenv("ATTUNE_E2E_MARKER")
+	if base == "" || k1 == "" || k2 == "" || marker == "" {
+		t.Skip("ATTUNE_E2E_TENANT2_KEY not set")
+	}
+	c1, _ := attune.New(base, k1)
+	c2, _ := attune.New(base, k2)
+	ctx := context.Background()
+
+	tag, err := c1.CreateTag(ctx, &attune.CreateTagRequest{Name: "iso-" + marker})
+	if err != nil {
+		t.Fatalf("tenant1 CreateTag: %v", err)
+	}
+
+	// tenant2 must NOT see tenant1's tag.
+	list2, err := c2.ListTags(ctx, true)
+	if err != nil {
+		t.Fatalf("tenant2 ListTags: %v", err)
+	}
+	for _, tg := range list2.GetTags() {
+		if tg.GetId() == tag.GetId() {
+			t.Fatalf("cross-tenant LEAK: tenant2 sees tenant1's tag %s", tag.GetId())
+		}
+	}
+
+	// tenant2 trying to archive tenant1's tag must not affect it.
+	_, _ = c2.ArchiveTag(ctx, tag.GetId())
+	list1, err := c1.ListTags(ctx, false)
+	if err != nil {
+		t.Fatalf("tenant1 ListTags: %v", err)
+	}
+	found := false
+	for _, tg := range list1.GetTags() {
+		if tg.GetId() == tag.GetId() {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("cross-tenant WRITE: tenant2 archived tenant1's tag")
+	}
+}
+
+func strptr(s string) *string { return &s }
+func int32ptr(i int32) *int32 { return &i }
 
 // TestE2EScopeDenied verifies scope gating actually works: a key restricted to
 // ingest:write only is FORBIDDEN on tag/workflow writes, but can still ingest.

@@ -92,11 +92,17 @@ RKEY_ID="$(echo "$RKEY_OUT" | awk '/ id:/{print $2}')"
 pg "insert into api_key_scopes (key_id, scope) values ('${RKEY_ID}', 'ingest:write');" >/dev/null
 [ -n "$RKEY" ] || { echo "failed to issue restricted key"; exit 1; }
 
+# A second tenant + key, to verify cross-tenant isolation.
+"$BIN" --config "$CONFIG" tenant create --slug sdkgoe2e2 --name "SDK Go E2E 2" >/dev/null
+TKEY="$("$BIN" --config "$CONFIG" keys issue --tenant sdkgoe2e2 --label "$MARKER-t2" 2>/dev/null \
+  | awk '/ key:/{print $2}')"
+[ -n "$TKEY" ] || { echo "failed to issue tenant-2 key"; exit 1; }
+
 log "run live Go e2e suite (go test -tags e2e ./test/e2e) against ${BASE_URL}"
 (
   cd "$SDK_DIR"
   ATTUNE_E2E_BASE_URL="$BASE_URL" ATTUNE_E2E_API_KEY="$KEY" \
-    ATTUNE_E2E_RESTRICTED_KEY="$RKEY" ATTUNE_E2E_MARKER="$MARKER" \
+    ATTUNE_E2E_RESTRICTED_KEY="$RKEY" ATTUNE_E2E_TENANT2_KEY="$TKEY" ATTUNE_E2E_MARKER="$MARKER" \
     go test -tags e2e -count=1 -v ./test/e2e
 )
 
