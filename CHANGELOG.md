@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   
 ### Security
 
+- **Node SDK does not follow HTTP redirects (#37).** `@phixsura/attune` issues
+  ingest requests with `redirect: "manual"`, so a compromised or misconfigured
+  endpoint can't 3xx-redirect the request and have `fetch` re-send the
+  `X-API-Key` header to an attacker host (credential leak). A 3xx now surfaces as
+  an `AttuneError` instead of being followed.
+
 - **SSRF-resistant outbound egress (#64).** A new `internal/pkg/nethardening`
   guard enforces an egress policy at dial time (after DNS resolution, so it
   defeats DNS rebinding) on outbound webhook delivery (including the console

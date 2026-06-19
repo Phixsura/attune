@@ -294,3 +294,18 @@ describe('transport: slow / partial / malformed responses', () => {
     await expect(client.ingest({ content: 'x' })).rejects.toMatchObject({ code: 'TIMEOUT' })
   })
 })
+
+describe('security: redirects are not followed (no API-key leak)', () => {
+  it('surfaces a 3xx as AttuneError, sets redirect:manual, and never re-sends', async () => {
+    const { fetch, calls } = stubFetch([
+      () => new Response('', { status: 307, headers: { location: 'http://evil.example/x' } }),
+    ])
+    const client = newClient(fetch, { maxRetries: 0 })
+    await expect(client.ingest({ content: 'x' })).rejects.toMatchObject({
+      name: 'AttuneError',
+      status: 307,
+    })
+    expect(calls).toHaveLength(1) // not followed to the redirect target
+    expect((calls[0]?.init as RequestInit).redirect).toBe('manual')
+  })
+})

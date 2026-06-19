@@ -201,6 +201,10 @@ export class Client {
         },
         body: payload,
         signal: controller.signal,
+        // Never auto-follow redirects: fetch would re-send the X-API-Key header
+        // to the redirect target, leaking the key if the endpoint is
+        // compromised/misconfigured. A 3xx is surfaced as an error instead.
+        redirect: 'manual',
       })
       // Read the body under the SAME timeout/abort scope: fetch() resolves on
       // headers, so a slow or truncated body would otherwise hang forever (the
