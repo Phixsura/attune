@@ -76,11 +76,13 @@ try {
 value (`"VALIDATION"`, `"UNAUTHORIZED"`, `"RATE_LIMITED"`, …) or a transport
 code (`"NETWORK"`, `"TIMEOUT"`, `"ABORTED"`).
 
-The client retries transient failures — HTTP `408` / `409` / `429` / `5xx`,
-network errors, and timeouts — up to `maxRetries`, with exponential backoff
-(±25% jitter) that honors a `Retry-After` response header. Deterministic client
-errors (`400`, `401`, `403`, `404`, `422`, …) are never retried. This policy is
-shared verbatim with the Go SDK.
+The client retries transient failures — HTTP `408` / `429` / `5xx`, network
+errors, and timeouts — up to `maxRetries`, with exponential backoff (±25%
+jitter) that honors a `Retry-After` response header. A `409 REQUEST_IN_PROGRESS`
+(a concurrent request with the same idempotency key is in flight) is retried so
+the in-flight call can finish; a `409 IDEMPOTENCY_CONFLICT` and other
+deterministic client errors (`400`, `401`, `403`, `404`, `422`, …) are never
+retried. This policy is shared verbatim with the Go SDK.
 
 ## Idempotency
 

@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { backoffDelay, isRetryableStatus, parseRetryAfter } from '../src/retry'
+import { backoffDelay, isRetryable, parseRetryAfter } from '../src/retry'
 
-describe('isRetryableStatus', () => {
-  it('retries 408/409/429 and all 5xx', () => {
-    for (const s of [408, 409, 429, 500, 502, 503, 504]) expect(isRetryableStatus(s)).toBe(true)
+describe('isRetryable', () => {
+  it('retries 408/429 and all 5xx', () => {
+    for (const s of [408, 429, 500, 502, 503, 504]) expect(isRetryable(s)).toBe(true)
   })
   it('does not retry deterministic 4xx', () => {
-    for (const s of [400, 401, 403, 404, 422]) expect(isRetryableStatus(s)).toBe(false)
+    for (const s of [400, 401, 403, 404, 422]) expect(isRetryable(s)).toBe(false)
+  })
+  it('splits 409 by code: retry REQUEST_IN_PROGRESS, never IDEMPOTENCY_CONFLICT', () => {
+    expect(isRetryable(409, 'REQUEST_IN_PROGRESS')).toBe(true)
+    expect(isRetryable(409, 'IDEMPOTENCY_CONFLICT')).toBe(false)
+    expect(isRetryable(409)).toBe(false) // unknown 409 → do not retry
   })
 })
 

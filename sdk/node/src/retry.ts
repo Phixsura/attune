@@ -2,21 +2,32 @@
 // docs/proposals/2026/06/2026-06-19-node-typescript-sdk.md § "Retry / error
 // contract". Behaviour here MUST stay in lockstep with that document.
 
-const RETRYABLE_STATUS = new Set([408, 409, 429])
-
 const BASE_DELAY_MS = 200
 const MAX_DELAY_MS = 2_000
 const JITTER_RATIO = 0.25
 const MAX_RETRY_AFTER_MS = 60_000
 
 /**
- * Retry on transient failures only: HTTP 408 / 409 / 429 and any 5xx.
- * Deterministic client errors (400, 401, 403, 404, 422, …) are never retried —
- * retrying wastes calls and, for the non-idempotent ingest POST, risks
- * duplicate rows.
+ * Whether a non-2xx response should be retried (with a fresh attempt under the
+ * same idempotency key, so a retry can never duplicate a row).
+ *
+ * Retried: 408 (request timeout), 429 (rate limited), any 5xx.
+ *
+ * 409 is split by error `code`, because ingest uses it for two opposite
+ * idempotency outcomes:
+ *   - REQUEST_IN_PROGRESS — a concurrent request with the same key is still
+ *     in flight; backing off and retrying lets it finish and returns the cached
+ *     result. Retried.
+ *   - IDEMPOTENCY_CONFLICT — the same key was reused with a different body; this
+ *     is permanent, retrying always 409s. NOT retried.
+ *
+ * Everything else (400, 401, 403, 404, 422, …) is a deterministic client error
+ * and is never retried.
  */
-export function isRetryableStatus(status: number): boolean {
-  return RETRYABLE_STATUS.has(status) || status >= 500
+export function isRetryable(status: number, code?: string): boolean {
+  if (status === 408 || status === 429 || status >= 500) return true
+  if (status === 409) return code === 'REQUEST_IN_PROGRESS'
+  return false
 }
 
 /**

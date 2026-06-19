@@ -119,8 +119,12 @@ message set into the package carries no runtime weight.
 
 This section is the normative contract both SDKs implement.
 
-- **Retry on:** network/connection errors, request timeout, HTTP `408`, `409`,
-  `429`, and `5xx`.
+- **Retry on:** network/connection errors, request timeout, HTTP `408`, `429`,
+  and `5xx`.
+- **409 is split by error `code`** (ingest reuses 409 for two opposite
+  idempotency outcomes): retry `REQUEST_IN_PROGRESS` (a concurrent same-key
+  request is in flight; backoff lets it finish and returns the cached result);
+  never retry `IDEMPOTENCY_CONFLICT` (same key + different body — permanent).
 - **Never retry:** `400`, `401`, `403`, `404`, `422`, and other non-listed 4xx —
   these are deterministic client errors; retrying wastes calls.
 - **Retry safety:** ingest is a non-idempotent POST, so retrying a request that

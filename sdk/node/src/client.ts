@@ -1,7 +1,7 @@
 import { AttuneError, TransportErrorCode } from './errors'
 import type { ErrorResponse } from './proto/attune/v1/common'
 import type { IngestRequest, IngestResponse } from './proto/attune/v1/ingest'
-import { backoffDelay, isRetryableStatus, parseRetryAfter } from './retry'
+import { backoffDelay, isRetryable, parseRetryAfter } from './retry'
 
 /**
  * Caller-facing ingest payload. Derived from the proto-generated
@@ -94,7 +94,7 @@ export class Client {
   ingest(input: IngestInput, options?: RequestOptions): Promise<IngestResponse> {
     // One key per call, reused across this call's retries — that is what makes
     // a retry safe against the non-idempotent ingest POST.
-    const idempotencyKey = options?.idempotencyKey ?? globalThis.crypto.randomUUID()
+    const idempotencyKey = options?.idempotencyKey ?? randomIdempotencyKey()
     return this.#request<IngestResponse>(INGEST_PATH, input, idempotencyKey, options?.signal)
   }
 
@@ -136,7 +136,7 @@ export class Client {
         await readErrorBody(response),
         response.headers,
       )
-      if (isRetryableStatus(response.status) && attempt < this.#maxRetries) {
+      if (isRetryable(response.status, error.code) && attempt < this.#maxRetries) {
         lastError = error
         await this.#sleep(parseRetryAfter(response.headers) ?? backoffDelay(attempt))
         continue
@@ -207,4 +207,22 @@ async function readErrorBody(response: Response): Promise<ErrorResponse | undefi
   } catch {
     return undefined
   }
+}
+
+// A dedup token valid against the server's key format ([A-Za-z0-9_-]{8,64}).
+// crypto.randomUUID needs a secure context (https/localhost), so a browser
+// widget served over plain http would otherwise throw — fall back gracefully.
+function randomIdempotencyKey(): string {
+  const c: Crypto | undefined = globalThis.crypto
+  if (typeof c?.randomUUID === 'function') return c.randomUUID()
+  if (typeof c?.getRandomValues === 'function') {
+    const b = c.getRandomValues(new Uint8Array(16))
+    b[6] = ((b[6] ?? 0) & 0x0f) | 0x40 // version 4
+    b[8] = ((b[8] ?? 0) & 0x3f) | 0x80 // variant
+    const hex = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+  // Last resort: uniqueness only (no Web Crypto at all). Idempotency keys need
+  // to be unique per call, not cryptographically strong.
+  return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
 }
