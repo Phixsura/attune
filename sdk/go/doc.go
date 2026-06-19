@@ -27,9 +27,26 @@
 // deduplicated server-side rather than inserting a duplicate row. Override the
 // key with [WithIdempotencyKey].
 //
-// Errors from the API surface as [*AttuneError] with a stable Code field; switch
-// on Code (never on the human-facing Message). Transport failures use the codes
-// [CodeNetwork], [CodeTimeout], and [CodeAborted].
+// The client never follows 3xx redirects (so the X-API-Key header can't leak to
+// a redirect target), rejects CR/LF in the key and idempotency key, and reads the
+// response body under a 1 MiB cap. A *[Client] is immutable after [New] and safe
+// for concurrent use across goroutines.
+//
+// # Errors
+//
+// Non-success outcomes return [*AttuneError]; switch on its stable Code (never
+// the human-facing Message). Code is one of the server [CodeBadRequest] …
+// [CodeInternal] constants, or a transport code ([CodeNetwork], [CodeTimeout],
+// [CodeAborted]). AttuneError also carries Status, RequestID, and the response
+// Headers (nil for transport errors).
+//
+// # Public surface
+//
+// The proto-generated wire types are re-exported for convenience —
+// [IngestRequest], [IngestResponse], [ErrorResponse], [ErrorCode] — along with
+// the retry policy ([IsRetryable], [BackoffDelay], [ParseRetryAfter]) and the
+// grouped [TransportErrorCode]. The full ErrorCode enum lives in the generated
+// package github.com/Phixsura/attune/sdk/go/attune/v1.
 //
 // # Installation
 //
