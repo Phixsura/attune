@@ -39,8 +39,8 @@ export function backoffDelay(attempt: number, random: () => number = Math.random
  * unparseable, so the caller falls back to {@link backoffDelay}.
  */
 export function parseRetryAfter(headers: Headers, now: number = Date.now()): number | undefined {
-  const raw = headers.get('retry-after')
-  if (!raw) return undefined
+  const raw = headers.get('retry-after')?.trim()
+  if (!raw) return undefined // absent, empty, or whitespace-only (Number("") is 0)
 
   const seconds = Number(raw)
   if (Number.isFinite(seconds)) {

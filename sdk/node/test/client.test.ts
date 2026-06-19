@@ -132,13 +132,16 @@ describe('ingest — retry policy', () => {
     expect(calls).toHaveLength(3) // 1 initial + 2 retries
   })
 
-  it('does NOT retry a 422 validation error', async () => {
+  it('does NOT retry a validation error (server sends 400 + VALIDATION)', async () => {
     const { fetch, calls } = stubFetch([
-      () => json(422, { code: 'VALIDATION', message: 'content required' }),
+      () => json(400, { code: 'VALIDATION', message: 'content required' }),
     ])
     const client = newClient(fetch, { maxRetries: 2 })
 
-    await expect(client.ingest({ content: '' })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(client.ingest({ content: '' })).rejects.toMatchObject({
+      status: 400,
+      code: 'VALIDATION',
+    })
     expect(calls).toHaveLength(1)
   })
 

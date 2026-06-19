@@ -4,7 +4,8 @@
 //   ATTUNE_API_KEY=ak_... \
 //   node index.ts "your feedback text"
 //
-// (Node 20+ runs .ts directly via type-stripping; or compile first.)
+// Running .ts directly needs Node's type-stripping (Node 23.6+, or 22.6+ with
+// --experimental-strip-types). On older Node, compile first: `tsc && node index.js`.
 import { AttuneError, Client } from '@phixsura/attune'
 
 const baseURL = process.env.ATTUNE_BASE_URL

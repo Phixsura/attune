@@ -1,3 +1,5 @@
 node_modules/
 dist/
 *.tsbuildinfo
+# pnpm packs the file:../.. dep into a tarball when examples install
+*.tgz

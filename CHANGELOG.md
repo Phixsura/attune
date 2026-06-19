@@ -105,9 +105,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Request/response types are generated from the proto contract (a new ts-proto
   `buf.gen` target → `sdk/node/src/proto/`, guarded by the `proto-sync` gate) —
   never hand-written. Transactional await-throw model with a typed `AttuneError`
-  (`code`/`status`/`requestId`) and a shared retry contract (408/409/429/5xx +
-  network/timeout, never 400/422, `Retry-After`-aware, default 2 retries) that
-  the Go SDK (#36) will adopt. Ships `examples/node-ingest` and
+  (`code`/`status`/`requestId`) and a shared retry contract (408/429/5xx +
+  network/timeout, never 400/409/422, `Retry-After`-aware, default 2 retries)
+  that the Go SDK (#36) will adopt. Ships `examples/node-ingest` and
   `examples/browser-ingest`; `ingest:write` keys are documented as publishable
   browser-safe credentials.
 

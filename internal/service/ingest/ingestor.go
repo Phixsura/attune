@@ -89,7 +89,7 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 		subjectHash = subjectkey.Hash(tenantID, subjectKey)
 	}
 
-	id, deduped, err := i.persist(ctx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in)
+	id, deduped, err := i.persist(ctx, tenantID, keyID, userID, subjectKey, subjectDisplay, subjectHash, in)
 	if err != nil {
 		if errors.Is(err, feedbackrepo.ErrIdempotencyConflict) {
 			return 0, ErrIdempotencyConflict
@@ -113,27 +113,29 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 // persist routes to the idempotent insert when a key is present, else the plain
 // insert. Returns (id, deduped, err).
 func (i *Ingestor) persist(
-	ctx context.Context, tenantID, userID, subjectKey, subjectDisplay, subjectHash string, in domain.IngestInput,
+	ctx context.Context, tenantID string, keyID uuid.UUID, userID, subjectKey, subjectDisplay, subjectHash string, in domain.IngestInput,
 ) (int64, bool, error) {
 	if in.IdempotencyKey != "" {
-		return i.repo.InsertIdempotent(ctx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in, hashIngest(tenantID, in))
+		return i.repo.InsertIdempotent(ctx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in, hashIngest(tenantID, keyID, in))
 	}
 	id, err := i.repo.Insert(ctx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in)
 	return id, false, err
 }
 
 // hashIngest is the canonical request fingerprint stored alongside the row, so
-// the same idempotency key reused with a different payload is a conflict rather
-// than a silent dedup.
-func hashIngest(tenantID string, in domain.IngestInput) []byte {
+// the same idempotency key reused with a different payload — or by a different
+// API key within the same tenant (keyID) — is a conflict rather than a silent
+// dedup to another caller's row.
+func hashIngest(tenantID string, keyID uuid.UUID, in domain.IngestInput) []byte {
 	canonical := struct {
 		TenantID   string         `json:"t"`
+		KeyID      string         `json:"k"`
 		Content    string         `json:"c"`
 		Source     string         `json:"s"`
 		SourceUser string         `json:"u"`
 		PageURL    string         `json:"p"`
 		SourceMeta map[string]any `json:"m"`
-	}{tenantID, in.Content, in.Source, in.SourceUser, in.PageURL, in.SourceMeta}
+	}{tenantID, keyID.String(), in.Content, in.Source, in.SourceUser, in.PageURL, in.SourceMeta}
 	data, _ := json.Marshal(canonical)
 	sum := sha256.Sum256(data)
 	return sum[:]
