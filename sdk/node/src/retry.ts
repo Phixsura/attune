@@ -13,21 +13,14 @@ const MAX_RETRY_AFTER_MS = 60_000
  *
  * Retried: 408 (request timeout), 429 (rate limited), any 5xx.
  *
- * 409 is split by error `code`, because ingest uses it for two opposite
- * idempotency outcomes:
- *   - REQUEST_IN_PROGRESS — a concurrent request with the same key is still
- *     in flight; backing off and retrying lets it finish and returns the cached
- *     result. Retried.
- *   - IDEMPOTENCY_CONFLICT — the same key was reused with a different body; this
- *     is permanent, retrying always 409s. NOT retried.
- *
- * Everything else (400, 401, 403, 404, 422, …) is a deterministic client error
- * and is never retried.
+ * NOT retried: 409 and the other deterministic client errors (400, 401, 403,
+ * 404, 422, …). ingest's only 409 is IDEMPOTENCY_CONFLICT (same key, different
+ * body) — permanent, so retrying always 409s. There is no in-progress 409:
+ * concurrent same-key retries are serialized by the server's unique index (the
+ * loser blocks then reads the original id), never bounced back to the client.
  */
-export function isRetryable(status: number, code?: string): boolean {
-  if (status === 408 || status === 429 || status >= 500) return true
-  if (status === 409) return code === 'REQUEST_IN_PROGRESS'
-  return false
+export function isRetryable(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500
 }
 
 /**

@@ -167,18 +167,6 @@ func TestIngestHTTP_IdempotencyConflict(t *testing.T) {
 	}
 }
 
-// A still-pending request with the same key → 409 REQUEST_IN_PROGRESS.
-func TestIngestHTTP_RequestInProgress(t *testing.T) {
-	fake := ptrext.Of(fakeIngestor{err: ingest.ErrRequestInProgress})
-	rec := doIngest(t, ingestTestServer(fake), `{"content":"x"}`)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 (%s)", rec.Code, rec.Body)
-	}
-	if got := decodeBody(t, rec)["code"]; got != "REQUEST_IN_PROGRESS" {
-		t.Errorf("code = %v, want REQUEST_IN_PROGRESS (%s)", got, rec.Body)
-	}
-}
-
 // No API key → the middleware rejects before the handler (proves the wiring).
 func TestIngestHTTP_NoAPIKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(`{"content":"x"}`))

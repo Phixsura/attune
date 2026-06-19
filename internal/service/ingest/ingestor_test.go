@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	feedbackrepo "github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
@@ -51,7 +53,7 @@ func TestScrubUntrustedSourceMeta_PreservesAdapterSourceKeys(t *testing.T) {
 func TestIngestRowSubmitsEnrichmentJob(t *testing.T) {
 	repo := ptrext.Of(fakeFeedbackRepo{insertID: 7})
 	submitter := ptrext.Of(fakeSubmitter{})
-	ingestor := NewIngestor(repo, submitter, nil)
+	ingestor := NewIngestor(repo, submitter)
 
 	id, err := ingestor.IngestRow(context.Background(), "tenant-1", uuid.Nil, domain.IngestInput{
 		Content: "checkout is broken",
@@ -73,7 +75,7 @@ func TestIngestRowSubmitsEnrichmentJob(t *testing.T) {
 
 func TestIngestRowQueueSubmitFailureDoesNotFailRequest(t *testing.T) {
 	repo := ptrext.Of(fakeFeedbackRepo{insertID: 11})
-	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{err: errors.New("queue full")}), nil)
+	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{err: errors.New("queue full")}))
 
 	id, err := ingestor.IngestRow(context.Background(), "tenant-1", uuid.Nil, domain.IngestInput{
 		Content: "search is slow",
@@ -87,9 +89,14 @@ func TestIngestRowQueueSubmitFailureDoesNotFailRequest(t *testing.T) {
 	}
 }
 
+// fakeFeedbackRepo simulates the partial-unique-index dedup of the real
+// InsertIdempotent: first key+hash inserts; a replay with the same hash dedups;
+// the same key with a different hash conflicts.
 type fakeFeedbackRepo struct {
 	insertID int64
 	inserts  int
+	seen     map[string][]byte
+	ids      map[string]int64
 }
 
 func (f *fakeFeedbackRepo) Insert(
@@ -103,6 +110,28 @@ func (f *fakeFeedbackRepo) Insert(
 ) (int64, error) {
 	f.inserts++
 	return f.insertID, nil
+}
+
+func (f *fakeFeedbackRepo) InsertIdempotent(
+	_ context.Context,
+	_, _, _, _, _ string,
+	in domain.IngestInput,
+	idemHash []byte,
+) (int64, bool, error) {
+	if f.seen == nil {
+		f.seen = map[string][]byte{}
+		f.ids = map[string]int64{}
+	}
+	if h, ok := f.seen[in.IdempotencyKey]; ok {
+		if !bytes.Equal(h, idemHash) {
+			return 0, false, feedbackrepo.ErrIdempotencyConflict
+		}
+		return f.ids[in.IdempotencyKey], true, nil
+	}
+	f.inserts++
+	f.seen[in.IdempotencyKey] = idemHash
+	f.ids[in.IdempotencyKey] = f.insertID
+	return f.insertID, false, nil
 }
 
 type fakeSubmitter struct {

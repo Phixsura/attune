@@ -114,6 +114,18 @@ live('ingest against a live attune server', () => {
       expect(second.id).toBe(first.id)
     })
 
+    it('N CONCURRENT ingests with the same key collapse to one row (same id)', async () => {
+      const key = `e2e-idem-${E2E_MARKER}-concurrent`
+      const c = client()
+      const results = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          c.ingest({ content: `${E2E_MARKER} idem-concurrent` }, { idempotencyKey: key }),
+        ),
+      )
+      const ids = new Set(results.map((r) => r.id))
+      expect(ids.size).toBe(1) // all 8 concurrent calls resolved to the same row
+    })
+
     it('same key with a different body → 409 IDEMPOTENCY_CONFLICT', async () => {
       const key = `e2e-idem-${E2E_MARKER}-conflict`
       const c = client()

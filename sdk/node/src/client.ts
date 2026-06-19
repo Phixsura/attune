@@ -136,7 +136,7 @@ export class Client {
         await readErrorBody(response),
         response.headers,
       )
-      if (isRetryable(response.status, error.code) && attempt < this.#maxRetries) {
+      if (isRetryable(response.status) && attempt < this.#maxRetries) {
         lastError = error
         await this.#sleep(parseRetryAfter(response.headers) ?? backoffDelay(attempt))
         continue

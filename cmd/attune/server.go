@@ -43,7 +43,6 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	gdprrepo "github.com/Phixsura/attune/internal/repo/gdpr"
 	"github.com/Phixsura/attune/internal/repo/guardpolicy"
-	idempotencyrepo "github.com/Phixsura/attune/internal/repo/idempotency"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
 	llmconfigrepo "github.com/Phixsura/attune/internal/repo/llmconfig"
@@ -289,7 +288,7 @@ func setupRuntimeServices(
 		enricher:         enricher,
 		enrichRunner:     enrichRunner,
 		enrichRuntime:    enrichRuntime,
-		ingestor:         ingest.NewIngestor(feedbackRepo, enrichRunner, idempotencyrepo.New(pool)),
+		ingestor:         ingest.NewIngestor(feedbackRepo, enrichRunner),
 	}, nil
 }
 

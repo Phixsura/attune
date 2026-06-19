@@ -155,17 +155,6 @@ describe('ingest — retry policy', () => {
     expect(calls).toHaveLength(1)
   })
 
-  it('retries a 409 REQUEST_IN_PROGRESS then succeeds', async () => {
-    const { fetch, calls } = stubFetch([
-      () => json(409, { code: 'REQUEST_IN_PROGRESS', message: 'in flight' }),
-      () => json(200, { id: '8', enrichmentStatus: 'pending' }),
-    ])
-    const res = await newClient(fetch, { maxRetries: 2 }).ingest({ content: 'x' })
-
-    expect(res.id).toBe('8')
-    expect(calls).toHaveLength(2)
-  })
-
   it('retries a network error then throws code NETWORK', async () => {
     let n = 0
     const fetch: FetchLike = () => {

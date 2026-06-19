@@ -115,11 +115,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   /v1/feedback/ingest` now honors an optional `Idempotency-Key` request header:
   a replay with the same key + body returns the original feedback id without
   inserting again; the same key with a different body is `409
-  IDEMPOTENCY_CONFLICT`; a concurrent in-flight key is `409 REQUEST_IN_PROGRESS`;
-  a malformed key is `400 VALIDATION`. Reuses the existing `idempotency_keys`
-  store (previously only `/batch`). The Node SDK sends a per-call key
-  automatically, held stable across retries, so a retried at-least-once delivery
-  cannot create a duplicate feedback row.
+  IDEMPOTENCY_CONFLICT`; a malformed key is `400 VALIDATION`. Dedup is enforced
+  by a partial unique index on `user_feedback (tenant_id, idempotency_key)`
+  (migration 055) with `INSERT … ON CONFLICT`, so it is atomic even under
+  concurrent retries (N simultaneous same-key requests collapse to one row). The
+  Node SDK sends a per-call key automatically, held stable across retries, so a
+  retried at-least-once delivery cannot create a duplicate feedback row.
 
 - **Terminal enrichment-failure observability (#64).** New metric
   `attune_enrichment_terminal_failures_total{tenant}` counts feedback rows that

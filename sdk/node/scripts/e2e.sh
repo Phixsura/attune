@@ -111,6 +111,12 @@ DUP="$(docker exec "$CONTAINER" psql -U attune -d attune -tAc \
 echo "  rows for replayed idempotency key: ${DUP}"
 [ "$DUP" = "1" ] || { echo "expected exactly 1 row for replayed key, got ${DUP}"; exit 1; }
 
+log "verify CONCURRENT dedup at the DB level (8 simultaneous → 1 row)"
+CONC="$(docker exec "$CONTAINER" psql -U attune -d attune -tAc \
+  "select count(*) from user_feedback where content = '${MARKER} idem-concurrent';")"
+echo "  rows for concurrent idempotency key: ${CONC}"
+[ "$CONC" = "1" ] || { echo "expected exactly 1 row for concurrent key, got ${CONC}"; exit 1; }
+
 log "verify CommonJS interop (require the CJS build)"
 node --input-type=commonjs -e "
 const { Client, AttuneError, ErrorCode } = require('${SDK_DIR}/dist/index.cjs');

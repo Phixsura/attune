@@ -15,7 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/pkg/subjectkey"
-	"github.com/Phixsura/attune/internal/repo/idempotency"
+	feedbackrepo "github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
@@ -23,15 +23,12 @@ import (
 var (
 	// ErrIdempotencyConflict: same key, different request body.
 	ErrIdempotencyConflict = errors.New("idempotency key used with different request")
-	// ErrRequestInProgress: same key, a concurrent request still pending.
-	ErrRequestInProgress = errors.New("request with this idempotency key is in progress")
 	// ErrInvalidIdempotencyKey: the supplied key is malformed.
 	ErrInvalidIdempotencyKey = errors.New("invalid idempotency key (8-64 chars, [A-Za-z0-9_-])")
 )
 
-// idempotencyKeyRe matches the idempotency_keys CHECK constraint (length 8-64,
-// chars [A-Za-z0-9_-]) so a malformed key fails fast with 400 rather than a DB
-// constraint 500.
+// idempotencyKeyRe bounds the key (length 8-64, chars [A-Za-z0-9_-]) so a
+// malformed value is a fast 400 rather than a wide/garbage index entry.
 var idempotencyKeyRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{8,64}$`)
 
 // Ingestor is the business-layer entry point for "a new feedback row
@@ -41,9 +38,6 @@ var idempotencyKeyRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{8,64}$`)
 type Ingestor struct {
 	repo      feedbackInserter
 	submitter enrich.Submitter
-	// idem dedups retried ingests when a request carries an Idempotency-Key.
-	// nil disables idempotency (the path simply inserts).
-	idem idempotency.Store
 }
 
 type feedbackInserter interface {
@@ -52,10 +46,18 @@ type feedbackInserter interface {
 		tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
 		in domain.IngestInput,
 	) (int64, error)
+	// InsertIdempotent dedups under the partial unique index; returns
+	// (id, deduped, err). deduped=true → an existing row was returned.
+	InsertIdempotent(
+		ctx context.Context,
+		tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
+		in domain.IngestInput,
+		idemHash []byte,
+	) (int64, bool, error)
 }
 
-func NewIngestor(r feedbackInserter, submitter enrich.Submitter, idem idempotency.Store) *Ingestor {
-	return ptrext.Of(Ingestor{repo: r, submitter: submitter, idem: idem})
+func NewIngestor(r feedbackInserter, submitter enrich.Submitter) *Ingestor {
+	return ptrext.Of(Ingestor{repo: r, submitter: submitter})
 }
 
 // IngestRow validates input, persists it, and fires off best-effort
@@ -63,8 +65,9 @@ func NewIngestor(r feedbackInserter, submitter enrich.Submitter, idem idempotenc
 // keyID is the UUID of the api key used to authenticate (uuid.Nil for
 // non-API-key sources like the #66 inbound webhook / email adapters).
 //
-// When in.IdempotencyKey is set and a store is configured, a repeated ingest
-// with the same key returns the original row id instead of inserting again.
+// When in.IdempotencyKey is set, persistence dedups via the partial unique
+// index: a replay (same key + body) returns the original id without inserting
+// or re-enriching; the same key with a different body is ErrIdempotencyConflict.
 func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
 	const where = "service.Ingestor.IngestRow"
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,key_id:%s,source:%s,content_len:%d,idempotent:%t",
@@ -74,70 +77,10 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 			where, tenantID, in.Source, err.Error())
 		return 0, err
 	}
-	if i.idem != nil && in.IdempotencyKey != "" {
-		return i.ingestIdempotent(ctx, tenantID, keyID, in)
-	}
-	return i.insertAndEnrich(ctx, tenantID, keyID, in)
-}
-
-// ingestIdempotent wraps the insert with Acquire/Complete so a retried request
-// with the same key never duplicates a row. Mirrors the batch pipeline pattern.
-func (i *Ingestor) ingestIdempotent(ctx context.Context, tenantID string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
-	const where = "service.Ingestor.ingestIdempotent"
-	if !idempotencyKeyRe.MatchString(in.IdempotencyKey) {
+	if in.IdempotencyKey != "" && !idempotencyKeyRe.MatchString(in.IdempotencyKey) {
 		return 0, ErrInvalidIdempotencyKey
 	}
 
-	key, acquired, err := i.idem.Acquire(ctx, tenantID, in.IdempotencyKey, hashIngest(tenantID, in), 0)
-	switch {
-	case errors.Is(err, idempotency.ErrHashMismatch):
-		return 0, ErrIdempotencyConflict
-	case errors.Is(err, idempotency.ErrExpired):
-		// Expired key behaves like a fresh request (no dedup guarantee).
-		return i.insertAndEnrich(ctx, tenantID, keyID, in)
-	case err != nil:
-		return 0, fmt.Errorf("idempotency acquire: %w", err)
-	}
-
-	if !acquired {
-		switch {
-		case key.Status == idempotency.StatusPending:
-			return 0, ErrRequestInProgress
-		case key.Status == idempotency.StatusCompleted && key.ResponseBody != nil:
-			var cached struct {
-				ID int64 `json:"id"`
-			}
-			if jErr := json.Unmarshal(key.ResponseBody, &cached); jErr == nil && cached.ID != 0 {
-				logext.Infof(ctx, "[%s] cache hit,tenant_id:%s,feedback_id:%d", where, tenantID, cached.ID)
-				return cached.ID, nil
-			}
-		}
-		// failed / nil / corrupt cached body — fall through to a fresh insert.
-		return i.insertAndEnrich(ctx, tenantID, keyID, in)
-	}
-
-	id, err := i.insertAndEnrich(ctx, tenantID, keyID, in)
-	if err != nil {
-		if fErr := i.idem.Fail(ctx, tenantID, in.IdempotencyKey); fErr != nil {
-			logext.Warnf(ctx, "[%s] mark key failed,tenant_id:%s,err:%+v", where, tenantID, fErr.Error())
-		}
-		return 0, err
-	}
-	body, _ := json.Marshal(struct {
-		ID int64 `json:"id"`
-	}{ID: id})
-	if cErr := i.idem.Complete(ctx, tenantID, in.IdempotencyKey, 200, body); cErr != nil {
-		// The row is already persisted; a Complete failure only weakens dedup
-		// for a subsequent retry. Log and return success.
-		logext.Warnf(ctx, "[%s] mark key completed,tenant_id:%s,feedback_id:%d,err:%+v",
-			where, tenantID, id, cErr.Error())
-	}
-	return id, nil
-}
-
-// insertAndEnrich persists the row and fires best-effort enrichment.
-func (i *Ingestor) insertAndEnrich(ctx context.Context, tenantID string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
-	const where = "service.Ingestor.insertAndEnrich"
 	in = scrubUntrustedSourceMeta(keyID, in)
 	userID := composeUserID(keyID, in.SourceUser)
 	subjectKey, subjectDisplay := subjectkey.Normalize(in.SourceUser, userID)
@@ -145,14 +88,20 @@ func (i *Ingestor) insertAndEnrich(ctx context.Context, tenantID string, keyID u
 	if subjectKey != "" {
 		subjectHash = subjectkey.Hash(tenantID, subjectKey)
 	}
-	id, err := i.repo.Insert(ctx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in)
+
+	id, deduped, err := i.persist(ctx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in)
 	if err != nil {
-		logext.Errorf(ctx, "[%s] repo.Insert failed,tenant_id:%s,err:%+v",
-			where, tenantID, err.Error())
+		if errors.Is(err, feedbackrepo.ErrIdempotencyConflict) {
+			return 0, ErrIdempotencyConflict
+		}
+		logext.Errorf(ctx, "[%s] repo.Insert failed,tenant_id:%s,err:%+v", where, tenantID, err.Error())
 		return 0, fmt.Errorf("repo insert: %w", err)
 	}
-	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d", where, tenantID, id)
-	if i.submitter != nil {
+
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d,deduped:%t", where, tenantID, id, deduped)
+	// A deduped replay already enqueued enrichment on its first insert — don't
+	// submit twice.
+	if !deduped && i.submitter != nil {
 		if err := i.submitter.Submit(ctx, enrich.Job{ID: id, TraceID: trace.FromContext(ctx)}); err != nil {
 			logext.Warnf(ctx, "[%s] enrich submit deferred,feedback_id:%d,inbound_trace_id:%s,err:%+v",
 				where, id, trace.FromContext(ctx), err.Error())
@@ -161,8 +110,21 @@ func (i *Ingestor) insertAndEnrich(ctx context.Context, tenantID string, keyID u
 	return id, nil
 }
 
-// hashIngest is the canonical request fingerprint for idempotency-conflict
-// detection: the same key with a different payload is a 409, not a cache hit.
+// persist routes to the idempotent insert when a key is present, else the plain
+// insert. Returns (id, deduped, err).
+func (i *Ingestor) persist(
+	ctx context.Context, tenantID, userID, subjectKey, subjectDisplay, subjectHash string, in domain.IngestInput,
+) (int64, bool, error) {
+	if in.IdempotencyKey != "" {
+		return i.repo.InsertIdempotent(ctx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in, hashIngest(tenantID, in))
+	}
+	id, err := i.repo.Insert(ctx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in)
+	return id, false, err
+}
+
+// hashIngest is the canonical request fingerprint stored alongside the row, so
+// the same idempotency key reused with a different payload is a conflict rather
+// than a silent dedup.
 func hashIngest(tenantID string, in domain.IngestInput) []byte {
 	canonical := struct {
 		TenantID   string         `json:"t"`

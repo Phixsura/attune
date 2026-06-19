@@ -121,12 +121,10 @@ This section is the normative contract both SDKs implement.
 
 - **Retry on:** network/connection errors, request timeout, HTTP `408`, `429`,
   and `5xx`.
-- **409 is split by error `code`** (ingest reuses 409 for two opposite
-  idempotency outcomes): retry `REQUEST_IN_PROGRESS` (a concurrent same-key
-  request is in flight; backoff lets it finish and returns the cached result);
-  never retry `IDEMPOTENCY_CONFLICT` (same key + different body — permanent).
-- **Never retry:** `400`, `401`, `403`, `404`, `422`, and other non-listed 4xx —
-  these are deterministic client errors; retrying wastes calls.
+- **Never retry:** `400`, `401`, `403`, `404`, `409`, `422`, and other 4xx —
+  deterministic client errors. ingest's only `409` is `IDEMPOTENCY_CONFLICT`
+  (same key + different body), which is permanent; there is no in-progress 409
+  (the server's unique index serializes concurrent same-key retries internally).
 - **Retry safety:** ingest is a non-idempotent POST, so retrying a request that
   the server already processed (lost response, timeout, proxy 5xx) would
   duplicate a feedback row. The SDK makes retries safe with an idempotency key —
@@ -146,26 +144,32 @@ This section is the normative contract both SDKs implement.
 
 ### Idempotency (server + SDK)
 
-Because ingest is a non-idempotent POST, safe retries require server cooperation
-— a header-keyed dedup. attune already has the machinery (`idempotency_keys`
-table + `repo/idempotency`, used by `/batch`); this reuses it on the ingest path:
+Because ingest is a non-idempotent POST, safe retries require server cooperation.
+The dedup point is a **partial unique index** on the insert itself — the only
+mechanism that is correct under concurrency (a check-then-insert, or reusing the
+`idempotency_keys`/`Acquire` machinery whose pending state returns
+`acquired=true`, both let two simultaneous retries each insert a row).
 
-- **SDK:** every `ingest()` call generates a UUID and sends it as the
-  `Idempotency-Key` header, **held stable across that call's retries**. Callers
-  can pass their own `idempotencyKey` to dedup across separate calls.
-- **Server (`internal/service/ingest`):** when the header is present, the
-  Ingestor `Acquire`s the key (hashing the canonical request), inserts, then
-  `Complete`s with the row id. A replay with the same key + body returns the
-  original id without re-inserting; the same key with a **different** body is a
-  `409 IDEMPOTENCY_CONFLICT`; a still-pending concurrent request is a
-  `409 REQUEST_IN_PROGRESS`; a malformed key is `400 VALIDATION`. The
-  `Idempotency-Key` is read from the header (not the proto body) and carried on
-  `domain.IngestInput`, so the inbound adapters (#66) are unaffected (they pass
-  none → the plain insert path, unchanged).
+- **Schema (migration 055):** `user_feedback` gains nullable `idempotency_key`
+  + `idempotency_hash` columns and a partial unique index
+  `(tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL`.
+- **Server (`repo/feedback.InsertIdempotent`):** `INSERT … ON CONFLICT
+  (tenant_id, idempotency_key) DO NOTHING RETURNING id`. A fresh insert returns
+  its id. On conflict it reads the existing row back and compares
+  `idempotency_hash`: a matching fingerprint is a **dedup** (returns the original
+  id, no new row, no second enrichment); a differing fingerprint is
+  `409 IDEMPOTENCY_CONFLICT`; a malformed key is `400 VALIDATION`. Under
+  concurrency the loser's INSERT blocks on the unique index until the winner
+  commits, then takes the conflict path — so N simultaneous same-key retries
+  collapse to one row, with **no in-progress 409** bounced to the client. The
+  key is read from the `Idempotency-Key` header (not the proto body) and carried
+  on `domain.IngestInput`, so inbound adapters (#66) pass none → unchanged path.
+- **SDK:** every `ingest()` call sends a UUID `Idempotency-Key`, **held stable
+  across that call's retries**; callers can pass their own `idempotencyKey`.
 
-This expands #37 from "SDK only" to "SDK + ingest idempotency". It is the
-Stripe-style design and the only way to keep the resilient retry contract above
-without risking duplicate rows.
+This expands #37 from "SDK only" to "SDK + ingest idempotency" — the only way to
+keep the resilient retry contract above without risking duplicate rows, verified
+by a live 8-way-concurrent e2e that asserts exactly one row.
 
 ### Browser support — publishable write-key model
 
@@ -230,14 +234,17 @@ browser. `examples/browser-ingest/` demonstrates the widget pattern.
 
 - **Retrying a non-idempotent POST.** Found during verification: without server
   cooperation, a retry of a request the server already processed duplicates a
-  feedback row. Mitigation: the Idempotency-Key mechanism above (SDK sends a
-  per-call key stable across retries; server dedups via `repo/idempotency`).
-  Residual: an **expired** (>24h) or previously **failed** key falls through to a
-  fresh insert — matches the batch path's lenient handling and is acceptable
-  since a 24h-late retry of the same call is not a realistic duplication vector.
-- **Scope expansion.** #37 now also touches the ingest handler/service. Mitigation:
-  reuses existing idempotency infra; the inbound adapters are untouched (empty
-  key → unchanged insert path); covered by new unit + live e2e tests.
+  feedback row — including the concurrent case (timeout → immediate retry while
+  the first is still in flight), which a first idempotency attempt using
+  `idempotency_keys`/`Acquire` did NOT cover (its pending state returns
+  `acquired=true`, so both retries insert). Mitigation: the partial-unique-index
+  dedup above is atomic under concurrency; proven by an 8-way-concurrent live
+  e2e that asserts exactly one row.
+- **Scope expansion + core-table migration.** #37 now adds two nullable columns
+  + a partial index to `user_feedback` and touches the ingest handler/service.
+  Mitigation: columns are nullable (backward-compatible); inbound adapters pass
+  no key → unchanged insert path; covered by new unit + live (incl. concurrent)
+  e2e tests.
 - **Publishable write-key messaging.** If users ship a broad-scope key to the
   browser thinking it is safe, that is a leak. Mitigation: README is explicit
   that only `ingest:write` keys are publishable and must be rate-limited /
@@ -262,9 +269,10 @@ browser. `examples/browser-ingest/` demonstrates the widget pattern.
 3. **Core.** `errors.ts` (AttuneError + ErrorCode mapping), `retry.ts` (the
    contract above), `client.ts` (`ingest`, portable timeout/abort via
    AbortController, auto `Idempotency-Key`), `index.ts` (public surface).
-4. **Ingest idempotency (server).** `domain.IngestInput.IdempotencyKey` (from the
-   header); `service.Ingestor` Acquire/Complete around the insert; handler maps
-   conflict/in-progress to 409; wire `repo/idempotency` in `cmd/attune`.
+4. **Ingest idempotency (server).** Migration 055 (idempotency columns + partial
+   unique index); `repo/feedback.InsertIdempotent` (ON CONFLICT DO NOTHING +
+   fingerprint compare); `domain.IngestInput.IdempotencyKey` from the header;
+   `service.Ingestor` routes to it and maps conflict → 409.
 5. **Tests.** Vitest unit (happy / 401 / validation-no-retry / 429-retry /
    network / timeout / abort / idempotency-key) + Go unit (ingestor dedup /
    conflict / in-progress / malformed-key; handler 409 mapping); `tsc --strict`.

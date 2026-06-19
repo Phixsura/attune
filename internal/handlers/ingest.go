@@ -118,10 +118,6 @@ func (h *IngestHandler) ingestError(
 		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(source), "conflict").Inc()
 		return dispatcher.Fail[*attunev1.IngestResponse](
 			http.StatusConflict, attunev1.ErrorCode_IDEMPOTENCY_CONFLICT, err.Error())
-	case errors.Is(err, ingest.ErrRequestInProgress):
-		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(source), "conflict").Inc()
-		return dispatcher.Fail[*attunev1.IngestResponse](
-			http.StatusConflict, attunev1.ErrorCode_REQUEST_IN_PROGRESS, err.Error())
 	default:
 		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(source), "validate_err").Inc()
 		return dispatcher.Fail[*attunev1.IngestResponse](
