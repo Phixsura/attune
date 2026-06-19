@@ -163,6 +163,39 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   server. A `SDK Release` workflow publishes to npm on an `sdk-v*` tag with npm
   provenance (signed SLSA attestation via OIDC).
 
+- **Go client SDK `github.com/Phixsura/attune/sdk/go` (#36).** Published client
+  for the ingest API under `sdk/go/`: `attune.New(baseURL, apiKey)` →
+  `c.Ingest(ctx, attune.IngestInput{Content: …})` returning the stored row `id`,
+  `ctx` first arg always. A nested module (minimum Go 1.25). Like the Node SDK,
+  the request/response wire types are **generated from the proto contract** (a
+  second `buf.gen` target → the public `sdk/go/attune/v1` package, guarded by the
+  `proto-sync` gate) and marshaled with `protojson`, so the wire shape is
+  single-sourced from proto and never hand-maintained. Like the Node SDK, those
+  generated types are part of the public surface: the root package re-exports
+  `IngestRequest`/`IngestResponse`/`ErrorResponse`/`ErrorCode`, plus the retry
+  helpers `IsRetryable`/`BackoffDelay`/`ParseRetryAfter` and `TransportErrorCode`.
+  `IngestInput`/`IngestResult` remain thin ergonomic facades over the generated
+  messages. This pulls `google.golang.org/protobuf` + `genproto` +
+  `gnostic-models`, which set the Go 1.25 floor. Adopts the Node SDK's contract
+  verbatim: a typed `AttuneError` (`Code`/`Status`/`RequestID`, switch on `Code`)
+  and shared retry policy (408/429/5xx + network/timeout, never 400/409/422,
+  `Retry-After`-aware, default 2 retries with bounded exponential backoff +
+  jitter). Each call carries a stable, auto-generated `Idempotency-Key` (reused
+  across retries) so a blind retry is deduped server-side; override with
+  `WithIdempotencyKey`. `WithDefaultHeaders` adds custom headers (reserved
+  headers always win). The full Node safeguard set is matched: 3xx responses are
+  surfaced as errors rather than followed (no `X-API-Key` leak to a redirect
+  target), CR/LF in `apiKey`/`idempotencyKey` is rejected up front, the response
+  body is read under a 1 MiB cap, `AttuneError` carries the response `Headers`,
+  idempotency-key generation never fails (a unique fallback when the crypto
+  source is unavailable), and a negative `maxRetries` clamps to 0. Ships
+  `examples/ingest-cli` (built in
+  CI) and an e2e harness (`scripts/e2e.sh`) that boots a real server + Postgres
+  and verifies live ingest, idempotency + concurrent dedup, real 401/validation
+  errors, the example CLI, and an external `go.mod`-consumer import. A `SDK Go
+  Release` workflow cuts a GitHub Release on a `sdk/go/vX.Y.Z` tag; the Go module
+  proxy serves `go get …@vX.Y.Z` on demand.
+
 - **Idempotent ingest via the `Idempotency-Key` header (#37).** `POST
   /v1/feedback/ingest` now honors an optional `Idempotency-Key` request header:
   a replay with the same key + body returns the original feedback id without

@@ -88,6 +88,16 @@ const client = new Client({ baseURL: 'https://attune.example.com', apiKey })
 const { id } = await client.ingest({ content: 'the export button is broken' })
 ```
 
+…or the official Go client, [`github.com/Phixsura/attune/sdk/go`](sdk/go/)
+(proto-generated types, same retry + idempotency contract):
+
+```go
+import attune "github.com/Phixsura/attune/sdk/go"
+
+client, _ := attune.New("https://attune.example.com", apiKey)
+res, _ := client.Ingest(ctx, attune.IngestInput{Content: "the export button is broken"})
+```
+
 …or any HTTP client:
 
 ```bash
@@ -163,6 +173,7 @@ internal/
     observability/           Vendored OTel + slog helpers
 console/                     React triage UI (feature-based: src/features/*)
 sdk/node/                    Node/TypeScript ingest client (@phixsura/attune)
+sdk/go/                      Go ingest client (github.com/Phixsura/attune/sdk/go)
 ```
 
 **Layering rule** — handlers never write SQL; service never writes HTTP; notify never imports service; infra never imports service or repo. A reverse import is a rejection-grade lint.
@@ -177,7 +188,7 @@ We ship monthly. Six milestones to v1.0 (full plan: [GitHub milestones](https://
 | [v0.3](https://github.com/Phixsura/attune/milestone/2) | 2026-08-04 | **Deployable** — docker-compose, observability overlay, PII redaction |
 | [v0.4](https://github.com/Phixsura/attune/milestone/3) | 2026-09-04 | **AI Depth** — sentiment, multi-language, multi-LLM backend, confidence + cost |
 | [v0.5](https://github.com/Phixsura/attune/milestone/4) | 2026-10-04 | **Operator Power** — clustering, daily digest, reply draft, batch ops |
-| [v0.6](https://github.com/Phixsura/attune/milestone/5) | 2026-11-04 | **Multi-channel** — Slack, Discord, email ingest, Adapter SDK, Go SDK; Node SDK [`@phixsura/attune`](sdk/node/) shipped early (#37) |
+| [v0.6](https://github.com/Phixsura/attune/milestone/5) | 2026-11-04 | **Multi-channel** — Slack, Discord, email ingest, Adapter SDK; Node SDK [`@phixsura/attune`](sdk/node/) (#37) and Go SDK [`sdk/go`](sdk/go/) (#36) shipped early |
 | [v1.0](https://github.com/Phixsura/attune/milestone/6) | 2026-12-04 | **Enterprise-ready** — RBAC, audit log, SSO, Helm chart, GDPR |
 
 ### Pillars

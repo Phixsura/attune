@@ -1,0 +1,19 @@
+# golangci-lint config for the published Go SDK (a separate module). The repo
+# root .golangci.yml carries server-specific depguard rules (slog facade, inbound
+# boundaries) that do not apply to this client SDK, so the SDK has its
+# own config: the standard linter set plus a few high-signal extras. Mirrors how
+# sdk/node has its own biome.json.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - bodyclose # response bodies must be closed
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unused

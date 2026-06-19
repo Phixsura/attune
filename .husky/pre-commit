@@ -70,13 +70,22 @@ if [ -n "$root_proposals" ]; then
 fi
 
 # ── ② go vet on staged packages (array → space-safe, no fragile xargs) ────────
+# sdk/go is a separate nested module: its packages must be vetted from their own
+# module root, not the main module (which doesn't contain them). Split staged
+# dirs by module and vet each from the right place.
 go_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
 if [ -n "$go_files" ]; then
   say "go vet"
   pkgs=()
-  while IFS= read -r d; do pkgs+=("./$d"); done \
-    < <(while IFS= read -r f; do dirname "$f"; done <<< "$go_files" | sort -u)
-  go vet "${pkgs[@]}" || fail=1
+  sdkgo=0
+  while IFS= read -r d; do
+    case "$d" in
+      sdk/go | sdk/go/*) sdkgo=1 ;;
+      *) pkgs+=("./$d") ;;
+    esac
+  done < <(while IFS= read -r f; do dirname "$f"; done <<< "$go_files" | sort -u)
+  [ ${#pkgs[@]} -gt 0 ] && { go vet "${pkgs[@]}" || fail=1; }
+  [ "$sdkgo" -eq 1 ] && { ( cd sdk/go && go vet ./... ) || fail=1; }
 fi
 
 # ── ③ slog/OTel lint (--strict gate; #4 / #9) ────────────────────────────────
