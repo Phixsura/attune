@@ -601,6 +601,17 @@ var APIKeyIPDeniedTotal = prometheus.NewCounter(
 	},
 )
 
+// APIKeyRateLimitedTotal counts requests rejected with 429 by the per-key rate
+// limiter (the key's own rate_limit_rpm). Distinct from the per-tenant
+// attune_ingest_rate_limit_total: spikes here mean a single key is hot/abused.
+var APIKeyRateLimitedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_apikey_rate_limited_total",
+		Help: "Requests rejected with 429 by the per-API-key rate limiter.",
+	},
+	[]string{"tenant"},
+)
+
 // APIKeyUsageTotal counts successful API key authentications.
 var APIKeyUsageTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -724,6 +735,7 @@ var allMetrics = []prometheus.Collector{
 	APIKeyScopeDeniedTotal,
 	APIKeyExpiredTotal,
 	APIKeyIPDeniedTotal,
+	APIKeyRateLimitedTotal,
 	APIKeyUsageTotal,
 	AuditRowsWrittenTotal,
 	AuditRowsPrunedTotal,
@@ -793,6 +805,7 @@ func RegisteredMetricNames() []string {
 		"attune_apikey_scope_denied_total",
 		"attune_apikey_expired_total",
 		"attune_apikey_ip_denied_total",
+		"attune_apikey_rate_limited_total",
 		"attune_apikey_usage_total",
 		"attune_audit_rows_written_total",
 		"attune_audit_rows_pruned_total",

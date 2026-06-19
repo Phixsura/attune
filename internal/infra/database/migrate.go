@@ -15,6 +15,7 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"fmt"
@@ -25,6 +26,13 @@ import (
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
 )
+
+// noTxDirective marks a migration that must run OUTSIDE a transaction (e.g.
+// CREATE INDEX CONCURRENTLY, which Postgres forbids inside a transaction
+// block). Such a migration MUST be a single statement and MUST be idempotent
+// (IF NOT EXISTS), because a non-transactional apply is not atomic with its
+// tracker insert — a crash between them re-runs the body on the next deploy.
+const noTxDirective = "migrate:no-transaction"
 
 //go:embed migrations/*.sql
 var migrationFS embed.FS
@@ -52,19 +60,21 @@ func acquireMigrationLock(ctx context.Context, pool *pgxpool.Pool) (*pgxpool.Con
 	if err != nil {
 		return nil, fmt.Errorf("acquire migration connection: %w", err)
 	}
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
-		conn.Release()
-		logext.Errorf(ctx, "[%s] lock failed,err:%+v", where, err.Error())
-		return nil, fmt.Errorf("acquire migration lock: %w", err)
-	}
 	// The pool sets a 30s statement_timeout default (database.NewPool, #64), but
 	// migrations can legitimately run long (large backfills, index builds). Clear
-	// it on this dedicated, soon-released migration connection so a slow migration
-	// can't be killed mid-statement and leave the schema half-applied.
+	// it BEFORE acquiring the advisory lock: a CONCURRENTLY index build on one
+	// replica can hold the lock for minutes, and the lock wait itself is a
+	// statement — under the 30s default a second replica's pg_advisory_lock would
+	// time out and fail startup instead of waiting its turn.
 	if _, err := conn.Exec(ctx, `SET statement_timeout = 0`); err != nil {
 		conn.Release()
 		logext.Errorf(ctx, "[%s] clear statement_timeout failed,err:%+v", where, err.Error())
 		return nil, fmt.Errorf("clear migration statement_timeout: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		conn.Release()
+		logext.Errorf(ctx, "[%s] lock failed,err:%+v", where, err.Error())
+		return nil, fmt.Errorf("acquire migration lock: %w", err)
 	}
 	logext.Infof(ctx, "[%s] OK", where)
 	return conn, nil
@@ -128,33 +138,73 @@ func runMigrationsLocked(ctx context.Context, conn *pgxpool.Conn) error {
 			logext.Errorf(ctx, "[%s] read file failed,file:%s,err:%+v", where, name, err.Error())
 			return fmt.Errorf("read %s: %w", name, err)
 		}
-		tx, err := conn.Begin(ctx)
-		if err != nil {
-			logext.Errorf(ctx, "[%s] begin tx failed,version:%d,err:%+v",
-				where, version, err.Error())
-			return fmt.Errorf("begin tx for %d: %w", version, err)
-		}
-		if _, err := tx.Exec(ctx, string(body)); err != nil {
-			_ = tx.Rollback(ctx)
-			logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
-			return fmt.Errorf("apply %s: %w", name, err)
-		}
-		if _, err := tx.Exec(
-			ctx,
-			fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable),
-			version, name,
-		); err != nil {
-			_ = tx.Rollback(ctx)
-			logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, err.Error())
-			return fmt.Errorf("record %s: %w", name, err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			logext.Errorf(ctx, "[%s] commit failed,version:%d,err:%+v",
-				where, version, err.Error())
-			return fmt.Errorf("commit %d: %w", version, err)
+		if isNoTxMigration(body) {
+			if err := applyMigrationNoTx(ctx, conn, version, name, body); err != nil {
+				return err
+			}
+		} else if err := applyMigrationTx(ctx, conn, version, name, body); err != nil {
+			return err
 		}
 		logext.Infof(ctx, "[%s] applied,version:%d,file:%s", where, version, name)
 	}
 	logext.Infof(ctx, "[%s] OK", where)
 	return nil
+}
+
+// applyMigrationTx runs a migration and records it atomically in one transaction.
+func applyMigrationTx(ctx context.Context, conn *pgxpool.Conn, version int, name string, body []byte) error {
+	const where = "database.applyMigrationTx"
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] begin tx failed,version:%d,err:%+v", where, version, err.Error())
+		return fmt.Errorf("begin tx for %d: %w", version, err)
+	}
+	if _, err := tx.Exec(ctx, string(body)); err != nil {
+		_ = tx.Rollback(ctx)
+		logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
+		return fmt.Errorf("apply %s: %w", name, err)
+	}
+	if _, err := tx.Exec(ctx, recordMigrationSQL(), version, name); err != nil {
+		_ = tx.Rollback(ctx)
+		logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, err.Error())
+		return fmt.Errorf("record %s: %w", name, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		logext.Errorf(ctx, "[%s] commit failed,version:%d,err:%+v", where, version, err.Error())
+		return fmt.Errorf("commit %d: %w", version, err)
+	}
+	return nil
+}
+
+// applyMigrationNoTx runs a single-statement migration OUTSIDE a transaction
+// (for CREATE INDEX CONCURRENTLY et al.) then records it. The two steps are not
+// atomic, so the body must be idempotent (see noTxDirective). conn.Exec with no
+// args uses the simple protocol, which does not open an implicit transaction
+// block — required for CONCURRENTLY.
+func applyMigrationNoTx(ctx context.Context, conn *pgxpool.Conn, version int, name string, body []byte) error {
+	const where = "database.applyMigrationNoTx"
+	if _, err := conn.Exec(ctx, string(body)); err != nil {
+		logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
+		return fmt.Errorf("apply %s (no-tx): %w", name, err)
+	}
+	if _, err := conn.Exec(ctx, recordMigrationSQL(), version, name); err != nil {
+		logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, err.Error())
+		return fmt.Errorf("record %s (no-tx): %w", name, err)
+	}
+	return nil
+}
+
+func recordMigrationSQL() string {
+	return fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable)
+}
+
+// isNoTxMigration reports whether a migration must run outside a transaction.
+// The directive must be on the FIRST line (as a SQL comment) so a stray mention
+// of the string inside another migration's body can't silently flip it.
+func isNoTxMigration(body []byte) bool {
+	first := body
+	if i := bytes.IndexByte(body, '\n'); i >= 0 {
+		first = body[:i]
+	}
+	return bytes.Contains(first, []byte(noTxDirective))
 }

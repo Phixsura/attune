@@ -6,6 +6,7 @@ package feedback
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,11 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
+
+// ErrIdempotencyConflict signals that the idempotency key already exists for a
+// row whose request fingerprint differs (same key, different body). The service
+// maps it to a 409.
+var ErrIdempotencyConflict = errors.New("idempotency key reused with a different request")
 
 // FeedbackRepo wraps the user_feedback table. Concurrency-safe: pgxpool
 // internally pools connections, so a single shared FeedbackRepo serves
@@ -78,6 +84,110 @@ func (r *FeedbackRepo) Insert(
 		return 0, fmt.Errorf("insert feedback: %w", err)
 	}
 	return id, nil
+}
+
+// InsertIdempotent inserts the row keyed by in.IdempotencyKey, deduping under
+// the partial unique index ux_user_feedback_idempotency (migration 056). A
+// concurrent retry's INSERT blocks on the index until the first commits, then
+// hits the conflict and reads back the original id — so concurrent retries can
+// never create a duplicate row. Returns (id, deduped, err): deduped=true means
+// an existing row with a matching request fingerprint was returned (no new
+// row, no enrichment). A matching key with a different fingerprint returns
+// ErrIdempotencyConflict.
+func (r *FeedbackRepo) InsertIdempotent(
+	ctx context.Context,
+	tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
+	in domain.IngestInput,
+	idemHash []byte,
+) (int64, bool, error) {
+	const where = "repo.FeedbackRepo.InsertIdempotent"
+	sourceMetaJSON := []byte("{}")
+	if in.SourceMeta != nil {
+		b, err := json.Marshal(in.SourceMeta)
+		if err != nil {
+			logext.Errorf(ctx, "[%s] marshal source_meta failed,tenant_id:%s,err:%+v",
+				where, tenantID, err.Error())
+			return 0, false, fmt.Errorf("marshal source_meta: %w", err)
+		}
+		sourceMetaJSON = b
+	}
+	inboundSourceID := inboundSourceIDFromMeta(in.SourceMeta)
+
+	// Bounded retry: the read-back after a conflict can race with a concurrent
+	// delete of the conflicting row (e.g. GDPR erasure), which frees the key —
+	// re-attempt the insert rather than misreporting a vanished row.
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		var id int64
+		err := r.pool.QueryRow(
+			ctx, `
+			INSERT INTO user_feedback
+			 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id, idempotency_key, idempotency_hash)
+			VALUES
+			 ($1, $2, $3, $4, $5, 'other', $6, $7, '[]'::jsonb, $8, $9,
+			  (SELECT id FROM inbound_sources WHERE id = $10 AND tenant_id = $2 AND channel = $8),
+			  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1),
+			  $11, $12)
+			ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+			DO NOTHING
+			RETURNING id`,
+			userID, tenantID, subjectKey, subjectDisplay, subjectHash,
+			in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
+			in.IdempotencyKey, idemHash,
+		).Scan(&id)
+		if err == nil {
+			return id, false, nil // fresh insert
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,source:%s,err:%+v",
+				where, tenantID, in.Source, err.Error())
+			return 0, false, fmt.Errorf("insert feedback (idempotent): %w", err)
+		}
+
+		// Conflict: a row with this key already exists. Read it back and compare
+		// the request fingerprint to tell a true replay from a key reuse.
+		var existingHash []byte
+		err = r.pool.QueryRow(
+			ctx, `
+			SELECT id, idempotency_hash FROM user_feedback
+			WHERE tenant_id = $1 AND idempotency_key = $2`,
+			tenantID, in.IdempotencyKey,
+		).Scan(&id, &existingHash)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue // conflicting row vanished between insert and read — retry
+		}
+		if err != nil {
+			logext.Errorf(ctx, "[%s] read existing failed,tenant_id:%s,err:%+v",
+				where, tenantID, err.Error())
+			return 0, false, fmt.Errorf("read idempotent feedback: %w", err)
+		}
+		if subtle.ConstantTimeCompare(existingHash, idemHash) != 1 {
+			return 0, false, ErrIdempotencyConflict
+		}
+		return id, true, nil // replay → existing row, no new insert
+	}
+	return 0, false, fmt.Errorf("insert feedback (idempotent): key contention exceeded %d attempts,tenant_id:%s", maxAttempts, tenantID)
+}
+
+// PurgeExpiredIdempotencyKeys clears idempotency_key/idempotency_hash on rows
+// older than retention, releasing them from the partial unique index so it stays
+// bounded to the recent dedup window (a key is only useful for the brief retry
+// window of one ingest). The feedback rows themselves are kept — only the dedup
+// tokens are dropped. Returns the number of rows cleared.
+func (r *FeedbackRepo) PurgeExpiredIdempotencyKeys(ctx context.Context, retention time.Duration) (int64, error) {
+	const where = "repo.FeedbackRepo.PurgeExpiredIdempotencyKeys"
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE user_feedback
+		SET idempotency_key = NULL, idempotency_hash = NULL
+		WHERE idempotency_key IS NOT NULL
+		  AND created_at < NOW() - make_interval(secs => $1)`,
+		retention.Seconds(),
+	)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] purge failed,err:%+v", where, err.Error())
+		return 0, fmt.Errorf("purge idempotency keys: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // TryClaim atomically transitions a row into 'enriching' if it's eligible:

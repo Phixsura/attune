@@ -83,6 +83,7 @@ func buildRouter(
 	// in production — no auth at the Go level.
 	r.Handle("/metrics", metrics.Handler())
 	rateLimiter := buildRateLimiter(cfg)
+	perKeyRateLimiter := buildPerKeyRateLimiter(cfg)
 
 	r.Route("/v1", func(r chi.Router) {
 		// Inbound adapter mux. Adapters have already registered their
@@ -109,7 +110,8 @@ func buildRouter(
 		r.Group(func(r chi.Router) {
 			r.Use(apikey.MiddlewareWithProxies(apiKeys, cfg.Security.TrustedProxyHops))
 			r.Use(apikey.RequireScope(domain.ScopeIngestWrite))
-			r.Use(rateLimiter.Middleware)
+			r.Use(rateLimiter.Middleware)       // per-tenant
+			r.Use(perKeyRateLimiter.Middleware) // per-key (key's own rate_limit_rpm)
 			r.Mount("/feedback", ingestHandler.Routes())
 		})
 	})

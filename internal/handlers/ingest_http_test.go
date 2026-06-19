@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/service/ingest"
 )
 
 // fakeIngestor records the mapped input and returns a canned (id, err) so the
@@ -40,8 +41,8 @@ func (okVerifier) LookupWithScopes(_ context.Context, _ string) (string, uuid.UU
 	return "tenant-123", uuid.Nil, domain.AllScopes, nil
 }
 
-func (okVerifier) LookupWithScopesAndIP(_ context.Context, _, _ string) (string, uuid.UUID, []domain.Scope, error) {
-	return "tenant-123", uuid.Nil, domain.AllScopes, nil
+func (okVerifier) LookupWithScopesAndIP(_ context.Context, _, _ string) (string, uuid.UUID, []domain.Scope, *int, error) {
+	return "tenant-123", uuid.Nil, domain.AllScopes, nil, nil
 }
 
 func ingestTestServer(ing *fakeIngestor) http.Handler {
@@ -133,6 +134,49 @@ func TestIngestHTTP_IngestError(t *testing.T) {
 	}
 	if got := decodeBody(t, rec)["message"]; got != "content is required" {
 		t.Errorf("error message = %v (%s)", got, rec.Body)
+	}
+}
+
+// The optional Idempotency-Key request header is mapped into the domain input.
+func TestIngestHTTP_IdempotencyKeyHeaderMapped(t *testing.T) {
+	fake := ptrext.Of(fakeIngestor{id: 5})
+	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(`{"content":"x"}`))
+	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "abcd1234efgh5678")
+	rec := httptest.NewRecorder()
+	ingestTestServer(fake).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if fake.gotIn.IdempotencyKey != "abcd1234efgh5678" {
+		t.Errorf("IdempotencyKey = %q, want abcd1234efgh5678", fake.gotIn.IdempotencyKey)
+	}
+}
+
+// An idempotency conflict from the service → 409 IDEMPOTENCY_CONFLICT.
+func TestIngestHTTP_IdempotencyConflict(t *testing.T) {
+	fake := ptrext.Of(fakeIngestor{err: ingest.ErrIdempotencyConflict})
+	rec := doIngest(t, ingestTestServer(fake), `{"content":"x"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%s)", rec.Code, rec.Body)
+	}
+	if got := decodeBody(t, rec)["code"]; got != "IDEMPOTENCY_CONFLICT" {
+		t.Errorf("code = %v, want IDEMPOTENCY_CONFLICT (%s)", got, rec.Body)
+	}
+}
+
+// A body over the 64 KiB cap → 413 BODY_TOO_LARGE (matches the rest of the API,
+// not 400).
+func TestIngestHTTP_BodyTooLarge(t *testing.T) {
+	big := `{"content":"` + strings.Repeat("a", 64*1024+10) + `"}`
+	rec := doIngest(t, ingestTestServer(ptrext.Of(fakeIngestor{})), big)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 (%s)", rec.Code, rec.Body)
+	}
+	if got := decodeBody(t, rec)["code"]; got != "BODY_TOO_LARGE" {
+		t.Errorf("code = %v, want BODY_TOO_LARGE (%s)", got, rec.Body)
 	}
 }
 

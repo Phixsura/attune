@@ -3633,7 +3633,20 @@ paths:
         post:
             tags:
                 - FeedbackService
+            description: |-
+                Ingest stores one feedback item and queues it for enrichment.
+
+                 Idempotency: send an `Idempotency-Key` header to make retries safe — a
+                 replay with the same key + body returns the original id; the same key with
+                 a different body fails 409. Errors use the shared ErrorResponse envelope
+                 (`code` from the ErrorCode enum).
             operationId: FeedbackService_Ingest
+            parameters:
+                - name: Idempotency-Key
+                  in: header
+                  description: Optional dedup token (8-64 chars, [A-Za-z0-9_-]). Replaying the same key with the same body returns the original feedback id; reusing it with a different body fails with 409 IDEMPOTENCY_CONFLICT. When omitted, each request is treated as distinct.
+                  schema:
+                    type: string
             requestBody:
                 content:
                     application/json:
@@ -3653,6 +3666,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+                "409":
+                    description: Idempotency-Key was reused with a different request body (error code IDEMPOTENCY_CONFLICT).
+                "413":
+                    description: Request body exceeds the 64 KiB ingest limit (error code BODY_TOO_LARGE).
+                "429":
+                    description: Rate limited by the per-tenant or per-key limiter; response carries a Retry-After header (error code RATE_LIMITED).
 components:
     schemas:
         AIAgentConfig:
@@ -3706,6 +3725,13 @@ components:
             properties:
                 tag:
                     $ref: '#/components/schemas/Tag'
+        Any:
+            type: object
+            properties:
+                value:
+                    $ref: '#/components/schemas/GoogleProtobufAny'
+                yaml:
+                    type: string
         ApiKey:
             type: object
             properties:
@@ -5105,6 +5131,18 @@ components:
                 retryAfterSeconds:
                     type: integer
                     format: int32
+        ExternalDocs:
+            type: object
+            properties:
+                description:
+                    type: string
+                url:
+                    type: string
+                specificationExtension:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/NamedAny'
+            description: Allows referencing an external resource for extended documentation.
         Feedback:
             type: object
             properties:
@@ -6260,6 +6298,17 @@ components:
                 acceptedAt:
                     type: string
             description: Member represents a user's membership in a tenant.
+        NamedAny:
+            type: object
+            properties:
+                name:
+                    type: string
+                    description: Map key
+                value:
+                    allOf:
+                        - $ref: '#/components/schemas/Any'
+                    description: Mapped value
+            description: Automatically-generated message used to represent maps of Any as ordered (name,value) pairs.
         NotifyTarget:
             type: object
             properties:
@@ -6906,27 +6955,17 @@ components:
         Tag:
             type: object
             properties:
-                id:
-                    type: string
                 name:
-                    type: string
-                color:
                     type: string
                 description:
                     type: string
-                exclusiveScope:
-                    type: string
-                usageCount:
-                    type: integer
-                    format: int32
-                archived:
-                    type: boolean
-                createdBy:
-                    type: string
-                createdAt:
-                    type: string
-                updatedAt:
-                    type: string
+                externalDocs:
+                    $ref: '#/components/schemas/ExternalDocs'
+                specificationExtension:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/NamedAny'
+            description: Adds metadata to a single tag that is used by the Operation Object. It is not mandatory to have a Tag Object per tag defined in the Operation Object instances.
         Taxonomy:
             type: object
             properties:

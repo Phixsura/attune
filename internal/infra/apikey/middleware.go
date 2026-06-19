@@ -30,7 +30,7 @@ import (
 type Verifier interface {
 	Lookup(ctx context.Context, raw string) (tenantID string, keyID uuid.UUID, err error)
 	LookupWithScopes(ctx context.Context, raw string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, err error)
-	LookupWithScopesAndIP(ctx context.Context, raw, clientIP string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, err error)
+	LookupWithScopesAndIP(ctx context.Context, raw, clientIP string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, rateLimitRPM *int, err error)
 }
 
 // AuthCtx is the request-scoped API key identity populated by Middleware.
@@ -39,6 +39,9 @@ type AuthCtx struct {
 	TenantID string
 	KeyID    uuid.UUID
 	Scopes   []domain.Scope
+	// RateLimitRPM is the key's per-key request-per-minute cap (nil = none);
+	// enforced by ratelimit.PerKeyLimiter.
+	RateLimitRPM *int
 }
 
 type ctxKey int
@@ -89,7 +92,7 @@ func MiddlewareWithProxies(v Verifier, trustedProxyHops int) func(http.Handler) 
 				return
 			}
 			clientIP := nethardening.ClientIP(r, trustedProxyHops)
-			tid, kid, scopes, err := v.LookupWithScopesAndIP(ctx, raw, clientIP)
+			tid, kid, scopes, rpm, err := v.LookupWithScopesAndIP(ctx, raw, clientIP)
 			if err != nil {
 				status := http.StatusUnauthorized
 				code := attunev1.ErrorCode_UNAUTHORIZED
@@ -120,9 +123,10 @@ func MiddlewareWithProxies(v Verifier, trustedProxyHops int) func(http.Handler) 
 			newCtx := context.WithValue(r.Context(), ctxTenantID, tid)
 			newCtx = context.WithValue(newCtx, ctxKeyID, kid)
 			newCtx = context.WithValue(newCtx, ctxAuth, ptrext.Of(AuthCtx{
-				TenantID: tid,
-				KeyID:    kid,
-				Scopes:   scopes,
+				TenantID:     tid,
+				KeyID:        kid,
+				Scopes:       scopes,
+				RateLimitRPM: rpm,
 			}))
 			next.ServeHTTP(w, r.WithContext(newCtx))
 		})

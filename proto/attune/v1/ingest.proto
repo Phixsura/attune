@@ -5,6 +5,7 @@ package attune.v1;
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/struct.proto";
+import "gnostic/openapi/v3/annotations.proto";
 
 import "attune/v1/tag.proto";
 import "attune/v1/workflow.proto";
@@ -17,10 +18,48 @@ import "attune/v1/workflow.proto";
 // annotation exists only so protoc-gen-openapi emits the REST path + operation
 // into the OpenAPI document. (ts-proto with onlyTypes ignores this service.)
 service FeedbackService {
+  // Ingest stores one feedback item and queues it for enrichment.
+  //
+  // Idempotency: send an `Idempotency-Key` header to make retries safe — a
+  // replay with the same key + body returns the original id; the same key with
+  // a different body fails 409. Errors use the shared ErrorResponse envelope
+  // (`code` from the ErrorCode enum).
   rpc Ingest(IngestRequest) returns (IngestResponse) {
     option (google.api.http) = {
       post: "/v1/feedback/ingest"
       body: "*"
+    };
+    // The OpenAPI document is generated, so the header parameter and the
+    // header-driven error responses (which the proto request/response types
+    // can't express) are declared here for the REST contract.
+    option (gnostic.openapi.v3.operation) = {
+      parameters: [
+        {
+          parameter: {
+            name: "Idempotency-Key"
+            in: "header"
+            description: "Optional dedup token (8-64 chars, [A-Za-z0-9_-]). Replaying the same key with the same body returns the original feedback id; reusing it with a different body fails with 409 IDEMPOTENCY_CONFLICT. When omitted, each request is treated as distinct."
+            required: false
+            schema: {schema: {type: "string"}}
+          }
+        }
+      ]
+      responses: {
+        response_or_reference: [
+          {
+            name: "409"
+            value: {response: {description: "Idempotency-Key was reused with a different request body (error code IDEMPOTENCY_CONFLICT)."}}
+          },
+          {
+            name: "413"
+            value: {response: {description: "Request body exceeds the 64 KiB ingest limit (error code BODY_TOO_LARGE)."}}
+          },
+          {
+            name: "429"
+            value: {response: {description: "Rate limited by the per-tenant or per-key limiter; response carries a Retry-After header (error code RATE_LIMITED)."}}
+          }
+        ]
+      }
     };
   }
 

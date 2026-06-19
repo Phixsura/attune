@@ -1,0 +1,78 @@
+# Publish the Node SDK (@phixsura/attune) to npm on an `sdk-v*` tag, with npm
+# provenance (a signed SLSA attestation via OIDC). The SDK versions
+# independently from the server image (which uses `v*` tags in release.yml).
+#
+# workflow_dispatch runs a publish dry-run (build + pack, no publish, no token)
+# so the path can be exercised without cutting a tag.
+#
+# Setup required once: an `NPM_TOKEN` repo secret (npm automation token with
+# publish rights to the @phixsura scope), or npm trusted publishing.
+name: SDK Release
+
+on:
+  push:
+    tags: ["sdk-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/node
+    permissions:
+      contents: read
+      id-token: write # npm provenance signs via OIDC
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          package_json_file: sdk/node/package.json
+
+      # Caching is intentionally NOT enabled here (no `cache:`): a publish
+      # workflow must not restore a potentially poisoned cache into an artifact
+      # it then signs and ships. The ignore is for zizmor's conservative default
+      # flag on setup-node; a clean frozen-lockfile install is cheap and safe.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0 # zizmor: ignore[cache-poisoning] — caching is not enabled; clean install
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - run: pnpm install --frozen-lockfile
+
+      # On a tag, the tag (sdk-vX.Y.Z) must match package.json "version".
+      - name: Verify tag matches package version
+        if: github.event_name == 'push'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag_version="${REF_NAME#sdk-v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag $REF_NAME ($tag_version) != package.json version $pkg_version"
+            exit 1
+          fi
+
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm exec vitest run
+
+      # prepack (tsdown) builds dist; publishConfig forces public access + npmjs.
+      - name: Publish (dry-run on manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: npm publish --provenance --dry-run
+
+      - name: Publish to npm
+        if: github.event_name == 'push'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance

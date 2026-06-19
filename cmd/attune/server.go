@@ -170,6 +170,11 @@ func runServer() error {
 	safego(ctx, "audit_pruner", func() {
 		runAuditPruner(ctx, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
 	})
+	// Release stale ingest idempotency keys so the partial unique index stays
+	// bounded to the recent retry window (#37).
+	safego(ctx, "idempotency_key_pruner", func() {
+		runIdempotencyKeyPruner(ctx, runtimeDeps.feedbackRepo, idempotencyKeyRetention, idempotencyKeyPruneInterval)
+	})
 
 	batchJobWorker := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, cfg.ConsoleBaseURL, cfg.GDPRExportTTL)
 	defer batchJobWorker.Stop()
@@ -354,6 +359,41 @@ func runAuditPruner(ctx context.Context, svc *auditlogsvc.Service, retention, in
 func pruneAuditOnce(ctx context.Context, svc *auditlogsvc.Service, retention time.Duration) {
 	const where = "main.pruneAuditLog"
 	rows, err := svc.Prune(ctx, retention)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] failed,err:%+v", where, err.Error())
+		return
+	}
+	logext.Infof(ctx, "[%s] OK,rows:%d,retention_hours:%d", where, rows, int(retention.Hours()))
+}
+
+const (
+	// idempotencyKeyRetention is how long an ingest idempotency key stays usable
+	// for dedup. A client retry happens within seconds/minutes; 48h is a generous
+	// upper bound after which the key is released to keep the index small.
+	idempotencyKeyRetention     = 48 * time.Hour
+	idempotencyKeyPruneInterval = 6 * time.Hour
+)
+
+func runIdempotencyKeyPruner(ctx context.Context, repo *feedback.FeedbackRepo, retention, interval time.Duration) {
+	if repo == nil || retention <= 0 || interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	pruneIdempotencyKeysOnce(ctx, repo, retention)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pruneIdempotencyKeysOnce(ctx, repo, retention)
+		}
+	}
+}
+
+func pruneIdempotencyKeysOnce(ctx context.Context, repo *feedback.FeedbackRepo, retention time.Duration) {
+	const where = "main.pruneIdempotencyKeys"
+	rows, err := repo.PurgeExpiredIdempotencyKeys(ctx, retention)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] failed,err:%+v", where, err.Error())
 		return

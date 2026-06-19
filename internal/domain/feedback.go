@@ -8,6 +8,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -76,6 +77,11 @@ type IngestInput struct {
 	SourceUser string         `json:"sourceUser,omitempty"`
 	SourceMeta map[string]any `json:"sourceMeta,omitempty"`
 	PageURL    string         `json:"pageUrl,omitempty"`
+	// IdempotencyKey is set server-side from the optional `Idempotency-Key`
+	// request header — never from the wire body (json:"-"). When non-empty,
+	// service.Ingestor dedups repeated ingests so a client retry of an
+	// at-least-once delivery cannot create a duplicate feedback row.
+	IdempotencyKey string `json:"-"`
 }
 
 // Validate enforces server-side invariants on input. Returns nil on
@@ -86,6 +92,11 @@ func (in IngestInput) Validate() error {
 	}
 	if len(in.Content) > MaxContentLen {
 		return fmt.Errorf("content too long (max %d chars)", MaxContentLen)
+	}
+	// PostgreSQL TEXT cannot store a NUL byte; reject it as a clean validation
+	// error rather than letting it fail at INSERT time as an opaque DB error.
+	if strings.ContainsRune(in.Content, '\x00') {
+		return fmt.Errorf("content contains a null byte")
 	}
 	if !ValidSources[in.Source] {
 		return fmt.Errorf("invalid source %q", in.Source)

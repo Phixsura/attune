@@ -86,6 +86,7 @@ exposition plus the portable assets in this directory.
 | `attune_apikey_scope_denied_total` | counter | `scope` | API key scope enforcement denials by required scope (#41) |
 | `attune_apikey_expired_total` | counter | — | API key requests denied due to key expiration |
 | `attune_apikey_ip_denied_total` | counter | — | API key requests denied due to IP not in allowlist |
+| `attune_apikey_rate_limited_total` | counter | `tenant` | requests rejected (429) by the per-key rate limiter (key's `rate_limit_rpm`) (#41) |
 | `attune_apikey_usage_total` | counter | `tenant`, `key_prefix` | Successful API key authentications by key prefix |
 | `attune_audit_rows_written_total` | counter | `action` | immutable audit-log rows written by action (#39) |
 | `attune_audit_rows_pruned_total` | counter | — | immutable audit-log rows pruned by retention policy (#39) |

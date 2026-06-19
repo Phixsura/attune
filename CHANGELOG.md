@@ -17,6 +17,38 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   
 ### Security
 
+- **Per-API-key rate limiting is now enforced (#41).** `external_api_keys.rate_limit_rpm`
+  was stored and shown in the console but never enforced — only a per-tenant
+  limit applied, so a leaked/abused key could consume the whole tenant's ingest
+  budget. A new per-key token-bucket limiter (`ratelimit.PerKeyLimiter`, mounted
+  after auth on `/v1/feedback/ingest`) now caps each key at its own
+  `rate_limit_rpm`, returning `429 RATE_LIMITED` + `Retry-After`. New metric
+  `attune_apikey_rate_limited_total{tenant}` (dashboarded). Keys without an rpm
+  are unaffected. **Behavior change:** keys that already have `rate_limit_rpm`
+  set start being enforced.
+
+- **API-key IP allowlist now works and fails closed (#41).** Two bugs: (1) any
+  key with a non-empty `allowed_cidrs` failed every lookup — pgx couldn't scan
+  the `inet[]` column into `[]string` (`cannot scan _inet`), so the allowlist
+  feature was effectively non-functional; fixed by selecting
+  `allowed_cidrs::text[]`. (2) the allowlist check was skipped when the resolved
+  client IP was empty (fail-open); it now fails closed — an empty/unresolvable
+  client IP with an allowlist configured is rejected (`ErrIPNotAllowed`), not
+  bypassed. Covered by a Postgres integration test (in-range accepted;
+  out-of-range / empty / unparseable rejected).
+
+- **Node SDK does not follow HTTP redirects (#37).** `@phixsura/attune` issues
+  ingest requests with `redirect: "manual"`, so a compromised or misconfigured
+  endpoint can't 3xx-redirect the request and have `fetch` re-send the
+  `X-API-Key` header to an attacker host (credential leak). A 3xx now surfaces as
+  an `AttuneError` instead of being followed.
+
+- **Node SDK input/response hardening (#37).** CR/LF in `apiKey` or a caller
+  `idempotencyKey` is rejected up front as `BAD_REQUEST` (header-injection guard,
+  and avoids retrying a deterministic config error); the response body is read
+  under a 1 MiB cap so a hostile server can't OOM the client with an unbounded
+  body.
+
 - **SSRF-resistant outbound egress (#64).** A new `internal/pkg/nethardening`
   guard enforces an egress policy at dial time (after DNS resolution, so it
   defeats DNS rebinding) on outbound webhook delivery (including the console
@@ -53,6 +85,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   — the leftmost `X-Forwarded-For` value.
 
 ### Changed
+
+- **OpenAPI now documents the ingest idempotency contract (#37).** The generated
+  `docs/openapi/openapi.yaml` for `POST /v1/feedback/ingest` now declares the
+  optional `Idempotency-Key` request header and the `409 IDEMPOTENCY_CONFLICT`,
+  `413 BODY_TOO_LARGE`, and `429 RATE_LIMITED` responses — header-driven behavior
+  the proto request/response types can't express. Done via `gnostic.openapi.v3`
+  operation annotations on the proto (still generated, never hand-edited); adds
+  the build-only `github.com/google/gnostic-models` dependency (blank-imported by
+  generated Go to register the extension; no runtime use).
+
+- **Oversized ingest body now returns `413 BODY_TOO_LARGE` (#37).** `POST
+  /v1/feedback/ingest` previously returned `400 BAD_REQUEST` for a body over the
+  64 KiB cap; it now returns `413` with code `BODY_TOO_LARGE`, matching the rest
+  of the HTTP API. A malformed (but in-size) body is still `400`.
 
 - **DB pool and HTTP server are now bounded (#64).** `database.NewPool` applies
   defaults for `MaxConns` (20), `connect_timeout` (10s), and `statement_timeout`
@@ -97,6 +143,42 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   backfills existing rows (label preserved in `display_name`, key slugged).
 
 ### Added
+
+- **Node/TypeScript client SDK `@phixsura/attune` (#37).** Published client for
+  the ingest API under `sdk/node/`: `new Client({ baseURL, apiKey })` →
+  `await client.ingest({ content, … })` returning the stored row `id`. ESM + CJS
+  (tsdown), zero runtime dependencies, native `fetch`, Node 20+ and browsers.
+  Request/response types are generated from the proto contract (a new ts-proto
+  `buf.gen` target → `sdk/node/src/proto/`, guarded by the `proto-sync` gate) —
+  never hand-written. Transactional await-throw model with a typed `AttuneError`
+  (`code`/`status`/`requestId`) and a shared retry contract (408/429/5xx +
+  network/timeout, never 400/409/422, `Retry-After`-aware, default 2 retries)
+  that the Go SDK (#36) will adopt. Ships `examples/node-ingest` and
+  `examples/browser-ingest`; `ingest:write` keys are documented as publishable
+  browser-safe credentials. Follows SDK conventions: a versioned `User-Agent`
+  (`attune-node/<version>`), a `defaultHeaders` option, a shipped `LICENSE`, and
+  sourcemaps in `dist`. The package is publish-ready (`publishConfig` public
+  access to npmjs + `prepack` build) and the e2e harness installs the packed
+  tarball into a fresh project to verify ESM + CJS consumption against a live
+  server. A `SDK Release` workflow publishes to npm on an `sdk-v*` tag with npm
+  provenance (signed SLSA attestation via OIDC).
+
+- **Idempotent ingest via the `Idempotency-Key` header (#37).** `POST
+  /v1/feedback/ingest` now honors an optional `Idempotency-Key` request header:
+  a replay with the same key + body returns the original feedback id without
+  inserting again; the same key with a different body is `409
+  IDEMPOTENCY_CONFLICT`; a malformed key is `400 VALIDATION`. Dedup is enforced
+  by a partial unique index on `user_feedback (tenant_id, idempotency_key)`
+  (migrations 055–056) with `INSERT … ON CONFLICT`, so it is atomic even under
+  concurrent retries (N simultaneous same-key requests collapse to one row). The
+  index is built `CONCURRENTLY` (migration 056, via new non-transactional
+  migration support) so deploying it does not lock ingest on a large table.
+  Ingest now feeds `attune_idempotency_key_usage_total{outcome}`
+  (new/cache_hit/conflict), so the Operations "Idempotency" dashboard covers
+  single-row ingest, not just batch. A background pruner releases idempotency
+  keys older than 48h (NULLing the columns) so the partial index stays bounded
+  to the recent retry window. The Node SDK sends a per-call key automatically, held stable across retries, so a
+  retried at-least-once delivery cannot create a duplicate feedback row.
 
 - **Terminal enrichment-failure observability (#64).** New metric
   `attune_enrichment_terminal_failures_total{tenant}` counts feedback rows that

@@ -34,3 +34,14 @@ func buildRateLimiter(cfg *config.Config) *ratelimit.Limiter {
 		},
 	)
 }
+
+// buildPerKeyRateLimiter enforces each API key's own rate_limit_rpm (a no-op for
+// keys without one). Shares the per-tenant limiter's disable switch.
+func buildPerKeyRateLimiter(cfg *config.Config) *ratelimit.PerKeyLimiter {
+	return ratelimit.NewPerKey(
+		cfg.RateLimitDisabled,
+		func(tenantID string) {
+			metrics.APIKeyRateLimitedTotal.WithLabelValues(tenantID).Inc()
+		},
+	)
+}

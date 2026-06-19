@@ -1,0 +1,17 @@
+{
+  "name": "attune-node-ingest-example",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "start": "node index.ts"
+  },
+  "dependencies": {
+    "@phixsura/attune": "file:../.."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  }
+}
