@@ -103,6 +103,19 @@ The request/response types are generated from attune's proto contract
 hand-written. Regenerate with `pnpm gen:proto` (runs `make proto` at the repo
 root).
 
+## Development
+
+```bash
+pnpm install
+pnpm test         # unit tests (the live e2e suite auto-skips)
+pnpm build        # dual ESM/CJS via tsdown
+pnpm e2e          # full e2e: boots Postgres + a real attune server, runs the
+                  # live suite against it, checks persistence, then tears down
+```
+
+`pnpm test:e2e` runs the env-driven live suite (`test/e2e`) against any existing
+deployment: set `ATTUNE_E2E_BASE_URL` and `ATTUNE_E2E_API_KEY` first.
+
 ## License
 
 Apache-2.0
