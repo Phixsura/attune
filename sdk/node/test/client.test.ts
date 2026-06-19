@@ -251,3 +251,46 @@ describe('ingest — cancellation', () => {
     expect(calls).toHaveLength(0) // aborted before the first attempt
   })
 })
+
+describe('transport: slow / partial / malformed responses', () => {
+  it('maps a malformed 200 body to AttuneError INTERNAL (not a raw SyntaxError)', async () => {
+    const { fetch } = stubFetch([() => new Response('this is not json{', { status: 200 })])
+    await expect(
+      newClient(fetch, { maxRetries: 0 }).ingest({ content: 'x' }),
+    ).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'INTERNAL',
+      status: 200,
+    })
+  })
+
+  it('maps an empty 200 body to AttuneError INTERNAL', async () => {
+    const { fetch } = stubFetch([() => new Response('', { status: 200 })])
+    await expect(
+      newClient(fetch, { maxRetries: 0 }).ingest({ content: 'x' }),
+    ).rejects.toBeInstanceOf(AttuneError)
+  })
+
+  it('times out a slow/hanging response BODY (not just slow headers)', async () => {
+    // fetch resolves headers immediately; the body read hangs until aborted.
+    const hangFetch: FetchLike = (_url, init) =>
+      Promise.resolve({
+        status: 200,
+        headers: new Headers(),
+        text: () =>
+          new Promise<string>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('aborted', 'AbortError')),
+            )
+          }),
+      } as unknown as Response)
+    const client = new Client({
+      baseURL: BASE,
+      apiKey: KEY,
+      fetch: hangFetch,
+      timeout: 50,
+      maxRetries: 0,
+    })
+    await expect(client.ingest({ content: 'x' })).rejects.toMatchObject({ code: 'TIMEOUT' })
+  })
+})

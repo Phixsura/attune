@@ -126,9 +126,9 @@ export class Client {
         throw new AttuneError({ code: TransportErrorCode.Aborted, message: 'request aborted' })
       }
 
-      let response: Response
+      let result: { status: number; headers: Headers; text: string }
       try {
-        response = await this.#fetchOnce(url, payload, idempotencyKey, userSignal)
+        result = await this.#fetchOnce(url, payload, idempotencyKey, userSignal)
       } catch (err) {
         const transportError = err as AttuneError
         // A caller-initiated abort is intentional — never retry it.
@@ -141,18 +141,25 @@ export class Client {
         throw transportError
       }
 
-      if (response.ok) {
-        return (await response.json()) as T
+      const { status, headers, text } = result
+      if (status >= 200 && status < 300) {
+        try {
+          return JSON.parse(text) as T
+        } catch (cause) {
+          throw new AttuneError({
+            code: 'INTERNAL',
+            status,
+            headers,
+            message: 'invalid JSON in response body',
+            cause,
+          })
+        }
       }
 
-      const error = AttuneError.fromResponse(
-        response.status,
-        await readErrorBody(response),
-        response.headers,
-      )
-      if (isRetryable(response.status) && attempt < this.#maxRetries) {
+      const error = AttuneError.fromResponse(status, parseErrorBody(text), headers)
+      if (isRetryable(status) && attempt < this.#maxRetries) {
         lastError = error
-        await this.#sleep(parseRetryAfter(response.headers) ?? backoffDelay(attempt))
+        await this.#sleep(parseRetryAfter(headers) ?? backoffDelay(attempt))
         continue
       }
       throw error
@@ -170,7 +177,7 @@ export class Client {
     payload: string,
     idempotencyKey: string,
     userSignal?: AbortSignal,
-  ): Promise<Response> {
+  ): Promise<{ status: number; headers: Headers; text: string }> {
     const controller = new AbortController()
     let timedOut = false
     // timeout <= 0 → no per-attempt deadline (don't arm the timer).
@@ -185,7 +192,7 @@ export class Client {
     if (userSignal) userSignal.addEventListener('abort', onUserAbort, { once: true })
 
     try {
-      return await this.#fetch(url, {
+      const response = await this.#fetch(url, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -195,6 +202,12 @@ export class Client {
         body: payload,
         signal: controller.signal,
       })
+      // Read the body under the SAME timeout/abort scope: fetch() resolves on
+      // headers, so a slow or truncated body would otherwise hang forever (the
+      // timer is cleared once this method returns). Reading here keeps the whole
+      // request — headers AND body — under one deadline.
+      const text = await response.text()
+      return { status: response.status, headers: response.headers, text }
     } catch (cause) {
       if (userSignal?.aborted) {
         throw new AttuneError({
@@ -227,9 +240,9 @@ function stripTrailingSlashes(s: string): string {
 }
 
 /** Best-effort parse of the unified ErrorResponse envelope; undefined on any failure. */
-async function readErrorBody(response: Response): Promise<ErrorResponse | undefined> {
+function parseErrorBody(text: string): ErrorResponse | undefined {
   try {
-    return (await response.json()) as ErrorResponse
+    return JSON.parse(text) as ErrorResponse
   } catch {
     return undefined
   }

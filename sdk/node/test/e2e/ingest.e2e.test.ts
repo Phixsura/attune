@@ -182,6 +182,34 @@ live('ingest against a live attune server', () => {
     })
   })
 
+  describe('load & large payloads (live)', () => {
+    it('handles a burst of 40 concurrent distinct ingests with no loss or duplication', async () => {
+      const c = client()
+      const res = await Promise.all(
+        Array.from({ length: 40 }, (_, i) => c.ingest({ content: `${E2E_MARKER} burst-${i}` })),
+      )
+      expect(res.every((r) => /^\d+$/.test(r.id))).toBe(true)
+      expect(new Set(res.map((r) => r.id)).size).toBe(40) // all distinct rows
+    })
+
+    it('accepts a large (near-limit) sourceMeta payload', async () => {
+      const res = await client().ingest({
+        content: `${E2E_MARKER} big-meta`,
+        sourceMeta: { blob: 'x'.repeat(40_000) },
+      })
+      expect(res.id).toMatch(/^\d+$/)
+    })
+
+    it('rejects an over-limit body (>64 KiB) with 413 BODY_TOO_LARGE', async () => {
+      await expect(
+        client().ingest({
+          content: `${E2E_MARKER} huge`,
+          sourceMeta: { blob: 'y'.repeat(70_000) },
+        }),
+      ).rejects.toMatchObject({ code: 'BODY_TOO_LARGE', status: 413 })
+    })
+  })
+
   describe('transport failures', () => {
     it('surfaces a connection failure as code NETWORK', async () => {
       const dead = new Client({ baseURL: 'http://127.0.0.1:1', apiKey: KEY, maxRetries: 0 })
