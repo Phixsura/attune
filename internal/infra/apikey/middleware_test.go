@@ -33,8 +33,8 @@ func (s stubVerifier) LookupWithScopes(ctx context.Context, raw string) (string,
 	return s.tid, s.kid, s.scopes, s.err
 }
 
-func (s stubVerifier) LookupWithScopesAndIP(ctx context.Context, raw, clientIP string) (string, uuid.UUID, []domain.Scope, error) {
-	return s.tid, s.kid, s.scopes, s.err
+func (s stubVerifier) LookupWithScopesAndIP(ctx context.Context, raw, clientIP string) (string, uuid.UUID, []domain.Scope, *int, error) {
+	return s.tid, s.kid, s.scopes, nil, s.err
 }
 
 // ipCapturingVerifier records the client IP the middleware resolved and passed
@@ -51,9 +51,9 @@ func (v *ipCapturingVerifier) LookupWithScopes(context.Context, string) (string,
 	return "t", uuid.Nil, nil, nil
 }
 
-func (v *ipCapturingVerifier) LookupWithScopesAndIP(_ context.Context, _, clientIP string) (string, uuid.UUID, []domain.Scope, error) {
+func (v *ipCapturingVerifier) LookupWithScopesAndIP(_ context.Context, _, clientIP string) (string, uuid.UUID, []domain.Scope, *int, error) {
 	v.gotIP = clientIP
-	return "t", uuid.Nil, nil, nil
+	return "t", uuid.Nil, nil, nil, nil
 }
 
 // TestMiddlewareWithProxies_ResolvesClientIP locks the XFF trust model: with no

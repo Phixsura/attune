@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #41 (advanced API-key security controls) |
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Started** | 2026-06-19 |
 | **Related** | #37 (Node SDK — its browser-key guidance leaned on a per-key limit that doesn't exist; surfaced this gap), ingest rate limiting (`internal/infra/ratelimit`) |
 

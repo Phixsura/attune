@@ -41,8 +41,8 @@ func (okVerifier) LookupWithScopes(_ context.Context, _ string) (string, uuid.UU
 	return "tenant-123", uuid.Nil, domain.AllScopes, nil
 }
 
-func (okVerifier) LookupWithScopesAndIP(_ context.Context, _, _ string) (string, uuid.UUID, []domain.Scope, error) {
-	return "tenant-123", uuid.Nil, domain.AllScopes, nil
+func (okVerifier) LookupWithScopesAndIP(_ context.Context, _, _ string) (string, uuid.UUID, []domain.Scope, *int, error) {
+	return "tenant-123", uuid.Nil, domain.AllScopes, nil, nil
 }
 
 func ingestTestServer(ing *fakeIngestor) http.Handler {

@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   
 ### Security
 
+- **Per-API-key rate limiting is now enforced (#41).** `external_api_keys.rate_limit_rpm`
+  was stored and shown in the console but never enforced — only a per-tenant
+  limit applied, so a leaked/abused key could consume the whole tenant's ingest
+  budget. A new per-key token-bucket limiter (`ratelimit.PerKeyLimiter`, mounted
+  after auth on `/v1/feedback/ingest`) now caps each key at its own
+  `rate_limit_rpm`, returning `429 RATE_LIMITED` + `Retry-After`. New metric
+  `attune_apikey_rate_limited_total{tenant}` (dashboarded). Keys without an rpm
+  are unaffected. **Behavior change:** keys that already have `rate_limit_rpm`
+  set start being enforced.
+
 - **API-key IP allowlist now works and fails closed (#41).** Two bugs: (1) any
   key with a non-empty `allowed_cidrs` failed every lookup — pgx couldn't scan
   the `inet[]` column into `[]string` (`cannot scan _inet`), so the allowlist

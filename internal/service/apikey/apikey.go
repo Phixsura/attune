@@ -113,35 +113,36 @@ func (s *APIKeys) Lookup(ctx context.Context, raw string) (tenantID string, keyI
 // atomically. If scope loading fails, returns domain.ErrInvalidAPIKey (fail-closed).
 // Deprecated: Use LookupWithScopesAndIP for IP allowlist support.
 func (s *APIKeys) LookupWithScopes(ctx context.Context, raw string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, err error) {
-	return s.LookupWithScopesAndIP(ctx, raw, "")
+	t, k, sc, _, e := s.LookupWithScopesAndIP(ctx, raw, "")
+	return t, k, sc, e
 }
 
 // LookupWithScopesAndIP verifies the raw key with expiration and IP allowlist checks.
 // Returns tenant, key ID, scopes, and rate limit on success.
-func (s *APIKeys) LookupWithScopesAndIP(ctx context.Context, raw, clientIP string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, err error) {
+func (s *APIKeys) LookupWithScopesAndIP(ctx context.Context, raw, clientIP string) (tenantID string, keyID uuid.UUID, scopes []domain.Scope, rateLimitRPM *int, err error) {
 	const where = "service.APIKeys.LookupWithScopesAndIP"
 	if len(raw) != len(domain.APIKeyPrefix)+rawKeyHexLen {
 		logext.Warnf(ctx, "[%s] reject: bad key length,len:%d", where, len(raw))
-		return "", uuid.Nil, nil, domain.ErrInvalidAPIKey
+		return "", uuid.Nil, nil, nil, domain.ErrInvalidAPIKey
 	}
 	digest := apiKeyLookupDigest(raw)
 	row, err := s.repo.LookupByHash(ctx, digest)
 	if errors.Is(err, apikeyrepo.ErrAPIKeyNotFound) {
 		logext.Warnf(ctx, "[%s] reject: hash not found", where)
-		return "", uuid.Nil, nil, domain.ErrInvalidAPIKey
+		return "", uuid.Nil, nil, nil, domain.ErrInvalidAPIKey
 	}
 	if err != nil {
 		logext.Errorf(ctx, "[%s] LookupByHash failed,err:%+v", where, err.Error())
-		return "", uuid.Nil, nil, err
+		return "", uuid.Nil, nil, nil, err
 	}
 	if !hmac.Equal(row.StoredHash, digest) {
 		logext.Warnf(ctx, "[%s] reject: hmac mismatch,key_id:%s", where, row.ID)
-		return "", uuid.Nil, nil, domain.ErrInvalidAPIKey
+		return "", uuid.Nil, nil, nil, domain.ErrInvalidAPIKey
 	}
 
 	if row.ExpiresAt != nil && time.Now().After(ptrext.Indirect(row.ExpiresAt)) {
 		logext.Warnf(ctx, "[%s] reject: key expired,key_id:%s,expires_at:%s", where, row.ID, row.ExpiresAt)
-		return "", uuid.Nil, nil, domain.ErrAPIKeyExpired
+		return "", uuid.Nil, nil, nil, domain.ErrAPIKeyExpired
 	}
 
 	// IP allowlist fails CLOSED: when CIDRs are configured but the client IP is
@@ -150,18 +151,18 @@ func (s *APIKeys) LookupWithScopesAndIP(ctx context.Context, raw, clientIP strin
 	if len(row.AllowedCIDRs) > 0 {
 		if clientIP == "" || !domain.IPAllowedStrings(row.AllowedCIDRs, clientIP) {
 			logext.Warnf(ctx, "[%s] reject: IP not allowed,key_id:%s,client_ip:%q", where, row.ID, clientIP)
-			return "", uuid.Nil, nil, domain.ErrIPNotAllowed
+			return "", uuid.Nil, nil, nil, domain.ErrIPNotAllowed
 		}
 	}
 
 	scopes, err = s.repo.GetScopes(ctx, row.ID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] GetScopes failed,key_id:%s,err:%+v", where, row.ID, err.Error())
-		return "", uuid.Nil, nil, domain.ErrInvalidAPIKey
+		return "", uuid.Nil, nil, nil, domain.ErrInvalidAPIKey
 	}
 
 	s.touchAsync(row.ID)
-	return row.TenantID, row.ID, scopes, nil
+	return row.TenantID, row.ID, scopes, row.RateLimitRPM, nil
 }
 
 // LookupResult contains all key details for verification API.

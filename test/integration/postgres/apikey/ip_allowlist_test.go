@@ -48,7 +48,7 @@ func TestPG_APIKeyIPAllowlistFailsClosed(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, _, _, err := svc.LookupWithScopesAndIP(ctx, raw, c.clientIP)
+			_, _, _, _, err := svc.LookupWithScopesAndIP(ctx, raw, c.clientIP)
 			if c.wantErr {
 				if !errors.Is(err, domain.ErrIPNotAllowed) {
 					t.Fatalf("clientIP=%q: err = %v, want ErrIPNotAllowed", c.clientIP, err)

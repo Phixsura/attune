@@ -273,9 +273,10 @@ func securityDashboard() dashboard {
 			targetExpr("B", `sum by (scope) (rate(attune_apikey_scope_denied_total[$__rate_interval]))`, "apikey scope {{scope}}"),
 		}, "reqps", gp(12, 17, 12, 8)),
 		rowPanel(15, "API key security", 25),
-		seriesDesc(16, "API key access denials", "API key requests denied due to expiration or IP restrictions. Spikes may indicate credential rotation issues or misconfigured allowlists.", []target{
+		seriesDesc(16, "API key access denials", "API key requests denied due to expiration, IP restrictions, or per-key rate limits. Spikes may indicate credential rotation issues, misconfigured allowlists, or a hot/abused key.", []target{
 			targetExpr("A", `sum(rate(attune_apikey_expired_total[$__rate_interval]))`, "expired"),
 			targetExpr("B", `sum(rate(attune_apikey_ip_denied_total[$__rate_interval]))`, "IP denied"),
+			targetExpr("C", `sum(rate(attune_apikey_rate_limited_total[$__rate_interval]))`, "rate limited"),
 		}, "reqps", gp(0, 26, 12, 8)),
 		seriesDesc(17, "API key usage", "Successful API key authentications by key prefix. Use this to track active keys and detect unusual usage patterns.", []target{
 			targetExpr("A", `sum by (key_prefix) (rate(attune_apikey_usage_total[$__rate_interval]))`, "{{key_prefix}}"),

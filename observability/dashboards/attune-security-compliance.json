@@ -606,7 +606,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "API key access denials",
-      "description": "API key requests denied due to expiration or IP restrictions. Spikes may indicate credential rotation issues or misconfigured allowlists.",
+      "description": "API key requests denied due to expiration, IP restrictions, or per-key rate limits. Spikes may indicate credential rotation issues, misconfigured allowlists, or a hot/abused key.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -623,6 +623,11 @@
           "expr": "(sum(rate(attune_apikey_ip_denied_total[$__rate_interval]))) or vector(0)",
           "legendFormat": "IP denied",
           "refId": "B"
+        },
+        {
+          "expr": "(sum(rate(attune_apikey_rate_limited_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "rate limited",
+          "refId": "C"
         }
       ],
       "fieldConfig": {
