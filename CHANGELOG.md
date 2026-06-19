@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **Oversized ingest body now returns `413 BODY_TOO_LARGE` (#37).** `POST
+  /v1/feedback/ingest` previously returned `400 BAD_REQUEST` for a body over the
+  64 KiB cap; it now returns `413` with code `BODY_TOO_LARGE`, matching the rest
+  of the HTTP API. A malformed (but in-size) body is still `400`.
+
 - **DB pool and HTTP server are now bounded (#64).** `database.NewPool` applies
   defaults for `MaxConns` (20), `connect_timeout` (10s), and `statement_timeout`
   (30s) unless the database URL already sets them, so a single stuck query can't
