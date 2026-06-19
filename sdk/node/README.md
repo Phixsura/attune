@@ -154,14 +154,14 @@ artifact is exercised, not just the source.
 ## Publishing
 
 Releases are automated by the `SDK Release` workflow
-(`.github/workflows/sdk-release.yml`) on an `sdk-vX.Y.Z` tag, authenticated by
-npm **Trusted Publishing (OIDC)** — no `NPM_TOKEN` secret. The workflow verifies
-the tag matches `package.json`'s `version`, runs the type check + tests, and
-publishes with provenance (a signed SLSA attestation). `publishConfig` forces
-public access to the public registry and `prepack` builds `dist/` before packing.
+(`.github/workflows/sdk-release.yml`) on an `sdk-vX.Y.Z` tag: it verifies the tag
+matches `package.json`'s `version`, runs the type check + tests, and publishes
+with provenance (a signed SLSA attestation) using the `NPM_TOKEN` repo secret.
+`publishConfig` forces public access to the public registry and `prepack` builds
+`dist/` before packing.
 
 ```bash
-# cut a release: bump the version, commit, then tag to trigger publish
+# cut a release: bump the version, then tag to trigger publish
 npm version <patch|minor|major>      # bump package.json + create git commit/tag
 git push && git push --tags          # or: git tag sdk-v0.1.1 <sha> && git push origin sdk-v0.1.1
 ```
