@@ -14,13 +14,63 @@ package e2e
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	attune "github.com/Phixsura/attune/sdk/go"
 )
+
+// TestE2ERetryAgainstRealServer exercises the SDK's retry path end-to-end: a
+// fault-injecting reverse proxy in front of the live server returns 503 for the
+// first two attempts (Retry-After: 0 → instant retries), then forwards the third
+// to the real server, which actually ingests. Proves transient failures are
+// retried and eventually succeed against a real backend (not just a mock).
+func TestE2ERetryAgainstRealServer(t *testing.T) {
+	base := os.Getenv("ATTUNE_E2E_BASE_URL")
+	key := os.Getenv("ATTUNE_E2E_API_KEY")
+	marker := os.Getenv("ATTUNE_E2E_MARKER")
+	if base == "" || key == "" || marker == "" {
+		t.Skip("ATTUNE_E2E_* not set")
+	}
+	target, err := url.Parse(base)
+	if err != nil {
+		t.Fatalf("parse base: %v", err)
+	}
+
+	var hits atomic.Int32
+	rp := httputil.NewSingleHostReverseProxy(target)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) <= 2 {
+			w.Header().Set("Retry-After", "0") // retry immediately
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		rp.ServeHTTP(w, r) // third attempt → real server
+	}))
+	defer proxy.Close()
+
+	c, err := attune.New(proxy.URL, key, attune.WithMaxRetries(2))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := c.Ingest(context.Background(), attune.IngestInput{Content: marker + " retry-then-ok"})
+	if err != nil {
+		t.Fatalf("Ingest should succeed after 2 retries: %v", err)
+	}
+	if res.ID == "" {
+		t.Fatal("empty id after successful retry")
+	}
+	if got := hits.Load(); got != 3 {
+		t.Errorf("server saw %d requests, want 3 (two 503s + one success)", got)
+	}
+}
 
 func newClient(t *testing.T) (*attune.Client, string) {
 	t.Helper()
