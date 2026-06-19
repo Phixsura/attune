@@ -15,6 +15,13 @@ the tag from the version:
 go get github.com/Phixsura/attune/sdk/go@v0.1.0
 ```
 
+The package is `attune`, so `import "github.com/Phixsura/attune/sdk/go"`
+resolves to `attune.New(…)` with **no import alias required** (the examples
+below spell out `attune "…/sdk/go"` only for clarity, since the path's last
+segment is `go`). The `…/sdk/go` layout follows the monorepo SDK convention used
+by, e.g., the Azure SDK for Go (`github.com/Azure/azure-sdk-for-go/sdk/azcore`),
+with per-module `sdk/go/vX.Y.Z` release tags.
+
 Minimum Go version: **1.25** (the proto-generated types pull
 `google.golang.org/protobuf` and `google.golang.org/genproto`, which require it).
 
