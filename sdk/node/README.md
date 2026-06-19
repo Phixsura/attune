@@ -141,8 +141,9 @@ pnpm e2e          # full e2e: boots Postgres + a real attune server, runs the
 `pnpm test:e2e` runs the env-driven live suite (`test/e2e`) against any existing
 deployment: set `ATTUNE_E2E_BASE_URL` and `ATTUNE_E2E_API_KEY` first. `pnpm e2e`
 additionally packs the publishable tarball, installs it into a throwaway project,
-and ingests through it via both ESM and CJS — so the real artifact is exercised,
-not just the source.
+ingests through it via both ESM and CJS, and bundles it for the browser
+(esbuild `platform=browser`, asserting no Node built-ins leak) — so the real
+artifact is exercised, not just the source.
 
 ## Publishing
 

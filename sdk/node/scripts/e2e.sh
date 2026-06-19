@@ -154,6 +154,22 @@ JS
 B="$BASE_URL" K="$KEY" MARK="$MARKER" node "$CONSUMER/esm.mjs"
 B="$BASE_URL" K="$KEY" MARK="$MARKER" node "$CONSUMER/cjs.cjs"
 
+log "verify the package bundles for the browser (esbuild platform=browser, no Node built-ins)"
+cat > "$CONSUMER/browser-entry.mjs" <<'JS'
+import { Client, AttuneError, ErrorCode } from '@phixsura/attune'
+const c = new Client({ baseURL: 'https://x.example', apiKey: 'ak_pub' })
+globalThis.__keep = [typeof c.ingest, typeof AttuneError, ErrorCode.VALIDATION]
+JS
+(
+  cd "$CONSUMER"
+  npx -y esbuild@latest browser-entry.mjs --bundle --platform=browser --format=esm --outfile=browser-bundle.js >/dev/null 2>&1
+)
+[ -f "$CONSUMER/browser-bundle.js" ] || { echo "browser bundle failed to build"; exit 1; }
+if grep -qE 'node:|require\("(http|crypto|stream|buffer|net|tls|fs)"\)' "$CONSUMER/browser-bundle.js"; then
+  echo "browser bundle leaked a Node built-in"; exit 1
+fi
+echo "  browser bundle OK ($(wc -c < "$CONSUMER/browser-bundle.js") bytes, no Node built-ins)"
+
 log "verify the external-consumer ingests landed in Postgres (ESM + CJS → 2 rows)"
 CONS="$(docker exec "$CONTAINER" psql -U attune -d attune -tAc \
   "select count(*) from user_feedback where content like '${MARKER} consumer-%';")"
