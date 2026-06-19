@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   
 ### Security
 
+- **Per-API-key rate limit now also covers the tag/workflow admin surface (#36).**
+  A key's `rate_limit_rpm` is the key's overall request budget, but it was only
+  enforced on `/v1/feedback/ingest`; the API-key tag/workflow routes
+  (`/v1/tags`, `/v1/workflow/...`, added in this release) applied no limiter, so
+  a rate-capped key could mutate tags/workflow config without bound (DB-write /
+  audit-log amplification). The existing `PerKeyLimiter` middleware is now also
+  mounted on the admin group, returning `429 RATE_LIMITED` + `Retry-After`. Keys
+  without an rpm are unaffected. The per-tenant ingest limiter remains
+  ingest-scoped by design.
+
 - **Per-API-key rate limiting is now enforced (#41).** `external_api_keys.rate_limit_rpm`
   was stored and shown in the console but never enforced — only a per-tenant
   limit applied, so a leaked/abused key could consume the whole tenant's ingest

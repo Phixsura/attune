@@ -16,6 +16,8 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/apikey"
+	"github.com/Phixsura/attune/internal/infra/ratelimit"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // scopedVerifier is a stub apikey.Verifier that authenticates every request as a
@@ -25,6 +27,7 @@ type scopedVerifier struct {
 	tenant string
 	key    uuid.UUID
 	scopes []domain.Scope
+	rpm    *int // per-key rate_limit_rpm (nil = no per-key cap)
 }
 
 func (v scopedVerifier) Lookup(context.Context, string) (string, uuid.UUID, error) {
@@ -36,8 +39,12 @@ func (v scopedVerifier) LookupWithScopes(context.Context, string) (string, uuid.
 }
 
 func (v scopedVerifier) LookupWithScopesAndIP(context.Context, string, string) (string, uuid.UUID, []domain.Scope, *int, error) {
-	return v.tenant, v.key, v.scopes, nil, nil
+	return v.tenant, v.key, v.scopes, v.rpm, nil
 }
+
+// disabledLimiter is a no-op per-key limiter for tests that don't exercise rate
+// limiting (every request is admitted).
+func disabledLimiter() *ratelimit.PerKeyLimiter { return ratelimit.NewPerKey(true, nil) }
 
 // TestApikeyToSessionMapsIdentity verifies the apikey→session adapter maps the
 // authenticated key identity onto the AuthCtx the console handlers consume, with
@@ -73,7 +80,7 @@ func TestAPIKeyAdminRoutesScopeGated(t *testing.T) {
 	t.Parallel()
 	v := scopedVerifier{tenant: "tenant-1", key: uuid.Nil, scopes: []domain.Scope{domain.ScopeIngestWrite}}
 	r := chi.NewRouter()
-	MountAPIKeyAdminRoutes(r, nil, v, 0)
+	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter())
 
 	cases := []struct {
 		name, method, path string
@@ -120,7 +127,7 @@ func TestAPIKeyAdminRoutesBindAndAuthorize(t *testing.T) {
 	v := scopedVerifier{tenant: "tenant-1", key: uuid.Nil, scopes: domain.AllScopes}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
-	MountAPIKeyAdminRoutes(r, nil, v, 0)
+	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter())
 
 	cases := []struct {
 		name, method, path, body string
@@ -159,13 +166,37 @@ func TestAPIKeyAdminRoutesBindAndAuthorize(t *testing.T) {
 	}
 }
 
+// TestAPIKeyAdminRoutesPerKeyRateLimited verifies the key's own rate_limit_rpm
+// is enforced on the admin surface (not just ingest): a 1-rpm key is admitted
+// once, then the second request is rejected 429 by the per-key limiter before
+// the handler runs. Without the limiter wired, a capped key could mutate
+// tags/workflow without bound.
+func TestAPIKeyAdminRoutesPerKeyRateLimited(t *testing.T) {
+	t.Parallel()
+	keyID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	v := scopedVerifier{tenant: "tenant-1", key: keyID, scopes: domain.AllScopes, rpm: ptrext.Of(1)}
+	r := chi.NewRouter()
+	r.Use(middleware.Recoverer) // the admitted request 500s on the nil pool; the limiter is what we assert
+	MountAPIKeyAdminRoutes(r, nil, v, 0, ratelimit.NewPerKey(false, nil))
+
+	do := func() int {
+		req := httptest.NewRequest(http.MethodGet, "/tags", nil)
+		req.Header.Set("X-API-Key", domain.APIKeyPrefix+"capped")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+	_ = do() // first request admitted (then 500s on the nil pool)
+	require.Equal(t, http.StatusTooManyRequests, do())
+}
+
 // TestAPIKeyAdminRoutesRejectMissingKey verifies the mounted group is behind the
 // API-key middleware: a request with no key is rejected 401 before any handler.
 func TestAPIKeyAdminRoutesRejectMissingKey(t *testing.T) {
 	t.Parallel()
 	v := scopedVerifier{tenant: "tenant-1", key: uuid.Nil, scopes: domain.AllScopes}
 	r := chi.NewRouter()
-	MountAPIKeyAdminRoutes(r, nil, v, 0)
+	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter())
 
 	req := httptest.NewRequest(http.MethodGet, "/tags", nil) // no X-API-Key
 	w := httptest.NewRecorder()

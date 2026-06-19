@@ -118,7 +118,7 @@ func buildRouter(
 
 		// Tag / workflow config over the API-key surface (scope-gated), reusing
 		// the console handlers — lets the SDKs manage tags/workflow (#36).
-		console.MountAPIKeyAdminRoutes(r, pool, apiKeys, cfg.Security.TrustedProxyHops)
+		console.MountAPIKeyAdminRoutes(r, pool, apiKeys, cfg.Security.TrustedProxyHops, perKeyRateLimiter)
 	})
 
 	// Console UI. Mounted under /fb/v1/console; the reverse

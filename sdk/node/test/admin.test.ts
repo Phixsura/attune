@@ -110,6 +110,34 @@ describe('retry safety (bug fix)', () => {
     await newClient(fetch).archiveTag('t1')
     expect(calls.length).toBe(3) // retried twice
   })
+
+  it('does NOT retry a non-idempotent POST (createWorkflowState)', async () => {
+    const { fetch, calls } = stubFetch([() => json(503, { code: 'INTERNAL', message: 'down' })])
+    await expect(
+      newClient(fetch).createWorkflowState({
+        name: 'triage',
+        color: '#3b82f6',
+        category: 'active',
+        position: 1,
+      }),
+    ).rejects.toBeInstanceOf(AttuneError)
+    expect(calls.length).toBe(1) // no retry — could otherwise duplicate the state
+  })
+
+  it('does NOT retry seedWorkflowDefaults (non-idempotent POST)', async () => {
+    const { fetch, calls } = stubFetch([() => json(503, { code: 'INTERNAL', message: 'down' })])
+    await expect(newClient(fetch).seedWorkflowDefaults()).rejects.toBeInstanceOf(AttuneError)
+    expect(calls.length).toBe(1)
+  })
+
+  it('DOES retry replaceWorkflowTransitions (idempotent PUT)', async () => {
+    let n = 0
+    const { fetch, calls } = stubFetch([
+      () => (++n < 3 ? json(503, { code: 'INTERNAL', message: 'down' }) : json(200, {})),
+    ])
+    await newClient(fetch).replaceWorkflowTransitions({ transitions: [] })
+    expect(calls.length).toBe(3) // retried twice
+  })
 })
 
 describe('workflow', () => {
@@ -157,6 +185,12 @@ describe('workflow', () => {
       expect(c0.url).toBe(`${BASE}${path}`)
     })
   }
+
+  it('listWorkflowStates includeArchived adds the query param', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { states: [] })])
+    await newClient(fetch).listWorkflowStates({ includeArchived: true })
+    expect(calls[0]?.url).toBe(`${BASE}/v1/workflow/states?include_archived=true`)
+  })
 
   it('updateWorkflowState rejects empty id', async () => {
     const { fetch } = stubFetch([() => json(200, {})])

@@ -16,6 +16,7 @@ import (
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoleworkflow "github.com/Phixsura/attune/internal/handlers/console/workflow"
 	"github.com/Phixsura/attune/internal/infra/apikey"
+	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
@@ -47,7 +48,12 @@ func apikeyToSession(r *http.Request) (*session.AuthCtx, error) {
 // MountAPIKeyAdminRoutes mounts the tag/workflow config endpoints under the
 // API-key surface (scope-gated), reusing the console handlers. It builds its own
 // handler instances from the pool so it does not depend on the console router.
-func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Verifier, trustedProxyHops int) {
+//
+// perKeyLimiter applies the key's own rate_limit_rpm here too: that cap is the
+// key's overall request budget, not an ingest-only limit, so these admin writes
+// must count against it (else a capped key could mutate tags/workflow without
+// bound). Mounted after the api-key middleware so AuthCtx is on the context.
+func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Verifier, trustedProxyHops int, perKeyLimiter *ratelimit.PerKeyLimiter) {
 	audit := auditlogsvc.New(auditlogrepo.New(pool))
 
 	tags := consoletag.NewHandler(feedbacktagrepo.New(pool))
@@ -59,6 +65,7 @@ func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Ver
 
 	r.Group(func(g chi.Router) {
 		g.Use(apikey.MiddlewareWithProxies(apiKeys, trustedProxyHops))
+		g.Use(perKeyLimiter.Middleware)
 		mountAPIKeyTags(g, tags)
 		mountAPIKeyWorkflow(g, wf)
 	})

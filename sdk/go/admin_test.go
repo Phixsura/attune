@@ -241,3 +241,61 @@ func TestWorkflowEmptyIDGuards(t *testing.T) {
 		t.Error("ArchiveWorkflowState empty id should error")
 	}
 }
+
+// The non-idempotent workflow POSTs must NOT retry on a transient failure — a
+// retry after a lost response could create a duplicate state (same bug class as
+// CreateTag). seed is a POST too and carries no idempotency key, so same rule.
+func TestCreateWorkflowStateNotRetried(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+	if _, err := c.CreateWorkflowState(context.Background(), &CreateStateRequest{Name: "s"}); err == nil {
+		t.Fatal("expected error")
+	}
+	if hits != 1 {
+		t.Errorf("CreateWorkflowState hit the server %d times, want 1", hits)
+	}
+}
+
+func TestSeedWorkflowDefaultsNotRetried(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+	if _, err := c.SeedWorkflowDefaults(context.Background()); err == nil {
+		t.Fatal("expected error")
+	}
+	if hits != 1 {
+		t.Errorf("SeedWorkflowDefaults hit the server %d times, want 1", hits)
+	}
+}
+
+// ReplaceWorkflowTransitions is a PUT (idempotent) → it MUST retry transient
+// failures, unlike the create*/seed POSTs above.
+func TestReplaceWorkflowTransitionsRetries(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		if hits < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+	if _, err := c.ReplaceWorkflowTransitions(context.Background(), &ReplaceTransitionsRequest{}); err != nil {
+		t.Fatalf("ReplaceWorkflowTransitions: %v", err)
+	}
+	if hits != 3 {
+		t.Errorf("ReplaceWorkflowTransitions hit the server %d times, want 3 (idempotent PUT retries)", hits)
+	}
+}
