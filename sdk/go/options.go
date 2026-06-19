@@ -2,8 +2,19 @@ package attune
 
 import (
 	"net/http"
+	"net/textproto"
 	"time"
 )
+
+// reservedHeaders are the canonical names the client controls itself; a
+// WithDefaultHeaders entry matching any of these (in any casing) is dropped so
+// it can never override what the client sets per request.
+var reservedHeaders = map[string]bool{
+	"Content-Type":    true,
+	"X-Api-Key":       true, // textproto canonical form of X-API-Key
+	"Idempotency-Key": true,
+	"User-Agent":      true,
+}
 
 // Option configures a Client at construction time. Pass options to New.
 type Option func(*Client)
@@ -43,7 +54,8 @@ func WithUserAgentSuffix(s string) Option {
 // WithDefaultHeaders sets extra headers sent on every request (e.g. a trace or
 // proxy token). The map is copied. The reserved headers Content-Type,
 // X-API-Key, Idempotency-Key, and User-Agent always take precedence and cannot
-// be overridden here.
+// be overridden here — they are dropped (compared canonically, so any casing is
+// caught) so they can never enter the default-header set.
 func WithDefaultHeaders(h map[string]string) Option {
 	return func(c *Client) {
 		if len(h) == 0 {
@@ -51,6 +63,9 @@ func WithDefaultHeaders(h map[string]string) Option {
 		}
 		c.defaultHeaders = make(map[string]string, len(h))
 		for k, v := range h {
+			if reservedHeaders[textproto.CanonicalMIMEHeaderKey(k)] {
+				continue
+			}
 			c.defaultHeaders[k] = v
 		}
 	}

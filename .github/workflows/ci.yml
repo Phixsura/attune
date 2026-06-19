@@ -429,6 +429,13 @@ jobs:
       # Compile the build-tagged e2e suite so it can't rot (it runs live in
       # scripts/e2e.sh, not in CI).
       - run: go vet -tags e2e ./test/...
+      # govulncheck on the SDK's own module — its deps (protobuf/genproto/
+      # gnostic-models) are NOT covered by the root govulncheck job. Advisory
+      # (continue-on-error), matching the root job's posture.
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+      - name: govulncheck ./... (sdk/go)
+        continue-on-error: true
+        run: govulncheck ./...
 
   # ── Changelog enforcement: a code PR must update CHANGELOG.md (CLAUDE.md §2) ─
   changelog:

@@ -2,6 +2,7 @@ package tag
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -26,7 +27,8 @@ func (f *fakeAuditRecorder) Record(_ context.Context, event auditlogsvc.Event) e
 }
 
 type fakeTagRepo struct {
-	current feedbacktag.Tag
+	current   feedbacktag.Tag
+	updateErr error
 }
 
 func (f *fakeTagRepo) List(context.Context, string, bool) ([]feedbacktag.Tag, error) {
@@ -42,6 +44,9 @@ func (f *fakeTagRepo) Create(_ context.Context, t feedbacktag.Tag) (*feedbacktag
 }
 
 func (f *fakeTagRepo) Update(_ context.Context, t feedbacktag.Tag) (*feedbacktag.Tag, error) {
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
 	f.current.Name = t.Name
 	f.current.Color = t.Color
 	f.current.Description = t.Description
@@ -106,6 +111,29 @@ func TestUpdateRecordsAudit(t *testing.T) {
 	require.Equal(t, "tag.update", audit.events[0].Action)
 	require.NotNil(t, audit.events[0].Before)
 	require.NotNil(t, audit.events[0].After)
+}
+
+// TestUpdateMapsCheckViolationTo400 verifies a DB CHECK-constraint violation
+// (empty/over-long name, bad color) surfaces as 400 VALIDATION, not 500 — so a
+// partial SDK update that trips a constraint gets a clean client error.
+func TestUpdateMapsCheckViolationTo400(t *testing.T) {
+	t.Parallel()
+	repo := ptrext.Of(fakeTagRepo{
+		current:   feedbacktag.Tag{ID: uuid.New(), TenantID: "tenant-1", Name: "X", Color: "#ef4444"},
+		updateErr: feedbacktag.ErrInvalidInput,
+	})
+	h := ptrext.Of(Handler{repo: repo, audit: ptrext.Of(fakeAuditRecorder{})})
+
+	_, err := h.Update(tagCtx(), ptrext.Of(attunev1.UpdateTagRequest{
+		Id:    repo.current.ID.String(),
+		Name:  ptrext.Of("Renamed"),
+		Color: ptrext.Of("#22c55e"),
+	}))
+
+	var de *dispatcher.Error
+	require.ErrorAs(t, err, &de) // ptrext:allow errors.As out-parameter
+	require.Equal(t, http.StatusBadRequest, de.Status)
+	require.Equal(t, attunev1.ErrorCode_VALIDATION, de.Code)
 }
 
 func TestArchiveRecordsAudit(t *testing.T) {

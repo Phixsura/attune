@@ -311,8 +311,10 @@ func TestWithDefaultHeaders(t *testing.T) {
 	defer srv.Close()
 
 	c, _ := newTestClient(t, srv, WithDefaultHeaders(map[string]string{
-		"X-Trace-Id": "trace-123",
-		"X-API-Key":  "attacker-override", // reserved header: must NOT win
+		"X-Trace-Id":   "trace-123",
+		"X-API-Key":    "attacker-override", // reserved header: must NOT win
+		"content-type": "text/evil",         // case-variant reserved: must NOT win either
+		"USER-AGENT":   "spoofed",
 	}))
 	if _, err := c.Ingest(context.Background(), IngestInput{Content: "x"}); err != nil {
 		t.Fatalf("Ingest: %v", err)
@@ -322,6 +324,12 @@ func TestWithDefaultHeaders(t *testing.T) {
 	}
 	if got.Get("X-API-Key") != "att_sk_test" {
 		t.Errorf("reserved X-API-Key was overridden by defaultHeaders: %q", got.Get("X-API-Key"))
+	}
+	if got.Get("Content-Type") != "application/json" {
+		t.Errorf("case-variant Content-Type leaked from defaultHeaders: %q", got.Get("Content-Type"))
+	}
+	if got.Get("User-Agent") == "spoofed" {
+		t.Errorf("case-variant User-Agent was overridden by defaultHeaders")
 	}
 }
 

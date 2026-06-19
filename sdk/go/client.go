@@ -13,6 +13,7 @@ import (
 
 	attunev1 "github.com/Phixsura/attune/sdk/go/attune/v1"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -32,7 +33,7 @@ var (
 // Client is a reusable, concurrency-safe attune ingest client. Create one with
 // New and share it across goroutines.
 type Client struct {
-	endpoint       string
+	baseURL        string
 	apiKey         string
 	httpClient     *http.Client
 	maxRetries     int
@@ -64,7 +65,7 @@ func New(baseURL, apiKey string, opts ...Option) (*Client, error) {
 	}
 
 	c := &Client{
-		endpoint:   strings.TrimRight(baseURL, "/") + ingestPath,
+		baseURL:    strings.TrimRight(baseURL, "/"),
 		apiKey:     apiKey,
 		maxRetries: 2,
 		timeout:    30 * time.Second,
@@ -120,6 +121,23 @@ func (c *Client) Ingest(ctx context.Context, in IngestInput, opts ...RequestOpti
 		return IngestResult{}, &AttuneError{Code: CodeBadRequest, Message: "invalid request body", cause: err}
 	}
 
+	var out attunev1.IngestResponse
+	if err := c.do(ctx, http.MethodPost, ingestPath, payload, &out, key); err != nil {
+		return IngestResult{}, err
+	}
+	return resultFromProto(&out), nil
+}
+
+// do runs one request through the retry loop. payload is the marshaled body
+// (nil for none); on a 2xx with a body it unmarshals into out (nil to ignore);
+// key, when non-empty, is sent as the Idempotency-Key. It returns nil on success
+// or an *AttuneError.
+func (c *Client) do(ctx context.Context, method, path string, payload []byte, out proto.Message, key string) error {
+	// A non-idempotent POST without a server-honored idempotency key must NOT be
+	// retried: a retry after a lost response could create a duplicate resource.
+	// (Ingest's POST carries an Idempotency-Key the server dedups on, so it stays
+	// retryable; GET/PUT/PATCH/DELETE are idempotent.)
+	retrySafe := method != http.MethodPost || key != ""
 	var last *attemptError
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
@@ -128,19 +146,49 @@ func (c *Client) Ingest(ctx context.Context, in IngestInput, opts ...RequestOpti
 				delay = last.retryAfter
 			}
 			if err := c.sleep(ctx, delay); err != nil {
-				return IngestResult{}, &AttuneError{Code: CodeAborted, Message: err.Error(), cause: err}
+				return &AttuneError{Code: CodeAborted, Message: err.Error(), cause: err}
 			}
 		}
-		res, ae := c.doOnce(ctx, payload, key)
+		ae := c.doOnce(ctx, method, path, payload, out, key)
 		if ae == nil {
-			return res, nil
+			return nil
 		}
 		last = ae
-		if !ae.retryable {
-			return IngestResult{}, ae.err
+		if !ae.retryable || !retrySafe {
+			return ae.err
 		}
 	}
-	return IngestResult{}, last.err
+	return last.err
+}
+
+// validPathSegment reports whether id is safe to splice into a URL path: it must
+// be non-empty and neither a dot-segment nor contain a slash, which would
+// otherwise alter the request path (parent walk / extra segment) once the URL is
+// resolved — url.PathEscape leaves '.' untouched.
+func validPathSegment(id string) bool {
+	return id != "" && id != "." && id != ".." && !strings.Contains(id, "/")
+}
+
+// readCappedBody reads the response body under the 1 MiB cap. It returns a
+// non-nil *attemptError for an over-cap body (INTERNAL) or a mid-stream read
+// failure (retryable NETWORK — a truncated/reset 2xx is a transport problem, not
+// a decode error), else the bytes.
+func readCappedBody(resp *http.Response) ([]byte, *attemptError) {
+	// Read one byte past the cap so an over-limit body is detectable without
+	// buffering the whole thing (hostile-server OOM guard).
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if len(data) > maxResponseBytes {
+		return nil, &attemptError{err: &AttuneError{
+			Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
+			Message: "response body exceeds the 1 MiB cap",
+		}}
+	}
+	if readErr != nil {
+		return nil, &attemptError{err: &AttuneError{
+			Code: CodeNetwork, Message: "reading response body: " + readErr.Error(), cause: readErr,
+		}, retryable: true}
+	}
+	return data, nil
 }
 
 // attemptError carries the outcome of a single HTTP attempt.
@@ -151,7 +199,7 @@ type attemptError struct {
 	hasRetryAfter bool
 }
 
-func (c *Client) doOnce(parent context.Context, payload []byte, key string) (IngestResult, *attemptError) {
+func (c *Client) doOnce(parent context.Context, method, path string, payload []byte, out proto.Message, key string) *attemptError {
 	ctx := parent
 	if c.timeout > 0 {
 		var cancel context.CancelFunc
@@ -159,45 +207,49 @@ func (c *Client) doOnce(parent context.Context, payload []byte, key string) (Ing
 		defer cancel()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(payload))
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
-		return IngestResult{}, &attemptError{err: &AttuneError{Code: CodeBadRequest, Message: err.Error(), cause: err}}
+		return &attemptError{err: &AttuneError{Code: CodeBadRequest, Message: err.Error(), cause: err}}
 	}
 	// Caller-supplied headers first, then the reserved headers override them so
 	// they can never be spoofed via WithDefaultHeaders.
 	for k, v := range c.defaultHeaders {
 		req.Header.Set(k, v)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	req.Header.Set("X-API-Key", c.apiKey)
-	req.Header.Set("Idempotency-Key", key)
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
 	req.Header.Set("User-Agent", c.userAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return IngestResult{}, c.classifyTransport(parent, ctx, err)
+		return c.classifyTransport(parent, ctx, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Read one byte past the cap so an over-limit body is detectable without
-	// buffering the whole thing (hostile-server OOM guard).
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if len(data) > maxResponseBytes {
-		return IngestResult{}, &attemptError{err: &AttuneError{
-			Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
-			Message: "response body exceeds the 1 MiB cap",
-		}}
+	data, readErrResult := readCappedBody(resp)
+	if readErrResult != nil {
+		return readErrResult
 	}
 
 	if resp.StatusCode/100 == 2 {
-		var out attunev1.IngestResponse
-		if err := protojsonUnmarshal.Unmarshal(data, &out); err != nil {
-			return IngestResult{}, &attemptError{err: &AttuneError{
-				Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
-				Message: "could not decode response body", cause: err,
-			}}
+		if out != nil && len(data) > 0 {
+			if err := protojsonUnmarshal.Unmarshal(data, out); err != nil {
+				return &attemptError{err: &AttuneError{
+					Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
+					Message: "could not decode response body", cause: err,
+				}}
+			}
 		}
-		return resultFromProto(&out), nil
+		return nil
 	}
 
 	var env attunev1.ErrorResponse
@@ -207,7 +259,7 @@ func (c *Client) doOnce(parent context.Context, payload []byte, key string) (Ing
 	}
 	ae := errorFromResponse(resp.StatusCode, envPtr, resp.Header)
 	ra, hasRA := ParseRetryAfter(resp.Header, time.Now())
-	return IngestResult{}, &attemptError{
+	return &attemptError{
 		err:           ae,
 		retryable:     IsRetryable(resp.StatusCode),
 		retryAfter:    ra,

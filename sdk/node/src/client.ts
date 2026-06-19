@@ -1,6 +1,25 @@
 import { AttuneError, TransportErrorCode } from './errors'
 import type { ErrorResponse } from './proto/attune/v1/common'
 import type { IngestRequest, IngestResponse } from './proto/attune/v1/ingest'
+import type {
+  ArchiveTagResponse,
+  CreateTagRequest,
+  ListTagsResponse,
+  Tag,
+  UpdateTagRequest,
+} from './proto/attune/v1/tag'
+import type {
+  ArchiveStateResponse,
+  CreateStateRequest,
+  CreateStateResponse,
+  ListStatesResponse,
+  ListTransitionsResponse,
+  ReplaceTransitionsRequest,
+  ReplaceTransitionsResponse,
+  SeedDefaultsResponse,
+  UpdateStateRequest,
+  UpdateStateResponse,
+} from './proto/attune/v1/workflow'
 import { backoffDelay, isRetryable, parseRetryAfter } from './retry'
 import { VERSION } from './version'
 
@@ -62,6 +81,20 @@ export interface RequestOptions {
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_RETRIES = 2
 const API_KEY_HEADER = 'X-API-Key'
+// Reserved headers the client always controls. A consumer's `defaultHeaders`
+// must never override these — matched case-INSENSITIVELY, since the WHATWG
+// `Headers` constructor lowercases names and would otherwise *concatenate* a
+// case-variant duplicate (e.g. `content-type` + `Content-Type`) into one
+// malformed header. Keys are stored lowercased for comparison.
+const RESERVED_HEADERS = new Set(['content-type', 'x-api-key', 'idempotency-key', 'user-agent'])
+
+// A path-segment id must be non-empty and must not be a dot-segment or contain a
+// slash: encodeURIComponent leaves '.' untouched, so `archiveTag('..')` would
+// otherwise build `/v1/tags/..` and resolve to a different path (parent walk /
+// extra segment) once fetch normalizes the URL.
+function isValidPathSegment(id: string): boolean {
+  return !!id && id !== '.' && id !== '..' && !id.includes('/')
+}
 const INGEST_PATH = '/v1/feedback/ingest'
 
 const defaultSleep = (ms: number): Promise<void> =>
@@ -95,6 +128,21 @@ export class Client {
     }
     if (!options.baseURL)
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'baseURL is required' })
+    // Validate at construction (parity with the Go SDK), not lazily at fetch time.
+    let parsedBase: URL
+    try {
+      parsedBase = new URL(options.baseURL)
+    } catch {
+      throw new AttuneError({ code: 'BAD_REQUEST', message: 'invalid baseURL' })
+    }
+    if (parsedBase.protocol !== 'http:' && parsedBase.protocol !== 'https:')
+      throw new AttuneError({ code: 'BAD_REQUEST', message: 'baseURL must be http or https' })
+    // `new URL` coerces host-less inputs ("http:foo", "http:///path") into a
+    // bogus host instead of failing. Require a real `scheme://host` authority so
+    // these are rejected (Go's url.Parse rejects them via Host=="") rather than
+    // silently sending every request to the wrong host.
+    if (!/^https?:\/\/[^/]/i.test(options.baseURL))
+      throw new AttuneError({ code: 'BAD_REQUEST', message: 'invalid baseURL' })
     if (!options.apiKey)
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'apiKey is required' })
     if (hasHeaderControlChar(options.apiKey))
@@ -115,7 +163,12 @@ export class Client {
     // than aborting instantly; negative maxRetries clamps to 0 (one attempt).
     this.#timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
     this.#maxRetries = Math.max(0, options.maxRetries ?? DEFAULT_MAX_RETRIES)
-    this.#defaultHeaders = { ...options.defaultHeaders }
+    // Drop any reserved header (case-insensitively) so a consumer's casing
+    // variant can't slip past and get concatenated by `Headers` at fetch time.
+    this.#defaultHeaders = {}
+    for (const [k, v] of Object.entries(options.defaultHeaders ?? {})) {
+      if (!RESERVED_HEADERS.has(k.toLowerCase())) this.#defaultHeaders[k] = v
+    }
     this.#sleep = options.sleep ?? defaultSleep
   }
 
@@ -132,10 +185,148 @@ export class Client {
         }),
       )
     }
-    return this.#request<IngestResponse>(INGEST_PATH, input, idempotencyKey, options?.signal)
+    return this.#request<IngestResponse>(
+      'POST',
+      INGEST_PATH,
+      input,
+      idempotencyKey,
+      options?.signal,
+    )
+  }
+
+  // ── Tags (needs a key with the tags:read / tags:write scope) ──────────────
+
+  /** List the tenant's tags. */
+  listTags(opts?: { includeArchived?: boolean; signal?: AbortSignal }): Promise<ListTagsResponse> {
+    const q = opts?.includeArchived ? '?include_archived=true' : ''
+    return this.#request<ListTagsResponse>('GET', `/v1/tags${q}`, undefined, '', opts?.signal)
+  }
+
+  /** Create a tag. */
+  createTag(req: CreateTagRequest, opts?: { signal?: AbortSignal }): Promise<Tag> {
+    return this.#request<Tag>('POST', '/v1/tags', req, '', opts?.signal)
+  }
+
+  /**
+   * Update a tag by id. **Replace-semantics**: send the full desired state —
+   * any writable field you omit (name, color, description) is overwritten, not
+   * preserved, so a partial update silently clears the omitted fields.
+   */
+  updateTag(req: UpdateTagRequest, opts?: { signal?: AbortSignal }): Promise<Tag> {
+    if (!isValidPathSegment(req.id))
+      return Promise.reject(new AttuneError({ code: 'BAD_REQUEST', message: 'tag id is invalid' }))
+    return this.#request<Tag>(
+      'PATCH',
+      `/v1/tags/${encodeURIComponent(req.id)}`,
+      req,
+      '',
+      opts?.signal,
+    )
+  }
+
+  /** Archive a tag by id. */
+  archiveTag(id: string, opts?: { signal?: AbortSignal }): Promise<ArchiveTagResponse> {
+    if (!isValidPathSegment(id))
+      return Promise.reject(new AttuneError({ code: 'BAD_REQUEST', message: 'tag id is invalid' }))
+    return this.#request<ArchiveTagResponse>(
+      'DELETE',
+      `/v1/tags/${encodeURIComponent(id)}`,
+      undefined,
+      '',
+      opts?.signal,
+    )
+  }
+
+  // ── Workflow config (needs the workflow:read / workflow:write scope) ──────
+
+  /** List the tenant's workflow states. */
+  listWorkflowStates(opts?: {
+    includeArchived?: boolean
+    signal?: AbortSignal
+  }): Promise<ListStatesResponse> {
+    const q = opts?.includeArchived ? '?include_archived=true' : ''
+    return this.#request<ListStatesResponse>(
+      'GET',
+      `/v1/workflow/states${q}`,
+      undefined,
+      '',
+      opts?.signal,
+    )
+  }
+
+  /** Create a workflow state. */
+  createWorkflowState(
+    req: CreateStateRequest,
+    opts?: { signal?: AbortSignal },
+  ): Promise<CreateStateResponse> {
+    return this.#request<CreateStateResponse>('POST', '/v1/workflow/states', req, '', opts?.signal)
+  }
+
+  /** Update a workflow state by id (replace-semantics). */
+  updateWorkflowState(
+    req: UpdateStateRequest,
+    opts?: { signal?: AbortSignal },
+  ): Promise<UpdateStateResponse> {
+    if (!isValidPathSegment(req.id))
+      return Promise.reject(
+        new AttuneError({ code: 'BAD_REQUEST', message: 'state id is invalid' }),
+      )
+    return this.#request<UpdateStateResponse>(
+      'PATCH',
+      `/v1/workflow/states/${encodeURIComponent(req.id)}`,
+      req,
+      '',
+      opts?.signal,
+    )
+  }
+
+  /** Archive a workflow state by id. */
+  archiveWorkflowState(id: string, opts?: { signal?: AbortSignal }): Promise<ArchiveStateResponse> {
+    if (!isValidPathSegment(id))
+      return Promise.reject(
+        new AttuneError({ code: 'BAD_REQUEST', message: 'state id is invalid' }),
+      )
+    return this.#request<ArchiveStateResponse>(
+      'DELETE',
+      `/v1/workflow/states/${encodeURIComponent(id)}`,
+      undefined,
+      '',
+      opts?.signal,
+    )
+  }
+
+  /** List the allowed workflow transitions. */
+  listWorkflowTransitions(opts?: { signal?: AbortSignal }): Promise<ListTransitionsResponse> {
+    return this.#request<ListTransitionsResponse>(
+      'GET',
+      '/v1/workflow/transitions',
+      undefined,
+      '',
+      opts?.signal,
+    )
+  }
+
+  /** Replace the workflow transition set. */
+  replaceWorkflowTransitions(
+    req: ReplaceTransitionsRequest,
+    opts?: { signal?: AbortSignal },
+  ): Promise<ReplaceTransitionsResponse> {
+    return this.#request<ReplaceTransitionsResponse>(
+      'PUT',
+      '/v1/workflow/transitions',
+      req,
+      '',
+      opts?.signal,
+    )
+  }
+
+  /** Seed the default workflow states/transitions. */
+  seedWorkflowDefaults(opts?: { signal?: AbortSignal }): Promise<SeedDefaultsResponse> {
+    return this.#request<SeedDefaultsResponse>('POST', '/v1/workflow/seed', {}, '', opts?.signal)
   }
 
   async #request<T>(
+    method: string,
     path: string,
     body: unknown,
     idempotencyKey: string,
@@ -144,16 +335,23 @@ export class Client {
     const url = this.#baseURL + path
     // Serialize once, reused across retries. A non-serializable body (BigInt,
     // circular ref, …) surfaces as a typed AttuneError, not a raw TypeError.
-    let payload: string
-    try {
-      payload = JSON.stringify(body)
-    } catch (cause) {
-      throw new AttuneError({
-        code: 'BAD_REQUEST',
-        message: 'request body is not JSON-serializable',
-        cause,
-      })
+    // No body for GET/DELETE.
+    let payload: string | undefined
+    if (body !== undefined) {
+      try {
+        payload = JSON.stringify(body)
+      } catch (cause) {
+        throw new AttuneError({
+          code: 'BAD_REQUEST',
+          message: 'request body is not JSON-serializable',
+          cause,
+        })
+      }
     }
+    // A non-idempotent POST without a server-honored idempotency key must NOT be
+    // retried: a retry after a lost response could create a duplicate resource.
+    // (Ingest's POST carries an Idempotency-Key; GET/PUT/PATCH/DELETE are idempotent.)
+    const retrySafe = method !== 'POST' || idempotencyKey !== ''
     let lastError: AttuneError | undefined
 
     for (let attempt = 0; attempt <= this.#maxRetries; attempt++) {
@@ -163,13 +361,13 @@ export class Client {
 
       let result: { status: number; headers: Headers; text: string }
       try {
-        result = await this.#fetchOnce(url, payload, idempotencyKey, userSignal)
+        result = await this.#fetchOnce(method, url, payload, idempotencyKey, userSignal)
       } catch (err) {
         const transportError = err as AttuneError
         // A caller-initiated abort is intentional — never retry it.
         if (transportError.code === TransportErrorCode.Aborted) throw transportError
         lastError = transportError
-        if (attempt < this.#maxRetries) {
+        if (retrySafe && attempt < this.#maxRetries) {
           await this.#sleep(backoffDelay(attempt))
           continue
         }
@@ -192,7 +390,7 @@ export class Client {
       }
 
       const error = AttuneError.fromResponse(status, parseErrorBody(text), headers)
-      if (isRetryable(status) && attempt < this.#maxRetries) {
+      if (isRetryable(status) && retrySafe && attempt < this.#maxRetries) {
         lastError = error
         await this.#sleep(parseRetryAfter(headers) ?? backoffDelay(attempt))
         continue
@@ -208,8 +406,9 @@ export class Client {
   // with AbortController — avoids AbortSignal.any/.timeout, which need Node 20.3
   // and very recent browsers). Throws a typed transport AttuneError on failure.
   async #fetchOnce(
+    method: string,
     url: string,
-    payload: string,
+    payload: string | undefined,
     idempotencyKey: string,
     userSignal?: AbortSignal,
   ): Promise<{ status: number; headers: Headers; text: string }> {
@@ -227,15 +426,16 @@ export class Client {
     if (userSignal) userSignal.addEventListener('abort', onUserAbort, { once: true })
 
     try {
+      const headers: Record<string, string> = {
+        ...this.#defaultHeaders,
+        'user-agent': USER_AGENT,
+        [API_KEY_HEADER]: this.#apiKey,
+      }
+      if (payload !== undefined) headers['content-type'] = 'application/json'
+      if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey
       const response = await this.#fetch(url, {
-        method: 'POST',
-        headers: {
-          ...this.#defaultHeaders,
-          'content-type': 'application/json',
-          'user-agent': USER_AGENT,
-          [API_KEY_HEADER]: this.#apiKey,
-          'Idempotency-Key': idempotencyKey,
-        },
+        method,
+        headers,
         body: payload,
         signal: controller.signal,
         // Never auto-follow redirects: fetch would re-send the X-API-Key header

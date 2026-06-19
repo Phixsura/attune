@@ -15,7 +15,74 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   whole erasure (a GDPR Art.17 + availability bug); residual PII in the delivery
   envelope is now removed too. The deletion record reports an `OutboxCount`.
   
+### Fixed
+
+- **Malformed workflow-state id now returns 400, not 500 (#36).** `PATCH`/`DELETE
+  /v1/workflow/states/{id}` passed the raw id straight to a UUID-typed column, so a
+  non-UUID id (reachable via the SDK admin surface) produced a Postgres 22P02 →
+  opaque `500 INTERNAL` that the SDKs then retried (PATCH/DELETE are idempotent).
+  Both `UpdateState` and `ArchiveState` now `uuid.Parse`-guard the id and forward
+  the **canonical** form (so a `urn:uuid:…` that `uuid.Parse` accepts but Postgres
+  rejects can't slip through), returning `400 BAD_ID` for anything invalid.
+
+- **Self-loop / duplicate workflow transitions now return 400, not 500 (#36).**
+  `ReplaceTransitions` validated state ownership but not `from == to` or repeated
+  edges, which tripped the DB `chk_wt_no_self_loop` / unique-edge constraints and
+  surfaced as `500 INTERNAL` (reachable with an arbitrary SDK payload). Both are
+  now rejected up front as `400 VALIDATION`.
+
+- **Tag create/update constraint violations now return 400, not 500 (#36).** An
+  empty/over-long name or malformed color reached a DB `CHECK` constraint and was
+  misclassified as `500 INTERNAL`; the repo now maps SQLSTATE 23514 (via a new
+  `pgxutil.IsCheckViolation`) to a `400 VALIDATION` envelope.
+
+- **Go SDK: a truncated/reset response body now retries (#37).** `doOnce`
+  discarded the body-read error, so a mid-stream connection reset on a 2xx became
+  a permanent `INTERNAL` decode error instead of a retryable `NETWORK` failure;
+  it is now surfaced as `NETWORK` so an idempotent request retries.
+
+- **Go SDK: reserved headers stripped from `WithDefaultHeaders` (#37).** Matching
+  the Node hardening, the reserved headers (Content-Type, X-API-Key,
+  Idempotency-Key, User-Agent) are dropped (canonical, case-insensitive) at the
+  construction boundary so a default header can't override them — including
+  `Content-Type` on bodyless GET/DELETE requests.
+
+- **SDKs reject dot-segment / slash ids (#37).** `archiveTag('..')` /
+  `updateWorkflowState({id:'../x'})` and friends are rejected before sending
+  (`encodeURIComponent`/`url.PathEscape` leave `.`/`..` untouched, which would
+  walk the request path); empty, `.`, `..`, and slash-containing ids now fail
+  fast as `BAD_REQUEST` in both SDKs.
+
+- **Node SDK: reserved headers can no longer be overridden via `defaultHeaders`
+  casing (#37).** A `defaultHeaders` entry whose key was a case-variant of a
+  reserved header (e.g. `content-type` vs the canonical `Content-Type`, or
+  `x-api-key`) survived as a distinct object key and got *concatenated* by the
+  WHATWG `Headers` constructor into a malformed header — silently overriding the
+  documented "reserved headers always take precedence". Reserved keys are now
+  stripped case-insensitively at construction.
+
+- **Node SDK: baseURL is validated at construction (#37).** A malformed,
+  non-`http(s)`, or host-less `baseURL` (e.g. `http:foo`, which `new URL` would
+  coerce to host `foo`) now throws `BAD_REQUEST` immediately — requiring a real
+  `scheme://host` authority for parity with the Go SDK, instead of constructing
+  successfully and silently sending to the wrong host.
+
+- **SDK retry parity: fractional `Retry-After` (#37).** The Node SDK accepted a
+  fractional `Retry-After: 1.5` (→1500 ms) while the Go SDK rejected it and fell
+  back to backoff; Node now treats only integer delta-seconds (RFC 9110) as a
+  delay, keeping the two SDKs in lockstep.
+
 ### Security
+
+- **Per-API-key rate limit now also covers the tag/workflow admin surface (#36).**
+  A key's `rate_limit_rpm` is the key's overall request budget, but it was only
+  enforced on `/v1/feedback/ingest`; the API-key tag/workflow routes
+  (`/v1/tags`, `/v1/workflow/...`, added in this release) applied no limiter, so
+  a rate-capped key could mutate tags/workflow config without bound (DB-write /
+  audit-log amplification). The existing `PerKeyLimiter` middleware is now also
+  mounted on the admin group, returning `429 RATE_LIMITED` + `Retry-After`. Keys
+  without an rpm are unaffected. The per-tenant ingest limiter remains
+  ingest-scoped by design.
 
 - **Per-API-key rate limiting is now enforced (#41).** `external_api_keys.rate_limit_rpm`
   was stored and shown in the console but never enforced — only a per-tenant
@@ -143,6 +210,27 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   backfills existing rows (label preserved in `display_name`, key slugged).
 
 ### Added
+
+- **Tag + workflow CRUD over the API-key surface, with Go + Node SDK methods (#36, #37).**
+  The tag and workflow-state config endpoints — previously console-session-only —
+  are now also mounted under the API-key group (`/v1/tags`, `/v1/workflow/...`),
+  scope-gated by `tags:read`/`tags:write` and `workflow:read`/`workflow:write`
+  (scopes that were defined but enforced nowhere). The existing console handlers
+  are reused via an apikey→AuthCtx adapter (`console.MountAPIKeyAdminRoutes`),
+  with the actor audited as `apikey:<keyID>`. Both SDKs gain the matching
+  methods — `listTags`/`createTag`/`updateTag`/`archiveTag` and
+  `listWorkflowStates`/`createWorkflowState`/`updateWorkflowState`/
+  `archiveWorkflowState`/`listWorkflowTransitions`/`replaceWorkflowTransitions`/
+  `seedWorkflowDefaults` (Go uses the `Ingest*`-style PascalCase) — built on a
+  generalized request core shared with `ingest`. The core preserves ingest's
+  retry-safety contract: idempotent `GET`/`PUT`/`PATCH`/`DELETE` are retried on
+  transient failure, but the non-idempotent `create*`/`seed*` `POST`s are not, so
+  a lost response can't create a duplicate resource; path ids are URL-escaped.
+  Both surfaces are verified by real-server e2e, including scope-denied (403) and
+  cross-tenant isolation. The server also now rejects a transition referencing a
+  state outside the tenant with `400 VALIDATION` (was a potential cross-tenant
+  reference / 500). Note: tag/state update is replace-semantics (send full
+  state), and these endpoints expose admin config to scoped API keys.
 
 - **Node/TypeScript client SDK `@phixsura/attune` (#37).** Published client for
   the ingest API under `sdk/node/`: `new Client({ baseURL, apiKey })` →

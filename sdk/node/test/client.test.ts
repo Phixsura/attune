@@ -51,6 +51,47 @@ describe('constructor', () => {
       globalThis.fetch = saved
     }
   })
+
+  it('rejects a non-http(s) or malformed baseURL at construction (parity with Go)', () => {
+    expect(() => new Client({ baseURL: 'ftp://attune.example.test', apiKey: KEY })).toThrow(
+      /baseURL must be http or https/,
+    )
+    expect(() => new Client({ baseURL: 'not a url', apiKey: KEY })).toThrow(/invalid baseURL/)
+    // host-less inputs that `new URL` tolerates but Go's url.Parse rejects.
+    expect(() => new Client({ baseURL: 'http:foo', apiKey: KEY })).toThrow(/invalid baseURL/)
+    expect(() => new Client({ baseURL: 'http:///v1/path', apiKey: KEY })).toThrow(/invalid baseURL/)
+    // http and https both accepted.
+    expect(() => new Client({ baseURL: 'http://localhost:8080', apiKey: KEY })).not.toThrow()
+  })
+})
+
+describe('reserved headers cannot be overridden by defaultHeaders', () => {
+  it('drops case-variant reserved keys so they are not concatenated by Headers', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    const client = new Client({
+      baseURL: BASE,
+      apiKey: KEY,
+      fetch,
+      sleep: noSleep,
+      defaultHeaders: {
+        // Case variants of reserved headers — must NOT survive into the request.
+        'x-api-key': 'attacker-key',
+        'Content-Type': 'text/evil',
+        'IDEMPOTENCY-KEY': 'spoofed',
+        'User-Agent': 'spoofed-ua',
+        // A genuinely custom header is preserved.
+        'x-trace-id': 'trace-123',
+      },
+    })
+    await client.ingest({ content: 'x' }, { idempotencyKey: 'real-idem-key' })
+    const h = new Headers(calls[0]?.init.headers)
+    expect(h.get('x-api-key')).toBe(KEY) // not "KEY, attacker-key"
+    expect(h.get('content-type')).toBe('application/json') // not "application/json, text/evil"
+    expect(h.get('idempotency-key')).toBe('real-idem-key')
+    expect(h.get('user-agent')).toMatch(/^attune-node\//) // SDK UA, not "spoofed-ua"
+    expect(h.get('user-agent')).not.toContain('spoofed-ua')
+    expect(h.get('x-trace-id')).toBe('trace-123') // custom header preserved
+  })
 })
 
 describe('adversarial inputs / config edges', () => {
@@ -65,9 +106,8 @@ describe('adversarial inputs / config edges', () => {
       code: 'BAD_REQUEST',
     })
     // biome-ignore lint/suspicious/noExplicitAny: BigInt is not serializable
-    await expect(
-      client.ingest({ content: 'x', sourceMeta: { big: 1n } as any }),
-    ).rejects.toBeInstanceOf(AttuneError)
+    const bad = { content: 'x', sourceMeta: { big: 1n } as any }
+    await expect(client.ingest(bad)).rejects.toBeInstanceOf(AttuneError)
     expect(calls).toHaveLength(0) // never hit the network
   })
 

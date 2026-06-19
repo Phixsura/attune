@@ -68,7 +68,7 @@ func TestArchiveStateRecordsAudit(t *testing.T) {
 	_, err := h.ArchiveState(ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
 		Context: context.Background(),
 		Auth:    ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}),
-	}), ptrext.Of(attunev1.ArchiveStateRequest{Id: "s-1"}))
+	}), ptrext.Of(attunev1.ArchiveStateRequest{Id: "11111111-1111-1111-1111-111111111111"}))
 
 	require.NoError(t, err)
 	require.Len(t, audit.events, 1)
@@ -101,7 +101,7 @@ func TestUpdateStateRecordsDistinctBeforeAndAfter(t *testing.T) {
 		Context: context.Background(),
 		Auth:    ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}),
 	}), ptrext.Of(attunev1.UpdateStateRequest{
-		Id:          "s-1",
+		Id:          "11111111-1111-1111-1111-111111111111",
 		DisplayName: ptrext.Of(attunev1.I18NString{Entries: map[string]string{"default": "Renamed"}}),
 	}))
 

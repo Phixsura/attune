@@ -105,6 +105,44 @@ await client.ingest({ content: 'x' }, { idempotencyKey: 'order-4242-feedback' })
 Replaying a key with a different body throws `AttuneError` `IDEMPOTENCY_CONFLICT`
 (409).
 
+## Tags & workflow config
+
+Beyond ingest, the client can manage a tenant's **tags** and **workflow
+configuration** (states + transitions). These routes need a key with the
+matching scope — `tags:read` / `tags:write` and `workflow:read` /
+`workflow:write` — and are server-side admin operations, so don't ship those
+keys to the browser.
+
+```ts
+// Tags (tags:read / tags:write)
+const { tags } = await client.listTags() // { includeArchived: true } to include archived
+const tag = await client.createTag({ name: 'billing', color: '#3b82f6' })
+await client.updateTag({ id: tag.id, name: 'billing', color: '#22c55e' }) // replace-semantics
+await client.archiveTag(tag.id)
+
+// Workflow config (workflow:read / workflow:write)
+await client.seedWorkflowDefaults()
+const { states } = await client.listWorkflowStates()
+const { state } = await client.createWorkflowState({
+  name: 'triage', // stable machine key, ^[a-z][a-z0-9_]{0,30}$
+  color: '#3b82f6',
+  category: 'active',
+  position: 1,
+  displayName: { entries: { en: 'Triage' } },
+})
+await client.updateWorkflowState({ id: state!.id, color: '#22c55e' }) // replace-semantics
+await client.archiveWorkflowState(state!.id)
+
+const { transitions } = await client.listWorkflowTransitions()
+await client.replaceWorkflowTransitions({ transitions })
+```
+
+`updateTag` / `updateWorkflowState` are **replace-semantics**: send the full
+desired state, not a sparse patch. These methods are idempotent (`GET` / `PUT` /
+`PATCH` / `DELETE`) and so retried on transient failure; `ingest` and the
+non-idempotent `create*` / `seed*` `POST`s are not retried, to avoid creating a
+duplicate resource after a lost response.
+
 ## Browser use & key safety
 
 The SDK runs in the browser with no special flag, so you can ingest directly

@@ -24,6 +24,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers"
+	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -114,6 +115,10 @@ func buildRouter(
 			r.Use(perKeyRateLimiter.Middleware) // per-key (key's own rate_limit_rpm)
 			r.Mount("/feedback", ingestHandler.Routes())
 		})
+
+		// Tag / workflow config over the API-key surface (scope-gated), reusing
+		// the console handlers — lets the SDKs manage tags/workflow (#36).
+		console.MountAPIKeyAdminRoutes(r, pool, apiKeys, cfg.Security.TrustedProxyHops, perKeyRateLimiter)
 	})
 
 	// Console UI. Mounted under /fb/v1/console; the reverse
