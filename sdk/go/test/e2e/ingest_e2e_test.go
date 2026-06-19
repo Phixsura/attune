@@ -176,6 +176,51 @@ func TestE2EValidationEmptyContent(t *testing.T) {
 	}
 }
 
+// TestE2ETagCRUD exercises the tag CRUD methods over the API-key surface against
+// the real server (the e2e key is unrestricted, so it has tags:read/write).
+func TestE2ETagCRUD(t *testing.T) {
+	c, marker := newClient(t)
+	ctx := context.Background()
+	name := "sdk-tag-" + marker
+
+	created, err := c.CreateTag(ctx, &attune.CreateTagRequest{Name: name})
+	if err != nil {
+		t.Fatalf("CreateTag: %v", err)
+	}
+	if created.GetId() == "" || created.GetName() != name {
+		t.Fatalf("created tag mismatch: %+v", created)
+	}
+
+	list, err := c.ListTags(ctx, false)
+	if err != nil {
+		t.Fatalf("ListTags: %v", err)
+	}
+	found := false
+	for _, tg := range list.GetTags() {
+		if tg.GetId() == created.GetId() {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("created tag not returned by ListTags")
+	}
+
+	// Update replaces fields, so send the full desired state (name + a valid color).
+	newName, color := name+"-v2", "#3b82f6"
+	upd, err := c.UpdateTag(ctx, &attune.UpdateTagRequest{Id: created.GetId(), Name: &newName, Color: &color})
+	if err != nil {
+		t.Fatalf("UpdateTag: %v", err)
+	}
+	if upd.GetName() != newName {
+		t.Errorf("updated name = %q, want %q", upd.GetName(), newName)
+	}
+
+	if _, err := c.ArchiveTag(ctx, created.GetId()); err != nil {
+		t.Fatalf("ArchiveTag: %v", err)
+	}
+}
+
 func TestE2EConcurrentDedup(t *testing.T) {
 	c, marker := newClient(t)
 	key := "concurrent-" + marker
