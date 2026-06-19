@@ -82,7 +82,7 @@ export class Client {
       })
     }
 
-    this.#baseURL = options.baseURL.replace(/\/+$/, '')
+    this.#baseURL = stripTrailingSlashes(options.baseURL)
     this.#apiKey = options.apiKey
     this.#fetch = fetchImpl
     this.#timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
@@ -199,6 +199,14 @@ export class Client {
       if (userSignal) userSignal.removeEventListener('abort', onUserAbort)
     }
   }
+}
+
+// Strip trailing '/' with a single linear scan — avoids the /\/+$/ regex, which
+// CodeQL flags as polynomial-ReDoS on inputs with many trailing slashes.
+function stripTrailingSlashes(s: string): string {
+  let end = s.length
+  while (end > 0 && s.charCodeAt(end - 1) === 47 /* '/' */) end--
+  return s.slice(0, end)
 }
 
 /** Best-effort parse of the unified ErrorResponse envelope; undefined on any failure. */
