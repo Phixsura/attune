@@ -34,6 +34,7 @@ type fakeStateStore struct {
 	listErr      error
 	replaceErr   error
 	listTransErr error
+	gotID        string // last id passed to GetByTenantAndID (to assert canonicalization)
 }
 
 func (f *fakeStateStore) List(_ context.Context, _ string, includeArchived bool) ([]workflowstate.WorkflowState, error) {
@@ -72,7 +73,8 @@ func (f *fakeStateStore) Update(_ context.Context, s workflowstate.WorkflowState
 	return &s, nil
 }
 
-func (f *fakeStateStore) GetByTenantAndID(_ context.Context, _, _ string) (*workflowstate.WorkflowState, error) {
+func (f *fakeStateStore) GetByTenantAndID(_ context.Context, _, id string) (*workflowstate.WorkflowState, error) {
+	f.gotID = id
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
@@ -379,6 +381,42 @@ func TestUpdateState_HTTP(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, w.Code)
 	})
 
+	t.Run("400 invalid id (not a uuid)", func(t *testing.T) {
+		h := NewHandler(&fakeStateStore{}, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.UpdateState",
+			dispatcher.JSON(func() *attunev1.UpdateStateRequest { return ptrext.Of(attunev1.UpdateStateRequest{}) }),
+			h.UpdateState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateStateRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/states/abc",
+			`{"id":"abc","name":"X"}`))
+		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("canonicalizes a urn:uuid id before the DB (not raw)", func(t *testing.T) {
+		// uuid.Parse accepts "urn:uuid:…" but Postgres' uuid column rejects it;
+		// the handler must forward the canonical form, not the raw input.
+		fake := &fakeStateStore{}
+		h := NewHandler(fake, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.UpdateState",
+			dispatcher.JSON(func() *attunev1.UpdateStateRequest { return ptrext.Of(attunev1.UpdateStateRequest{}) }),
+			h.UpdateState,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateStateRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut,
+			"/workflow/states/urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+			`{"id":"urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd430c8","name":"X"}`))
+		require.Equal(t, "6ba7b810-9dad-11d1-80b4-00c04fd430c8", fake.gotID) // canonical, no urn: prefix
+	})
+
 	t.Run("409 name conflict on update", func(t *testing.T) {
 		h := NewHandler(&fakeStateStore{
 			states:    []workflowstate.WorkflowState{{ID: "s-1", TenantID: "tenant-1", Name: "Open", Category: "open", CreatedAt: now, UpdatedAt: now}},
@@ -508,6 +546,46 @@ func TestReplaceTransitions_HTTP(t *testing.T) {
 		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/transitions",
 			`{"transitions":[{"fromStateId":"s-1","toStateId":"s-2"}]}`))
 		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("400 self-loop transition", func(t *testing.T) {
+		h := NewHandler(&fakeStateStore{
+			states: []workflowstate.WorkflowState{{ID: "11111111-1111-1111-1111-111111111111"}},
+		}, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.ReplaceTransitions",
+			dispatcher.JSON(func() *attunev1.ReplaceTransitionsRequest {
+				return ptrext.Of(attunev1.ReplaceTransitionsRequest{})
+			}),
+			h.ReplaceTransitions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ReplaceTransitionsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/transitions",
+			`{"transitions":[{"fromStateId":"11111111-1111-1111-1111-111111111111","toStateId":"11111111-1111-1111-1111-111111111111"}]}`))
+		require.Equal(t, http.StatusBadRequest, w.Code) // self-loop → 400, not a DB-check 500
+	})
+
+	t.Run("400 duplicate edge", func(t *testing.T) {
+		h := NewHandler(&fakeStateStore{
+			states: []workflowstate.WorkflowState{{ID: "s-1"}, {ID: "s-2"}},
+		}, &fakeWorkflowService{})
+		handler := dispatcher.Bind(
+			"console.WorkflowHandler.ReplaceTransitions",
+			dispatcher.JSON(func() *attunev1.ReplaceTransitionsRequest {
+				return ptrext.Of(attunev1.ReplaceTransitionsRequest{})
+			}),
+			h.ReplaceTransitions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ReplaceTransitionsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPut, "/workflow/transitions",
+			`{"transitions":[{"fromStateId":"s-1","toStateId":"s-2"},{"fromStateId":"s-1","toStateId":"s-2"}]}`))
+		require.Equal(t, http.StatusBadRequest, w.Code) // duplicate edge → 400, not a unique-violation 500
 	})
 
 	t.Run("500 replace error", func(t *testing.T) {

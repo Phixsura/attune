@@ -76,10 +76,22 @@ describe('tags', () => {
     expect(calls[0]?.url).toBe(`${BASE}/v1/tags/t9`)
   })
 
-  it('escapes ids with special chars in the path', async () => {
+  it('escapes an allowed special char in the path', async () => {
     const { fetch, calls } = stubFetch([() => json(200, {})])
-    await newClient(fetch).archiveTag('a/b')
-    expect(calls[0]?.url).toBe(`${BASE}/v1/tags/a%2Fb`)
+    await newClient(fetch).archiveTag('a b') // space is allowed but must be escaped
+    expect(calls[0]?.url).toBe(`${BASE}/v1/tags/a%20b`)
+  })
+
+  it('rejects dot-segment / slash ids before sending (no path walking)', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, {})])
+    const c = newClient(fetch)
+    for (const bad of ['.', '..', 'a/b', '../admin']) {
+      await expect(c.archiveTag(bad)).rejects.toBeInstanceOf(AttuneError)
+      await expect(c.updateTag({ id: bad })).rejects.toBeInstanceOf(AttuneError)
+      await expect(c.archiveWorkflowState(bad)).rejects.toBeInstanceOf(AttuneError)
+      await expect(c.updateWorkflowState({ id: bad })).rejects.toBeInstanceOf(AttuneError)
+    }
+    expect(calls).toHaveLength(0) // never hit the network
   })
 
   it('surfaces a FORBIDDEN error envelope', async () => {

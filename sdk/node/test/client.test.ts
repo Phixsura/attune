@@ -57,6 +57,9 @@ describe('constructor', () => {
       /baseURL must be http or https/,
     )
     expect(() => new Client({ baseURL: 'not a url', apiKey: KEY })).toThrow(/invalid baseURL/)
+    // host-less inputs that `new URL` tolerates but Go's url.Parse rejects.
+    expect(() => new Client({ baseURL: 'http:foo', apiKey: KEY })).toThrow(/invalid baseURL/)
+    expect(() => new Client({ baseURL: 'http:///v1/path', apiKey: KEY })).toThrow(/invalid baseURL/)
     // http and https both accepted.
     expect(() => new Client({ baseURL: 'http://localhost:8080', apiKey: KEY })).not.toThrow()
   })

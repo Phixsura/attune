@@ -31,6 +31,17 @@ func IsForeignKeyViolation(err error) bool {
 	return false
 }
 
+// IsCheckViolation reports SQLSTATE 23514 (a CHECK constraint failed) — a
+// caller-input problem (an out-of-range length or malformed value) that should
+// surface as a 400, not a 500.
+func IsCheckViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23514"
+	}
+	return false
+}
+
 // Truncate caps a string to n bytes — for keeping log lines and error
 // reasons short in TEXT columns. Returns the input unchanged when shorter.
 func Truncate(s string, n int) string {

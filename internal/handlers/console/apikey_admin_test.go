@@ -132,14 +132,17 @@ func TestAPIKeyAdminRoutesBindAndAuthorize(t *testing.T) {
 	cases := []struct {
 		name, method, path, body string
 	}{
+		// Bodies/ids are fully valid so each request passes binding + the
+		// handler's input validation and actually reaches the (nil-pool)
+		// data-access layer — see the docstring.
 		{"list tags", http.MethodGet, "/tags?include_archived=true", ""},
-		{"create tag", http.MethodPost, "/tags", `{"name":"x"}`},
-		{"update tag", http.MethodPatch, "/tags/t1", `{"name":"x","color":"#3b82f6"}`},
-		{"archive tag", http.MethodDelete, "/tags/t1", ""},
+		{"create tag", http.MethodPost, "/tags", `{"name":"x","color":"#3b82f6"}`},
+		{"update tag", http.MethodPatch, "/tags/11111111-1111-1111-1111-111111111111", `{"name":"x","color":"#3b82f6"}`},
+		{"archive tag", http.MethodDelete, "/tags/11111111-1111-1111-1111-111111111111", ""},
 		{"list states", http.MethodGet, "/workflow/states?include_archived=1", ""},
-		{"create state", http.MethodPost, "/workflow/states", `{"name":"s","color":"#3b82f6","category":"active","position":1}`},
-		{"update state", http.MethodPatch, "/workflow/states/s1", `{"color":"#22c55e"}`},
-		{"archive state", http.MethodDelete, "/workflow/states/s1", ""},
+		{"create state", http.MethodPost, "/workflow/states", `{"name":"s","displayName":{"entries":{"en":"S"}},"color":"#3b82f6","category":"active","position":1}`},
+		{"update state", http.MethodPatch, "/workflow/states/11111111-1111-1111-1111-111111111111", `{"color":"#22c55e"}`},
+		{"archive state", http.MethodDelete, "/workflow/states/11111111-1111-1111-1111-111111111111", ""},
 		{"list transitions", http.MethodGet, "/workflow/transitions", ""},
 		{"replace transitions", http.MethodPut, "/workflow/transitions", `{"transitions":[]}`},
 		{"seed defaults", http.MethodPost, "/workflow/seed", ""},

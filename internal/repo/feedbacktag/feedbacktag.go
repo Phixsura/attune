@@ -19,6 +19,9 @@ import (
 var (
 	ErrNotFound     = errors.New("tag not found")
 	ErrNameConflict = errors.New("tag name already exists for tenant")
+	// ErrInvalidInput is a DB CHECK-constraint violation (empty/over-long name,
+	// malformed color, …) — caller input, mapped to 400 by the handler.
+	ErrInvalidInput = errors.New("tag field violates a constraint")
 )
 
 type Tag struct {
@@ -88,6 +91,9 @@ func (r *Repo) Create(ctx context.Context, t Tag) (*Tag, error) {
 		if pgxutil.IsUniqueViolation(err) {
 			return nil, ErrNameConflict
 		}
+		if pgxutil.IsCheckViolation(err) {
+			return nil, ErrInvalidInput
+		}
 		return nil, fmt.Errorf("create tag: %w", err)
 	}
 	return ptrext.Of(created), nil
@@ -108,6 +114,9 @@ func (r *Repo) Update(ctx context.Context, t Tag) (*Tag, error) {
 	if err != nil {
 		if pgxutil.IsUniqueViolation(err) {
 			return nil, ErrNameConflict
+		}
+		if pgxutil.IsCheckViolation(err) {
+			return nil, ErrInvalidInput
 		}
 		return nil, fmt.Errorf("update tag: %w", err)
 	}

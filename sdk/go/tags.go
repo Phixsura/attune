@@ -49,8 +49,8 @@ func (c *Client) CreateTag(ctx context.Context, req *CreateTagRequest) (*Tag, er
 // Update replaces the tag's fields, so send the full desired state (e.g. a valid
 // Color), not just the fields you want to change.
 func (c *Client) UpdateTag(ctx context.Context, req *UpdateTagRequest) (*Tag, error) {
-	if req.GetId() == "" {
-		return nil, &AttuneError{Code: CodeBadRequest, Message: "tag id is required"}
+	if !validPathSegment(req.GetId()) {
+		return nil, &AttuneError{Code: CodeBadRequest, Message: "tag id is invalid"}
 	}
 	payload, err := protojsonMarshal.Marshal(req)
 	if err != nil {
@@ -65,8 +65,8 @@ func (c *Client) UpdateTag(ctx context.Context, req *UpdateTagRequest) (*Tag, er
 
 // ArchiveTag archives a tag by id (needs `tags:write`).
 func (c *Client) ArchiveTag(ctx context.Context, id string) (*ArchiveTagResponse, error) {
-	if id == "" {
-		return nil, &AttuneError{Code: CodeBadRequest, Message: "tag id is required"}
+	if !validPathSegment(id) {
+		return nil, &AttuneError{Code: CodeBadRequest, Message: "tag id is invalid"}
 	}
 	var out attunev1.ArchiveTagResponse
 	if err := c.do(ctx, http.MethodDelete, "/v1/tags/"+url.PathEscape(id), nil, &out, ""); err != nil {

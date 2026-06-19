@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -224,11 +225,64 @@ func TestArchiveTagEscapesID(t *testing.T) {
 	}))
 	defer srv.Close()
 	c, _ := newTestClient(t, srv)
-	if _, err := c.ArchiveTag(context.Background(), "a/b"); err != nil {
+	// A space is an allowed-but-must-escape char (a '/' would be rejected by the
+	// path-segment guard, see TestArchiveRejectsDotSegmentID).
+	if _, err := c.ArchiveTag(context.Background(), "a b"); err != nil {
 		t.Fatalf("ArchiveTag: %v", err)
 	}
-	if gotPath != "/v1/tags/a%2Fb" {
-		t.Errorf("escaped path = %q, want /v1/tags/a%%2Fb", gotPath)
+	if gotPath != "/v1/tags/a%20b" {
+		t.Errorf("escaped path = %q, want /v1/tags/a%%20b", gotPath)
+	}
+}
+
+// errBodyOnce is an http.RoundTripper whose first response has a body that
+// errors mid-read (simulating a truncated/reset connection on a 2xx), then
+// succeeds — to prove a body read failure is retried as NETWORK, not surfaced as
+// a permanent decode error.
+type errBodyOnce struct{ n int }
+
+type erroringBody struct{}
+
+func (erroringBody) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+func (erroringBody) Close() error             { return nil }
+
+func (t *errBodyOnce) RoundTrip(*http.Request) (*http.Response, error) {
+	t.n++
+	if t.n == 1 {
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: erroringBody{}}, nil
+	}
+	return &http.Response{
+		StatusCode: 200, Header: http.Header{},
+		Body: io.NopCloser(strings.NewReader(`{"tags":[]}`)),
+	}, nil
+}
+
+func TestTruncatedBodyRetriedAsNetwork(t *testing.T) {
+	tr := &errBodyOnce{}
+	c, err := New("https://x.example", "k", WithHTTPClient(&http.Client{Transport: tr}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := c.ListTags(context.Background(), false); err != nil {
+		t.Fatalf("ListTags should succeed after retrying the truncated body: %v", err)
+	}
+	if tr.n != 2 {
+		t.Errorf("transport called %d times, want 2 (truncated body must retry)", tr.n)
+	}
+}
+
+// TestArchiveRejectsDotSegmentID locks the path-segment guard: dot-segments and
+// slashes are rejected client-side (never sent), so a crafted id can't walk the
+// path. Empty is also rejected.
+func TestArchiveRejectsDotSegmentID(t *testing.T) {
+	c, _ := New("https://x.example", "k")
+	for _, bad := range []string{"", ".", "..", "a/b", "../admin"} {
+		if _, err := c.ArchiveTag(context.Background(), bad); err == nil {
+			t.Errorf("ArchiveTag(%q) should be rejected", bad)
+		}
+		if _, err := c.ArchiveWorkflowState(context.Background(), bad); err == nil {
+			t.Errorf("ArchiveWorkflowState(%q) should be rejected", bad)
+		}
 	}
 }
 

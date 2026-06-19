@@ -87,6 +87,14 @@ const API_KEY_HEADER = 'X-API-Key'
 // case-variant duplicate (e.g. `content-type` + `Content-Type`) into one
 // malformed header. Keys are stored lowercased for comparison.
 const RESERVED_HEADERS = new Set(['content-type', 'x-api-key', 'idempotency-key', 'user-agent'])
+
+// A path-segment id must be non-empty and must not be a dot-segment or contain a
+// slash: encodeURIComponent leaves '.' untouched, so `archiveTag('..')` would
+// otherwise build `/v1/tags/..` and resolve to a different path (parent walk /
+// extra segment) once fetch normalizes the URL.
+function isValidPathSegment(id: string): boolean {
+  return !!id && id !== '.' && id !== '..' && !id.includes('/')
+}
 const INGEST_PATH = '/v1/feedback/ingest'
 
 const defaultSleep = (ms: number): Promise<void> =>
@@ -129,6 +137,12 @@ export class Client {
     }
     if (parsedBase.protocol !== 'http:' && parsedBase.protocol !== 'https:')
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'baseURL must be http or https' })
+    // `new URL` coerces host-less inputs ("http:foo", "http:///path") into a
+    // bogus host instead of failing. Require a real `scheme://host` authority so
+    // these are rejected (Go's url.Parse rejects them via Host=="") rather than
+    // silently sending every request to the wrong host.
+    if (!/^https?:\/\/[^/]/i.test(options.baseURL))
+      throw new AttuneError({ code: 'BAD_REQUEST', message: 'invalid baseURL' })
     if (!options.apiKey)
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'apiKey is required' })
     if (hasHeaderControlChar(options.apiKey))
@@ -193,10 +207,14 @@ export class Client {
     return this.#request<Tag>('POST', '/v1/tags', req, '', opts?.signal)
   }
 
-  /** Update a tag by id (replace-semantics: send the full desired state). */
+  /**
+   * Update a tag by id. **Replace-semantics**: send the full desired state —
+   * any writable field you omit (name, color, description) is overwritten, not
+   * preserved, so a partial update silently clears the omitted fields.
+   */
   updateTag(req: UpdateTagRequest, opts?: { signal?: AbortSignal }): Promise<Tag> {
-    if (!req.id)
-      return Promise.reject(new AttuneError({ code: 'BAD_REQUEST', message: 'tag id is required' }))
+    if (!isValidPathSegment(req.id))
+      return Promise.reject(new AttuneError({ code: 'BAD_REQUEST', message: 'tag id is invalid' }))
     return this.#request<Tag>(
       'PATCH',
       `/v1/tags/${encodeURIComponent(req.id)}`,
@@ -208,8 +226,8 @@ export class Client {
 
   /** Archive a tag by id. */
   archiveTag(id: string, opts?: { signal?: AbortSignal }): Promise<ArchiveTagResponse> {
-    if (!id)
-      return Promise.reject(new AttuneError({ code: 'BAD_REQUEST', message: 'tag id is required' }))
+    if (!isValidPathSegment(id))
+      return Promise.reject(new AttuneError({ code: 'BAD_REQUEST', message: 'tag id is invalid' }))
     return this.#request<ArchiveTagResponse>(
       'DELETE',
       `/v1/tags/${encodeURIComponent(id)}`,
@@ -249,9 +267,9 @@ export class Client {
     req: UpdateStateRequest,
     opts?: { signal?: AbortSignal },
   ): Promise<UpdateStateResponse> {
-    if (!req.id)
+    if (!isValidPathSegment(req.id))
       return Promise.reject(
-        new AttuneError({ code: 'BAD_REQUEST', message: 'state id is required' }),
+        new AttuneError({ code: 'BAD_REQUEST', message: 'state id is invalid' }),
       )
     return this.#request<UpdateStateResponse>(
       'PATCH',
@@ -264,9 +282,9 @@ export class Client {
 
   /** Archive a workflow state by id. */
   archiveWorkflowState(id: string, opts?: { signal?: AbortSignal }): Promise<ArchiveStateResponse> {
-    if (!id)
+    if (!isValidPathSegment(id))
       return Promise.reject(
-        new AttuneError({ code: 'BAD_REQUEST', message: 'state id is required' }),
+        new AttuneError({ code: 'BAD_REQUEST', message: 'state id is invalid' }),
       )
     return this.#request<ArchiveStateResponse>(
       'DELETE',

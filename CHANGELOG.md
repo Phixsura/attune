@@ -21,8 +21,37 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   /v1/workflow/states/{id}` passed the raw id straight to a UUID-typed column, so a
   non-UUID id (reachable via the SDK admin surface) produced a Postgres 22P02 →
   opaque `500 INTERNAL` that the SDKs then retried (PATCH/DELETE are idempotent).
-  Both `UpdateState` and `ArchiveState` now `uuid.Parse`-guard the id and return
-  `400 BAD_ID`, mirroring the tag handler.
+  Both `UpdateState` and `ArchiveState` now `uuid.Parse`-guard the id and forward
+  the **canonical** form (so a `urn:uuid:…` that `uuid.Parse` accepts but Postgres
+  rejects can't slip through), returning `400 BAD_ID` for anything invalid.
+
+- **Self-loop / duplicate workflow transitions now return 400, not 500 (#36).**
+  `ReplaceTransitions` validated state ownership but not `from == to` or repeated
+  edges, which tripped the DB `chk_wt_no_self_loop` / unique-edge constraints and
+  surfaced as `500 INTERNAL` (reachable with an arbitrary SDK payload). Both are
+  now rejected up front as `400 VALIDATION`.
+
+- **Tag create/update constraint violations now return 400, not 500 (#36).** An
+  empty/over-long name or malformed color reached a DB `CHECK` constraint and was
+  misclassified as `500 INTERNAL`; the repo now maps SQLSTATE 23514 (via a new
+  `pgxutil.IsCheckViolation`) to a `400 VALIDATION` envelope.
+
+- **Go SDK: a truncated/reset response body now retries (#37).** `doOnce`
+  discarded the body-read error, so a mid-stream connection reset on a 2xx became
+  a permanent `INTERNAL` decode error instead of a retryable `NETWORK` failure;
+  it is now surfaced as `NETWORK` so an idempotent request retries.
+
+- **Go SDK: reserved headers stripped from `WithDefaultHeaders` (#37).** Matching
+  the Node hardening, the reserved headers (Content-Type, X-API-Key,
+  Idempotency-Key, User-Agent) are dropped (canonical, case-insensitive) at the
+  construction boundary so a default header can't override them — including
+  `Content-Type` on bodyless GET/DELETE requests.
+
+- **SDKs reject dot-segment / slash ids (#37).** `archiveTag('..')` /
+  `updateWorkflowState({id:'../x'})` and friends are rejected before sending
+  (`encodeURIComponent`/`url.PathEscape` leave `.`/`..` untouched, which would
+  walk the request path); empty, `.`, `..`, and slash-containing ids now fail
+  fast as `BAD_REQUEST` in both SDKs.
 
 - **Node SDK: reserved headers can no longer be overridden via `defaultHeaders`
   casing (#37).** A `defaultHeaders` entry whose key was a case-variant of a
@@ -32,10 +61,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   documented "reserved headers always take precedence". Reserved keys are now
   stripped case-insensitively at construction.
 
-- **Node SDK: baseURL is validated at construction (#37).** A malformed or
-  non-`http(s)` `baseURL` now throws `BAD_REQUEST` immediately (parity with the Go
-  SDK), instead of constructing successfully and failing later as a transport
-  error on the first request.
+- **Node SDK: baseURL is validated at construction (#37).** A malformed,
+  non-`http(s)`, or host-less `baseURL` (e.g. `http:foo`, which `new URL` would
+  coerce to host `foo`) now throws `BAD_REQUEST` immediately — requiring a real
+  `scheme://host` authority for parity with the Go SDK, instead of constructing
+  successfully and silently sending to the wrong host.
 
 - **SDK retry parity: fractional `Retry-After` (#37).** The Node SDK accepted a
   fractional `Retry-After: 1.5` (→1500 ms) while the Go SDK rejected it and fell

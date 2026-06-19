@@ -52,8 +52,8 @@ func (c *Client) CreateWorkflowState(ctx context.Context, req *CreateStateReques
 
 // UpdateWorkflowState updates a state by id (needs `workflow:write`). Replace-semantics.
 func (c *Client) UpdateWorkflowState(ctx context.Context, req *UpdateStateRequest) (*UpdateStateResponse, error) {
-	if req.GetId() == "" {
-		return nil, &AttuneError{Code: CodeBadRequest, Message: "state id is required"}
+	if !validPathSegment(req.GetId()) {
+		return nil, &AttuneError{Code: CodeBadRequest, Message: "state id is invalid"}
 	}
 	payload, err := protojsonMarshal.Marshal(req)
 	if err != nil {
@@ -68,8 +68,8 @@ func (c *Client) UpdateWorkflowState(ctx context.Context, req *UpdateStateReques
 
 // ArchiveWorkflowState archives a state by id (needs `workflow:write`).
 func (c *Client) ArchiveWorkflowState(ctx context.Context, id string) (*ArchiveStateResponse, error) {
-	if id == "" {
-		return nil, &AttuneError{Code: CodeBadRequest, Message: "state id is required"}
+	if !validPathSegment(id) {
+		return nil, &AttuneError{Code: CodeBadRequest, Message: "state id is invalid"}
 	}
 	var out attunev1.ArchiveStateResponse
 	if err := c.do(ctx, http.MethodDelete, "/v1/workflow/states/"+url.PathEscape(id), nil, &out, ""); err != nil {

@@ -111,6 +111,11 @@ func (h *Handler) Create(
 			http.StatusConflict, attunev1.ErrorCode_CONFLICT, "tag name already exists",
 		)
 	}
+	if errors.Is(err, feedbacktag.ErrInvalidInput) {
+		return dispatcher.Fail[*attunev1.Tag](
+			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "tag field is invalid",
+		)
+	}
 	if err != nil {
 		logext.Errorf(ctx, "[%s] create failed,tenant_id:%s,err:%+v", where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.Tag](
@@ -263,6 +268,11 @@ func tagWriteError(
 	if errors.Is(err, feedbacktag.ErrNameConflict) {
 		return dispatcher.NewError(
 			http.StatusConflict, attunev1.ErrorCode_CONFLICT, "tag name already exists",
+		)
+	}
+	if errors.Is(err, feedbacktag.ErrInvalidInput) {
+		return dispatcher.NewError(
+			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "tag field is invalid",
 		)
 	}
 	logext.Errorf(ctx, "[%s] update failed,tenant_id:%s,tag_id:%s,err:%+v",

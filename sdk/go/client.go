@@ -161,6 +161,36 @@ func (c *Client) do(ctx context.Context, method, path string, payload []byte, ou
 	return last.err
 }
 
+// validPathSegment reports whether id is safe to splice into a URL path: it must
+// be non-empty and neither a dot-segment nor contain a slash, which would
+// otherwise alter the request path (parent walk / extra segment) once the URL is
+// resolved — url.PathEscape leaves '.' untouched.
+func validPathSegment(id string) bool {
+	return id != "" && id != "." && id != ".." && !strings.Contains(id, "/")
+}
+
+// readCappedBody reads the response body under the 1 MiB cap. It returns a
+// non-nil *attemptError for an over-cap body (INTERNAL) or a mid-stream read
+// failure (retryable NETWORK — a truncated/reset 2xx is a transport problem, not
+// a decode error), else the bytes.
+func readCappedBody(resp *http.Response) ([]byte, *attemptError) {
+	// Read one byte past the cap so an over-limit body is detectable without
+	// buffering the whole thing (hostile-server OOM guard).
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if len(data) > maxResponseBytes {
+		return nil, &attemptError{err: &AttuneError{
+			Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
+			Message: "response body exceeds the 1 MiB cap",
+		}}
+	}
+	if readErr != nil {
+		return nil, &attemptError{err: &AttuneError{
+			Code: CodeNetwork, Message: "reading response body: " + readErr.Error(), cause: readErr,
+		}, retryable: true}
+	}
+	return data, nil
+}
+
 // attemptError carries the outcome of a single HTTP attempt.
 type attemptError struct {
 	err           *AttuneError
@@ -205,14 +235,9 @@ func (c *Client) doOnce(parent context.Context, method, path string, payload []b
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Read one byte past the cap so an over-limit body is detectable without
-	// buffering the whole thing (hostile-server OOM guard).
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if len(data) > maxResponseBytes {
-		return &attemptError{err: &AttuneError{
-			Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
-			Message: "response body exceeds the 1 MiB cap",
-		}}
+	data, readErrResult := readCappedBody(resp)
+	if readErrResult != nil {
+		return readErrResult
 	}
 
 	if resp.StatusCode/100 == 2 {
