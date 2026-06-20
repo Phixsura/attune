@@ -16,12 +16,13 @@ import (
 )
 
 type fakeAuditRecorder struct {
-	events []auditlogsvc.Event
+	events    []auditlogsvc.Event
+	recordErr error // when set, Record fails with it (event still captured)
 }
 
 func (f *fakeAuditRecorder) Record(_ context.Context, event auditlogsvc.Event) error {
 	f.events = append(f.events, event)
-	return nil
+	return f.recordErr
 }
 
 func TestUpdateRecordsAudit(t *testing.T) {

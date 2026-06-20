@@ -39,6 +39,7 @@ import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
 import { EnrichmentRuntimePage } from '@/features/settings/components/enrichment-runtime-page'
+import { SuggestedValuesPanel } from '@/features/settings/components/suggested-values-panel'
 import { TagsPage } from '@/features/tags/components/tags-page'
 import { WorkflowSettingsPage } from '@/features/workflow/components/workflow-settings-page'
 import type { Dimension } from '@/proto/attune/v1/common'
@@ -291,6 +292,8 @@ function ClassificationSettings({
           <DimensionsEditor value={dimensions} onChange={onDimensionsChange} disabled={!canEdit} />
         </CardContent>
       </Card>
+
+      <SuggestedValuesPanel canEdit={canEdit} />
 
       <Card>
         <CardHeader>

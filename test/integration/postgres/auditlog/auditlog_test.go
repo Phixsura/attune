@@ -75,6 +75,27 @@ func TestPG_AuditLogRejectsUpdateDeleteTruncateAndUnknownAction(t *testing.T) {
 	require.Contains(t, err.Error(), "chk_audit_action_value")
 }
 
+// TestPG_AuditLogAcceptsNewlyRegisteredActions guards migration 057: the
+// chk_audit_action_value constraint must accept the actions whose audit
+// writes were previously dropped silently (enrich_config.promote_suggested
+// from #83; api_key.rotate, a pre-existing gap found by the same audit
+// cross-check). Both the Go allow-list and this DB constraint must list them.
+func TestPG_AuditLogAcceptsNewlyRegisteredActions(t *testing.T) {
+	pool := sharedPool
+	ctx := context.Background()
+	tenantID := insertTenant(t, ctx, pool, "audit-new-actions")
+
+	for _, action := range []string{"enrich_config.promote_suggested", "api_key.rotate"} {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO audit_log (
+				tenant_id, actor_type, actor_id, actor_email, actor_ip, actor_user_agent,
+				action, target_type, target_id, summary
+			) VALUES ($1, 'admin', 'user-1', '', '', '', $2, 'enrich_config', 'acme', 'e2e regression')
+		`, tenantID, action)
+		require.NoErrorf(t, err, "DB constraint chk_audit_action_value must accept %q", action)
+	}
+}
+
 func TestPG_AuditLogListFiltersByActionActorAndDateRange(t *testing.T) {
 	pool := sharedPool
 	ctx := context.Background()

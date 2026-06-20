@@ -531,5 +531,45 @@ func (r *FeedbackRepo) SampleEnriched(ctx context.Context, since time.Time, n in
 	return out, rows.Err()
 }
 
+// SampleEnrichedByTenant returns a random sample of rows with completed
+// enrichment after `since` for a specific tenant. Used by Console API
+// eval-suggestions endpoint to ensure tenant isolation.
+func (r *FeedbackRepo) SampleEnrichedByTenant(ctx context.Context, tenantID string, since time.Time, n int) ([]SampleRow, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, tenant_id, content,
+		 COALESCE(enriched_attrs, '{}'::jsonb),
+		 is_urgent
+		 FROM user_feedback
+		 WHERE tenant_id = $1
+		 AND enrichment_status = 'done'
+		 AND enriched_at >= $2
+		 ORDER BY RANDOM()
+		 LIMIT $3`, tenantID, since, n)
+	if err != nil {
+		return nil, fmt.Errorf("sample enriched by tenant: %w", err)
+	}
+	defer rows.Close()
+	var out []SampleRow
+	for rows.Next() {
+		var (
+			s        SampleRow
+			attrsRaw []byte
+		)
+		if err := rows.Scan(
+			&s.ID, &s.TenantID, &s.Content,
+			&attrsRaw, &s.IsUrgent,
+		); err != nil {
+			return nil, fmt.Errorf("scan sample row: %w", err)
+		}
+		if len(attrsRaw) > 0 {
+			if err := json.Unmarshal(attrsRaw, &s.Attrs); err != nil {
+				return nil, fmt.Errorf("decode sample attrs: %w", err)
+			}
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // truncate moved to internal/repo/pgxutil.Truncate (single canonical
 // helper imported by every repo subpackage).

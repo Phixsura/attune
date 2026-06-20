@@ -21,6 +21,9 @@ import (
 type fakeConfigService struct {
 	view enrich.View
 
+	getErr    error // when set, Get fails with it
+	updateErr error // when set, Update fails with it
+
 	updateTenant string
 	updateView   enrich.View
 
@@ -30,10 +33,23 @@ type fakeConfigService struct {
 }
 
 func (f *fakeConfigService) Get(_ context.Context, _ string) (enrich.View, error) {
+	if f.getErr != nil {
+		return enrich.View{}, f.getErr
+	}
 	return f.view, nil
 }
 
 func (f *fakeConfigService) Update(_ context.Context, tenantID string, v enrich.View) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	// Mirror the real ConfigService.Update, which runs domain validation before
+	// persisting. Without this the fake would mask handler bugs that push
+	// invalid taxonomy past the handler's own checks and rely on Update to
+	// reject them (the promote endpoint's whitespace/dup/display-name edges).
+	if err := v.Dimensions.Validate(); err != nil {
+		return err
+	}
 	f.updateTenant = tenantID
 	f.updateView = v
 	f.view = v

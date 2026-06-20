@@ -60,6 +60,13 @@ type classifyResult struct {
 	Route             llmclient.RouteMetadata
 }
 
+// ClassifyResult is the public result type for ClassifyWithDiagnostics.
+// It exposes the diagnostics for eval to capture off-list values.
+type ClassifyResult struct {
+	Enriched        domain.Enriched
+	DropDiagnostics []domain.AttrDropDiagnostic
+}
+
 // NewEnricher takes an optional legacy model id. New deployments leave it empty
 // and let the DB-managed LLM router resolve model/channel by purpose.
 func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient, model string) *Enricher {
@@ -206,6 +213,25 @@ func (e *Enricher) Classify(ctx context.Context, content string, cfg ClassifyCon
 		return domain.Enriched{}, err
 	}
 	return result.Enriched, nil
+}
+
+// ClassifyWithDiagnostics is like Classify but also returns drop diagnostics.
+// Used by eval to capture off-list values that were filtered out.
+func (e *Enricher) ClassifyWithDiagnostics(ctx context.Context, content string, cfg ClassifyConfig) (ClassifyResult, error) {
+	if cfg.Language == "" {
+		cfg.Language = detectRowLanguage(content)
+	}
+	if cfg.DisplayLocale == "" {
+		cfg.DisplayLocale = classifyDisplayLocale(cfg)
+	}
+	result, err := e.classifyWithDiagnostics(ctx, content, cfg)
+	if err != nil {
+		return ClassifyResult{}, err
+	}
+	return ClassifyResult{
+		Enriched:        result.Enriched,
+		DropDiagnostics: result.DropDiagnostics,
+	}, nil
 }
 
 func (e *Enricher) classifyWithDiagnostics(ctx context.Context, content string, cfg ClassifyConfig) (classifyResult, error) {

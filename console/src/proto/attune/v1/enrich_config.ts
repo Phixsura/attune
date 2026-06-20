@@ -5,7 +5,7 @@
 // source: attune/v1/enrich_config.proto
 
 /* eslint-disable */
-import { type Dimension } from "./common";
+import { type Dimension, type I18nString } from "./common";
 
 export const protobufPackage = "attune.v1";
 
@@ -55,6 +55,54 @@ export interface PreviewEnrichPromptResponse {
   renderedPrompt: string;
 }
 
+/** GetEvalSuggestions returns off-list values the LLM suggested during eval. */
+export interface GetEvalSuggestionsRequest {
+}
+
+export interface GetEvalSuggestionsResponse {
+  /** Coverage per dimension: 1.0 = all on-list, 0.85 = 15% dropped. */
+  coverage: { [key: string]: number };
+  /** Top suggested candidates sorted by confidence descending. */
+  candidates: SuggestedCandidate[];
+  /** Actionable recommendations for high-confidence candidates. */
+  recommendations: SuggestedRecommendation[];
+}
+
+export interface GetEvalSuggestionsResponse_CoverageEntry {
+  key: string;
+  value: number;
+}
+
+/** SuggestedCandidate is one off-list value with analysis metadata. */
+export interface SuggestedCandidate {
+  dim: string;
+  value: string;
+  count: number;
+  confidence: number;
+  coverageImpact: number;
+}
+
+/** SuggestedRecommendation is an actionable suggestion for the operator. */
+export interface SuggestedRecommendation {
+  action: string;
+  dim: string;
+  value: string;
+  reason: string;
+  impact: string;
+}
+
+/** PromoteSuggestedValue adds a value to the dimension taxonomy. */
+export interface PromoteSuggestedValueRequest {
+  dimensionName: string;
+  value: string;
+  displayName?: I18nString | undefined;
+}
+
+export interface PromoteSuggestedValueResponse {
+  /** The updated dimension with the new taxonomy value. */
+  dimension?: Dimension | undefined;
+}
+
 /**
  * EnrichConfigService manages per-tenant enricher prompt + the
  * metadata-driven Dimension set (#10 → E3 proposal
@@ -67,4 +115,14 @@ export interface EnrichConfigService {
   UpdateEnrichConfig(request: UpdateEnrichConfigRequest): Promise<UpdateEnrichConfigResponse>;
   /** POST /fb/v1/console/enrich-config/preview */
   PreviewEnrichPrompt(request: PreviewEnrichPromptRequest): Promise<PreviewEnrichPromptResponse>;
+  /**
+   * GET /fb/v1/console/enrich-config/eval-suggestions
+   * Returns off-list values the LLM suggested during the most recent eval run.
+   */
+  GetEvalSuggestions(request: GetEvalSuggestionsRequest): Promise<GetEvalSuggestionsResponse>;
+  /**
+   * POST /fb/v1/console/enrich-config/promote
+   * Promotes a suggested value to the dimension taxonomy.
+   */
+  PromoteSuggestedValue(request: PromoteSuggestedValueRequest): Promise<PromoteSuggestedValueResponse>;
 }

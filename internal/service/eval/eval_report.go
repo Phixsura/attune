@@ -43,20 +43,67 @@ func FormatReport(rep *EvalReport) string {
 			fmt.Fprintf(b, "| %s | multi | avg IoU %.2f | 0.75 |\n", name, avg)
 		}
 	}
-	if len(rep.Mismatches) == 0 {
-		return b.String()
+	if len(rep.Mismatches) > 0 {
+		b.WriteString("\n## top 10 mismatches\n\n")
+		b.WriteString("| id | dim diffs | content |\n")
+		b.WriteString("|----|----------|--------|\n")
+		for i, m := range rep.Mismatches {
+			if i >= 10 {
+				break
+			}
+			fmt.Fprintf(b, "| %d | %s | %s |\n",
+				m.FeedbackID, summarizeDiffs(m.Diffs), truncateForReport(m.Content, 60))
+		}
 	}
-	b.WriteString("\n## top 10 mismatches\n\n")
-	b.WriteString("| id | dim diffs | content |\n")
-	b.WriteString("|----|----------|--------|\n")
-	for i, m := range rep.Mismatches {
-		if i >= 10 {
+	formatSuggestedAttrs(b, &rep.SuggestedAttrs, rep.SampleSize) // ptrext:allow avoid-copy
+	return b.String()
+}
+
+func formatSuggestedAttrs(b *strings.Builder, sa *SuggestedAttrsReport, _ int) {
+	if sa == nil || (len(sa.Coverage) == 0 && len(sa.Candidates) == 0) {
+		return
+	}
+	b.WriteString("\n## suggested values (off-list)\n\n")
+	b.WriteString("| dimension | coverage | top suggestions |\n")
+	b.WriteString("|-----------|----------|----------------|\n")
+	for _, dim := range sortedCoverageDims(sa.Coverage) {
+		cov := sa.Coverage[dim]
+		suggestions := formatTopSuggestions(sa.Candidates, dim, 3)
+		if suggestions == "" {
+			suggestions = "—"
+		}
+		fmt.Fprintf(b, "| %s | %.0f%% | %s |\n", dim, cov*100, suggestions)
+	}
+	if len(sa.Recommendations) > 0 {
+		b.WriteString("\nRecommendations:\n")
+		for _, r := range sa.Recommendations {
+			fmt.Fprintf(b, "• %s %s.%s — %s, %s\n",
+				strings.ToUpper(r.Action), r.Dim, r.Value, r.Reason, r.Impact)
+		}
+	}
+}
+
+func sortedCoverageDims(coverage map[string]float64) []string {
+	out := make([]string, 0, len(coverage))
+	for k := range coverage {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func formatTopSuggestions(candidates []SuggestedCandidate, dim string, n int) string {
+	var parts []string
+	for _, c := range candidates {
+		if c.Dim != dim {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s (%d)", c.Value, c.Count))
+		if len(parts) >= n {
 			break
 		}
-		fmt.Fprintf(b, "| %d | %s | %s |\n",
-			m.FeedbackID, summarizeDiffs(m.Diffs), truncateForReport(m.Content, 60))
 	}
-	return b.String()
+	return strings.Join(parts, ", ")
 }
 
 func summarizeDiffs(diffs map[string]DimDiff) string {

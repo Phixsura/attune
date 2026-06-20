@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- **Eval report now surfaces off-list module suggestions (#83).** When the LLM
+  systematically suggests taxonomy values that are filtered out (e.g., tenant
+  whitelist is `["payment"]` but LLM outputs `["payment", "checkout"]`), the
+  eval report now captures these suggestions with frequency distribution,
+  coverage metrics, confidence scoring, and actionable recommendations. This
+  enables operators to identify systematic gaps in their taxonomy and evolve
+  it based on LLM behavior. CLI output includes a "suggested values" section
+  with per-dimension coverage and top suggestions. Console API endpoints
+  `GET /enrich-config/eval-suggestions` and `POST /enrich-config/promote`
+  allow viewing suggestions and promoting values to the taxonomy directly.
+  The Console settings → classification tab adds a "Suggested values" panel:
+  an on-demand "Analyze" action runs the eval, shows per-dimension coverage,
+  lists each off-list candidate with its frequency, confidence, and predicted
+  coverage gain, and a one-click "Promote" adds it to the dimension taxonomy
+  (after which it leaves the list and coverage rises). Analyze + Promote are
+  gated behind edit permission, matching the admin-only server routes, so a
+  view-only member sees the data scope without triggering a 403. Suggested
+  candidates are ordered deterministically (confidence desc, then dim + value)
+  so equal-frequency values don't reshuffle between eval runs. Hardening: the
+  eval-suggestions endpoint is per-tenant rate limited (6/min) since each call
+  runs an LLM eval; the accumulator counts each off-list value once per row;
+  candidate counts are clamped on the int32 wire narrowing; the panel shows
+  "<1%" for a nonzero confidence/impact that rounds to 0; and the promote
+  button has a synchronous re-entrancy latch so a double-click sends one POST. Promote input is canonicalized (values trimmed;
+  whitespace-only rejected as 400, trimmed-duplicate as 409, missing display
+  name defaulted to the value) and domain-validation failures map to 4xx
+  instead of 500.
+
+### Fixed
+
+- **Audit writes for promote-suggested and API-key rotation no longer silently
+  dropped (#83).** Two emitted audit actions were missing from both the Go
+  allow-list (`internal/service/auditlog/actions.go`) and the DB
+  `chk_audit_action_value` constraint, so `auditlog.Service.Record` rejected
+  them and the handlers — which log the error but still return 200 — left no
+  audit trail: `enrich_config.promote_suggested` (taxonomy promotion, #83) and
+  `api_key.rotate` (emitted since key rotation shipped; a security-observability
+  gap where rotations went unaudited). Both are now registered in lockstep
+  (migration `057_eval_promote_audit_action.sql`), and a router cross-check test
+  asserts every emitted audit action is allow-listed so this class of bug fails
+  CI instead of production. Found via the full-stack e2e for #83.
+
 - **GDPR erasure no longer aborts on subjects with deliveries (#131).** The
   data-subject delete now purges `notify_outbox` (a `NOT NULL` FK to
   `user_feedback` with no `ON DELETE` action, whose `payload` holds the feedback

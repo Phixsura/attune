@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/handlers/console"
+	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
@@ -21,6 +22,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/pkg/crypto"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
@@ -49,6 +51,7 @@ import (
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
+	evalsvc "github.com/Phixsura/attune/internal/service/eval"
 	"github.com/Phixsura/attune/internal/service/feedbackbatch"
 	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
@@ -198,7 +201,7 @@ func buildConsoleRouter(
 	feedback.SetRegenLimiter(ratelimit.New(60, 20, false, nil))
 	usage := console.NewUsageHandler(feedbackRepo, llmauditrepo.New(pool))
 	gdprHandler := buildGDPRHandler(cfg, pool, auditLogSvc, signer, adminRepo)
-	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
+	enrichConfig := buildEnrichConfigHandler(tenantRepo, feedbackRepo, llm)
 	var enrichmentRuntimeHandler *consoleenrichmentruntime.Handler
 	if enrichRuntime != nil {
 		enrichmentRuntimeHandler = console.NewEnrichmentRuntimeHandler(enrichRuntime, cfg.GDPRStepUpTTL)
@@ -366,4 +369,78 @@ func enrichmentRuntimeBootstrapVersion(cfg *config.Config) string {
 		cfg.EnricherLLMMaxQPS,
 		cfg.EnricherLLMBurst,
 	)
+}
+
+// buildEnrichConfigHandler wires the enrich-config console handler with its
+// eval-suggestions getter and a per-tenant rate limit (6/min, burst 2) — each
+// eval-suggestions call runs an LLM eval, so a scripted caller must be capped.
+func buildEnrichConfigHandler(
+	tenantRepo *tenant.TenantRepo,
+	feedbackRepo *feedback.FeedbackRepo,
+	llm llmclient.LLMClient,
+) *enrichconfig.Handler {
+	h := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
+	h.SetEvalGetter(buildEvalSuggestionsGetter(feedbackRepo, tenantRepo, llm))
+	h.SetEvalLimiter(ratelimit.New(6, 2, false, nil))
+	return h
+}
+
+const (
+	// evalSuggestionsWindow is how far back the Console eval-suggestions
+	// endpoint samples enriched rows.
+	evalSuggestionsWindow = 30 * 24 * time.Hour
+	// evalSuggestionsSample is the per-call sample size (each sampled row is
+	// re-classified by the LLM).
+	evalSuggestionsSample = 20
+	// evalSuggestionsTimeout bounds the whole eval. Each sampled row makes one
+	// LLM call (bounded only by the channel timeout), so without a ceiling a
+	// slow/hung provider could pin a request for many minutes. On deadline the
+	// remaining classify calls fail fast and the loop returns what it has.
+	evalSuggestionsTimeout = 60 * time.Second
+)
+
+// buildEvalSuggestionsGetter builds an enrichconfig.EvalSuggestionsGetter that
+// runs quick consistency evals via the console API (#83).
+func buildEvalSuggestionsGetter(
+	feedbackRepo *feedback.FeedbackRepo,
+	tenantRepo *tenant.TenantRepo,
+	llm llmclient.LLMClient,
+) enrichconfig.EvalSuggestionsGetter {
+	evalEnricher := enrich.NewEnricher(feedbackRepo, llm, "")
+	evaluator := evalsvc.NewEvaluator(feedbackRepo, tenantRepo, evalEnricher)
+	return func(ctx context.Context, tenantID string) (*enrichconfig.SuggestedAttrsReport, error) {
+		ctx, cancel := context.WithTimeout(ctx, evalSuggestionsTimeout)
+		defer cancel()
+		since := time.Now().Add(-evalSuggestionsWindow)
+		report, err := evaluator.RunConsistencyForTenant(ctx, tenantID, since, evalSuggestionsSample)
+		if err != nil {
+			return nil, err
+		}
+		return evalReportToEnrichconfig(report.SuggestedAttrs), nil
+	}
+}
+
+func evalReportToEnrichconfig(sa evalsvc.SuggestedAttrsReport) *enrichconfig.SuggestedAttrsReport {
+	out := ptrext.Of(enrichconfig.SuggestedAttrsReport{
+		Coverage: sa.Coverage,
+	})
+	for _, c := range sa.Candidates {
+		out.Candidates = append(out.Candidates, enrichconfig.SuggestedCandidate{
+			Dim:            c.Dim,
+			Value:          c.Value,
+			Count:          c.Count,
+			Confidence:     c.Confidence,
+			CoverageImpact: c.CoverageImpact,
+		})
+	}
+	for _, r := range sa.Recommendations {
+		out.Recommendations = append(out.Recommendations, enrichconfig.SuggestedRecommendation{
+			Action: r.Action,
+			Dim:    r.Dim,
+			Value:  r.Value,
+			Reason: r.Reason,
+			Impact: r.Impact,
+		})
+	}
+	return out
 }
