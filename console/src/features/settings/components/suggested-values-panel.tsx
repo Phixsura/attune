@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, Sparkles, TrendingUp } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,15 @@ import {
 import { evalSuggestionsQuery } from '@/features/settings/api/get-eval-suggestions'
 import { usePromoteSuggestedValue } from '@/features/settings/api/promote-suggested-value'
 
+// formatPct renders a 0–1 ratio as a percent. A nonzero ratio that would
+// round to "0%" is shown as "<1%" so a real candidate never appears to have
+// zero confidence/impact (reachable for rare values in large eval samples).
+function formatPct(ratio: number): string {
+  const pct = ratio * 100
+  if (pct > 0 && pct < 0.5) return '<1%'
+  return `${Math.round(pct)}%`
+}
+
 // SuggestedValuesPanel surfaces off-list values the LLM repeatedly suggested
 // during eval (#83). Running the eval re-classifies a sample via the LLM, so
 // the fetch is gated behind an explicit "Analyze" click. Each candidate can be
@@ -27,8 +36,14 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
   const q = useQuery(evalSuggestionsQuery(analyzed))
   const promote = usePromoteSuggestedValue()
   const [promoting, setPromoting] = useState<string | null>(null)
+  // Synchronous re-entrancy latch: `promoting` state updates async, so a
+  // rapid second click reads the stale (null) value and slips through. A ref
+  // flips synchronously, so the second click bails before a duplicate POST.
+  const inFlight = useRef(false)
 
   const onPromote = async (dim: string, value: string) => {
+    if (inFlight.current) return
+    inFlight.current = true
     setPromoting(`${dim}:${value}`)
     try {
       await promote.mutateAsync({
@@ -40,6 +55,7 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.suggestions.promote_failed'))
     } finally {
+      inFlight.current = false
       setPromoting(null)
     }
   }
@@ -138,10 +154,10 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
                     <TableCell className="font-medium">{c.value}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.count}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {Math.round(c.confidence * 100)}%
+                      {formatPct(c.confidence)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-emerald-600">
-                      +{Math.round(c.coverageImpact * 100)}%
+                      +{formatPct(c.coverageImpact)}
                     </TableCell>
                     <TableCell className="text-right">
                       {canEdit && (

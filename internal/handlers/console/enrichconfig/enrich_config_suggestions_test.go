@@ -16,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -80,6 +81,33 @@ func TestGetEvalSuggestions_Success(t *testing.T) {
 	require.Contains(t, body, "coverage")
 	require.Contains(t, body, "candidates")
 	require.Contains(t, body, "recommendations")
+}
+
+func TestGetEvalSuggestions_RateLimited(t *testing.T) {
+	t.Parallel()
+
+	h := &Handler{svc: &fakeConfigService{}}
+	h.evalGetter = func(_ context.Context, _ string) (*SuggestedAttrsReport, error) {
+		return &SuggestedAttrsReport{}, nil
+	}
+	// 1/min, burst 1: the second call within the window is rejected.
+	h.SetEvalLimiter(ratelimit.New(1, 1, false, nil))
+	handler := dispatcher.Bind(
+		"console.EnrichConfigHandler.GetEvalSuggestions",
+		dispatcher.Empty(func() *attunev1.GetEvalSuggestionsRequest { return &attunev1.GetEvalSuggestionsRequest{} }),
+		h.GetEvalSuggestions,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetEvalSuggestionsRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+	req := func() *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodGet, "/fb/v1/console/enrich-config/eval-suggestions", ""))
+		return w
+	}
+
+	require.Equal(t, http.StatusOK, req().Code, "first call allowed")
+	require.Equal(t, http.StatusTooManyRequests, req().Code, "second call rate limited")
 }
 
 func TestGetEvalSuggestions_EvalError(t *testing.T) {
@@ -475,6 +503,14 @@ func TestPromoteSuggestedValue_UpdateError(t *testing.T) {
 	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/promote", reqBody))
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestClampInt32(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, int32(0), clampInt32(0))
+	require.Equal(t, int32(42), clampInt32(42))
+	require.Equal(t, int32(0), clampInt32(-1), "negative clamped to 0")
+	require.Equal(t, int32(2147483647), clampInt32(1<<40), "overflow clamped to MaxInt32")
 }
 
 func TestSuggestedReportToProto_Nil(t *testing.T) {

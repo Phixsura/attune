@@ -127,6 +127,33 @@ func TestBuild_DimWithZeroTotalGetsFullCoverage(t *testing.T) {
 	require.Equal(t, 1.0, report.Coverage["modules"])
 }
 
+// TestAdd_DedupsValuesWithinDiagnostic: a value repeated inside one
+// diagnostic counts once (per-row frequency), never inflating past the
+// number of rows it appeared in.
+func TestAdd_DedupsValuesWithinDiagnostic(t *testing.T) {
+	t.Parallel()
+	acc := newSuggestedAccumulator()
+	// one row whose diagnostic lists "checkout" three times.
+	acc.Add(
+		[]domain.AttrDropDiagnostic{{
+			Dim:    "modules",
+			Reason: domain.AttrDropOffListValue,
+			Values: []string{"checkout", "checkout", "checkout"},
+			Count:  1,
+		}},
+		map[string]any{"modules": []string{"payment"}},
+		domain.DimensionSet{{Name: "modules", Kind: domain.DimMulti}},
+	)
+	report := acc.Build(10)
+	// frequency is 1 (one row), not 3.
+	require.Equal(t, 1, report.ValueFreq["modules"]["checkout"])
+	for _, c := range report.Candidates {
+		if c.Value == "checkout" {
+			require.Equal(t, 1, c.Count)
+		}
+	}
+}
+
 // --- candidate ordering determinism on ties ----------------------------
 
 // TestBuild_DeterministicOrderOnConfidenceTies: equal-count (→ equal

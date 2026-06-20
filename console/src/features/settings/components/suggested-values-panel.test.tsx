@@ -49,6 +49,48 @@ describe('SuggestedValuesPanel', () => {
     expect(screen.getByText('+33%')).toBeInTheDocument()
   })
 
+  it('renders <1% for a nonzero confidence/impact that rounds to zero', async () => {
+    server.use(
+      http.get(SUGGESTIONS_URL, () =>
+        HttpResponse.json({
+          coverage: { modules: 0.999 },
+          candidates: [
+            { dim: 'modules', value: 'rare', count: 1, confidence: 0.003, coverageImpact: 0.002 },
+          ],
+          recommendations: [],
+        }),
+      ),
+    )
+    renderWithProviders(<SuggestedValuesPanel canEdit={true} />)
+    await userEvent.click(screen.getByTestId('analyze-suggestions'))
+    await waitFor(() => expect(screen.getByTestId('suggestion-row-rare')).toBeInTheDocument())
+    const row = screen.getByTestId('suggestion-row-rare')
+    expect(row).toHaveTextContent('<1%') // confidence 0.3% → <1%
+    expect(row).toHaveTextContent('+<1%') // impact 0.2% → +<1%
+  })
+
+  it('promotes only once when the button is double-clicked', async () => {
+    let promoteCalls = 0
+    server.use(
+      http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())),
+      http.post(PROMOTE_URL, async () => {
+        promoteCalls += 1
+        await new Promise((r) => setTimeout(r, 50))
+        return HttpResponse.json({ dimension: { name: 'modules', taxonomy: [] } })
+      }),
+    )
+    renderWithProviders(<SuggestedValuesPanel canEdit={true} />)
+    await userEvent.click(screen.getByTestId('analyze-suggestions'))
+    await waitFor(() => expect(screen.getByTestId('promote-checkout')).toBeInTheDocument())
+
+    const btn = screen.getByTestId('promote-checkout')
+    // fire two clicks back-to-back before the request resolves
+    btn.click()
+    btn.click()
+    await new Promise((r) => setTimeout(r, 150))
+    expect(promoteCalls).toBe(1)
+  })
+
   it('promotes a candidate via POST /promote', async () => {
     let promoted: { dimensionName: string; value: string } | null = null
     server.use(

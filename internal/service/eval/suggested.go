@@ -105,7 +105,16 @@ func (a *suggestedAccumulator) Add(
 		if a.valueFreq[diag.Dim] == nil {
 			a.valueFreq[diag.Dim] = make(map[string]int)
 		}
+		// Count each value at most once per diagnostic so valueFreq stays a
+		// per-row frequency (confidence = rows-it-appeared-in / sampleSize).
+		// The enricher gate already dedups, but don't depend on that — a
+		// duplicate here would silently inflate a value's count past sampleSize.
+		seen := make(map[string]bool, len(diag.Values))
 		for _, v := range diag.Values {
+			if seen[v] {
+				continue
+			}
+			seen[v] = true
 			a.valueFreq[diag.Dim][v]++
 		}
 	}

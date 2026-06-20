@@ -201,8 +201,7 @@ func buildConsoleRouter(
 	feedback.SetRegenLimiter(ratelimit.New(60, 20, false, nil))
 	usage := console.NewUsageHandler(feedbackRepo, llmauditrepo.New(pool))
 	gdprHandler := buildGDPRHandler(cfg, pool, auditLogSvc, signer, adminRepo)
-	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
-	enrichConfig.SetEvalGetter(buildEvalSuggestionsGetter(feedbackRepo, tenantRepo, llm))
+	enrichConfig := buildEnrichConfigHandler(tenantRepo, feedbackRepo, llm)
 	var enrichmentRuntimeHandler *consoleenrichmentruntime.Handler
 	if enrichRuntime != nil {
 		enrichmentRuntimeHandler = console.NewEnrichmentRuntimeHandler(enrichRuntime, cfg.GDPRStepUpTTL)
@@ -370,6 +369,20 @@ func enrichmentRuntimeBootstrapVersion(cfg *config.Config) string {
 		cfg.EnricherLLMMaxQPS,
 		cfg.EnricherLLMBurst,
 	)
+}
+
+// buildEnrichConfigHandler wires the enrich-config console handler with its
+// eval-suggestions getter and a per-tenant rate limit (6/min, burst 2) — each
+// eval-suggestions call runs an LLM eval, so a scripted caller must be capped.
+func buildEnrichConfigHandler(
+	tenantRepo *tenant.TenantRepo,
+	feedbackRepo *feedback.FeedbackRepo,
+	llm llmclient.LLMClient,
+) *enrichconfig.Handler {
+	h := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
+	h.SetEvalGetter(buildEvalSuggestionsGetter(feedbackRepo, tenantRepo, llm))
+	h.SetEvalLimiter(ratelimit.New(6, 2, false, nil))
+	return h
 }
 
 // buildEvalSuggestionsGetter builds an enrichconfig.EvalSuggestionsGetter that

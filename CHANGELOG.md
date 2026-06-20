@@ -27,7 +27,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   gated behind edit permission, matching the admin-only server routes, so a
   view-only member sees the data scope without triggering a 403. Suggested
   candidates are ordered deterministically (confidence desc, then dim + value)
-  so equal-frequency values don't reshuffle between eval runs. Promote input is canonicalized (values trimmed;
+  so equal-frequency values don't reshuffle between eval runs. Hardening: the
+  eval-suggestions endpoint is per-tenant rate limited (6/min) since each call
+  runs an LLM eval; the accumulator counts each off-list value once per row;
+  candidate counts are clamped on the int32 wire narrowing; the panel shows
+  "<1%" for a nonzero confidence/impact that rounds to 0; and the promote
+  button has a synchronous re-entrancy latch so a double-click sends one POST. Promote input is canonicalized (values trimmed;
   whitespace-only rejected as 400, trimmed-duplicate as 409, missing display
   name defaulted to the value) and domain-validation failures map to 4xx
   instead of 500.

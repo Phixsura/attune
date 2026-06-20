@@ -2,6 +2,7 @@ package enrichconfig
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"strings"
 
@@ -30,6 +31,18 @@ func (h *Handler) GetEvalSuggestions(
 			http.StatusServiceUnavailable,
 			attunev1.ErrorCode_INTERNAL,
 			"eval service not configured",
+		)
+	}
+
+	// Per-tenant rate limit: each call runs an LLM eval over a sample, so a
+	// scripted or rapid-fire caller could rack up unbounded LLM spend. The
+	// frontend gates this behind a button, but the endpoint must defend itself.
+	if h.evalLimiter != nil && !h.evalLimiter.Allow(auth.TenantID) {
+		logext.Warnf(ctx, "[%s] reject: rate limited,tenant_id:%s", where, auth.TenantID)
+		return dispatcher.Fail[*attunev1.GetEvalSuggestionsResponse](
+			http.StatusTooManyRequests,
+			attunev1.ErrorCode_RATE_LIMITED,
+			"too many eval-suggestion requests; please slow down",
 		)
 	}
 
@@ -173,6 +186,19 @@ func (h *Handler) PromoteSuggestedValue(
 	}))
 }
 
+// clampInt32 narrows an int count to int32 without wrapping to a negative on
+// overflow. Counts are bounded by the eval sample size in practice, but the
+// narrowing is unchecked otherwise — clamp defensively.
+func clampInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < 0 {
+		return 0
+	}
+	return int32(n)
+}
+
 func suggestedReportToProto(sa *SuggestedAttrsReport) *attunev1.GetEvalSuggestionsResponse {
 	if sa == nil {
 		return ptrext.Of(attunev1.GetEvalSuggestionsResponse{})
@@ -186,7 +212,7 @@ func suggestedReportToProto(sa *SuggestedAttrsReport) *attunev1.GetEvalSuggestio
 		resp.Candidates = append(resp.Candidates, ptrext.Of(attunev1.SuggestedCandidate{
 			Dim:            c.Dim,
 			Value:          c.Value,
-			Count:          int32(c.Count),
+			Count:          clampInt32(c.Count),
 			Confidence:     c.Confidence,
 			CoverageImpact: c.CoverageImpact,
 		}))

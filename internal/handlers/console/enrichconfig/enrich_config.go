@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -13,10 +14,15 @@ import (
 // Handler serves /fb/v1/console/enrich-config (#10 → E3
 // metadata-driven Dimensions).
 type Handler struct {
-	svc        configService
-	audit      auditRecorder
-	evalGetter EvalSuggestionsGetter
+	svc         configService
+	audit       auditRecorder
+	evalGetter  EvalSuggestionsGetter
+	evalLimiter *ratelimit.Limiter // optional per-tenant rate limit on eval-suggestions; nil disables
 }
+
+// SetEvalLimiter wires a per-tenant token bucket that backstops the
+// eval-suggestions endpoint, which runs an LLM eval per call. nil disables.
+func (h *Handler) SetEvalLimiter(l *ratelimit.Limiter) { h.evalLimiter = l }
 
 type configService interface {
 	Get(ctx context.Context, tenantID string) (enrich.View, error)
