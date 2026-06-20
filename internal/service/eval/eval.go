@@ -34,12 +34,35 @@ import (
 // a Jaccard IoU sum (averaged out in reporting). Both metrics live in
 // one DimScore map keyed by Dimension.Name.
 type Evaluator struct {
-	repo     *feedback.FeedbackRepo
-	tenants  *tenant.TenantRepo
-	enricher *enrich.Enricher
+	repo     enrichedSampler
+	tenants  tenantConfigReader
+	enricher rowClassifier
 }
 
-func NewEvaluator(r *feedback.FeedbackRepo, tenants *tenant.TenantRepo, e *enrich.Enricher) *Evaluator {
+// enrichedSampler is the row-sampling surface the evaluator needs.
+// *feedback.FeedbackRepo satisfies it; tests inject a fake.
+type enrichedSampler interface {
+	SampleEnriched(ctx context.Context, since time.Time, n int) ([]feedback.SampleRow, error)
+	SampleEnrichedByTenant(ctx context.Context, tenantID string, since time.Time, n int) ([]feedback.SampleRow, error)
+}
+
+// tenantConfigReader reads the per-tenant Dimension set.
+// *tenant.TenantRepo satisfies it; tests inject a fake.
+type tenantConfigReader interface {
+	GetEnrichConfig(ctx context.Context, tenantID string) (tenant.EnrichConfig, error)
+}
+
+// rowClassifier re-runs LLM classification with drop diagnostics.
+// *enrich.Enricher satisfies it; tests inject a fake.
+type rowClassifier interface {
+	ClassifyWithDiagnostics(ctx context.Context, content string, cfg enrich.ClassifyConfig) (enrich.ClassifyResult, error)
+}
+
+// NewEvaluator wires the evaluator against the production repos/enricher.
+// Params are interfaces so the orchestration paths are unit-testable with
+// fakes; the concrete *feedback.FeedbackRepo / *tenant.TenantRepo /
+// *enrich.Enricher satisfy them directly.
+func NewEvaluator(r enrichedSampler, tenants tenantConfigReader, e rowClassifier) *Evaluator {
 	return ptrext.Of(Evaluator{repo: r, tenants: tenants, enricher: e})
 }
 
@@ -91,6 +114,7 @@ type DimDiff struct {
 // RunConsistency re-runs LLM classification on a random sample of rows
 // enriched since `since`, compares new attrs vs old, and returns a
 // per-dim score report. Estimated LLM cost: ~¥0.008/row × sample size.
+// Rows may span tenants, so config is resolved per row.
 func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample int) (*EvalReport, error) {
 	const where = "service.Evaluator.RunConsistency"
 	logext.Infof(ctx, "[%s] start,since:%s,sample:%d", where, since.Format(time.RFC3339), sample)
@@ -103,43 +127,17 @@ func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample
 		logext.Errorf(ctx, "[%s] sample failed,err:%+v", where, err.Error())
 		return nil, fmt.Errorf("sample: %w", err)
 	}
-	report := ptrext.Of(EvalReport{
-		Mode:        "consistency",
-		LabelSource: "ai-rerun",
-		GeneratedAt: time.Now(),
-		Since:       since,
-		SampleSize:  len(rows),
-		Dims:        map[string]DimScore{},
+	report := ev.runConsistencyLoop(ctx, since, rows, func(r feedback.SampleRow) enrich.ClassifyConfig {
+		return ev.resolveConfig(ctx, r.TenantID)
 	})
-	suggestedAcc := newSuggestedAccumulator()
-	for _, r := range rows {
-		cfg := enrich.ClassifyConfig{TenantID: r.TenantID, Purpose: "eval"}
-		if ev.tenants != nil {
-			tenantCfg, err := ev.tenants.GetEnrichConfig(ctx, r.TenantID)
-			if err == nil {
-				cfg.PromptTemplate = tenantCfg.PromptTemplate
-				cfg.Dimensions = tenantCfg.Dimensions
-			}
-		}
-		result, err := ev.enricher.ClassifyWithDiagnostics(ctx, r.Content, cfg)
-		if err != nil {
-			// LLM blip — skip this row, don't blow up the whole report.
-			continue
-		}
-		suggestedAcc.Add(result.DropDiagnostics, result.Enriched.Attrs, cfg.Dimensions)
-		scoreRow(report, r, result.Enriched.Attrs, cfg.Dimensions)
-	}
-	report.LLMCostYuan = float64(report.SampleSize) * 0.008
-	report.SuggestedAttrs = suggestedAcc.Build(report.SampleSize)
-	sortMismatches(report.Mismatches)
 	logext.Infof(ctx, "[%s] OK,sample:%d,dims:%d,cost_yuan:%.2f",
 		where, report.SampleSize, len(report.Dims), report.LLMCostYuan)
 	return report, nil
 }
 
 // RunConsistencyForTenant is like RunConsistency but scoped to a single
-// tenant. Used by Console API eval-suggestions endpoint to ensure tenant
-// data isolation.
+// tenant. Used by the Console API eval-suggestions endpoint to ensure
+// tenant data isolation. Config is resolved once for the whole sample.
 func (ev *Evaluator) RunConsistencyForTenant(ctx context.Context, tenantID string, since time.Time, sample int) (*EvalReport, error) {
 	const where = "service.Evaluator.RunConsistencyForTenant"
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,since:%s,sample:%d", where, tenantID, since.Format(time.RFC3339), sample)
@@ -152,6 +150,39 @@ func (ev *Evaluator) RunConsistencyForTenant(ctx context.Context, tenantID strin
 		logext.Errorf(ctx, "[%s] sample failed,err:%+v", where, err.Error())
 		return nil, fmt.Errorf("sample: %w", err)
 	}
+	cfg := ev.resolveConfig(ctx, tenantID)
+	report := ev.runConsistencyLoop(ctx, since, rows, func(feedback.SampleRow) enrich.ClassifyConfig { return cfg })
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,sample:%d,dims:%d,cost_yuan:%.2f",
+		where, tenantID, report.SampleSize, len(report.Dims), report.LLMCostYuan)
+	return report, nil
+}
+
+// resolveConfig builds the ClassifyConfig for a tenant. TenantID + Purpose
+// are always set; PromptTemplate + Dimensions are layered on only when the
+// tenant config loads (a read miss degrades to built-in defaults, not an
+// error — the eval still runs and scores against an empty dim set).
+func (ev *Evaluator) resolveConfig(ctx context.Context, tenantID string) enrich.ClassifyConfig {
+	cfg := enrich.ClassifyConfig{TenantID: tenantID, Purpose: "eval"}
+	if ev.tenants != nil {
+		if tc, err := ev.tenants.GetEnrichConfig(ctx, tenantID); err == nil {
+			cfg.PromptTemplate = tc.PromptTemplate
+			cfg.Dimensions = tc.Dimensions
+		}
+	}
+	return cfg
+}
+
+// runConsistencyLoop is the shared classify→accumulate→score core for both
+// RunConsistency variants. resolveCfg yields the per-row ClassifyConfig
+// (per-tenant for the scoped variant, per-row for the cross-tenant one).
+// An LLM error on any row skips that row without failing the whole report;
+// SampleSize (and thus cost) still reflects every sampled row.
+func (ev *Evaluator) runConsistencyLoop(
+	ctx context.Context,
+	since time.Time,
+	rows []feedback.SampleRow,
+	resolveCfg func(feedback.SampleRow) enrich.ClassifyConfig,
+) *EvalReport {
 	report := ptrext.Of(EvalReport{
 		Mode:        "consistency",
 		LabelSource: "ai-rerun",
@@ -160,31 +191,21 @@ func (ev *Evaluator) RunConsistencyForTenant(ctx context.Context, tenantID strin
 		SampleSize:  len(rows),
 		Dims:        map[string]DimScore{},
 	})
-	var tenantCfg enrich.ClassifyConfig
-	if ev.tenants != nil {
-		cfg, err := ev.tenants.GetEnrichConfig(ctx, tenantID)
-		if err == nil {
-			tenantCfg.TenantID = tenantID
-			tenantCfg.Purpose = "eval"
-			tenantCfg.PromptTemplate = cfg.PromptTemplate
-			tenantCfg.Dimensions = cfg.Dimensions
-		}
-	}
 	suggestedAcc := newSuggestedAccumulator()
 	for _, r := range rows {
-		result, err := ev.enricher.ClassifyWithDiagnostics(ctx, r.Content, tenantCfg)
+		cfg := resolveCfg(r)
+		result, err := ev.enricher.ClassifyWithDiagnostics(ctx, r.Content, cfg)
 		if err != nil {
+			// LLM blip — skip this row, don't blow up the whole report.
 			continue
 		}
-		suggestedAcc.Add(result.DropDiagnostics, result.Enriched.Attrs, tenantCfg.Dimensions)
-		scoreRow(report, r, result.Enriched.Attrs, tenantCfg.Dimensions)
+		suggestedAcc.Add(result.DropDiagnostics, result.Enriched.Attrs, cfg.Dimensions)
+		scoreRow(report, r, result.Enriched.Attrs, cfg.Dimensions)
 	}
 	report.LLMCostYuan = float64(report.SampleSize) * 0.008
 	report.SuggestedAttrs = suggestedAcc.Build(report.SampleSize)
 	sortMismatches(report.Mismatches)
-	logext.Infof(ctx, "[%s] OK,tenant_id:%s,sample:%d,dims:%d,cost_yuan:%.2f",
-		where, tenantID, report.SampleSize, len(report.Dims), report.LLMCostYuan)
-	return report, nil
+	return report
 }
 
 // ExportForHuman writes a CSV that a human reviewer fills in. The

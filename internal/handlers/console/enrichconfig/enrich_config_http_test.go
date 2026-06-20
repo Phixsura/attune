@@ -21,6 +21,9 @@ import (
 type fakeConfigService struct {
 	view enrich.View
 
+	getErr    error // when set, Get fails with it
+	updateErr error // when set, Update fails with it
+
 	updateTenant string
 	updateView   enrich.View
 
@@ -30,10 +33,16 @@ type fakeConfigService struct {
 }
 
 func (f *fakeConfigService) Get(_ context.Context, _ string) (enrich.View, error) {
+	if f.getErr != nil {
+		return enrich.View{}, f.getErr
+	}
 	return f.view, nil
 }
 
 func (f *fakeConfigService) Update(_ context.Context, tenantID string, v enrich.View) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
 	f.updateTenant = tenantID
 	f.updateView = v
 	f.view = v

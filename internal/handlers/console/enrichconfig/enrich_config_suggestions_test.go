@@ -216,6 +216,122 @@ func TestPromoteSuggestedValue_EmptyInput(t *testing.T) {
 	}
 }
 
+func TestPromoteSuggestedValue_RecordsAudit(t *testing.T) {
+	t.Parallel()
+
+	fakeSvc := &fakeConfigService{
+		view: enrich.View{
+			Dimensions: domain.DimensionSet{{
+				Name:     "modules",
+				Kind:     domain.DimMulti,
+				Taxonomy: []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
+			}},
+		},
+	}
+	audit := &fakeAuditRecorder{}
+	h := &Handler{svc: fakeSvc, audit: audit}
+	handler := dispatcher.Bind(
+		"console.EnrichConfigHandler.PromoteSuggestedValue",
+		dispatcher.JSON(func() *attunev1.PromoteSuggestedValueRequest { return &attunev1.PromoteSuggestedValueRequest{} }),
+		h.PromoteSuggestedValue,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PromoteSuggestedValueRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+
+	w := httptest.NewRecorder()
+	reqBody := `{"dimensionName":"modules","value":"checkout","displayName":{"entries":{"en":"Checkout"}}}`
+	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/promote", reqBody))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, audit.events, 1)
+	require.Equal(t, "enrich_config.promote_suggested", audit.events[0].Action)
+	require.Equal(t, "enrich_config", audit.events[0].TargetType)
+}
+
+func TestPromoteSuggestedValue_AuditFailureIsNonFatal(t *testing.T) {
+	t.Parallel()
+
+	fakeSvc := &fakeConfigService{
+		view: enrich.View{
+			Dimensions: domain.DimensionSet{{
+				Name:     "modules",
+				Kind:     domain.DimMulti,
+				Taxonomy: []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
+			}},
+		},
+	}
+	audit := &fakeAuditRecorder{recordErr: errors.New("audit sink down")}
+	h := &Handler{svc: fakeSvc, audit: audit}
+	handler := dispatcher.Bind(
+		"console.EnrichConfigHandler.PromoteSuggestedValue",
+		dispatcher.JSON(func() *attunev1.PromoteSuggestedValueRequest { return &attunev1.PromoteSuggestedValueRequest{} }),
+		h.PromoteSuggestedValue,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PromoteSuggestedValueRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+
+	w := httptest.NewRecorder()
+	reqBody := `{"dimensionName":"modules","value":"checkout","displayName":{"entries":{"en":"Checkout"}}}`
+	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/promote", reqBody))
+
+	// Taxonomy write succeeded; audit failure must not fail the request.
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, 2, len(fakeSvc.view.Dimensions[0].Taxonomy))
+}
+
+func TestPromoteSuggestedValue_GetConfigError(t *testing.T) {
+	t.Parallel()
+
+	fakeSvc := &fakeConfigService{getErr: errors.New("db unavailable")}
+	h := &Handler{svc: fakeSvc}
+	handler := dispatcher.Bind(
+		"console.EnrichConfigHandler.PromoteSuggestedValue",
+		dispatcher.JSON(func() *attunev1.PromoteSuggestedValueRequest { return &attunev1.PromoteSuggestedValueRequest{} }),
+		h.PromoteSuggestedValue,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PromoteSuggestedValueRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+
+	w := httptest.NewRecorder()
+	reqBody := `{"dimensionName":"modules","value":"checkout","displayName":{"entries":{"en":"Checkout"}}}`
+	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/promote", reqBody))
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestPromoteSuggestedValue_UpdateError(t *testing.T) {
+	t.Parallel()
+
+	fakeSvc := &fakeConfigService{
+		view: enrich.View{
+			Dimensions: domain.DimensionSet{{
+				Name:     "modules",
+				Kind:     domain.DimMulti,
+				Taxonomy: []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
+			}},
+		},
+		updateErr: errors.New("write conflict"),
+	}
+	h := &Handler{svc: fakeSvc}
+	handler := dispatcher.Bind(
+		"console.EnrichConfigHandler.PromoteSuggestedValue",
+		dispatcher.JSON(func() *attunev1.PromoteSuggestedValueRequest { return &attunev1.PromoteSuggestedValueRequest{} }),
+		h.PromoteSuggestedValue,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PromoteSuggestedValueRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+
+	w := httptest.NewRecorder()
+	reqBody := `{"dimensionName":"modules","value":"checkout","displayName":{"entries":{"en":"Checkout"}}}`
+	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/promote", reqBody))
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
 func TestSuggestedReportToProto_Nil(t *testing.T) {
 	t.Parallel()
 
