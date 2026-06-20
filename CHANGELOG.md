@@ -25,7 +25,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   coverage gain, and a one-click "Promote" adds it to the dimension taxonomy
   (after which it leaves the list and coverage rises). Analyze + Promote are
   gated behind edit permission, matching the admin-only server routes, so a
-  view-only member sees the data scope without triggering a 403. Promote input is canonicalized (values trimmed;
+  view-only member sees the data scope without triggering a 403. Suggested
+  candidates are ordered deterministically (confidence desc, then dim + value)
+  so equal-frequency values don't reshuffle between eval runs. Promote input is canonicalized (values trimmed;
   whitespace-only rejected as 400, trimmed-duplicate as 409, missing display
   name defaulted to the value) and domain-validation failures map to 4xx
   instead of 500.

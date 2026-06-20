@@ -156,8 +156,15 @@ func (a *suggestedAccumulator) Build(sampleSize int) SuggestedAttrsReport {
 		for v, c := range values {
 			sorted = append(sorted, valCount{v, c})
 		}
+		// Count desc, then value asc as a tiebreaker. Map iteration order is
+		// random and sort.Slice is not stable, so without the secondary key the
+		// order of equal-count values (very common: confidence = count/sample,
+		// so equal counts tie) would vary between runs — flaky UI + reports.
 		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].count > sorted[j].count
+			if sorted[i].count != sorted[j].count {
+				return sorted[i].count > sorted[j].count
+			}
+			return sorted[i].val < sorted[j].val
 		})
 
 		// Take top N
@@ -177,9 +184,17 @@ func (a *suggestedAccumulator) Build(sampleSize int) SuggestedAttrsReport {
 		}
 	}
 
-	// Sort all candidates by confidence descending
+	// Confidence desc, then (dim, value) asc as tiebreakers so the global
+	// ordering is fully deterministic when confidences tie (which they do
+	// whenever counts match — confidence is count/sampleSize).
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].Confidence > candidates[j].Confidence
+		if candidates[i].Confidence != candidates[j].Confidence {
+			return candidates[i].Confidence > candidates[j].Confidence
+		}
+		if candidates[i].Dim != candidates[j].Dim {
+			return candidates[i].Dim < candidates[j].Dim
+		}
+		return candidates[i].Value < candidates[j].Value
 	})
 	report.Candidates = candidates
 

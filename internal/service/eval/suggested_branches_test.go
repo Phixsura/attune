@@ -127,6 +127,115 @@ func TestBuild_DimWithZeroTotalGetsFullCoverage(t *testing.T) {
 	require.Equal(t, 1.0, report.Coverage["modules"])
 }
 
+// --- candidate ordering determinism on ties ----------------------------
+
+// TestBuild_DeterministicOrderOnConfidenceTies: equal-count (→ equal
+// confidence) candidates must order by value name, not map-iteration order,
+// so the report/UI is reproducible run to run.
+func TestBuild_DeterministicOrderOnConfidenceTies(t *testing.T) {
+	t.Parallel()
+	// Build many times from the same input; the candidate order must be stable.
+	values := []string{"zebra", "alpha", "mango", "delta", "kappa"}
+	var first []string
+	for iter := 0; iter < 25; iter++ {
+		acc := newSuggestedAccumulator()
+		for _, v := range values {
+			// every value appears exactly twice → identical count/confidence.
+			acc.Add(
+				[]domain.AttrDropDiagnostic{{Dim: "modules", Reason: domain.AttrDropOffListValue, Values: []string{v}, Count: 1}},
+				nil, domain.DimensionSet{{Name: "modules", Kind: domain.DimMulti}},
+			)
+			acc.Add(
+				[]domain.AttrDropDiagnostic{{Dim: "modules", Reason: domain.AttrDropOffListValue, Values: []string{v}, Count: 1}},
+				nil, domain.DimensionSet{{Name: "modules", Kind: domain.DimMulti}},
+			)
+		}
+		report := acc.Build(10)
+		got := make([]string, 0, len(report.Candidates))
+		for _, c := range report.Candidates {
+			got = append(got, c.Value)
+		}
+		if iter == 0 {
+			first = got
+			require.Equal(t, []string{"alpha", "delta", "kappa", "mango", "zebra"}, got,
+				"equal-confidence candidates sorted by value asc")
+		} else {
+			require.Equalf(t, first, got, "candidate order must be identical across runs (iter %d)", iter)
+		}
+	}
+}
+
+// TestBuild_MultiDimensionOffList: off-list values across two dimensions are
+// each tracked, with per-dim coverage and globally-ordered candidates.
+func TestBuild_MultiDimensionOffList(t *testing.T) {
+	t.Parallel()
+	dims := domain.DimensionSet{
+		{Name: "modules", Kind: domain.DimMulti},
+		{Name: "sentiment", Kind: domain.DimSingle},
+	}
+	acc := newSuggestedAccumulator()
+	// modules: 1 kept (payment) + checkout off-list ×3
+	// sentiment: 1 kept (positive) + mixed off-list ×1
+	for i := 0; i < 3; i++ {
+		acc.Add(
+			[]domain.AttrDropDiagnostic{{Dim: "modules", Reason: domain.AttrDropOffListValue, Values: []string{"checkout"}, Count: 1}},
+			map[string]any{"modules": []string{"payment"}, "sentiment": "positive"},
+			dims,
+		)
+	}
+	acc.Add(
+		[]domain.AttrDropDiagnostic{{Dim: "sentiment", Reason: domain.AttrDropOffListValue, Values: []string{"mixed"}, Count: 1}},
+		map[string]any{"modules": []string{"payment"}, "sentiment": "positive"},
+		dims,
+	)
+
+	report := acc.Build(4)
+
+	// both dims have coverage
+	require.Contains(t, report.Coverage, "modules")
+	require.Contains(t, report.Coverage, "sentiment")
+	// modules: kept 4 (payment ×4), dropped 3 → 4/7
+	require.InDelta(t, 4.0/7.0, report.Coverage["modules"], 1e-9)
+	// sentiment: kept 4 (positive ×4), dropped 1 → 4/5
+	require.InDelta(t, 4.0/5.0, report.Coverage["sentiment"], 1e-9)
+
+	// candidates from both dims present
+	byVal := map[string]SuggestedCandidate{}
+	for _, c := range report.Candidates {
+		byVal[c.Value] = c
+	}
+	require.Equal(t, "modules", byVal["checkout"].Dim)
+	require.Equal(t, 3, byVal["checkout"].Count)
+	require.Equal(t, "sentiment", byVal["mixed"].Dim)
+	require.Equal(t, 1, byVal["mixed"].Count)
+	// checkout (conf 3/4) ranks before mixed (conf 1/4)
+	require.Equal(t, "checkout", report.Candidates[0].Value)
+}
+
+// TestBuild_CrossDimTieOrdersByDim: equal-confidence candidates in different
+// dimensions order by dimension name (the dim tiebreaker).
+func TestBuild_CrossDimTieOrdersByDim(t *testing.T) {
+	t.Parallel()
+	dims := domain.DimensionSet{
+		{Name: "zdim", Kind: domain.DimMulti},
+		{Name: "adim", Kind: domain.DimMulti},
+	}
+	acc := newSuggestedAccumulator()
+	// one off-list value in each dim, identical count → identical confidence.
+	acc.Add(
+		[]domain.AttrDropDiagnostic{
+			{Dim: "zdim", Reason: domain.AttrDropOffListValue, Values: []string{"v"}, Count: 1},
+			{Dim: "adim", Reason: domain.AttrDropOffListValue, Values: []string{"v"}, Count: 1},
+		},
+		nil, dims,
+	)
+	report := acc.Build(10)
+	require.Len(t, report.Candidates, 2)
+	// adim sorts before zdim despite identical confidence + value.
+	require.Equal(t, "adim", report.Candidates[0].Dim)
+	require.Equal(t, "zdim", report.Candidates[1].Dim)
+}
+
 // --- stringArrAttr default branch --------------------------------------
 
 func TestStringArrAttr_UnsupportedTypeReturnsNil(t *testing.T) {
