@@ -9,7 +9,7 @@ export const useCreateMCPClient = () => {
     mutationFn: async (params: CreateMCPClientRequest): Promise<MCPClient> => {
       const resp = await api<CreateMCPClientResponse>('/fb/v1/console/mcp/clients', {
         method: 'POST',
-        body: JSON.stringify(params),
+        body: params,
       })
       return resp.client
     },
