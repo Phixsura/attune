@@ -96,7 +96,7 @@ type SuggestedCandidate struct {
 
 // SuggestedRecommendation is an actionable suggestion for the operator
 type SuggestedRecommendation struct {
-    Action string `json:"action"` // "add", "merge", "investigate"
+    Action string `json:"action"` // P0/P1: "add" only; P3 may add "merge", "investigate"
     Dim    string `json:"dim"`
     Value  string `json:"value"`
     Reason string `json:"reason"`
@@ -111,12 +111,9 @@ suggested values, we need to expose the diagnostics:
 
 ```go
 // ClassifyResult is the full output including diagnostics.
-// Note: SuggestedValues is derived from DropDiagnostics where
-// Reason == AttrDropOffListValue; it's a convenience accessor.
 type ClassifyResult struct {
     Enriched        domain.Enriched
     DropDiagnostics []domain.AttrDropDiagnostic
-    SuggestedValues map[string][]string // dim → off-list values (derived)
 }
 
 // ClassifyWithDiagnostics exposes the existing internal classifyWithDiagnostics
@@ -126,6 +123,9 @@ func (e *Enricher) ClassifyWithDiagnostics(
     ctx context.Context, content string, cfg ClassifyConfig,
 ) (ClassifyResult, error)
 ```
+
+The accumulator extracts off-list values from `DropDiagnostics` where
+`Reason == AttrDropOffListValue` — no redundant `SuggestedValues` field needed.
 
 The existing `Classify` becomes a thin wrapper for backward compatibility.
 
@@ -279,7 +279,7 @@ The Console UI shows:
 When an operator promotes a value:
 
 1. Value is added to `Dimension.Taxonomy` via existing update API
-2. Audit log records `source: "suggested"` and `eval_run_id`
+2. Audit log records `source: "suggested"` (P3 may add `eval_run_id` once runs are persisted)
 3. Future enrichments use the expanded taxonomy
 4. Next eval run shows improved coverage
 
