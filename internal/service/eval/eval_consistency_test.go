@@ -107,6 +107,26 @@ func sampleRows(n int) []feedback.SampleRow {
 	return rows
 }
 
+// --- NewEvaluator constructor -----------------------------------------
+
+func TestNewEvaluator_WiresDependencies(t *testing.T) {
+	t.Parallel()
+	smp := &fakeSampler{rows: sampleRows(1)}
+	cr := &fakeConfigReader{cfg: tenant.EnrichConfig{Dimensions: modulesDims()}}
+	clf := &fakeClassifier{result: offListResult()}
+
+	ev := NewEvaluator(smp, cr, clf)
+	require.NotNil(t, ev)
+
+	// Exercise one path end-to-end to prove all three deps are wired.
+	report, err := ev.RunConsistencyForTenant(context.Background(), "tenant-1", time.Unix(0, 0), 5)
+	require.NoError(t, err)
+	require.True(t, smp.byTenantUsed)
+	require.Equal(t, []string{"tenant-1"}, cr.gotTenantIDs)
+	require.Equal(t, 1, clf.calls)
+	require.Equal(t, 1, report.SampleSize)
+}
+
 // --- runConsistencyLoop (shared core) ---------------------------------
 
 func TestRunConsistencyLoop_EmptyRows(t *testing.T) {
