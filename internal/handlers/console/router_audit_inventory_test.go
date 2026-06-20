@@ -30,6 +30,7 @@ import (
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
 	consoleworkflow "github.com/Phixsura/attune/internal/handlers/console/workflow"
+	"github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
@@ -82,6 +83,39 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 	}
 	for route := range coverage {
 		require.Truef(t, got[route], "stale audit coverage decision for missing route %s; got:\n%s", route, strings.Join(sortedKeys(got), "\n"))
+	}
+}
+
+// auditEmittedActions are audit actions this test has verified are emitted by
+// real handler code (not just inventory labels) and must therefore exist in
+// the auditlog allow-list. Handler unit tests use a fake recorder that accepts
+// any action, so a route can claim to be audited while the real
+// auditlog.Service silently rejects its action at runtime. The #83 e2e found
+// enrich_config.promote_suggested unregistered; the same scan surfaced
+// api_key.rotate (emitted by apikey/api_keys_advanced.go) with the same gap.
+//
+// NOTE: many other "audited: <action>" inventory decisions are label-only —
+// the route is mounted but no handler code emits that action yet. Those are
+// tracked separately; this test guards only the actions proven to be emitted.
+var auditEmittedActions = []string{
+	"enrich_config.update",
+	"enrich_config.promote_suggested",
+	"api_key.rotate",
+	"api_key.create",
+	"api_key.revoke",
+}
+
+// TestAuditedRouteActionsAreRegistered asserts every emitted audit action is
+// in the auditlog allow-list, so a runtime audit write is never silently
+// dropped for an unregistered action.
+func TestAuditedRouteActionsAreRegistered(t *testing.T) {
+	t.Parallel()
+
+	for _, action := range auditEmittedActions {
+		require.Truef(t, auditlog.IsKnownAction(action),
+			"audit action %q is emitted by handler code but not in auditlog.validActions — "+
+				"register it in internal/service/auditlog/actions.go or the runtime audit write is silently dropped",
+			action)
 	}
 }
 

@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Audit writes for promote-suggested and API-key rotation no longer silently
+  dropped (#83).** Two emitted audit actions were missing from both the Go
+  allow-list (`internal/service/auditlog/actions.go`) and the DB
+  `chk_audit_action_value` constraint, so `auditlog.Service.Record` rejected
+  them and the handlers — which log the error but still return 200 — left no
+  audit trail: `enrich_config.promote_suggested` (taxonomy promotion, #83) and
+  `api_key.rotate` (emitted since key rotation shipped; a security-observability
+  gap where rotations went unaudited). Both are now registered in lockstep
+  (migration `057_eval_promote_audit_action.sql`), and a router cross-check test
+  asserts every emitted audit action is allow-listed so this class of bug fails
+  CI instead of production. Found via the full-stack e2e for #83.
+
 - **GDPR erasure no longer aborts on subjects with deliveries (#131).** The
   data-subject delete now purges `notify_outbox` (a `NOT NULL` FK to
   `user_feedback` with no `ON DELETE` action, whose `payload` holds the feedback
