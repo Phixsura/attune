@@ -86,13 +86,45 @@ describe('SuggestedValuesPanel', () => {
     expect(screen.getByTestId('suggestion-row-checkout')).toBeInTheDocument()
   })
 
-  it('hides promote buttons when canEdit is false', async () => {
-    server.use(http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())))
+  it('shows a read-only hint and no Analyze button when canEdit is false', async () => {
+    let called = false
+    server.use(
+      http.get(SUGGESTIONS_URL, () => {
+        called = true
+        return HttpResponse.json(suggestionsResponse())
+      }),
+    )
     renderWithProviders(<SuggestedValuesPanel canEdit={false} />)
 
+    // View-only members must not be able to trigger the admin-only eval.
+    expect(screen.getByTestId('suggestions-readonly')).toBeInTheDocument()
+    expect(screen.queryByTestId('analyze-suggestions')).not.toBeInTheDocument()
+    expect(called).toBe(false)
+  })
+
+  it('renders per-dimension coverage badges after Analyze', async () => {
+    server.use(http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())))
+    renderWithProviders(<SuggestedValuesPanel canEdit={true} />)
+
     await userEvent.click(screen.getByTestId('analyze-suggestions'))
-    await waitFor(() => expect(screen.getByTestId('suggestions-table')).toBeInTheDocument())
-    expect(screen.queryByTestId('promote-checkout')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('coverage-summary')).toBeInTheDocument())
+    // coverage 0.3333 → 33%
+    expect(screen.getByTestId('coverage-modules')).toHaveTextContent('33%')
+  })
+
+  it('shows coverage even when there are no candidates (all on-list)', async () => {
+    server.use(
+      http.get(SUGGESTIONS_URL, () =>
+        HttpResponse.json({ coverage: { modules: 1 }, candidates: [], recommendations: [] }),
+      ),
+    )
+    renderWithProviders(<SuggestedValuesPanel canEdit={true} />)
+
+    await userEvent.click(screen.getByTestId('analyze-suggestions'))
+    await waitFor(() => expect(screen.getByTestId('coverage-modules')).toBeInTheDocument())
+    expect(screen.getByTestId('coverage-modules')).toHaveTextContent('100%')
+    // no candidates → no table
+    expect(screen.queryByTestId('suggestions-table')).not.toBeInTheDocument()
   })
 
   it('shows an empty state when there are no off-list values', async () => {

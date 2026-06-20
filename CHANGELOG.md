@@ -20,10 +20,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `GET /enrich-config/eval-suggestions` and `POST /enrich-config/promote`
   allow viewing suggestions and promoting values to the taxonomy directly.
   The Console settings → classification tab adds a "Suggested values" panel:
-  an on-demand "Analyze" action runs the eval, lists each off-list candidate
-  with its frequency, confidence, and predicted coverage gain, and a one-click
-  "Promote" adds it to the dimension taxonomy (after which it leaves the list
-  and coverage rises). Promote input is canonicalized (values trimmed;
+  an on-demand "Analyze" action runs the eval, shows per-dimension coverage,
+  lists each off-list candidate with its frequency, confidence, and predicted
+  coverage gain, and a one-click "Promote" adds it to the dimension taxonomy
+  (after which it leaves the list and coverage rises). Analyze + Promote are
+  gated behind edit permission, matching the admin-only server routes, so a
+  view-only member sees the data scope without triggering a 403. Promote input is canonicalized (values trimmed;
   whitespace-only rejected as 400, trimmed-duplicate as 409, missing display
   name defaulted to the value) and domain-validation failures map to 4xx
   instead of 500.

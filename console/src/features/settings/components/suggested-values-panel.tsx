@@ -45,7 +45,8 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
   }
 
   const data = q.data
-  const hasResults = data && (data.candidates.length > 0 || Object.keys(data.coverage).length > 0)
+  const coverageDims = data ? Object.keys(data.coverage).sort() : []
+  const hasResults = data && (data.candidates.length > 0 || coverageDims.length > 0)
 
   return (
     <Card>
@@ -57,7 +58,15 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
         <CardDescription>{t('settings.suggestions.help')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {!analyzed && (
+        {/* Analyze runs an admin-only, LLM-cost eval — gate it behind edit
+            permission so a view-only member doesn't trigger a 403. */}
+        {!canEdit && (
+          <p className="text-sm text-muted-foreground" data-testid="suggestions-readonly">
+            {t('settings.suggestions.readonly')}
+          </p>
+        )}
+
+        {canEdit && !analyzed && (
           <Button
             type="button"
             variant="outline"
@@ -89,7 +98,24 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
           </p>
         )}
 
-        {data && hasResults && (
+        {data && hasResults && coverageDims.length > 0 && (
+          <div className="flex flex-wrap gap-2" data-testid="coverage-summary">
+            <span className="text-xs text-muted-foreground">
+              {t('settings.suggestions.coverage_label')}
+            </span>
+            {coverageDims.map((dim) => (
+              <span
+                key={dim}
+                className="rounded border px-2 py-0.5 text-xs tabular-nums"
+                data-testid={`coverage-${dim}`}
+              >
+                <span className="font-mono">{dim}</span> {Math.round(data.coverage[dim] * 100)}%
+              </span>
+            ))}
+          </div>
+        )}
+
+        {data && data.candidates.length > 0 && (
           <Table data-testid="suggestions-table">
             <TableHeader>
               <TableRow>
