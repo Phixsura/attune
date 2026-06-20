@@ -459,13 +459,44 @@ func (s *AuthServer) ServeAuthorize(w http.ResponseWriter, r *http.Request) {
 		CodeChallengeMethod: q.Get("code_challenge_method"),
 	}
 
+	// Validate client and redirect_uri before any redirect to prevent open redirect.
+	// This explicit validation allows the redirect_uri to be safely used for error responses.
+	validatedURI, err := s.validateClientAndRedirect(r.Context(), req.ClientID, req.RedirectURI)
+	if err != nil {
+		_, desc := mapAuthError(err)
+		http.Error(w, desc, http.StatusBadRequest)
+		return
+	}
+
 	resp, err := s.Authorize(r.Context(), req)
 	if err != nil {
-		errorRedirect(w, r, req.RedirectURI, req.State, err)
+		// Safe to redirect: validatedURI was validated against registered client URIs
+		errorRedirect(w, r, validatedURI, req.State, err)
 		return
 	}
 
 	redirectWithCode(w, r, resp)
+}
+
+// validateClientAndRedirect validates the client ID and redirect URI.
+// Returns the validated redirect URI if valid, or an error if validation fails.
+// This must be called before using the redirect URI for any redirects.
+func (s *AuthServer) validateClientAndRedirect(ctx context.Context, clientIDStr, redirectURI string) (string, error) {
+	clientID, err := uuid.Parse(clientIDStr)
+	if err != nil {
+		return "", ErrInvalidClient
+	}
+
+	if _, err := s.clients.GetByID(ctx, clientID); err != nil {
+		return "", ErrInvalidClient
+	}
+
+	valid, err := s.clients.ValidateRedirectURI(ctx, clientID, redirectURI)
+	if err != nil || !valid {
+		return "", ErrInvalidRedirectURI
+	}
+
+	return redirectURI, nil
 }
 
 // ServeToken handles POST /token.
