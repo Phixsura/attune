@@ -180,18 +180,28 @@ type AuthorizeResponse struct {
 	RedirectURI string
 }
 
+// validateAuthRequest performs input length and format validation.
+func validateAuthRequest(req AuthorizeRequest) error {
+	if len(req.ClientID) > 36 || len(req.RedirectURI) > 2048 ||
+		len(req.Scope) > 1024 || len(req.State) > 256 || len(req.CodeChallenge) > 128 {
+		return ErrInvalidRequest
+	}
+	if req.ResponseType != "code" {
+		return errors.New("unsupported response_type")
+	}
+	if req.CodeChallenge == "" {
+		return ErrPKCERequired
+	}
+	if req.CodeChallengeMethod != "S256" {
+		return errors.New("code_challenge_method must be S256")
+	}
+	return nil
+}
+
 // Authorize handles the authorization request.
 func (s *AuthServer) Authorize(ctx context.Context, req AuthorizeRequest) (*AuthorizeResponse, error) {
 	const where = "oauth.AuthServer.Authorize"
 
-	// Input length validation to prevent DoS via oversized parameters.
-	if len(req.ClientID) > 36 || len(req.RedirectURI) > 2048 ||
-		len(req.Scope) > 1024 || len(req.State) > 256 || len(req.CodeChallenge) > 128 {
-		return nil, ErrInvalidRequest
-	}
-
-	// Per RFC 6749 Section 4.1.2.1: Validate client_id and redirect_uri FIRST.
-	// If these are invalid, we MUST NOT redirect - return error directly.
 	clientID, err := uuid.Parse(req.ClientID)
 	if err != nil {
 		return nil, ErrInvalidClient
@@ -209,27 +219,17 @@ func (s *AuthServer) Authorize(ctx context.Context, req AuthorizeRequest) (*Auth
 		return nil, ErrInvalidRedirectURI
 	}
 
-	// Now that redirect_uri is validated, subsequent errors can be redirected.
-	if req.ResponseType != "code" {
-		return nil, errors.New("unsupported response_type")
-	}
-
-	if req.CodeChallenge == "" {
-		return nil, ErrPKCERequired
-	}
-	if req.CodeChallengeMethod != "S256" {
-		return nil, errors.New("code_challenge_method must be S256")
+	if err := validateAuthRequest(req); err != nil {
+		return nil, err
 	}
 
 	scopes := parseScopes(req.Scope)
 	if len(scopes) == 0 {
 		scopes = client.Scopes
-	} else {
-		if !scopesAllowed(scopes, client.Scopes) {
-			logext.Warnf(ctx, "[%s] scope exceeds client authorization,client_id:%s,requested:%v,allowed:%v",
-				where, req.ClientID, scopes, client.Scopes)
-			return nil, ErrInvalidScope
-		}
+	} else if !scopesAllowed(scopes, client.Scopes) {
+		logext.Warnf(ctx, "[%s] scope exceeds client authorization,client_id:%s,requested:%v,allowed:%v",
+			where, req.ClientID, scopes, client.Scopes)
+		return nil, ErrInvalidScope
 	}
 
 	code := generateCode()

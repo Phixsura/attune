@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/mcp"
@@ -352,6 +353,7 @@ func getAccessTokenWithScope(t *testing.T, serverURL string, clientID uuid.UUID,
 	codeChallenge := base64.RawURLEncoding.EncodeToString(h[:])
 
 	noRedirectClient := &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

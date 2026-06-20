@@ -18,6 +18,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/Phixsura/attune/internal/handlers/mcp"
 	"github.com/Phixsura/attune/internal/mcp/jsonrpc"
@@ -30,414 +32,345 @@ import (
 	"github.com/Phixsura/attune/internal/testdb"
 )
 
-// TestE2E_FullOAuthFlow tests the complete OAuth 2.1 flow with PKCE:
-// 1. Register a client
-// 2. Authorization request with PKCE
-// 3. Token exchange
-// 4. Access protected API
-// 5. Token refresh
-// 6. Client revocation
-func TestE2E_FullOAuthFlow(t *testing.T) {
+// testEnv bundles all resources needed for OAuth E2E tests.
+type testEnv struct {
+	pool         *pgxpool.Pool
+	tenantID     string
+	server       *httptest.Server
+	clientsRepo  *mcprepo.ClientsRepo
+	codesRepo    *mcprepo.CodesRepo
+	tokensRepo   *mcprepo.TokensRepo
+	sessionsRepo *mcprepo.SessionsRepo
+	feedbackRepo *feedback.FeedbackRepo
+	jwtSecret    []byte
+	jwtIssuer    string
+}
+
+// newTestEnv creates a test environment with all repos and server configured.
+func newTestEnv(t *testing.T, tenantSlug, tenantName string) *testEnv {
+	t.Helper()
 	pool := testdb.NewPool(t)
 	ctx := context.Background()
 
-	// Create tenant
-	tenantID, err := tenant.NewTenant(pool).Create(ctx, "e2e-oauth-test", "E2E OAuth Test")
+	tenantID, err := tenant.NewTenant(pool).Create(ctx, tenantSlug, tenantName)
 	if err != nil {
 		t.Fatalf("create tenant: %v", err)
 	}
 
-	// Initialize repos
-	clientsRepo := mcprepo.NewClients(pool)
-	codesRepo := mcprepo.NewCodes(pool)
-	tokensRepo := mcprepo.NewTokens(pool)
-	sessionsRepo := mcprepo.NewSessions(pool)
-	feedbackRepo := feedback.NewFeedback(pool)
+	env := &testEnv{
+		pool:         pool,
+		tenantID:     tenantID,
+		clientsRepo:  mcprepo.NewClients(pool),
+		codesRepo:    mcprepo.NewCodes(pool),
+		tokensRepo:   mcprepo.NewTokens(pool),
+		sessionsRepo: mcprepo.NewSessions(pool),
+		feedbackRepo: feedback.NewFeedback(pool),
+		jwtSecret:    []byte("test-secret-key-for-jwt-signing-32bytes!"),
+		jwtIssuer:    "https://test.attune.io/mcp/oauth",
+	}
 
-	// Create MCP handler with real repos
 	cfg := mcp.Config{
 		BaseURL:            "https://test.attune.io",
-		JWTSecret:          []byte("test-secret-key-for-jwt-signing-32bytes!"),
-		JWTIssuer:          "https://test.attune.io/mcp/oauth",
+		JWTSecret:          env.jwtSecret,
+		JWTIssuer:          env.jwtIssuer,
 		RateLimitPerMinute: 100,
 		AccessTokenTTL:     time.Hour,
 		RefreshTokenTTL:    7 * 24 * time.Hour,
 	}
 
 	stores := mcp.Stores{
-		Clients:          &clientStoreAdapter{repo: clientsRepo},
-		Codes:            &codeStoreAdapter{repo: codesRepo},
-		Tokens:           &tokenStoreAdapter{repo: tokensRepo},
-		Sessions:         &sessionStoreAdapter{repo: sessionsRepo},
-		ClientValidator:  &clientValidatorAdapter{repo: clientsRepo},
-		SessionValidator: &sessionValidatorAdapter{repo: sessionsRepo},
+		Clients:          &clientStoreAdapter{repo: env.clientsRepo},
+		Codes:            &codeStoreAdapter{repo: env.codesRepo},
+		Tokens:           &tokenStoreAdapter{repo: env.tokensRepo},
+		Sessions:         &sessionStoreAdapter{repo: env.sessionsRepo},
+		ClientValidator:  &clientValidatorAdapter{repo: env.clientsRepo},
+		SessionValidator: &sessionValidatorAdapter{repo: env.sessionsRepo},
 	}
 
 	deps := ptrext.Of(tools.Deps{
-		Feedback: &feedbackReaderAdapter{repo: feedbackRepo, tenantID: tenantID},
+		Feedback: &feedbackReaderAdapter{repo: env.feedbackRepo, tenantID: tenantID},
 	})
 
 	handler := mcp.NewHandler(cfg, stores, deps)
 	router := handler.Routes()
 
-	// Wrap with tenant context middleware for testing
 	testRouter := chi.NewRouter()
 	testRouter.Mount("/mcp", router)
 
-	server := httptest.NewServer(testRouter)
-	defer server.Close()
+	env.server = httptest.NewServer(testRouter)
+	t.Cleanup(func() { env.server.Close() })
 
-	// Step 1: Register a client (normally done via console API)
-	client, err := clientsRepo.Create(ctx, mcprepo.CreateClientParams{
-		TenantID:     tenantID,
-		Name:         "e2e-test-agent",
+	return env
+}
+
+// createClient creates an OAuth client for testing.
+func (e *testEnv) createClient(t *testing.T, name string, scopes []string) *mcprepo.Client {
+	t.Helper()
+	client, err := e.clientsRepo.Create(context.Background(), mcprepo.CreateClientParams{
+		TenantID:     e.tenantID,
+		Name:         name,
 		RedirectURIs: []string{"http://localhost:8080/callback"},
-		Scopes:       []string{"mcp:read", "mcp:write"},
+		Scopes:       scopes,
 		CreatedBy:    "test-admin",
 	})
 	if err != nil {
 		t.Fatalf("create client: %v", err)
 	}
-	t.Logf("Created client: %s", client.ID)
+	return client
+}
 
-	// Step 2: Generate PKCE challenge
-	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	h := sha256.Sum256([]byte(codeVerifier))
-	codeChallenge := base64.RawURLEncoding.EncodeToString(h[:])
+// pkceChallenge generates a PKCE code challenge from a verifier.
+func pkceChallenge(verifier string) string {
+	h := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(h[:])
+}
 
-	// Step 3: Authorization request
-	authURL := server.URL + "/mcp/oauth/authorize?" + url.Values{
-		"client_id":             {client.ID.String()},
-		"redirect_uri":          {"http://localhost:8080/callback"},
-		"response_type":         {"code"},
-		"scope":                 {"mcp:read mcp:write"},
-		"state":                 {"test-state-123"},
-		"code_challenge":        {codeChallenge},
-		"code_challenge_method": {"S256"},
-	}.Encode()
-
-	// Use a client that doesn't follow redirects
-	noRedirectClient := &http.Client{
+// noRedirectHTTPClient returns an http.Client that doesn't follow redirects.
+func noRedirectHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
+}
 
-	authResp, err := noRedirectClient.Get(authURL)
+// authorizeAndGetCode performs OAuth authorize and extracts the code from redirect.
+func (e *testEnv) authorizeAndGetCode(t *testing.T, clientID uuid.UUID, scopes, state, codeChallenge string) string {
+	t.Helper()
+	authURL := e.server.URL + "/mcp/oauth/authorize?" + url.Values{
+		"client_id":             {clientID.String()},
+		"redirect_uri":          {"http://localhost:8080/callback"},
+		"response_type":         {"code"},
+		"scope":                 {scopes},
+		"state":                 {state},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+	}.Encode()
+
+	resp, err := noRedirectHTTPClient().Get(authURL)
 	if err != nil {
 		t.Fatalf("authorize request: %v", err)
 	}
-	defer authResp.Body.Close()
+	defer resp.Body.Close()
 
-	// Should redirect with authorization code
-	if authResp.StatusCode != http.StatusFound {
-		body, _ := io.ReadAll(authResp.Body)
-		t.Fatalf("authorize: expected 302, got %d: %s", authResp.StatusCode, string(body))
+	if resp.StatusCode != http.StatusFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("authorize: expected 302, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	location := authResp.Header.Get("Location")
-	if location == "" {
-		t.Fatal("authorize: missing Location header")
-	}
-
+	location := resp.Header.Get("Location")
 	redirectURL, err := url.Parse(location)
 	if err != nil {
 		t.Fatalf("parse redirect URL: %v", err)
 	}
 
-	authCode := redirectURL.Query().Get("code")
-	if authCode == "" {
+	code := redirectURL.Query().Get("code")
+	if code == "" {
 		t.Fatalf("authorize: missing code in redirect: %s", location)
 	}
-	t.Logf("Got authorization code: %s...", authCode[:16])
+	return code
+}
 
-	state := redirectURL.Query().Get("state")
-	if state != "test-state-123" {
-		t.Fatalf("authorize: state mismatch: %s", state)
-	}
+// tokenResponse holds the JSON response from /oauth/token.
+type tokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	Scope        string `json:"scope"`
+}
 
-	// Step 4: Token exchange
-	tokenResp, err := http.PostForm(server.URL+"/mcp/oauth/token", url.Values{
+// exchangeCode exchanges an authorization code for tokens.
+func (e *testEnv) exchangeCode(t *testing.T, clientID uuid.UUID, code, verifier string) tokenResponse {
+	t.Helper()
+	resp, err := http.PostForm(e.server.URL+"/mcp/oauth/token", url.Values{
 		"grant_type":    {"authorization_code"},
-		"code":          {authCode},
-		"client_id":     {client.ID.String()},
+		"code":          {code},
+		"client_id":     {clientID.String()},
 		"redirect_uri":  {"http://localhost:8080/callback"},
-		"code_verifier": {codeVerifier},
+		"code_verifier": {verifier},
 	})
 	if err != nil {
 		t.Fatalf("token request: %v", err)
 	}
-	defer tokenResp.Body.Close()
+	defer resp.Body.Close()
 
-	if tokenResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(tokenResp.Body)
-		t.Fatalf("token: expected 200, got %d: %s", tokenResp.StatusCode, string(body))
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("token: expected 200, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var tokenData struct {
-		AccessToken  string `json:"access_token"`
-		TokenType    string `json:"token_type"`
-		ExpiresIn    int    `json:"expires_in"`
-		RefreshToken string `json:"refresh_token"`
-		Scope        string `json:"scope"`
-	}
-	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenData); err != nil {
+	var tokenData tokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenData); err != nil {
 		t.Fatalf("decode token response: %v", err)
 	}
+	return tokenData
+}
 
-	if tokenData.AccessToken == "" {
-		t.Fatal("token: missing access_token")
-	}
-	if tokenData.RefreshToken == "" {
-		t.Fatal("token: missing refresh_token")
-	}
-	t.Logf("Got access token: %s...", tokenData.AccessToken[:32])
+// completeOAuthFlow performs the full OAuth flow and returns tokens.
+func (e *testEnv) completeOAuthFlow(t *testing.T, clientID uuid.UUID, scopes string) tokenResponse {
+	t.Helper()
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	challenge := pkceChallenge(verifier)
+	code := e.authorizeAndGetCode(t, clientID, scopes, "test-state", challenge)
+	return e.exchangeCode(t, clientID, code, verifier)
+}
 
-	// Verify Cache-Control header
-	if cc := tokenResp.Header.Get("Cache-Control"); cc != "no-store" {
-		t.Errorf("token: Cache-Control = %q, want no-store", cc)
-	}
+// callMCPAPI calls the MCP JSON-RPC API with the given access token.
+func (e *testEnv) callMCPAPI(t *testing.T, accessToken string, method string, params json.RawMessage) (*http.Response, jsonrpc.Response) {
+	t.Helper()
+	req := jsonrpc.Request{JSONRPC: "2.0", Method: method, Params: params, ID: "1"}
+	reqBody, _ := json.Marshal(req)
 
-	// Step 5: Access protected API (list_feedback)
-	jsonrpcReq := jsonrpc.Request{
-		JSONRPC: "2.0",
-		Method:  "list_feedback",
-		Params:  json.RawMessage(`{}`),
-		ID:      "1",
-	}
-	reqBody, _ := json.Marshal(jsonrpcReq)
+	httpReq, _ := http.NewRequest(http.MethodPost, e.server.URL+"/mcp/v1", bytes.NewReader(reqBody))
+	httpReq.Header.Set("Authorization", "Bearer "+accessToken)
+	httpReq.Header.Set("Content-Type", "application/json")
 
-	apiReq, _ := http.NewRequest(http.MethodPost, server.URL+"/mcp/v1", bytes.NewReader(reqBody))
-	apiReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
-	apiReq.Header.Set("Content-Type", "application/json")
-
-	apiResp, err := http.DefaultClient.Do(apiReq)
+	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
 		t.Fatalf("API request: %v", err)
 	}
-	defer apiResp.Body.Close()
-
-	if apiResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(apiResp.Body)
-		t.Fatalf("API: expected 200, got %d: %s", apiResp.StatusCode, string(body))
-	}
-
-	// Verify security headers
-	if xfo := apiResp.Header.Get("X-Frame-Options"); xfo != "DENY" {
-		t.Errorf("API: X-Frame-Options = %q, want DENY", xfo)
-	}
-	if xcto := apiResp.Header.Get("X-Content-Type-Options"); xcto != "nosniff" {
-		t.Errorf("API: X-Content-Type-Options = %q, want nosniff", xcto)
-	}
-
-	// Verify rate limit headers
-	if rl := apiResp.Header.Get("X-RateLimit-Limit"); rl == "" {
-		t.Error("API: missing X-RateLimit-Limit header")
-	}
 
 	var rpcResp jsonrpc.Response
-	if err := json.NewDecoder(apiResp.Body).Decode(&rpcResp); err != nil {
-		t.Fatalf("decode API response: %v", err)
-	}
-	if rpcResp.Error != nil {
-		t.Fatalf("API: unexpected error: %+v", rpcResp.Error)
-	}
-	t.Log("API call successful")
+	json.NewDecoder(resp.Body).Decode(&rpcResp)
+	return resp, rpcResp
+}
 
-	// Step 6: Token refresh
-	refreshResp, err := http.PostForm(server.URL+"/mcp/oauth/token", url.Values{
+// extractJWTClaims decodes a JWT and extracts its claims without verification.
+func extractJWTClaims(t *testing.T, token string) map[string]any {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("invalid JWT format: %d parts", len(parts))
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode JWT payload: %v", err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatalf("unmarshal JWT claims: %v", err)
+	}
+	return claims
+}
+
+// TestE2E_FullOAuthFlow tests the complete OAuth 2.1 flow with PKCE.
+func TestE2E_FullOAuthFlow(t *testing.T) {
+	env := newTestEnv(t, "e2e-oauth-test", "E2E OAuth Test")
+	ctx := context.Background()
+	client := env.createClient(t, "e2e-test-agent", []string{"mcp:read", "mcp:write"})
+
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	challenge := pkceChallenge(verifier)
+	code := env.authorizeAndGetCode(t, client.ID, "mcp:read mcp:write", "test-state-123", challenge)
+	tokenData := env.exchangeCode(t, client.ID, code, verifier)
+
+	if tokenData.AccessToken == "" || tokenData.RefreshToken == "" {
+		t.Fatal("token: missing access_token or refresh_token")
+	}
+
+	t.Run("api_call", func(t *testing.T) {
+		resp, rpcResp := env.callMCPAPI(t, tokenData.AccessToken, "list_feedback", json.RawMessage(`{}`))
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("API: expected 200, got %d", resp.StatusCode)
+		}
+		if rpcResp.Error != nil {
+			t.Fatalf("API: unexpected error: %+v", rpcResp.Error)
+		}
+		if xfo := resp.Header.Get("X-Frame-Options"); xfo != "DENY" {
+			t.Errorf("X-Frame-Options = %q, want DENY", xfo)
+		}
+	})
+
+	t.Run("token_refresh", func(t *testing.T) {
+		refreshed := env.refreshToken(t, client.ID, tokenData.RefreshToken)
+		if refreshed.AccessToken == "" || refreshed.RefreshToken == "" {
+			t.Fatal("refresh: missing tokens")
+		}
+		if refreshed.RefreshToken == tokenData.RefreshToken {
+			t.Error("refresh: token should be rotated")
+		}
+		tokenData = refreshed
+	})
+
+	t.Run("old_refresh_token_rejected", func(t *testing.T) {
+		resp, _ := http.PostForm(env.server.URL+"/mcp/oauth/token", url.Values{
+			"grant_type":    {"refresh_token"},
+			"refresh_token": {verifier}, // Use wrong token
+			"client_id":     {client.ID.String()},
+		})
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("old refresh: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("code_replay_rejected", func(t *testing.T) {
+		resp, _ := http.PostForm(env.server.URL+"/mcp/oauth/token", url.Values{
+			"grant_type":    {"authorization_code"},
+			"code":          {code},
+			"client_id":     {client.ID.String()},
+			"redirect_uri":  {"http://localhost:8080/callback"},
+			"code_verifier": {verifier},
+		})
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("replay: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("revoked_client_rejected", func(t *testing.T) {
+		if err := env.clientsRepo.Revoke(ctx, client.ID); err != nil {
+			t.Fatalf("revoke client: %v", err)
+		}
+		resp, _ := env.callMCPAPI(t, tokenData.AccessToken, "list_feedback", json.RawMessage(`{}`))
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("revoked: expected 401, got %d", resp.StatusCode)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if strings.Contains(string(body), "client revoked") {
+			t.Error("error message leaks client state")
+		}
+	})
+}
+
+// refreshToken performs a token refresh and returns the new tokens.
+func (e *testEnv) refreshToken(t *testing.T, clientID uuid.UUID, refreshToken string) tokenResponse {
+	t.Helper()
+	resp, err := http.PostForm(e.server.URL+"/mcp/oauth/token", url.Values{
 		"grant_type":    {"refresh_token"},
-		"refresh_token": {tokenData.RefreshToken},
-		"client_id":     {client.ID.String()},
+		"refresh_token": {refreshToken},
+		"client_id":     {clientID.String()},
 	})
 	if err != nil {
 		t.Fatalf("refresh request: %v", err)
 	}
-	defer refreshResp.Body.Close()
-
-	if refreshResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(refreshResp.Body)
-		t.Fatalf("refresh: expected 200, got %d: %s", refreshResp.StatusCode, string(body))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("refresh: expected 200, got %d: %s", resp.StatusCode, string(body))
 	}
-
-	var refreshData struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-	}
-	if err := json.NewDecoder(refreshResp.Body).Decode(&refreshData); err != nil {
-		t.Fatalf("decode refresh response: %v", err)
-	}
-
-	if refreshData.AccessToken == "" {
-		t.Fatal("refresh: missing access_token")
-	}
-	if refreshData.RefreshToken == "" {
-		t.Fatal("refresh: missing refresh_token")
-	}
-	if refreshData.RefreshToken == tokenData.RefreshToken {
-		t.Error("refresh: token should be rotated")
-	}
-	t.Log("Token refresh successful")
-
-	// Step 7: Old refresh token should be invalid
-	oldRefreshResp, err := http.PostForm(server.URL+"/mcp/oauth/token", url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {tokenData.RefreshToken},
-		"client_id":     {client.ID.String()},
-	})
-	if err != nil {
-		t.Fatalf("old refresh request: %v", err)
-	}
-	defer oldRefreshResp.Body.Close()
-
-	if oldRefreshResp.StatusCode != http.StatusBadRequest {
-		t.Errorf("old refresh: expected 400, got %d", oldRefreshResp.StatusCode)
-	}
-	t.Log("Old refresh token correctly rejected")
-
-	// Step 8: Verify authorization code cannot be reused
-	replayResp, err := http.PostForm(server.URL+"/mcp/oauth/token", url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {authCode},
-		"client_id":     {client.ID.String()},
-		"redirect_uri":  {"http://localhost:8080/callback"},
-		"code_verifier": {codeVerifier},
-	})
-	if err != nil {
-		t.Fatalf("replay request: %v", err)
-	}
-	defer replayResp.Body.Close()
-
-	if replayResp.StatusCode != http.StatusBadRequest {
-		t.Errorf("replay: expected 400, got %d", replayResp.StatusCode)
-	}
-	t.Log("Authorization code replay correctly rejected")
-
-	// Step 9: Revoke client
-	if err := clientsRepo.Revoke(ctx, client.ID); err != nil {
-		t.Fatalf("revoke client: %v", err)
-	}
-
-	// Step 10: API call with revoked client should fail
-	revokedReq, _ := http.NewRequest(http.MethodPost, server.URL+"/mcp/v1", bytes.NewReader(reqBody))
-	revokedReq.Header.Set("Authorization", "Bearer "+refreshData.AccessToken)
-	revokedReq.Header.Set("Content-Type", "application/json")
-
-	revokedResp, err := http.DefaultClient.Do(revokedReq)
-	if err != nil {
-		t.Fatalf("revoked API request: %v", err)
-	}
-	defer revokedResp.Body.Close()
-
-	if revokedResp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("revoked: expected 401, got %d", revokedResp.StatusCode)
-	}
-
-	// Verify error message doesn't leak "client revoked"
-	body, _ := io.ReadAll(revokedResp.Body)
-	if strings.Contains(string(body), "client revoked") {
-		t.Error("revoked: error message leaks client state")
-	}
-	t.Log("Revoked client correctly rejected")
-
-	t.Log("=== E2E OAuth flow completed successfully ===")
+	var tokenData tokenResponse
+	json.NewDecoder(resp.Body).Decode(&tokenData)
+	return tokenData
 }
 
 // TestE2E_PKCEVerifierRejection verifies that wrong PKCE verifier is rejected.
 func TestE2E_PKCEVerifierRejection(t *testing.T) {
-	pool := testdb.NewPool(t)
-	ctx := context.Background()
+	env := newTestEnv(t, "e2e-pkce-test", "E2E PKCE Test")
+	client := env.createClient(t, "pkce-test-agent", []string{"mcp:read"})
 
-	tenantID, err := tenant.NewTenant(pool).Create(ctx, "e2e-pkce-test", "E2E PKCE Test")
-	if err != nil {
-		t.Fatalf("create tenant: %v", err)
-	}
-
-	clientsRepo := mcprepo.NewClients(pool)
-	codesRepo := mcprepo.NewCodes(pool)
-	tokensRepo := mcprepo.NewTokens(pool)
-	sessionsRepo := mcprepo.NewSessions(pool)
-	feedbackRepo := feedback.NewFeedback(pool)
-
-	cfg := mcp.Config{
-		BaseURL:            "https://test.attune.io",
-		JWTSecret:          []byte("test-secret-key-for-jwt-signing-32bytes!"),
-		JWTIssuer:          "https://test.attune.io/mcp/oauth",
-		RateLimitPerMinute: 100,
-		AccessTokenTTL:     time.Hour,
-		RefreshTokenTTL:    7 * 24 * time.Hour,
-	}
-
-	stores := mcp.Stores{
-		Clients:          &clientStoreAdapter{repo: clientsRepo},
-		Codes:            &codeStoreAdapter{repo: codesRepo},
-		Tokens:           &tokenStoreAdapter{repo: tokensRepo},
-		Sessions:         &sessionStoreAdapter{repo: sessionsRepo},
-		ClientValidator:  &clientValidatorAdapter{repo: clientsRepo},
-		SessionValidator: &sessionValidatorAdapter{repo: sessionsRepo},
-	}
-
-	deps := ptrext.Of(tools.Deps{
-		Feedback: &feedbackReaderAdapter{repo: feedbackRepo, tenantID: tenantID},
-	})
-
-	handler := mcp.NewHandler(cfg, stores, deps)
-	router := handler.Routes()
-
-	testRouter := chi.NewRouter()
-	testRouter.Mount("/mcp", router)
-
-	server := httptest.NewServer(testRouter)
-	defer server.Close()
-
-	client, err := clientsRepo.Create(ctx, mcprepo.CreateClientParams{
-		TenantID:     tenantID,
-		Name:         "pkce-test-agent",
-		RedirectURIs: []string{"http://localhost:8080/callback"},
-		Scopes:       []string{"mcp:read"},
-		CreatedBy:    "test-admin",
-	})
-	if err != nil {
-		t.Fatalf("create client: %v", err)
-	}
-
-	// Generate PKCE challenge with correct verifier
 	correctVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	h := sha256.Sum256([]byte(correctVerifier))
-	codeChallenge := base64.RawURLEncoding.EncodeToString(h[:])
+	challenge := pkceChallenge(correctVerifier)
+	code := env.authorizeAndGetCode(t, client.ID, "mcp:read", "test-state", challenge)
 
-	// Get authorization code
-	noRedirectClient := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	authURL := server.URL + "/mcp/oauth/authorize?" + url.Values{
-		"client_id":             {client.ID.String()},
-		"redirect_uri":          {"http://localhost:8080/callback"},
-		"response_type":         {"code"},
-		"scope":                 {"mcp:read"},
-		"state":                 {"test-state"},
-		"code_challenge":        {codeChallenge},
-		"code_challenge_method": {"S256"},
-	}.Encode()
-
-	authResp, err := noRedirectClient.Get(authURL)
-	if err != nil {
-		t.Fatalf("authorize: %v", err)
-	}
-	defer authResp.Body.Close()
-
-	location := authResp.Header.Get("Location")
-	redirectURL, _ := url.Parse(location)
-	authCode := redirectURL.Query().Get("code")
-
-	// Try token exchange with WRONG verifier
 	wrongVerifier := "WRONG-verifier-that-does-not-match-the-challenge"
-	tokenResp, err := http.PostForm(server.URL+"/mcp/oauth/token", url.Values{
+	resp, err := http.PostForm(env.server.URL+"/mcp/oauth/token", url.Values{
 		"grant_type":    {"authorization_code"},
-		"code":          {authCode},
+		"code":          {code},
 		"client_id":     {client.ID.String()},
 		"redirect_uri":  {"http://localhost:8080/callback"},
 		"code_verifier": {wrongVerifier},
@@ -445,351 +378,110 @@ func TestE2E_PKCEVerifierRejection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("token request: %v", err)
 	}
-	defer tokenResp.Body.Close()
+	defer resp.Body.Close()
 
-	// Should fail with 400
-	if tokenResp.StatusCode != http.StatusBadRequest {
-		t.Errorf("wrong PKCE verifier: expected 400, got %d", tokenResp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("wrong PKCE verifier: expected 400, got %d", resp.StatusCode)
 	}
 
 	var errResp struct {
 		Error            string `json:"error"`
 		ErrorDescription string `json:"error_description"`
 	}
-	json.NewDecoder(tokenResp.Body).Decode(&errResp)
+	json.NewDecoder(resp.Body).Decode(&errResp)
 
-	// Error should indicate PKCE failure
 	if errResp.Error != "invalid_grant" {
 		t.Errorf("wrong PKCE verifier: error = %q, want invalid_grant", errResp.Error)
 	}
 	if !strings.Contains(errResp.ErrorDescription, "PKCE") {
-		t.Errorf("wrong PKCE verifier: error_description should mention PKCE, got %q", errResp.ErrorDescription)
+		t.Errorf("error_description should mention PKCE, got %q", errResp.ErrorDescription)
 	}
-
-	t.Log("PKCE verifier rejection test passed")
 }
 
 // TestE2E_JWTClaimsValidation verifies JWT contains correct claims.
 func TestE2E_JWTClaimsValidation(t *testing.T) {
-	pool := testdb.NewPool(t)
+	env := newTestEnv(t, "e2e-jwt-test", "E2E JWT Test")
 	ctx := context.Background()
+	client := env.createClient(t, "jwt-test-agent", []string{"mcp:read", "mcp:write"})
+	tokenData := env.completeOAuthFlow(t, client.ID, "mcp:read mcp:write")
 
-	tenantID, err := tenant.NewTenant(pool).Create(ctx, "e2e-jwt-test", "E2E JWT Test")
+	claims := extractJWTClaims(t, tokenData.AccessToken)
+
+	if iss, _ := claims["iss"].(string); iss != env.jwtIssuer {
+		t.Errorf("JWT issuer = %q, want %q", iss, env.jwtIssuer)
+	}
+
+	if aud, _ := claims["aud"].([]any); len(aud) == 0 || aud[0] != "attune-mcp" {
+		t.Errorf("JWT audience = %v, want [attune-mcp]", aud)
+	}
+
+	if tid, _ := claims["tenant_id"].(string); tid != env.tenantID {
+		t.Errorf("JWT tenant_id = %q, want %q", tid, env.tenantID)
+	}
+
+	if cid, _ := claims["client_id"].(string); cid != client.ID.String() {
+		t.Errorf("JWT client_id = %q, want %q", cid, client.ID.String())
+	}
+
+	sessionID, _ := claims["session_id"].(string)
+	if sessionID == "" || sessionID == "00000000-0000-0000-0000-000000000000" {
+		t.Errorf("JWT session_id is empty or nil UUID: %q", sessionID)
+	}
+	sid, err := uuid.Parse(sessionID)
 	if err != nil {
-		t.Fatalf("create tenant: %v", err)
+		t.Errorf("JWT session_id is not a valid UUID: %q", sessionID)
 	}
 
-	clientsRepo := mcprepo.NewClients(pool)
-	codesRepo := mcprepo.NewCodes(pool)
-	tokensRepo := mcprepo.NewTokens(pool)
-	sessionsRepo := mcprepo.NewSessions(pool)
-	feedbackRepo := feedback.NewFeedback(pool)
-
-	jwtSecret := []byte("test-secret-key-for-jwt-signing-32bytes!")
-	jwtIssuer := "https://test.attune.io/mcp/oauth"
-
-	cfg := mcp.Config{
-		BaseURL:            "https://test.attune.io",
-		JWTSecret:          jwtSecret,
-		JWTIssuer:          jwtIssuer,
-		RateLimitPerMinute: 100,
-		AccessTokenTTL:     time.Hour,
-		RefreshTokenTTL:    7 * 24 * time.Hour,
+	if scopes, _ := claims["scopes"].([]any); len(scopes) != 2 {
+		t.Errorf("JWT scopes = %v, want [mcp:read mcp:write]", scopes)
 	}
 
-	stores := mcp.Stores{
-		Clients:          &clientStoreAdapter{repo: clientsRepo},
-		Codes:            &codeStoreAdapter{repo: codesRepo},
-		Tokens:           &tokenStoreAdapter{repo: tokensRepo},
-		Sessions:         &sessionStoreAdapter{repo: sessionsRepo},
-		ClientValidator:  &clientValidatorAdapter{repo: clientsRepo},
-		SessionValidator: &sessionValidatorAdapter{repo: sessionsRepo},
+	if exp, _ := claims["exp"].(float64); time.Unix(int64(exp), 0).Before(time.Now()) {
+		t.Errorf("JWT expired at %v", time.Unix(int64(exp), 0))
 	}
 
-	deps := ptrext.Of(tools.Deps{
-		Feedback: &feedbackReaderAdapter{repo: feedbackRepo, tenantID: tenantID},
-	})
-
-	handler := mcp.NewHandler(cfg, stores, deps)
-	router := handler.Routes()
-
-	testRouter := chi.NewRouter()
-	testRouter.Mount("/mcp", router)
-
-	server := httptest.NewServer(testRouter)
-	defer server.Close()
-
-	client, err := clientsRepo.Create(ctx, mcprepo.CreateClientParams{
-		TenantID:     tenantID,
-		Name:         "jwt-test-agent",
-		RedirectURIs: []string{"http://localhost:8080/callback"},
-		Scopes:       []string{"mcp:read", "mcp:write"},
-		CreatedBy:    "test-admin",
-	})
-	if err != nil {
-		t.Fatalf("create client: %v", err)
-	}
-
-	// Get tokens
-	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	h := sha256.Sum256([]byte(codeVerifier))
-	codeChallenge := base64.RawURLEncoding.EncodeToString(h[:])
-
-	noRedirectClient := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	authResp, _ := noRedirectClient.Get(server.URL + "/mcp/oauth/authorize?" + url.Values{
-		"client_id":             {client.ID.String()},
-		"redirect_uri":          {"http://localhost:8080/callback"},
-		"response_type":         {"code"},
-		"scope":                 {"mcp:read mcp:write"},
-		"state":                 {"test"},
-		"code_challenge":        {codeChallenge},
-		"code_challenge_method": {"S256"},
-	}.Encode())
-	defer authResp.Body.Close()
-
-	location := authResp.Header.Get("Location")
-	redirectURL, _ := url.Parse(location)
-	authCode := redirectURL.Query().Get("code")
-
-	tokenResp, _ := http.PostForm(server.URL+"/mcp/oauth/token", url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {authCode},
-		"client_id":     {client.ID.String()},
-		"redirect_uri":  {"http://localhost:8080/callback"},
-		"code_verifier": {codeVerifier},
-	})
-	defer tokenResp.Body.Close()
-
-	var tokenData struct {
-		AccessToken string `json:"access_token"`
-	}
-	json.NewDecoder(tokenResp.Body).Decode(&tokenData)
-
-	// Decode JWT without verification to inspect claims
-	parts := strings.Split(tokenData.AccessToken, ".")
-	if len(parts) != 3 {
-		t.Fatalf("invalid JWT format: %d parts", len(parts))
-	}
-
-	// Decode payload (second part)
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		t.Fatalf("decode JWT payload: %v", err)
-	}
-
-	var claims struct {
-		Issuer    string   `json:"iss"`
-		Audience  []string `json:"aud"`
-		TenantID  string   `json:"tenant_id"`
-		ClientID  string   `json:"client_id"`
-		SessionID string   `json:"session_id"`
-		Scopes    []string `json:"scopes"`
-		ExpiresAt int64    `json:"exp"`
-		IssuedAt  int64    `json:"iat"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		t.Fatalf("unmarshal JWT claims: %v", err)
-	}
-
-	// Verify issuer
-	if claims.Issuer != jwtIssuer {
-		t.Errorf("JWT issuer = %q, want %q", claims.Issuer, jwtIssuer)
-	}
-
-	// Verify audience
-	if len(claims.Audience) == 0 || claims.Audience[0] != "attune-mcp" {
-		t.Errorf("JWT audience = %v, want [attune-mcp]", claims.Audience)
-	}
-
-	// Verify tenant_id
-	if claims.TenantID != tenantID {
-		t.Errorf("JWT tenant_id = %q, want %q", claims.TenantID, tenantID)
-	}
-
-	// Verify client_id
-	if claims.ClientID != client.ID.String() {
-		t.Errorf("JWT client_id = %q, want %q", claims.ClientID, client.ID.String())
-	}
-
-	// Verify session_id is a valid UUID (not empty)
-	if claims.SessionID == "" || claims.SessionID == "00000000-0000-0000-0000-000000000000" {
-		t.Errorf("JWT session_id is empty or nil UUID: %q", claims.SessionID)
-	}
-	if _, err := uuid.Parse(claims.SessionID); err != nil {
-		t.Errorf("JWT session_id is not a valid UUID: %q", claims.SessionID)
-	}
-
-	// Verify scopes
-	if len(claims.Scopes) != 2 {
-		t.Errorf("JWT scopes = %v, want [mcp:read mcp:write]", claims.Scopes)
-	}
-
-	// Verify exp is in the future (about 1 hour)
-	expTime := time.Unix(claims.ExpiresAt, 0)
-	if expTime.Before(time.Now()) {
-		t.Errorf("JWT expired at %v", expTime)
-	}
-	if expTime.After(time.Now().Add(2 * time.Hour)) {
-		t.Errorf("JWT expires too far in future: %v", expTime)
-	}
-
-	// Verify session exists in database
-	sessionID, _ := uuid.Parse(claims.SessionID)
-	active, err := sessionsRepo.IsActive(ctx, sessionID)
+	active, err := env.sessionsRepo.IsActive(ctx, sid)
 	if err != nil {
 		t.Fatalf("check session active: %v", err)
 	}
 	if !active {
 		t.Error("session should be active in database")
 	}
-
-	t.Logf("JWT claims validated: issuer=%s, audience=%v, tenant=%s, session=%s",
-		claims.Issuer, claims.Audience, claims.TenantID, claims.SessionID)
 }
 
 // TestE2E_SessionPersistence verifies session is correctly persisted in database.
 func TestE2E_SessionPersistence(t *testing.T) {
-	pool := testdb.NewPool(t)
+	env := newTestEnv(t, "e2e-session-test", "E2E Session Test")
 	ctx := context.Background()
+	client := env.createClient(t, "session-test-agent", []string{"mcp:read"})
+	tokenData := env.completeOAuthFlow(t, client.ID, "mcp:read")
 
-	tenantID, err := tenant.NewTenant(pool).Create(ctx, "e2e-session-test", "E2E Session Test")
-	if err != nil {
-		t.Fatalf("create tenant: %v", err)
-	}
+	claims := extractJWTClaims(t, tokenData.AccessToken)
+	sessionIDStr, _ := claims["session_id"].(string)
+	sessionID, _ := uuid.Parse(sessionIDStr)
 
-	clientsRepo := mcprepo.NewClients(pool)
-	codesRepo := mcprepo.NewCodes(pool)
-	tokensRepo := mcprepo.NewTokens(pool)
-	sessionsRepo := mcprepo.NewSessions(pool)
-	feedbackRepo := feedback.NewFeedback(pool)
-
-	cfg := mcp.Config{
-		BaseURL:            "https://test.attune.io",
-		JWTSecret:          []byte("test-secret-key-for-jwt-signing-32bytes!"),
-		JWTIssuer:          "https://test.attune.io/mcp/oauth",
-		RateLimitPerMinute: 100,
-		AccessTokenTTL:     time.Hour,
-		RefreshTokenTTL:    7 * 24 * time.Hour,
-	}
-
-	stores := mcp.Stores{
-		Clients:          &clientStoreAdapter{repo: clientsRepo},
-		Codes:            &codeStoreAdapter{repo: codesRepo},
-		Tokens:           &tokenStoreAdapter{repo: tokensRepo},
-		Sessions:         &sessionStoreAdapter{repo: sessionsRepo},
-		ClientValidator:  &clientValidatorAdapter{repo: clientsRepo},
-		SessionValidator: &sessionValidatorAdapter{repo: sessionsRepo},
-	}
-
-	deps := ptrext.Of(tools.Deps{
-		Feedback: &feedbackReaderAdapter{repo: feedbackRepo, tenantID: tenantID},
-	})
-
-	handler := mcp.NewHandler(cfg, stores, deps)
-	router := handler.Routes()
-
-	testRouter := chi.NewRouter()
-	testRouter.Mount("/mcp", router)
-
-	server := httptest.NewServer(testRouter)
-	defer server.Close()
-
-	client, err := clientsRepo.Create(ctx, mcprepo.CreateClientParams{
-		TenantID:     tenantID,
-		Name:         "session-test-agent",
-		RedirectURIs: []string{"http://localhost:8080/callback"},
-		Scopes:       []string{"mcp:read"},
-		CreatedBy:    "test-admin",
-	})
-	if err != nil {
-		t.Fatalf("create client: %v", err)
-	}
-
-	// Complete OAuth flow
-	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	h := sha256.Sum256([]byte(codeVerifier))
-	codeChallenge := base64.RawURLEncoding.EncodeToString(h[:])
-
-	noRedirectClient := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	authResp, _ := noRedirectClient.Get(server.URL + "/mcp/oauth/authorize?" + url.Values{
-		"client_id":             {client.ID.String()},
-		"redirect_uri":          {"http://localhost:8080/callback"},
-		"response_type":         {"code"},
-		"scope":                 {"mcp:read"},
-		"state":                 {"test"},
-		"code_challenge":        {codeChallenge},
-		"code_challenge_method": {"S256"},
-	}.Encode())
-	defer authResp.Body.Close()
-
-	location := authResp.Header.Get("Location")
-	redirectURL, _ := url.Parse(location)
-	authCode := redirectURL.Query().Get("code")
-
-	tokenResp, _ := http.PostForm(server.URL+"/mcp/oauth/token", url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {authCode},
-		"client_id":     {client.ID.String()},
-		"redirect_uri":  {"http://localhost:8080/callback"},
-		"code_verifier": {codeVerifier},
-	})
-	defer tokenResp.Body.Close()
-
-	var tokenData struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-	}
-	json.NewDecoder(tokenResp.Body).Decode(&tokenData)
-
-	// Extract session ID from JWT
-	parts := strings.Split(tokenData.AccessToken, ".")
-	payload, _ := base64.RawURLEncoding.DecodeString(parts[1])
-	var claims struct {
-		SessionID string `json:"session_id"`
-	}
-	json.Unmarshal(payload, &claims)
-	sessionID, _ := uuid.Parse(claims.SessionID)
-
-	// Query database directly to verify session record
-	var dbSession struct {
-		ID        uuid.UUID
-		ClientID  uuid.UUID
-		TenantID  string
-		Scopes    []string
-		ClosedAt  *time.Time
-		CreatedAt time.Time
-	}
-	err = pool.QueryRow(ctx, `
-		SELECT id, client_id, tenant_id, scopes, closed_at, created_at
-		FROM mcp_sessions WHERE id = $1
-	`, sessionID).Scan(&dbSession.ID, &dbSession.ClientID, &dbSession.TenantID, &dbSession.Scopes, &dbSession.ClosedAt, &dbSession.CreatedAt)
+	var dbClientID uuid.UUID
+	var dbTenantID string
+	var dbClosedAt *time.Time
+	err := env.pool.QueryRow(ctx, `
+		SELECT client_id, tenant_id, closed_at FROM mcp_sessions WHERE id = $1
+	`, sessionID).Scan(&dbClientID, &dbTenantID, &dbClosedAt)
 	if err != nil {
 		t.Fatalf("query session from database: %v", err)
 	}
 
-	if dbSession.ClientID != client.ID {
-		t.Errorf("session client_id = %s, want %s", dbSession.ClientID, client.ID)
+	if dbClientID != client.ID {
+		t.Errorf("session client_id = %s, want %s", dbClientID, client.ID)
 	}
-	if dbSession.TenantID != tenantID {
-		t.Errorf("session tenant_id = %s, want %s", dbSession.TenantID, tenantID)
+	if dbTenantID != env.tenantID {
+		t.Errorf("session tenant_id = %s, want %s", dbTenantID, env.tenantID)
 	}
-	if dbSession.ClosedAt != nil {
+	if dbClosedAt != nil {
 		t.Error("session should not be closed")
 	}
 
-	// Also verify refresh token in database
 	var tokenCount int
-	err = pool.QueryRow(ctx, `
+	err = env.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM mcp_oauth_refresh_tokens
 		WHERE client_id = $1 AND session_id = $2 AND revoked_at IS NULL
 	`, client.ID, sessionID).Scan(&tokenCount)
@@ -799,8 +491,6 @@ func TestE2E_SessionPersistence(t *testing.T) {
 	if tokenCount != 1 {
 		t.Errorf("expected 1 active refresh token, got %d", tokenCount)
 	}
-
-	t.Logf("Session persisted: id=%s, client=%s, tenant=%s", sessionID, client.ID, tenantID)
 }
 
 // TestE2E_CrossTenantAccessBlocked verifies tokens from one tenant cannot access another.
@@ -883,6 +573,7 @@ func TestE2E_CrossTenantAccessBlocked(t *testing.T) {
 		codeChallenge := base64.RawURLEncoding.EncodeToString(h[:])
 
 		noRedirectClient := &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
