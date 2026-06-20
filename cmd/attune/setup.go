@@ -381,9 +381,9 @@ func buildEvalSuggestionsGetter(
 ) enrichconfig.EvalSuggestionsGetter {
 	evalEnricher := enrich.NewEnricher(feedbackRepo, llm, "")
 	evaluator := evalsvc.NewEvaluator(feedbackRepo, tenantRepo, evalEnricher)
-	return func(ctx context.Context, _ string) (*enrichconfig.SuggestedAttrsReport, error) {
+	return func(ctx context.Context, tenantID string) (*enrichconfig.SuggestedAttrsReport, error) {
 		since := time.Now().AddDate(0, 0, -30)
-		report, err := evaluator.RunConsistency(ctx, since, 20)
+		report, err := evaluator.RunConsistencyForTenant(ctx, tenantID, since, 20)
 		if err != nil {
 			return nil, err
 		}

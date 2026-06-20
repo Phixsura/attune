@@ -137,6 +137,56 @@ func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample
 	return report, nil
 }
 
+// RunConsistencyForTenant is like RunConsistency but scoped to a single
+// tenant. Used by Console API eval-suggestions endpoint to ensure tenant
+// data isolation.
+func (ev *Evaluator) RunConsistencyForTenant(ctx context.Context, tenantID string, since time.Time, sample int) (*EvalReport, error) {
+	const where = "service.Evaluator.RunConsistencyForTenant"
+	logext.Infof(ctx, "[%s] start,tenant_id:%s,since:%s,sample:%d", where, tenantID, since.Format(time.RFC3339), sample)
+	if ev.enricher == nil {
+		logext.Warnf(ctx, "[%s] reject: enricher not configured", where)
+		return nil, fmt.Errorf("eval: enricher (LLM client) not configured")
+	}
+	rows, err := ev.repo.SampleEnrichedByTenant(ctx, tenantID, since, sample)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] sample failed,err:%+v", where, err.Error())
+		return nil, fmt.Errorf("sample: %w", err)
+	}
+	report := ptrext.Of(EvalReport{
+		Mode:        "consistency",
+		LabelSource: "ai-rerun",
+		GeneratedAt: time.Now(),
+		Since:       since,
+		SampleSize:  len(rows),
+		Dims:        map[string]DimScore{},
+	})
+	var tenantCfg enrich.ClassifyConfig
+	if ev.tenants != nil {
+		cfg, err := ev.tenants.GetEnrichConfig(ctx, tenantID)
+		if err == nil {
+			tenantCfg.TenantID = tenantID
+			tenantCfg.Purpose = "eval"
+			tenantCfg.PromptTemplate = cfg.PromptTemplate
+			tenantCfg.Dimensions = cfg.Dimensions
+		}
+	}
+	suggestedAcc := newSuggestedAccumulator()
+	for _, r := range rows {
+		result, err := ev.enricher.ClassifyWithDiagnostics(ctx, r.Content, tenantCfg)
+		if err != nil {
+			continue
+		}
+		suggestedAcc.Add(result.DropDiagnostics, result.Enriched.Attrs, tenantCfg.Dimensions)
+		scoreRow(report, r, result.Enriched.Attrs, tenantCfg.Dimensions)
+	}
+	report.LLMCostYuan = float64(report.SampleSize) * 0.008
+	report.SuggestedAttrs = suggestedAcc.Build(report.SampleSize)
+	sortMismatches(report.Mismatches)
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,sample:%d,dims:%d,cost_yuan:%.2f",
+		where, tenantID, report.SampleSize, len(report.Dims), report.LLMCostYuan)
+	return report, nil
+}
+
 // ExportForHuman writes a CSV that a human reviewer fills in. The
 // header is data-driven from the tenant's DimensionSet:
 //

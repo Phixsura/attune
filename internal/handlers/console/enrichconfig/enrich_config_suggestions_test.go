@@ -185,6 +185,37 @@ func TestPromoteSuggestedValue_ValueExists(t *testing.T) {
 	require.Equal(t, http.StatusConflict, w.Code)
 }
 
+func TestPromoteSuggestedValue_EmptyInput(t *testing.T) {
+	t.Parallel()
+
+	h := &Handler{svc: &fakeConfigService{}}
+	handler := dispatcher.Bind(
+		"console.EnrichConfigHandler.PromoteSuggestedValue",
+		dispatcher.JSON(func() *attunev1.PromoteSuggestedValueRequest { return &attunev1.PromoteSuggestedValueRequest{} }),
+		h.PromoteSuggestedValue,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PromoteSuggestedValueRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+
+	tests := []struct {
+		name    string
+		reqBody string
+	}{
+		{"empty_dimension", `{"dimensionName":"","value":"checkout","displayName":{"entries":{"en":"Checkout"}}}`},
+		{"empty_value", `{"dimensionName":"modules","value":"","displayName":{"entries":{"en":"Checkout"}}}`},
+		{"both_empty", `{"dimensionName":"","value":"","displayName":{"entries":{"en":"Checkout"}}}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/promote", tc.reqBody))
+			require.Equal(t, http.StatusBadRequest, w.Code)
+		})
+	}
+}
+
 func TestSuggestedReportToProto_Nil(t *testing.T) {
 	t.Parallel()
 

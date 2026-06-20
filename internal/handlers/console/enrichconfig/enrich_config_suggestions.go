@@ -58,6 +58,14 @@ func (h *Handler) PromoteSuggestedValue(
 	value := req.GetValue()
 	displayName := i18nFromProto(req.GetDisplayName())
 
+	if dimName == "" || value == "" {
+		return dispatcher.Fail[*attunev1.PromoteSuggestedValueResponse](
+			http.StatusBadRequest,
+			attunev1.ErrorCode_VALIDATION,
+			"dimension_name and value are required",
+		)
+	}
+
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,dim:%s,value:%s", where, auth.TenantID, dimName, value)
 
 	// Get current config
