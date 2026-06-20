@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   coverage metrics, confidence scoring, and actionable recommendations. This
   enables operators to identify systematic gaps in their taxonomy and evolve
   it based on LLM behavior. CLI output includes a "suggested values" section
-  with per-dimension coverage and top suggestions.
+  with per-dimension coverage and top suggestions. Console API endpoints
+  `GET /enrich-config/eval-suggestions` and `POST /enrich-config/promote`
+  allow viewing suggestions and promoting values to the taxonomy directly.
 
 ### Fixed
 
