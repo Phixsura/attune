@@ -1153,6 +1153,27 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrich-config/eval-suggestions:
+        get:
+            tags:
+                - EnrichConfigService
+            description: |-
+                GET /fb/v1/console/enrich-config/eval-suggestions
+                 Returns off-list values the LLM suggested during the most recent eval run.
+            operationId: EnrichConfigService_GetEvalSuggestions
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetEvalSuggestionsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrich-config/preview:
         post:
             tags:
@@ -1172,6 +1193,33 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/PreviewEnrichPromptResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrich-config/promote:
+        post:
+            tags:
+                - EnrichConfigService
+            description: |-
+                POST /fb/v1/console/enrich-config/promote
+                 Promotes a suggested value to the dimension taxonomy.
+            operationId: EnrichConfigService_PromoteSuggestedValue
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PromoteSuggestedValueRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PromoteSuggestedValueResponse'
                 default:
                     description: Default error response
                     content:
@@ -5485,6 +5533,25 @@ components:
             properties:
                 runtime:
                     $ref: '#/components/schemas/EnrichmentRuntimeReadModel'
+        GetEvalSuggestionsResponse:
+            type: object
+            properties:
+                coverage:
+                    type: object
+                    additionalProperties:
+                        type: number
+                        format: double
+                    description: 'Coverage per dimension: 1.0 = all on-list, 0.85 = 15% dropped.'
+                candidates:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SuggestedCandidate'
+                    description: Top suggested candidates sorted by confidence descending.
+                recommendations:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SuggestedRecommendation'
+                    description: Actionable recommendations for high-confidence candidates.
         GetFeedbackStatsResponse:
             type: object
             properties:
@@ -6469,6 +6536,27 @@ components:
                 updatedAt:
                     type: string
             description: Projects
+        PromoteSuggestedValueRequest:
+            required:
+                - dimensionName
+                - value
+                - displayName
+            type: object
+            properties:
+                dimensionName:
+                    type: string
+                value:
+                    type: string
+                displayName:
+                    $ref: '#/components/schemas/I18nString'
+            description: PromoteSuggestedValue adds a value to the dimension taxonomy.
+        PromoteSuggestedValueResponse:
+            type: object
+            properties:
+                dimension:
+                    allOf:
+                        - $ref: '#/components/schemas/Dimension'
+                    description: The updated dimension with the new taxonomy value.
         RegenerateReplyDraftRequest:
             type: object
             properties:
@@ -6952,6 +7040,37 @@ components:
                         $ref: '#/components/schemas/GoogleProtobufAny'
                     description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
             description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
+        SuggestedCandidate:
+            type: object
+            properties:
+                dim:
+                    type: string
+                value:
+                    type: string
+                count:
+                    type: integer
+                    format: int32
+                confidence:
+                    type: number
+                    format: double
+                coverageImpact:
+                    type: number
+                    format: double
+            description: SuggestedCandidate is one off-list value with analysis metadata.
+        SuggestedRecommendation:
+            type: object
+            properties:
+                action:
+                    type: string
+                dim:
+                    type: string
+                value:
+                    type: string
+                reason:
+                    type: string
+                impact:
+                    type: string
+            description: SuggestedRecommendation is an actionable suggestion for the operator.
         Tag:
             type: object
             properties:

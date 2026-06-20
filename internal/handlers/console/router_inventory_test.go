@@ -115,6 +115,8 @@ var expectedOtherRoutes = []string{
 	"GET /enrich-config/",
 	"PUT /enrich-config/",
 	"POST /enrich-config/preview",
+	"GET /enrich-config/eval-suggestions",
+	"POST /enrich-config/promote",
 	"GET /guard-policies/",
 	"POST /guard-policies/",
 	"PUT /guard-policies/",

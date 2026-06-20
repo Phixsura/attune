@@ -28,6 +28,19 @@ service EnrichConfigService {
       body: "*"
     };
   }
+  // GET /fb/v1/console/enrich-config/eval-suggestions
+  // Returns off-list values the LLM suggested during the most recent eval run.
+  rpc GetEvalSuggestions(GetEvalSuggestionsRequest) returns (GetEvalSuggestionsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/enrich-config/eval-suggestions"};
+  }
+  // POST /fb/v1/console/enrich-config/promote
+  // Promotes a suggested value to the dimension taxonomy.
+  rpc PromoteSuggestedValue(PromoteSuggestedValueRequest) returns (PromoteSuggestedValueResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/enrich-config/promote"
+      body: "*"
+    };
+  }
 }
 
 message EnrichConfig {
@@ -65,4 +78,46 @@ message PreviewEnrichPromptRequest {
 
 message PreviewEnrichPromptResponse {
   string rendered_prompt = 1;
+}
+
+// GetEvalSuggestions returns off-list values the LLM suggested during eval.
+message GetEvalSuggestionsRequest {}
+
+message GetEvalSuggestionsResponse {
+  // Coverage per dimension: 1.0 = all on-list, 0.85 = 15% dropped.
+  map<string, double> coverage = 1;
+  // Top suggested candidates sorted by confidence descending.
+  repeated SuggestedCandidate candidates = 2;
+  // Actionable recommendations for high-confidence candidates.
+  repeated SuggestedRecommendation recommendations = 3;
+}
+
+// SuggestedCandidate is one off-list value with analysis metadata.
+message SuggestedCandidate {
+  string dim = 1;
+  string value = 2;
+  int32 count = 3;
+  double confidence = 4;
+  double coverage_impact = 5;
+}
+
+// SuggestedRecommendation is an actionable suggestion for the operator.
+message SuggestedRecommendation {
+  string action = 1;
+  string dim = 2;
+  string value = 3;
+  string reason = 4;
+  string impact = 5;
+}
+
+// PromoteSuggestedValue adds a value to the dimension taxonomy.
+message PromoteSuggestedValueRequest {
+  string dimension_name = 1 [(google.api.field_behavior) = REQUIRED];
+  string value = 2 [(google.api.field_behavior) = REQUIRED];
+  I18nString display_name = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+message PromoteSuggestedValueResponse {
+  // The updated dimension with the new taxonomy value.
+  Dimension dimension = 1;
 }

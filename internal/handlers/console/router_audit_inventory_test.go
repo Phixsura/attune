@@ -132,6 +132,7 @@ func expectedMutatingRouteCoverage() map[string]string {
 		"POST /feedback/{id}/transition":                   "exempt: per-feedback workflow audit path, not unified control-plane audit",
 		"PUT /enrich-config/":                              "audited: enrich_config.update",
 		"POST /enrich-config/preview":                      "exempt: preview-only, does not persist config",
+		"POST /enrich-config/promote":                      "audited: enrich_config.promote_suggested",
 		"PUT /enrichment-runtime/":                         "audited: enrichment_runtime.update",
 		"POST /enrichment-runtime/reset":                   "audited: enrichment_runtime.reset",
 		"POST /enrichment-runtime/rollback":                "audited: enrichment_runtime.rollback",

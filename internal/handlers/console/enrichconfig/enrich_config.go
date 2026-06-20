@@ -13,14 +13,50 @@ import (
 // Handler serves /fb/v1/console/enrich-config (#10 → E3
 // metadata-driven Dimensions).
 type Handler struct {
-	svc   configService
-	audit auditRecorder
+	svc        configService
+	audit      auditRecorder
+	evalGetter EvalSuggestionsGetter
 }
 
 type configService interface {
 	Get(ctx context.Context, tenantID string) (enrich.View, error)
 	Update(ctx context.Context, tenantID string, v enrich.View) error
 	Preview(ctx context.Context, tenantID, sampleContent string) (string, error)
+}
+
+// EvalSuggestionsGetter is a function that returns eval suggestions for a tenant.
+// It's a function type to avoid import cycles with internal/service/eval.
+// The caller (cmd/attune) injects this at wiring time.
+type EvalSuggestionsGetter func(ctx context.Context, tenantID string) (*SuggestedAttrsReport, error)
+
+// SuggestedAttrsReport mirrors eval.SuggestedAttrsReport.
+type SuggestedAttrsReport struct {
+	Coverage        map[string]float64
+	Candidates      []SuggestedCandidate
+	Recommendations []SuggestedRecommendation
+}
+
+// SuggestedCandidate mirrors eval.SuggestedCandidate.
+type SuggestedCandidate struct {
+	Dim            string
+	Value          string
+	Count          int
+	Confidence     float64
+	CoverageImpact float64
+}
+
+// SuggestedRecommendation mirrors eval.SuggestedRecommendation.
+type SuggestedRecommendation struct {
+	Action string
+	Dim    string
+	Value  string
+	Reason string
+	Impact string
+}
+
+// SetEvalGetter sets the function that retrieves eval suggestions.
+func (h *Handler) SetEvalGetter(g EvalSuggestionsGetter) {
+	h.evalGetter = g
 }
 
 func NewHandler(svc *enrich.ConfigService) *Handler {

@@ -1564,6 +1564,24 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		e.Get("/eval-suggestions", dispatcher.Bind(
+			"console.EnrichConfigHandler.GetEvalSuggestions",
+			dispatcher.Empty(func() *attunev1.GetEvalSuggestionsRequest { return ptrext.Of(attunev1.GetEvalSuggestionsRequest{}) }),
+			r.enrichConfig.GetEvalSuggestions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetEvalSuggestionsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		e.Post("/promote", dispatcher.Bind(
+			"console.EnrichConfigHandler.PromoteSuggestedValue",
+			dispatcher.JSON(func() *attunev1.PromoteSuggestedValueRequest {
+				return ptrext.Of(attunev1.PromoteSuggestedValueRequest{})
+			}),
+			r.enrichConfig.PromoteSuggestedValue,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PromoteSuggestedValueRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 	})
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/handlers/console"
+	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
@@ -21,6 +22,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/pkg/crypto"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
@@ -49,6 +51,7 @@ import (
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
+	evalsvc "github.com/Phixsura/attune/internal/service/eval"
 	"github.com/Phixsura/attune/internal/service/feedbackbatch"
 	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
@@ -199,6 +202,7 @@ func buildConsoleRouter(
 	usage := console.NewUsageHandler(feedbackRepo, llmauditrepo.New(pool))
 	gdprHandler := buildGDPRHandler(cfg, pool, auditLogSvc, signer, adminRepo)
 	enrichConfig := console.NewEnrichConfigHandler(enrich.NewConfigService(tenantRepo))
+	enrichConfig.SetEvalGetter(buildEvalSuggestionsGetter(feedbackRepo, tenantRepo, llm))
 	var enrichmentRuntimeHandler *consoleenrichmentruntime.Handler
 	if enrichRuntime != nil {
 		enrichmentRuntimeHandler = console.NewEnrichmentRuntimeHandler(enrichRuntime, cfg.GDPRStepUpTTL)
@@ -366,4 +370,48 @@ func enrichmentRuntimeBootstrapVersion(cfg *config.Config) string {
 		cfg.EnricherLLMMaxQPS,
 		cfg.EnricherLLMBurst,
 	)
+}
+
+// buildEvalSuggestionsGetter builds an enrichconfig.EvalSuggestionsGetter that
+// runs quick consistency evals via the console API (#83).
+func buildEvalSuggestionsGetter(
+	feedbackRepo *feedback.FeedbackRepo,
+	tenantRepo *tenant.TenantRepo,
+	llm llmclient.LLMClient,
+) enrichconfig.EvalSuggestionsGetter {
+	evalEnricher := enrich.NewEnricher(feedbackRepo, llm, "")
+	evaluator := evalsvc.NewEvaluator(feedbackRepo, tenantRepo, evalEnricher)
+	return func(ctx context.Context, _ string) (*enrichconfig.SuggestedAttrsReport, error) {
+		since := time.Now().AddDate(0, 0, -30)
+		report, err := evaluator.RunConsistency(ctx, since, 20)
+		if err != nil {
+			return nil, err
+		}
+		return evalReportToEnrichconfig(report.SuggestedAttrs), nil
+	}
+}
+
+func evalReportToEnrichconfig(sa evalsvc.SuggestedAttrsReport) *enrichconfig.SuggestedAttrsReport {
+	out := ptrext.Of(enrichconfig.SuggestedAttrsReport{
+		Coverage: sa.Coverage,
+	})
+	for _, c := range sa.Candidates {
+		out.Candidates = append(out.Candidates, enrichconfig.SuggestedCandidate{
+			Dim:            c.Dim,
+			Value:          c.Value,
+			Count:          c.Count,
+			Confidence:     c.Confidence,
+			CoverageImpact: c.CoverageImpact,
+		})
+	}
+	for _, r := range sa.Recommendations {
+		out.Recommendations = append(out.Recommendations, enrichconfig.SuggestedRecommendation{
+			Action: r.Action,
+			Dim:    r.Dim,
+			Value:  r.Value,
+			Reason: r.Reason,
+			Impact: r.Impact,
+		})
+	}
+	return out
 }
