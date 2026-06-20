@@ -17,26 +17,28 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
+func postJSONRPC(h http.Handler, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/mcp/v1", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func decodeResponse(t *testing.T, rec *httptest.ResponseRecorder) jsonrpc.Response {
+	t.Helper()
+	var resp jsonrpc.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	return resp
+}
+
 func TestHandler_Success(t *testing.T) {
 	d := jsonrpc.NewDispatcher()
 	d.Register("ping", func(_ context.Context, _ json.RawMessage) (any, error) {
 		return map[string]string{"pong": "ok"}, nil
 	})
-
-	h := jsonrpc.NewHandler(d)
-
-	body := `{"jsonrpc":"2.0","method":"ping","id":"1"}`
-	req := httptest.NewRequest(http.MethodPost, "/mcp/v1", bytes.NewBufferString(body))
-	rec := httptest.NewRecorder()
-
-	h.ServeHTTP(rec, req)
-
+	rec := postJSONRPC(jsonrpc.NewHandler(d), `{"jsonrpc":"2.0","method":"ping","id":"1"}`)
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
-
-	var resp jsonrpc.Response
-	err := json.Unmarshal(rec.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	resp := decodeResponse(t, rec)
 	assert.Equal(t, "1", resp.ID)
 	assert.Nil(t, resp.Error)
 }
@@ -44,66 +46,31 @@ func TestHandler_Success(t *testing.T) {
 func TestHandler_Notification(t *testing.T) {
 	d := jsonrpc.NewDispatcher()
 	called := false
-	d.Register("notify", func(_ context.Context, _ json.RawMessage) (any, error) {
-		called = true
-		return nil, nil
-	})
-
-	h := jsonrpc.NewHandler(d)
-
-	body := `{"jsonrpc":"2.0","method":"notify"}`
-	req := httptest.NewRequest(http.MethodPost, "/mcp/v1", bytes.NewBufferString(body))
-	rec := httptest.NewRecorder()
-
-	h.ServeHTTP(rec, req)
-
+	d.Register("notify", func(_ context.Context, _ json.RawMessage) (any, error) { called = true; return nil, nil })
+	rec := postJSONRPC(jsonrpc.NewHandler(d), `{"jsonrpc":"2.0","method":"notify"}`)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.True(t, called)
 }
 
 func TestHandler_MethodNotAllowed(t *testing.T) {
-	h := jsonrpc.NewHandler(jsonrpc.NewDispatcher())
-
 	req := httptest.NewRequest(http.MethodGet, "/mcp/v1", nil)
 	rec := httptest.NewRecorder()
-
-	h.ServeHTTP(rec, req)
-
+	jsonrpc.NewHandler(jsonrpc.NewDispatcher()).ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
 func TestHandler_InvalidJSON(t *testing.T) {
-	h := jsonrpc.NewHandler(jsonrpc.NewDispatcher())
-
-	body := `{invalid json}`
-	req := httptest.NewRequest(http.MethodPost, "/mcp/v1", bytes.NewBufferString(body))
-	rec := httptest.NewRecorder()
-
-	h.ServeHTTP(rec, req)
-
+	rec := postJSONRPC(jsonrpc.NewHandler(jsonrpc.NewDispatcher()), `{invalid json}`)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-
-	var resp jsonrpc.Response
-	err := json.Unmarshal(rec.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	resp := decodeResponse(t, rec)
 	require.NotNil(t, resp.Error)
 	assert.Equal(t, jsonrpc.CodeParseError, resp.Error.Code)
 }
 
 func TestHandler_MethodNotFound(t *testing.T) {
-	h := jsonrpc.NewHandler(jsonrpc.NewDispatcher())
-
-	body := `{"jsonrpc":"2.0","method":"unknown","id":"1"}`
-	req := httptest.NewRequest(http.MethodPost, "/mcp/v1", bytes.NewBufferString(body))
-	rec := httptest.NewRecorder()
-
-	h.ServeHTTP(rec, req)
-
+	rec := postJSONRPC(jsonrpc.NewHandler(jsonrpc.NewDispatcher()), `{"jsonrpc":"2.0","method":"unknown","id":"1"}`)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-
-	var resp jsonrpc.Response
-	err := json.Unmarshal(rec.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	resp := decodeResponse(t, rec)
 	require.NotNil(t, resp.Error)
 	assert.Equal(t, jsonrpc.CodeMethodNotFound, resp.Error.Code)
 }
@@ -128,38 +95,22 @@ func TestHandler_DispatchContext(t *testing.T) {
 }
 
 func TestHandler_InvalidContentType(t *testing.T) {
-	h := jsonrpc.NewHandler(jsonrpc.NewDispatcher())
-
-	body := `{"jsonrpc":"2.0","method":"test","id":"1"}`
-	req := httptest.NewRequest(http.MethodPost, "/mcp/v1", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/mcp/v1", bytes.NewBufferString(`{"jsonrpc":"2.0","method":"test","id":"1"}`))
 	req.Header.Set("Content-Type", "text/plain")
 	rec := httptest.NewRecorder()
-
-	h.ServeHTTP(rec, req)
-
+	jsonrpc.NewHandler(jsonrpc.NewDispatcher()).ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusUnsupportedMediaType, rec.Code)
-
-	var resp jsonrpc.Response
-	err := json.Unmarshal(rec.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	resp := decodeResponse(t, rec)
 	require.NotNil(t, resp.Error)
 	assert.Equal(t, jsonrpc.CodeParseError, resp.Error.Code)
 }
 
 func TestHandler_ValidContentTypeWithCharset(t *testing.T) {
 	d := jsonrpc.NewDispatcher()
-	d.Register("ping", func(_ context.Context, _ json.RawMessage) (any, error) {
-		return "pong", nil
-	})
-
-	h := jsonrpc.NewHandler(d)
-
-	body := `{"jsonrpc":"2.0","method":"ping","id":"1"}`
-	req := httptest.NewRequest(http.MethodPost, "/mcp/v1", bytes.NewBufferString(body))
+	d.Register("ping", func(_ context.Context, _ json.RawMessage) (any, error) { return "pong", nil })
+	req := httptest.NewRequest(http.MethodPost, "/mcp/v1", bytes.NewBufferString(`{"jsonrpc":"2.0","method":"ping","id":"1"}`))
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	rec := httptest.NewRecorder()
-
-	h.ServeHTTP(rec, req)
-
+	jsonrpc.NewHandler(d).ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }

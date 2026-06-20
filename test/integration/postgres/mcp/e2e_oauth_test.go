@@ -495,150 +495,30 @@ func TestE2E_SessionPersistence(t *testing.T) {
 
 // TestE2E_CrossTenantAccessBlocked verifies tokens from one tenant cannot access another.
 func TestE2E_CrossTenantAccessBlocked(t *testing.T) {
-	pool := testdb.NewPool(t)
-	ctx := context.Background()
+	envA := newTestEnv(t, "tenant-a-test", "Tenant A")
+	envB := newTestEnv(t, "tenant-b-test", "Tenant B")
 
-	// Create two tenants
-	tenantRepo := tenant.NewTenant(pool)
-	tenantA, _ := tenantRepo.Create(ctx, "tenant-a-test", "Tenant A")
-	tenantB, _ := tenantRepo.Create(ctx, "tenant-b-test", "Tenant B")
+	clientA := envA.createClient(t, "tenant-a-agent", []string{"mcp:read"})
+	clientB := envB.createClient(t, "tenant-b-agent", []string{"mcp:read"})
 
-	clientsRepo := mcprepo.NewClients(pool)
-	codesRepo := mcprepo.NewCodes(pool)
-	tokensRepo := mcprepo.NewTokens(pool)
-	sessionsRepo := mcprepo.NewSessions(pool)
+	tokenDataA := envA.completeOAuthFlow(t, clientA.ID, "mcp:read")
+	tokenDataB := envB.completeOAuthFlow(t, clientB.ID, "mcp:read")
 
-	cfg := mcp.Config{
-		BaseURL:            "https://test.attune.io",
-		JWTSecret:          []byte("test-secret-key-for-jwt-signing-32bytes!"),
-		JWTIssuer:          "https://test.attune.io/mcp/oauth",
-		RateLimitPerMinute: 100,
-		AccessTokenTTL:     time.Hour,
-		RefreshTokenTTL:    7 * 24 * time.Hour,
+	claimsA := extractJWTClaims(t, tokenDataA.AccessToken)
+	claimsB := extractJWTClaims(t, tokenDataB.AccessToken)
+
+	tenantInTokenA, _ := claimsA["tenant_id"].(string)
+	tenantInTokenB, _ := claimsB["tenant_id"].(string)
+
+	if tenantInTokenA != envA.tenantID {
+		t.Errorf("token A tenant_id = %s, want %s", tenantInTokenA, envA.tenantID)
 	}
-
-	stores := mcp.Stores{
-		Clients:          &clientStoreAdapter{repo: clientsRepo},
-		Codes:            &codeStoreAdapter{repo: codesRepo},
-		Tokens:           &tokenStoreAdapter{repo: tokensRepo},
-		Sessions:         &sessionStoreAdapter{repo: sessionsRepo},
-		ClientValidator:  &clientValidatorAdapter{repo: clientsRepo},
-		SessionValidator: &sessionValidatorAdapter{repo: sessionsRepo},
-	}
-
-	// Create separate feedback repos for each tenant
-	feedbackRepoA := feedback.NewFeedback(pool)
-	feedbackRepoB := feedback.NewFeedback(pool)
-
-	depsA := ptrext.Of(tools.Deps{
-		Feedback: &feedbackReaderAdapter{repo: feedbackRepoA, tenantID: tenantA},
-	})
-	depsB := ptrext.Of(tools.Deps{
-		Feedback: &feedbackReaderAdapter{repo: feedbackRepoB, tenantID: tenantB},
-	})
-
-	_ = depsB // We'll use tenant A's handler but verify the JWT contains tenant A's ID
-
-	handler := mcp.NewHandler(cfg, stores, depsA)
-	router := handler.Routes()
-
-	testRouter := chi.NewRouter()
-	testRouter.Mount("/mcp", router)
-
-	server := httptest.NewServer(testRouter)
-	defer server.Close()
-
-	// Create client for tenant A
-	clientA, _ := clientsRepo.Create(ctx, mcprepo.CreateClientParams{
-		TenantID:     tenantA,
-		Name:         "tenant-a-agent",
-		RedirectURIs: []string{"http://localhost:8080/callback"},
-		Scopes:       []string{"mcp:read"},
-		CreatedBy:    "test-admin",
-	})
-
-	// Create client for tenant B
-	clientB, _ := clientsRepo.Create(ctx, mcprepo.CreateClientParams{
-		TenantID:     tenantB,
-		Name:         "tenant-b-agent",
-		RedirectURIs: []string{"http://localhost:8080/callback"},
-		Scopes:       []string{"mcp:read"},
-		CreatedBy:    "test-admin",
-	})
-
-	// Get tokens for both tenants
-	getToken := func(clientID uuid.UUID) string {
-		codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-		h := sha256.Sum256([]byte(codeVerifier))
-		codeChallenge := base64.RawURLEncoding.EncodeToString(h[:])
-
-		noRedirectClient := &http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
-
-		authResp, _ := noRedirectClient.Get(server.URL + "/mcp/oauth/authorize?" + url.Values{
-			"client_id":             {clientID.String()},
-			"redirect_uri":          {"http://localhost:8080/callback"},
-			"response_type":         {"code"},
-			"scope":                 {"mcp:read"},
-			"state":                 {"test"},
-			"code_challenge":        {codeChallenge},
-			"code_challenge_method": {"S256"},
-		}.Encode())
-		defer authResp.Body.Close()
-
-		location := authResp.Header.Get("Location")
-		redirectURL, _ := url.Parse(location)
-		authCode := redirectURL.Query().Get("code")
-
-		tokenResp, _ := http.PostForm(server.URL+"/mcp/oauth/token", url.Values{
-			"grant_type":    {"authorization_code"},
-			"code":          {authCode},
-			"client_id":     {clientID.String()},
-			"redirect_uri":  {"http://localhost:8080/callback"},
-			"code_verifier": {codeVerifier},
-		})
-		defer tokenResp.Body.Close()
-
-		var tokenData struct {
-			AccessToken string `json:"access_token"`
-		}
-		json.NewDecoder(tokenResp.Body).Decode(&tokenData)
-		return tokenData.AccessToken
-	}
-
-	tokenA := getToken(clientA.ID)
-	tokenB := getToken(clientB.ID)
-
-	// Extract tenant IDs from JWTs
-	extractTenantID := func(token string) string {
-		parts := strings.Split(token, ".")
-		payload, _ := base64.RawURLEncoding.DecodeString(parts[1])
-		var claims struct {
-			TenantID string `json:"tenant_id"`
-		}
-		json.Unmarshal(payload, &claims)
-		return claims.TenantID
-	}
-
-	tenantInTokenA := extractTenantID(tokenA)
-	tenantInTokenB := extractTenantID(tokenB)
-
-	// Verify tenant IDs are correctly isolated
-	if tenantInTokenA != tenantA {
-		t.Errorf("token A tenant_id = %s, want %s", tenantInTokenA, tenantA)
-	}
-	if tenantInTokenB != tenantB {
-		t.Errorf("token B tenant_id = %s, want %s", tenantInTokenB, tenantB)
+	if tenantInTokenB != envB.tenantID {
+		t.Errorf("token B tenant_id = %s, want %s", tenantInTokenB, envB.tenantID)
 	}
 	if tenantInTokenA == tenantInTokenB {
 		t.Error("tenant A and B tokens should have different tenant_ids")
 	}
-
-	t.Logf("Cross-tenant isolation verified: tokenA.tenant=%s, tokenB.tenant=%s", tenantInTokenA, tenantInTokenB)
 }
 
 // Adapter implementations to bridge repo types to oauth interface types
@@ -711,14 +591,17 @@ type tokenStoreAdapter struct {
 	repo *mcprepo.TokensRepo
 }
 
+func repoToOAuthToken(t *mcprepo.RefreshToken) *oauth.RefreshToken {
+	return &oauth.RefreshToken{
+		ID: t.ID, ClientID: t.ClientID, SessionID: t.SessionID,
+		TokenHash: t.TokenHash, TenantID: t.UserID, Scopes: t.Scopes, ExpiresAt: t.ExpiresAt,
+	}
+}
+
 func (a *tokenStoreAdapter) Create(ctx context.Context, token *oauth.RefreshToken) error {
 	_, err := a.repo.CreateWithHash(ctx, mcprepo.CreateWithHashParams{
-		ClientID:  token.ClientID,
-		SessionID: token.SessionID,
-		TokenHash: token.TokenHash,
-		Scopes:    token.Scopes,
-		UserID:    token.TenantID, // oauth uses TenantID, repo uses UserID
-		ExpiresAt: token.ExpiresAt,
+		ClientID: token.ClientID, SessionID: token.SessionID, TokenHash: token.TokenHash,
+		Scopes: token.Scopes, UserID: token.TenantID, ExpiresAt: token.ExpiresAt,
 	})
 	return err
 }
@@ -728,15 +611,7 @@ func (a *tokenStoreAdapter) GetByHash(ctx context.Context, hash string) (*oauth.
 	if err != nil {
 		return nil, oauth.ErrInvalidRefreshToken
 	}
-	return &oauth.RefreshToken{
-		ID:        t.ID,
-		ClientID:  t.ClientID,
-		SessionID: t.SessionID,
-		TokenHash: t.TokenHash,
-		TenantID:  t.UserID, // repo uses UserID, oauth uses TenantID
-		Scopes:    t.Scopes,
-		ExpiresAt: t.ExpiresAt,
-	}, nil
+	return repoToOAuthToken(t), nil
 }
 
 func (a *tokenStoreAdapter) Revoke(ctx context.Context, id uuid.UUID) error {
@@ -748,41 +623,17 @@ func (a *tokenStoreAdapter) Consume(ctx context.Context, hash string) (*oauth.Re
 	if err != nil {
 		return nil, oauth.ErrInvalidRefreshToken
 	}
-	return &oauth.RefreshToken{
-		ID:        t.ID,
-		ClientID:  t.ClientID,
-		SessionID: t.SessionID,
-		TokenHash: t.TokenHash,
-		TenantID:  t.UserID, // repo uses UserID, oauth uses TenantID
-		Scopes:    t.Scopes,
-		ExpiresAt: t.ExpiresAt,
-	}, nil
+	return repoToOAuthToken(t), nil
 }
 
 func (a *tokenStoreAdapter) RotateToken(ctx context.Context, oldHash, newHash string, newExpiresAt time.Time) (*oauth.RefreshToken, *oauth.RefreshToken, error) {
 	old, newTok, err := a.repo.RotateToken(ctx, mcprepo.RotateTokenParams{
-		OldTokenHash: oldHash,
-		NewTokenHash: newHash,
-		NewExpiresAt: newExpiresAt,
+		OldTokenHash: oldHash, NewTokenHash: newHash, NewExpiresAt: newExpiresAt,
 	})
 	if err != nil {
 		return nil, nil, oauth.ErrInvalidRefreshToken
 	}
-	return &oauth.RefreshToken{
-			ID:        old.ID,
-			ClientID:  old.ClientID,
-			SessionID: old.SessionID,
-			TokenHash: old.TokenHash,
-			TenantID:  old.UserID, // repo uses UserID, oauth uses TenantID
-			Scopes:    old.Scopes,
-		}, &oauth.RefreshToken{
-			ID:        newTok.ID,
-			ClientID:  newTok.ClientID,
-			SessionID: newTok.SessionID,
-			TokenHash: newTok.TokenHash,
-			TenantID:  newTok.UserID, // repo uses UserID, oauth uses TenantID
-			Scopes:    newTok.Scopes,
-		}, nil
+	return repoToOAuthToken(old), repoToOAuthToken(newTok), nil
 }
 
 type sessionStoreAdapter struct {

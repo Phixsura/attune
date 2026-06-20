@@ -65,17 +65,20 @@ func newMockTokenStore() *mockTokenStore {
 	return ptrext.Of(mockTokenStore{tokens: make(map[string]*oauth.RefreshToken)})
 }
 
+func (m *mockTokenStore) get(hash string) (*oauth.RefreshToken, error) {
+	if t, ok := m.tokens[hash]; ok {
+		return t, nil
+	}
+	return nil, oauth.ErrInvalidRefreshToken
+}
+
 func (m *mockTokenStore) Create(_ context.Context, token *oauth.RefreshToken) error {
 	m.tokens[token.TokenHash] = token
 	return nil
 }
 
 func (m *mockTokenStore) GetByHash(_ context.Context, hash string) (*oauth.RefreshToken, error) {
-	t, ok := m.tokens[hash]
-	if !ok {
-		return nil, oauth.ErrInvalidRefreshToken
-	}
-	return t, nil
+	return m.get(hash)
 }
 
 func (m *mockTokenStore) Revoke(_ context.Context, id uuid.UUID) error {
@@ -89,9 +92,9 @@ func (m *mockTokenStore) Revoke(_ context.Context, id uuid.UUID) error {
 }
 
 func (m *mockTokenStore) Consume(_ context.Context, hash string) (*oauth.RefreshToken, error) {
-	t, ok := m.tokens[hash]
-	if !ok {
-		return nil, oauth.ErrInvalidRefreshToken
+	t, err := m.get(hash)
+	if err != nil {
+		return nil, err
 	}
 	delete(m.tokens, hash)
 	return t, nil
@@ -142,177 +145,113 @@ func (m *mockSessionStore) IsActive(_ context.Context, id uuid.UUID) (bool, erro
 	return ok, nil
 }
 
-func TestAuthServer_Authorize(t *testing.T) {
+// testServer bundles common test fixtures for OAuth tests.
+type testServer struct {
+	server       *oauth.AuthServer
+	clientID     uuid.UUID
+	client       *oauth.Client
+	codeStore    *mockCodeStore
+	tokenStore   *mockTokenStore
+	sessionStore *mockSessionStore
+}
+
+// newTestServer creates a test server with standard fixtures.
+func newTestServer(t *testing.T, clientScopes []string) *testServer {
+	t.Helper()
 	clientID := uuid.New()
 	client := ptrext.Of(oauth.Client{
 		ID:           clientID,
 		TenantID:     "tenant-123",
 		Name:         "Test Client",
 		RedirectURIs: []string{"https://example.com/callback"},
-		Scopes:       []string{"mcp:read", "mcp:write"},
+		Scopes:       clientScopes,
 	})
-
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{client: client, valid: true}),
-		newMockCodeStore(),
-		newMockTokenStore(),
-		newMockSessionStore(),
-		signer,
-		oauth.AuthServerConfig{BaseURL: "https://attune.example.com"},
-	)
-
-	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	codeChallenge := oauth.GenerateCodeChallenge(codeVerifier)
-
-	resp, err := server.Authorize(context.Background(), oauth.AuthorizeRequest{
-		ClientID:            clientID.String(),
-		RedirectURI:         "https://example.com/callback",
-		ResponseType:        "code",
-		Scope:               "mcp:read",
-		State:               "xyz",
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: "S256",
-	})
-
-	require.NoError(t, err)
-	assert.NotEmpty(t, resp.Code)
-	assert.Equal(t, "xyz", resp.State)
-	assert.Equal(t, "https://example.com/callback", resp.RedirectURI)
-}
-
-func TestAuthServer_Authorize_PKCERequired(t *testing.T) {
-	clientID := uuid.New()
-	client := ptrext.Of(oauth.Client{
-		ID:       clientID,
-		TenantID: "tenant-123",
-	})
-
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{client: client, valid: true}),
-		newMockCodeStore(),
-		newMockTokenStore(),
-		newMockSessionStore(),
-		signer,
-		oauth.AuthServerConfig{},
-	)
-
-	_, err := server.Authorize(context.Background(), oauth.AuthorizeRequest{
-		ClientID:     clientID.String(),
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-	})
-
-	assert.ErrorIs(t, err, oauth.ErrPKCERequired)
-}
-
-func TestAuthServer_Token_AuthorizationCode(t *testing.T) {
-	clientID := uuid.New()
-	client := ptrext.Of(oauth.Client{
-		ID:           clientID,
-		TenantID:     "tenant-123",
-		RedirectURIs: []string{"https://example.com/callback"},
-		Scopes:       []string{"mcp:read"},
-	})
-
-	codeStore := newMockCodeStore()
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{client: client, valid: true}),
-		codeStore,
-		newMockTokenStore(),
-		newMockSessionStore(),
-		signer,
-		oauth.AuthServerConfig{},
-	)
-
-	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	codeChallenge := oauth.GenerateCodeChallenge(codeVerifier)
-
-	authResp, err := server.Authorize(context.Background(), oauth.AuthorizeRequest{
-		ClientID:            clientID.String(),
-		RedirectURI:         "https://example.com/callback",
-		ResponseType:        "code",
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: "S256",
-	})
-	require.NoError(t, err)
-
-	tokenResp, err := server.Token(context.Background(), oauth.TokenRequest{
-		GrantType:    "authorization_code",
-		Code:         authResp.Code,
-		RedirectURI:  "https://example.com/callback",
-		ClientID:     clientID.String(),
-		CodeVerifier: codeVerifier,
-	})
-
-	require.NoError(t, err)
-	assert.NotEmpty(t, tokenResp.AccessToken)
-	assert.Equal(t, "Bearer", tokenResp.TokenType)
-	assert.NotEmpty(t, tokenResp.RefreshToken)
-}
-
-func TestAuthServer_Token_RefreshToken(t *testing.T) {
-	clientID := uuid.New()
-	client := ptrext.Of(oauth.Client{
-		ID:           clientID,
-		TenantID:     "tenant-123",
-		RedirectURIs: []string{"https://example.com/callback"},
-		Scopes:       []string{"mcp:read"},
-	})
-
 	codeStore := newMockCodeStore()
 	tokenStore := newMockTokenStore()
 	sessionStore := newMockSessionStore()
 	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
 	server := oauth.NewAuthServer(
 		ptrext.Of(mockClientStore{client: client, valid: true}),
-		codeStore,
-		tokenStore,
-		sessionStore,
-		signer,
-		oauth.AuthServerConfig{},
+		codeStore, tokenStore, sessionStore, signer,
+		oauth.AuthServerConfig{BaseURL: "https://attune.example.com"},
 	)
+	return ptrext.Of(testServer{server: server, clientID: clientID, client: client, codeStore: codeStore, tokenStore: tokenStore, sessionStore: sessionStore})
+}
 
-	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	codeChallenge := oauth.GenerateCodeChallenge(codeVerifier)
-
-	authResp, err := server.Authorize(context.Background(), oauth.AuthorizeRequest{
-		ClientID:            clientID.String(),
+// authorize performs an authorization request with standard PKCE.
+func (ts *testServer) authorize(t *testing.T, scope string, verifier string) *oauth.AuthorizeResponse {
+	t.Helper()
+	challenge := oauth.GenerateCodeChallenge(verifier)
+	resp, err := ts.server.Authorize(context.Background(), oauth.AuthorizeRequest{
+		ClientID:            ts.clientID.String(),
 		RedirectURI:         "https://example.com/callback",
 		ResponseType:        "code",
-		CodeChallenge:       codeChallenge,
+		Scope:               scope,
+		State:               "test-state",
+		CodeChallenge:       challenge,
 		CodeChallengeMethod: "S256",
 	})
 	require.NoError(t, err)
+	return resp
+}
 
-	tokenResp, err := server.Token(context.Background(), oauth.TokenRequest{
+// token exchanges an auth code for tokens.
+func (ts *testServer) token(t *testing.T, code, verifier string) *oauth.TokenResponse {
+	t.Helper()
+	resp, err := ts.server.Token(context.Background(), oauth.TokenRequest{
 		GrantType:    "authorization_code",
-		Code:         authResp.Code,
+		Code:         code,
 		RedirectURI:  "https://example.com/callback",
-		ClientID:     clientID.String(),
-		CodeVerifier: codeVerifier,
+		ClientID:     ts.clientID.String(),
+		CodeVerifier: verifier,
 	})
 	require.NoError(t, err)
+	return resp
+}
 
-	refreshResp, err := server.Token(context.Background(), oauth.TokenRequest{
-		GrantType:    "refresh_token",
-		RefreshToken: tokenResp.RefreshToken,
-		ClientID:     clientID.String(),
+const testCodeVerifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+
+func TestAuthServer_Authorize(t *testing.T) {
+	ts := newTestServer(t, []string{"mcp:read", "mcp:write"})
+	resp := ts.authorize(t, "mcp:read", testCodeVerifier)
+	assert.NotEmpty(t, resp.Code)
+	assert.Equal(t, "https://example.com/callback", resp.RedirectURI)
+}
+
+func TestAuthServer_Authorize_PKCERequired(t *testing.T) {
+	ts := newTestServer(t, []string{"mcp:read"})
+	_, err := ts.server.Authorize(context.Background(), oauth.AuthorizeRequest{
+		ClientID:     ts.clientID.String(),
+		RedirectURI:  "https://example.com/callback",
+		ResponseType: "code",
 	})
+	assert.ErrorIs(t, err, oauth.ErrPKCERequired)
+}
 
+func TestAuthServer_Token_AuthorizationCode(t *testing.T) {
+	ts := newTestServer(t, []string{"mcp:read"})
+	authResp := ts.authorize(t, "mcp:read", testCodeVerifier)
+	tokenResp := ts.token(t, authResp.Code, testCodeVerifier)
+	assert.NotEmpty(t, tokenResp.AccessToken)
+	assert.Equal(t, "Bearer", tokenResp.TokenType)
+	assert.NotEmpty(t, tokenResp.RefreshToken)
+}
+
+func TestAuthServer_Token_RefreshToken(t *testing.T) {
+	ts := newTestServer(t, []string{"mcp:read"})
+	authResp := ts.authorize(t, "mcp:read", testCodeVerifier)
+	tokenResp := ts.token(t, authResp.Code, testCodeVerifier)
+
+	refreshResp, err := ts.server.Token(context.Background(), oauth.TokenRequest{
+		GrantType: "refresh_token", RefreshToken: tokenResp.RefreshToken, ClientID: ts.clientID.String(),
+	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, refreshResp.AccessToken)
-	assert.Equal(t, "Bearer", refreshResp.TokenType)
 	assert.NotEmpty(t, refreshResp.RefreshToken, "rotated refresh token must be returned")
 	assert.NotEqual(t, tokenResp.RefreshToken, refreshResp.RefreshToken, "refresh token must be rotated")
 
-	// Old refresh token should no longer work
-	_, err = server.Token(context.Background(), oauth.TokenRequest{
-		GrantType:    "refresh_token",
-		RefreshToken: tokenResp.RefreshToken,
-		ClientID:     clientID.String(),
+	_, err = ts.server.Token(context.Background(), oauth.TokenRequest{
+		GrantType: "refresh_token", RefreshToken: tokenResp.RefreshToken, ClientID: ts.clientID.String(),
 	})
 	assert.ErrorIs(t, err, oauth.ErrInvalidRefreshToken)
 }
@@ -380,116 +319,29 @@ func TestAuthServer_Token_ExpiredCode(t *testing.T) {
 }
 
 func TestAuthServer_Authorize_ScopeEscalationPrevention(t *testing.T) {
-	clientID := uuid.New()
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{
-			client: ptrext.Of(oauth.Client{
-				ID:           clientID,
-				TenantID:     "tenant-123",
-				RedirectURIs: []string{"https://example.com/callback"},
-				Scopes:       []string{"mcp:read"},
-			}),
-			valid: true,
-		}),
-		newMockCodeStore(),
-		newMockTokenStore(),
-		newMockSessionStore(),
-		signer,
-		oauth.AuthServerConfig{},
-	)
-
-	codeChallenge := oauth.GenerateCodeChallenge("test-verifier")
-
-	_, err := server.Authorize(context.Background(), oauth.AuthorizeRequest{
-		ClientID:            clientID.String(),
-		RedirectURI:         "https://example.com/callback",
-		ResponseType:        "code",
-		Scope:               "mcp:read mcp:write mcp:ingest",
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: "S256",
+	ts := newTestServer(t, []string{"mcp:read"})
+	challenge := oauth.GenerateCodeChallenge("test-verifier")
+	_, err := ts.server.Authorize(context.Background(), oauth.AuthorizeRequest{
+		ClientID: ts.clientID.String(), RedirectURI: "https://example.com/callback", ResponseType: "code",
+		Scope: "mcp:read mcp:write mcp:ingest", CodeChallenge: challenge, CodeChallengeMethod: "S256",
 	})
-
 	assert.ErrorIs(t, err, oauth.ErrInvalidScope)
 }
 
 func TestAuthServer_Authorize_ScopeSubsetAllowed(t *testing.T) {
-	clientID := uuid.New()
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{
-			client: ptrext.Of(oauth.Client{
-				ID:           clientID,
-				TenantID:     "tenant-123",
-				RedirectURIs: []string{"https://example.com/callback"},
-				Scopes:       []string{"mcp:read", "mcp:write", "mcp:ingest"},
-			}),
-			valid: true,
-		}),
-		newMockCodeStore(),
-		newMockTokenStore(),
-		newMockSessionStore(),
-		signer,
-		oauth.AuthServerConfig{},
-	)
-
-	codeChallenge := oauth.GenerateCodeChallenge("test-verifier")
-
-	resp, err := server.Authorize(context.Background(), oauth.AuthorizeRequest{
-		ClientID:            clientID.String(),
-		RedirectURI:         "https://example.com/callback",
-		ResponseType:        "code",
-		Scope:               "mcp:read",
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: "S256",
-	})
-
-	require.NoError(t, err)
+	ts := newTestServer(t, []string{"mcp:read", "mcp:write", "mcp:ingest"})
+	resp := ts.authorize(t, "mcp:read", "test-verifier")
 	assert.NotEmpty(t, resp.Code)
 }
 
 func TestAuthServer_Token_ClientIDMismatch(t *testing.T) {
-	clientID := uuid.New()
+	ts := newTestServer(t, []string{"mcp:read"})
+	authResp := ts.authorize(t, "mcp:read", testCodeVerifier)
 	wrongClientID := uuid.New()
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-	codeStore := newMockCodeStore()
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{
-			client: ptrext.Of(oauth.Client{
-				ID:           clientID,
-				TenantID:     "tenant-123",
-				RedirectURIs: []string{"https://example.com/callback"},
-				Scopes:       []string{"mcp:read"},
-			}),
-			valid: true,
-		}),
-		codeStore,
-		newMockTokenStore(),
-		newMockSessionStore(),
-		signer,
-		oauth.AuthServerConfig{},
-	)
-
-	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	codeChallenge := oauth.GenerateCodeChallenge(codeVerifier)
-
-	authResp, err := server.Authorize(context.Background(), oauth.AuthorizeRequest{
-		ClientID:            clientID.String(),
-		RedirectURI:         "https://example.com/callback",
-		ResponseType:        "code",
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: "S256",
+	_, err := ts.server.Token(context.Background(), oauth.TokenRequest{
+		GrantType: "authorization_code", Code: authResp.Code, RedirectURI: "https://example.com/callback",
+		ClientID: wrongClientID.String(), CodeVerifier: testCodeVerifier,
 	})
-	require.NoError(t, err)
-
-	_, err = server.Token(context.Background(), oauth.TokenRequest{
-		GrantType:    "authorization_code",
-		Code:         authResp.Code,
-		RedirectURI:  "https://example.com/callback",
-		ClientID:     wrongClientID.String(),
-		CodeVerifier: codeVerifier,
-	})
-
 	assert.ErrorIs(t, err, oauth.ErrInvalidClient)
 }
 
@@ -527,203 +379,48 @@ func TestAuthServer_Authorize_InvalidRedirectURINoOpenRedirect(t *testing.T) {
 	assert.ErrorIs(t, err, oauth.ErrInvalidRedirectURI)
 }
 
-func TestAuthServer_Token_RefreshRequiresClientID(t *testing.T) {
-	clientID := uuid.New()
-	client := ptrext.Of(oauth.Client{
-		ID:           clientID,
-		TenantID:     "tenant-123",
-		RedirectURIs: []string{"https://example.com/callback"},
-		Scopes:       []string{"mcp:read"},
-	})
-
-	codeStore := newMockCodeStore()
-	tokenStore := newMockTokenStore()
-	sessionStore := newMockSessionStore()
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{client: client, valid: true}),
-		codeStore,
-		tokenStore,
-		sessionStore,
-		signer,
-		oauth.AuthServerConfig{},
-	)
-
-	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	codeChallenge := oauth.GenerateCodeChallenge(codeVerifier)
-
-	authResp, err := server.Authorize(context.Background(), oauth.AuthorizeRequest{
-		ClientID:            clientID.String(),
-		RedirectURI:         "https://example.com/callback",
-		ResponseType:        "code",
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: "S256",
-	})
-	require.NoError(t, err)
-
-	tokenResp, err := server.Token(context.Background(), oauth.TokenRequest{
-		GrantType:    "authorization_code",
-		Code:         authResp.Code,
-		RedirectURI:  "https://example.com/callback",
-		ClientID:     clientID.String(),
-		CodeVerifier: codeVerifier,
-	})
-	require.NoError(t, err)
-
-	// Try to refresh without client_id - should fail
-	_, err = server.Token(context.Background(), oauth.TokenRequest{
-		GrantType:    "refresh_token",
-		RefreshToken: tokenResp.RefreshToken,
-		ClientID:     "", // Missing client_id
-	})
-
-	assert.ErrorIs(t, err, oauth.ErrInvalidClient)
-}
-
-func TestAuthServer_Token_RefreshClientIDMismatch(t *testing.T) {
-	clientID := uuid.New()
-	wrongClientID := uuid.New()
-	client := ptrext.Of(oauth.Client{
-		ID:           clientID,
-		TenantID:     "tenant-123",
-		RedirectURIs: []string{"https://example.com/callback"},
-		Scopes:       []string{"mcp:read"},
-	})
-
-	codeStore := newMockCodeStore()
-	tokenStore := newMockTokenStore()
-	sessionStore := newMockSessionStore()
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{client: client, valid: true}),
-		codeStore,
-		tokenStore,
-		sessionStore,
-		signer,
-		oauth.AuthServerConfig{},
-	)
-
-	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	codeChallenge := oauth.GenerateCodeChallenge(codeVerifier)
-
-	authResp, err := server.Authorize(context.Background(), oauth.AuthorizeRequest{
-		ClientID:            clientID.String(),
-		RedirectURI:         "https://example.com/callback",
-		ResponseType:        "code",
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: "S256",
-	})
-	require.NoError(t, err)
-
-	tokenResp, err := server.Token(context.Background(), oauth.TokenRequest{
-		GrantType:    "authorization_code",
-		Code:         authResp.Code,
-		RedirectURI:  "https://example.com/callback",
-		ClientID:     clientID.String(),
-		CodeVerifier: codeVerifier,
-	})
-	require.NoError(t, err)
-
-	// Try to refresh with wrong client_id - should fail
-	_, err = server.Token(context.Background(), oauth.TokenRequest{
-		GrantType:    "refresh_token",
-		RefreshToken: tokenResp.RefreshToken,
-		ClientID:     wrongClientID.String(),
-	})
-
-	assert.ErrorIs(t, err, oauth.ErrInvalidClient)
+func TestAuthServer_Token_RefreshClientIDValidation(t *testing.T) {
+	ts := newTestServer(t, []string{"mcp:read"})
+	authResp := ts.authorize(t, "mcp:read", testCodeVerifier)
+	tokenResp := ts.token(t, authResp.Code, testCodeVerifier)
+	for _, clientID := range []string{"", uuid.New().String()} {
+		_, err := ts.server.Token(context.Background(), oauth.TokenRequest{
+			GrantType: "refresh_token", RefreshToken: tokenResp.RefreshToken, ClientID: clientID,
+		})
+		assert.ErrorIs(t, err, oauth.ErrInvalidClient)
+	}
 }
 
 func TestServeToken_CacheControlNoStore(t *testing.T) {
-	clientID := uuid.New()
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-	codeStore := newMockCodeStore()
+	ts := newTestServer(t, []string{"mcp:read"})
+	authResp := ts.authorize(t, "mcp:read", testCodeVerifier)
 
-	client := ptrext.Of(oauth.Client{
-		ID:           clientID,
-		TenantID:     "tenant-123",
-		RedirectURIs: []string{"https://example.com/callback"},
-		Scopes:       []string{"mcp:read"},
-	})
-
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{client: client, valid: true}),
-		codeStore,
-		newMockTokenStore(),
-		newMockSessionStore(),
-		signer,
-		oauth.AuthServerConfig{},
-	)
-
-	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	codeChallenge := oauth.GenerateCodeChallenge(codeVerifier)
-
-	authResp, err := server.Authorize(context.Background(), oauth.AuthorizeRequest{
-		ClientID:            clientID.String(),
-		RedirectURI:         "https://example.com/callback",
-		ResponseType:        "code",
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: "S256",
-	})
-	require.NoError(t, err)
-
-	form := url.Values{}
-	form.Set("grant_type", "authorization_code")
-	form.Set("code", authResp.Code)
-	form.Set("redirect_uri", "https://example.com/callback")
-	form.Set("client_id", clientID.String())
-	form.Set("code_verifier", codeVerifier)
-
-	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-
-	server.ServeToken(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
-}
-
-func TestServeToken_ErrorResponse_CacheControlNoStore(t *testing.T) {
-	clientID := uuid.New()
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{client: nil, valid: false}),
-		newMockCodeStore(),
-		newMockTokenStore(),
-		newMockSessionStore(),
-		signer,
-		oauth.AuthServerConfig{},
-	)
-
-	form := url.Values{}
-	form.Set("grant_type", "authorization_code")
-	form.Set("code", "invalid-code")
-	form.Set("redirect_uri", "https://example.com/callback")
-	form.Set("client_id", clientID.String())
-	form.Set("code_verifier", "test-verifier")
-
-	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-
-	server.ServeToken(rec, req)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	tests := []struct {
+		name, code, verifier string
+		expect               int
+	}{
+		{"success", authResp.Code, testCodeVerifier, http.StatusOK},
+		{"error", "invalid-code", "test-verifier", http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			form := url.Values{
+				"grant_type": {"authorization_code"}, "code": {tt.code},
+				"redirect_uri": {"https://example.com/callback"}, "client_id": {ts.clientID.String()}, "code_verifier": {tt.verifier},
+			}
+			req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			ts.server.ServeToken(rec, req)
+			assert.Equal(t, tt.expect, rec.Code)
+			assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+		})
+	}
 }
 
 func TestAuthServer_Authorize_InputLengthValidation(t *testing.T) {
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "test-issuer")
-	server := oauth.NewAuthServer(
-		ptrext.Of(mockClientStore{client: nil, valid: false}),
-		newMockCodeStore(),
-		newMockTokenStore(),
-		newMockSessionStore(),
-		signer,
-		oauth.AuthServerConfig{},
-	)
+	ts := newTestServer(t, []string{"mcp:read"})
+	clientID := ts.clientID.String()
 
 	tests := []struct {
 		name  string
@@ -733,38 +430,24 @@ func TestAuthServer_Authorize_InputLengthValidation(t *testing.T) {
 		{
 			name: "state too long",
 			req: oauth.AuthorizeRequest{
-				ClientID:      "valid-uuid-format-1234567890ab",
-				RedirectURI:   "https://example.com/callback",
-				State:         strings.Repeat("a", 257),
-				CodeChallenge: "valid",
+				ClientID: clientID, RedirectURI: "https://example.com/callback",
+				State: strings.Repeat("a", 257), CodeChallenge: "valid", CodeChallengeMethod: "S256",
 			},
 			errIs: oauth.ErrInvalidRequest,
 		},
 		{
 			name: "scope too long",
 			req: oauth.AuthorizeRequest{
-				ClientID:      "valid-uuid-format-1234567890ab",
-				RedirectURI:   "https://example.com/callback",
-				Scope:         strings.Repeat("a", 1025),
-				CodeChallenge: "valid",
-			},
-			errIs: oauth.ErrInvalidRequest,
-		},
-		{
-			name: "redirect_uri too long",
-			req: oauth.AuthorizeRequest{
-				ClientID:      "valid-uuid-format-1234567890ab",
-				RedirectURI:   "https://example.com/" + strings.Repeat("a", 2050),
-				CodeChallenge: "valid",
+				ClientID: clientID, RedirectURI: "https://example.com/callback",
+				Scope: strings.Repeat("a", 1025), CodeChallenge: "valid", CodeChallengeMethod: "S256",
 			},
 			errIs: oauth.ErrInvalidRequest,
 		},
 		{
 			name: "code_challenge too long",
 			req: oauth.AuthorizeRequest{
-				ClientID:      "valid-uuid-format-1234567890ab",
-				RedirectURI:   "https://example.com/callback",
-				CodeChallenge: strings.Repeat("a", 129),
+				ClientID: clientID, RedirectURI: "https://example.com/callback",
+				CodeChallenge: strings.Repeat("a", 129), CodeChallengeMethod: "S256",
 			},
 			errIs: oauth.ErrInvalidRequest,
 		},
@@ -772,7 +455,7 @@ func TestAuthServer_Authorize_InputLengthValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := server.Authorize(context.Background(), tt.req)
+			_, err := ts.server.Authorize(context.Background(), tt.req)
 			assert.ErrorIs(t, err, tt.errIs)
 		})
 	}

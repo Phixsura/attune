@@ -57,46 +57,24 @@ func TestJWT_ExpiredToken(t *testing.T) {
 	assert.ErrorIs(t, err, oauth.ErrInvalidToken)
 }
 
-func TestJWT_WrongSecret(t *testing.T) {
-	secret1 := []byte("test-secret-key-for-jwt-signing-32b")
-	secret2 := []byte("different-secret-key-for-testing32")
-	issuer := "https://attune.example.com/mcp/oauth"
-
-	signer1 := oauth.NewJWTSigner(secret1, issuer)
-	signer2 := oauth.NewJWTSigner(secret2, issuer)
-
-	claims := oauth.AccessTokenClaims{
-		TenantID:  "tenant-123",
-		ClientID:  uuid.New(),
-		SessionID: uuid.New(),
-		Scopes:    []string{"mcp:read"},
+func TestJWT_VerifyMismatch(t *testing.T) {
+	claims := oauth.AccessTokenClaims{TenantID: "tenant-123", ClientID: uuid.New(), SessionID: uuid.New(), Scopes: []string{"mcp:read"}}
+	tests := []struct {
+		name                     string
+		signSecret, verifySecret string
+		signIssuer, verifyIssuer string
+	}{
+		{"wrong_secret", "test-secret-key-for-jwt-signing-32b", "different-secret-key-for-testing32", "https://attune.example.com/mcp/oauth", "https://attune.example.com/mcp/oauth"},
+		{"wrong_issuer", "test-secret-key-for-jwt-signing-32b", "test-secret-key-for-jwt-signing-32b", "https://attune.example.com/mcp/oauth", "https://other.example.com/mcp/oauth"},
 	}
-
-	token, err := signer1.Sign(claims, 1*time.Hour)
-	require.NoError(t, err)
-
-	_, err = signer2.Verify(token)
-	assert.ErrorIs(t, err, oauth.ErrInvalidToken)
-}
-
-func TestJWT_WrongIssuer(t *testing.T) {
-	secret := []byte("test-secret-key-for-jwt-signing-32b")
-	issuer1 := "https://attune.example.com/mcp/oauth"
-	issuer2 := "https://other.example.com/mcp/oauth"
-
-	signer1 := oauth.NewJWTSigner(secret, issuer1)
-	signer2 := oauth.NewJWTSigner(secret, issuer2)
-
-	claims := oauth.AccessTokenClaims{
-		TenantID:  "tenant-123",
-		ClientID:  uuid.New(),
-		SessionID: uuid.New(),
-		Scopes:    []string{"mcp:read"},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			signer := oauth.NewJWTSigner([]byte(tt.signSecret), tt.signIssuer)
+			verifier := oauth.NewJWTSigner([]byte(tt.verifySecret), tt.verifyIssuer)
+			token, err := signer.Sign(claims, time.Hour)
+			require.NoError(t, err)
+			_, err = verifier.Verify(token)
+			assert.ErrorIs(t, err, oauth.ErrInvalidToken)
+		})
 	}
-
-	token, err := signer1.Sign(claims, 1*time.Hour)
-	require.NoError(t, err)
-
-	_, err = signer2.Verify(token)
-	assert.ErrorIs(t, err, oauth.ErrInvalidToken)
 }

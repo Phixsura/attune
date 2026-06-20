@@ -17,20 +17,25 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
+const (
+	testJWTSecret = "test-secret-key-for-jwt-signing-32b"
+	testIssuer    = "https://attune.example.com/mcp/oauth"
+)
+
+func newTestSigner() *oauth.JWTSigner { return oauth.NewJWTSigner([]byte(testJWTSecret), testIssuer) }
+
+func newTestMiddleware() *server.AuthMiddleware {
+	return server.NewAuthMiddleware(newTestSigner(), nil, nil)
+}
+
+func testFailingHandler(t *testing.T) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Fatal("should not reach handler") })
+}
+
 func TestAuthMiddleware_ValidToken(t *testing.T) {
-	secret := []byte("test-secret-key-for-jwt-signing-32b")
-	issuer := "https://attune.example.com/mcp/oauth"
-
-	signer := oauth.NewJWTSigner(secret, issuer)
+	signer := newTestSigner()
 	middleware := server.NewAuthMiddleware(signer, nil, nil)
-
-	claims := oauth.AccessTokenClaims{
-		TenantID:  "tenant-123",
-		ClientID:  uuid.New(),
-		SessionID: uuid.New(),
-		Scopes:    []string{"mcp:read"},
-	}
-
+	claims := oauth.AccessTokenClaims{TenantID: "tenant-123", ClientID: uuid.New(), SessionID: uuid.New(), Scopes: []string{"mcp:read"}}
 	token, err := signer.Sign(claims, time.Hour)
 	assert.NoError(t, err)
 
@@ -43,7 +48,6 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
-
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -51,90 +55,54 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 	assert.Equal(t, "tenant-123", capturedClaims.TenantID)
 }
 
-func TestAuthMiddleware_MissingHeader(t *testing.T) {
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "issuer")
-	middleware := server.NewAuthMiddleware(signer, nil, nil)
-
-	handler := middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assert.Equal(t, "Bearer", rec.Header().Get("WWW-Authenticate"))
+func TestAuthMiddleware_Unauthorized(t *testing.T) {
+	handler := newTestMiddleware().Wrap(testFailingHandler(t))
+	tests := []struct {
+		name, auth, wwwAuth string
+	}{
+		{"missing_header", "", "Bearer"},
+		{"invalid_header", "Basic dXNlcjpwYXNz", ""},
+		{"invalid_token", "Bearer invalid-token", "invalid_token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.auth != "" {
+				req.Header.Set("Authorization", tt.auth)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			if tt.wwwAuth != "" {
+				assert.Contains(t, rec.Header().Get("WWW-Authenticate"), tt.wwwAuth)
+			}
+		})
+	}
 }
 
-func TestAuthMiddleware_InvalidHeader(t *testing.T) {
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "issuer")
-	middleware := server.NewAuthMiddleware(signer, nil, nil)
-
-	handler := middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-}
-
-func TestAuthMiddleware_InvalidToken(t *testing.T) {
-	signer := oauth.NewJWTSigner([]byte("test-secret-key-for-jwt-signing-32b"), "issuer")
-	middleware := server.NewAuthMiddleware(signer, nil, nil)
-
-	handler := middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer invalid-token")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assert.Contains(t, rec.Header().Get("WWW-Authenticate"), "invalid_token")
-}
-
-func TestRequireScope_HasScope(t *testing.T) {
+func TestRequireScope(t *testing.T) {
 	claims := ptrext.Of(oauth.AccessTokenClaims{Scopes: []string{"mcp:read"}})
 	ctx := server.WithClaims(httptest.NewRequest(http.MethodGet, "/", nil).Context(), claims)
 
-	handler := server.RequireScope("mcp:read")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-func TestRequireScope_MissingScope(t *testing.T) {
-	claims := ptrext.Of(oauth.AccessTokenClaims{Scopes: []string{"mcp:read"}})
-	ctx := server.WithClaims(httptest.NewRequest(http.MethodGet, "/", nil).Context(), claims)
-
-	handler := server.RequireScope("mcp:write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusForbidden, rec.Code)
+	tests := []struct {
+		name   string
+		scope  string
+		expect int
+	}{
+		{"has_scope", "mcp:read", http.StatusOK},
+		{"missing_scope", "mcp:write", http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := server.RequireScope(tt.scope)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			assert.Equal(t, tt.expect, rec.Code)
+		})
+	}
 }
 
 type mockClientValidator struct {
@@ -153,58 +121,32 @@ func (m *mockSessionValidator) IsActive(_ context.Context, _ uuid.UUID) (bool, e
 	return m.active, nil
 }
 
-func TestAuthMiddleware_RevokedClient(t *testing.T) {
-	secret := []byte("test-secret-key-for-jwt-signing-32b")
-	issuer := "https://attune.example.com/mcp/oauth"
-	signer := oauth.NewJWTSigner(secret, issuer)
-	middleware := server.NewAuthMiddleware(signer, ptrext.Of(mockClientValidator{revoked: true}), nil)
-
+func testValidToken(t *testing.T) string {
+	signer := newTestSigner()
 	token, err := signer.Sign(oauth.AccessTokenClaims{
-		TenantID:  "tenant-123",
-		ClientID:  uuid.New(),
-		SessionID: uuid.New(),
-		Scopes:    []string{"mcp:read"},
+		TenantID: "tenant-123", ClientID: uuid.New(), SessionID: uuid.New(), Scopes: []string{"mcp:read"},
 	}, time.Hour)
 	assert.NoError(t, err)
-
-	handler := middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assert.Contains(t, rec.Body.String(), "invalid or expired token")
+	return token
 }
 
-func TestAuthMiddleware_ClosedSession(t *testing.T) {
-	secret := []byte("test-secret-key-for-jwt-signing-32b")
-	issuer := "https://attune.example.com/mcp/oauth"
-	signer := oauth.NewJWTSigner(secret, issuer)
-	middleware := server.NewAuthMiddleware(signer, nil, ptrext.Of(mockSessionValidator{active: false}))
-
-	token, err := signer.Sign(oauth.AccessTokenClaims{
-		TenantID:  "tenant-123",
-		ClientID:  uuid.New(),
-		SessionID: uuid.New(),
-		Scopes:    []string{"mcp:read"},
-	}, time.Hour)
-	assert.NoError(t, err)
-
-	handler := middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assert.Contains(t, rec.Body.String(), "invalid or expired token")
+func TestAuthMiddleware_RevokedOrClosed(t *testing.T) {
+	signer := newTestSigner()
+	tests := []struct {
+		name       string
+		middleware *server.AuthMiddleware
+	}{
+		{"revoked_client", server.NewAuthMiddleware(signer, ptrext.Of(mockClientValidator{revoked: true}), nil)},
+		{"closed_session", server.NewAuthMiddleware(signer, nil, ptrext.Of(mockSessionValidator{active: false}))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Authorization", "Bearer "+testValidToken(t))
+			rec := httptest.NewRecorder()
+			tt.middleware.Wrap(testFailingHandler(t)).ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			assert.Contains(t, rec.Body.String(), "invalid or expired token")
+		})
+	}
 }

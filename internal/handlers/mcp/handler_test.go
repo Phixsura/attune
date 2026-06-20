@@ -98,6 +98,14 @@ func newTestHandler() *mcp.Handler {
 	return mcp.NewHandler(cfg, stores, deps)
 }
 
+func newTestToken(t *testing.T, h *mcp.Handler) string {
+	t.Helper()
+	claims := oauth.AccessTokenClaims{TenantID: "tenant-123", ClientID: uuid.New(), SessionID: uuid.New(), Scopes: []string{"mcp:read"}}
+	token, err := h.Signer().Sign(claims, time.Hour)
+	require.NoError(t, err)
+	return token
+}
+
 func TestHandler_Discovery(t *testing.T) {
 	h := newTestHandler()
 	router := h.Routes()
@@ -131,15 +139,7 @@ func TestHandler_Unauthorized(t *testing.T) {
 func TestHandler_AuthenticatedRequest(t *testing.T) {
 	h := newTestHandler()
 	router := h.Routes()
-
-	claims := oauth.AccessTokenClaims{
-		TenantID:  "tenant-123",
-		ClientID:  uuid.New(),
-		SessionID: uuid.New(),
-		Scopes:    []string{"mcp:read"},
-	}
-	token, err := h.Signer().Sign(claims, time.Hour)
-	require.NoError(t, err)
+	token := newTestToken(t, h)
 
 	body := `{"jsonrpc":"2.0","method":"list_feedback","id":"1"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1", bytes.NewBufferString(body))
@@ -149,10 +149,8 @@ func TestHandler_AuthenticatedRequest(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-
 	var resp jsonrpc.Response
-	err = json.Unmarshal(rec.Body.Bytes(), &resp)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Nil(t, resp.Error)
 }
 
@@ -186,18 +184,9 @@ func TestHandler_SecurityHeaders(t *testing.T) {
 func TestHandler_RateLimitHeaders(t *testing.T) {
 	h := newTestHandler()
 	router := h.Routes()
+	token := newTestToken(t, h)
 
-	claims := oauth.AccessTokenClaims{
-		TenantID:  "tenant-123",
-		ClientID:  uuid.New(),
-		SessionID: uuid.New(),
-		Scopes:    []string{"mcp:read"},
-	}
-	token, err := h.Signer().Sign(claims, time.Hour)
-	require.NoError(t, err)
-
-	body := `{"jsonrpc":"2.0","method":"list_feedback","id":"1"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1", bytes.NewBufferString(`{"jsonrpc":"2.0","method":"list_feedback","id":"1"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 

@@ -232,7 +232,7 @@ func (s *AuthServer) Authorize(ctx context.Context, req AuthorizeRequest) (*Auth
 		return nil, ErrInvalidScope
 	}
 
-	code := generateCode()
+	code := generateRandomString()
 	authCode := ptrext.Of(AuthCode{
 		Code:                code,
 		ClientID:            clientID,
@@ -344,7 +344,7 @@ func (s *AuthServer) tokenFromCode(ctx context.Context, req TokenRequest) (*Toke
 		return nil, ErrInvalidGrant
 	}
 
-	refreshToken := generateToken()
+	refreshToken := generateRandomString()
 	rt := ptrext.Of(RefreshToken{
 		ID:        uuid.New(),
 		TokenHash: hashToken(refreshToken),
@@ -407,7 +407,7 @@ func (s *AuthServer) tokenFromRefresh(ctx context.Context, req TokenRequest) (*T
 	}
 
 	// Generate new refresh token
-	newRefreshToken := generateToken()
+	newRefreshToken := generateRandomString()
 	newHash := hashToken(newRefreshToken)
 	newExpiresAt := time.Now().Add(s.refreshTTL)
 
@@ -535,15 +535,7 @@ func scopesAllowed(requested, allowed []string) bool {
 	return true
 }
 
-func generateCode() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
-	}
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func generateToken() string {
+func generateRandomString() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		panic("crypto/rand failed: " + err.Error())
