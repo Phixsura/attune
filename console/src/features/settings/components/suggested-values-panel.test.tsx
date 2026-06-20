@@ -110,6 +110,34 @@ describe('SuggestedValuesPanel', () => {
     expect(promoted).toMatchObject({ dimensionName: 'modules', value: 'checkout' })
   })
 
+  it('drops the promoted candidate without re-running the eval (no second GET)', async () => {
+    let getCalls = 0
+    server.use(
+      http.get(SUGGESTIONS_URL, () => {
+        getCalls += 1
+        return HttpResponse.json(suggestionsResponse())
+      }),
+      http.post(PROMOTE_URL, () =>
+        HttpResponse.json({ dimension: { name: 'modules', taxonomy: [] } }),
+      ),
+    )
+    renderWithProviders(<SuggestedValuesPanel canEdit={true} />)
+
+    await userEvent.click(screen.getByTestId('analyze-suggestions'))
+    await waitFor(() => expect(screen.getByTestId('promote-checkout')).toBeInTheDocument())
+    expect(getCalls).toBe(1)
+
+    await userEvent.click(screen.getByTestId('promote-checkout'))
+
+    // checkout drops from the list, billing stays — via cache update, not a refetch.
+    await waitFor(() =>
+      expect(screen.queryByTestId('suggestion-row-checkout')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByTestId('suggestion-row-billing')).toBeInTheDocument()
+    // crucially, the expensive eval was NOT re-run.
+    expect(getCalls).toBe(1)
+  })
+
   it('keeps the candidate and shows a toast when promote fails (e.g. 409)', async () => {
     server.use(
       http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())),

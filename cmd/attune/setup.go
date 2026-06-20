@@ -385,6 +385,20 @@ func buildEnrichConfigHandler(
 	return h
 }
 
+const (
+	// evalSuggestionsWindow is how far back the Console eval-suggestions
+	// endpoint samples enriched rows.
+	evalSuggestionsWindow = 30 * 24 * time.Hour
+	// evalSuggestionsSample is the per-call sample size (each sampled row is
+	// re-classified by the LLM).
+	evalSuggestionsSample = 20
+	// evalSuggestionsTimeout bounds the whole eval. Each sampled row makes one
+	// LLM call (bounded only by the channel timeout), so without a ceiling a
+	// slow/hung provider could pin a request for many minutes. On deadline the
+	// remaining classify calls fail fast and the loop returns what it has.
+	evalSuggestionsTimeout = 60 * time.Second
+)
+
 // buildEvalSuggestionsGetter builds an enrichconfig.EvalSuggestionsGetter that
 // runs quick consistency evals via the console API (#83).
 func buildEvalSuggestionsGetter(
@@ -395,8 +409,10 @@ func buildEvalSuggestionsGetter(
 	evalEnricher := enrich.NewEnricher(feedbackRepo, llm, "")
 	evaluator := evalsvc.NewEvaluator(feedbackRepo, tenantRepo, evalEnricher)
 	return func(ctx context.Context, tenantID string) (*enrichconfig.SuggestedAttrsReport, error) {
-		since := time.Now().AddDate(0, 0, -30)
-		report, err := evaluator.RunConsistencyForTenant(ctx, tenantID, since, 20)
+		ctx, cancel := context.WithTimeout(ctx, evalSuggestionsTimeout)
+		defer cancel()
+		since := time.Now().Add(-evalSuggestionsWindow)
+		report, err := evaluator.RunConsistencyForTenant(ctx, tenantID, since, evalSuggestionsSample)
 		if err != nil {
 			return nil, err
 		}
