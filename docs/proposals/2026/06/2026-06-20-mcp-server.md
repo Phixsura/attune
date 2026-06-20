@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #93 |
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Started** | 2026-06-20 |
 | **Related** | #66 (channel-agnostic inbound — symmetric counterpart), #41 (API key scopes — extended for MCP), #39 (audit log — reused for MCP actions), #40 (OIDC SSO — OAuth AS reuses OIDC login), #34 (outbound notify — parallel adapter pattern) |
 
