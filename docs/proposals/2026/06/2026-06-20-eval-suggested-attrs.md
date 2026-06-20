@@ -89,9 +89,9 @@ type SuggestedCandidate struct {
     Dim            string  `json:"dim"`
     Value          string  `json:"value"`
     Count          int     `json:"count"`
-    Confidence     float64 `json:"confidence"`       // 0-1, freq × cross-sample agreement
+    Confidence     float64 `json:"confidence"`       // 0-1, see formula below
     CoverageImpact float64 `json:"coverage_impact"`  // predicted Δcoverage if added
-    NearestValue   string  `json:"nearest_value,omitempty"` // most similar existing taxonomy value
+    NearestValue   string  `json:"nearest_value,omitempty"` // P3: most similar existing taxonomy value (empty in P0/P1)
 }
 
 // SuggestedRecommendation is an actionable suggestion for the operator
@@ -157,17 +157,34 @@ func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample
 }
 ```
 
+`ScoreHuman` also surfaces suggested values. When comparing human labels vs AI
+labels, both sides may contain off-list values:
+
+- **AI off-list**: LLM suggested something not in taxonomy (same as consistency)
+- **Human off-list**: Human labeled with a value not in taxonomy (rarer, but
+  indicates taxonomy gap from the ground-truth perspective)
+
+Both are captured in the same `SuggestedAttrsReport`. The `source` distinction
+(AI vs human) is not tracked in P0 — a future enhancement could split them.
+
 ### Coverage metric
 
-Coverage per dimension measures how much of the LLM's output survives filtering:
+Coverage per dimension measures how much of the LLM's output survives filtering.
+**Counted per-value, not per-row** — a multi-kind dim with `["a", "b", "c"]`
+where `"c"` is off-list counts as 2 kept, 1 dropped.
 
 ```
-coverage[dim] = 1 - (dropped[dim] / (kept[dim] + dropped[dim]))
+coverage[dim] = 1 - (dropped_count[dim] / (kept_count[dim] + dropped_count[dim]))
 ```
 
 - `coverage = 1.0` → LLM always outputs on-list values
-- `coverage = 0.85` → 15% of LLM outputs were dropped (systematic gap)
-- `coverage = 0.5` → Half dropped (major taxonomy mismatch)
+- `coverage = 0.85` → 15% of LLM output values were dropped (systematic gap)
+- `coverage = 0.5` → Half of values dropped (major taxonomy mismatch)
+
+Note: `AttrDropDiagnostic.Values` is capped at 5 per row (for persistence size),
+but `Count` is accurate. Coverage uses `Count`, so the cap doesn't affect it.
+`ValueFreq` aggregates across rows, so rare cases where one row has >5 distinct
+off-list values for one dim are acceptable losses for P0.
 
 ### Confidence scoring
 
@@ -175,32 +192,41 @@ Not all off-list values are equal. A value appearing once might be LLM noise;
 a value appearing 50 times across independent samples is a systematic signal.
 
 ```go
-func computeConfidence(count int, sampleSize int, dims DimensionSet, dim string) float64 {
-    // Frequency component: how often does this value appear?
+func computeConfidence(count int, sampleSize int) float64 {
+    // Frequency: what fraction of samples produced this value?
     freq := float64(count) / float64(sampleSize)
     
-    // Agreement component: is this consistent across samples?
-    // For now, freq is the proxy; later we can add cross-sample agreement
-    agreement := math.Min(1.0, freq * 5) // saturates at 20% frequency
-    
-    // Combined score
-    return freq * agreement
+    // Confidence = freq, capped at 1.0
+    // Simple and interpretable: confidence 0.24 means "appeared in 24% of samples"
+    return math.Min(1.0, freq)
 }
 ```
+
+Simpler is better for P0. The frequency itself is the confidence score — no
+compounding formulas. A value appearing in 24% of samples has confidence 0.24.
+P3 may add cross-sample agreement metrics (e.g., did independent content pieces
+produce the same suggestion?).
 
 ### Impact prediction
 
 If we added value V to dimension D, how much would coverage improve?
 
 ```go
-func predictImpact(candidate SuggestedCandidate, currentCoverage float64, totalDropped int) float64 {
-    // Simple model: this value's share of total drops
-    if totalDropped == 0 {
+// predictImpact estimates coverage gain if candidate.Value were added to taxonomy.
+// totalDroppedForDim is the total dropped count for this dimension across all samples.
+func predictImpact(candidate SuggestedCandidate, currentCoverage float64, totalDroppedForDim int) float64 {
+    if totalDroppedForDim == 0 {
         return 0
     }
-    return (1 - currentCoverage) * (float64(candidate.Count) / float64(totalDropped))
+    // This value's share of the coverage gap for its dimension
+    coverageGap := 1 - currentCoverage
+    valueShare := float64(candidate.Count) / float64(totalDroppedForDim)
+    return coverageGap * valueShare
 }
 ```
+
+Example: dimension has 85% coverage (15% gap). Value "checkout" accounts for 80%
+of the drops. Impact = 0.15 × 0.80 = 0.12 (+12% expected coverage).
 
 ### CLI output
 
@@ -214,8 +240,12 @@ func predictImpact(candidate SuggestedCandidate, currentCoverage float64, totalD
 
 Recommendations:
 • ADD modules.checkout — appeared 12 times (24%), +12% expected coverage
-• INVESTIGATE modules.billing — appeared 5 times (10%), may overlap with "payment"
+• ADD modules.billing — appeared 5 times (10%), +5% expected coverage
 ```
+
+Note: P0/P1 recommendations are purely frequency-based ("ADD" for high-confidence
+candidates). P3 may add "INVESTIGATE" or "MERGE" when semantic clustering detects
+potential overlap with existing taxonomy values.
 
 ### Console API (Level 3)
 
@@ -233,7 +263,8 @@ message PromoteSuggestedValueRequest {
     string dimension_name = 2;
     string value = 3;
     attune.v1.I18nString display_name = 4;
-    string eval_run_id = 5; // for audit trail
+    // eval_run_id omitted in P2 — eval runs are not persisted yet.
+    // P3 may add eval run persistence and reference here for audit trail.
 }
 ```
 
@@ -294,6 +325,7 @@ exists.
 | Noisy suggestions | Confidence threshold (default 0.1) filters single-occurrence noise |
 | Console API scope | P1 is CLI-only; Console API is P2 |
 | Breaking proto changes | New fields only (additive); no removal or rename |
+| Freeform dims (empty taxonomy) | No off-list concept — coverage is always 100%, no suggestions |
 
 ---
 
