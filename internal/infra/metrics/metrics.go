@@ -137,8 +137,8 @@ var EnrichmentTerminalFailuresTotal = prometheus.NewCounterVec(
 )
 
 // NotifyFailuresTotal increments on every notifier push that didn't
-// return nil. destination_type ∈ {raw-webhook, github-issue};
-// reason is the error class (transport | terminal).
+// return nil. destination_type ∈ {raw-webhook, slack, lark, discord,
+// github-issue}; reason is the error class (transport | terminal).
 var NotifyFailuresTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "attune_notify_failures_total",

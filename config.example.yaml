@@ -105,6 +105,12 @@ security:
   # direct peer) so a direct client cannot spoof an allowlisted source IP.
   trusted_proxy_hops: 0
 
-# Optional bootstrap raw-webhook destinations. The console/API can manage
-# runtime targets after startup.
+# Optional bootstrap outbound destinations. The console/API can manage
+# runtime targets after startup. Each entry's destination_type is one of
+# raw-webhook (default) | slack | lark | discord | github-issue. For slack /
+# lark / discord the webhook URL is the credential, so secret is optional.
+#   - tenant_slug: acme
+#     destination_type: discord
+#     audience: all          # pool | radar | all
+#     url: https://discord.com/api/webhooks/123/abc
 custom_webhooks: []

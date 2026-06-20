@@ -35,6 +35,7 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 			"raw-webhook":  true,
 			"slack":        true,
 			"lark":         true,
+			"discord":      true,
 			"github-issue": true,
 		}
 		channels := outbound.Channels()
@@ -260,6 +261,49 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 		if !result.OK {
 			t.Fatalf("lark TestSend failed: ok=%v status=%d err=%v",
 				result.OK, result.StatusCode, result.Err)
+		}
+	})
+
+	// Discord delivers embeds and treats 204 No Content as success.
+	t.Run("test_send_discord_delivers_embeds", func(t *testing.T) {
+		var received []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			received, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		t.Cleanup(srv.Close)
+
+		notify.SetEgressPolicy(nethardening.Policy{AllowLoopback: true, AllowPrivate: true})
+
+		target := notifytarget.NotifyTarget{
+			ID:              uuid.New(),
+			TenantID:        "e2e-tenant",
+			DestinationType: notifytarget.DestDiscord,
+			Audience:        notifytarget.AudienceAll,
+			URL:             srv.URL,
+			TimeoutSeconds:  5,
+		}
+
+		result := notify.TestSend(t.Context(), target)
+		if !result.OK {
+			t.Fatalf("discord TestSend failed: ok=%v status=%d err=%v",
+				result.OK, result.StatusCode, result.Err)
+		}
+
+		var msg struct {
+			Embeds          []map[string]any `json:"embeds"`
+			AllowedMentions struct {
+				Parse []string `json:"parse"`
+			} `json:"allowed_mentions"`
+		}
+		if err := json.Unmarshal(received, &msg); err != nil {
+			t.Fatalf("unmarshal received discord body: %v", err)
+		}
+		if len(msg.Embeds) == 0 {
+			t.Errorf("expected at least one embed in discord payload")
+		}
+		if msg.AllowedMentions.Parse == nil || len(msg.AllowedMentions.Parse) != 0 {
+			t.Errorf("allowed_mentions.parse must be present and empty, got %v", msg.AllowedMentions.Parse)
 		}
 	})
 }

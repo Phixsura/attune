@@ -15,7 +15,7 @@ import (
 // only touched at boot.
 type CustomWebhookDest struct {
 	TenantSlug      string `yaml:"tenant_slug" json:"tenant_slug"`
-	DestinationType string `yaml:"destination_type" json:"destination_type"` // raw-webhook (default) | slack | lark | github-issue
+	DestinationType string `yaml:"destination_type" json:"destination_type"` // raw-webhook (default) | slack | lark | discord | github-issue
 	Audience        string `yaml:"audience" json:"audience"`                 // pool / radar / all (default pool)
 	URL             string `yaml:"url" json:"url"`
 	Secret          string `yaml:"secret" json:"secret"`
@@ -35,14 +35,16 @@ var validDestTypes = map[string]bool{
 	"raw-webhook":  true,
 	"slack":        true,
 	"lark":         true,
+	"discord":      true,
 	"github-issue": true,
 }
 
 // secretOptionalDestTypes lists destination types where the secret field
 // is optional — the URL itself is the authenticating credential.
 var secretOptionalDestTypes = map[string]bool{
-	"slack": true,
-	"lark":  true,
+	"slack":   true,
+	"lark":    true,
+	"discord": true,
 }
 
 func (c *Config) validateCustomWebhooks() error {
@@ -62,7 +64,7 @@ func (c *Config) validateCustomWebhooks() error {
 			destType = "raw-webhook"
 		}
 		if !validDestTypes[destType] {
-			return fmt.Errorf("custom_webhooks[%d]: destination_type %q is not valid (allowed: raw-webhook, slack, lark, github-issue)", i, destType)
+			return fmt.Errorf("custom_webhooks[%d]: destination_type %q is not valid (allowed: raw-webhook, slack, lark, discord, github-issue)", i, destType)
 		}
 		if !secretOptionalDestTypes[destType] && len(w.Secret) < 16 {
 			return fmt.Errorf("custom_webhooks[%d]: secret must be at least 16 chars", i)

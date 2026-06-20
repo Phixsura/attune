@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,6 +211,31 @@ func TestAuditNotifyTargetSnapshot_WithSecret(t *testing.T) {
 	require.True(t, hasURL, "targets with secret should have sanitized url")
 	_, hasHash := snap["url_hash"]
 	require.False(t, hasHash, "targets with secret should not have url_hash")
+}
+
+// A token-in-URL destination (Discord/Slack/Lark) must NEVER have its URL path
+// written to the audit log, even when the operator also supplies an optional
+// secret. The Discord webhook token lives in the URL path, so logging the
+// "sanitized" URL (which keeps the path) would leak the credential.
+func TestAuditNotifyTargetSnapshot_DiscordWithSecretStillHashesURL(t *testing.T) {
+	t.Parallel()
+	target := notifytarget.NotifyTarget{
+		DestinationType: notifytarget.DestDiscord,
+		URL:             "https://discord.com/api/webhooks/123456789/SUPER_SECRET_TOKEN",
+		Secret:          "operator-supplied-extra-secret",
+	}
+	snap := auditNotifyTargetSnapshot(target)
+
+	if _, hasURL := snap["url"]; hasURL {
+		t.Errorf("token-in-URL dest must not record a path-bearing url, got %v", snap["url"])
+	}
+	hash, hasHash := snap["url_hash"]
+	if !hasHash {
+		t.Fatalf("token-in-URL dest must record url_hash even with a secret")
+	}
+	if hashStr, _ := hash.(string); strings.Contains(hashStr, "SUPER_SECRET_TOKEN") {
+		t.Errorf("url_hash must not contain the raw token: %v", hashStr)
+	}
 }
 
 func TestAuditNotifyTargetSnapshot_WithoutSecret(t *testing.T) {

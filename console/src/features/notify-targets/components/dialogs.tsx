@@ -48,6 +48,12 @@ const DEST_TYPES = [
     urlHelp: 'Slack incoming webhook URL',
     secretHelp: 'Not used — URL is the secret',
   },
+  {
+    value: 'discord',
+    label: 'Discord',
+    urlHelp: 'Discord channel webhook URL',
+    secretHelp: 'Not used — URL is the secret',
+  },
 ] as const
 
 type DestType = (typeof DEST_TYPES)[number]['value']
