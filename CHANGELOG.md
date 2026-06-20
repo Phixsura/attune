@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **MCP (Model Context Protocol) server with OAuth 2.1 (#93).** Adds a
+  full MCP server implementation enabling AI agents to interact with
+  attune feedback data. Includes:
+  - OAuth 2.1 Authorization Server with PKCE (S256 required)
+  - JWT access tokens (HS256) with configurable TTL
+  - JSON-RPC 2.0 over Streamable HTTP transport
+  - 10 MCP tools: `list_feedback`, `get_feedback`, `list_workflow_states`,
+    `get_workflow_state`, `list_tags` (mcp:read scope); `update_workflow_state`,
+    `add_tag`, `remove_tag`, `set_urgent` (mcp:write scope); `submit_feedback`
+    (mcp:ingest scope)
+  - OAuth client management via database tables (`mcp_oauth_clients`,
+    `mcp_oauth_codes`, `mcp_oauth_refresh_tokens`, `mcp_sessions`)
+  - Discovery endpoint at `/.well-known/oauth-protected-resource`
+  - New scopes: `mcp:read`, `mcp:write`, `mcp:ingest` (write implies read)
+  - Audit actions for all MCP operations
+
 - **`AttuneOutboxDeadRowsHigh` alert (#32).** The `attune_outbox_dead_rows`
   gauge was dashboard-only; a webhook deleted on the destination side (a common
   self-service action for Discord/Slack channel webhooks) silently piled

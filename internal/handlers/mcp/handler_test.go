@@ -33,17 +33,56 @@ func (m *mockFeedbackReader) GetForConsole(_ context.Context, _ string, _ int64)
 	return nil, feedback.ErrFeedbackNotFound
 }
 
-func TestHandler_Discovery(t *testing.T) {
+type mockClientStore struct{}
+
+func (m *mockClientStore) GetByID(_ context.Context, _ uuid.UUID) (*oauth.Client, error) {
+	return nil, oauth.ErrInvalidClient
+}
+
+func (m *mockClientStore) ValidateRedirectURI(_ context.Context, _ uuid.UUID, _ string) (bool, error) {
+	return false, nil
+}
+
+type mockCodeStore struct{}
+
+func (m *mockCodeStore) Create(_ context.Context, _ *oauth.AuthCode) error { return nil }
+func (m *mockCodeStore) Consume(_ context.Context, _ string) (*oauth.AuthCode, error) {
+	return nil, oauth.ErrInvalidCode
+}
+
+type mockTokenStore struct{}
+
+func (m *mockTokenStore) Create(_ context.Context, _ *oauth.RefreshToken) error { return nil }
+func (m *mockTokenStore) GetByHash(_ context.Context, _ string) (*oauth.RefreshToken, error) {
+	return nil, oauth.ErrInvalidRefreshToken
+}
+func (m *mockTokenStore) Revoke(_ context.Context, _ uuid.UUID) error { return nil }
+
+type mockSessionStore struct{}
+
+func (m *mockSessionStore) Create(_ context.Context, _ *oauth.Session) error { return nil }
+func (m *mockSessionStore) Touch(_ context.Context, _ uuid.UUID) error       { return nil }
+
+func newTestHandler() *mcp.Handler {
 	cfg := mcp.Config{
 		BaseURL:   "https://attune.example.com",
 		JWTSecret: []byte("test-secret-key-for-jwt-signing-32b"),
 		JWTIssuer: "https://attune.example.com/mcp/oauth",
 	}
+	stores := mcp.Stores{
+		Clients:  ptrext.Of(mockClientStore{}),
+		Codes:    ptrext.Of(mockCodeStore{}),
+		Tokens:   ptrext.Of(mockTokenStore{}),
+		Sessions: ptrext.Of(mockSessionStore{}),
+	}
 	deps := ptrext.Of(tools.Deps{
 		Feedback: ptrext.Of(mockFeedbackReader{}),
 	})
+	return mcp.NewHandler(cfg, stores, deps)
+}
 
-	h := mcp.NewHandler(cfg, deps)
+func TestHandler_Discovery(t *testing.T) {
+	h := newTestHandler()
 	router := h.Routes()
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource", nil)
@@ -60,16 +99,7 @@ func TestHandler_Discovery(t *testing.T) {
 }
 
 func TestHandler_Unauthorized(t *testing.T) {
-	cfg := mcp.Config{
-		BaseURL:   "https://attune.example.com",
-		JWTSecret: []byte("test-secret-key-for-jwt-signing-32b"),
-		JWTIssuer: "https://attune.example.com/mcp/oauth",
-	}
-	deps := ptrext.Of(tools.Deps{
-		Feedback: ptrext.Of(mockFeedbackReader{}),
-	})
-
-	h := mcp.NewHandler(cfg, deps)
+	h := newTestHandler()
 	router := h.Routes()
 
 	body := `{"jsonrpc":"2.0","method":"list_feedback","id":"1"}`
@@ -82,16 +112,7 @@ func TestHandler_Unauthorized(t *testing.T) {
 }
 
 func TestHandler_AuthenticatedRequest(t *testing.T) {
-	cfg := mcp.Config{
-		BaseURL:   "https://attune.example.com",
-		JWTSecret: []byte("test-secret-key-for-jwt-signing-32b"),
-		JWTIssuer: "https://attune.example.com/mcp/oauth",
-	}
-	deps := ptrext.Of(tools.Deps{
-		Feedback: ptrext.Of(mockFeedbackReader{}),
-	})
-
-	h := mcp.NewHandler(cfg, deps)
+	h := newTestHandler()
 	router := h.Routes()
 
 	claims := oauth.AccessTokenClaims{
@@ -116,4 +137,16 @@ func TestHandler_AuthenticatedRequest(t *testing.T) {
 	err = json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.Nil(t, resp.Error)
+}
+
+func TestHandler_OAuthEndpoints(t *testing.T) {
+	h := newTestHandler()
+	router := h.Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?client_id=invalid&response_type=code", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
