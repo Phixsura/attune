@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **`AttuneOutboxDeadRowsHigh` alert (#32).** The `attune_outbox_dead_rows`
+  gauge was dashboard-only; a webhook deleted on the destination side (a common
+  self-service action for Discord/Slack channel webhooks) silently piled
+  terminal-failed deliveries into the dead queue with no alert. A new alert
+  fires when any delivery sits in the `dead` state for 15m, with a runbook
+  pointing the operator to Console > Dead deliveries.
+
 - **Discord webhook outbound adapter (#32).** A new `discord` destination type
   delivers per-event and daily-digest notifications as Discord embed objects
   (`internal/outbound/adapter/discord/`). The embed color is keyed off the

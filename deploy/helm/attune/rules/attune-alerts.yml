@@ -176,6 +176,20 @@ groups:
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunenotifyfailures"
           action: "Group by destination_type/reason, verify customer webhook or Lark target health, and avoid replaying until terminal failures are understood."
 
+      - alert: AttuneOutboxDeadRowsHigh
+        expr: attune_outbox_dead_rows > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune has deliveries stuck in the dead queue"
+          description: "{{ $value }} outbox delivery(s) are in the terminal 'dead' state. A webhook may be deleted/misconfigured (e.g. a removed Discord/Slack channel webhook)."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxdeadrowshigh"
+          action: "Open Console > Dead deliveries, inspect destination_type and last_error, fix or remove the target, then manually retry."
+
   - name: attune.alerts.security
     rules:
       - alert: AttuneAuthorizationDenialsHigh

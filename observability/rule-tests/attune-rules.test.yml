@@ -19,6 +19,8 @@ tests:
         values: '0+6x40'
       - series: 'attune_outbox_lag_seconds'
         values: '120x40'
+      - series: 'attune_outbox_dead_rows'
+        values: '3x40'
 
     alert_rule_test:
       - eval_time: 20m
@@ -84,3 +86,18 @@ tests:
               description: Oldest pending delivery is 2m 0s. Check Attune Operations > Delivery and contention.
               runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxlaghigh
               summary: Attune outbox lag is above 60s
+
+      - eval_time: 20m
+        alertname: AttuneOutboxDeadRowsHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneOutboxDeadRowsHigh
+              service: attune
+              severity: warning
+            exp_annotations:
+              action: Open Console > Dead deliveries, inspect destination_type and last_error, fix or remove the target, then manually retry.
+              dashboard: Attune Operations
+              dashboard_url: /d/attune-operations/attune-operations
+              description: 3 outbox delivery(s) are in the terminal 'dead' state. A webhook may be deleted/misconfigured (e.g. a removed Discord/Slack channel webhook).
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxdeadrowshigh
+              summary: Attune has deliveries stuck in the dead queue

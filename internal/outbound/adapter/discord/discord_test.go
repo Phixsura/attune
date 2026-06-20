@@ -528,26 +528,8 @@ func TestBuildEventEmbed_WithinTotalLimit(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Rune-safe truncation
-// ---------------------------------------------------------------------------
-
-func TestTruncate_RuneSafe(t *testing.T) {
-	s := "你好世界这是一段测试文本"
-	result := truncate(s, 10)
-	if runes := []rune(result); len(runes) > 10 {
-		t.Errorf("result exceeds limit: got %d runes, want ≤10", len(runes))
-	}
-	if !strings.HasSuffix(result, "...") {
-		t.Errorf("expected '...' suffix, got %q", result)
-	}
-}
-
-func TestTruncate_ShortString(t *testing.T) {
-	if truncate("hello", 10) != "hello" {
-		t.Errorf("short strings should not be truncated")
-	}
-}
+// (truncate/mapStr/severity-category moved to internal/outbound/render and are
+// tested there; the embed-level behavior is still covered above.)
 
 // ---------------------------------------------------------------------------
 // helpers

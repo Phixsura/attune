@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/outbound"
+	"github.com/Phixsura/attune/internal/outbound/render"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -103,7 +104,7 @@ func checkDiscord(label string) outbound.ResponseChecker {
 			return fmt.Errorf("%s retryable status=%d", label, status)
 		case status >= 400 && status < 500:
 			return fmt.Errorf("%w: %s status=%d body=%s",
-				outbound.ErrTerminal, label, status, truncate(string(body), 256))
+				outbound.ErrTerminal, label, status, render.Truncate(string(body), 256))
 		default:
 			return fmt.Errorf("%s status=%d", label, status)
 		}
@@ -164,12 +165,12 @@ func buildEventEmbed(env *outbound.Envelope) discordEmbed {
 
 	// The outbox envelope nests title/is_urgent inside feedback.enriched;
 	// TestSend / direct construction puts them at the feedback top level.
-	title := mapStr(fb, "title")
+	title := render.MapStr(fb, "title")
 	if title == "" && enriched != nil {
-		title = mapStr(enriched, "title")
+		title = render.MapStr(enriched, "title")
 	}
-	content := mapStr(fb, "content")
-	source := mapStr(fb, "source")
+	content := render.MapStr(fb, "content")
+	source := render.MapStr(fb, "source")
 
 	isUrgent, _ := fb["is_urgent"].(bool)
 	if !isUrgent && enriched != nil {
@@ -185,30 +186,30 @@ func buildEventEmbed(env *outbound.Envelope) discordEmbed {
 		title = "[Urgent] " + title
 	}
 
-	severity, category := extractSeverityCategory(enriched)
+	severity, category := render.SeverityCategory(enriched)
 
 	embed := discordEmbed{
-		Title:     truncate(emoji+" "+title, embedTitleMax),
+		Title:     render.Truncate(emoji+" "+title, embedTitleMax),
 		Color:     severityColor(severity, isUrgent),
-		Footer:    ptrext.Of(discordFooter{Text: truncate("via Attune", embedFooterMax)}),
+		Footer:    ptrext.Of(discordFooter{Text: render.Truncate("via Attune", embedFooterMax)}),
 		Timestamp: validTimestamp(env.Timestamp),
 	}
 
 	var fields []discordField
 	if severity != "" {
-		fields = append(fields, discordField{Name: "Severity", Value: truncate(severity, embedFieldValueMax), Inline: true})
+		fields = append(fields, discordField{Name: "Severity", Value: render.Truncate(severity, embedFieldValueMax), Inline: true})
 	}
 	if category != "" {
-		fields = append(fields, discordField{Name: "Category", Value: truncate(category, embedFieldValueMax), Inline: true})
+		fields = append(fields, discordField{Name: "Category", Value: render.Truncate(category, embedFieldValueMax), Inline: true})
 	}
 	if source != "" {
-		fields = append(fields, discordField{Name: "Source", Value: truncate(source, embedFieldValueMax), Inline: true})
+		fields = append(fields, discordField{Name: "Source", Value: render.Truncate(source, embedFieldValueMax), Inline: true})
 	}
 	embed.Fields = fields
 
 	// Budget the description so the assembled embed stays within the 6000-rune
 	// cap (a sum across title + fields + footer + description).
-	embed.Description = truncate(content, descriptionBudget(embed))
+	embed.Description = render.Truncate(content, descriptionBudget(embed))
 	return embed
 }
 
@@ -237,7 +238,7 @@ func buildDigestEmbed(view any) discordEmbed {
 	if !ok {
 		return discordEmbed{
 			Title:       "\U0001F4CA Daily Feedback Digest", // 📊
-			Description: truncate(formatFallback(view), embedDescriptionMax),
+			Description: render.FallbackJSON(view, 2000),
 			Color:       colorGray,
 			Footer:      ptrext.Of(discordFooter{Text: "via Attune"}),
 		}
@@ -264,8 +265,8 @@ func buildDigestEmbed(view any) discordEmbed {
 	}
 
 	return discordEmbed{
-		Title:       truncate("\U0001F4CA Daily Digest — "+dv.RunDate, embedTitleMax),
-		Description: truncate(b.String(), embedDescriptionMax),
+		Title:       render.Truncate("\U0001F4CA Daily Digest — "+dv.RunDate, embedTitleMax),
+		Description: render.Truncate(b.String(), embedDescriptionMax),
 		Color:       colorGray,
 		Footer:      ptrext.Of(discordFooter{Text: "via Attune"}),
 	}
@@ -325,33 +326,6 @@ type digestItem struct {
 	Title string
 }
 
-func formatFallback(view any) string {
-	b, _ := json.MarshalIndent(view, "", "  ")
-	return "```\n" + truncate(string(b), 2000) + "\n```"
-}
-
-func mapStr(m map[string]any, key string) string {
-	v, _ := m[key].(string)
-	return v
-}
-
-func extractSeverityCategory(enriched map[string]any) (string, string) {
-	if enriched == nil {
-		return "", ""
-	}
-	severity := mapStr(enriched, "severity")
-	category := mapStr(enriched, "category")
-	if attrs, ok := enriched["attrs"].(map[string]any); ok {
-		if severity == "" {
-			severity = mapStr(attrs, "severity")
-		}
-		if category == "" {
-			category = mapStr(attrs, "category")
-		}
-	}
-	return severity, category
-}
-
 // validTimestamp returns s only if it is a well-formed RFC3339 timestamp;
 // otherwise "". Discord rejects an embed with a non-empty malformed timestamp
 // with a 400, which would burn outbox retries — dropping it is the safe default.
@@ -363,15 +337,4 @@ func validTimestamp(s string) string {
 		return ""
 	}
 	return s
-}
-
-func truncate(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
-	}
-	if n > 3 {
-		return string(runes[:n-3]) + "..."
-	}
-	return string(runes[:n])
 }

@@ -97,8 +97,10 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 		if result.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, want 200", result.StatusCode)
 		}
-		if result.LatencyMs <= 0 {
-			t.Errorf("latency_ms = %d, want > 0", result.LatencyMs)
+		// Latency can legitimately be 0ms on a fast loopback round-trip; only a
+		// negative value would indicate a measurement bug.
+		if result.LatencyMs < 0 {
+			t.Errorf("latency_ms = %d, want >= 0", result.LatencyMs)
 		}
 
 		// Verify the payload is valid Slack Block Kit JSON.
