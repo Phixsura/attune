@@ -1,0 +1,150 @@
+// ptrext:file-allow test fixtures construct stub adapters inline.
+package notify
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/Phixsura/attune/internal/outbound"
+	"github.com/Phixsura/attune/internal/repo/notifytarget"
+)
+
+func TestTestSend_EmptyURL(t *testing.T) {
+	t.Parallel()
+	result := TestSend(context.Background(), notifytarget.NotifyTarget{
+		ID:              uuid.New(),
+		DestinationType: "raw-webhook",
+	})
+	if result.OK {
+		t.Fatal("empty URL should fail")
+	}
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "url is empty") {
+		t.Fatalf("unexpected error: %v", result.Err)
+	}
+}
+
+func TestTestSend_UnknownDestType(t *testing.T) {
+	t.Parallel()
+	result := TestSend(context.Background(), notifytarget.NotifyTarget{
+		ID:              uuid.New(),
+		DestinationType: "carrier-pigeon",
+		URL:             "https://example.com/hook",
+	})
+	if result.OK {
+		t.Fatal("unknown dest type should fail")
+	}
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "not implemented") {
+		t.Fatalf("unexpected error: %v", result.Err)
+	}
+}
+
+func TestTestSend_StubAdapter_HappyPath(t *testing.T) {
+	t.Parallel()
+	registerStubAdapter(t, "test-stub-happy")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	result := TestSend(t.Context(), notifytarget.NotifyTarget{
+		ID:              uuid.New(),
+		TenantID:        "t1",
+		DestinationType: "test-stub-happy",
+		URL:             srv.URL,
+		TimeoutSeconds:  5,
+	})
+	if !result.OK {
+		t.Fatalf("expected OK, got err=%v status=%d", result.Err, result.StatusCode)
+	}
+	if result.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", result.StatusCode)
+	}
+	if result.LatencyMs < 0 {
+		t.Errorf("latency_ms = %d, want >= 0", result.LatencyMs)
+	}
+}
+
+func TestTestSend_StubAdapter_ServerError(t *testing.T) {
+	t.Parallel()
+	registerStubAdapter(t, "test-stub-5xx")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	t.Cleanup(srv.Close)
+
+	result := TestSend(t.Context(), notifytarget.NotifyTarget{
+		ID:              uuid.New(),
+		TenantID:        "t1",
+		DestinationType: "test-stub-5xx",
+		URL:             srv.URL,
+		TimeoutSeconds:  5,
+	})
+	if result.OK {
+		t.Fatal("500 should not be OK")
+	}
+	if result.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", result.StatusCode)
+	}
+}
+
+func TestTestSend_DefaultTimeout(t *testing.T) {
+	t.Parallel()
+	registerStubAdapter(t, "test-stub-timeout")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	result := TestSend(t.Context(), notifytarget.NotifyTarget{
+		ID:              uuid.New(),
+		TenantID:        "t1",
+		DestinationType: "test-stub-timeout",
+		URL:             srv.URL,
+		TimeoutSeconds:  0,
+	})
+	if !result.OK {
+		t.Fatalf("default timeout should work, err=%v", result.Err)
+	}
+}
+
+// registerStubAdapter registers a minimal EventChannel for testing and
+// cleans it up after the test via ResetForTest indirection.
+func registerStubAdapter(t *testing.T, id string) {
+	t.Helper()
+	outbound.Register(&stubChannel{id: id})
+	t.Cleanup(outbound.ResetForTest)
+}
+
+type stubChannel struct {
+	id string
+}
+
+func (s *stubChannel) ID() string { return s.id }
+
+func (s *stubChannel) RenderEvent(env *outbound.Envelope, dst outbound.Target) (outbound.Rendered, error) {
+	return outbound.Rendered{
+		Build: func(ctx context.Context) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, dst.URL, strings.NewReader(`{"test":true}`))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Content-Type", "application/json")
+			return req, nil
+		},
+		Check: func(ctx context.Context, status int, body []byte) error {
+			if status >= 200 && status < 300 {
+				return nil
+			}
+			return outbound.ErrTerminal
+		},
+	}, nil
+}

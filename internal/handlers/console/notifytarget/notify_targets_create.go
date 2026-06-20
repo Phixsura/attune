@@ -29,13 +29,6 @@ func (h *NotifyTargetsHandler) Create(ctx *dispatcher.RequestContext[*session.Au
 			where, auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	}
-	// Today only ships lark-bot + raw-webhook adapters.
-	if nreq.DestinationType == notifytarget.DestSlackBot || nreq.DestinationType == notifytarget.DestEmail {
-		logext.Warnf(ctx, "[%s] reject: not implemented,tenant_id:%s,dest:%s",
-			where, auth.TenantID, nreq.DestinationType)
-		return dispatcher.Fail[*attunev1.NotifyTarget](http.StatusNotImplemented, attunev1.ErrorCode_NOT_IMPLEMENTED,
-			"destination_type "+nreq.DestinationType+" is not implemented yet")
-	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,dest:%s,audience:%s",
 		where, auth.TenantID, nreq.DestinationType, nreq.Audience)
 

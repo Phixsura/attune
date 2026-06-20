@@ -103,9 +103,13 @@ func syncCustomWebhooks(
 		if timeout <= 0 {
 			timeout = 10
 		}
+		destType := d.DestinationType
+		if destType == "" {
+			destType = notifytarget.DestRawWebhook
+		}
 		if err := targets.Upsert(ctx, notifytarget.NotifyTarget{
 			TenantID:        tenantID,
-			DestinationType: notifytarget.DestRawWebhook,
+			DestinationType: destType,
 			Audience:        audience,
 			URL:             d.URL,
 			Secret:          d.Secret,
@@ -114,8 +118,8 @@ func syncCustomWebhooks(
 		}); err != nil {
 			return fmt.Errorf("custom_webhooks[%d]: upsert: %w", i, err)
 		}
-		logext.Infof(ctx, "[%s] custom webhook synced,tenant_slug:%s,audience:%s,disabled:%t",
-			where, d.TenantSlug, audience, d.Disabled)
+		logext.Infof(ctx, "[%s] custom webhook synced,tenant_slug:%s,dest_type:%s,audience:%s,disabled:%t",
+			where, d.TenantSlug, destType, audience, d.Disabled)
 	}
 	return nil
 }

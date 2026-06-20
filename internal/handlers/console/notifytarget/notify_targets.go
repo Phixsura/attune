@@ -2,7 +2,9 @@ package notifytarget
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -81,7 +83,8 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 		return errors.New("destination_type must not be empty")
 	}
 	switch req.DestinationType {
-	case notifytarget.DestRawWebhook, notifytarget.DestSlackBot, notifytarget.DestEmail:
+	case notifytarget.DestRawWebhook, notifytarget.DestSlack, notifytarget.DestLark,
+		notifytarget.DestGitHubIssue:
 	default:
 		return errors.New("destination_type value is not allowed")
 	}
@@ -153,14 +156,20 @@ func notifyTargetSummary(action string, target notifytarget.NotifyTarget) string
 }
 
 func auditNotifyTargetSnapshot(target notifytarget.NotifyTarget) map[string]any {
-	return map[string]any{
+	snap := map[string]any{
 		"id":               target.ID.String(),
 		"destination_type": target.DestinationType,
 		"audience":         target.Audience,
-		"url":              sanitizeNotifyTargetURL(target.URL),
 		"timeout_seconds":  target.TimeoutSeconds,
 		"disabled":         target.Disabled,
 	}
+	if target.Secret != "" {
+		snap["url"] = sanitizeNotifyTargetURL(target.URL)
+		snap["has_secret"] = true
+	} else {
+		snap["url_hash"] = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(target.URL)))
+	}
+	return snap
 }
 
 func sanitizeNotifyTargetURL(raw string) string {

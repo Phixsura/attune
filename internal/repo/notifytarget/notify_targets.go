@@ -37,9 +37,11 @@ func NewNotifyTarget(pool *pgxpool.Pool) *NotifyTargetRepo {
 // the audience semantics apply.
 const (
 	DestRawWebhook  = "raw-webhook"
-	DestSlackBot    = "slack-bot"
+	DestSlackBot    = "slack-bot" // legacy — kept for migration compat
+	DestSlack       = "slack"     // Slack incoming webhook (Block Kit)
+	DestLark        = "lark"      // Lark/Feishu incoming webhook (interactive card)
 	DestEmail       = "email"
-	DestGitHubIssue = "github-issue" // Sprint 1 (2026-05-17): native GitHub Issue dispatch
+	DestGitHubIssue = "github-issue"
 )
 
 // Audiences — keep in lockstep with the CHECK constraint.

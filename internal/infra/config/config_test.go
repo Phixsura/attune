@@ -378,6 +378,82 @@ func TestLoadPathRejectsInvalidShutdownConfig(t *testing.T) {
 	}
 }
 
+func TestLoadPathAcceptsSlackWebhookWithoutSecret(t *testing.T) {
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"custom_webhooks: []",
+		`custom_webhooks:
+  - tenant_slug: demo
+    destination_type: slack
+    audience: pool
+    url: "https://hooks.slack.com/services/T00/B00/xxx"`,
+		1,
+	)
+	cfg, err := LoadPath(writeConfig(t, raw))
+	if err != nil {
+		t.Fatalf("slack webhook without secret should be valid: %v", err)
+	}
+	if len(cfg.CustomWebhooks) != 1 {
+		t.Fatalf("expected 1 custom webhook, got %d", len(cfg.CustomWebhooks))
+	}
+	w := cfg.CustomWebhooks[0]
+	if w.DestinationType != "slack" {
+		t.Fatalf("destination_type = %q, want slack", w.DestinationType)
+	}
+	if w.Secret != "" {
+		t.Fatalf("secret = %q, want empty for slack", w.Secret)
+	}
+}
+
+func TestLoadPathAcceptsMultiChannelWebhooks(t *testing.T) {
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"custom_webhooks: []",
+		`custom_webhooks:
+  - tenant_slug: demo
+    destination_type: raw-webhook
+    audience: pool
+    url: "https://example.com/hook"
+    secret: "0123456789abcdef"
+  - tenant_slug: demo
+    destination_type: slack
+    audience: pool
+    url: "https://hooks.slack.com/services/T00/B00/xxx"`,
+		1,
+	)
+	cfg, err := LoadPath(writeConfig(t, raw))
+	if err != nil {
+		t.Fatalf("same tenant+audience but different dest types should be valid: %v", err)
+	}
+	if len(cfg.CustomWebhooks) != 2 {
+		t.Fatalf("expected 2 custom webhooks, got %d", len(cfg.CustomWebhooks))
+	}
+}
+
+func TestLoadPathRejectsSlackWebhookDuplicate(t *testing.T) {
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"custom_webhooks: []",
+		`custom_webhooks:
+  - tenant_slug: demo
+    destination_type: slack
+    audience: pool
+    url: "https://hooks.slack.com/services/T00/B00/xxx"
+  - tenant_slug: demo
+    destination_type: slack
+    audience: pool
+    url: "https://hooks.slack.com/services/T00/B00/yyy"`,
+		1,
+	)
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("duplicate slack webhook for same tenant+audience should be rejected")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestSetPathAndPath(t *testing.T) {
 	original := Path()
 	t.Cleanup(func() {

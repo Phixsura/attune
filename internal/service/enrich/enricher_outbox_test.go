@@ -164,3 +164,34 @@ func TestSelectOutboxTargets_GitHubIssueRoutes(t *testing.T) {
 		t.Errorf("github-issue must route through outbox: %d", len(got))
 	}
 }
+
+func TestSelectOutboxTargets_SlackRoutes(t *testing.T) {
+	targets := []notifytarget.NotifyTarget{
+		{TenantID: "t", DestinationType: notifytarget.DestSlack, Audience: notifytarget.AudiencePool, URL: "https://hooks.slack.com/services/x"},
+	}
+	if got := selectOutboxTargets(targets, sampleSnapshot(false)); len(got) != 1 {
+		t.Errorf("slack must route through outbox: %d", len(got))
+	}
+}
+
+func TestSelectOutboxTargets_LarkRoutes(t *testing.T) {
+	targets := []notifytarget.NotifyTarget{
+		{TenantID: "t", DestinationType: notifytarget.DestLark, Audience: notifytarget.AudiencePool, URL: "https://open.feishu.cn/open-apis/bot/v2/hook/x"},
+	}
+	if got := selectOutboxTargets(targets, sampleSnapshot(false)); len(got) != 1 {
+		t.Errorf("lark must route through outbox: %d", len(got))
+	}
+}
+
+func TestSelectOutboxTargets_MultiChannelFanout(t *testing.T) {
+	targets := []notifytarget.NotifyTarget{
+		{TenantID: "t", DestinationType: notifytarget.DestRawWebhook, Audience: notifytarget.AudiencePool, URL: "https://a"},
+		{TenantID: "t", DestinationType: notifytarget.DestSlack, Audience: notifytarget.AudiencePool, URL: "https://b"},
+		{TenantID: "t", DestinationType: notifytarget.DestLark, Audience: notifytarget.AudiencePool, URL: "https://c"},
+		{TenantID: "t", DestinationType: notifytarget.DestGitHubIssue, Audience: notifytarget.AudienceAll, URL: "https://d"},
+	}
+	got := selectOutboxTargets(targets, sampleSnapshot(false))
+	if len(got) != 4 {
+		t.Errorf("all four outbox dest types should route, got %d", len(got))
+	}
+}
