@@ -237,3 +237,45 @@ func TestRetry_RepoError(t *testing.T) {
 	_, err := h.Retry(testCtx(), &attunev1.RetryDeliveryRequest{Id: 9})
 	assertErr(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
 }
+
+// ToProto must redact the token-in-path webhook URL from every operator-facing
+// field (destination_target plus any URL echoed into last_error / dead_reason).
+// Discord/Slack/Lark webhook URLs carry the auth token in the path.
+func TestToProto_RedactsTokenInURL(t *testing.T) {
+	raw := "https://discord.com/api/webhooks/123/SUPER_SECRET_TOKEN"
+	row := outboxrepo.OutboxRow{
+		ID:                7,
+		DestinationType:   "discord",
+		DestinationTarget: raw,
+		LastError:         `Post "` + raw + `": dial tcp: i/o timeout`,
+		DeadReason:        "exhausted after " + raw,
+	}
+
+	got := ToProto(row)
+
+	for name, field := range map[string]string{
+		"destination_target": got.DestinationTarget,
+		"last_error":         got.LastError,
+		"dead_reason":        got.DeadReason,
+	} {
+		if contains(field, "SUPER_SECRET_TOKEN") {
+			t.Errorf("%s leaked the token: %q", name, field)
+		}
+	}
+	if got.DestinationTarget != "https://discord.com" {
+		t.Errorf("destination_target should be host-only, got %q", got.DestinationTarget)
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || indexOf(s, sub) >= 0)
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}

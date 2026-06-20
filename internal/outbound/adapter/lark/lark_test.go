@@ -104,3 +104,5 @@ func TestRenderDigestCard_Integration(t *testing.T) {
 
 	t.Log("Lark RenderDigest integration test passed")
 }
+
+// truncate moved to internal/outbound/render and is rune-safe-tested there.

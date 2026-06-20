@@ -285,37 +285,8 @@ func TestRenderEvent_HttptestSend_429(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Rune-safe truncation
-// ---------------------------------------------------------------------------
-
-func TestTruncate_RuneSafe(t *testing.T) {
-	s := "你好世界这是一段测试文本"
-
-	result := truncate(s, 10)
-	runes := []rune(result)
-	if len(runes) > 10 {
-		t.Errorf("result exceeds limit: got %d runes, want ≤10", len(runes))
-	}
-	if string(runes[:7]) != "你好世界这是一" {
-		t.Errorf("expected first 7 runes '你好世界这是一', got %q", result)
-	}
-	if !strings.HasSuffix(result, "...") {
-		t.Errorf("expected '...' suffix, got %q", result)
-	}
-
-	small := truncate(s, 4)
-	if small != "你..." {
-		t.Errorf("n=4: expected '你...', got %q", small)
-	}
-}
-
-func TestTruncate_ShortString(t *testing.T) {
-	s := "hello"
-	if truncate(s, 10) != "hello" {
-		t.Errorf("short strings should not be truncated")
-	}
-}
+// truncate/mapStr/severity-category moved to internal/outbound/render and are
+// tested there; the Block Kit behavior is still covered above.
 
 // ---------------------------------------------------------------------------
 // Digest rendering (existing)

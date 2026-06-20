@@ -16,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
@@ -159,18 +160,21 @@ func nextCursor(rows []outboxrepo.OutboxRow, limit int) int64 {
 // ToProto maps a repo row to the wire delivery. Timestamps are RFC3339 ("" when
 // unset), matching the rest of the console contract.
 func ToProto(r outboxrepo.OutboxRow) *attunev1.OutboxDelivery {
+	// The webhook URL can carry an auth token in its path (Slack/Lark/Discord),
+	// so redact it to scheme://host on every operator-facing field — including
+	// last_error / dead_reason, which may embed the full URL via a *url.Error.
 	return ptrext.Of(attunev1.OutboxDelivery{
 		Id:                r.ID,
 		FeedbackId:        r.FeedbackID,
 		DestinationType:   r.DestinationType,
-		DestinationTarget: r.DestinationTarget,
+		DestinationTarget: nethardening.RedactURL(r.DestinationTarget),
 		Audience:          r.Audience,
 		Status:            r.Status,
 		Attempts:          int32(r.Attempts),
 		FailureKind:       failureKindToProto(r.FailureKind),
 		HttpStatus:        int32(r.HTTPStatus),
-		LastError:         r.LastError,
-		DeadReason:        r.DeadReason,
+		LastError:         nethardening.RedactURLIn(r.LastError, r.DestinationTarget),
+		DeadReason:        nethardening.RedactURLIn(r.DeadReason, r.DestinationTarget),
 		TraceId:           r.TraceID,
 		NextRetryAt:       formatTime(r.NextRetryAt),
 		CreatedAt:         formatTime(r.CreatedAt),

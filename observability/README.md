@@ -106,7 +106,7 @@ Label values:
 - enrich `dims_mode` — `freeform` · `constrained` (set per the tenant's `DimensionSet`: `constrained` when at least one dim has a non-empty taxonomy).
 - enrich `dim` — the stable `Dimension.Name` (e.g. `type`, `severity`, `labels`).
 - enrich `result` — `ok` · `llm_err` · `parse_err` · `other_err` · `db_err`.
-- `destination_type` — `lark-pool` · `lark-radar` · `raw-webhook`.
+- `destination_type` — `raw-webhook` · `slack` · `lark` · `discord` · `github-issue`.
 - `reason` — `transport` · `terminal`.
 - `decision` — `ignore` · `fast` · `full`.
 - guard `stage` — `llm_input` · `llm_output` · `outbound` · `tool_call`.

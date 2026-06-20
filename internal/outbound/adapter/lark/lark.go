@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Phixsura/attune/internal/outbound"
+	"github.com/Phixsura/attune/internal/outbound/render"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
@@ -90,9 +91,9 @@ func checkLarkResponse(label string) outbound.ResponseChecker {
 				return fmt.Errorf("%s rate limited status=%d", label, status)
 			}
 			if status >= 400 && status < 500 {
-				return fmt.Errorf("%w: %s status=%d body=%s", outbound.ErrTerminal, label, status, truncate(string(body), 200))
+				return fmt.Errorf("%w: %s status=%d body=%s", outbound.ErrTerminal, label, status, render.Truncate(string(body), 200))
 			}
-			return fmt.Errorf("%s status=%d body=%s", label, status, truncate(string(body), 200))
+			return fmt.Errorf("%s status=%d body=%s", label, status, render.Truncate(string(body), 200))
 		}
 
 		var resp struct {
@@ -160,7 +161,7 @@ func buildEventCard(env *outbound.Envelope) larkCard {
 			Template: template,
 		},
 		Elements: []larkElement{
-			{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: truncate(content, 500)})},
+			{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: render.Truncate(content, 500)})},
 			{Tag: "hr"},
 			{Tag: "note", Elements: []larkElement{{Tag: "plain_text", Content: ptrext.Of(larkText{Tag: "plain_text", Content: fmt.Sprintf("via Attune · %s", env.Timestamp)})}}},
 		},
@@ -176,7 +177,7 @@ func buildDigestCard(view any) larkCard {
 				Template: "purple",
 			},
 			Elements: []larkElement{
-				{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: formatFallbackMarkdown(view)})},
+				{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: render.FallbackJSON(view, 2000)})},
 			},
 		}
 	}
@@ -207,13 +208,13 @@ func buildDigestCard(view any) larkCard {
 				line += "s"
 			}
 			if len(t.ExampleTitles) > 0 {
-				line += fmt.Sprintf("\n   > \"%s\"", truncate(t.ExampleTitles[0], 60))
+				line += fmt.Sprintf("\n   > \"%s\"", render.Truncate(t.ExampleTitles[0], 60))
 			}
 			elements = append(elements, larkElement{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: line})})
 		}
 	} else if len(dv.Result.Items) > 0 {
 		for _, it := range dv.Result.Items {
-			line := fmt.Sprintf("• #%d %s", it.ID, truncate(it.Title, 50))
+			line := fmt.Sprintf("• #%d %s", it.ID, render.Truncate(it.Title, 50))
 			elements = append(elements, larkElement{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: line})})
 		}
 	}
@@ -333,16 +334,4 @@ func renderSparkline(counts []int) string {
 		sb.WriteRune(bars[idx])
 	}
 	return sb.String()
-}
-
-func formatFallbackMarkdown(view any) string {
-	b, _ := json.MarshalIndent(view, "", "  ")
-	return "```\n" + truncate(string(b), 2000) + "\n```"
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }

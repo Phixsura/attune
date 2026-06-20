@@ -244,6 +244,29 @@ and outbound network health before replaying.
 
 Recovery: failure rate is zero for 10 minutes and outbox lag is not increasing.
 
+## AttuneOutboxDeadRowsHigh
+
+Impact: one or more deliveries exhausted their retries (or hit a terminal 4xx)
+and are parked in the `dead` queue. The destination is not receiving those
+notifications until an operator intervenes. A common cause is a webhook that was
+deleted or rotated on the destination side — e.g. a removed Discord/Slack
+channel webhook returns 404 (terminal), or a revoked token returns 403.
+
+Confirm:
+
+```promql
+attune_outbox_dead_rows
+```
+
+Open `Console > Dead deliveries`. For each row, inspect `destination_type` and
+`last_error` (the URL is redacted to scheme://host — the host tells you which
+integration). Fix or remove the offending notify target, then use the per-row
+manual retry. If the target is permanently gone, delete it so new feedback stops
+queuing failures.
+
+Recovery: the dead-row gauge returns to zero after the targets are fixed and the
+parked rows are retried or cleared.
+
 ## AttuneAuthorizationDenialsHigh
 
 Impact: users are being denied console actions. This can be normal access

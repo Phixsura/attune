@@ -304,6 +304,7 @@ var outboxDestTypes = map[string]bool{
 	notifytarget.DestGitHubIssue: true,
 	notifytarget.DestSlack:       true,
 	notifytarget.DestLark:        true,
+	notifytarget.DestDiscord:     true,
 }
 
 // selectOutboxTargets returns the destination rows that should receive

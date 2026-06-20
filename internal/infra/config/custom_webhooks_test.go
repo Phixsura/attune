@@ -21,6 +21,21 @@ func TestValidateCustomWebhooks_SlackSkipsSecretRequirement(t *testing.T) {
 	}
 }
 
+func TestValidateCustomWebhooks_DiscordSkipsSecretRequirement(t *testing.T) {
+	t.Parallel()
+	cfg := &Config{
+		CustomWebhooks: []CustomWebhookDest{{
+			TenantSlug:      "demo",
+			DestinationType: "discord",
+			Audience:        "all",
+			URL:             "https://discord.com/api/webhooks/123/abc",
+		}},
+	}
+	if err := cfg.validateCustomWebhooks(); err != nil {
+		t.Fatalf("discord without secret should pass: %v", err)
+	}
+}
+
 func TestValidateCustomWebhooks_RawWebhookRequiresSecret(t *testing.T) {
 	t.Parallel()
 	cfg := &Config{

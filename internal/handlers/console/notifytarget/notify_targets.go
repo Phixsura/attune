@@ -84,7 +84,7 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 	}
 	switch req.DestinationType {
 	case notifytarget.DestRawWebhook, notifytarget.DestSlack, notifytarget.DestLark,
-		notifytarget.DestGitHubIssue:
+		notifytarget.DestDiscord, notifytarget.DestGitHubIssue:
 	default:
 		return errors.New("destination_type value is not allowed")
 	}
@@ -163,11 +163,19 @@ func auditNotifyTargetSnapshot(target notifytarget.NotifyTarget) map[string]any 
 		"timeout_seconds":  target.TimeoutSeconds,
 		"disabled":         target.Disabled,
 	}
-	if target.Secret != "" {
+	// For token-in-URL destinations (Slack/Lark/Discord) the auth token lives in
+	// the URL path, so the URL must always be hashed — never recorded as a path,
+	// even when the operator also supplies an optional secret. Only HMAC-style
+	// destinations (raw-webhook), where the path is not the credential, get the
+	// human-readable sanitized URL.
+	if target.Secret != "" && !notifytarget.URLIsCredential(target.DestinationType) {
 		snap["url"] = sanitizeNotifyTargetURL(target.URL)
 		snap["has_secret"] = true
 	} else {
 		snap["url_hash"] = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(target.URL)))
+		if target.Secret != "" {
+			snap["has_secret"] = true
+		}
 	}
 	return snap
 }

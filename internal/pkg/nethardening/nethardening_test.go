@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -148,5 +149,27 @@ func TestClientIP(t *testing.T) {
 				t.Fatalf("ClientIP() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRedactURLIn(t *testing.T) {
+	raw := "https://discord.com/api/webhooks/123/SUPER_SECRET_TOKEN"
+	errMsg := `Post "` + raw + `": dial tcp: timeout`
+
+	got := RedactURLIn(errMsg, raw)
+	if strings.Contains(got, "SUPER_SECRET_TOKEN") {
+		t.Errorf("redacted string must not contain the token: %q", got)
+	}
+	if !strings.Contains(got, "https://discord.com") {
+		t.Errorf("redacted string should keep scheme+host: %q", got)
+	}
+	if !strings.Contains(got, "dial tcp: timeout") {
+		t.Errorf("redacted string should keep the non-URL remainder: %q", got)
+	}
+	if RedactURLIn("no url here", raw) != "no url here" {
+		t.Errorf("absent URL should be a no-op")
+	}
+	if RedactURLIn("anything", "") != "anything" {
+		t.Errorf("empty rawURL should be a no-op")
 	}
 }

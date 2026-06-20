@@ -11,7 +11,7 @@ export const protobufPackage = "attune.v1";
 /** NotifyTarget never carries the secret — it is write-only once stored. */
 export interface NotifyTarget {
   id: string;
-  /** raw-webhook | slack-bot | email (#34 outbound adapter SDK extends this) */
+  /** raw-webhook | slack | lark | discord | github-issue (slack-bot is legacy/migration-only) */
   destinationType: string;
   /** pool | radar | all */
   audience: string;

@@ -40,9 +40,23 @@ const (
 	DestSlackBot    = "slack-bot" // legacy — kept for migration compat
 	DestSlack       = "slack"     // Slack incoming webhook (Block Kit)
 	DestLark        = "lark"      // Lark/Feishu incoming webhook (interactive card)
+	DestDiscord     = "discord"   // Discord incoming webhook (embed objects)
 	DestEmail       = "email"
 	DestGitHubIssue = "github-issue"
 )
+
+// URLIsCredential reports whether the destination type's webhook URL carries
+// its auth token in the URL itself (Slack/Lark/Discord incoming webhooks embed
+// the token in the path). For these, the URL must never be logged or audited
+// beyond its host — even the path is secret. Mirrors config.secretOptionalDestTypes.
+func URLIsCredential(destType string) bool {
+	switch destType {
+	case DestSlack, DestLark, DestDiscord:
+		return true
+	default:
+		return false
+	}
+}
 
 // Audiences — keep in lockstep with the CHECK constraint.
 const (

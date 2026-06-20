@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Phixsura/attune/internal/outbound"
+	"github.com/Phixsura/attune/internal/outbound/render"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -76,7 +77,7 @@ func checkSlack(label string) outbound.ResponseChecker {
 			return fmt.Errorf("%s retryable status=%d", label, status)
 		case status >= 400 && status < 500:
 			return fmt.Errorf("%w: %s status=%d body=%s",
-				outbound.ErrTerminal, label, status, truncate(string(body), 256))
+				outbound.ErrTerminal, label, status, render.Truncate(string(body), 256))
 		default:
 			return fmt.Errorf("%s status=%d", label, status)
 		}
@@ -106,12 +107,12 @@ func buildEventBlocks(env *outbound.Envelope) []slackBlock {
 	// The outbox envelope nests title and is_urgent inside feedback.enriched;
 	// TestSend / direct construction puts them at the feedback top level.
 	// Support both paths so the adapter works for outbox delivery and test sends.
-	title := mapStr(fb, "title")
+	title := render.MapStr(fb, "title")
 	if title == "" && enriched != nil {
-		title = mapStr(enriched, "title")
+		title = render.MapStr(enriched, "title")
 	}
-	content := mapStr(fb, "content")
-	source := mapStr(fb, "source")
+	content := render.MapStr(fb, "content")
+	source := render.MapStr(fb, "source")
 
 	isUrgent, _ := fb["is_urgent"].(bool)
 	if !isUrgent && enriched != nil {
@@ -131,16 +132,16 @@ func buildEventBlocks(env *outbound.Envelope) []slackBlock {
 	blocks := []slackBlock{
 		{
 			Type: "header",
-			Text: ptrext.Of(slackText{Type: "plain_text", Text: truncate(emoji+" "+title, headerMaxChars), Emoji: true}),
+			Text: ptrext.Of(slackText{Type: "plain_text", Text: render.Truncate(emoji+" "+title, headerMaxChars), Emoji: true}),
 		},
 		{
 			Type: "section",
-			Text: ptrext.Of(slackText{Type: "mrkdwn", Text: truncate(escapeMrkdwn(content), sectionMaxChars)}),
+			Text: ptrext.Of(slackText{Type: "mrkdwn", Text: render.Truncate(escapeMrkdwn(content), sectionMaxChars)}),
 		},
 	}
 
 	// Severity/category: direct (TestSend) or nested in enriched.attrs (outbox).
-	severity, category := extractSeverityCategory(enriched)
+	severity, category := render.SeverityCategory(enriched)
 	if severity != "" || category != "" {
 		var fields strings.Builder
 		if severity != "" {
@@ -181,7 +182,7 @@ func buildDigestBlocks(view any) []slackBlock {
 			},
 			{
 				Type: "section",
-				Text: ptrext.Of(slackText{Type: "mrkdwn", Text: formatFallbackMarkdown(view)}),
+				Text: ptrext.Of(slackText{Type: "mrkdwn", Text: render.FallbackJSON(view, 2000)}),
 			},
 		}
 	}
@@ -189,7 +190,7 @@ func buildDigestBlocks(view any) []slackBlock {
 	blocks := []slackBlock{
 		{
 			Type: "header",
-			Text: ptrext.Of(slackText{Type: "plain_text", Text: truncate(":bar_chart: Daily Digest — "+dv.RunDate, headerMaxChars), Emoji: true}),
+			Text: ptrext.Of(slackText{Type: "plain_text", Text: render.Truncate(":bar_chart: Daily Digest — "+dv.RunDate, headerMaxChars), Emoji: true}),
 		},
 	}
 
@@ -224,22 +225,22 @@ func buildDigestBlocks(view any) []slackBlock {
 			}
 			themesText.WriteString("\n")
 			if len(t.ExampleTitles) > 0 {
-				fmt.Fprintf(&themesText, "    > _%s_\n", truncate(escapeMrkdwn(t.ExampleTitles[0]), 60))
+				fmt.Fprintf(&themesText, "    > _%s_\n", render.Truncate(escapeMrkdwn(t.ExampleTitles[0]), 60))
 			}
 		}
 		blocks = append(blocks, slackBlock{
 			Type: "section",
-			Text: ptrext.Of(slackText{Type: "mrkdwn", Text: truncate(themesText.String(), sectionMaxChars)}),
+			Text: ptrext.Of(slackText{Type: "mrkdwn", Text: render.Truncate(themesText.String(), sectionMaxChars)}),
 		})
 	} else if len(dv.Result.Items) > 0 {
 		var itemsText strings.Builder
 		itemsText.WriteString("*Recent Feedback*\n")
 		for _, it := range dv.Result.Items {
-			fmt.Fprintf(&itemsText, "• #%d %s\n", it.ID, truncate(escapeMrkdwn(it.Title), 50))
+			fmt.Fprintf(&itemsText, "• #%d %s\n", it.ID, render.Truncate(escapeMrkdwn(it.Title), 50))
 		}
 		blocks = append(blocks, slackBlock{
 			Type: "section",
-			Text: ptrext.Of(slackText{Type: "mrkdwn", Text: truncate(itemsText.String(), sectionMaxChars)}),
+			Text: ptrext.Of(slackText{Type: "mrkdwn", Text: render.Truncate(itemsText.String(), sectionMaxChars)}),
 		})
 	}
 
@@ -374,11 +375,6 @@ func renderSparkline(counts []int) string {
 	return sb.String()
 }
 
-func formatFallbackMarkdown(view any) string {
-	b, _ := json.MarshalIndent(view, "", "  ")
-	return "```\n" + truncate(string(b), 2000) + "\n```"
-}
-
 // escapeMrkdwn neutralises Slack mrkdwn control sequences in user content.
 // Without this, strings containing "<" can trigger @channel / @here mentions
 // or produce unwanted link markup (e.g. "<!channel>" pings the whole channel).
@@ -387,37 +383,4 @@ func escapeMrkdwn(s string) string {
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
-}
-
-func mapStr(m map[string]any, key string) string {
-	v, _ := m[key].(string)
-	return v
-}
-
-func extractSeverityCategory(enriched map[string]any) (string, string) {
-	if enriched == nil {
-		return "", ""
-	}
-	severity := mapStr(enriched, "severity")
-	category := mapStr(enriched, "category")
-	if attrs, ok := enriched["attrs"].(map[string]any); ok {
-		if severity == "" {
-			severity = mapStr(attrs, "severity")
-		}
-		if category == "" {
-			category = mapStr(attrs, "category")
-		}
-	}
-	return severity, category
-}
-
-func truncate(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
-	}
-	if n > 3 {
-		return string(runes[:n-3]) + "..."
-	}
-	return string(runes[:n])
 }

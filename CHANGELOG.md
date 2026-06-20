@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **`AttuneOutboxDeadRowsHigh` alert (#32).** The `attune_outbox_dead_rows`
+  gauge was dashboard-only; a webhook deleted on the destination side (a common
+  self-service action for Discord/Slack channel webhooks) silently piled
+  terminal-failed deliveries into the dead queue with no alert. A new alert
+  fires when any delivery sits in the `dead` state for 15m, with a runbook
+  pointing the operator to Console > Dead deliveries.
+
+- **Discord webhook outbound adapter (#32).** A new `discord` destination type
+  delivers per-event and daily-digest notifications as Discord embed objects
+  (`internal/outbound/adapter/discord/`). The embed color is keyed off the
+  enrichment severity (`critical`→red, `major`→orange, `minor`→yellow, with a
+  gray fallback for tenant-custom taxonomies); `is_urgent` overrides to red.
+  Built end-to-end on the #31 framework: outbox routing, Console CRUD, config
+  validation (`destination_type: discord`, secret optional — the webhook URL is
+  the credential), the registry-driven Test button, and a `058` migration
+  widening the `destination_type` CHECK. A `checkDiscord` response checker
+  treats Discord's `204 No Content` as success and 408/429 as retryable; all
+  embeds ship `allowed_mentions:{parse:[]}` so user content can never trigger an
+  `@everyone`/`@here` ping, and every field is rune-safe truncated to Discord's
+  embed limits (title 256, description 4096, 6000 total). A malformed upstream
+  timestamp is dropped rather than passed through (Discord 400s on a bad
+  `embed.timestamp`), and the daily-digest path renders both clustered themes
+  and a recent-items fallback.
+
 - **Slack outbound adapter wired into delivery pipeline (#31).** The existing
   Slack Block Kit adapter (`internal/outbound/adapter/slack/`) is now
   delivery-reachable end-to-end: outbox routing creates rows for `slack`
@@ -29,6 +53,30 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Security
 
+- **Dead-queue console surface no longer leaks token-in-URL webhook
+  credentials (#32).** The outbox dead-queue API (`ToProto`) returned the full
+  `destination_target` URL — and any URL echoed into `last_error` /
+  `dead_reason` via a `*url.Error` — verbatim to operators. For Slack/Lark/
+  Discord the token lives in the URL path, so an operator viewing a failed
+  delivery saw the credential in clear text. All three fields are now redacted
+  to scheme://host at the read boundary (`nethardening.RedactURL` /
+  `RedactURLIn`); the full URL is still stored at rest for redelivery.
+
+- **`notify.TestSend` no longer leaks the webhook URL in transport errors
+  (#32).** A connection/DNS/TLS failure returned the raw `*url.Error` (which Go
+  formats with the full request URL) to the API response and audit log. The
+  returned error is now scrubbed with `nethardening.RedactURLIn`.
+
+- **Audit snapshot no longer leaks token-in-URL webhook credentials (#32).**
+  `auditNotifyTargetSnapshot` chose between a hashed URL and a path-preserving
+  "sanitized" URL based solely on whether a `secret` was set. For destinations
+  whose token lives in the URL path (Slack/Lark/Discord incoming webhooks), an
+  operator who also supplied an optional `secret` would get the full webhook
+  token written to the audit log in clear text. The snapshot now keys on the
+  destination type (`notifytarget.URLIsCredential`) and always hashes the URL
+  for token-in-URL destinations regardless of any secret. Fixes a latent leak
+  that also affected the existing Slack/Lark types.
+
 - **Slack webhook URL redacted in logs (#31).** The adapter now logs
   `nethardening.RedactURL(dst.URL)` (scheme + host only) instead of the
   full incoming-webhook URL, which contains the authentication token in
@@ -40,6 +88,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   link markup.
 
 ### Fixed
+
+- **Lark adapter `truncate` is now rune-safe (#32).** It used byte slicing
+  (`s[:n]`), which split multibyte UTF-8 mid-rune — corrupting CJK/emoji titles
+  and risking an upstream 400 — and appended `"..."` past `n`. Replaced with the
+  rune-safe version already used by the Slack/Discord adapters (found while
+  reviewing the Discord copy-adapt for shared-helper drift).
 
 - **`outbound.ErrTerminal` now recognised by transport retry loop (#31).**
   `outbound.ErrTerminal` and `notify.ErrTerminal` were separate
