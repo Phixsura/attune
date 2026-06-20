@@ -6,7 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"runtime/debug"
 
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -45,7 +48,14 @@ func (d *Dispatcher) Register(name string, fn ToolFunc) {
 }
 
 // Dispatch routes a request to the appropriate tool.
-func (d *Dispatcher) Dispatch(ctx context.Context, req *Request) *Response {
+func (d *Dispatcher) Dispatch(ctx context.Context, req *Request) (resp *Response) {
+	defer func() {
+		if r := recover(); r != nil {
+			logext.Errorf(ctx, "mcp tool panic: %v\n%s", r, debug.Stack())
+			resp = InternalError(req.ID, "internal server error")
+		}
+	}()
+
 	if req.JSONRPC != Version {
 		return InvalidRequest(req.ID, "invalid jsonrpc version")
 	}
@@ -65,7 +75,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req *Request) *Response {
 		if errors.As(err, &toolErr) {
 			return NewErrorResponse(req.ID, toolErr.Code, toolErr.Message, toolErr.Data)
 		}
-		return InternalError(req.ID, err.Error())
+		logext.Warnf(ctx, "mcp tool %s internal error: %v", req.Method, err)
+		return InternalError(req.ID, fmt.Sprintf("tool %s failed", req.Method))
 	}
 
 	return NewResponse(req.ID, result)

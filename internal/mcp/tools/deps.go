@@ -4,10 +4,12 @@ package tools
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/mcp/server"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/feedbacktag"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
@@ -51,6 +53,23 @@ type Ingestor interface {
 	Ingest(ctx context.Context, tenantID, userID string, in domain.IngestInput) (int64, error)
 }
 
+// AuditEvent represents an audit log event.
+type AuditEvent struct {
+	TenantID   string
+	Actor      string
+	Action     string
+	TargetType string
+	TargetID   string
+	Summary    string
+	Before     any
+	After      any
+}
+
+// AuditRecorder records audit events.
+type AuditRecorder interface {
+	Record(ctx context.Context, event AuditEvent) error
+}
+
 // Deps holds dependencies for MCP tools.
 type Deps struct {
 	Feedback        FeedbackReader
@@ -60,4 +79,12 @@ type Deps struct {
 	Tag             TagReader
 	TagAssign       TagAssigner
 	Ingestor        Ingestor
+	Audit           AuditRecorder
+}
+
+// MCPPrincipal returns the audit actor string for MCP tool calls.
+func MCPPrincipal(ctx context.Context) string {
+	clientID := server.ClientIDFromContext(ctx)
+	sessionID := server.SessionIDFromContext(ctx)
+	return fmt.Sprintf("mcp:%s:%s", clientID.String(), sessionID.String())
 }

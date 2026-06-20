@@ -521,3 +521,49 @@ func TestMemoryConcurrencyLimiter_CurrentCount(t *testing.T) {
 		t.Fatalf("count after all releases = %d, want 0", got)
 	}
 }
+
+func TestMemorySlidingLimiter_AllowWithInfo(t *testing.T) {
+	m := NewMemorySlidingLimiter()
+	ctx := context.Background()
+
+	// First request: should have full remaining
+	allowed, info, err := m.AllowWithInfo(ctx, "tenant-1", 5, time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !allowed {
+		t.Fatal("first request should be allowed")
+	}
+	if info.Limit != 5 {
+		t.Fatalf("info.Limit = %d, want 5", info.Limit)
+	}
+	if info.Remaining != 4 {
+		t.Fatalf("info.Remaining = %d, want 4", info.Remaining)
+	}
+	if info.Reset <= 0 {
+		t.Fatalf("info.Reset = %v, want > 0", info.Reset)
+	}
+
+	// Use up remaining quota
+	for i := 0; i < 4; i++ {
+		allowed, _, _ = m.AllowWithInfo(ctx, "tenant-1", 5, time.Minute)
+		if !allowed {
+			t.Fatalf("request %d should be allowed", i+2)
+		}
+	}
+
+	// 6th request should be blocked with remaining=0
+	allowed, info, err = m.AllowWithInfo(ctx, "tenant-1", 5, time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if allowed {
+		t.Fatal("6th request should be blocked")
+	}
+	if info.Remaining != 0 {
+		t.Fatalf("info.Remaining = %d, want 0", info.Remaining)
+	}
+	if info.Reset <= 0 {
+		t.Fatal("info.Reset should be positive when blocked")
+	}
+}

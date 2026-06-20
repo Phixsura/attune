@@ -46,6 +46,7 @@ import (
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
 	llmconfigrepo "github.com/Phixsura/attune/internal/repo/llmconfig"
+	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -175,6 +176,10 @@ func runServer() error {
 	safego(ctx, "idempotency_key_pruner", func() {
 		runIdempotencyKeyPruner(ctx, runtimeDeps.feedbackRepo, idempotencyKeyRetention, idempotencyKeyPruneInterval)
 	})
+	// MCP OAuth cleanup: expired codes, revoked tokens, idle sessions (#93).
+	safego(ctx, "mcp_pruner", func() {
+		runMCPPruner(ctx, pool, mcpPruneInterval, mcpSessionIdleLimit)
+	})
 
 	batchJobWorker := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, cfg.ConsoleBaseURL, cfg.GDPRExportTTL)
 	defer batchJobWorker.Stop()
@@ -198,6 +203,7 @@ func runServer() error {
 	r, err := buildRouter(
 		ctx, cfg, ingestHandler, runtimeDeps.apiKeys, pool, ready, runtimeDeps.llm,
 		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo, runtimeDeps.enrichRuntime,
+		runtimeDeps.ingestor,
 	)
 	if err != nil {
 		return err
@@ -399,6 +405,57 @@ func pruneIdempotencyKeysOnce(ctx context.Context, repo *feedback.FeedbackRepo, 
 		return
 	}
 	logext.Infof(ctx, "[%s] OK,rows:%d,retention_hours:%d", where, rows, int(retention.Hours()))
+}
+
+const (
+	mcpPruneInterval    = 1 * time.Hour
+	mcpSessionIdleLimit = 7 * 24 * time.Hour
+)
+
+func runMCPPruner(ctx context.Context, pool *pgxpool.Pool, interval, sessionIdleLimit time.Duration) {
+	if pool == nil || interval <= 0 {
+		return
+	}
+	codes := mcprepo.NewCodes(pool)
+	tokens := mcprepo.NewTokens(pool)
+	sessions := mcprepo.NewSessions(pool)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	pruneMCPOnce(ctx, codes, tokens, sessions, sessionIdleLimit)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pruneMCPOnce(ctx, codes, tokens, sessions, sessionIdleLimit)
+		}
+	}
+}
+
+func pruneMCPOnce(ctx context.Context, codes *mcprepo.CodesRepo, tokens *mcprepo.TokensRepo, sessions *mcprepo.SessionsRepo, sessionIdleLimit time.Duration) {
+	const where = "main.pruneMCP"
+
+	codesRows, err := codes.Cleanup(ctx)
+	if err != nil {
+		logext.Warnf(ctx, "[%s.codes] failed,err:%+v", where, err.Error())
+	} else if codesRows > 0 {
+		logext.Infof(ctx, "[%s.codes] OK,rows:%d", where, codesRows)
+	}
+
+	tokensRows, err := tokens.Cleanup(ctx)
+	if err != nil {
+		logext.Warnf(ctx, "[%s.tokens] failed,err:%+v", where, err.Error())
+	} else if tokensRows > 0 {
+		logext.Infof(ctx, "[%s.tokens] OK,rows:%d", where, tokensRows)
+	}
+
+	sessionsRows, err := sessions.CleanupIdle(ctx, sessionIdleLimit)
+	if err != nil {
+		logext.Warnf(ctx, "[%s.sessions] failed,err:%+v", where, err.Error())
+	} else if sessionsRows > 0 {
+		logext.Infof(ctx, "[%s.sessions] OK,rows:%d,idle_hours:%d", where, sessionsRows, int(sessionIdleLimit.Hours()))
+	}
 }
 
 // setupTracing builds the OpenTelemetry tracer from config. An empty

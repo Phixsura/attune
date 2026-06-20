@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -28,13 +30,15 @@ type auditRecorder interface {
 
 // Handler implements MCP OAuth client management endpoints.
 type Handler struct {
-	clients *mcprepo.ClientsRepo
-	audit   auditRecorder
+	clients  *mcprepo.ClientsRepo
+	tokens   *mcprepo.TokensRepo
+	sessions *mcprepo.SessionsRepo
+	audit    auditRecorder
 }
 
 // NewHandler creates a new MCP client handler.
-func NewHandler(clients *mcprepo.ClientsRepo) *Handler {
-	return ptrext.Of(Handler{clients: clients})
+func NewHandler(clients *mcprepo.ClientsRepo, tokens *mcprepo.TokensRepo, sessions *mcprepo.SessionsRepo) *Handler {
+	return ptrext.Of(Handler{clients: clients, tokens: tokens, sessions: sessions})
 }
 
 // SetAuditLogger configures the audit logger for tracking client operations.
@@ -94,6 +98,9 @@ func (h *Handler) Create(ctx context.Context, auth *session.AuthCtx, req *Create
 	if len(req.RedirectURIs) == 0 {
 		return nil, ptrext.Of(ValidationError{Field: "redirect_uris", Message: "at least one redirect URI is required"})
 	}
+	if err := validateRedirectURIs(req.RedirectURIs); err != nil {
+		return nil, err
+	}
 
 	client, err := h.clients.Create(ctx, mcprepo.CreateClientParams{
 		TenantID:     auth.TenantID,
@@ -148,6 +155,14 @@ func (h *Handler) Revoke(ctx context.Context, auth *session.AuthCtx, req *Revoke
 		return nil, err
 	}
 
+	// Revoke all refresh tokens and close all sessions for this client
+	if h.tokens != nil {
+		_, _ = h.tokens.RevokeByClient(ctx, id)
+	}
+	if h.sessions != nil {
+		_, _ = h.sessions.CloseByClient(ctx, id)
+	}
+
 	if h.audit != nil {
 		h.audit.Record(ctx, auditlogsvc.Event{ //nolint:errcheck
 			TenantID:   auth.TenantID,
@@ -191,6 +206,30 @@ func validateScopes(scopes []string) error {
 		}
 	}
 	return nil
+}
+
+func validateRedirectURIs(uris []string) error {
+	for _, uri := range uris {
+		u, err := url.Parse(uri)
+		if err != nil {
+			return ptrext.Of(ValidationError{Field: "redirect_uris", Message: "invalid URL: " + uri})
+		}
+		if u.Fragment != "" {
+			return ptrext.Of(ValidationError{Field: "redirect_uris", Message: "fragment not allowed in redirect URI"})
+		}
+		if u.Scheme == "javascript" || u.Scheme == "data" || u.Scheme == "file" || u.Scheme == "vbscript" {
+			return ptrext.Of(ValidationError{Field: "redirect_uris", Message: "dangerous URI scheme not allowed"})
+		}
+		if u.Scheme != "https" && !isLoopbackURI(u) {
+			return ptrext.Of(ValidationError{Field: "redirect_uris", Message: "redirect URI must use HTTPS (except for localhost)"})
+		}
+	}
+	return nil
+}
+
+func isLoopbackURI(u *url.URL) bool {
+	host := strings.ToLower(u.Hostname())
+	return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
 }
 
 // ValidationError represents a validation failure.

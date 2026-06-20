@@ -34,6 +34,7 @@ var ValidSources = map[string]bool{
 	"webhook": true, // generic inbound HTTP webhook
 	"email":   true, // mailbox poller / inbound IMAP
 	"web":     true, // in-app JS feedback widget
+	"mcp":     true, // Model Context Protocol integration (#93)
 	"other":   true, // catch-all for misc integrations
 }
 
@@ -61,6 +62,8 @@ func SourceDisplayName(source string) string {
 		return "Email"
 	case "web":
 		return "Web Widget"
+	case "mcp":
+		return "MCP"
 	case "other":
 		return "Other"
 	default:

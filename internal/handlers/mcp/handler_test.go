@@ -57,11 +57,27 @@ func (m *mockTokenStore) GetByHash(_ context.Context, _ string) (*oauth.RefreshT
 	return nil, oauth.ErrInvalidRefreshToken
 }
 func (m *mockTokenStore) Revoke(_ context.Context, _ uuid.UUID) error { return nil }
+func (m *mockTokenStore) Consume(_ context.Context, _ string) (*oauth.RefreshToken, error) {
+	return nil, oauth.ErrInvalidRefreshToken
+}
+
+func (m *mockTokenStore) RotateToken(_ context.Context, _, _ string, _ time.Time) (*oauth.RefreshToken, *oauth.RefreshToken, error) {
+	return nil, nil, oauth.ErrInvalidRefreshToken
+}
 
 type mockSessionStore struct{}
 
 func (m *mockSessionStore) Create(_ context.Context, _ *oauth.Session) error { return nil }
 func (m *mockSessionStore) Touch(_ context.Context, _ uuid.UUID) error       { return nil }
+func (m *mockSessionStore) IsActive(_ context.Context, _ uuid.UUID) (bool, error) {
+	return true, nil
+}
+
+type mockSessionValidator struct{}
+
+func (m *mockSessionValidator) IsActive(_ context.Context, _ uuid.UUID) (bool, error) {
+	return true, nil
+}
 
 func newTestHandler() *mcp.Handler {
 	cfg := mcp.Config{
@@ -70,10 +86,11 @@ func newTestHandler() *mcp.Handler {
 		JWTIssuer: "https://attune.example.com/mcp/oauth",
 	}
 	stores := mcp.Stores{
-		Clients:  ptrext.Of(mockClientStore{}),
-		Codes:    ptrext.Of(mockCodeStore{}),
-		Tokens:   ptrext.Of(mockTokenStore{}),
-		Sessions: ptrext.Of(mockSessionStore{}),
+		Clients:          ptrext.Of(mockClientStore{}),
+		Codes:            ptrext.Of(mockCodeStore{}),
+		Tokens:           ptrext.Of(mockTokenStore{}),
+		Sessions:         ptrext.Of(mockSessionStore{}),
+		SessionValidator: ptrext.Of(mockSessionValidator{}),
 	}
 	deps := ptrext.Of(tools.Deps{
 		Feedback: ptrext.Of(mockFeedbackReader{}),
@@ -149,4 +166,60 @@ func TestHandler_OAuthEndpoints(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandler_SecurityHeaders(t *testing.T) {
+	h := newTestHandler()
+	router := h.Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "strict-origin-when-cross-origin", rec.Header().Get("Referrer-Policy"))
+}
+
+func TestHandler_RateLimitHeaders(t *testing.T) {
+	h := newTestHandler()
+	router := h.Routes()
+
+	claims := oauth.AccessTokenClaims{
+		TenantID:  "tenant-123",
+		ClientID:  uuid.New(),
+		SessionID: uuid.New(),
+		Scopes:    []string{"mcp:read"},
+	}
+	token, err := h.Signer().Sign(claims, time.Hour)
+	require.NoError(t, err)
+
+	body := `{"jsonrpc":"2.0","method":"list_feedback","id":"1"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.NotEmpty(t, rec.Header().Get("X-RateLimit-Limit"))
+	assert.NotEmpty(t, rec.Header().Get("X-RateLimit-Remaining"))
+	assert.NotEmpty(t, rec.Header().Get("X-RateLimit-Reset"))
+}
+
+func TestHandler_OAuthRateLimitHeaders(t *testing.T) {
+	h := newTestHandler()
+	router := h.Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?client_id=invalid&response_type=code", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	// Even on error, rate limit headers should be present
+	assert.NotEmpty(t, rec.Header().Get("X-RateLimit-Limit"))
+	assert.NotEmpty(t, rec.Header().Get("X-RateLimit-Remaining"))
+	assert.NotEmpty(t, rec.Header().Get("X-RateLimit-Reset"))
 }

@@ -571,5 +571,21 @@ func (r *FeedbackRepo) SampleEnrichedByTenant(ctx context.Context, tenantID stri
 	return out, rows.Err()
 }
 
+// SetUrgent updates the is_urgent flag on a feedback row.
+func (r *FeedbackRepo) SetUrgent(ctx context.Context, tenantID string, id int64, urgent bool) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE user_feedback SET is_urgent = $3, updated_at = NOW()
+		 WHERE id = $1 AND tenant_id = $2`,
+		id, tenantID, urgent,
+	)
+	if err != nil {
+		return fmt.Errorf("set urgent: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("feedback not found")
+	}
+	return nil
+}
+
 // truncate moved to internal/repo/pgxutil.Truncate (single canonical
 // helper imported by every repo subpackage).

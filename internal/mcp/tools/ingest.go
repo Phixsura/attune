@@ -5,10 +5,12 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/mcp/jsonrpc"
 	"github.com/Phixsura/attune/internal/mcp/server"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // RegisterIngestTools registers ingest MCP tools.
@@ -57,7 +59,7 @@ func submitFeedback(deps *Deps) jsonrpc.ToolFunc {
 
 		userID := p.UserID
 		if userID == "" {
-			userID = mcpPrincipal(ctx)
+			userID = MCPPrincipal(ctx)
 		}
 
 		input := domain.IngestInput{
@@ -70,7 +72,21 @@ func submitFeedback(deps *Deps) jsonrpc.ToolFunc {
 
 		id, err := deps.Ingestor.Ingest(ctx, tenantID, userID, input)
 		if err != nil {
-			return nil, err
+			logext.Warnf(ctx, "mcp tool submit_feedback failed: %v", err)
+			return nil, jsonrpc.NewToolError(jsonrpc.CodeInternalError, "failed to submit feedback")
+		}
+
+		if deps.Audit != nil {
+			byUser := MCPPrincipal(ctx)
+			deps.Audit.Record(ctx, AuditEvent{ //nolint:errcheck
+				TenantID:   tenantID,
+				Actor:      byUser,
+				Action:     domain.AuditActionMCPSubmitFeedback,
+				TargetType: "feedback",
+				TargetID:   fmt.Sprintf("%d", id),
+				Summary:    "Submitted feedback via MCP",
+				After:      map[string]any{"source": source},
+			})
 		}
 
 		return SubmitFeedbackResponse{FeedbackID: id}, nil

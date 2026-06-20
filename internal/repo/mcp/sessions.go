@@ -120,3 +120,17 @@ func (r *SessionsRepo) CleanupIdle(ctx context.Context, idleThreshold time.Durat
 	}
 	return tag.RowsAffected(), nil
 }
+
+// IsActive checks if a session is active (not closed).
+func (r *SessionsRepo) IsActive(ctx context.Context, id uuid.UUID) (bool, error) {
+	const q = `SELECT closed_at IS NULL FROM mcp_sessions WHERE id = $1`
+	var active bool
+	err := r.pool.QueryRow(ctx, q, id).Scan(&active)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return active, nil
+}

@@ -58,12 +58,25 @@ ALTER TABLE audit_log ADD CONSTRAINT chk_audit_action_value
         'workflow_state.update',
         'workflow_transition.replace',
 
-        -- MCP tool calls (new)
+        -- MCP tool calls - read operations
         'mcp.list_feedback',
-        'mcp.search_feedback',
         'mcp.get_feedback',
-        'mcp.list_dimensions',
+        'mcp.list_workflow_states',
+        'mcp.get_workflow_state',
         'mcp.list_tags',
+
+        -- MCP tool calls - write operations
+        'mcp.update_workflow_state',
+        'mcp.add_tag',
+        'mcp.remove_tag',
+        'mcp.set_urgent',
+
+        -- MCP tool calls - ingest operations
+        'mcp.submit_feedback',
+
+        -- MCP tool calls - future expansion
+        'mcp.search_feedback',
+        'mcp.list_dimensions',
         'mcp.list_clusters',
         'mcp.get_cluster',
         'mcp.get_digest',

@@ -5,7 +5,9 @@ package oauth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -20,11 +22,13 @@ import (
 )
 
 var (
+	ErrInvalidRequest      = errors.New("invalid request")
 	ErrInvalidClient       = errors.New("invalid client")
 	ErrInvalidRedirectURI  = errors.New("invalid redirect uri")
 	ErrInvalidGrant        = errors.New("invalid grant")
 	ErrInvalidCode         = errors.New("invalid or expired code")
 	ErrInvalidRefreshToken = errors.New("invalid refresh token")
+	ErrInvalidScope        = errors.New("requested scope exceeds client authorization")
 	ErrPKCERequired        = errors.New("PKCE required")
 	ErrPKCEFailed          = errors.New("PKCE verification failed")
 )
@@ -46,12 +50,18 @@ type TokenStore interface {
 	Create(ctx context.Context, token *RefreshToken) error
 	GetByHash(ctx context.Context, hash string) (*RefreshToken, error)
 	Revoke(ctx context.Context, id uuid.UUID) error
+	// Consume atomically retrieves and revokes a refresh token (for rotation).
+	Consume(ctx context.Context, hash string) (*RefreshToken, error)
+	// RotateToken atomically consumes old token and creates new one in a transaction.
+	// Returns (oldToken, newToken, error). If any step fails, neither change commits.
+	RotateToken(ctx context.Context, oldHash, newHash string, newExpiresAt time.Time) (*RefreshToken, *RefreshToken, error)
 }
 
 // SessionStore provides MCP session operations.
 type SessionStore interface {
 	Create(ctx context.Context, session *Session) error
 	Touch(ctx context.Context, id uuid.UUID) error
+	IsActive(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
 // Client represents an OAuth client (public client, no secret - uses PKCE).
@@ -137,7 +147,7 @@ func NewAuthServer(
 		cfg.AccessTTL = 1 * time.Hour
 	}
 	if cfg.RefreshTTL == 0 {
-		cfg.RefreshTTL = 30 * 24 * time.Hour
+		cfg.RefreshTTL = 7 * 24 * time.Hour // 7 days per industry best practice
 	}
 	return ptrext.Of(AuthServer{
 		clients:      clients,
@@ -174,17 +184,14 @@ type AuthorizeResponse struct {
 func (s *AuthServer) Authorize(ctx context.Context, req AuthorizeRequest) (*AuthorizeResponse, error) {
 	const where = "oauth.AuthServer.Authorize"
 
-	if req.ResponseType != "code" {
-		return nil, errors.New("unsupported response_type")
+	// Input length validation to prevent DoS via oversized parameters.
+	if len(req.ClientID) > 36 || len(req.RedirectURI) > 2048 ||
+		len(req.Scope) > 1024 || len(req.State) > 256 || len(req.CodeChallenge) > 128 {
+		return nil, ErrInvalidRequest
 	}
 
-	if req.CodeChallenge == "" {
-		return nil, ErrPKCERequired
-	}
-	if req.CodeChallengeMethod != "S256" {
-		return nil, errors.New("code_challenge_method must be S256")
-	}
-
+	// Per RFC 6749 Section 4.1.2.1: Validate client_id and redirect_uri FIRST.
+	// If these are invalid, we MUST NOT redirect - return error directly.
 	clientID, err := uuid.Parse(req.ClientID)
 	if err != nil {
 		return nil, ErrInvalidClient
@@ -202,9 +209,27 @@ func (s *AuthServer) Authorize(ctx context.Context, req AuthorizeRequest) (*Auth
 		return nil, ErrInvalidRedirectURI
 	}
 
+	// Now that redirect_uri is validated, subsequent errors can be redirected.
+	if req.ResponseType != "code" {
+		return nil, errors.New("unsupported response_type")
+	}
+
+	if req.CodeChallenge == "" {
+		return nil, ErrPKCERequired
+	}
+	if req.CodeChallengeMethod != "S256" {
+		return nil, errors.New("code_challenge_method must be S256")
+	}
+
 	scopes := parseScopes(req.Scope)
 	if len(scopes) == 0 {
 		scopes = client.Scopes
+	} else {
+		if !scopesAllowed(scopes, client.Scopes) {
+			logext.Warnf(ctx, "[%s] scope exceeds client authorization,client_id:%s,requested:%v,allowed:%v",
+				where, req.ClientID, scopes, client.Scopes)
+			return nil, ErrInvalidScope
+		}
 	}
 
 	code := generateCode()
@@ -221,7 +246,8 @@ func (s *AuthServer) Authorize(ctx context.Context, req AuthorizeRequest) (*Auth
 	})
 
 	if err := s.codes.Create(ctx, authCode); err != nil {
-		return nil, err
+		logext.Errorf(ctx, "[%s] code create failed,err:%v", where, err)
+		return nil, errors.New("authorization failed")
 	}
 
 	logext.Infof(ctx, "[%s] code issued,client_id:%s,scopes:%v", where, req.ClientID, scopes)
@@ -273,6 +299,17 @@ func (s *AuthServer) tokenFromCode(ctx context.Context, req TokenRequest) (*Toke
 		return nil, ErrInvalidCode
 	}
 
+	if time.Now().After(authCode.ExpiresAt) {
+		logext.Warnf(ctx, "[%s] code expired,code:%s,expires_at:%v", where, req.Code[:8], authCode.ExpiresAt)
+		return nil, ErrInvalidCode
+	}
+
+	reqClientID, err := uuid.Parse(req.ClientID)
+	if err != nil || reqClientID != authCode.ClientID {
+		logext.Warnf(ctx, "[%s] client_id mismatch,req:%s,code:%s", where, req.ClientID, authCode.ClientID)
+		return nil, ErrInvalidClient
+	}
+
 	if authCode.RedirectURI != req.RedirectURI {
 		return nil, ErrInvalidRedirectURI
 	}
@@ -282,9 +319,7 @@ func (s *AuthServer) tokenFromCode(ctx context.Context, req TokenRequest) (*Toke
 		return nil, ErrPKCEFailed
 	}
 
-	sessionID := uuid.New()
 	session := ptrext.Of(Session{
-		ID:        sessionID,
 		ClientID:  authCode.ClientID,
 		TenantID:  authCode.TenantID,
 		Scopes:    authCode.Scopes,
@@ -293,17 +328,20 @@ func (s *AuthServer) tokenFromCode(ctx context.Context, req TokenRequest) (*Toke
 		LastUsed:  time.Now(),
 	})
 	if err := s.sessions.Create(ctx, session); err != nil {
-		return nil, err
+		logext.Errorf(ctx, "[%s] session create failed: %v", where, err)
+		return nil, ErrInvalidGrant
 	}
+	// session.ID is set by Create - use it from here on
 
 	accessToken, err := s.signer.Sign(AccessTokenClaims{
 		TenantID:  authCode.TenantID,
 		ClientID:  authCode.ClientID,
-		SessionID: sessionID,
+		SessionID: session.ID,
 		Scopes:    authCode.Scopes,
 	}, s.accessTTL)
 	if err != nil {
-		return nil, err
+		logext.Errorf(ctx, "[%s] access token sign failed: %v", where, err)
+		return nil, ErrInvalidGrant
 	}
 
 	refreshToken := generateToken()
@@ -312,16 +350,17 @@ func (s *AuthServer) tokenFromCode(ctx context.Context, req TokenRequest) (*Toke
 		TokenHash: hashToken(refreshToken),
 		ClientID:  authCode.ClientID,
 		TenantID:  authCode.TenantID,
-		SessionID: sessionID,
+		SessionID: session.ID,
 		Scopes:    authCode.Scopes,
 		ExpiresAt: time.Now().Add(s.refreshTTL),
 		CreatedAt: time.Now(),
 	})
 	if err := s.tokens.Create(ctx, rt); err != nil {
-		return nil, err
+		logext.Errorf(ctx, "[%s] refresh token create failed: %v", where, err)
+		return nil, ErrInvalidGrant
 	}
 
-	logext.Infof(ctx, "[%s] tokens issued,client_id:%s,session_id:%s", where, authCode.ClientID, sessionID)
+	logext.Infof(ctx, "[%s] tokens issued,client_id:%s,session_id:%s", where, authCode.ClientID, session.ID)
 
 	return ptrext.Of(TokenResponse{
 		AccessToken:  accessToken,
@@ -335,17 +374,52 @@ func (s *AuthServer) tokenFromCode(ctx context.Context, req TokenRequest) (*Toke
 func (s *AuthServer) tokenFromRefresh(ctx context.Context, req TokenRequest) (*TokenResponse, error) {
 	const where = "oauth.AuthServer.tokenFromRefresh"
 
-	hash := hashToken(req.RefreshToken)
-	rt, err := s.tokens.GetByHash(ctx, hash)
+	// Client ID is required for public clients (PKCE flow)
+	if req.ClientID == "" {
+		logext.Warnf(ctx, "[%s] missing client_id", where)
+		return nil, ErrInvalidClient
+	}
+	reqClientID, err := uuid.Parse(req.ClientID)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] invalid client_id format,req:%s", where, req.ClientID)
+		return nil, ErrInvalidClient
+	}
+
+	oldHash := hashToken(req.RefreshToken)
+
+	// Validate token exists and get metadata (without consuming yet)
+	rt, err := s.tokens.GetByHash(ctx, oldHash)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] refresh token not found", where)
 		return nil, ErrInvalidRefreshToken
 	}
 
-	if time.Now().After(rt.ExpiresAt) {
+	if reqClientID != rt.ClientID {
+		logext.Warnf(ctx, "[%s] client_id mismatch,req:%s,token:%s", where, req.ClientID, rt.ClientID)
+		return nil, ErrInvalidClient
+	}
+
+	// Verify session is still active before issuing new tokens
+	active, err := s.sessions.IsActive(ctx, rt.SessionID)
+	if err != nil || !active {
+		logext.Warnf(ctx, "[%s] session not active,session_id:%s", where, rt.SessionID)
 		return nil, ErrInvalidRefreshToken
 	}
 
+	// Generate new refresh token
+	newRefreshToken := generateToken()
+	newHash := hashToken(newRefreshToken)
+	newExpiresAt := time.Now().Add(s.refreshTTL)
+
+	// Atomic rotation: consume old + create new in single transaction.
+	// If new token creation fails, old token is NOT revoked.
+	_, _, err = s.tokens.RotateToken(ctx, oldHash, newHash, newExpiresAt)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] token rotation failed: %v", where, err)
+		return nil, ErrInvalidRefreshToken
+	}
+
+	// Touch session after successful rotation
 	if err := s.sessions.Touch(ctx, rt.SessionID); err != nil {
 		logext.Warnf(ctx, "[%s] session touch failed,session_id:%s,err:%v", where, rt.SessionID, err)
 	}
@@ -357,16 +431,18 @@ func (s *AuthServer) tokenFromRefresh(ctx context.Context, req TokenRequest) (*T
 		Scopes:    rt.Scopes,
 	}, s.accessTTL)
 	if err != nil {
-		return nil, err
+		logext.Errorf(ctx, "[%s] access token sign failed: %v", where, err)
+		return nil, ErrInvalidGrant
 	}
 
-	logext.Infof(ctx, "[%s] access token refreshed,client_id:%s,session_id:%s", where, rt.ClientID, rt.SessionID)
+	logext.Infof(ctx, "[%s] tokens refreshed,client_id:%s,session_id:%s", where, rt.ClientID, rt.SessionID)
 
 	return ptrext.Of(TokenResponse{
-		AccessToken: accessToken,
-		TokenType:   "Bearer",
-		ExpiresIn:   int(s.accessTTL.Seconds()),
-		Scope:       strings.Join(rt.Scopes, " "),
+		AccessToken:  accessToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int(s.accessTTL.Seconds()),
+		RefreshToken: newRefreshToken,
+		Scope:        strings.Join(rt.Scopes, " "),
 	}), nil
 }
 
@@ -394,6 +470,7 @@ func (s *AuthServer) ServeAuthorize(w http.ResponseWriter, r *http.Request) {
 
 // ServeToken handles POST /token.
 func (s *AuthServer) ServeToken(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64KB limit
 	if err := r.ParseForm(); err != nil {
 		writeTokenError(w, "invalid_request", "failed to parse form")
 		return
@@ -411,12 +488,25 @@ func (s *AuthServer) ServeToken(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.Token(r.Context(), req)
 	if err != nil {
 		code := "invalid_grant"
-		if errors.Is(err, ErrPKCEFailed) {
+		desc := "authorization failed"
+		switch {
+		case errors.Is(err, ErrPKCEFailed):
 			code = "invalid_grant"
-		} else if errors.Is(err, ErrInvalidClient) {
+			desc = "PKCE verification failed"
+		case errors.Is(err, ErrInvalidClient):
 			code = "invalid_client"
+			desc = "invalid client"
+		case errors.Is(err, ErrInvalidCode):
+			code = "invalid_grant"
+			desc = "invalid or expired code"
+		case errors.Is(err, ErrInvalidRefreshToken):
+			code = "invalid_grant"
+			desc = "invalid refresh token"
+		case errors.Is(err, ErrInvalidScope):
+			code = "invalid_scope"
+			desc = "invalid scope"
 		}
-		writeTokenError(w, code, err.Error())
+		writeTokenError(w, code, desc)
 		return
 	}
 
@@ -432,43 +522,89 @@ func parseScopes(s string) []string {
 	return strings.Fields(s)
 }
 
+func scopesAllowed(requested, allowed []string) bool {
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, s := range allowed {
+		allowedSet[s] = true
+	}
+	for _, s := range requested {
+		if !allowedSet[s] {
+			return false
+		}
+	}
+	return true
+}
+
 func generateCode() string {
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func generateToken() string {
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func hashToken(token string) string {
-	return GenerateCodeChallenge(token)
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
 }
 
 func errorRedirect(w http.ResponseWriter, r *http.Request, redirectURI, state string, err error) {
+	errCode, errDesc := mapAuthError(err)
+
+	// Per RFC 6749 Section 4.1.2.1: If the error is due to invalid client_id or
+	// redirect_uri, we MUST NOT redirect. The redirect_uri cannot be trusted
+	// until it has been validated against the client's registered URIs.
+	// ErrInvalidRequest is also not redirected as it occurs before validation.
+	if errors.Is(err, ErrInvalidRequest) || errors.Is(err, ErrInvalidClient) || errors.Is(err, ErrInvalidRedirectURI) {
+		http.Error(w, errDesc, http.StatusBadRequest)
+		return
+	}
+
 	if redirectURI == "" {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, errDesc, http.StatusBadRequest)
 		return
 	}
 
 	u, parseErr := url.Parse(redirectURI)
 	if parseErr != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, errDesc, http.StatusBadRequest)
 		return
 	}
 
 	q := u.Query()
-	q.Set("error", "access_denied")
-	q.Set("error_description", err.Error())
+	q.Set("error", errCode)
+	q.Set("error_description", errDesc)
 	if state != "" {
 		q.Set("state", state)
 	}
 	u.RawQuery = q.Encode()
 
 	http.Redirect(w, r, u.String(), http.StatusFound)
+}
+
+func mapAuthError(err error) (code, description string) {
+	switch {
+	case errors.Is(err, ErrInvalidRequest):
+		return "invalid_request", "request parameter validation failed"
+	case errors.Is(err, ErrInvalidClient):
+		return "invalid_request", "invalid client"
+	case errors.Is(err, ErrInvalidRedirectURI):
+		return "invalid_request", "invalid redirect_uri"
+	case errors.Is(err, ErrPKCERequired):
+		return "invalid_request", "PKCE is required"
+	case errors.Is(err, ErrInvalidScope):
+		return "invalid_scope", "requested scope exceeds authorization"
+	default:
+		return "access_denied", "authorization denied"
+	}
 }
 
 func redirectWithCode(w http.ResponseWriter, r *http.Request, resp *AuthorizeResponse) {
@@ -490,6 +626,7 @@ func redirectWithCode(w http.ResponseWriter, r *http.Request, resp *AuthorizeRes
 
 func writeTokenError(w http.ResponseWriter, code, description string) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store") // RFC 6749: all token responses MUST NOT be cached
 	w.WriteHeader(http.StatusBadRequest)
 	json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
 		"error":             code,

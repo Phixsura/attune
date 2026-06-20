@@ -101,8 +101,12 @@ func TestPG_MCPCodesCreateConsume(t *testing.T) {
 		t.Fatalf("Create client: %v", err)
 	}
 
+	// Generate a random authorization code (in production this is done by oauth.AuthServer)
+	rawCode := uuid.New().String() + uuid.New().String()
+
 	codes := mcprepo.NewCodes(pool)
 	code, err := codes.Create(ctx, mcprepo.CreateCodeParams{
+		Code:          rawCode,
 		ClientID:      client.ID,
 		RedirectURI:   "http://localhost:8080/callback",
 		Scopes:        []string{"mcp:read"},
@@ -116,6 +120,9 @@ func TestPG_MCPCodesCreateConsume(t *testing.T) {
 	if len(code.Code) == 0 {
 		t.Fatal("expected non-empty code")
 	}
+	if code.Code != rawCode {
+		t.Fatalf("code mismatch: got %s, want %s", code.Code, rawCode)
+	}
 
 	consumed, err := codes.Consume(ctx, code.Code)
 	if err != nil {
@@ -128,6 +135,13 @@ func TestPG_MCPCodesCreateConsume(t *testing.T) {
 	_, err = codes.Consume(ctx, code.Code)
 	if !errors.Is(err, mcprepo.ErrCodeNotFound) {
 		t.Fatalf("second Consume: got %v, want %v", err, mcprepo.ErrCodeNotFound)
+	}
+
+	// Verify that a wrong code cannot consume (hashing works)
+	wrongCode := uuid.New().String() + uuid.New().String()
+	_, err = codes.Consume(ctx, wrongCode)
+	if !errors.Is(err, mcprepo.ErrCodeNotFound) {
+		t.Fatalf("wrong code Consume: got %v, want %v", err, mcprepo.ErrCodeNotFound)
 	}
 }
 
@@ -182,6 +196,62 @@ func TestPG_MCPRefreshTokensCreateRevokeByClient(t *testing.T) {
 		t.Fatalf("expected 1 token revoked, got %d", count)
 	}
 
+	_, err = tokens.GetByToken(ctx, result.RawToken)
+	if !errors.Is(err, mcprepo.ErrRefreshTokenNotFound) {
+		t.Fatalf("GetByToken after revoke: got %v, want %v", err, mcprepo.ErrRefreshTokenNotFound)
+	}
+}
+
+func TestPG_MCPTokenRotation(t *testing.T) {
+	pool := testdb.NewPool(t)
+	ctx := context.Background()
+
+	tenantID, err := tenant.NewTenant(pool).Create(ctx, "mcp-rotation-io", "MCP Rotation IO")
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+
+	clients := mcprepo.NewClients(pool)
+	client, err := clients.Create(ctx, mcprepo.CreateClientParams{
+		TenantID:     tenantID,
+		Name:         "rotation-test-agent",
+		RedirectURIs: []string{"http://localhost:8080/callback"},
+		Scopes:       []string{"mcp:read"},
+		CreatedBy:    "test-user",
+	})
+	if err != nil {
+		t.Fatalf("Create client: %v", err)
+	}
+
+	sessions := mcprepo.NewSessions(pool)
+	session, err := sessions.Create(ctx, mcprepo.CreateSessionParams{
+		ClientID: client.ID,
+		TenantID: tenantID,
+		Scopes:   []string{"mcp:read"},
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	tokens := mcprepo.NewTokens(pool)
+	result, err := tokens.Create(ctx, mcprepo.CreateRefreshTokenParams{
+		ClientID:  client.ID,
+		Scopes:    []string{"mcp:read"},
+		UserID:    tenantID,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	})
+	// Note: session association is handled separately via sessions.Create
+	_ = session // session created above but tokens.Create doesn't require it directly
+	if err != nil {
+		t.Fatalf("Create token: %v", err)
+	}
+
+	// Revoke the token
+	if err := tokens.Revoke(ctx, result.Token.ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	// Revoked token should no longer be valid
 	_, err = tokens.GetByToken(ctx, result.RawToken)
 	if !errors.Is(err, mcprepo.ErrRefreshTokenNotFound) {
 		t.Fatalf("GetByToken after revoke: got %v, want %v", err, mcprepo.ErrRefreshTokenNotFound)

@@ -295,7 +295,11 @@ func attachOutboxHandler(router *console.Router, pool *pgxpool.Pool, audit *audi
 
 // attachMCPClientHandler wires the MCP OAuth client console handler (#93).
 func attachMCPClientHandler(router *console.Router, pool *pgxpool.Pool, audit *auditlogsvc.Service) {
-	h := console.NewMCPClientHandler(mcprepo.NewClients(pool))
+	h := console.NewMCPClientHandler(
+		mcprepo.NewClients(pool),
+		mcprepo.NewTokens(pool),
+		mcprepo.NewSessions(pool),
+	)
 	h.SetAuditLogger(audit)
 	router.SetMCPClientHandler(h)
 }

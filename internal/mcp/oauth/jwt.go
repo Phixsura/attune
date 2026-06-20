@@ -29,13 +29,18 @@ type jwtClaims struct {
 
 // JWTSigner handles signing and verifying MCP access tokens.
 type JWTSigner struct {
-	secret []byte
-	issuer string
+	secret   []byte
+	issuer   string
+	audience string
 }
 
 // NewJWTSigner creates a new JWTSigner.
+// Panics if secret is less than 32 bytes (required for HS256 security).
 func NewJWTSigner(secret []byte, issuer string) *JWTSigner {
-	return ptrext.Of(JWTSigner{secret: secret, issuer: issuer})
+	if len(secret) < 32 {
+		panic("mcp jwt secret must be at least 32 bytes")
+	}
+	return ptrext.Of(JWTSigner{secret: secret, issuer: issuer, audience: "attune-mcp"})
 }
 
 // Sign creates a signed JWT access token.
@@ -44,6 +49,7 @@ func (s *JWTSigner) Sign(claims AccessTokenClaims, ttl time.Duration) (string, e
 	c := jwtClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.issuer,
+			Audience:  jwt.ClaimStrings{s.audience},
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 			ID:        uuid.New().String(),
@@ -76,5 +82,18 @@ func (s *JWTSigner) Verify(tokenString string) (*AccessTokenClaims, error) {
 		return nil, ErrInvalidToken
 	}
 
+	if !audienceContains(claims.Audience, s.audience) {
+		return nil, ErrInvalidToken
+	}
+
 	return ptrext.Of(claims.AccessTokenClaims), nil
+}
+
+func audienceContains(aud jwt.ClaimStrings, target string) bool {
+	for _, a := range aud {
+		if a == target {
+			return true
+		}
+	}
+	return false
 }

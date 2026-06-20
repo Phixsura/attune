@@ -141,3 +141,14 @@ func (r *ClientsRepo) Revoke(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+// IsRevoked checks if a client has been revoked.
+func (r *ClientsRepo) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
+	const q = `SELECT revoked_at IS NOT NULL FROM mcp_oauth_clients WHERE id = $1`
+	var revoked bool
+	err := r.pool.QueryRow(ctx, q, id).Scan(&revoked)
+	if err != nil {
+		return false, err
+	}
+	return revoked, nil
+}

@@ -19,6 +19,13 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
+// RateLimitInfo contains rate limit state for response headers.
+type RateLimitInfo struct {
+	Limit     int           // Maximum requests allowed in window
+	Remaining int           // Requests remaining in current window
+	Reset     time.Duration // Time until window resets
+}
+
 // SlidingLimiter checks if a request should be allowed using a sliding window.
 type SlidingLimiter interface {
 	// Allow checks if key is under the rate limit.
@@ -27,6 +34,9 @@ type SlidingLimiter interface {
 	//   - retryAfter: duration to wait if not allowed (0 if allowed)
 	//   - err: error if limiter failed (reserved for distributed implementations)
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (allowed bool, retryAfter time.Duration, err error)
+
+	// AllowWithInfo is like Allow but also returns rate limit info for headers.
+	AllowWithInfo(ctx context.Context, key string, limit int, window time.Duration) (allowed bool, info RateLimitInfo, err error)
 }
 
 // ConcurrencyLimiter tracks concurrent usage limits (e.g., max async jobs).
@@ -113,6 +123,80 @@ func (m *MemorySlidingLimiter) Allow(
 
 	entry.timestamps = append(entry.timestamps, now)
 	return true, 0, nil
+}
+
+// AllowWithInfo implements SlidingLimiter. It's like Allow but returns full
+// rate limit info for setting X-RateLimit-* response headers.
+func (m *MemorySlidingLimiter) AllowWithInfo(
+	ctx context.Context, key string, limit int, window time.Duration,
+) (bool, RateLimitInfo, error) {
+	if limit <= 0 || key == "" {
+		return true, RateLimitInfo{Limit: limit, Remaining: limit, Reset: window}, nil
+	}
+
+	// Track the largest window seen for cleanup purposes.
+	m.mu.RLock()
+	currentMax := m.maxWindow
+	m.mu.RUnlock()
+	if window > currentMax {
+		m.mu.Lock()
+		if window > m.maxWindow {
+			m.maxWindow = window
+		}
+		m.mu.Unlock()
+	}
+
+	now := m.nowFunc()
+	cutoff := now.Add(-window)
+
+	entryAny, _ := m.windows.LoadOrStore(key, ptrext.Of(windowEntry{}))
+	entry := entryAny.(*windowEntry)
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	// Filter out expired timestamps.
+	valid := entry.timestamps[:0]
+	var oldest time.Time
+	for _, ts := range entry.timestamps {
+		if ts.After(cutoff) {
+			valid = append(valid, ts)
+			if oldest.IsZero() || ts.Before(oldest) {
+				oldest = ts
+			}
+		}
+	}
+	entry.timestamps = valid
+
+	// Calculate reset time: when the oldest request in the window expires.
+	var reset time.Duration
+	if len(entry.timestamps) > 0 {
+		reset = oldest.Add(window).Sub(now)
+		if reset < 0 {
+			reset = 0
+		}
+	} else {
+		reset = window
+	}
+
+	if len(entry.timestamps) >= limit {
+		info := RateLimitInfo{
+			Limit:     limit,
+			Remaining: 0,
+			Reset:     reset,
+		}
+		return false, info, nil
+	}
+
+	remaining := limit - len(entry.timestamps) - 1 // -1 for the request we're about to add
+	entry.timestamps = append(entry.timestamps, now)
+
+	info := RateLimitInfo{
+		Limit:     limit,
+		Remaining: remaining,
+		Reset:     reset,
+	}
+	return true, info, nil
 }
 
 // StartCleanup runs a background goroutine that periodically evicts keys with

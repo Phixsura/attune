@@ -110,7 +110,7 @@ func TestUpdateWorkflowState_TransitionError(t *testing.T) {
 
 	resp := d.Dispatch(ctx, req)
 	require.NotNil(t, resp.Error)
-	assert.Contains(t, resp.Error.Message, "invalid transition")
+	assert.Contains(t, resp.Error.Message, "workflow transition failed")
 }
 
 func TestAddTag(t *testing.T) {

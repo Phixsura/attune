@@ -152,3 +152,45 @@ func TestDispatcher_Methods(t *testing.T) {
 	assert.Contains(t, methods, "a")
 	assert.Contains(t, methods, "b")
 }
+
+func TestDispatcher_Dispatch_PanicRecovery(t *testing.T) {
+	d := jsonrpc.NewDispatcher()
+
+	d.Register("panicking", func(_ context.Context, _ json.RawMessage) (any, error) {
+		panic("simulated panic")
+	})
+
+	req := ptrext.Of(jsonrpc.Request{
+		JSONRPC: jsonrpc.Version,
+		Method:  "panicking",
+		ID:      "123",
+	})
+
+	resp := d.Dispatch(context.Background(), req)
+
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, jsonrpc.CodeInternalError, resp.Error.Code)
+	assert.Equal(t, "internal server error", resp.Error.Message)
+}
+
+func TestDispatcher_Dispatch_InternalErrorMasked(t *testing.T) {
+	d := jsonrpc.NewDispatcher()
+
+	d.Register("leaky", func(_ context.Context, _ json.RawMessage) (any, error) {
+		return nil, errors.New("sensitive database connection error: host=10.0.0.1 user=admin")
+	})
+
+	req := ptrext.Of(jsonrpc.Request{
+		JSONRPC: jsonrpc.Version,
+		Method:  "leaky",
+		ID:      "123",
+	})
+
+	resp := d.Dispatch(context.Background(), req)
+
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, jsonrpc.CodeInternalError, resp.Error.Code)
+	assert.NotContains(t, resp.Error.Message, "database")
+	assert.NotContains(t, resp.Error.Message, "10.0.0.1")
+	assert.Contains(t, resp.Error.Message, "tool leaky failed")
+}

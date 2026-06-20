@@ -189,6 +189,9 @@ type MCPConfig struct {
 
 // MCPOAuthConfig holds OAuth 2.1 Authorization Server settings.
 type MCPOAuthConfig struct {
+	// JWTSecret is the HS256 signing key for MCP access tokens.
+	// Must be at least 32 bytes when MCP is enabled.
+	JWTSecret       string `yaml:"jwt_secret"`
 	Issuer          string `yaml:"issuer"`
 	AccessTokenTTL  string `yaml:"access_token_ttl"`
 	RefreshTokenTTL string `yaml:"refresh_token_ttl"`
@@ -492,6 +495,9 @@ func (c *Config) validate() error {
 	if err := c.validateEnricherConfig(); err != nil {
 		return err
 	}
+	if err := c.validateMCPConfig(); err != nil {
+		return err
+	}
 	return c.validateCustomWebhooks()
 }
 
@@ -546,6 +552,35 @@ func (c *Config) validateEnricherConfig() error {
 	}
 	if c.EnricherLLMBurst < 0 {
 		return fmt.Errorf("config: enricher.llm_burst must be non-negative")
+	}
+	return nil
+}
+
+func (c *Config) validateMCPConfig() error {
+	if !c.MCP.Enabled {
+		return nil
+	}
+	secret := strings.TrimSpace(c.MCP.OAuth.JWTSecret)
+	if secret == "" {
+		return fmt.Errorf("config: mcp.oauth.jwt_secret is required when MCP is enabled")
+	}
+	if len(secret) < 32 {
+		return fmt.Errorf("config: mcp.oauth.jwt_secret must be at least 32 bytes")
+	}
+	if secret == "replace-with-32-or-more-random-characters" {
+		return fmt.Errorf("config: mcp.oauth.jwt_secret must be replaced with a random value")
+	}
+	if c.MCPAccessTokenTTL <= 0 {
+		return fmt.Errorf("config: mcp.oauth.access_token_ttl must be positive")
+	}
+	if c.MCPRefreshTokenTTL <= 0 {
+		return fmt.Errorf("config: mcp.oauth.refresh_token_ttl must be positive")
+	}
+	if c.MCPRateLimitPerMinute <= 0 {
+		return fmt.Errorf("config: mcp.rate_limit.requests_per_minute must be positive")
+	}
+	if c.MCPRateLimitBurst <= 0 {
+		return fmt.Errorf("config: mcp.rate_limit.burst must be positive")
 	}
 	return nil
 }

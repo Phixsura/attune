@@ -9,8 +9,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/mcp/jsonrpc"
 	"github.com/Phixsura/attune/internal/mcp/server"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
 // RegisterWriteTools registers write MCP tools.
@@ -50,10 +52,23 @@ func updateWorkflowState(deps *Deps) jsonrpc.ToolFunc {
 			return nil, jsonrpc.NewToolError(jsonrpc.CodeInvalidRequest, "no tenant context")
 		}
 
-		byUser := mcpPrincipal(ctx)
+		byUser := MCPPrincipal(ctx)
 		err := deps.WorkflowTransit.Transition(ctx, tenantID, p.FeedbackID, p.StateID, byUser, p.Comment)
 		if err != nil {
-			return nil, jsonrpc.NewToolError(jsonrpc.CodeInvalidParams, err.Error())
+			logext.Warnf(ctx, "mcp tool update_workflow_state failed: %v", err)
+			return nil, jsonrpc.NewToolError(jsonrpc.CodeInvalidParams, "workflow transition failed")
+		}
+
+		if deps.Audit != nil {
+			deps.Audit.Record(ctx, AuditEvent{ //nolint:errcheck
+				TenantID:   tenantID,
+				Actor:      byUser,
+				Action:     domain.AuditActionMCPUpdateWorkflowState,
+				TargetType: "feedback",
+				TargetID:   fmt.Sprintf("%d", p.FeedbackID),
+				Summary:    fmt.Sprintf("Set workflow state to %s via MCP", p.StateID),
+				After:      map[string]any{"state_id": p.StateID, "comment": p.Comment},
+			})
 		}
 
 		return map[string]any{
@@ -97,10 +112,23 @@ func addTag(deps *Deps) jsonrpc.ToolFunc {
 			return nil, jsonrpc.NewToolError(jsonrpc.CodeInvalidRequest, "no tenant context")
 		}
 
-		byUser := mcpPrincipal(ctx)
+		byUser := MCPPrincipal(ctx)
 		added, err := deps.TagAssign.Add(ctx, tenantID, p.FeedbackID, tagUUID, byUser)
 		if err != nil {
-			return nil, err
+			logext.Warnf(ctx, "mcp tool add_tag failed: %v", err)
+			return nil, jsonrpc.NewToolError(jsonrpc.CodeInternalError, "failed to add tag")
+		}
+
+		if deps.Audit != nil && added {
+			deps.Audit.Record(ctx, AuditEvent{ //nolint:errcheck
+				TenantID:   tenantID,
+				Actor:      byUser,
+				Action:     domain.AuditActionMCPAddTag,
+				TargetType: "feedback",
+				TargetID:   fmt.Sprintf("%d", p.FeedbackID),
+				Summary:    fmt.Sprintf("Added tag %s via MCP", p.TagID),
+				After:      map[string]any{"tag_id": p.TagID},
+			})
 		}
 
 		return map[string]any{
@@ -147,7 +175,21 @@ func removeTag(deps *Deps) jsonrpc.ToolFunc {
 
 		removed, err := deps.TagAssign.Remove(ctx, tenantID, p.FeedbackID, tagUUID)
 		if err != nil {
-			return nil, err
+			logext.Warnf(ctx, "mcp tool remove_tag failed: %v", err)
+			return nil, jsonrpc.NewToolError(jsonrpc.CodeInternalError, "failed to remove tag")
+		}
+
+		if deps.Audit != nil && removed {
+			byUser := MCPPrincipal(ctx)
+			deps.Audit.Record(ctx, AuditEvent{ //nolint:errcheck
+				TenantID:   tenantID,
+				Actor:      byUser,
+				Action:     domain.AuditActionMCPRemoveTag,
+				TargetType: "feedback",
+				TargetID:   fmt.Sprintf("%d", p.FeedbackID),
+				Summary:    fmt.Sprintf("Removed tag %s via MCP", p.TagID),
+				Before:     map[string]any{"tag_id": p.TagID},
+			})
 		}
 
 		return map[string]any{
@@ -186,7 +228,21 @@ func setUrgent(deps *Deps) jsonrpc.ToolFunc {
 
 		err := deps.FeedbackWriter.SetUrgent(ctx, tenantID, p.FeedbackID, p.Urgent)
 		if err != nil {
-			return nil, err
+			logext.Warnf(ctx, "mcp tool set_urgent failed: %v", err)
+			return nil, jsonrpc.NewToolError(jsonrpc.CodeInternalError, "failed to set urgent flag")
+		}
+
+		if deps.Audit != nil {
+			byUser := MCPPrincipal(ctx)
+			deps.Audit.Record(ctx, AuditEvent{ //nolint:errcheck
+				TenantID:   tenantID,
+				Actor:      byUser,
+				Action:     domain.AuditActionMCPSetUrgent,
+				TargetType: "feedback",
+				TargetID:   fmt.Sprintf("%d", p.FeedbackID),
+				Summary:    fmt.Sprintf("Set urgent=%v via MCP", p.Urgent),
+				After:      map[string]any{"urgent": p.Urgent},
+			})
 		}
 
 		return map[string]any{
@@ -195,10 +251,4 @@ func setUrgent(deps *Deps) jsonrpc.ToolFunc {
 			"urgent":      p.Urgent,
 		}, nil
 	}
-}
-
-func mcpPrincipal(ctx context.Context) string {
-	clientID := server.ClientIDFromContext(ctx)
-	sessionID := server.SessionIDFromContext(ctx)
-	return fmt.Sprintf("mcp:%s:%s", clientID.String(), sessionID.String())
 }
