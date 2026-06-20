@@ -54,12 +54,11 @@ type SessionStore interface {
 	Touch(ctx context.Context, id uuid.UUID) error
 }
 
-// Client represents an OAuth client.
+// Client represents an OAuth client (public client, no secret - uses PKCE).
 type Client struct {
 	ID           uuid.UUID
 	TenantID     string
 	Name         string
-	SecretHash   string
 	RedirectURIs []string
 	Scopes       []string
 	CreatedAt    time.Time
