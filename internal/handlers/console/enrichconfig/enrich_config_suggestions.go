@@ -1,7 +1,9 @@
 package enrichconfig
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
@@ -9,6 +11,8 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/repo/tenant"
+	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
 // GetEvalSuggestions handles GET /fb/v1/console/enrich-config/eval-suggestions.
@@ -54,8 +58,13 @@ func (h *Handler) PromoteSuggestedValue(
 	const where = "console.EnrichConfigHandler.PromoteSuggestedValue"
 	auth := ctx.Auth
 
-	dimName := req.GetDimensionName()
-	value := req.GetValue()
+	// Canonicalize: the taxonomy validator (domain.Dimension.Validate) trims
+	// and rejects empty/duplicate values, so trim here too. Without this a
+	// whitespace-only value ("  ") or a trailing-space duplicate ("checkout ")
+	// would pass the handler's own checks, then fail deep in svc.Update and
+	// surface as a 500 instead of a clean 400/409.
+	dimName := strings.TrimSpace(req.GetDimensionName())
+	value := strings.TrimSpace(req.GetValue())
 	displayName := i18nFromProto(req.GetDisplayName())
 
 	if dimName == "" || value == "" {
@@ -65,10 +74,22 @@ func (h *Handler) PromoteSuggestedValue(
 			"dimension_name and value are required",
 		)
 	}
+	// displayName is required by the taxonomy validator. A promote request is
+	// just a raw value, so default the display surface to the value itself
+	// when the caller omits it rather than rejecting the request.
+	if len(displayName) == 0 {
+		displayName = domain.I18nString{"default": value}
+	}
 
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,dim:%s,value:%s", where, auth.TenantID, dimName, value)
 
-	// Get current config
+	// Get current config. NOTE: this is a read-modify-write over the whole
+	// enrich-config document with no optimistic-lock guard, so two concurrent
+	// promotes of *different* values can last-write-wins and drop one. That is
+	// acceptable here: promote is an admin-only, operator-paced Console action
+	// (the UI promotes one value at a time and refetches after each), so the
+	// race window is not realistically hit. Hardening to optimistic locking is
+	// tracked separately.
 	current, err := h.svc.Get(ctx, auth.TenantID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] get config failed,err:%+v", where, err.Error())
@@ -95,9 +116,10 @@ func (h *Handler) PromoteSuggestedValue(
 		)
 	}
 
-	// Check if value already exists in taxonomy
+	// Check if value already exists in taxonomy (compare trimmed, matching the
+	// validator's dedup so a trailing-space variant is a 409, not a 500).
 	for _, t := range current.Dimensions[dimIdx].Taxonomy {
-		if t.Value == value {
+		if strings.TrimSpace(t.Value) == value {
 			return dispatcher.Fail[*attunev1.PromoteSuggestedValueResponse](
 				http.StatusConflict,
 				attunev1.ErrorCode_VALIDATION,
@@ -106,15 +128,27 @@ func (h *Handler) PromoteSuggestedValue(
 		}
 	}
 
-	// Add new taxonomy value
+	// Add new taxonomy value (store the canonical trimmed value).
 	newTaxonomy := domain.Taxonomy{
 		Value:       value,
 		DisplayName: displayName,
 	}
 	current.Dimensions[dimIdx].Taxonomy = append(current.Dimensions[dimIdx].Taxonomy, newTaxonomy)
 
-	// Save updated config
+	// Save updated config. Map domain validation failures to 400 (or 404 for a
+	// vanished tenant) instead of a blanket 500 — the same mapping Update uses.
 	if err := h.svc.Update(ctx, auth.TenantID, current); err != nil {
+		if code := enrich.ErrToCode(err); code != attunev1.ErrorCode_ERROR_CODE_UNSPECIFIED {
+			msg := enrich.ErrToMessage(err)
+			if msg == "" {
+				msg = err.Error()
+			}
+			status := http.StatusBadRequest
+			if errors.Is(err, tenant.ErrTenantNotFound) {
+				status = http.StatusNotFound
+			}
+			return dispatcher.Fail[*attunev1.PromoteSuggestedValueResponse](status, code, msg)
+		}
 		logext.Errorf(ctx, "[%s] update failed,err:%+v", where, err.Error())
 		return dispatcher.Fail[*attunev1.PromoteSuggestedValueResponse](
 			http.StatusInternalServerError,

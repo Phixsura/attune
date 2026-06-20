@@ -43,6 +43,13 @@ func (f *fakeConfigService) Update(_ context.Context, tenantID string, v enrich.
 	if f.updateErr != nil {
 		return f.updateErr
 	}
+	// Mirror the real ConfigService.Update, which runs domain validation before
+	// persisting. Without this the fake would mask handler bugs that push
+	// invalid taxonomy past the handler's own checks and rely on Update to
+	// reject them (the promote endpoint's whitespace/dup/display-name edges).
+	if err := v.Dimensions.Validate(); err != nil {
+		return err
+	}
 	f.updateTenant = tenantID
 	f.updateView = v
 	f.view = v

@@ -23,7 +23,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   an on-demand "Analyze" action runs the eval, lists each off-list candidate
   with its frequency, confidence, and predicted coverage gain, and a one-click
   "Promote" adds it to the dimension taxonomy (after which it leaves the list
-  and coverage rises).
+  and coverage rises). Promote input is canonicalized (values trimmed;
+  whitespace-only rejected as 400, trimmed-duplicate as 409, missing display
+  name defaulted to the value) and domain-validation failures map to 4xx
+  instead of 500.
 
 ### Fixed
 

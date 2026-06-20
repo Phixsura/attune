@@ -3,9 +3,11 @@ package enrichconfig
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,8 +17,15 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
+
+// jsonStr returns s as a JSON string literal (quoted + escaped).
+func jsonStr(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
 
 func TestGetEvalSuggestions_NoEvalGetter(t *testing.T) {
 	t.Parallel()
@@ -101,9 +110,10 @@ func TestPromoteSuggestedValue_Success(t *testing.T) {
 	fakeSvc := &fakeConfigService{
 		view: enrich.View{
 			Dimensions: domain.DimensionSet{{
-				Name:     "modules",
-				Kind:     domain.DimMulti,
-				Taxonomy: []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
+				Name:        "modules",
+				DisplayName: domain.I18nString{"en": "Modules"},
+				Kind:        domain.DimMulti,
+				Taxonomy:    []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
 			}},
 		},
 	}
@@ -162,9 +172,10 @@ func TestPromoteSuggestedValue_ValueExists(t *testing.T) {
 	fakeSvc := &fakeConfigService{
 		view: enrich.View{
 			Dimensions: domain.DimensionSet{{
-				Name:     "modules",
-				Kind:     domain.DimMulti,
-				Taxonomy: []domain.Taxonomy{{Value: "checkout", DisplayName: domain.I18nString{"en": "Checkout"}}},
+				Name:        "modules",
+				DisplayName: domain.I18nString{"en": "Modules"},
+				Kind:        domain.DimMulti,
+				Taxonomy:    []domain.Taxonomy{{Value: "checkout", DisplayName: domain.I18nString{"en": "Checkout"}}},
 			}},
 		},
 	}
@@ -216,15 +227,147 @@ func TestPromoteSuggestedValue_EmptyInput(t *testing.T) {
 	}
 }
 
+// promoteHandler builds a bound PromoteSuggestedValue handler over a fake
+// seeded with a single multi-kind "modules" dim carrying the given taxonomy
+// values, for the edge-case table tests.
+func promoteHandler(t *testing.T, taxValues ...string) (*fakeConfigService, http.HandlerFunc) {
+	t.Helper()
+	tax := make([]domain.Taxonomy, 0, len(taxValues))
+	for _, v := range taxValues {
+		tax = append(tax, domain.Taxonomy{Value: v, DisplayName: domain.I18nString{"en": v}})
+	}
+	fakeSvc := &fakeConfigService{
+		view: enrich.View{
+			Dimensions: domain.DimensionSet{{
+				Name:        "modules",
+				DisplayName: domain.I18nString{"en": "Modules"},
+				Kind:        domain.DimMulti,
+				Taxonomy:    tax,
+			}},
+		},
+	}
+	h := &Handler{svc: fakeSvc}
+	return fakeSvc, dispatcher.Bind(
+		"console.EnrichConfigHandler.PromoteSuggestedValue",
+		dispatcher.JSON(func() *attunev1.PromoteSuggestedValueRequest { return &attunev1.PromoteSuggestedValueRequest{} }),
+		h.PromoteSuggestedValue,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PromoteSuggestedValueRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+}
+
+func doPromote(handler http.HandlerFunc, body string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/promote", body))
+	return w
+}
+
+// TestPromoteSuggestedValue_WhitespaceValueRejected: a whitespace-only value
+// must be a clean 400, not a 500 from deep taxonomy validation. (The validator
+// trims then rejects empty.)
+func TestPromoteSuggestedValue_WhitespaceValueRejected(t *testing.T) {
+	t.Parallel()
+	_, handler := promoteHandler(t, "payment")
+	w := doPromote(handler, `{"dimensionName":"modules","value":"   ","displayName":{"entries":{"en":"x"}}}`)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestPromoteSuggestedValue_TrailingSpaceDuplicateConflicts: "checkout " when
+// "checkout" exists must be a 409, not a 500 — the dedup compares trimmed.
+func TestPromoteSuggestedValue_TrailingSpaceDuplicateConflicts(t *testing.T) {
+	t.Parallel()
+	_, handler := promoteHandler(t, "payment", "checkout")
+	w := doPromote(handler, `{"dimensionName":"modules","value":"  checkout  ","displayName":{"entries":{"en":"Checkout"}}}`)
+	require.Equal(t, http.StatusConflict, w.Code)
+}
+
+// TestPromoteSuggestedValue_TrimsBeforeStoring: surrounding whitespace is
+// stripped so the persisted taxonomy value is canonical.
+func TestPromoteSuggestedValue_TrimsBeforeStoring(t *testing.T) {
+	t.Parallel()
+	fakeSvc, handler := promoteHandler(t, "payment")
+	w := doPromote(handler, `{"dimensionName":"modules","value":"  checkout  ","displayName":{"entries":{"en":"Checkout"}}}`)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "checkout", fakeSvc.view.Dimensions[0].Taxonomy[1].Value)
+}
+
+// TestPromoteSuggestedValue_MissingDisplayNameDefaultsToValue: the taxonomy
+// validator requires a display name; a promote with none defaults it to the
+// value rather than 400-ing.
+func TestPromoteSuggestedValue_MissingDisplayNameDefaultsToValue(t *testing.T) {
+	t.Parallel()
+	fakeSvc, handler := promoteHandler(t, "payment")
+	w := doPromote(handler, `{"dimensionName":"modules","value":"checkout"}`)
+	require.Equal(t, http.StatusOK, w.Code)
+	added := fakeSvc.view.Dimensions[0].Taxonomy[1]
+	require.Equal(t, "checkout", added.Value)
+	require.NotEmpty(t, added.DisplayName, "display name defaulted")
+	require.Equal(t, "checkout", added.DisplayName["default"])
+}
+
+// TestPromoteSuggestedValue_CaseSensitiveDistinct: taxonomy values are
+// case-sensitive, so "Checkout" and "checkout" coexist (documents behavior).
+func TestPromoteSuggestedValue_CaseSensitiveDistinct(t *testing.T) {
+	t.Parallel()
+	fakeSvc, handler := promoteHandler(t, "payment", "checkout")
+	w := doPromote(handler, `{"dimensionName":"modules","value":"Checkout","displayName":{"entries":{"en":"Checkout (cap)"}}}`)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, fakeSvc.view.Dimensions[0].Taxonomy, 3)
+}
+
+// TestPromoteSuggestedValue_UnicodeAndLongValues: non-ASCII and very long
+// values are accepted (no length cap on taxonomy values, any non-empty
+// Unicode allowed).
+func TestPromoteSuggestedValue_UnicodeAndLongValues(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"cjk":   "结算",
+		"emoji": "🛒checkout",
+		"long":  strings.Repeat("x", 500),
+	}
+	for name, val := range cases {
+		t.Run(name, func(t *testing.T) {
+			fakeSvc, handler := promoteHandler(t, "payment")
+			body := `{"dimensionName":"modules","value":` + jsonStr(val) + `,"displayName":{"entries":{"en":"d"}}}`
+			w := doPromote(handler, body)
+			require.Equal(t, http.StatusOK, w.Code)
+			require.Equal(t, val, fakeSvc.view.Dimensions[0].Taxonomy[1].Value)
+		})
+	}
+}
+
+// TestPromoteSuggestedValue_UpdateValidationErrorMapsTo400: a domain
+// validation error surfacing from svc.Update (one the handler's pre-checks
+// didn't anticipate) maps to 400, not a blanket 500.
+func TestPromoteSuggestedValue_UpdateValidationErrorMapsTo400(t *testing.T) {
+	t.Parallel()
+	fakeSvc, handler := promoteHandler(t, "payment")
+	fakeSvc.updateErr = domain.ErrTaxonomyValueDup
+	w := doPromote(handler, `{"dimensionName":"modules","value":"checkout","displayName":{"entries":{"en":"Checkout"}}}`)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestPromoteSuggestedValue_UpdateTenantNotFoundMapsTo404: a vanished tenant
+// from svc.Update maps to 404.
+func TestPromoteSuggestedValue_UpdateTenantNotFoundMapsTo404(t *testing.T) {
+	t.Parallel()
+	fakeSvc, handler := promoteHandler(t, "payment")
+	fakeSvc.updateErr = tenant.ErrTenantNotFound
+	w := doPromote(handler, `{"dimensionName":"modules","value":"checkout","displayName":{"entries":{"en":"Checkout"}}}`)
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
 func TestPromoteSuggestedValue_RecordsAudit(t *testing.T) {
 	t.Parallel()
 
 	fakeSvc := &fakeConfigService{
 		view: enrich.View{
 			Dimensions: domain.DimensionSet{{
-				Name:     "modules",
-				Kind:     domain.DimMulti,
-				Taxonomy: []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
+				Name:        "modules",
+				DisplayName: domain.I18nString{"en": "Modules"},
+				Kind:        domain.DimMulti,
+				Taxonomy:    []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
 			}},
 		},
 	}
@@ -255,9 +398,10 @@ func TestPromoteSuggestedValue_AuditFailureIsNonFatal(t *testing.T) {
 	fakeSvc := &fakeConfigService{
 		view: enrich.View{
 			Dimensions: domain.DimensionSet{{
-				Name:     "modules",
-				Kind:     domain.DimMulti,
-				Taxonomy: []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
+				Name:        "modules",
+				DisplayName: domain.I18nString{"en": "Modules"},
+				Kind:        domain.DimMulti,
+				Taxonomy:    []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
 			}},
 		},
 	}
@@ -308,9 +452,10 @@ func TestPromoteSuggestedValue_UpdateError(t *testing.T) {
 	fakeSvc := &fakeConfigService{
 		view: enrich.View{
 			Dimensions: domain.DimensionSet{{
-				Name:     "modules",
-				Kind:     domain.DimMulti,
-				Taxonomy: []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
+				Name:        "modules",
+				DisplayName: domain.I18nString{"en": "Modules"},
+				Kind:        domain.DimMulti,
+				Taxonomy:    []domain.Taxonomy{{Value: "payment", DisplayName: domain.I18nString{"en": "Payment"}}},
 			}},
 		},
 		updateErr: errors.New("write conflict"),

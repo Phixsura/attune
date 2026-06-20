@@ -68,6 +68,24 @@ describe('SuggestedValuesPanel', () => {
     expect(promoted).toMatchObject({ dimensionName: 'modules', value: 'checkout' })
   })
 
+  it('keeps the candidate and shows a toast when promote fails (e.g. 409)', async () => {
+    server.use(
+      http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())),
+      http.post(PROMOTE_URL, () =>
+        HttpResponse.json({ code: 'VALIDATION', message: 'value already exists' }, { status: 409 }),
+      ),
+    )
+    renderWithProviders(<SuggestedValuesPanel canEdit={true} />)
+
+    await userEvent.click(screen.getByTestId('analyze-suggestions'))
+    await waitFor(() => expect(screen.getByTestId('promote-checkout')).toBeInTheDocument())
+    await userEvent.click(screen.getByTestId('promote-checkout'))
+
+    // Row stays (no optimistic removal), and the promote button is usable again.
+    await waitFor(() => expect(screen.getByTestId('promote-checkout')).toBeEnabled())
+    expect(screen.getByTestId('suggestion-row-checkout')).toBeInTheDocument()
+  })
+
   it('hides promote buttons when canEdit is false', async () => {
     server.use(http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())))
     renderWithProviders(<SuggestedValuesPanel canEdit={false} />)
