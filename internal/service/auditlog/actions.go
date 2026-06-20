@@ -55,6 +55,34 @@ var validActions = map[string]struct{}{
 	"workflow_state.create":           {},
 	"workflow_state.update":           {},
 	"workflow_transition.replace":     {},
+
+	// MCP tool calls
+	"mcp.archive_tag":           {},
+	"mcp.batch_update_status":   {},
+	"mcp.batch_update_tags":     {},
+	"mcp.create_tag":            {},
+	"mcp.get_cluster":           {},
+	"mcp.get_digest":            {},
+	"mcp.get_enrichment_status": {},
+	"mcp.get_feedback":          {},
+	"mcp.get_usage_stats":       {},
+	"mcp.link_issue":            {},
+	"mcp.list_clusters":         {},
+	"mcp.list_dimensions":       {},
+	"mcp.list_feedback":         {},
+	"mcp.list_tags":             {},
+	"mcp.mark_duplicate":        {},
+	"mcp.reclassify":            {},
+	"mcp.record_signal":         {},
+	"mcp.retry_enrichment":      {},
+	"mcp.search_feedback":       {},
+	"mcp.trigger_digest":        {},
+	"mcp.update_status":         {},
+	"mcp.update_tags":           {},
+
+	// MCP OAuth admin actions
+	"mcp_client.create": {},
+	"mcp_client.revoke": {},
 }
 
 func isKnownAction(action string) bool {
