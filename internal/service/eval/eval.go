@@ -57,14 +57,15 @@ type DimScore struct {
 // EvalReport is the unified shape both consistency and score-human
 // produce. Mode + LabelSource distinguish them.
 type EvalReport struct {
-	Mode        string              `json:"mode"`         // "consistency" | "score-human"
-	LabelSource string              `json:"label_source"` // "ai-rerun" | "human-labeled"
-	GeneratedAt time.Time           `json:"generated_at"`
-	Since       time.Time           `json:"since"`
-	SampleSize  int                 `json:"sample_size"`
-	Dims        map[string]DimScore `json:"dims"`
-	LLMCostYuan float64             `json:"llm_cost_yuan"`
-	Mismatches  []Mismatch          `json:"mismatches,omitempty"`
+	Mode           string               `json:"mode"`         // "consistency" | "score-human"
+	LabelSource    string               `json:"label_source"` // "ai-rerun" | "human-labeled"
+	GeneratedAt    time.Time            `json:"generated_at"`
+	Since          time.Time            `json:"since"`
+	SampleSize     int                  `json:"sample_size"`
+	Dims           map[string]DimScore  `json:"dims"`
+	LLMCostYuan    float64              `json:"llm_cost_yuan"`
+	Mismatches     []Mismatch           `json:"mismatches,omitempty"`
+	SuggestedAttrs SuggestedAttrsReport `json:"suggested_attrs,omitempty"`
 }
 
 // Mismatch is one row where the AI's freshly-computed attrs differ
@@ -110,6 +111,7 @@ func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample
 		SampleSize:  len(rows),
 		Dims:        map[string]DimScore{},
 	})
+	suggestedAcc := newSuggestedAccumulator()
 	for _, r := range rows {
 		cfg := enrich.ClassifyConfig{TenantID: r.TenantID, Purpose: "eval"}
 		if ev.tenants != nil {
@@ -119,14 +121,16 @@ func (ev *Evaluator) RunConsistency(ctx context.Context, since time.Time, sample
 				cfg.Dimensions = tenantCfg.Dimensions
 			}
 		}
-		newEnriched, err := ev.enricher.Classify(ctx, r.Content, cfg)
+		result, err := ev.enricher.ClassifyWithDiagnostics(ctx, r.Content, cfg)
 		if err != nil {
 			// LLM blip — skip this row, don't blow up the whole report.
 			continue
 		}
-		scoreRow(report, r, newEnriched.Attrs, cfg.Dimensions)
+		suggestedAcc.Add(result.DropDiagnostics, result.Enriched.Attrs, cfg.Dimensions)
+		scoreRow(report, r, result.Enriched.Attrs, cfg.Dimensions)
 	}
 	report.LLMCostYuan = float64(report.SampleSize) * 0.008
+	report.SuggestedAttrs = suggestedAcc.Build(report.SampleSize)
 	sortMismatches(report.Mismatches)
 	logext.Infof(ctx, "[%s] OK,sample:%d,dims:%d,cost_yuan:%.2f",
 		where, report.SampleSize, len(report.Dims), report.LLMCostYuan)

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- **Eval report now surfaces off-list module suggestions (#83).** When the LLM
+  systematically suggests taxonomy values that are filtered out (e.g., tenant
+  whitelist is `["payment"]` but LLM outputs `["payment", "checkout"]`), the
+  eval report now captures these suggestions with frequency distribution,
+  coverage metrics, confidence scoring, and actionable recommendations. This
+  enables operators to identify systematic gaps in their taxonomy and evolve
+  it based on LLM behavior. CLI output includes a "suggested values" section
+  with per-dimension coverage and top suggestions.
+
+### Fixed
+
 - **GDPR erasure no longer aborts on subjects with deliveries (#131).** The
   data-subject delete now purges `notify_outbox` (a `NOT NULL` FK to
   `user_feedback` with no `ON DELETE` action, whose `payload` holds the feedback

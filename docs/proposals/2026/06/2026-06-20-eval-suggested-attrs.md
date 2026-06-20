@@ -3,7 +3,7 @@
 | Field    | Value                                                    |
 |----------|----------------------------------------------------------|
 | Issue    | [#83](https://github.com/Phixsura/attune/issues/83)      |
-| Status   | Proposed                                                 |
+| Status   | Accepted                                                 |
 | Started  | 2026-06-20                                               |
 | Related  | #19 (proto IDL), #66 (inbound framework)                 |
 
