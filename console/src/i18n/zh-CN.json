@@ -345,6 +345,22 @@
     "sidebar_label": "设置项",
     "classification_title": "AI 分类设置",
     "classification_help": "自定义 AI 分类提示词与维度元数据。维度可任意增删改、跨语言展示。",
+    "suggestions": {
+      "title": "建议分类值（off-list）",
+      "help": "AI 反复给出但被分类值白名单过滤掉的值。分析会对历史反馈抽样重跑 LLM 分类，开销较大。一键将高频值提升进维度分类值。",
+      "analyze": "分析建议",
+      "analyzing": "正在重跑分类抽样…",
+      "error": "获取建议失败，请稍后重试。",
+      "empty": "暂无 off-list 建议——AI 输出都在白名单内。",
+      "col_dim": "维度",
+      "col_value": "建议值",
+      "col_count": "出现次数",
+      "col_confidence": "置信度",
+      "col_impact": "覆盖率提升",
+      "promote": "提升",
+      "promoted": "已将「{{value}}」加入分类值",
+      "promote_failed": "提升失败"
+    },
     "areas": {
       "classification": {
         "title": "AI 分类",

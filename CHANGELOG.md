@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   with per-dimension coverage and top suggestions. Console API endpoints
   `GET /enrich-config/eval-suggestions` and `POST /enrich-config/promote`
   allow viewing suggestions and promoting values to the taxonomy directly.
+  The Console settings → classification tab adds a "Suggested values" panel:
+  an on-demand "Analyze" action runs the eval, lists each off-list candidate
+  with its frequency, confidence, and predicted coverage gain, and a one-click
+  "Promote" adds it to the dimension taxonomy (after which it leaves the list
+  and coverage rises).
 
 ### Fixed
 
