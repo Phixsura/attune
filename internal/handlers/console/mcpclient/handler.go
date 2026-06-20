@@ -7,9 +7,12 @@ package mcpclient
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/domain"
@@ -198,4 +201,79 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string {
 	return e.Field + ": " + e.Message
+}
+
+// ServeList handles GET /mcp/clients.
+func (h *Handler) ServeList(w http.ResponseWriter, r *http.Request) {
+	auth := session.FromContext(r.Context())
+	resp, err := h.List(r.Context(), auth, ptrext.Of(ListRequest{}))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ServeCreate handles POST /mcp/clients.
+func (h *Handler) ServeCreate(w http.ResponseWriter, r *http.Request) {
+	auth := session.FromContext(r.Context())
+
+	var req CreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, ptrext.Of(ValidationError{Field: "body", Message: "invalid JSON"}))
+		return
+	}
+
+	resp, err := h.Create(r.Context(), auth, ptrext.Of(req), r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// ServeRevoke handles DELETE /mcp/clients/{id}.
+func (h *Handler) ServeRevoke(w http.ResponseWriter, r *http.Request) {
+	auth := session.FromContext(r.Context())
+
+	id := chi.URLParam(r, "id")
+	req := ptrext.Of(RevokeRequest{ID: id})
+
+	_, err := h.Revoke(r.Context(), auth, req, r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v) //nolint:errcheck
+}
+
+func writeError(w http.ResponseWriter, err error) {
+	var ve *ValidationError
+	if errors.As(err, &ve) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+			"error": ve.Error(),
+		})
+		return
+	}
+	if errors.Is(err, mcprepo.ErrClientNotFound) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+			"error": "client not found",
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+		"error": "internal error",
+	})
 }

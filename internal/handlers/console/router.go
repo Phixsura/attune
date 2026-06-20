@@ -37,6 +37,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/rbac"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	consolellmconfig "github.com/Phixsura/attune/internal/handlers/console/llmconfig"
+	consolemcpclient "github.com/Phixsura/attune/internal/handlers/console/mcpclient"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/member"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
@@ -90,6 +91,7 @@ var (
 	NewWorkflowHandler           = consoleworkflow.NewHandler
 	NewOIDCHandler               = consoleoidc.NewHandler
 	NewMemberHandler             = member.NewHandler
+	NewMCPClientHandler          = consolemcpclient.NewHandler
 	BootstrapAdmin               = auth.BootstrapAdmin
 )
 
@@ -166,6 +168,7 @@ type Router struct {
 	workflow           *consoleworkflow.Handler
 	oidc               *consoleoidc.Handler
 	members            *member.Handler
+	mcpClients         *consolemcpclient.Handler
 	admins             adminReader
 	rbac               *rbac.Middleware
 }
@@ -308,6 +311,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountGDPR(m)
 	r.mountNotifyTargets(m)
 	r.mountOutbox(m)
+	r.mountMCPClients(m)
 	r.mountDigestSubscription(m)
 	r.mountFeedback(m)
 	m.Group(func(u chi.Router) {
@@ -1917,6 +1921,24 @@ func bindListDeliveriesRequest(r *http.Request, req *attunev1.ListDeliveriesRequ
 		req.BeforeId = n
 	}
 	return nil
+}
+
+// SetMCPClientHandler injects the MCP OAuth client handler (#93). Optional, so
+// callers of NewRouter that don't wire it (tests) simply don't expose /mcp/clients.
+func (r *Router) SetMCPClientHandler(h *consolemcpclient.Handler) {
+	r.mcpClients = h
+}
+
+func (r *Router) mountMCPClients(m chi.Router) {
+	if r.mcpClients == nil {
+		return
+	}
+	m.Route("/mcp/clients", func(c chi.Router) {
+		c.Use(r.requireAdmin)
+		c.Get("/", r.mcpClients.ServeList)
+		c.Post("/", r.mcpClients.ServeCreate)
+		c.Delete("/{id}", r.mcpClients.ServeRevoke)
+	})
 }
 
 func (r *Router) mountTags(m chi.Router) {

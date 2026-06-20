@@ -40,6 +40,7 @@ import (
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	llmauditrepo "github.com/Phixsura/attune/internal/repo/llmaudit"
 	llmconfigrepo "github.com/Phixsura/attune/internal/repo/llmconfig"
+	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	oidcuserrepo "github.com/Phixsura/attune/internal/repo/oidcuser"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
@@ -279,6 +280,7 @@ func buildConsoleRouter(
 		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
 	attachOutboxHandler(router, pool, auditLogSvc)
+	attachMCPClientHandler(router, pool, auditLogSvc)
 	return router.Mount(), nil
 }
 
@@ -289,6 +291,13 @@ func attachOutboxHandler(router *console.Router, pool *pgxpool.Pool, audit *audi
 	h := console.NewOutboxHandler(outboxrepo.NewOutbox(pool))
 	h.SetAuditLogger(audit)
 	router.SetOutboxHandler(h)
+}
+
+// attachMCPClientHandler wires the MCP OAuth client console handler (#93).
+func attachMCPClientHandler(router *console.Router, pool *pgxpool.Pool, audit *auditlogsvc.Service) {
+	h := console.NewMCPClientHandler(mcprepo.NewClients(pool))
+	h.SetAuditLogger(audit)
+	router.SetMCPClientHandler(h)
 }
 
 func buildGDPRHandler(
