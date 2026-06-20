@@ -153,6 +153,157 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		require.Equal(t, id, repo.deleteID)
 	})
 
+	t.Run("create slack", func(t *testing.T) {
+		id := uuid.New()
+		createdAt := time.Date(2026, 6, 20, 9, 0, 0, 0, time.UTC)
+		repo := &fakeNotifyRepo{insertID: id, insertTime: createdAt}
+		h := NewNotifyTargetsHandler(repo)
+		handler := dispatcher.Bind(
+			"console.NotifyTargetsHandler.Create",
+			dispatcher.JSON(func() *attunev1.CreateNotifyTargetRequest { return &attunev1.CreateNotifyTargetRequest{} }),
+			h.Create,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateNotifyTargetRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(
+			http.MethodPost,
+			"/fb/v1/console/notify-targets",
+			`{"destinationType":"slack","audience":"pool","url":"https://hooks.slack.com/services/T00/B00/xxx"}`,
+		))
+
+		require.Equal(t, http.StatusCreated, w.Code)
+		require.NotNil(t, repo.insertTarget)
+		require.Equal(t, notifytarget.DestSlack, repo.insertTarget.DestinationType)
+		require.Equal(t, notifytarget.AudiencePool, repo.insertTarget.Audience)
+		require.Equal(t, "https://hooks.slack.com/services/T00/B00/xxx", repo.insertTarget.URL)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		require.Equal(t, id.String(), body["id"])
+		require.Equal(t, "slack", body["destinationType"])
+	})
+
+	t.Run("create slack-bot returns 400", func(t *testing.T) {
+		repo := &fakeNotifyRepo{}
+		h := NewNotifyTargetsHandler(repo)
+		handler := dispatcher.Bind(
+			"console.NotifyTargetsHandler.Create",
+			dispatcher.JSON(func() *attunev1.CreateNotifyTargetRequest { return &attunev1.CreateNotifyTargetRequest{} }),
+			h.Create,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateNotifyTargetRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(
+			http.MethodPost,
+			"/fb/v1/console/notify-targets",
+			`{"destinationType":"slack-bot","audience":"all","url":"https://example.com/hook"}`,
+		))
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		require.Contains(t, body["message"], "not allowed")
+	})
+
+	t.Run("list includes slack", func(t *testing.T) {
+		slackID := uuid.New()
+		rawID := uuid.New()
+		h := NewNotifyTargetsHandler(&fakeNotifyRepo{
+			listRows: []notifytarget.NotifyTarget{
+				{
+					ID:              rawID,
+					TenantID:        dispatchtest.TenantID,
+					DestinationType: notifytarget.DestRawWebhook,
+					Audience:        notifytarget.AudienceAll,
+					URL:             "https://example.com/hook",
+					TimeoutSeconds:  10,
+					CreatedAt:       time.Date(2026, 6, 9, 1, 2, 3, 0, time.UTC),
+				},
+				{
+					ID:              slackID,
+					TenantID:        dispatchtest.TenantID,
+					DestinationType: notifytarget.DestSlack,
+					Audience:        notifytarget.AudiencePool,
+					URL:             "https://hooks.slack.com/services/T00/B00/xxx",
+					TimeoutSeconds:  10,
+					CreatedAt:       time.Date(2026, 6, 20, 9, 0, 0, 0, time.UTC),
+				},
+			},
+		})
+		handler := dispatcher.Bind(
+			"console.NotifyTargetsHandler.List",
+			dispatcher.Empty(func() *attunev1.ListNotifyTargetsRequest { return &attunev1.ListNotifyTargetsRequest{} }),
+			h.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListNotifyTargetsRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodGet, "/fb/v1/console/notify-targets", ""))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		items := body["items"].([]any)
+		require.Len(t, items, 2)
+		slackItem := items[1].(map[string]any)
+		require.Equal(t, slackID.String(), slackItem["id"])
+		require.Equal(t, "slack", slackItem["destinationType"])
+		require.Equal(t, "pool", slackItem["audience"])
+	})
+
+	t.Run("test send slack", func(t *testing.T) {
+		targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		}))
+		t.Cleanup(targetServer.Close)
+
+		id := uuid.New()
+		repo := &fakeNotifyRepo{
+			getRow: &notifytarget.NotifyTarget{
+				ID:              id,
+				TenantID:        dispatchtest.TenantID,
+				DestinationType: notifytarget.DestSlack,
+				Audience:        notifytarget.AudiencePool,
+				URL:             targetServer.URL,
+				TimeoutSeconds:  1,
+				CreatedAt:       time.Date(2026, 6, 20, 9, 0, 0, 0, time.UTC),
+			},
+		}
+		h := NewNotifyTargetsHandler(repo)
+		handler := dispatcher.Bind(
+			"console.NotifyTargetsHandler.Test",
+			dispatcher.Path(
+				func() *attunev1.TestNotifyTargetRequest { return &attunev1.TestNotifyTargetRequest{} },
+				dispatcher.Param("id", func(req *attunev1.TestNotifyTargetRequest, id string) { req.Id = id }),
+			),
+			h.Test,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TestNotifyTargetRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(
+			http.MethodPost,
+			"/fb/v1/console/notify-targets/"+id.String()+"/test",
+			"",
+			dispatchtest.Param{Name: "id", Value: id.String()},
+		))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		require.Equal(t, true, body["ok"])
+	})
+
 	t.Run("test send", func(t *testing.T) {
 		targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, http.MethodPost, r.Method)

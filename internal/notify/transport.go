@@ -153,7 +153,8 @@ func (t *Transport) attempt(
 		return Classify(fmt.Errorf("http do: %w", err), 0)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	const maxResponseBody = 1 << 20 // 1 MiB — defense against oversized upstream responses
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
 		return Classify(fmt.Errorf("read body: %w", err), 0)
 	}

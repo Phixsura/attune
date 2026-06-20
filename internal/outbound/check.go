@@ -8,8 +8,10 @@ import (
 	"fmt"
 )
 
-// ErrTerminal signals the response is a final failure — transport stops
-// retrying and returns the error. Re-exported from notify for adapter use.
+// ErrTerminal signals the response is a final failure — the adapter
+// considers retrying pointless (e.g. 403 invalid_token). The service
+// layer's wrapCheck translates this into notify.ErrTerminal at the
+// bridge point (depguard forbids outbound → notify).
 var ErrTerminal = errors.New("terminal failure")
 
 // CheckWebhook is the standard response checker for raw-webhook style

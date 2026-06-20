@@ -6,6 +6,7 @@ package outbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/Phixsura/attune/internal/notify"
@@ -54,10 +55,24 @@ func (w *OutboxWorker) sendByDestType(
 }
 
 // unmarshalEnvelope converts the outbox payload JSON into an outbound.Envelope.
+// The outbox format uses "delivered_at" and nests tenant_id inside feedback;
+// Envelope expects "timestamp" and top-level "tenant_id". We fix up after unmarshal.
 func unmarshalEnvelope(payload []byte) (*outbound.Envelope, error) {
 	var env outbound.Envelope
 	if err := json.Unmarshal(payload, &env); err != nil { // ptrext:allow unmarshal-out-param
 		return nil, err
+	}
+	if env.Timestamp == "" {
+		var raw struct {
+			DeliveredAt string `json:"delivered_at"`
+		}
+		_ = json.Unmarshal(payload, &raw) // ptrext:allow unmarshal-out-param
+		env.Timestamp = raw.DeliveredAt
+	}
+	if env.TenantID == "" {
+		if tid, ok := env.Feedback["tenant_id"].(string); ok {
+			env.TenantID = tid
+		}
 	}
 	return ptrext.Of(env), nil
 }
@@ -90,6 +105,13 @@ func wrapCheck(check outbound.ResponseChecker, row outboxrepo.OutboxRow) notify.
 		if err == nil {
 			logext.Infof(ctx, "[%s] row delivered,id:%d,tenant:%s,inbound_trace_id:%s,status:%d",
 				where, row.ID, row.TenantID, row.TraceID, status)
+			return nil
+		}
+		// outbound.ErrTerminal and notify.ErrTerminal are separate sentinels
+		// (depguard forbids outbound → notify). Translate here so the
+		// transport's retry loop recognises adapter-terminal failures.
+		if errors.Is(err, outbound.ErrTerminal) {
+			return fmt.Errorf("%w: %w", notify.ErrTerminal, err)
 		}
 		return err
 	}

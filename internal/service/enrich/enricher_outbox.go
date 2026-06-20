@@ -302,6 +302,8 @@ func promptLanguageForSemanticRun(cfg ClassifyConfig) string {
 var outboxDestTypes = map[string]bool{
 	notifytarget.DestRawWebhook:  true,
 	notifytarget.DestGitHubIssue: true,
+	notifytarget.DestSlack:       true,
+	notifytarget.DestLark:        true,
 }
 
 // selectOutboxTargets returns the destination rows that should receive

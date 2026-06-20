@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Slack outbound adapter wired into delivery pipeline (#31).** The existing
+  Slack Block Kit adapter (`internal/outbound/adapter/slack/`) is now
+  delivery-reachable end-to-end: outbox routing creates rows for `slack`
+  (and `lark`) destination types, Console CRUD validates and accepts the new
+  types, `notify.TestSend` uses the adapter registry instead of a hardcoded
+  switch, `CustomWebhookDest` config accepts a `destination_type` field
+  (defaulting to `raw-webhook`), and the audit snapshot hashes the URL for
+  signing-less destinations (Slack incoming webhooks have no request signing).
+  The adapter renders both per-event and daily-digest Block Kit messages with
+  severity/category fields from the enrichment pipeline. A custom
+  `checkSlack` response checker classifies 408/429 as retryable and 4xx as
+  terminal (replacing the generic `CheckWebhook`). Config validation
+  rejects unknown `destination_type` values (typo guard) and skips the
+  shared-secret requirement for Slack and Lark (the URL is the credential).
+  Response bodies are capped at 1 MiB via `io.LimitReader` for both
+  `Transport.Send` and `TestSend`. Block Kit header/section text is
+  truncated to Slack's hard limits (150/3000 chars, rune-safe).
+
+### Security
+
+- **Slack webhook URL redacted in logs (#31).** The adapter now logs
+  `nethardening.RedactURL(dst.URL)` (scheme + host only) instead of the
+  full incoming-webhook URL, which contains the authentication token in
+  the path segment.
+- **Slack mrkdwn injection prevented (#31).** User-supplied content
+  (title, severity, category, source, digest theme/item titles) embedded
+  in mrkdwn fields is escaped (`<` → `&lt;`, `>` → `&gt;`, `&` → `&amp;`)
+  to prevent `<!channel>` / `<!here>` mention injection and unintended
+  link markup.
+
+### Fixed
+
+- **`outbound.ErrTerminal` now recognised by transport retry loop (#31).**
+  `outbound.ErrTerminal` and `notify.ErrTerminal` were separate
+  `errors.New` sentinels (depguard prohibits the import). The outbox
+  worker's `wrapCheck` bridge now translates `outbound.ErrTerminal` →
+  `notify.ErrTerminal` so that adapter-terminal responses (e.g. Slack
+  403) stop retrying immediately instead of exhausting all attempts.
+- **Outbox envelope field mapping fixed for Slack adapter (#31).**
+  The outbox serialises `title`/`is_urgent` inside `feedback.enriched`
+  and `severity`/`category` inside `enriched.attrs`, but the adapter
+  read them from the flat `feedback` level. The adapter now probes
+  both paths. Timestamp (`delivered_at` → `timestamp`) and `tenant_id`
+  (nested → top-level) are also fixed up during unmarshal.
+- **Digest view JSON roundtrip aligned with upstream types (#31).**
+  Local digest structs used lowercase json tags while upstream
+  `digest.Result` / `feedback.DigestWindowStats` / `digest.Theme`
+  use Go-default capitalised field names (no json tags). The roundtrip
+  in `toDigestView` silently dropped all nested data. Tags removed so
+  both sides marshal identically.
+- **`truncate()` no longer exceeds the requested limit (#31).**
+  The ellipsis suffix was appended beyond `n`, producing `n+3` chars.
+  Now stays within `n` by reserving 3 chars for `"..."`.
+
 - **Eval report now surfaces off-list module suggestions (#83).** When the LLM
   systematically suggests taxonomy values that are filtered out (e.g., tenant
   whitelist is `["payment"]` but LLM outputs `["payment", "checkout"]`), the
