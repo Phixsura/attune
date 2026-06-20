@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -103,4 +104,20 @@ func TestRenderDigestCard_Integration(t *testing.T) {
 	}
 
 	t.Log("Lark RenderDigest integration test passed")
+}
+
+// truncate must be rune-safe: cutting a multibyte UTF-8 string mid-rune would
+// emit invalid bytes and can trip an upstream 400. It also must not exceed n.
+func TestTruncate_RuneSafe(t *testing.T) {
+	s := "你好世界这是一段测试文本" // 12 runes, 36 bytes
+	got := truncate(s, 10)
+	if !utf8.ValidString(got) {
+		t.Errorf("truncate produced invalid UTF-8: %q", got)
+	}
+	if n := len([]rune(got)); n > 10 {
+		t.Errorf("result exceeds limit: %d runes, want <=10 (%q)", n, got)
+	}
+	if truncate("hello", 10) != "hello" {
+		t.Errorf("short strings must be returned unchanged")
+	}
 }

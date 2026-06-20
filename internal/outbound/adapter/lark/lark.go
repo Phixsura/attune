@@ -340,9 +340,16 @@ func formatFallbackMarkdown(view any) string {
 	return "```\n" + truncate(string(b), 2000) + "\n```"
 }
 
+// truncate is rune-safe and never exceeds n runes. Cutting a multibyte UTF-8
+// string on a byte boundary would emit invalid bytes and can trip an upstream
+// 400 (matches the slack/discord adapters).
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n] + "..."
+	if n > 3 {
+		return string(runes[:n-3]) + "..."
+	}
+	return string(runes[:n])
 }

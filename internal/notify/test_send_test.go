@@ -148,3 +148,31 @@ func (s *stubChannel) RenderEvent(env *outbound.Envelope, dst outbound.Target) (
 		},
 	}, nil
 }
+
+// A transport-level failure (the *url.Error from http.Client.Do embeds the full
+// request URL) must have its token-in-path webhook URL redacted before it is
+// returned to the operator (API response + audit log).
+func TestTestSend_TransportError_RedactsURL(t *testing.T) {
+	t.Parallel()
+	registerStubAdapter(t, "test-stub-transport-err")
+
+	// Start then immediately close a server so the dial is refused.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	base := srv.URL
+	srv.Close()
+
+	leakURL := base + "/webhooks/123/SUPER_SECRET_TOKEN"
+	result := TestSend(t.Context(), notifytarget.NotifyTarget{
+		ID:              uuid.New(),
+		TenantID:        "t1",
+		DestinationType: "test-stub-transport-err",
+		URL:             leakURL,
+		TimeoutSeconds:  2,
+	})
+	if result.OK || result.Err == nil {
+		t.Fatalf("expected a transport error, got ok=%v err=%v", result.OK, result.Err)
+	}
+	if strings.Contains(result.Err.Error(), "SUPER_SECRET_TOKEN") {
+		t.Errorf("returned error leaked the token: %q", result.Err.Error())
+	}
+}

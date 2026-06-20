@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -93,7 +94,10 @@ func TestSend(ctx context.Context, target notifytarget.NotifyTarget) TestResult 
 	if doErr != nil {
 		logext.Errorf(ctx, "[%s] http do failed,url:%s,latency_ms:%d,err:%+v",
 			where, nethardening.RedactURL(target.URL), latencyMs, doErr.Error())
-		return TestResult{LatencyMs: latencyMs, Err: doErr}
+		// doErr is a *url.Error embedding the full request URL; for token-in-path
+		// webhooks that URL is the credential, so scrub it before it reaches the
+		// API response and audit log.
+		return TestResult{LatencyMs: latencyMs, Err: errors.New(nethardening.RedactURLIn(doErr.Error(), target.URL))}
 	}
 	defer resp.Body.Close()
 	const maxResponseBody = 1 << 20 // 1 MiB

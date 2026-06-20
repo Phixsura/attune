@@ -46,6 +46,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Security
 
+- **Dead-queue console surface no longer leaks token-in-URL webhook
+  credentials (#32).** The outbox dead-queue API (`ToProto`) returned the full
+  `destination_target` URL — and any URL echoed into `last_error` /
+  `dead_reason` via a `*url.Error` — verbatim to operators. For Slack/Lark/
+  Discord the token lives in the URL path, so an operator viewing a failed
+  delivery saw the credential in clear text. All three fields are now redacted
+  to scheme://host at the read boundary (`nethardening.RedactURL` /
+  `RedactURLIn`); the full URL is still stored at rest for redelivery.
+
+- **`notify.TestSend` no longer leaks the webhook URL in transport errors
+  (#32).** A connection/DNS/TLS failure returned the raw `*url.Error` (which Go
+  formats with the full request URL) to the API response and audit log. The
+  returned error is now scrubbed with `nethardening.RedactURLIn`.
+
 - **Audit snapshot no longer leaks token-in-URL webhook credentials (#32).**
   `auditNotifyTargetSnapshot` chose between a hashed URL and a path-preserving
   "sanitized" URL based solely on whether a `secret` was set. For destinations
@@ -67,6 +81,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   link markup.
 
 ### Fixed
+
+- **Lark adapter `truncate` is now rune-safe (#32).** It used byte slicing
+  (`s[:n]`), which split multibyte UTF-8 mid-rune — corrupting CJK/emoji titles
+  and risking an upstream 400 — and appended `"..."` past `n`. Replaced with the
+  rune-safe version already used by the Slack/Discord adapters (found while
+  reviewing the Discord copy-adapt for shared-helper drift).
 
 - **`outbound.ErrTerminal` now recognised by transport retry loop (#31).**
   `outbound.ErrTerminal` and `notify.ErrTerminal` were separate

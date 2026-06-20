@@ -215,6 +215,18 @@ func RedactURL(raw string) string {
 	return u.Scheme + "://" + u.Host
 }
 
+// RedactURLIn replaces every occurrence of rawURL in s with its host-only
+// redaction. Used to scrub a token-in-path webhook URL out of a free-form
+// string that may embed it — e.g. a *url.Error message ("Post \"<url>\": ...")
+// or a persisted last_error — before it reaches an operator-facing surface
+// (API response, audit log, dead-queue). No-op when rawURL is empty/absent.
+func RedactURLIn(s, rawURL string) string {
+	if rawURL == "" || !strings.Contains(s, rawURL) {
+		return s
+	}
+	return strings.ReplaceAll(s, rawURL, RedactURL(rawURL))
+}
+
 func isDNSRebindingService(host string) bool {
 	for _, s := range []string{".nip.io", ".xip.io", ".sslip.io", ".localtest.me", ".vcap.me"} {
 		if strings.HasSuffix(host, s) {
