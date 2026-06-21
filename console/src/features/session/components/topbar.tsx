@@ -43,12 +43,12 @@ export function TopBar({ me }: TopBarProps) {
 
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-6 px-6">
-        <Link to="/" className="hover:opacity-80">
+      <div className="mx-auto flex h-14 w-full max-w-6xl min-w-0 items-center gap-3 px-4 sm:gap-6 sm:px-6">
+        <Link to="/" className="shrink-0 hover:opacity-80">
           <Logo />
         </Link>
-        <span className="text-sm text-muted-foreground">{me.tenant?.name}</span>
-        <nav className="ml-6 flex items-center gap-4 text-sm">
+        <span className="hidden text-sm text-muted-foreground md:inline">{me.tenant?.name}</span>
+        <nav className="flex min-w-0 flex-1 items-center gap-3 overflow-x-auto text-sm sm:gap-4">
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
           <NavLink to="/usage">{t('nav.usage')}</NavLink>
           <NavLink to="/llm-usage">{t('nav.llm_usage')}</NavLink>
@@ -56,13 +56,15 @@ export function TopBar({ me }: TopBarProps) {
           {can('nav:settings') && <NavLink to="/settings">{t('nav.settings')}</NavLink>}
           {isAdmin && <NavLink to="/outbox-dead">{t('nav.outbox_dead')}</NavLink>}
         </nav>
-        <div className="ml-auto flex items-center gap-3">
-          <RoleBadge role={role} />
+        <div className="flex shrink-0 items-center gap-1 sm:gap-3">
+          <div className="hidden sm:block">
+            <RoleBadge role={role} />
+          </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="gap-2">
+              <Button variant="ghost" size="sm" className="gap-2 px-2 sm:px-3">
                 <User className="size-4" />
-                {me.user?.name}
+                <span className="hidden max-w-32 truncate sm:inline">{me.user?.name}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">

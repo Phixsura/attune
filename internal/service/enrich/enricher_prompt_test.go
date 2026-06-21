@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
@@ -61,6 +63,23 @@ func TestRenderPrompt_CustomTemplateRespected(t *testing.T) {
 	}
 }
 
+func TestRenderPrompt_SubstitutesWhitespaceWrappedTokens(t *testing.T) {
+	cfg := ClassifyConfig{
+		PromptTemplate: ptrext.Of("custom: {{ content }} | dims:\n{{ dimensions }}"),
+		Dimensions:     domain.DimensionSet{sevDim()},
+	}
+	out := renderPrompt(cfg, "hi")
+	if !strings.Contains(out, "custom: hi") {
+		t.Fatalf("content token not substituted:\n%s", out)
+	}
+	if !strings.Contains(out, `"severity"`) {
+		t.Fatalf("dimensions token not substituted:\n%s", out)
+	}
+	if strings.Contains(out, "{{ content }}") || strings.Contains(out, "{{ dimensions }}") {
+		t.Fatalf("raw whitespace-wrapped token leaked:\n%s", out)
+	}
+}
+
 func TestRenderPrompt_UsesLanguageVariant(t *testing.T) {
 	zh := renderPrompt(ClassifyConfig{Language: LanguageEnglish, DisplayLocale: LanguageChinese}, "checkout failed")
 	if !strings.Contains(zh, "你是产品反馈分类器") {
@@ -82,32 +101,177 @@ func TestRenderPrompt_UsesLanguageVariant(t *testing.T) {
 	}
 }
 
+func TestDefaultPromptTemplateForLocale(t *testing.T) {
+	require.Contains(t, DefaultPromptTemplate(), "You are a product-feedback classifier")
+	require.Contains(t, DefaultPromptTemplateForLocale("zh-CN"), "你是产品反馈分类器")
+	require.Contains(t, DefaultPromptTemplateForLocale("zh-Hant"), "你是产品反馈分类器")
+	require.Contains(t, DefaultPromptTemplateForLocale("ja-JP"), "You are a product-feedback classifier")
+}
+
+func TestRenderPolicyGuidance(t *testing.T) {
+	displayOnly := renderOutputLanguagePolicy(domain.EnrichPromptPolicyConfig{
+		OutputLanguagePolicy: domain.PromptOutputDisplayOnly,
+	}, "Japanese")
+	require.Contains(t, displayOnly, `Write "title" and "rationale" in Japanese`)
+
+	sourceAndDisplay := renderOutputLanguagePolicy(domain.EnrichPromptPolicyConfig{}, "Simplified Chinese")
+	require.Contains(t, sourceAndDisplay, "same natural language as the raw feedback")
+	require.Contains(t, sourceAndDisplay, "Simplified Chinese")
+
+	require.Equal(t, "", renderDomainGuidance("   "))
+	require.Equal(t, "Additional operator guidance: Treat billing as high signal.", renderDomainGuidance("  Treat billing as high signal.  "))
+}
+
 func TestPromptVersion(t *testing.T) {
-	if got := promptVersion(ClassifyConfig{Language: LanguageJapanese}); got != "default:en" {
-		t.Fatalf("Japanese source should report English built-in prompt, got %q", got)
+	if got := promptVersion(ClassifyConfig{Language: LanguageJapanese}); got != "enrich.default@1" {
+		t.Fatalf("Japanese source should report default policy, got %q", got)
 	}
 	if got := promptVersion(ClassifyConfig{
 		Language:      LanguageEnglish,
 		DisplayLocale: LanguageChinese,
-	}); got != "default:zh" {
-		t.Fatalf("Chinese display locale should report zh built-in prompt, got %q", got)
+	}); got != "enrich.default@1" {
+		t.Fatalf("Chinese display locale should report default policy, got %q", got)
 	}
 	if got := promptVersion(ClassifyConfig{
 		Language:       LanguageChinese,
 		PromptTemplate: ptrext.Of("custom {{content}}"),
-	}); got != "tenant_custom" {
+	}); !strings.HasPrefix(got, "enrich.legacy_custom_template@sha256:") {
 		t.Fatalf("custom prompt version=%q", got)
 	}
 }
 
-func TestRenderPrompt_EmptyDimensionsRendersToBlankSlot(t *testing.T) {
+func TestResolvePromptPolicy_CustomWarningsAndIdentity(t *testing.T) {
+	policy := resolvePromptPolicy(ClassifyConfig{
+		PromptTemplate: ptrext.Of("custom {{content}} {{modules}} {{unknown}}"),
+		Dimensions:     domain.DimensionSet{sevDim()},
+	})
+	if policy.PolicyID != "enrich.legacy_custom_template" {
+		t.Fatalf("policy id=%q", policy.PolicyID)
+	}
+	if policy.Mode != "legacy_custom_override" {
+		t.Fatalf("mode=%q", policy.Mode)
+	}
+	if !strings.HasPrefix(policy.PolicyVersion, "sha256:") {
+		t.Fatalf("policy version=%q", policy.PolicyVersion)
+	}
+	codes := map[string]bool{}
+	for _, w := range policy.Warnings {
+		codes[w.Code] = true
+	}
+	for _, want := range []string{"legacy_variable_modules", "unknown_variable", "missing_dimensions"} {
+		if !codes[want] {
+			t.Fatalf("warning %q missing from %#v", want, policy.Warnings)
+		}
+	}
+}
+
+func TestResolvePromptPolicy_DefaultMetadataAndGuard(t *testing.T) {
+	policy := resolvePromptPolicy(ClassifyConfig{
+		DisplayLocale: "ja-JP",
+		PolicyConfig: domain.EnrichPromptPolicyConfig{
+			Tone:           "detailed",
+			DomainGuidance: "Treat checkout failures as high signal.",
+		},
+		Dimensions: domain.DimensionSet{sevDim()},
+	})
+	require.Equal(t, "enrich.default", policy.PolicyID)
+	require.Equal(t, "1", policy.PolicyVersion)
+	require.Equal(t, "enrich.default@1", policy.PromptVersion)
+	require.Equal(t, "default", policy.Mode)
+	require.Equal(t, "built_in", policy.PromptSource)
+	require.Equal(t, "en", policy.TemplateLanguage)
+	require.Equal(t, "ja-JP", policy.DisplayLocale)
+	require.Equal(t, "Japanese", policy.DisplayLanguageName)
+	require.True(t, strings.HasPrefix(policy.PromptFingerprint, "sha256:"), policy.PromptPolicyMetadata)
+	require.True(t, strings.HasPrefix(policy.SchemaFingerprint, "sha256:"), policy.PromptPolicyMetadata)
+	require.GreaterOrEqual(t, len(policy.Variables), 5)
+	require.GreaterOrEqual(t, len(policy.Outputs), 5)
+
+	guard := promptPolicyGuard(policy)
+	require.Contains(t, guard, "policy_id")
+	require.Contains(t, guard, "policy_version")
+	require.Contains(t, guard, "prompt_contract")
+	require.Contains(t, guard, "output_contract")
+	require.Contains(t, guard, "policy_config")
+	require.Contains(t, guard, "schema_fingerprint")
+	require.Contains(t, guard, "prompt_fingerprint")
+	require.Nil(t, warningCodes(nil))
+}
+
+func TestPromptTemplateWarnings_MissingOutputMentions(t *testing.T) {
+	warnings := promptTemplateWarnings("custom {{content}} {{dimensions}} title rationale")
+	codes := map[string]int{}
+	for _, w := range warnings {
+		codes[w.Code]++
+		if w.Code == "missing_output_mention" && w.Severity != "info" {
+			t.Fatalf("missing output warning should be info: %#v", w)
+		}
+	}
+	if codes["missing_dimensions"] != 0 || codes["unknown_variable"] != 0 {
+		t.Fatalf("unexpected warning codes: %#v", codes)
+	}
+	if codes["missing_output_mention"] == 0 {
+		t.Fatalf("expected missing output mention warnings: %#v", warnings)
+	}
+	missing := missingOutputMentions("title rationale display_title display_rationale classification_confidence")
+	if len(missing) != 0 {
+		t.Fatalf("all required mentions present, got %#v", missing)
+	}
+}
+
+func TestPromptVariableHelpers(t *testing.T) {
+	if got := promptVariableName("{{ display_locale }}"); got != "display_locale" {
+		t.Fatalf("variable name=%q", got)
+	}
+	if got := promptVariableName("not a token"); got != "" {
+		t.Fatalf("invalid token should not parse, got %q", got)
+	}
+	vars := promptVariables("{{content}} {{ content }} {{dimensions}}")
+	if !vars["content"] || !vars["dimensions"] || len(vars) != 2 {
+		t.Fatalf("variables not normalized/deduplicated: %#v", vars)
+	}
+	unknown := unknownPromptVariables("{{zzz}} {{aaa}} {{content}} {{zzz}}")
+	if strings.Join(unknown, ",") != "aaa,zzz" {
+		t.Fatalf("unknown variables should be sorted/deduped, got %#v", unknown)
+	}
+	if canonicalTemplate("{{ content }} {{dimensions }}") != "{{content}} {{dimensions}}" {
+		t.Fatalf("canonical template mismatch")
+	}
+}
+
+func TestResolvePromptPolicy_DimensionsTokenAllowsWhitespace(t *testing.T) {
+	policy := resolvePromptPolicy(ClassifyConfig{
+		PromptTemplate: ptrext.Of("custom {{ content }} {{ dimensions }}"),
+	})
+	for _, w := range policy.Warnings {
+		if w.Code == "missing_dimensions" {
+			t.Fatalf("{{ dimensions }} should satisfy dimensions warning check: %#v", policy.Warnings)
+		}
+	}
+}
+
+func TestResolvePromptPolicy_FingerprintDoesNotIncludeContent(t *testing.T) {
+	cfg := ClassifyConfig{PromptTemplate: ptrext.Of("custom {{content}} {{dimensions}}")}
+	a := resolvePromptPolicy(cfg)
+	b := resolvePromptPolicy(cfg)
+	if a.promptFingerprint != b.promptFingerprint {
+		t.Fatalf("same prompt shape should have stable fingerprint: %q vs %q", a.promptFingerprint, b.promptFingerprint)
+	}
+	if strings.Contains(a.promptFingerprint, "custom") || strings.Contains(a.promptFingerprint, "content") {
+		t.Fatalf("fingerprint should be a hash only, got %q", a.promptFingerprint)
+	}
+}
+
+func TestRenderPrompt_EmptyDimensionsExplainsBuiltInsOnly(t *testing.T) {
 	out := renderPrompt(ClassifyConfig{}, "x")
 	if !strings.Contains(out, "x") {
 		t.Error("content missing")
 	}
-	// {{dimensions}} expanded to "" — the empty marker should be gone
 	if strings.Contains(out, "{{dimensions}}") {
 		t.Error("dimensions token leaked when no dims configured")
+	}
+	if !strings.Contains(out, "No custom Dimensions configured") {
+		t.Fatalf("empty dimension guidance missing:\n%s", out)
 	}
 }
 

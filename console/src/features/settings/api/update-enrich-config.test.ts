@@ -3,7 +3,10 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { createElement, type ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
-import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
+import {
+  useActivateEnrichPromptVersion,
+  useUpdateEnrichConfig,
+} from '@/features/settings/api/update-enrich-config'
 import { server } from '@/testing/mocks/server'
 
 function wrap() {
@@ -25,6 +28,20 @@ describe('useUpdateEnrichConfig — cache write side effect', () => {
             promptTemplate: body.promptTemplate ?? 'echoed',
             defaultPromptTemplate: 'DEFAULT',
             dimensions: body.dimensions,
+            promptPolicy: {
+              policyId: 'enrich.legacy_custom_template',
+              policyVersion: 'sha256:abc',
+              promptVersion: 'enrich.legacy_custom_template@sha256:abc',
+              mode: 'legacy_custom_override',
+              promptSource: 'custom_template',
+              templateLanguage: 'custom',
+              displayLocale: 'zh-CN',
+              displayLanguageName: 'Simplified Chinese',
+              variables: [],
+              outputs: [],
+              warnings: [],
+            },
+            promptVersions: [],
           },
         })
       }),
@@ -42,6 +59,20 @@ describe('useUpdateEnrichConfig — cache write side effect', () => {
       promptTemplate: 'tpl',
       defaultPromptTemplate: 'DEFAULT',
       dimensions: [],
+      promptPolicy: {
+        policyId: 'enrich.legacy_custom_template',
+        policyVersion: 'sha256:abc',
+        promptVersion: 'enrich.legacy_custom_template@sha256:abc',
+        mode: 'legacy_custom_override',
+        promptSource: 'custom_template',
+        templateLanguage: 'custom',
+        displayLocale: 'zh-CN',
+        displayLanguageName: 'Simplified Chinese',
+        variables: [],
+        outputs: [],
+        warnings: [],
+      },
+      promptVersions: [],
     })
   })
 
@@ -57,5 +88,54 @@ describe('useUpdateEnrichConfig — cache write side effect', () => {
     result.current.mutate({ promptTemplate: '', dimensions: [] })
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect(qc.getQueryData(['console', 'enrich-config'])).toEqual({ original: true })
+  })
+
+  it('activate success writes resp.config into ["console","enrich-config"]', async () => {
+    server.use(
+      http.post('/fb/v1/console/enrich-config/versions/:id\\:activate', ({ params }) =>
+        HttpResponse.json({
+          config: {
+            promptTemplate: undefined,
+            defaultPromptTemplate: 'DEFAULT',
+            dimensions: [],
+            promptPolicy: {
+              policyId: 'enrich.default',
+              policyVersion: '1',
+              promptVersion: 'enrich.default@1',
+              mode: 'default',
+              promptSource: 'built_in',
+              templateLanguage: 'en',
+              displayLocale: 'zh-CN',
+              displayLanguageName: 'Simplified Chinese',
+              variables: [],
+              outputs: [],
+              warnings: [],
+            },
+            promptVersions: [
+              {
+                id: params.id,
+                promptVersion: 'enrich.default@1',
+                policyId: 'enrich.default',
+                policyVersion: '1',
+                mode: 'default',
+                promptSource: 'built_in',
+                createdAt: '2026-06-21T00:00:00Z',
+                isActive: true,
+                hasTemplate: false,
+                dimensionsCount: 0,
+                warnings: [],
+              },
+            ],
+          },
+        }),
+      ),
+    )
+    const { qc, wrapper } = wrap()
+    const { result } = renderHook(() => useActivateEnrichPromptVersion(), { wrapper })
+    result.current.mutate('version-1')
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(qc.getQueryData(['console', 'enrich-config'])).toMatchObject({
+      promptVersions: [{ id: 'version-1', isActive: true }],
+    })
   })
 })

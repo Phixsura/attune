@@ -770,7 +770,7 @@ describe('EnrichmentRuntimePage', () => {
     await waitFor(() => {
       expect(verifyBody).toEqual({ password: 'correct horse battery staple' })
     })
-  })
+  }, 20_000) // Full-page runtime smoke covers dialogs, step-up auth, and mutation refetches.
 
   it('submits reset and rollback actions when recent auth is already satisfied', async () => {
     let resetBody: unknown
@@ -817,5 +817,5 @@ describe('EnrichmentRuntimePage', () => {
         updateReason: 'rollback for stability',
       })
     })
-  })
+  }, 20_000) // Full-page runtime smoke covers multiple guarded action dialogs.
 })

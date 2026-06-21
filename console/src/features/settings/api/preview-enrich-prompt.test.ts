@@ -12,16 +12,40 @@ describe('usePreviewEnrichPrompt', () => {
     server.use(
       http.post('/fb/v1/console/enrich-config/preview', async ({ request }) => {
         observed = await request.json()
-        return HttpResponse.json({ renderedPrompt: '[rendered output]' })
+        return HttpResponse.json({
+          renderedPrompt: '[rendered output]',
+          promptPolicy: {
+            policyId: 'enrich.default',
+            policyVersion: '1',
+            promptVersion: 'enrich.default@1',
+            mode: 'default',
+            promptSource: 'built_in',
+            templateLanguage: 'en',
+            displayLocale: 'zh-CN',
+            displayLanguageName: 'Simplified Chinese',
+            variables: [],
+            outputs: [],
+            warnings: [],
+          },
+        })
       }),
     )
     const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
     const wrapper = ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client: qc }, children)
     const { result } = renderHook(() => usePreviewEnrichPrompt(), { wrapper })
-    result.current.mutate({ sampleContent: 'sample feedback content' })
+    result.current.mutate({
+      sampleContent: 'sample feedback content',
+      useDraftConfig: false,
+      dimensions: [],
+    })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(observed).toEqual({ sampleContent: 'sample feedback content' })
+    expect(observed).toEqual({
+      sampleContent: 'sample feedback content',
+      useDraftConfig: false,
+      dimensions: [],
+    })
     expect(result.current.data?.renderedPrompt).toBe('[rendered output]')
+    expect(result.current.data?.promptPolicy?.promptVersion).toBe('enrich.default@1')
   })
 })

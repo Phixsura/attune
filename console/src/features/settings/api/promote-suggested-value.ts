@@ -11,11 +11,10 @@ import type {
 //
 // On success it surgically drops the promoted candidate (and any matching
 // recommendation) from the cached eval-suggestions data via setQueryData —
-// NOT invalidateQueries. Invalidating would refetch, and the eval-suggestions
-// query re-runs an LLM eval on every fetch, so invalidating per promote would
-// spend LLM budget on each click and trip the endpoint's rate limit when
-// promoting several values in a row. Coverage is left as-is until the operator
-// re-runs "Analyze". The enrich-config query is invalidated (cheap, no LLM).
+// NOT invalidateQueries. Analyze is an explicit LLM-cost POST; promoting a
+// value must not silently re-run that analysis. Coverage is left as-is until
+// the operator re-runs "Analyze". The enrich-config query is invalidated
+// (cheap, no LLM).
 export function usePromoteSuggestedValue() {
   const qc = useQueryClient()
   return useMutation({

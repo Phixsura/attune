@@ -40,14 +40,23 @@ func (f *fakeSampler) SampleEnrichedByTenant(_ context.Context, tenantID string,
 }
 
 type fakeConfigReader struct {
-	cfg          tenant.EnrichConfig
-	err          error
-	gotTenantIDs []string
+	cfg           tenant.EnrichConfig
+	cfgWithLocale tenant.EnrichConfigWithLocale
+	err           error
+	gotTenantIDs  []string
 }
 
 func (f *fakeConfigReader) GetEnrichConfig(_ context.Context, tenantID string) (tenant.EnrichConfig, error) {
 	f.gotTenantIDs = append(f.gotTenantIDs, tenantID)
 	return f.cfg, f.err
+}
+
+func (f *fakeConfigReader) GetEnrichConfigWithLocale(_ context.Context, tenantID string) (tenant.EnrichConfigWithLocale, error) {
+	f.gotTenantIDs = append(f.gotTenantIDs, tenantID)
+	if f.cfgWithLocale.PromptTemplate != nil || len(f.cfgWithLocale.Dimensions) > 0 || f.cfgWithLocale.Locale != "" {
+		return f.cfgWithLocale, f.err
+	}
+	return tenant.EnrichConfigWithLocale{EnrichConfig: f.cfg}, f.err
 }
 
 // fakeClassifier replays a queued response per call. A nil entry in errs
@@ -224,7 +233,10 @@ func TestRunConsistencyLoop_PassesResolvedConfigToClassifier(t *testing.T) {
 func TestResolveConfig_AppliesTenantConfig(t *testing.T) {
 	t.Parallel()
 	tmpl := "custom"
-	cr := &fakeConfigReader{cfg: tenant.EnrichConfig{PromptTemplate: &tmpl, Dimensions: modulesDims()}}
+	cr := &fakeConfigReader{cfgWithLocale: tenant.EnrichConfigWithLocale{
+		EnrichConfig: tenant.EnrichConfig{PromptTemplate: &tmpl, Dimensions: modulesDims()},
+		Locale:       "zh-CN",
+	}}
 	ev := &Evaluator{tenants: cr}
 
 	cfg := ev.resolveConfig(context.Background(), "tenant-1")
@@ -233,6 +245,7 @@ func TestResolveConfig_AppliesTenantConfig(t *testing.T) {
 	require.Equal(t, "eval", cfg.Purpose)
 	require.Equal(t, &tmpl, cfg.PromptTemplate)
 	require.Len(t, cfg.Dimensions, 1)
+	require.Equal(t, "zh-CN", cfg.DisplayLocale)
 	require.Equal(t, []string{"tenant-1"}, cr.gotTenantIDs)
 }
 

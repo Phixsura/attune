@@ -1539,8 +1539,7 @@ func (r *Router) mountFeedbackBatchRoutes(f chi.Router) {
 
 func (r *Router) mountEnrichConfig(m chi.Router) {
 	m.Route("/enrich-config", func(e chi.Router) {
-		e.Use(r.requireAdmin) // AI classification config is admin-only
-		e.Get("/", dispatcher.Bind(
+		e.With(r.requireViewer).Get("/", dispatcher.Bind(
 			"console.EnrichConfigHandler.Get",
 			dispatcher.Empty(func() *attunev1.GetEnrichConfigRequest { return ptrext.Of(attunev1.GetEnrichConfigRequest{}) }),
 			r.enrichConfig.Get,
@@ -1548,7 +1547,7 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		e.Put("/", dispatcher.Bind(
+		e.With(r.requireAdmin).Put("/", dispatcher.Bind(
 			"console.EnrichConfigHandler.Update",
 			dispatcher.JSON(func() *attunev1.UpdateEnrichConfigRequest { return ptrext.Of(attunev1.UpdateEnrichConfigRequest{}) }),
 			r.enrichConfig.Update,
@@ -1556,7 +1555,7 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		e.Post("/preview", dispatcher.Bind(
+		e.With(r.requireAdmin).Post("/preview", dispatcher.Bind(
 			"console.EnrichConfigHandler.Preview",
 			dispatcher.JSON(func() *attunev1.PreviewEnrichPromptRequest { return ptrext.Of(attunev1.PreviewEnrichPromptRequest{}) }),
 			r.enrichConfig.Preview,
@@ -1564,21 +1563,49 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		e.Get("/eval-suggestions", dispatcher.Bind(
+		e.With(r.requireAdmin).Post("/eval-suggestions:analyze", dispatcher.Bind(
 			"console.EnrichConfigHandler.GetEvalSuggestions",
-			dispatcher.Empty(func() *attunev1.GetEvalSuggestionsRequest { return ptrext.Of(attunev1.GetEvalSuggestionsRequest{}) }),
+			dispatcher.JSON(func() *attunev1.GetEvalSuggestionsRequest { return ptrext.Of(attunev1.GetEvalSuggestionsRequest{}) }),
 			r.enrichConfig.GetEvalSuggestions,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetEvalSuggestionsRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		e.Post("/promote", dispatcher.Bind(
+		e.With(r.requireAdmin).Post("/promote", dispatcher.Bind(
 			"console.EnrichConfigHandler.PromoteSuggestedValue",
 			dispatcher.JSON(func() *attunev1.PromoteSuggestedValueRequest {
 				return ptrext.Of(attunev1.PromoteSuggestedValueRequest{})
 			}),
 			r.enrichConfig.PromoteSuggestedValue,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PromoteSuggestedValueRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		e.With(r.requireAdmin).Post("/versions/{version_id}:activate", dispatcher.Bind(
+			"console.EnrichConfigHandler.ActivatePromptVersion",
+			dispatcher.Path(
+				func() *attunev1.ActivateEnrichPromptVersionRequest {
+					return ptrext.Of(attunev1.ActivateEnrichPromptVersionRequest{})
+				},
+				dispatcher.Param("version_id", func(req *attunev1.ActivateEnrichPromptVersionRequest, id string) {
+					req.VersionId = id
+				}),
+			),
+			r.enrichConfig.ActivatePromptVersion,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ActivateEnrichPromptVersionRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		e.With(r.requireViewer).Get("/versions", dispatcher.Bind(
+			"console.EnrichConfigHandler.ListPromptVersions",
+			dispatcher.Query(
+				func() *attunev1.ListEnrichPromptVersionsRequest {
+					return ptrext.Of(attunev1.ListEnrichPromptVersionsRequest{})
+				},
+				enrichconfig.BindListPromptVersionsRequest,
+			),
+			r.enrichConfig.ListPromptVersions,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListEnrichPromptVersionsRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
