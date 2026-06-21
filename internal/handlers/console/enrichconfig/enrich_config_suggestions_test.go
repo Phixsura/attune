@@ -35,7 +35,7 @@ func TestGetEvalSuggestions_NoEvalGetter(t *testing.T) {
 	// evalGetter is nil
 	handler := dispatcher.Bind(
 		"console.EnrichConfigHandler.GetEvalSuggestions",
-		dispatcher.Empty(func() *attunev1.GetEvalSuggestionsRequest { return &attunev1.GetEvalSuggestionsRequest{} }),
+		dispatcher.JSON(func() *attunev1.GetEvalSuggestionsRequest { return &attunev1.GetEvalSuggestionsRequest{} }),
 		h.GetEvalSuggestions,
 		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetEvalSuggestionsRequest) (*session.AuthCtx, error) {
 			return dispatchtest.Auth(r.Context()), nil
@@ -43,7 +43,7 @@ func TestGetEvalSuggestions_NoEvalGetter(t *testing.T) {
 	)
 
 	w := httptest.NewRecorder()
-	handler(w, dispatchtest.Request(http.MethodGet, "/fb/v1/console/enrich-config/eval-suggestions", ""))
+	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/eval-suggestions:analyze", "{}"))
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
@@ -65,7 +65,7 @@ func TestGetEvalSuggestions_Success(t *testing.T) {
 	}
 	handler := dispatcher.Bind(
 		"console.EnrichConfigHandler.GetEvalSuggestions",
-		dispatcher.Empty(func() *attunev1.GetEvalSuggestionsRequest { return &attunev1.GetEvalSuggestionsRequest{} }),
+		dispatcher.JSON(func() *attunev1.GetEvalSuggestionsRequest { return &attunev1.GetEvalSuggestionsRequest{} }),
 		h.GetEvalSuggestions,
 		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetEvalSuggestionsRequest) (*session.AuthCtx, error) {
 			return dispatchtest.Auth(r.Context()), nil
@@ -73,7 +73,7 @@ func TestGetEvalSuggestions_Success(t *testing.T) {
 	)
 
 	w := httptest.NewRecorder()
-	handler(w, dispatchtest.Request(http.MethodGet, "/fb/v1/console/enrich-config/eval-suggestions", ""))
+	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/eval-suggestions:analyze", "{}"))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	body, err := dispatchtest.DecodeJSON(w.Body)
@@ -94,7 +94,7 @@ func TestGetEvalSuggestions_RateLimited(t *testing.T) {
 	h.SetEvalLimiter(ratelimit.New(1, 1, false, nil))
 	handler := dispatcher.Bind(
 		"console.EnrichConfigHandler.GetEvalSuggestions",
-		dispatcher.Empty(func() *attunev1.GetEvalSuggestionsRequest { return &attunev1.GetEvalSuggestionsRequest{} }),
+		dispatcher.JSON(func() *attunev1.GetEvalSuggestionsRequest { return &attunev1.GetEvalSuggestionsRequest{} }),
 		h.GetEvalSuggestions,
 		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetEvalSuggestionsRequest) (*session.AuthCtx, error) {
 			return dispatchtest.Auth(r.Context()), nil
@@ -102,7 +102,7 @@ func TestGetEvalSuggestions_RateLimited(t *testing.T) {
 	)
 	req := func() *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
-		handler(w, dispatchtest.Request(http.MethodGet, "/fb/v1/console/enrich-config/eval-suggestions", ""))
+		handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/eval-suggestions:analyze", "{}"))
 		return w
 	}
 
@@ -119,7 +119,7 @@ func TestGetEvalSuggestions_EvalError(t *testing.T) {
 	}
 	handler := dispatcher.Bind(
 		"console.EnrichConfigHandler.GetEvalSuggestions",
-		dispatcher.Empty(func() *attunev1.GetEvalSuggestionsRequest { return &attunev1.GetEvalSuggestionsRequest{} }),
+		dispatcher.JSON(func() *attunev1.GetEvalSuggestionsRequest { return &attunev1.GetEvalSuggestionsRequest{} }),
 		h.GetEvalSuggestions,
 		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetEvalSuggestionsRequest) (*session.AuthCtx, error) {
 			return dispatchtest.Auth(r.Context()), nil
@@ -127,7 +127,7 @@ func TestGetEvalSuggestions_EvalError(t *testing.T) {
 	)
 
 	w := httptest.NewRecorder()
-	handler(w, dispatchtest.Request(http.MethodGet, "/fb/v1/console/enrich-config/eval-suggestions", ""))
+	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/eval-suggestions:analyze", "{}"))
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 }
@@ -420,7 +420,7 @@ func TestPromoteSuggestedValue_RecordsAudit(t *testing.T) {
 	require.Equal(t, "enrich_config", audit.events[0].TargetType)
 }
 
-func TestPromoteSuggestedValue_AuditFailureIsNonFatal(t *testing.T) {
+func TestPromoteSuggestedValue_AuditFailureReturnsInternal(t *testing.T) {
 	t.Parallel()
 
 	fakeSvc := &fakeConfigService{
@@ -448,8 +448,7 @@ func TestPromoteSuggestedValue_AuditFailureIsNonFatal(t *testing.T) {
 	reqBody := `{"dimensionName":"modules","value":"checkout","displayName":{"entries":{"en":"Checkout"}}}`
 	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/enrich-config/promote", reqBody))
 
-	// Taxonomy write succeeded; audit failure must not fail the request.
-	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
 	require.Equal(t, 2, len(fakeSvc.view.Dimensions[0].Taxonomy))
 }
 

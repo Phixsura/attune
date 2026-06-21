@@ -36,15 +36,14 @@ import (
 // without forcing a Chinese prompt body.
 const defaultPromptTmpl = defaultPromptTmplEn
 
-const defaultPromptTmplEn = `You are a product-feedback classifier. Given one raw user-feedback string, emit ONE single-line JSON object (no markdown fences, no commentary, no leading or trailing blank lines). Write "title" and "rationale" in the same natural language as the raw feedback whenever the source language is clear. The schema is:
-Also write "display_title" and "display_rationale" in {{display_language_name}} for the product team reading the console. If the source language and display language are the same, the display fields may match the source-language fields. Set "classification_confidence" to your overall classification confidence from 0.0 to 1.0; 0.5 means ambiguous enough for human review.
+const defaultPromptTmplEn = `You are a product-feedback classifier. Given one raw user-feedback string, emit ONE single-line JSON object (no markdown fences, no commentary, no leading or trailing blank lines). {{output_language_policy}} If the source language and display language are the same, the display fields may match the source-language fields. Use a {{tone}} tone. {{domain_guidance}} Set "classification_confidence" to your overall classification confidence from 0.0 to 1.0; 0.5 means ambiguous enough for human review. The schema is:
 
 {
- "title": "a 10-30 character one-sentence summary, no trailing punctuation",
+ "title": "a 10-{{title_max_chars}} character one-sentence summary, no trailing punctuation",
  "display_title": "same summary translated/localized for console readers",
 {{dimensions}}
- "rationale": "<=30 characters: why these values",
- "display_rationale": "<=30 characters in {{display_language_name}}: why these values",
+ "rationale": "<={{rationale_max_chars}} characters: why these values",
+ "display_rationale": "<={{rationale_max_chars}} characters in {{display_language_name}}: why these values",
  "classification_confidence": 0.72
 }
 
@@ -53,15 +52,14 @@ Raw user feedback:
 {{content}}
 """`
 
-const defaultPromptTmplZh = `你是产品反馈分类器。给定一条原始用户反馈，只输出一个单行 JSON 对象（不要 markdown 代码块，不要解释，不要前后空行）。当原始反馈语言清晰时，"title" 和 "rationale" 必须使用与原文相同的自然语言。
-同时用 {{display_language_name}} 写 "display_title" 和 "display_rationale"，给控制台里的产品/运营团队阅读。如果原文语言和展示语言相同，display 字段可以与原语言字段一致。"classification_confidence" 是 0.0 到 1.0 的整体分类置信度；0.5 表示足够模糊，需要人工复核。JSON schema 是：
+const defaultPromptTmplZh = `你是产品反馈分类器。给定一条原始用户反馈，只输出一个单行 JSON 对象（不要 markdown 代码块，不要解释，不要前后空行）。{{output_language_policy}} 如果原文语言和展示语言相同，display 字段可以与原语言字段一致。语气要求：{{tone}}。{{domain_guidance}} "classification_confidence" 是 0.0 到 1.0 的整体分类置信度；0.5 表示足够模糊，需要人工复核。JSON schema 是：
 
 {
- "title": "10-30 个字符的一句话摘要，不要句末标点",
+ "title": "10-{{title_max_chars}} 个字符的一句话摘要，不要句末标点",
  "display_title": "给控制台读者看的同一摘要",
 {{dimensions}}
- "rationale": "<=30 个字符：为什么选择这些值",
- "display_rationale": "<=30 个字符的 {{display_language_name}}：为什么选择这些值",
+ "rationale": "<={{rationale_max_chars}} 个字符：为什么选择这些值",
+ "display_rationale": "<={{rationale_max_chars}} 个字符的 {{display_language_name}}：为什么选择这些值",
  "classification_confidence": 0.72
 }
 
@@ -70,9 +68,15 @@ const defaultPromptTmplZh = `你是产品反馈分类器。给定一条原始用
 {{content}}
 """`
 
-// DefaultPromptTemplate returns the built-in prompt body (before token
-// substitution). Console uses this for "restore default" and preview.
+// DefaultPromptTemplate returns the English built-in prompt body (before token
+// substitution). Locale-aware callers should prefer DefaultPromptTemplateForLocale.
 func DefaultPromptTemplate() string { return defaultPromptTmpl }
+
+// DefaultPromptTemplateForLocale returns the built-in prompt body matching the
+// tenant/operator display locale.
+func DefaultPromptTemplateForLocale(locale string) string {
+	return defaultPromptTemplateFor(displayLanguageForLocale(displayLocaleForTenantLocale(locale)))
+}
 
 // ClassifyConfig is the per-tenant override applied to one Classify
 // call. PromptTemplate / Dimensions nil/empty-safe → "use defaults".
@@ -84,16 +88,18 @@ func DefaultPromptTemplate() string { return defaultPromptTmpl }
 // template also references {{dimensions}}; custom templates may omit
 // it, in which case dim guidance is left to the model.
 type ClassifyConfig struct {
-	TenantID       string
-	FeedbackID     int64
-	Channel        string
-	SourceID       string
-	SourceTags     []string
-	Purpose        string
-	Language       string
-	DisplayLocale  string
-	PromptTemplate *string
-	Dimensions     domain.DimensionSet
+	TenantID        string
+	FeedbackID      int64
+	Channel         string
+	SourceID        string
+	SourceTags      []string
+	Purpose         string
+	Language        string
+	DisplayLocale   string
+	PromptTemplate  *string
+	PolicyConfig    domain.EnrichPromptPolicyConfig
+	PromptVersionID string
+	Dimensions      domain.DimensionSet
 }
 
 // HasConstrained reports whether at least one Dimension has a
@@ -120,19 +126,40 @@ func (c ClassifyConfig) HasConstrained() bool {
 // literal {{content}} inside the data cannot trigger further
 // substitution.
 func renderPrompt(cfg ClassifyConfig, content string) string {
-	displayLocale := classifyDisplayLocale(cfg)
-	displayLanguage := displayLanguageForLocale(displayLocale)
-	body := defaultPromptTemplateFor(displayLanguage)
-	if cfg.PromptTemplate != nil && ptrext.Indirect(cfg.PromptTemplate) != "" {
-		body = ptrext.Indirect(cfg.PromptTemplate)
+	policy := resolvePromptPolicy(cfg)
+	values := map[string]string{
+		"content":                content,
+		"dimensions":             renderDimensionsClause(cfg.Dimensions),
+		"display_locale":         policy.DisplayLocale,
+		"display_language":       displayLanguageForLocale(policy.DisplayLocale),
+		"display_language_name":  policy.DisplayLanguageName,
+		"output_language_policy": renderOutputLanguagePolicy(policy.PolicyConfig, policy.DisplayLanguageName),
+		"title_max_chars":        fmt.Sprintf("%d", policy.PolicyConfig.TitleMaxChars),
+		"rationale_max_chars":    fmt.Sprintf("%d", policy.PolicyConfig.RationaleMaxChars),
+		"tone":                   policy.PolicyConfig.Tone,
+		"domain_guidance":        renderDomainGuidance(policy.PolicyConfig.DomainGuidance),
 	}
-	return strings.NewReplacer(
-		"{{content}}", content,
-		"{{dimensions}}", renderDimensionsClause(cfg.Dimensions),
-		"{{display_locale}}", displayLocale,
-		"{{display_language}}", displayLanguage,
-		"{{display_language_name}}", displayLanguageName(displayLocale),
-	).Replace(body)
+	return promptVarPattern.ReplaceAllStringFunc(policy.template, func(token string) string {
+		name := promptVariableName(token)
+		if v, ok := values[name]; ok {
+			return v
+		}
+		return token
+	})
+}
+
+func renderOutputLanguagePolicy(policy domain.EnrichPromptPolicyConfig, displayLanguageName string) string {
+	if policy.OutputLanguagePolicy == domain.PromptOutputDisplayOnly {
+		return fmt.Sprintf(`Write "title" and "rationale" in %s. The display fields must match the same operator-facing language.`, displayLanguageName)
+	}
+	return fmt.Sprintf(`Write "title" and "rationale" in the same natural language as the raw feedback whenever the source language is clear. Also write "display_title" and "display_rationale" in %s for the product team reading the console.`, displayLanguageName)
+}
+
+func renderDomainGuidance(guidance string) string {
+	if strings.TrimSpace(guidance) == "" {
+		return ""
+	}
+	return "Additional operator guidance: " + strings.TrimSpace(guidance)
 }
 
 func classifyDisplayLocale(cfg ClassifyConfig) string {
@@ -171,10 +198,7 @@ func displayLanguageName(code string) string {
 }
 
 func promptVersion(cfg ClassifyConfig) string {
-	if cfg.PromptTemplate != nil && ptrext.Indirect(cfg.PromptTemplate) != "" {
-		return "tenant_custom"
-	}
-	return "default:" + promptLanguageFor(displayLanguageForLocale(classifyDisplayLocale(cfg)))
+	return resolvePromptPolicy(cfg).PromptVersion
 }
 
 // renderDimensionsClause expands the {{dimensions}} slot — one line
@@ -187,7 +211,7 @@ func promptVersion(cfg ClassifyConfig) string {
 // "any short string is allowed".
 func renderDimensionsClause(dims domain.DimensionSet) string {
 	if len(dims) == 0 {
-		return ""
+		return " // No custom Dimensions configured; classify only the built-in title, rationale, display fields, and classification_confidence.\n"
 	}
 	b := ptrext.Of(strings.Builder{})
 	for _, d := range dims {

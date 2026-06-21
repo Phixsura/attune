@@ -25,6 +25,14 @@ export interface EnrichConfig {
    * remove / edit any dim from here.
    */
   dimensions: Dimension[];
+  /** Resolved prompt policy metadata for the active tenant config. */
+  promptPolicy?:
+    | EnrichPromptPolicy
+    | undefined;
+  /** Recent immutable prompt-policy snapshots, newest first. */
+  promptVersions: EnrichPromptVersion[];
+  /** Operator-authored prompt behavior knobs layered onto the built-in policy. */
+  policyConfig?: EnrichPromptPolicyConfig | undefined;
 }
 
 export interface GetEnrichConfigRequest {
@@ -41,6 +49,7 @@ export interface UpdateEnrichConfigRequest {
     | undefined;
   /** Empty list clears all dims (LLM still emits title + rationale). */
   dimensions: Dimension[];
+  policyConfig?: EnrichPromptPolicyConfig | undefined;
 }
 
 export interface UpdateEnrichConfigResponse {
@@ -49,10 +58,23 @@ export interface UpdateEnrichConfigResponse {
 
 export interface PreviewEnrichPromptRequest {
   sampleContent: string;
+  /** Optional unsaved prompt draft; omitted means preview the persisted config. */
+  promptTemplate?:
+    | string
+    | undefined;
+  /** Optional unsaved Dimension draft; omitted means preview persisted Dimensions. */
+  dimensions: Dimension[];
+  /**
+   * When true, prompt_template/dimensions are treated as the draft config,
+   * including an intentionally empty dimensions list.
+   */
+  useDraftConfig: boolean;
+  policyConfig?: EnrichPromptPolicyConfig | undefined;
 }
 
 export interface PreviewEnrichPromptResponse {
   renderedPrompt: string;
+  promptPolicy?: EnrichPromptPolicy | undefined;
 }
 
 /** GetEvalSuggestions returns off-list values the LLM suggested during eval. */
@@ -103,6 +125,107 @@ export interface PromoteSuggestedValueResponse {
   dimension?: Dimension | undefined;
 }
 
+export interface EnrichPromptPolicy {
+  policyId: string;
+  policyVersion: string;
+  promptVersion: string;
+  mode: string;
+  promptSource: string;
+  templateLanguage: string;
+  displayLocale: string;
+  displayLanguageName: string;
+  variables: EnrichPromptVariable[];
+  outputs: EnrichPromptOutput[];
+  warnings: EnrichPromptWarning[];
+  policyConfig?: EnrichPromptPolicyConfig | undefined;
+  promptFingerprint: string;
+  schemaFingerprint: string;
+}
+
+export interface EnrichPromptPolicyConfig {
+  /**
+   * source_and_display keeps source-language title/rationale plus display fields.
+   * display_only writes all summary fields in the tenant display language.
+   */
+  outputLanguagePolicy: string;
+  titleMaxChars: number;
+  rationaleMaxChars: number;
+  displayFieldsRequired?:
+    | boolean
+    | undefined;
+  /** concise or neutral. */
+  tone: string;
+  domainGuidance: string;
+}
+
+export interface EnrichPromptVariable {
+  name: string;
+  required: boolean;
+  meaning: string;
+}
+
+export interface EnrichPromptOutput {
+  name: string;
+  required: boolean;
+  language: string;
+}
+
+export interface EnrichPromptWarning {
+  code: string;
+  severity: string;
+  message: string;
+}
+
+export interface EnrichPromptVersion {
+  id: string;
+  promptVersion: string;
+  policyId: string;
+  policyVersion: string;
+  mode: string;
+  promptSource: string;
+  createdAt: string;
+  isActive: boolean;
+  hasTemplate: boolean;
+  dimensionsCount: number;
+  warnings: string[];
+  /**
+   * Snapshot values restored by activation. Admin-only Console API already
+   * exposes the active prompt and dimensions; history includes them so an
+   * operator can inspect a rollback target before activating it.
+   */
+  promptTemplate?: string | undefined;
+  dimensions: Dimension[];
+  policyConfig?: EnrichPromptPolicyConfig | undefined;
+  promptFingerprint: string;
+  schemaFingerprint: string;
+}
+
+export interface ActivateEnrichPromptVersionRequest {
+  versionId: string;
+}
+
+export interface ActivateEnrichPromptVersionResponse {
+  config?: EnrichConfig | undefined;
+}
+
+export interface ListEnrichPromptVersionsRequest {
+  /** Cursor from the previous response. It is the last seen version id. */
+  cursor?: string | undefined;
+  limit?:
+    | number
+    | undefined;
+  /**
+   * Case-insensitive search across version identity, fingerprints, warnings,
+   * dimensions, and custom prompt body.
+   */
+  q?: string | undefined;
+}
+
+export interface ListEnrichPromptVersionsResponse {
+  versions: EnrichPromptVersion[];
+  nextCursor?: string | undefined;
+}
+
 /**
  * EnrichConfigService manages per-tenant enricher prompt + the
  * metadata-driven Dimension set (#10 → E3 proposal
@@ -116,8 +239,8 @@ export interface EnrichConfigService {
   /** POST /fb/v1/console/enrich-config/preview */
   PreviewEnrichPrompt(request: PreviewEnrichPromptRequest): Promise<PreviewEnrichPromptResponse>;
   /**
-   * GET /fb/v1/console/enrich-config/eval-suggestions
-   * Returns off-list values the LLM suggested during the most recent eval run.
+   * POST /fb/v1/console/enrich-config/eval-suggestions:analyze
+   * Runs an LLM-backed eval sample and returns off-list suggested values.
    */
   GetEvalSuggestions(request: GetEvalSuggestionsRequest): Promise<GetEvalSuggestionsResponse>;
   /**
@@ -125,4 +248,16 @@ export interface EnrichConfigService {
    * Promotes a suggested value to the dimension taxonomy.
    */
   PromoteSuggestedValue(request: PromoteSuggestedValueRequest): Promise<PromoteSuggestedValueResponse>;
+  /**
+   * POST /fb/v1/console/enrich-config/versions/{version_id}:activate
+   * Restores a previous immutable prompt-policy snapshot.
+   */
+  ActivateEnrichPromptVersion(
+    request: ActivateEnrichPromptVersionRequest,
+  ): Promise<ActivateEnrichPromptVersionResponse>;
+  /**
+   * GET /fb/v1/console/enrich-config/versions
+   * Lists immutable prompt-policy snapshots newest first.
+   */
+  ListEnrichPromptVersions(request: ListEnrichPromptVersionsRequest): Promise<ListEnrichPromptVersionsResponse>;
 }

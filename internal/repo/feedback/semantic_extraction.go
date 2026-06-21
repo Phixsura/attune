@@ -20,18 +20,19 @@ const (
 // extraction. user_feedback keeps the fast current-state snapshot; this table
 // keeps append-only history for recompute, audit, and evaluation.
 type SemanticExtractionRun struct {
-	TenantID      string
-	SubjectType   string
-	SubjectID     int64
-	DomainPack    string
-	SchemaVersion string
-	PromptVersion string
-	Model         string
-	GuardSummary  map[string]any
-	Attrs         map[string]any
-	Confidence    map[string]any
-	Rationale     map[string]any
-	DroppedAttrs  map[string]any
+	TenantID        string
+	SubjectType     string
+	SubjectID       int64
+	DomainPack      string
+	SchemaVersion   string
+	PromptVersion   string
+	PromptVersionID string
+	Model           string
+	GuardSummary    map[string]any
+	Attrs           map[string]any
+	Confidence      map[string]any
+	Rationale       map[string]any
+	DroppedAttrs    map[string]any
 }
 
 // InsertSemanticExtractionRunTx writes one extraction run inside the caller's
@@ -68,14 +69,14 @@ func (r *FeedbackRepo) InsertSemanticExtractionRunTx(
 	err = tx.QueryRow(ctx, `
 		INSERT INTO semantic_extraction_runs
 		 (tenant_id, subject_type, subject_id, domain_pack, schema_version,
-		  prompt_version, model, guard_summary, attrs, confidence, rationale,
+		  prompt_version, prompt_version_id, model, guard_summary, attrs, confidence, rationale,
 		  dropped_attrs)
 		VALUES
-		 ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb,
-		  $11::jsonb, $12::jsonb)
+		 ($1, $2, $3, $4, $5, $6, NULLIF($7, '')::uuid, $8, $9::jsonb, $10::jsonb, $11::jsonb,
+		  $12::jsonb, $13::jsonb)
 		RETURNING id`,
 		run.TenantID, run.SubjectType, run.SubjectID, run.DomainPack,
-		run.SchemaVersion, run.PromptVersion, run.Model, guardJSON, attrsJSON,
+		run.SchemaVersion, run.PromptVersion, run.PromptVersionID, run.Model, guardJSON, attrsJSON,
 		confidenceJSON, rationaleJSON, droppedJSON,
 	).Scan(&id)
 	if err != nil {

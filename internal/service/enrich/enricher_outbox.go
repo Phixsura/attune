@@ -212,7 +212,8 @@ func (e *Enricher) semanticRun(
 	cfg ClassifyConfig,
 	result classifyResult,
 ) feedback.SemanticExtractionRun {
-	promptLang := promptLanguageForSemanticRun(cfg)
+	policy := resolvePromptPolicy(cfg)
+	promptLang := policy.TemplateLanguage
 	detectedLang := normalizeLanguage(s.Language)
 	displayLocale := s.DisplayLocale
 	rationale := map[string]any{
@@ -236,24 +237,29 @@ func (e *Enricher) semanticRun(
 		model = strings.TrimSpace(e.model)
 	}
 	guardSummary := map[string]any{
-		"language": languageGuard,
+		"language":      languageGuard,
+		"prompt_policy": promptPolicyGuard(policy),
+	}
+	if cfg.PromptVersionID != "" {
+		guardSummary["prompt_version_id"] = cfg.PromptVersionID
 	}
 	if route := semanticRouteGuard(result.Route); len(route) > 0 {
 		guardSummary["routing"] = route
 	}
 	return feedback.SemanticExtractionRun{
-		TenantID:      s.TenantID,
-		SubjectType:   feedback.SemanticSubjectFeedback,
-		SubjectID:     s.ID,
-		DomainPack:    feedback.DefaultDomainPack,
-		SchemaVersion: feedback.DefaultSchemaVersion,
-		PromptVersion: promptVersion(cfg),
-		Model:         model,
-		GuardSummary:  guardSummary,
-		Attrs:         result.Enriched.Attrs,
-		Confidence:    confidenceAudit(result.Enriched),
-		Rationale:     rationale,
-		DroppedAttrs:  result.DroppedAttrsAudit,
+		TenantID:        s.TenantID,
+		SubjectType:     feedback.SemanticSubjectFeedback,
+		SubjectID:       s.ID,
+		DomainPack:      feedback.DefaultDomainPack,
+		SchemaVersion:   feedback.DefaultSchemaVersion,
+		PromptVersion:   policy.PromptVersion,
+		PromptVersionID: cfg.PromptVersionID,
+		Model:           model,
+		GuardSummary:    guardSummary,
+		Attrs:           result.Enriched.Attrs,
+		Confidence:      confidenceAudit(result.Enriched),
+		Rationale:       rationale,
+		DroppedAttrs:    result.DroppedAttrsAudit,
 	}
 }
 
@@ -285,13 +291,6 @@ func confidenceAudit(enriched domain.Enriched) map[string]any {
 		"overall": ptrext.Indirect(enriched.ClassificationConfidence),
 		"source":  "llm_self_report",
 	}
-}
-
-func promptLanguageForSemanticRun(cfg ClassifyConfig) string {
-	if cfg.PromptTemplate != nil && ptrext.Indirect(cfg.PromptTemplate) != "" {
-		return "custom"
-	}
-	return promptLanguageFor(displayLanguageForLocale(cfg.DisplayLocale))
 }
 
 // outboxDestTypes lists destination_type values that go through the

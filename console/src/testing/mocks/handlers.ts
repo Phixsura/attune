@@ -192,11 +192,84 @@ const defaultTestLLMChannelResponse: TestLLMChannelResponse = {
 // Enrich config ------------------------------------------------------------
 export const defaultEnrichConfig: EnrichConfig = {
   promptTemplate: undefined,
-  defaultPromptTemplate: '',
+  defaultPromptTemplate: 'DEFAULT {{content}} {{dimensions}}',
   dimensions: [],
+  promptPolicy: defaultPromptPolicy('built_in'),
+  policyConfig: {
+    outputLanguagePolicy: 'source_and_display',
+    titleMaxChars: 30,
+    rationaleMaxChars: 30,
+    displayFieldsRequired: true,
+    tone: 'concise',
+    domainGuidance: '',
+  },
+  promptVersions: [
+    {
+      id: '11111111-2222-3333-4444-555555555555',
+      promptVersion: 'enrich.default@1',
+      promptFingerprint: 'sha256:mock-default-prompt',
+      schemaFingerprint: 'sha256:mock-schema',
+      policyId: 'enrich.default',
+      policyVersion: '1',
+      mode: 'default',
+      promptSource: 'built_in',
+      createdAt: '2026-06-21T00:00:00Z',
+      isActive: true,
+      hasTemplate: false,
+      dimensionsCount: 0,
+      dimensions: [],
+      policyConfig: {
+        outputLanguagePolicy: 'source_and_display',
+        titleMaxChars: 30,
+        rationaleMaxChars: 30,
+        displayFieldsRequired: true,
+        tone: 'concise',
+        domainGuidance: '',
+      },
+      warnings: [],
+    },
+  ],
+}
+
+function defaultPromptPolicy(source: 'built_in' | 'custom_template') {
+  if (source === 'custom_template') {
+    return {
+      policyId: 'enrich.legacy_custom_template',
+      policyVersion: 'sha256:mock',
+      promptVersion: 'enrich.legacy_custom_template@sha256:mock',
+      promptFingerprint: 'sha256:mock-custom-prompt',
+      schemaFingerprint: 'sha256:mock-schema',
+      mode: 'legacy_custom_override',
+      promptSource: 'custom_template',
+      templateLanguage: 'custom',
+      displayLocale: 'zh-CN',
+      displayLanguageName: 'Simplified Chinese',
+      variables: [],
+      outputs: [],
+      warnings: [],
+    }
+  }
+  return {
+    policyId: 'enrich.default',
+    policyVersion: '1',
+    promptVersion: 'enrich.default@1',
+    promptFingerprint: 'sha256:mock-default-prompt',
+    schemaFingerprint: 'sha256:mock-schema',
+    mode: 'default',
+    promptSource: 'built_in',
+    templateLanguage: 'en',
+    displayLocale: 'zh-CN',
+    displayLanguageName: 'Simplified Chinese',
+    variables: [],
+    outputs: [],
+    warnings: [],
+  }
 }
 export const defaultGetEnrichConfig: GetEnrichConfigResponse = { config: defaultEnrichConfig }
-export const defaultPreviewEnrichPrompt: PreviewEnrichPromptResponse = { renderedPrompt: '' }
+export const defaultPreviewEnrichPrompt: PreviewEnrichPromptResponse = {
+  renderedPrompt: '',
+  promptPolicy: defaultEnrichConfig.promptPolicy,
+}
 
 // Feedback -----------------------------------------------------------------
 export const defaultFeedbackList: ListFeedbackResponse = { items: [], nextCursor: undefined }
@@ -313,20 +386,78 @@ export const handlers = [
   http.post(`${BASE}/llm/routes/delete`, () => new HttpResponse(null, { status: 204 })),
 
   http.get(`${BASE}/enrich-config`, () => HttpResponse.json(defaultGetEnrichConfig)),
+  http.get(`${BASE}/enrich-config/versions`, () =>
+    HttpResponse.json({
+      versions: defaultEnrichConfig.promptVersions,
+    }),
+  ),
   http.put(`${BASE}/enrich-config`, async ({ request }) => {
     // The PUT body is UpdateEnrichConfigRequest = { promptTemplate?, dimensions };
     // the response wraps it in { config } via UpdateEnrichConfigResponse.
-    const body = (await request.json()) as { promptTemplate?: string; dimensions?: unknown[] }
+    const body = (await request.json()) as {
+      promptTemplate?: string
+      dimensions?: unknown[]
+      policyConfig?: EnrichConfig['policyConfig']
+    }
     const resp: UpdateEnrichConfigResponse = {
       config: {
         promptTemplate: body.promptTemplate,
-        defaultPromptTemplate: '',
+        defaultPromptTemplate: defaultEnrichConfig.defaultPromptTemplate,
         dimensions: (body.dimensions ?? []) as EnrichConfig['dimensions'],
+        promptPolicy: defaultPromptPolicy(body.promptTemplate ? 'custom_template' : 'built_in'),
+        promptVersions: [
+          {
+            id: '22222222-3333-4444-5555-666666666666',
+            promptVersion: body.promptTemplate
+              ? 'enrich.legacy_custom_template@sha256:mock'
+              : 'enrich.default@1',
+            promptFingerprint: body.promptTemplate
+              ? 'sha256:mock-custom-prompt'
+              : 'sha256:mock-default-prompt',
+            schemaFingerprint: 'sha256:mock-schema',
+            policyId: body.promptTemplate ? 'enrich.legacy_custom_template' : 'enrich.default',
+            policyVersion: body.promptTemplate ? 'sha256:mock' : '1',
+            mode: body.promptTemplate ? 'legacy_custom_override' : 'default',
+            promptSource: body.promptTemplate ? 'custom_template' : 'built_in',
+            createdAt: '2026-06-21T00:01:00Z',
+            isActive: true,
+            hasTemplate: Boolean(body.promptTemplate),
+            dimensionsCount: body.dimensions?.length ?? 0,
+            promptTemplate: body.promptTemplate,
+            dimensions: (body.dimensions ?? []) as EnrichConfig['dimensions'],
+            policyConfig: body.policyConfig,
+            warnings: [],
+          },
+        ],
       },
     }
     return HttpResponse.json(resp)
   }),
-  http.post(`${BASE}/enrich-config/preview`, () => HttpResponse.json(defaultPreviewEnrichPrompt)),
+  http.post(`${BASE}/enrich-config/versions/:id\\:activate`, ({ params }) =>
+    HttpResponse.json({
+      config: {
+        ...defaultEnrichConfig,
+        promptVersions: defaultEnrichConfig.promptVersions.map((version) => ({
+          ...version,
+          isActive: version.id === params.id,
+        })),
+      },
+    }),
+  ),
+  http.post(`${BASE}/enrich-config/preview`, async ({ request }) => {
+    const body = (await request.json()) as { promptTemplate?: string }
+    return HttpResponse.json({
+      ...defaultPreviewEnrichPrompt,
+      promptPolicy: defaultPromptPolicy(body.promptTemplate ? 'custom_template' : 'built_in'),
+    })
+  }),
+  http.post(`${BASE}/enrich-config/eval-suggestions\\:analyze`, () =>
+    HttpResponse.json({
+      coverage: {},
+      candidates: [],
+      recommendations: [],
+    }),
+  ),
 
   http.get(`${BASE}/feedback`, () => HttpResponse.json(defaultFeedbackList)),
   http.get(`${BASE}/feedback/stats`, () => HttpResponse.json(defaultFeedbackStats)),

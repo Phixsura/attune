@@ -1,4 +1,3 @@
-import { useQuery } from '@tanstack/react-query'
 import { Loader2, Sparkles, TrendingUp } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -13,7 +12,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { evalSuggestionsQuery } from '@/features/settings/api/get-eval-suggestions'
+import {
+  type GetEvalSuggestionsResponse,
+  useAnalyzeEvalSuggestions,
+} from '@/features/settings/api/get-eval-suggestions'
 import { usePromoteSuggestedValue } from '@/features/settings/api/promote-suggested-value'
 
 // formatPct renders a 0–1 ratio as a percent. A nonzero ratio that would
@@ -33,8 +35,9 @@ function formatPct(ratio: number): string {
 export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
   const { t } = useTranslation()
   const [analyzed, setAnalyzed] = useState(false)
-  const q = useQuery(evalSuggestionsQuery(analyzed))
+  const analyze = useAnalyzeEvalSuggestions()
   const promote = usePromoteSuggestedValue()
+  const [data, setData] = useState<GetEvalSuggestionsResponse | undefined>()
   const [promoting, setPromoting] = useState<string | null>(null)
   // Synchronous re-entrancy latch: `promoting` state updates async, so a
   // rapid second click reads the stale (null) value and slips through. A ref
@@ -51,6 +54,17 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
         value,
         displayName: { entries: { 'zh-CN': value } },
       })
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              candidates: current.candidates.filter((c) => c.dim !== dim || c.value !== value),
+              recommendations: current.recommendations.filter(
+                (r) => r.dim !== dim || r.value !== value,
+              ),
+            }
+          : current,
+      )
       toast.success(t('settings.suggestions.promoted', { value }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.suggestions.promote_failed'))
@@ -60,7 +74,6 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
     }
   }
 
-  const data = q.data
   const coverageDims = data ? Object.keys(data.coverage).sort() : []
   const hasResults = data && (data.candidates.length > 0 || coverageDims.length > 0)
 
@@ -87,7 +100,12 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setAnalyzed(true)}
+            onClick={() => {
+              setAnalyzed(true)
+              analyze.mutate(undefined, {
+                onSuccess: (resp) => setData(resp),
+              })
+            }}
             data-testid="analyze-suggestions"
           >
             <TrendingUp className="mr-2 h-3.5 w-3.5" />
@@ -95,20 +113,20 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
           </Button>
         )}
 
-        {analyzed && q.isPending && (
+        {analyzed && analyze.isPending && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             {t('settings.suggestions.analyzing')}
           </div>
         )}
 
-        {analyzed && q.isError && (
+        {analyzed && analyze.isError && (
           <p className="text-sm text-destructive" data-testid="suggestions-error">
             {t('settings.suggestions.error')}
           </p>
         )}
 
-        {analyzed && !q.isPending && !q.isError && !hasResults && (
+        {analyzed && !analyze.isPending && !analyze.isError && !hasResults && (
           <p className="text-sm text-muted-foreground" data-testid="suggestions-empty">
             {t('settings.suggestions.empty')}
           </p>

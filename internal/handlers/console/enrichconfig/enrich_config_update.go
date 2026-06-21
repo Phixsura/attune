@@ -30,6 +30,7 @@ func (h *Handler) Update(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 		return dispatcher.Fail[*attunev1.UpdateEnrichConfigResponse](http.StatusBadRequest, enrich.ErrToCode(err), enrich.ErrToMessage(err))
 	}
 	in := enrich.View{Dimensions: dims}
+	in.PolicyConfig = policyConfigFromProto(req.GetPolicyConfig())
 	if req.PromptTemplate != nil {
 		t := strings.TrimSpace(ptrext.Indirect(req.PromptTemplate))
 		if t == "" {
