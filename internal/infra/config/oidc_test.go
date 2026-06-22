@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func TestIsPrivateHost(t *testing.T) {
@@ -90,4 +92,114 @@ func TestIsCloudMetadataHost(t *testing.T) {
 			assert.Equal(t, tt.expect, isCloudMetadataHost(tt.host), "host: %s", tt.host)
 		})
 	}
+}
+
+func TestIsLoopback(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		host   string
+		expect bool
+	}{
+		{"localhost", "localhost", true},
+		{"localhost with port", "localhost:8080", true},
+		{"IPv4 loopback", "127.0.0.1", true},
+		{"IPv4 loopback with port", "127.0.0.1:3000", true},
+		{"IPv6 loopback", "::1", true},
+		{"IPv6 loopback in brackets", "[::1]", true},
+		{"IPv6 loopback with port", "[::1]:8080", true},
+		{"public domain", "example.com", false},
+		{"public IPv4", "8.8.8.8", false},
+		{"private IPv4", "192.168.1.1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expect, isLoopback(tt.host), "host: %s", tt.host)
+		})
+	}
+}
+
+func TestNormalizeHost(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{"plain host", "example.com", "example.com"},
+		{"host with port", "example.com:443", "example.com"},
+		{"IPv4", "192.168.1.1", "192.168.1.1"},
+		{"IPv4 with port", "192.168.1.1:8080", "192.168.1.1"},
+		{"IPv6 in brackets", "[::1]", "::1"},
+		{"IPv6 with port", "[::1]:8080", "::1"},
+		{"IPv6 with zone", "fe80::1%eth0", "fe80::1"},
+		{"localhost", "localhost", "localhost"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expect, normalizeHost(tt.input), "input: %s", tt.input)
+		})
+	}
+}
+
+func TestParseNonStandardIP(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		input     string
+		expectNil bool
+		expectIP  string
+	}{
+		{"decimal 127.0.0.1", "2130706433", false, "127.0.0.1"},
+		{"hex 127.0.0.1", "0x7f000001", false, "127.0.0.1"},
+		{"hex uppercase", "0X7F000001", false, "127.0.0.1"},
+		{"decimal 10.0.0.1", "167772161", false, "10.0.0.1"},
+		{"invalid decimal", "not-a-number", true, ""},
+		{"invalid hex", "0xGGGGGGGG", true, ""},
+		{"normal IP", "192.168.1.1", true, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := parseNonStandardIP(tt.input)
+			if tt.expectNil {
+				assert.Nil(t, ip, "input: %s", tt.input)
+			} else {
+				assert.NotNil(t, ip, "input: %s", tt.input)
+				assert.Equal(t, tt.expectIP, ip.String(), "input: %s", tt.input)
+			}
+		})
+	}
+}
+
+func TestOIDCConfig_ApplyDefaults(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty config gets defaults", func(t *testing.T) {
+		cfg := ptrext.Of(OIDCConfig{})
+		cfg.ApplyDefaults()
+		assert.Equal(t, []string{"openid", "email", "profile"}, cfg.Scopes)
+		assert.Equal(t, "email", cfg.UserClaim)
+		assert.Equal(t, "groups", cfg.GroupsClaim)
+		assert.Equal(t, "SSO", cfg.ProviderName)
+	})
+
+	t.Run("existing values preserved", func(t *testing.T) {
+		cfg := ptrext.Of(OIDCConfig{
+			Scopes:       []string{"openid", "custom"},
+			UserClaim:    "sub",
+			GroupsClaim:  "roles",
+			ProviderName: "Okta",
+		})
+		cfg.ApplyDefaults()
+		assert.Equal(t, []string{"openid", "custom"}, cfg.Scopes)
+		assert.Equal(t, "sub", cfg.UserClaim)
+		assert.Equal(t, "roles", cfg.GroupsClaim)
+		assert.Equal(t, "Okta", cfg.ProviderName)
+	})
 }

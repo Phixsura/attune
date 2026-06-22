@@ -481,3 +481,137 @@ func (b captureBackend) Close() error { return nil }
 func intPtr(v int) *int {
 	return ptrext.Of(v)
 }
+
+func TestPublicProviderError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"nil error", nil, ""},
+		{"deadline exceeded", context.DeadlineExceeded, "provider request timed out"},
+		{"canceled", context.Canceled, "provider request was canceled"},
+		{"401 status", errors.New("got status 401 unauthorized"), "provider returned status 401"},
+		{"status=401", errors.New("status=401"), "provider returned status 401"},
+		{"status code: 401", errors.New("status code: 401"), "provider returned status 401"},
+		{"429 status", errors.New("got status 429 rate limited"), "provider returned status 429"},
+		{"5xx status", errors.New("got status 502"), "provider returned a 5xx status"},
+		{"generic status", errors.New("got status 400"), "provider returned an error status"},
+		{"other error", errors.New("connection refused"), "provider request failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := publicProviderError(tt.err)
+			if got != tt.want {
+				t.Errorf("publicProviderError() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidProtocol(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		protocol string
+		want     bool
+	}{
+		{llmrepo.ProtocolOpenAICompat, true},
+		{llmrepo.ProtocolOpenAIResponses, true},
+		{llmrepo.ProtocolAnthropic, true},
+		{llmrepo.ProtocolGemini, true},
+		{"", false},
+		{"unknown", false},
+		{"azure", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.protocol, func(t *testing.T) {
+			if got := validProtocol(tt.protocol); got != tt.want {
+				t.Errorf("validProtocol(%q) = %v, want %v", tt.protocol, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidStatus(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		status string
+		want   bool
+	}{
+		{llmrepo.ChannelStatusEnabled, true},
+		{llmrepo.ChannelStatusDisabled, true},
+		{llmrepo.ChannelStatusDraining, true},
+		{"", false},
+		{"unknown", false},
+		{"active", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			if got := validStatus(tt.status); got != tt.want {
+				t.Errorf("validStatus(%q) = %v, want %v", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsLoopbackHost(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"localhost", true},
+		{"LOCALHOST", true},
+		{" localhost ", true},
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"example.com", false},
+		{"192.168.1.1", false},
+		{"10.0.0.1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			if got := isLoopbackHost(tt.host); got != tt.want {
+				t.Errorf("isLoopbackHost(%q) = %v, want %v", tt.host, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateBaseURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{"empty is valid", "", false},
+		{"https is valid", "https://api.example.com", false},
+		{"https with port", "https://api.example.com:8443", false},
+		{"http localhost", "http://localhost:8080", false},
+		{"http loopback", "http://127.0.0.1:8080", false},
+		{"http public", "http://example.com", true},
+		{"missing scheme", "example.com", true},
+		{"userinfo not allowed", "https://user:pass@example.com", true},
+		{"ftp not allowed", "ftp://example.com", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateBaseURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateBaseURL(%q) err = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
