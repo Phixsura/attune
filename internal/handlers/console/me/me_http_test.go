@@ -14,6 +14,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/dispatchtest"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	"github.com/Phixsura/attune/internal/repo/admin"
 	tenantrepo "github.com/Phixsura/attune/internal/repo/tenant"
 )
 
@@ -111,4 +112,37 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		require.Contains(t, setCookie, session.SessionCookieName+"=")
 		require.Contains(t, setCookie, "Max-Age=0")
 	})
+}
+
+func TestAdminDisplay(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		admin  admin.Admin
+		expect string
+	}{
+		{
+			name:   "uses display name when set",
+			admin:  admin.Admin{DisplayName: "Alice Admin", Email: "alice@example.com"},
+			expect: "Alice Admin",
+		},
+		{
+			name:   "falls back to email when display name empty",
+			admin:  admin.Admin{DisplayName: "", Email: "alice@example.com"},
+			expect: "alice@example.com",
+		},
+		{
+			name:   "both empty returns empty string",
+			admin:  admin.Admin{},
+			expect: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := adminDisplay(tt.admin)
+			require.Equal(t, tt.expect, result)
+		})
+	}
 }
