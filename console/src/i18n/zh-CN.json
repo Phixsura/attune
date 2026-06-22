@@ -1564,6 +1564,8 @@
       "all": "所有 {{dim}}",
       "all_tags": "所有标签",
       "all_states": "所有状态",
+      "all_enrichment": "所有 AI 状态",
+      "enrichment_status": "AI 富化状态",
       "search_placeholder": "搜索内容或标题...",
       "quick": {
         "all": "全部反馈",
@@ -1598,6 +1600,7 @@
       "delete_success": "已删除 {{count}} 条反馈",
       "delete_title": "删除反馈",
       "delete_description": "确定要删除这 {{count}} 条反馈吗？此操作可撤销。",
+      "delete_warning": "此操作不可撤销，删除后数据将无法恢复。",
       "delete_permanent_title": "永久删除反馈",
       "delete_permanent_description": "确定要永久删除这 {{count}} 条反馈吗？此操作不可撤销。",
       "confirm_tag_title": "批量修改标签",
@@ -1615,7 +1618,22 @@
       "result_failed_count": "失败 {{count}} 条",
       "show_failures": "查看失败详情",
       "more_failures": "还有 {{count}} 条失败…",
-      "retry_failed": "重试失败项"
+      "retry_failed": "重试失败项",
+      "retry_enrichment": "重试富化",
+      "retry_enrichment_title": "重试 AI 富化",
+      "retry_enrichment_description": "将对 {{count}} 条失败的反馈重新执行 AI 富化。重试后会重置尝试次数。",
+      "retry_enrichment_success": "已提交 {{count}} 条反馈重试",
+      "retry_enrichment_partial": "{{succeeded}} 条成功，{{failed}} 条失败",
+      "retry_enrichment_failed": "重试失败",
+      "no_terminal_failures": "选中的条目中没有终态失败项"
+    },
+    "terminal_summary": {
+      "title": "终态失败需要关注",
+      "description": "有 {{count}} 条反馈已达到重试上限，不会自动恢复。检查 LLM 配置或手动重试。",
+      "terminal_count": "{{count}} 条终态失败",
+      "retrying_count": "{{count}} ���重试中",
+      "view_action": "查看终态失败",
+      "retry_action": "重试选中项"
     },
     "job": {
       "status_queued": "排队中",
@@ -1702,11 +1720,22 @@
       "workbench_active_body": "这条反馈来自处理中工作面。优先补齐上下文、确认负责人，并决定下一步状态是否需要前移。",
       "workbench_failed_title": "先判断是个例还是配置问题",
       "workbench_failed_body": "这条反馈来自富化失败工作面。先看失败信息和上下文，确认是单条异常，还是已经需要回到运行时和模型配置层排障。",
+      "workbench_terminal_title": "这条反馈已永久失败",
+      "workbench_terminal_body": "该反馈已经耗尽所有重试次数。你可以点击重试按钮手动触发，或者先检查 LLM 配置是否正确。",
       "workbench_ready_title": "优先把这条反馈转成明确判断",
       "workbench_ready_body": "这条反馈来自 AI 已就绪工作面。当前信息已经足够支持快速判断，适合直接打标签、调整状态或生成回复草稿。",
       "workbench_ready_missing_body": "这条反馈虽然在 AI 已就绪工作面中被打开，但当前可见 AI 信号仍不完整，建议先核对分类和富化状态。",
       "workflow_state": "工作流状态",
-      "audit_log": "操作日志"
+      "audit_log": "操作日志",
+      "enrichment_attempts": "富化尝试",
+      "enrichment_attempts_value": "{{count}} 次",
+      "enrichment_next_retry": "下次重试",
+      "enrichment_terminal": "已达上限",
+      "retry_enrichment": "重试富化",
+      "retry_enrichment_success": "已加入重试队列",
+      "retry_enrichment_failed": "重试失败，请稍后再试",
+      "terminal_failure_title": "这条反馈已永久失败",
+      "terminal_failure_body": "富化已尝试 {{count}} 次，均未成功。你可以点击下方按钮手动触发重试，或先检查 LLM 配置。"
     },
     "error_title": "反馈列表暂时无法加载",
     "error_body": "保留当前筛选条件后重试；如果问题持续，优先检查控制台 API 与当前租户权限。",
@@ -1798,6 +1827,7 @@
       "urgent": "紧急",
       "active": "处理中",
       "failed": "富化失败",
+      "terminal": "终态失败",
       "ready": "AI 已就绪"
     },
     "lane": {
@@ -1859,6 +1889,7 @@
       "ready_hint": "标题、维度或置信度已经足够支持人工分诊。",
       "failed": "富化失败",
       "failed_hint": "这些条目更适合先排查模型配置或运行时问题。",
+      "terminal_hint": "已耗尽所有重试次数，需要手动介入或检查 LLM 配置。",
       "pending": "等待富化",
       "pending_hint": "反馈已入库，但 AI 分类链路仍在等待或执行中。",
       "sources": "来源覆盖",
@@ -1866,6 +1897,9 @@
       "oldest": "最早一条",
       "oldest_hint": "当前可见队列里最旧的一条，可用来粗看积压感。",
       "playbook_title": "当前建议",
+      "priority_action": "优先处理",
+      "priority_action_with_id": "优先处理 #{{id}}",
+      "feedback_id": "反馈编号 #{{id}}",
       "actions": {
         "title": "直接动作",
         "description": "不用离开当前页面，先打开最该看的那条，再决定是否继续收窄或回到配置层排障。",
@@ -1874,6 +1908,7 @@
         "open_urgent": "打开紧急反馈",
         "open_active": "打开处理中反馈",
         "open_failed": "打开失败条目",
+        "open_terminal": "打开终态失败条目",
         "open_ready": "打开 AI 已就绪反馈",
         "fix_runtime": "去检查富化运行时"
       },
@@ -1911,8 +1946,12 @@
       "classification_pending": "等待富化",
       "urgent": "需优先处理",
       "decision_snapshot": "快速判读",
+      "terminal_attempts_hint": "已尝试 {{count}} 次，达到上限，不会自动重试",
+      "retry_attempts_hint": "已尝试 {{count}} 次，等待下次自动重试",
+      "next_retry_hint": "下次重试：{{time}}",
       "priority": {
         "urgent": "紧急",
+        "terminal": "终态失败",
         "active": "处理中",
         "closed": "已闭环",
         "new": "新反馈"

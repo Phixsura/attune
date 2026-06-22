@@ -93,6 +93,8 @@ func Channels() []Entry {
 // across tests that import multiple adapter packages transitively.
 // Runtime-gated via testing.Testing() so production binaries panic if
 // this is accidentally called.
+//
+// WARNING: Do not use in parallel tests — use UnregisterForTest instead.
 func ResetForTest() {
 	if !testing.Testing() {
 		panic("outbound.ResetForTest must only be called from tests")
@@ -100,4 +102,17 @@ func ResetForTest() {
 	mu.Lock()
 	defer mu.Unlock()
 	channels = map[string]any{}
+}
+
+// UnregisterForTest — removes a single channel by ID. Safe for parallel tests
+// since it only affects the specific adapter registered by that test.
+// Runtime-gated via testing.Testing() so production binaries panic if
+// this is accidentally called.
+func UnregisterForTest(id string) {
+	if !testing.Testing() {
+		panic("outbound.UnregisterForTest must only be called from tests")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	delete(channels, id)
 }

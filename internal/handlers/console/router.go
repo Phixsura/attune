@@ -1436,38 +1436,20 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		if r.tagAssignments != nil {
-			f.Post("/{id}/tags", dispatcher.Bind(
-				"console.TagAssignmentHandler.Add",
-				dispatcher.Combine(
-					func() *attunev1.AddFeedbackTagRequest { return ptrext.Of(attunev1.AddFeedbackTagRequest{}) },
-					dispatcher.JSONBody[*attunev1.AddFeedbackTagRequest],
-					dispatcher.ParamInt64("id", func(req *attunev1.AddFeedbackTagRequest, id int64) {
-						req.FeedbackId = id
-					}, "id must be an integer"),
-				),
-				r.tagAssignments.Add,
-				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.AddFeedbackTagRequest) (*session.AuthCtx, error) {
-					return session.FromContext(r.Context()), nil
-				}),
-			))
-			f.Delete("/{id}/tags/{tag_id}", dispatcher.Bind(
-				"console.TagAssignmentHandler.Remove",
-				dispatcher.Path(
-					func() *attunev1.RemoveFeedbackTagRequest { return ptrext.Of(attunev1.RemoveFeedbackTagRequest{}) },
-					dispatcher.ParamInt64("id", func(req *attunev1.RemoveFeedbackTagRequest, id int64) {
-						req.FeedbackId = id
-					}, "id must be an integer"),
-					dispatcher.Param("tag_id", func(req *attunev1.RemoveFeedbackTagRequest, id string) {
-						req.TagId = id
-					}),
-				),
-				r.tagAssignments.Remove,
-				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RemoveFeedbackTagRequest) (*session.AuthCtx, error) {
-					return session.FromContext(r.Context()), nil
-				}),
-			))
-		}
+		f.Post("/{id}/retry-enrichment", dispatcher.Bind(
+			"console.FeedbackHandler.RetryEnrichment",
+			dispatcher.Path(
+				func() *attunev1.RetryEnrichmentRequest { return ptrext.Of(attunev1.RetryEnrichmentRequest{}) },
+				dispatcher.ParamInt64("id", func(req *attunev1.RetryEnrichmentRequest, id int64) {
+					req.Id = id
+				}, "id must be an integer"),
+			),
+			r.feedback.RetryEnrichment,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RetryEnrichmentRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		r.mountFeedbackTagRoutes(f)
 		f.Post("/{id}/transition", dispatcher.Bind(
 			"console.FeedbackHandler.TransitionState",
 			dispatcher.Combine(
@@ -1539,6 +1521,42 @@ func (r *Router) mountFeedbackBatchRoutes(f chi.Router) {
 			}),
 		))
 	}
+}
+
+func (r *Router) mountFeedbackTagRoutes(f chi.Router) {
+	if r.tagAssignments == nil {
+		return
+	}
+	f.Post("/{id}/tags", dispatcher.Bind(
+		"console.TagAssignmentHandler.Add",
+		dispatcher.Combine(
+			func() *attunev1.AddFeedbackTagRequest { return ptrext.Of(attunev1.AddFeedbackTagRequest{}) },
+			dispatcher.JSONBody[*attunev1.AddFeedbackTagRequest],
+			dispatcher.ParamInt64("id", func(req *attunev1.AddFeedbackTagRequest, id int64) {
+				req.FeedbackId = id
+			}, "id must be an integer"),
+		),
+		r.tagAssignments.Add,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.AddFeedbackTagRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.Delete("/{id}/tags/{tag_id}", dispatcher.Bind(
+		"console.TagAssignmentHandler.Remove",
+		dispatcher.Path(
+			func() *attunev1.RemoveFeedbackTagRequest { return ptrext.Of(attunev1.RemoveFeedbackTagRequest{}) },
+			dispatcher.ParamInt64("id", func(req *attunev1.RemoveFeedbackTagRequest, id int64) {
+				req.FeedbackId = id
+			}, "id must be an integer"),
+			dispatcher.Param("tag_id", func(req *attunev1.RemoveFeedbackTagRequest, id string) {
+				req.TagId = id
+			}),
+		),
+		r.tagAssignments.Remove,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RemoveFeedbackTagRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountEnrichConfig(m chi.Router) {

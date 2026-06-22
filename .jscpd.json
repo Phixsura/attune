@@ -1,0 +1,11 @@
+{
+  "threshold": 5,
+  "reporters": ["console"],
+  "ignore": [
+    "**/*.pb.go",
+    "**/*_test.go",
+    "**/testdata/**",
+    "**/test/**"
+  ],
+  "format": ["go"]
+}

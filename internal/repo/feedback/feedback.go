@@ -600,3 +600,60 @@ func (r *FeedbackRepo) SetUrgent(ctx context.Context, tenantID string, id int64,
 
 // truncate moved to internal/repo/pgxutil.Truncate (single canonical
 // helper imported by every repo subpackage).
+
+// RetryResult holds the result of a successful RetryEnrichment call.
+type RetryResult struct {
+	ID          int64
+	Status      string
+	Attempts    int
+	NextRetryAt *time.Time
+}
+
+// ErrInvalidStateForRetry signals that the row is not in a failed state and
+// cannot be retried.
+var ErrInvalidStateForRetry = errors.New("invalid state for retry: row must be in failed status")
+
+// RetryEnrichment resets a terminal-failed row so it can be re-enriched. It sets
+// enrichment_attempts=0, enrichment_next_retry_at=NOW(), and clears enrichment_error.
+// Returns ErrFeedbackNotFound if the row doesn't exist or belongs to a different tenant.
+// Returns ErrInvalidStateForRetry if the row is not in failed status.
+func (r *FeedbackRepo) RetryEnrichment(ctx context.Context, tenantID string, id int64) (*RetryResult, error) {
+	const where = "repo.FeedbackRepo.RetryEnrichment"
+	var result RetryResult
+	var nextRetry time.Time
+	err := r.pool.QueryRow(ctx, `
+		UPDATE user_feedback
+		SET enrichment_attempts = 0,
+		    enrichment_next_retry_at = NOW(),
+		    enrichment_error = NULL,
+		    updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND enrichment_status = 'failed'
+		RETURNING id, enrichment_status, enrichment_attempts, enrichment_next_retry_at
+	`, id, tenantID).Scan(&result.ID, &result.Status, &result.Attempts, &nextRetry)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Could be: not found, wrong tenant, or not in failed status.
+		// Check if the row exists at all to return the right error.
+		var status string
+		checkErr := r.pool.QueryRow(ctx,
+			`SELECT enrichment_status FROM user_feedback WHERE id = $1 AND tenant_id = $2`,
+			id, tenantID).Scan(&status)
+		if errors.Is(checkErr, pgx.ErrNoRows) {
+			return nil, ErrFeedbackNotFound
+		}
+		if checkErr != nil {
+			logext.Errorf(ctx, "[%s] check row failed,tenant_id:%s,id:%d,err:%+v",
+				where, tenantID, id, checkErr.Error())
+			return nil, fmt.Errorf("retry enrichment: %w", checkErr)
+		}
+		// Row exists but not in failed status
+		return nil, ErrInvalidStateForRetry
+	}
+	if err != nil {
+		logext.Errorf(ctx, "[%s] update failed,tenant_id:%s,id:%d,err:%+v",
+			where, tenantID, id, err.Error())
+		return nil, fmt.Errorf("retry enrichment: %w", err)
+	}
+	result.NextRetryAt = ptrext.Of(nextRetry)
+	return ptrext.Of(result), nil
+}

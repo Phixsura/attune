@@ -213,9 +213,7 @@ func buildConsoleRouter(
 	}
 	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool)))
 	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
-	llmConfig := console.NewLLMConfigHandler(
-		llmconfigsvc.NewService(llmconfigrepo.New(pool), secrets),
-	)
+	llmConfig := console.NewLLMConfigHandler(llmconfigsvc.NewService(llmconfigrepo.New(pool), secrets))
 	clustersHandler := console.NewClustersHandler(embeddingrepo.NewTaskRepo(pool))
 	digestSub := console.NewDigestSubscriptionHandler(digestsubrepo.New(pool), tenantRepo)
 	tagRepo := feedbacktagrepo.New(pool)
@@ -251,10 +249,10 @@ func buildConsoleRouter(
 	// Job handler uses batch service (implements jobService interface).
 	jobHandler := feedbackjob.NewHandler(batchSvc)
 
-	// Tenant member repo and handler for RBAC (#38).
-	memberRepo := tenantmember.NewRepo(pool)
+	memberRepo := tenantmember.NewRepo(pool) // RBAC (#38); passed to both NewMemberHandler and NewRouter
 	memberHandler := console.NewMemberHandler(memberRepo)
 	apiKeys.SetAuditLogger(auditLogSvc)
+	feedback.SetAuditLogger(auditLogSvc)
 	notifyTargets.SetAuditLogger(auditLogSvc)
 	inboundHandler.SetAuditLogger(auditLogSvc)
 	memberHandler.SetAuditLogger(auditLogSvc)

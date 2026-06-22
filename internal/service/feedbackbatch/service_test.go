@@ -633,6 +633,47 @@ func TestStatusToProto(t *testing.T) {
 	}
 }
 
+func TestOperationType(t *testing.T) {
+	tests := []struct {
+		name   string
+		op     *attunev1.BatchOperation
+		expect string
+	}{
+		{"nil operation", nil, "unknown"},
+		{"empty operation", &attunev1.BatchOperation{}, "unknown"},
+		{
+			"tag operation",
+			&attunev1.BatchOperation{
+				Op: &attunev1.BatchOperation_Tag{Tag: &attunev1.BatchTagOp{}},
+			},
+			"tag",
+		},
+		{
+			"workflow operation",
+			&attunev1.BatchOperation{
+				Op: &attunev1.BatchOperation_Workflow{Workflow: &attunev1.BatchWorkflowOp{}},
+			},
+			"workflow",
+		},
+		{
+			"delete operation",
+			&attunev1.BatchOperation{
+				Op: &attunev1.BatchOperation_Delete{Delete: &attunev1.BatchDeleteOp{}},
+			},
+			"delete",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := operationType(tt.op)
+			if result != tt.expect {
+				t.Errorf("operationType() = %q, want %q", result, tt.expect)
+			}
+		})
+	}
+}
+
 func TestGetJobStatus(t *testing.T) {
 	ctx := context.Background()
 

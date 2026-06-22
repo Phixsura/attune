@@ -90,6 +90,30 @@ func TestRecordAcceptsOutboxRetry(t *testing.T) {
 	}
 }
 
+// TestRecordAcceptsRetryEnrichment guards the action emitted by the
+// retry-enrichment handler (#81). Regression: it was missing from
+// the allow-list, so every manual retry would fail the audit write.
+func TestRecordAcceptsRetryEnrichment(t *testing.T) {
+	t.Parallel()
+
+	repo := ptrext.Of(stubRepo{})
+	svc := New(repo)
+
+	err := svc.Record(context.Background(), Event{
+		TenantID:   "tenant-1",
+		Actor:      Actor{Type: "admin", ID: "user-1"},
+		Action:     "retry_enrichment",
+		TargetType: "feedback",
+		TargetID:   "123",
+	})
+	if err != nil {
+		t.Fatalf("Record(retry_enrichment) err = %v, want nil (action must be registered)", err)
+	}
+	if !repo.insertCalled {
+		t.Fatal("Record did not persist retry_enrichment")
+	}
+}
+
 // TestRecordTxAcceptsOutboxRetry covers the transactional audit path used by
 // the dead-queue retry (#33): it validates the action and persists via InsertTx.
 func TestRecordTxAcceptsOutboxRetry(t *testing.T) {

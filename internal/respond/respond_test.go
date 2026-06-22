@@ -72,3 +72,41 @@ func TestErrorWritesUnifiedErrorResponse(t *testing.T) {
 		t.Fatalf("unexpected error body fields: code=%q message=%q requestId=%q", body.Code, body.Message, body.RequestId)
 	}
 }
+
+func TestProtoWritesHTTPBodyWithEmptyContentType(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	Proto(rec, http.StatusOK, ptrext.Of(httpbody.HttpBody{
+		ContentType: "",
+		Data:        []byte("binary data"),
+	}))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Fatalf("Content-Type = %q, want application/octet-stream", got)
+	}
+	if got := rec.Body.String(); got != "binary data" {
+		t.Fatalf("body = %q", got)
+	}
+}
+
+func TestProtoWithPresetContentType(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Type", "image/png")
+	Proto(rec, http.StatusOK, ptrext.Of(httpbody.HttpBody{
+		ContentType: "text/plain",
+		Data:        []byte("data"),
+	}))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png (preset not overwritten)", got)
+	}
+}

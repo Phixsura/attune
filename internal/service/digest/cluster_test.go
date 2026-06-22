@@ -289,3 +289,109 @@ func TestSelectClosestToCentroid(t *testing.T) {
 		t.Errorf("expected ID 1 first, got %d", result[0].ID)
 	}
 }
+
+func TestComputeCentroid(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty members", func(t *testing.T) {
+		result := computeCentroid(nil)
+		if result != nil {
+			t.Errorf("computeCentroid(nil) = %v, want nil", result)
+		}
+	})
+
+	t.Run("single member", func(t *testing.T) {
+		members := []embedding.EmbeddedFeedback{
+			{Embedding: []float32{1.0, 2.0, 3.0}},
+		}
+		result := computeCentroid(members)
+		if len(result) != 3 {
+			t.Fatalf("len(result) = %d, want 3", len(result))
+		}
+		if result[0] != 1.0 || result[1] != 2.0 || result[2] != 3.0 {
+			t.Errorf("result = %v, want [1.0 2.0 3.0]", result)
+		}
+	})
+
+	t.Run("multiple members", func(t *testing.T) {
+		members := []embedding.EmbeddedFeedback{
+			{Embedding: []float32{1.0, 2.0, 3.0}},
+			{Embedding: []float32{3.0, 4.0, 5.0}},
+		}
+		result := computeCentroid(members)
+		if len(result) != 3 {
+			t.Fatalf("len(result) = %d, want 3", len(result))
+		}
+		if result[0] != 2.0 || result[1] != 3.0 || result[2] != 4.0 {
+			t.Errorf("result = %v, want [2.0 3.0 4.0]", result)
+		}
+	})
+}
+
+func TestCosineDistance(t *testing.T) {
+	t.Parallel()
+
+	t.Run("identical vectors", func(t *testing.T) {
+		a := []float32{1.0, 0.0, 0.0}
+		dist := cosineDistance(a, a)
+		if dist > 1e-6 {
+			t.Errorf("cosineDistance(identical) = %f, want 0", dist)
+		}
+	})
+
+	t.Run("orthogonal vectors", func(t *testing.T) {
+		a := []float32{1.0, 0.0, 0.0}
+		b := []float32{0.0, 1.0, 0.0}
+		dist := cosineDistance(a, b)
+		if dist < 0.99 || dist > 1.01 {
+			t.Errorf("cosineDistance(orthogonal) = %f, want 1.0", dist)
+		}
+	})
+
+	t.Run("empty vectors", func(t *testing.T) {
+		dist := cosineDistance(nil, nil)
+		if dist != 1.0 {
+			t.Errorf("cosineDistance(empty) = %f, want 1.0", dist)
+		}
+	})
+
+	t.Run("mismatched lengths", func(t *testing.T) {
+		a := []float32{1.0, 0.0}
+		b := []float32{1.0, 0.0, 0.0}
+		dist := cosineDistance(a, b)
+		if dist != 1.0 {
+			t.Errorf("cosineDistance(mismatched) = %f, want 1.0", dist)
+		}
+	})
+
+	t.Run("zero vectors", func(t *testing.T) {
+		a := []float32{0.0, 0.0, 0.0}
+		dist := cosineDistance(a, a)
+		if dist != 1.0 {
+			t.Errorf("cosineDistance(zeros) = %f, want 1.0", dist)
+		}
+	})
+}
+
+func TestSelectClosestToCentroid_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty members", func(t *testing.T) {
+		result := selectClosestToCentroid(nil, []float32{1.0, 0.0}, 3)
+		if len(result) != 0 {
+			t.Errorf("len(result) = %d, want 0", len(result))
+		}
+	})
+
+	t.Run("fewer than n members", func(t *testing.T) {
+		members := []embedding.EmbeddedFeedback{
+			{ID: 1, Embedding: []float32{1.0, 0.0}},
+			{ID: 2, Embedding: []float32{0.9, 0.1}},
+		}
+		centroid := []float32{1.0, 0.0}
+		result := selectClosestToCentroid(members, centroid, 5)
+		if len(result) != 2 {
+			t.Errorf("len(result) = %d, want 2", len(result))
+		}
+	})
+}

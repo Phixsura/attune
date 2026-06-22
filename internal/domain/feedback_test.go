@@ -17,17 +17,46 @@ func TestValidSources_WebhookAndEmail(t *testing.T) {
 	}
 }
 
-// TestSourceDisplayName_WebhookAndEmail — the human-facing strings must
-// match the values stamped onto notify-card envelopes for the new channels.
-func TestSourceDisplayName_WebhookAndEmail(t *testing.T) {
-	want := map[string]string{
-		"webhook": "Webhook",
-		"email":   "Email",
+// TestSourceDisplayName covers all source display name mappings.
+func TestSourceDisplayName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{"api", "API client"},
+		{"webhook", "Webhook"},
+		{"email", "Email"},
+		{"web", "Web Widget"},
+		{"mcp", "MCP"},
+		{"other", "Other"},
+		{"unknown", "unknown"},
+		{"custom-source", "custom-source"},
 	}
-	for src, w := range want {
-		if got := SourceDisplayName(src); got != w {
-			t.Errorf("SourceDisplayName(%q) = %q; want %q", src, got, w)
+	for _, tt := range tests {
+		t.Run(tt.source, func(t *testing.T) {
+			t.Parallel()
+			if got := SourceDisplayName(tt.source); got != tt.want {
+				t.Errorf("SourceDisplayName(%q) = %q; want %q", tt.source, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidSources_AllKnownSources verifies all expected sources are valid.
+func TestValidSources_AllKnownSources(t *testing.T) {
+	t.Parallel()
+
+	expected := []string{"api", "webhook", "email", "web", "mcp", "other"}
+	for _, src := range expected {
+		if !ValidSources[src] {
+			t.Errorf("ValidSources[%q] = false; want true", src)
 		}
+	}
+
+	if ValidSources["nonexistent"] {
+		t.Error("ValidSources[\"nonexistent\"] = true; want false")
 	}
 }
 

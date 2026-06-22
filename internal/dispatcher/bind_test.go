@@ -398,3 +398,68 @@ func TestBindMapsContextCancellationErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestErrorImplementsErrorInterface(t *testing.T) {
+	t.Parallel()
+
+	e := NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "test error")
+	require.Equal(t, "test error", e.Error())
+}
+
+func TestRequestContextSetHeader(t *testing.T) {
+	t.Parallel()
+
+	h := Bind(
+		"dispatcher.SetHeader",
+		Empty(func() *attunev1.GetUsageRequest { return &attunev1.GetUsageRequest{} }),
+		func(ctx *RequestContext[testAuth], _ *attunev1.GetUsageRequest) (Result[*attunev1.GetUsageResponse], error) {
+			ctx.SetHeader("X-Custom-Header", "custom-value")
+			return OK(&attunev1.GetUsageResponse{Total: 1})
+		},
+		contextAuth[testAuth, *attunev1.GetUsageRequest](func(context.Context) testAuth {
+			return testAuth{TenantID: "tenant-1"}
+		}),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	rec := httptest.NewRecorder()
+
+	h(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "custom-value", rec.Header().Get("X-Custom-Header"))
+}
+
+func TestRequestContextRequest(t *testing.T) {
+	t.Parallel()
+
+	var capturedPath string
+	h := Bind(
+		"dispatcher.Request",
+		Empty(func() *attunev1.GetUsageRequest { return &attunev1.GetUsageRequest{} }),
+		func(ctx *RequestContext[testAuth], _ *attunev1.GetUsageRequest) (Result[*attunev1.GetUsageResponse], error) {
+			capturedPath = ctx.Request().URL.Path
+			return OK(&attunev1.GetUsageResponse{Total: 1})
+		},
+		contextAuth[testAuth, *attunev1.GetUsageRequest](func(context.Context) testAuth {
+			return testAuth{TenantID: "tenant-1"}
+		}),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/test/path", nil)
+	rec := httptest.NewRecorder()
+
+	h(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "/test/path", capturedPath)
+}
+
+func TestWriteText(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	WriteText(rec, http.StatusOK, "hello world")
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "text/plain; charset=utf-8", rec.Header().Get("Content-Type"))
+	require.Equal(t, "hello world", rec.Body.String())
+}

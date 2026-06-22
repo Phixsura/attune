@@ -132,8 +132,8 @@ ci-check: ## Run all CI checks locally before push.
 	@bash scripts/lint-integration-layout.sh
 	@echo "✓ lint-integration-layout"
 	@echo
-	@echo "▸ jscpd (duplication < 5%)"
-	@npx -y jscpd . -f go -i '**/*.pb.go' -t 5 --silent
+	@echo "▸ jscpd (duplication < 5%, test files excluded)"
+	@npx -y jscpd . --silent
 	@echo "✓ jscpd"
 	@echo
 	@echo "▸ console: pnpm tsc"

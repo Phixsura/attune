@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SelectionActionBar } from '@/features/feedback/components/selection-action-bar'
+import type { WorkflowState } from '@/proto/attune/v1/workflow'
 import { renderWithProviders, screen } from '@/testing/test-utils'
 
 describe('SelectionActionBar', () => {
@@ -94,5 +95,189 @@ describe('SelectionActionBar', () => {
     const cancelBtn = screen.getByRole('button', { name: /取消/ })
     await user.click(cancelBtn)
     expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  describe('workflow transition', () => {
+    const workflowStates: WorkflowState[] = [
+      {
+        id: 'state-1',
+        name: 'Open',
+        displayName: { entries: { en: 'Open', 'zh-CN': '待处理' } },
+        color: '#22c55e',
+        category: 'active',
+        position: 0,
+        isDefault: true,
+        archived: false,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'state-2',
+        name: 'Closed',
+        displayName: { entries: { en: 'Closed', 'zh-CN': '已关闭' } },
+        color: '#ef4444',
+        category: 'done',
+        position: 1,
+        isDefault: false,
+        archived: false,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'state-3',
+        name: 'Archived',
+        displayName: { entries: { en: 'Archived' } },
+        color: '#gray',
+        category: 'done',
+        position: 2,
+        isDefault: false,
+        archived: true,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ]
+
+    it('shows transition select when workflowStates and onBatchTransition provided', () => {
+      renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          workflowStates={workflowStates}
+          onBatchTransition={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('combobox')).toBeInTheDocument()
+    })
+
+    it('does not show transition select when workflowStates empty', () => {
+      renderWithProviders(
+        <SelectionActionBar {...defaultProps} workflowStates={[]} onBatchTransition={vi.fn()} />,
+      )
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    })
+
+    it('does not show transition select when onBatchTransition not provided', () => {
+      renderWithProviders(<SelectionActionBar {...defaultProps} workflowStates={workflowStates} />)
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    })
+
+    it('filters out archived states', () => {
+      renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          workflowStates={workflowStates}
+          onBatchTransition={vi.fn()}
+        />,
+      )
+      expect(screen.queryByText('Archived')).not.toBeInTheDocument()
+    })
+
+    it('falls back to state name when displayName is empty', async () => {
+      const statesWithEmptyDisplay: WorkflowState[] = [
+        {
+          id: 'state-x',
+          name: 'FallbackName',
+          displayName: { entries: {} },
+          color: '#000',
+          category: 'active',
+          position: 0,
+          isDefault: false,
+          archived: false,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      ]
+      const { user } = renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          workflowStates={statesWithEmptyDisplay}
+          onBatchTransition={vi.fn()}
+        />,
+      )
+      await user.click(screen.getByRole('combobox'))
+      expect(screen.getByText('FallbackName')).toBeInTheDocument()
+    })
+  })
+
+  describe('tag operations', () => {
+    it('shows remove tag button when removableTags has items', () => {
+      const removableTags = [
+        {
+          id: 'tag-1',
+          name: 'Bug',
+          color: '#ff0000',
+          description: '',
+          usageCount: 0,
+          archived: false,
+          createdBy: 'user-1',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      ]
+      renderWithProviders(<SelectionActionBar {...defaultProps} removableTags={removableTags} />)
+      expect(screen.getByRole('button', { name: /移除标签/ })).toBeInTheDocument()
+    })
+
+    it('does not show remove tag button when removableTags is empty', () => {
+      renderWithProviders(<SelectionActionBar {...defaultProps} removableTags={[]} />)
+      expect(screen.queryByRole('button', { name: /移除标签/ })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('retry enrichment', () => {
+    it('shows retry button when onBatchRetryEnrichment provided and terminalFailureCount > 0', async () => {
+      const onBatchRetryEnrichment = vi.fn()
+      const { user } = renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          onBatchRetryEnrichment={onBatchRetryEnrichment}
+          terminalFailureCount={3}
+        />,
+      )
+      const retryBtn = screen.getByRole('button', { name: /重试/ })
+      await user.click(retryBtn)
+      expect(onBatchRetryEnrichment).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not show retry button when terminalFailureCount is 0', () => {
+      renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          onBatchRetryEnrichment={vi.fn()}
+          terminalFailureCount={0}
+        />,
+      )
+      expect(screen.queryByRole('button', { name: /重试/ })).not.toBeInTheDocument()
+    })
+
+    it('does not show retry button when onBatchRetryEnrichment not provided', () => {
+      renderWithProviders(<SelectionActionBar {...defaultProps} terminalFailureCount={3} />)
+      expect(screen.queryByRole('button', { name: /重试/ })).not.toBeInTheDocument()
+    })
+
+    it('shows count badge when terminalFailureCount differs from total count', () => {
+      renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          count={10}
+          onBatchRetryEnrichment={vi.fn()}
+          terminalFailureCount={3}
+        />,
+      )
+      expect(screen.getByText('3')).toBeInTheDocument()
+    })
+
+    it('does not show count badge when terminalFailureCount equals total count', () => {
+      renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          count={5}
+          onBatchRetryEnrichment={vi.fn()}
+          terminalFailureCount={5}
+        />,
+      )
+      const retryBtn = screen.getByRole('button', { name: /重试/ })
+      expect(retryBtn).toBeInTheDocument()
+      expect(screen.queryByText('5')).not.toBeInTheDocument()
+    })
   })
 })

@@ -57,6 +57,7 @@ type FeedbackHandler struct {
 	workflow       workflowTransitioner
 	auditReader    auditReader
 	workflowStates workflowStateReader
+	audit          auditRecorder // optional writer for retry-enrichment audit trail
 }
 
 // Drafter regenerates a reply draft synchronously, sharing the worker's
@@ -91,12 +92,16 @@ func (h *FeedbackHandler) SetAuditReader(r auditReader) { h.auditReader = r }
 // SetWorkflowStates wires the state reader for hydrating workflow state on list/detail.
 func (h *FeedbackHandler) SetWorkflowStates(r workflowStateReader) { h.workflowStates = r }
 
+// SetAuditLogger wires the audit writer for retry-enrichment audit trail.
+func (h *FeedbackHandler) SetAuditLogger(audit auditRecorder) { h.audit = audit }
+
 type feedbackRepo interface {
 	ListForConsole(ctx context.Context, tenantID string, opts feedback.ConsoleListOpts) ([]feedback.ConsoleListRow, error)
 	GetForConsole(ctx context.Context, tenantID string, id int64) (*feedback.ConsoleDetailRow, error)
 	UsageByDay(ctx context.Context, tenantID string, from, to time.Time) ([]feedback.UsageBucket, error)
 	UrgentCount(ctx context.Context, tenantID string, from, to time.Time) (int64, error)
 	TopValuesByDim(ctx context.Context, tenantID, dim string, multi bool, from, to time.Time, limit int) ([]feedback.ValueCount, error)
+	RetryEnrichment(ctx context.Context, tenantID string, id int64) (*feedback.RetryResult, error)
 }
 
 type tenantConfigRepo interface {
@@ -136,7 +141,7 @@ func attrsToStruct(raw []byte) *structpb.Struct {
 }
 
 func toProtoFeedback(row feedback.ConsoleListRow) *attunev1.Feedback {
-	return ptrext.Of(attunev1.Feedback{
+	f := ptrext.Of(attunev1.Feedback{
 		Id:                       row.ID,
 		Content:                  row.Content,
 		Source:                   row.Source,
@@ -152,7 +157,12 @@ func toProtoFeedback(row feedback.ConsoleListRow) *attunev1.Feedback {
 		ClassificationConfidence: row.ClassificationConfidence,
 		EnrichmentStatus:         row.EnrichmentStatus,
 		CreatedAt:                row.CreatedAt.UTC().Format(time.RFC3339),
+		EnrichmentAttempts:       ptrext.Of(int32(row.EnrichmentAttempts)),
 	})
+	if row.EnrichmentNextRetryAt != nil {
+		f.EnrichmentNextRetryAt = ptrext.Of(row.EnrichmentNextRetryAt.UTC().Format(time.RFC3339))
+	}
+	return f
 }
 
 // extractAttrFilters walks the query string for keys matching a

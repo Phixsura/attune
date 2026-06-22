@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { AlertCircle, Check, Copy, Loader2, RefreshCw, Sparkles } from 'lucide-react'
+import { AlertCircle, Check, Copy, Loader2, RefreshCw, RotateCcw, Sparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -22,15 +22,20 @@ import {
   feedbackDetailQuery,
 } from '@/features/feedback/api/get-feedback-detail'
 import { useRegenerateReplyDraft } from '@/features/feedback/api/regenerate-reply-draft'
+import { useRetryEnrichment } from '@/features/feedback/api/retry-enrichment'
 import { ConfidenceIndicator } from '@/features/feedback/components/confidence-indicator'
 import { FeedbackTagSection } from '@/features/feedback/components/feedback-tags'
 import { LanguageBadge, languagesDiffer } from '@/features/feedback/components/language-badge'
+import {
+  isTerminalFailure,
+  MAX_ENRICHMENT_ATTEMPTS,
+} from '@/features/feedback/lib/enrichment-utils'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import { cn } from '@/lib/utils'
 import type { Dimension } from '@/proto/attune/v1/common'
 import type { Tag } from '@/proto/attune/v1/tag'
 
-type FeedbackWorkbenchMode = 'all' | 'urgent' | 'active' | 'failed' | 'ready'
+type FeedbackWorkbenchMode = 'all' | 'urgent' | 'active' | 'failed' | 'terminal' | 'ready'
 
 // `dims` is supplied by the parent route so this component does not
 // cross feature boundaries (the dim set is owned by the settings
@@ -215,20 +220,7 @@ function DetailBody({
       </Card>
 
       {!hasClassificationSignal && (
-        <DetailStateBanner
-          tone={data.enrichmentError ? 'error' : 'muted'}
-          title={
-            data.enrichmentError
-              ? t('feedback.detail.enrichment_failed_title')
-              : t('feedback.detail.pending_classification_title')
-          }
-          body={
-            data.enrichmentError
-              ? t('feedback.detail.enrichment_failed_body')
-              : t('feedback.detail.pending_classification_body')
-          }
-          detail={data.enrichmentError || undefined}
-        />
+        <EnrichmentStatusBanner data={data} isTerminalFailure={isTerminalFailure(data)} />
       )}
 
       {workbenchCue ? (
@@ -702,6 +694,7 @@ function workbenchModeLabel(mode: FeedbackWorkbenchMode, t: (key: string) => str
   if (mode === 'urgent') return t('feedback.queue_mode.urgent')
   if (mode === 'active') return t('feedback.queue_mode.active')
   if (mode === 'failed') return t('feedback.queue_mode.failed')
+  if (mode === 'terminal') return t('feedback.queue_mode.terminal')
   if (mode === 'ready') return t('feedback.queue_mode.ready')
   return t('feedback.queue_mode.all')
 }
@@ -717,6 +710,13 @@ function detailWorkbenchCue(
       tone: 'danger' as const,
       title: t('feedback.detail.workbench_failed_title'),
       body: t('feedback.detail.workbench_failed_body'),
+    }
+  }
+  if (mode === 'terminal') {
+    return {
+      tone: 'danger' as const,
+      title: t('feedback.detail.workbench_terminal_title'),
+      body: t('feedback.detail.workbench_terminal_body'),
     }
   }
   if (mode === 'active') {
@@ -745,6 +745,36 @@ function detailWorkbenchCue(
   return null
 }
 
+function ErrorMessageBlock({ error }: { error: string }) {
+  const { t } = useTranslation()
+  const [copied, setCopied] = useState(false)
+  const timerRef = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(timerRef.current), [])
+
+  const onCopy = () => {
+    navigator.clipboard.writeText(error).then(() => {
+      setCopied(true)
+      timerRef.current = window.setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  return (
+    <div className="mt-3 group relative rounded-lg border border-border/50 bg-background/80">
+      <pre className="overflow-x-auto px-3 py-2 pr-10 font-mono text-xs text-muted-foreground whitespace-pre-wrap break-words">
+        {error}
+      </pre>
+      <button
+        type="button"
+        onClick={onCopy}
+        className="absolute right-2 top-2 rounded p-1 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+        title={t('common.copy')}
+      >
+        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      </button>
+    </div>
+  )
+}
+
 function JsonSection({ label, value }: { label: string; value: unknown }) {
   return (
     <Section label={label}>
@@ -755,5 +785,134 @@ function JsonSection({ label, value }: { label: string; value: unknown }) {
         </pre>
       </details>
     </Section>
+  )
+}
+
+function EnrichmentStatusBanner({
+  data,
+  isTerminalFailure: terminal,
+}: {
+  data: FeedbackDetail
+  isTerminalFailure: boolean
+}) {
+  const { t } = useTranslation()
+  const retry = useRetryEnrichment(String(data.id))
+
+  const onRetry = () => {
+    retry.mutate(undefined, {
+      onSuccess: () => {
+        toast.success(t('feedback.detail.retry_enrichment_success'))
+      },
+      onError: () => {
+        toast.error(t('feedback.detail.retry_enrichment_failed'))
+      },
+    })
+  }
+
+  if (!data.enrichmentError) {
+    return (
+      <DetailStateBanner
+        tone="muted"
+        title={t('feedback.detail.pending_classification_title')}
+        body={t('feedback.detail.pending_classification_body')}
+      />
+    )
+  }
+
+  const attempts = data.enrichmentAttempts ?? 0
+  const nextRetry = data.enrichmentNextRetryAt
+
+  return (
+    <div className="rounded-xl border border-destructive/25 bg-destructive/[0.04] px-4 py-4">
+      <div className="flex items-start gap-3">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-2xl border border-current/10 bg-background/85 text-destructive">
+          <AlertCircle className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h4 className="text-sm font-semibold text-foreground">
+            {terminal
+              ? t('feedback.detail.terminal_failure_title')
+              : t('feedback.detail.enrichment_failed_title')}
+          </h4>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground text-pretty">
+            {terminal
+              ? t('feedback.detail.terminal_failure_body', { count: attempts })
+              : t('feedback.detail.enrichment_failed_body')}
+          </p>
+
+          <div className="mt-3 space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground shrink-0">
+                {t('feedback.detail.enrichment_attempts')}
+              </span>
+              <div className="flex items-center gap-2 flex-1">
+                <div className="flex gap-1">
+                  {[0, 1, 2, 3, 4].map((idx) => (
+                    <div
+                      key={idx}
+                      className={cn(
+                        'size-2 rounded-full transition-colors',
+                        idx < attempts
+                          ? terminal
+                            ? 'bg-destructive'
+                            : 'bg-amber-500'
+                          : 'bg-muted-foreground/20',
+                      )}
+                    />
+                  ))}
+                </div>
+                <span className="text-sm font-medium tabular-nums">
+                  {attempts}/{MAX_ENRICHMENT_ATTEMPTS}
+                </span>
+              </div>
+            </div>
+            <dl className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+              {nextRetry && (
+                <div className="flex items-center gap-2">
+                  <dt className="text-xs text-muted-foreground">
+                    {t('feedback.detail.enrichment_next_retry')}:
+                  </dt>
+                  <dd className="font-medium">
+                    {formatDistanceToNow(new Date(nextRetry), { addSuffix: true, locale: zhCN })}
+                  </dd>
+                </div>
+              )}
+              {terminal && (
+                <div className="flex items-center gap-2">
+                  <dt className="text-xs text-muted-foreground">
+                    {t('feedback.detail.enrichment_next_retry')}:
+                  </dt>
+                  <dd className="font-medium text-destructive">
+                    {t('feedback.detail.enrichment_terminal')}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </div>
+
+          {data.enrichmentError && <ErrorMessageBlock error={data.enrichmentError} />}
+
+          {terminal && (
+            <div className="mt-4">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onRetry}
+                disabled={retry.isPending}
+                className="motion-safe:active:scale-[0.98]"
+              >
+                {retry.isPending ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="size-3.5" />
+                )}
+                {t('feedback.detail.retry_enrichment')}
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }

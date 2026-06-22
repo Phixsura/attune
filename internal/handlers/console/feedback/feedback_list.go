@@ -13,40 +13,28 @@ import (
 )
 
 var listFeedbackReservedQuery = map[string]struct{}{
-	"cursor":            {},
-	"limit":             {},
-	"q":                 {},
-	"urgent":            {},
-	"tag":               {},
-	"workflow_state":    {},
-	"workflow_category": {},
+	"cursor":               {},
+	"limit":                {},
+	"q":                    {},
+	"urgent":               {},
+	"tag":                  {},
+	"workflow_state":       {},
+	"workflow_category":    {},
+	"enrichment_status":    {},
+	"terminal_failed_only": {},
 }
 
 func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
 	q := r.URL.Query()
-	if v := q.Get("cursor"); v != "" {
-		req.Cursor = ptrext.Of(v)
-	}
-	if v := q.Get("limit"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
-			req.Limit = ptrext.Of(int32(n))
-		}
-	}
-	if v := q.Get("q"); v != "" {
-		req.Q = ptrext.Of(v)
-	}
-	if v := q.Get("urgent"); v != "" {
-		req.Urgent = ptrext.Of(v == "true" || v == "1")
-	}
-	if v := q.Get("tag"); v != "" {
-		req.TagId = ptrext.Of(v)
-	}
-	if v := q.Get("workflow_state"); v != "" {
-		req.WorkflowStateId = ptrext.Of(v)
-	}
-	if v := q.Get("workflow_category"); v != "" {
-		req.WorkflowCategory = ptrext.Of(v)
-	}
+	req.Cursor = queryStr(q, "cursor")
+	req.Limit = queryInt32(q, "limit")
+	req.Q = queryStr(q, "q")
+	req.Urgent = queryBool(q, "urgent")
+	req.TagId = queryStr(q, "tag")
+	req.WorkflowStateId = queryStr(q, "workflow_state")
+	req.WorkflowCategory = queryStr(q, "workflow_category")
+	req.EnrichmentStatus = queryStr(q, "enrichment_status")
+	req.TerminalFailedOnly = queryBool(q, "terminal_failed_only")
 	for k, vs := range q {
 		if _, ok := listFeedbackReservedQuery[k]; ok {
 			continue
@@ -57,6 +45,29 @@ func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
 			}
 			req.Attrs = append(req.Attrs, ptrext.Of(attunev1.AttrFilter{Dim: k, Value: v}))
 		}
+	}
+	return nil
+}
+
+func queryStr(q map[string][]string, key string) *string {
+	if vs := q[key]; len(vs) > 0 && vs[0] != "" {
+		return ptrext.Of(vs[0])
+	}
+	return nil
+}
+
+func queryInt32(q map[string][]string, key string) *int32 {
+	if vs := q[key]; len(vs) > 0 {
+		if n, err := strconv.ParseInt(vs[0], 10, 32); err == nil {
+			return ptrext.Of(int32(n))
+		}
+	}
+	return nil
+}
+
+func queryBool(q map[string][]string, key string) *bool {
+	if vs := q[key]; len(vs) > 0 && vs[0] != "" {
+		return ptrext.Of(vs[0] == "true" || vs[0] == "1")
 	}
 	return nil
 }
@@ -100,6 +111,12 @@ func (h *FeedbackHandler) List(ctx *dispatcher.RequestContext[*session.AuthCtx],
 	}
 	if req.WorkflowCategory != nil {
 		opts.WorkflowCategory = req.WorkflowCategory
+	}
+	if req.EnrichmentStatus != nil {
+		opts.EnrichmentStatus = req.EnrichmentStatus
+	}
+	if req.TerminalFailedOnly != nil {
+		opts.TerminalFailedOnly = req.TerminalFailedOnly
 	}
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,attrs_n:%d,limit:%d,cursor:%d",
 		where, auth.TenantID, len(opts.Attrs), opts.Limit, opts.Cursor)

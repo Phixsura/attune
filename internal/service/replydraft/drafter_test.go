@@ -92,3 +92,98 @@ func TestCleanDraft_RuneTruncationNoCorruption(t *testing.T) {
 		t.Fatalf("rune count = %d, want %d", n, draftMaxRunes)
 	}
 }
+
+func TestAttrToString(t *testing.T) {
+	cases := []struct {
+		name string
+		v    any
+		want string
+	}{
+		{"nil", nil, ""},
+		{"string", "bug", "bug"},
+		{"empty string", "", ""},
+		{"slice string", []any{"auth", "mobile"}, "auth/mobile"},
+		{"empty slice", []any{}, ""},
+		{"slice mixed types", []any{"valid", 123, "also-valid"}, "valid/also-valid"},
+		{"int", 42, "42"},
+		{"bool", true, "true"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := attrToString(tc.v); got != tc.want {
+				t.Errorf("attrToString(%v) = %q, want %q", tc.v, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestContextLine(t *testing.T) {
+	cases := []struct {
+		name string
+		in   replydraftrepo.DraftInput
+		want string
+	}{
+		{
+			name: "all fields",
+			in: replydraftrepo.DraftInput{
+				EnrichedTitle: "Test Title",
+				Attrs:         map[string]any{"kind": "bug", "severity": "high"},
+			},
+			want: "Context: title=Test Title, kind=bug, severity=high\n",
+		},
+		{
+			name: "only title",
+			in: replydraftrepo.DraftInput{
+				EnrichedTitle: "Only Title",
+			},
+			want: "Context: title=Only Title\n",
+		},
+		{
+			name: "only attrs",
+			in: replydraftrepo.DraftInput{
+				Attrs: map[string]any{"sentiment": "happy"},
+			},
+			want: "Context: sentiment=happy\n",
+		},
+		{
+			name: "empty",
+			in:   replydraftrepo.DraftInput{},
+			want: "",
+		},
+		{
+			name: "nil attrs",
+			in: replydraftrepo.DraftInput{
+				Attrs: nil,
+			},
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := contextLine(tc.in)
+			if got != tc.want {
+				t.Errorf("contextLine() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyTemplate(t *testing.T) {
+	in := replydraftrepo.DraftInput{
+		Content:       "feedback content",
+		Language:      "en",
+		EnrichedTitle: "Title Here",
+		Attrs: map[string]any{
+			"kind":      "feature",
+			"severity":  "low",
+			"modules":   []any{"ui", "api"},
+			"sentiment": "neutral",
+		},
+	}
+	tmpl := "Lang: {language}, Content: {content}, Kind: {kind}, Modules: {modules}"
+	got := applyTemplate(tmpl, in)
+	want := "Lang: en, Content: feedback content, Kind: feature, Modules: ui/api"
+	if got != want {
+		t.Errorf("applyTemplate() = %q, want %q", got, want)
+	}
+}

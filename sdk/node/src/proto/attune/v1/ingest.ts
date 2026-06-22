@@ -89,6 +89,12 @@ export interface Feedback {
   tags: Tag[];
   workflowState?: WorkflowState | undefined;
   allowedNextStates: WorkflowState[];
+  /** Number of enrichment attempts made (0 = never attempted, max 5) */
+  enrichmentAttempts?:
+    | number
+    | undefined;
+  /** RFC3339 timestamp of next scheduled retry; absent if terminal or not failed */
+  enrichmentNextRetryAt?: string | undefined;
 }
 
 /** FeedbackDetail is the single-row view: the list fields plus extras (flat). */
@@ -154,6 +160,12 @@ export interface FeedbackDetail {
   tags: Tag[];
   workflowState?: WorkflowState | undefined;
   allowedNextStates: WorkflowState[];
+  /** Number of enrichment attempts made (0 = never attempted, max 5) */
+  enrichmentAttempts?:
+    | number
+    | undefined;
+  /** RFC3339 timestamp of next scheduled retry; absent if terminal or not failed */
+  enrichmentNextRetryAt?: string | undefined;
 }
 
 export interface Attachment {
@@ -190,7 +202,18 @@ export interface ListFeedbackRequest {
   q?: string | undefined;
   tagId?: string | undefined;
   workflowStateId?: string | undefined;
-  workflowCategory?: string | undefined;
+  workflowCategory?:
+    | string
+    | undefined;
+  /** Filter by enrichment status: "pending" | "enriching" | "done" | "failed" */
+  enrichmentStatus?:
+    | string
+    | undefined;
+  /**
+   * If true, only return rows where enrichment_status='failed' AND
+   * enrichment_attempts >= maxEnrichmentAttempts AND enrichment_next_retry_at IS NULL.
+   */
+  terminalFailedOnly?: boolean | undefined;
 }
 
 export interface ListFeedbackResponse {
@@ -214,6 +237,22 @@ export interface RegenerateReplyDraftResponse {
   replyDraft: string;
   /** RFC3339 */
   replyDraftGeneratedAt: string;
+}
+
+/** RetryEnrichmentRequest resets a terminal-failed row for re-enrichment (#81). */
+export interface RetryEnrichmentRequest {
+  /** path param */
+  id: string;
+}
+
+export interface RetryEnrichmentResponse {
+  id: string;
+  /** will be "failed" (sweeper picks it up) */
+  enrichmentStatus: string;
+  /** will be 0 */
+  enrichmentAttempts: number;
+  /** RFC3339; will be ~NOW */
+  enrichmentNextRetryAt: string;
 }
 
 export interface GetFeedbackStatsRequest {
@@ -268,4 +307,9 @@ export interface FeedbackService {
   GetFeedbackStats(request: GetFeedbackStatsRequest): Promise<GetFeedbackStatsResponse>;
   /** POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; session auth) */
   RegenerateReplyDraft(request: RegenerateReplyDraftRequest): Promise<RegenerateReplyDraftResponse>;
+  /**
+   * POST /fb/v1/console/feedback/{id}/retry-enrichment (console; session auth)
+   * Resets a terminal-failed row so it can be re-enriched.
+   */
+  RetryEnrichment(request: RetryEnrichmentRequest): Promise<RetryEnrichmentResponse>;
 }

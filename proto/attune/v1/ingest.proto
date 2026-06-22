@@ -82,6 +82,14 @@ service FeedbackService {
       body: "*"
     };
   }
+  // POST /fb/v1/console/feedback/{id}/retry-enrichment (console; session auth)
+  // Resets a terminal-failed row so it can be re-enriched.
+  rpc RetryEnrichment(RetryEnrichmentRequest) returns (RetryEnrichmentResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/{id}/retry-enrichment"
+      body: "*"
+    };
+  }
 }
 
 // IngestRequest is the JSON body of POST /v1/feedback/ingest.
@@ -143,6 +151,10 @@ message Feedback {
   repeated Tag tags = 16;
   optional WorkflowState         workflow_state      = 17;
   repeated WorkflowState         allowed_next_states = 18;
+  // Number of enrichment attempts made (0 = never attempted, max 5)
+  optional int32 enrichment_attempts = 19;
+  // RFC3339 timestamp of next scheduled retry; absent if terminal or not failed
+  optional string enrichment_next_retry_at = 20;
 }
 
 // FeedbackDetail is the single-row view: the list fields plus extras (flat).
@@ -177,6 +189,10 @@ message FeedbackDetail {
   repeated Tag tags = 25;
   optional WorkflowState         workflow_state      = 26;
   repeated WorkflowState         allowed_next_states = 27;
+  // Number of enrichment attempts made (0 = never attempted, max 5)
+  optional int32 enrichment_attempts = 28;
+  // RFC3339 timestamp of next scheduled retry; absent if terminal or not failed
+  optional string enrichment_next_retry_at = 29;
 }
 
 message Attachment {
@@ -206,6 +222,11 @@ message ListFeedbackRequest {
   optional string tag_id = 6;
   optional string workflow_state_id = 7;
   optional string workflow_category = 8;
+  // Filter by enrichment status: "pending" | "enriching" | "done" | "failed"
+  optional string enrichment_status = 9;
+  // If true, only return rows where enrichment_status='failed' AND
+  // enrichment_attempts >= maxEnrichmentAttempts AND enrichment_next_retry_at IS NULL.
+  optional bool terminal_failed_only = 10;
 }
 
 message ListFeedbackResponse {
@@ -225,6 +246,18 @@ message RegenerateReplyDraftRequest {
 message RegenerateReplyDraftResponse {
   string reply_draft = 1;
   string reply_draft_generated_at = 2;  // RFC3339
+}
+
+// RetryEnrichmentRequest resets a terminal-failed row for re-enrichment (#81).
+message RetryEnrichmentRequest {
+  int64 id = 1;  // path param
+}
+
+message RetryEnrichmentResponse {
+  int64 id = 1;
+  string enrichment_status = 2;  // will be "failed" (sweeper picks it up)
+  int32 enrichment_attempts = 3; // will be 0
+  string enrichment_next_retry_at = 4; // RFC3339; will be ~NOW
 }
 
 message GetFeedbackStatsRequest {}
