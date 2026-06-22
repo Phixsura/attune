@@ -14,7 +14,7 @@ describe('enrichment-utils', () => {
         isTerminalFailure({
           enrichmentStatus: 'failed',
           enrichmentAttempts: 5,
-          enrichmentNextRetryAt: null,
+          enrichmentNextRetryAt: undefined,
         }),
       ).toBe(true)
     })
@@ -24,7 +24,7 @@ describe('enrichment-utils', () => {
         isTerminalFailure({
           enrichmentStatus: 'failed',
           enrichmentAttempts: 10,
-          enrichmentNextRetryAt: null,
+          enrichmentNextRetryAt: undefined,
         }),
       ).toBe(true)
     })
@@ -34,7 +34,7 @@ describe('enrichment-utils', () => {
         isTerminalFailure({
           enrichmentStatus: 'success',
           enrichmentAttempts: 5,
-          enrichmentNextRetryAt: null,
+          enrichmentNextRetryAt: undefined,
         }),
       ).toBe(false)
     })
@@ -44,7 +44,7 @@ describe('enrichment-utils', () => {
         isTerminalFailure({
           enrichmentStatus: 'pending',
           enrichmentAttempts: 0,
-          enrichmentNextRetryAt: null,
+          enrichmentNextRetryAt: undefined,
         }),
       ).toBe(false)
     })
@@ -54,7 +54,7 @@ describe('enrichment-utils', () => {
         isTerminalFailure({
           enrichmentStatus: 'failed',
           enrichmentAttempts: 3,
-          enrichmentNextRetryAt: null,
+          enrichmentNextRetryAt: undefined,
         }),
       ).toBe(false)
     })
@@ -74,19 +74,9 @@ describe('enrichment-utils', () => {
         isTerminalFailure({
           enrichmentStatus: 'failed',
           enrichmentAttempts: undefined,
-          enrichmentNextRetryAt: null,
+          enrichmentNextRetryAt: undefined,
         }),
       ).toBe(false)
-    })
-
-    it('handles null enrichmentNextRetryAt correctly', () => {
-      expect(
-        isTerminalFailure({
-          enrichmentStatus: 'failed',
-          enrichmentAttempts: 5,
-          enrichmentNextRetryAt: null,
-        }),
-      ).toBe(true)
     })
 
     it('handles undefined enrichmentNextRetryAt correctly', () => {
