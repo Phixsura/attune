@@ -104,6 +104,7 @@ var auditEmittedActions = []string{
 	"api_key.rotate",
 	"api_key.create",
 	"api_key.revoke",
+	"retry_enrichment",
 }
 
 // TestAuditedRouteActionsAreRegistered asserts every emitted audit action is
@@ -165,6 +166,7 @@ func expectedMutatingRouteCoverage() map[string]string {
 		"POST /feedback/{id}/tags":                           "exempt: per-feedback tagging flow, not unified control-plane audit",
 		"DELETE /feedback/{id}/tags/{tag_id}":                "exempt: per-feedback tagging flow, not unified control-plane audit",
 		"POST /feedback/{id}/transition":                     "exempt: per-feedback workflow audit path, not unified control-plane audit",
+		"POST /feedback/{id}/retry-enrichment":               "audited: retry_enrichment",
 		"PUT /enrich-config/":                                "audited: enrich_config.update",
 		"POST /enrich-config/versions/{version_id}:activate": "audited: enrich_config.activate_version",
 		"POST /enrich-config/eval-suggestions:analyze":       "exempt: explicit LLM eval analysis, no persisted config mutation",

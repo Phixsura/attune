@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Terminal enrichment failure visibility (#81).** Operators can now filter and
+  manually retry feedback rows that have exhausted the enrichment retry budget
+  (5 attempts). Includes:
+  - New `enrichment_status` and `terminal_failed_only` query filters on
+    `GET /fb/v1/console/feedback`
+  - `enrichment_attempts` and `enrichment_next_retry_at` metadata on list/detail
+    responses
+  - `POST /fb/v1/console/feedback/{id}/retry-enrichment` endpoint to reset a
+    terminal-failed row for re-enrichment (409 if row is not in failed status)
+  - `retry_enrichment` audit action
+  - Console: terminal failure count in stats panel with red visual tone
+  - Console: "终态失败" queue mode filter and header summary pill
+  - Console: red left border on terminal failure rows in list view
+  - Console: visual retry progress indicator (5 dots showing attempts/max)
+  - Console: error message block with copy-to-clipboard button
+  - Console: batch delete dialog for permanent removal of terminal failures
+
 - **MCP (Model Context Protocol) server with OAuth 2.1 (#93).** Adds a
   full MCP server implementation enabling AI agents to interact with
   attune feedback data. Includes:
@@ -199,6 +216,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   rather than any partial enrichment artifact, and runtime-remediation links are
   only surfaced when the current queue truly looks like a configuration/runtime
   problem instead of appearing on every lane that merely contains a failed row.
+
+- **Code duplication check now excludes test files (#81).** The jscpd duplication
+  gate (< 5%) now excludes `*_test.go`, `testdata/`, and `test/` via a
+  `.jscpd.json` config file. Test fixtures commonly have acceptable duplication
+  (similar setup patterns), and production code alone is at 3.4%. This follows
+  industry practice and focuses the gate on shipping code quality.
 
 ### Security
 

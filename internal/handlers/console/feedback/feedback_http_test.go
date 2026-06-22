@@ -66,6 +66,12 @@ func (f *fakeFeedbackRepo) TopValuesByDim(
 	return f.topValues[dim], nil
 }
 
+func (f *fakeFeedbackRepo) RetryEnrichment(
+	_ context.Context, _ string, _ int64,
+) (*feedbackrepo.RetryResult, error) {
+	return nil, nil
+}
+
 type fakeTenantConfigRepo struct {
 	cfg tenantrepo.EnrichConfig
 }

@@ -8,6 +8,7 @@ import {
   Clock3,
   Inbox,
   Loader2,
+  RotateCcw,
   Search,
   Sparkles,
   Target,
@@ -32,6 +33,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { WorkflowStateBadge } from '@/components/workflow/workflow-state-badge'
+import { useBatchDeleteFeedback } from '@/features/feedback/api/batch-delete'
+import { useBatchRetryEnrichment } from '@/features/feedback/api/batch-retry-enrichment'
 import { useBatchUpdateTags } from '@/features/feedback/api/batch-update-tags'
 import type { FeedbackDetail } from '@/features/feedback/api/get-feedback-detail'
 import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
@@ -42,18 +45,24 @@ import {
   feedbackListInfiniteQuery,
 } from '@/features/feedback/api/list-feedback-infinite'
 import { ClustersCard } from '@/features/feedback/components/clusters-card'
+import { DeleteFeedbackDialog } from '@/features/feedback/components/delete-feedback-dialog'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
 import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
 import { LanguageBadge } from '@/features/feedback/components/language-badge'
+import { RetryEnrichmentDialog } from '@/features/feedback/components/retry-enrichment-dialog'
 import { SelectionActionBar } from '@/features/feedback/components/selection-action-bar'
 import { useRowSelection } from '@/features/feedback/hooks/use-row-selection'
+import {
+  isTerminalFailure,
+  MAX_ENRICHMENT_ATTEMPTS,
+} from '@/features/feedback/lib/enrichment-utils'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Dimension } from '@/proto/attune/v1/common'
 import type { Tag } from '@/proto/attune/v1/tag'
 import type { WorkflowState } from '@/proto/attune/v1/workflow'
 
 type FeedbackSortMode = 'newest' | 'urgent' | 'active'
-type FeedbackQueueMode = 'all' | 'urgent' | 'active' | 'failed' | 'ready'
+type FeedbackQueueMode = 'all' | 'urgent' | 'active' | 'failed' | 'terminal' | 'ready'
 
 type BatchTransitionFeedbackMutation = {
   mutate: (
@@ -88,6 +97,7 @@ export function FeedbackPage({
   const [attrFilters, setAttrFilters] = useState<Record<string, string>>({})
   const [tagFilter, setTagFilter] = useState<string>('')
   const [workflowFilter, setWorkflowFilter] = useState<string>('')
+  const [enrichmentFilter, setEnrichmentFilter] = useState<string>('')
   const [urgentOnly, setUrgentOnly] = useState(false)
   const [qInput, setQInput] = useState('')
   const [sortMode, setSortMode] = useState<FeedbackSortMode>('newest')
@@ -99,14 +109,20 @@ export function FeedbackPage({
     const attrs: AttrFilterEntry[] = Object.entries(attrFilters)
       .filter(([, v]) => v && v !== '__all')
       .map(([dim, value]) => ({ dim, value }))
+    // Enrichment status: independent filter takes precedence, then queue mode
+    const effectiveEnrichmentStatus =
+      enrichmentFilter ||
+      (queueMode === 'failed' || queueMode === 'terminal' ? 'failed' : undefined)
     return {
       attrs,
       q: qDeferred.trim(),
       urgent: urgentOnly ? true : undefined,
       tag: tagFilter || undefined,
       workflowState: workflowFilter || undefined,
+      enrichmentStatus: effectiveEnrichmentStatus || undefined,
+      terminalFailedOnly: queueMode === 'terminal' ? true : undefined,
     }
-  }, [attrFilters, qDeferred, tagFilter, urgentOnly, workflowFilter])
+  }, [attrFilters, qDeferred, tagFilter, urgentOnly, workflowFilter, enrichmentFilter, queueMode])
 
   const list = useInfiniteQuery(feedbackListInfiniteQuery(filters))
   const items = list.data?.pages.flatMap((p) => p.items) ?? []
@@ -115,6 +131,7 @@ export function FeedbackPage({
     Object.values(attrFilters).filter((value) => value && value !== '__all').length +
     (tagFilter ? 1 : 0) +
     (workflowFilter ? 1 : 0) +
+    (enrichmentFilter ? 1 : 0) +
     (urgentOnly ? 1 : 0) +
     (queueMode !== 'all' ? 1 : 0) +
     (qInput.trim() ? 1 : 0)
@@ -140,6 +157,7 @@ export function FeedbackPage({
   const displayedFailedCount = displayedItems.filter(
     (item) => item.enrichmentStatus === 'failed',
   ).length
+  const displayedTerminalCount = displayedItems.filter(isTerminalFailure).length
   const displayedPendingAiCount = displayedItems.filter(
     (item) => item.enrichmentStatus === 'pending' || item.enrichmentStatus === 'enriching',
   ).length
@@ -159,6 +177,14 @@ export function FeedbackPage({
   const { selected, toggle, toggleAll, clear, isAllSelected } = useRowSelection(itemIds)
 
   const batchUpdate = useBatchUpdateTags()
+  const batchRetry = useBatchRetryEnrichment()
+  const batchDelete = useBatchDeleteFeedback()
+  const [retryDialogOpen, setRetryDialogOpen] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+
+  const selectedTerminalFailures = useMemo(() => {
+    return items.filter((i) => selected.has(i.id) && isTerminalFailure(i))
+  }, [items, selected])
 
   const removableTags = useMemo(() => {
     const selectedItems = items.filter((i) => selected.has(i.id))
@@ -210,6 +236,16 @@ export function FeedbackPage({
       })
     }
 
+    if (enrichmentFilter) {
+      chips.push({
+        key: 'enrichment',
+        label: t('feedback.filter.enrichment_status'),
+        value: enrichmentStatusLabel(enrichmentFilter, t),
+        tone: enrichmentFilter === 'failed' ? 'urgent' : 'active',
+        onRemove: () => setEnrichmentFilter(''),
+      })
+    }
+
     if (urgentOnly) {
       chips.push({
         key: 'urgent',
@@ -255,6 +291,7 @@ export function FeedbackPage({
     attrFilters,
     dims,
     displayOf,
+    enrichmentFilter,
     queueMode,
     qInput,
     sortMode,
@@ -304,10 +341,65 @@ export function FeedbackPage({
     )
   }
 
+  const handleBatchRetryEnrichment = () => {
+    if (selectedTerminalFailures.length === 0) {
+      toast.error(t('feedback.batch.no_terminal_failures'))
+      return
+    }
+    setRetryDialogOpen(true)
+  }
+
+  const confirmBatchRetryEnrichment = () => {
+    const ids = selectedTerminalFailures.map((f) => f.id)
+    batchRetry.mutate(ids, {
+      onSuccess: (res) => {
+        setRetryDialogOpen(false)
+        if (res.failed.length === 0) {
+          toast.success(t('feedback.batch.retry_enrichment_success', { count: res.succeeded }))
+        } else if (res.succeeded > 0) {
+          toast.warning(
+            t('feedback.batch.retry_enrichment_partial', {
+              succeeded: res.succeeded,
+              failed: res.failed.length,
+            }),
+          )
+        } else {
+          toast.error(t('feedback.batch.retry_enrichment_failed'))
+        }
+        clear()
+      },
+      onError: (err) => {
+        setRetryDialogOpen(false)
+        toast.error(err instanceof Error ? err.message : t('common.error'))
+      },
+    })
+  }
+
+  const handleBatchDelete = () => {
+    if (selected.size === 0) return
+    setDeleteDialogOpen(true)
+  }
+
+  const confirmBatchDelete = () => {
+    const ids = Array.from(selected)
+    batchDelete.mutate(ids, {
+      onSuccess: (res) => {
+        setDeleteDialogOpen(false)
+        toast.success(t('feedback.batch.delete_success', { count: res.succeeded }))
+        clear()
+      },
+      onError: (err) => {
+        setDeleteDialogOpen(false)
+        toast.error(err instanceof Error ? err.message : t('common.error'))
+      },
+    })
+  }
+
   const clearFilters = () => {
     setAttrFilters({})
     setTagFilter('')
     setWorkflowFilter('')
+    setEnrichmentFilter('')
     setUrgentOnly(false)
     setQueueMode('all')
     setQInput('')
@@ -351,7 +443,7 @@ export function FeedbackPage({
                 />
               </div>
             </div>
-            <div className="mt-4 grid gap-2 rounded-[1.15rem] border border-border/60 bg-background/80 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] sm:grid-cols-2 xl:grid-cols-5">
+            <div className="mt-4 grid gap-2 rounded-[1.15rem] border border-border/60 bg-background/80 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] sm:grid-cols-2 xl:grid-cols-6">
               <FeedbackStat
                 label={t('feedback.summary.visible')}
                 value={String(displayedItems.length)}
@@ -374,6 +466,12 @@ export function FeedbackPage({
                 value={String(displayedFailedCount)}
                 tone={displayedFailedCount > 0 ? 'urgent' : 'default'}
                 hint={t('feedback.queue.failed_hint')}
+              />
+              <FeedbackStat
+                label={t('feedback.queue_mode.terminal')}
+                value={String(displayedTerminalCount)}
+                tone={displayedTerminalCount > 0 ? 'terminal' : 'default'}
+                hint={t('feedback.queue.terminal_hint')}
               />
               <FeedbackStat
                 label={t('feedback.queue.ready')}
@@ -403,6 +501,7 @@ export function FeedbackPage({
                 attrFilters={attrFilters}
                 tagFilter={tagFilter}
                 workflowFilter={workflowFilter}
+                enrichmentFilter={enrichmentFilter}
                 tags={tagList}
                 workflowStates={stateList}
                 urgentOnly={urgentOnly}
@@ -410,6 +509,7 @@ export function FeedbackPage({
                 onAttrChange={(dim, value) => setAttrFilters((m) => ({ ...m, [dim]: value }))}
                 onTagChange={setTagFilter}
                 onWorkflowChange={setWorkflowFilter}
+                onEnrichmentChange={setEnrichmentFilter}
                 onUrgentToggle={() => setUrgentOnly((value) => !value)}
                 onQ={setQInput}
               />
@@ -498,6 +598,7 @@ export function FeedbackPage({
                 visibleCount={displayedItems.length}
                 readyCount={displayedReadyCount}
                 failedCount={displayedFailedCount}
+                terminalCount={displayedTerminalCount}
                 pendingAiCount={displayedPendingAiCount}
                 oldestVisibleAt={oldestVisibleAt}
                 priorityItem={priorityItem}
@@ -526,6 +627,9 @@ export function FeedbackPage({
                           onBatchAdd={handleBatchAdd}
                           onBatchRemove={handleBatchRemove}
                           onBatchTransition={handleBatchTransition}
+                          onBatchDelete={handleBatchDelete}
+                          onBatchRetryEnrichment={handleBatchRetryEnrichment}
+                          terminalFailureCount={selectedTerminalFailures.length}
                           onCancel={clear}
                         />
                       </div>
@@ -551,6 +655,7 @@ export function FeedbackPage({
                         urgentCount={displayedUrgentCount}
                         activeCount={visibleActiveCount}
                         failedCount={displayedFailedCount}
+                        terminalCount={displayedTerminalCount}
                         readyCount={displayedReadyCount}
                         pendingAiCount={displayedPendingAiCount}
                         priorityItem={priorityItem}
@@ -565,6 +670,7 @@ export function FeedbackPage({
                           queueMode,
                           displayedUrgentCount,
                           displayedFailedCount,
+                          displayedTerminalCount,
                           t,
                         )}
                       />
@@ -613,6 +719,7 @@ export function FeedbackPage({
                   urgentCount={displayedUrgentCount}
                   readyCount={displayedReadyCount}
                   failedCount={displayedFailedCount}
+                  terminalCount={displayedTerminalCount}
                   pendingAiCount={displayedPendingAiCount}
                   sourceCount={uniqueSources}
                   oldestVisibleAt={oldestVisibleAt}
@@ -628,6 +735,17 @@ export function FeedbackPage({
             )}
           </CardContent>
         </Card>
+
+        {displayedTerminalCount > 0 && (
+          <TerminalFailuresSummaryCard
+            terminalCount={displayedTerminalCount}
+            failedCount={displayedFailedCount}
+            onViewTerminal={() => setQueueMode('terminal')}
+            onRetryAll={
+              selectedTerminalFailures.length > 0 ? handleBatchRetryEnrichment : undefined
+            }
+          />
+        )}
 
         <details className="group rounded-[0.95rem] border border-border/45 bg-muted/6">
           <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium text-foreground">
@@ -665,6 +783,22 @@ export function FeedbackPage({
         renderWorkflowTransition={renderWorkflowTransition}
         renderAuditLog={renderAuditLog}
       />
+
+      <RetryEnrichmentDialog
+        open={retryDialogOpen}
+        count={selectedTerminalFailures.length}
+        isLoading={batchRetry.isPending}
+        onConfirm={confirmBatchRetryEnrichment}
+        onCancel={() => setRetryDialogOpen(false)}
+      />
+
+      <DeleteFeedbackDialog
+        open={deleteDialogOpen}
+        count={selected.size}
+        isLoading={batchDelete.isPending}
+        onConfirm={confirmBatchDelete}
+        onCancel={() => setDeleteDialogOpen(false)}
+      />
     </div>
   )
 }
@@ -674,6 +808,7 @@ function FilterBar({
   attrFilters,
   tagFilter,
   workflowFilter,
+  enrichmentFilter,
   tags,
   workflowStates,
   urgentOnly,
@@ -681,6 +816,7 @@ function FilterBar({
   onAttrChange,
   onTagChange,
   onWorkflowChange,
+  onEnrichmentChange,
   onUrgentToggle,
   onQ,
 }: {
@@ -688,6 +824,7 @@ function FilterBar({
   attrFilters: Record<string, string>
   tagFilter: string
   workflowFilter: string
+  enrichmentFilter: string
   tags: Tag[]
   workflowStates: WorkflowState[]
   urgentOnly: boolean
@@ -695,6 +832,7 @@ function FilterBar({
   onAttrChange: (dim: string, value: string) => void
   onTagChange: (tagId: string) => void
   onWorkflowChange: (stateId: string) => void
+  onEnrichmentChange: (status: string) => void
   onUrgentToggle: () => void
   onQ: (v: string) => void
 }) {
@@ -797,6 +935,41 @@ function FilterBar({
             </SelectContent>
           </Select>
         )}
+        <Select
+          value={enrichmentFilter || '__all'}
+          onValueChange={(v) => onEnrichmentChange(v === '__all' ? '' : v)}
+        >
+          <SelectTrigger className="h-10 w-full bg-background">
+            <SelectValue placeholder={t('feedback.filter.enrichment_status')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">{t('feedback.filter.all_enrichment')}</SelectItem>
+            <SelectItem value="pending">
+              <span className="flex items-center gap-2">
+                <span className="inline-block size-2 rounded-full bg-slate-400" />
+                {t('feedback.status.pending')}
+              </span>
+            </SelectItem>
+            <SelectItem value="enriching">
+              <span className="flex items-center gap-2">
+                <span className="inline-block size-2 rounded-full bg-blue-500" />
+                {t('feedback.status.enriching')}
+              </span>
+            </SelectItem>
+            <SelectItem value="done">
+              <span className="flex items-center gap-2">
+                <span className="inline-block size-2 rounded-full bg-emerald-500" />
+                {t('feedback.status.done')}
+              </span>
+            </SelectItem>
+            <SelectItem value="failed">
+              <span className="flex items-center gap-2">
+                <span className="inline-block size-2 rounded-full bg-destructive" />
+                {t('feedback.status.failed')}
+              </span>
+            </SelectItem>
+          </SelectContent>
+        </Select>
       </div>
     </div>
   )
@@ -860,7 +1033,8 @@ function FeedbackTable({
             if (Array.isArray(value)) return value.length > 0
             return typeof value === 'string' ? value.length > 0 : value != null
           })
-          const rowTone = toneForFeedbackRow(f.isUrgent, workflowCategory, isSelected)
+          const terminal = isTerminalFailure(f)
+          const rowTone = toneForFeedbackRow(f.isUrgent, workflowCategory, isSelected, terminal)
           return (
             <div
               key={f.id}
@@ -880,9 +1054,9 @@ function FeedbackTable({
               >
                 <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-muted-foreground">
                   <span
-                    className={`inline-flex rounded-full px-1.5 py-0.5 font-medium tracking-[0.04em] ${eyebrowToneForFeedbackRow(f.isUrgent, workflowCategory)}`}
+                    className={`inline-flex rounded-full px-1.5 py-0.5 font-medium tracking-[0.04em] ${eyebrowToneForFeedbackRow(f.isUrgent, workflowCategory, terminal)}`}
                   >
-                    {labelForFeedbackRow(f.isUrgent, workflowCategory, t)}
+                    {labelForFeedbackRow(f.isUrgent, workflowCategory, terminal, t)}
                   </span>
                   <span>#{f.id}</span>
                   <span className="text-muted-foreground/50">/</span>
@@ -930,6 +1104,13 @@ function FeedbackTable({
                       tone={classificationToneForFeedback(f)}
                       label={classificationLabelForFeedback(f, t)}
                     />
+                    {f.enrichmentStatus === 'failed' && (f.enrichmentAttempts ?? 0) > 0 && (
+                      <EnrichmentAttemptsBadge
+                        attempts={f.enrichmentAttempts ?? 0}
+                        isTerminal={isTerminalFailure(f)}
+                        nextRetryAt={f.enrichmentNextRetryAt}
+                      />
+                    )}
                   </div>
                   {filledDims.length > 0 ? (
                     <dl className="grid gap-1.5">
@@ -977,11 +1158,17 @@ function toneForFeedbackRow(
   urgent: boolean | undefined,
   workflowCategory: string,
   isSelected: boolean,
+  isTerminal: boolean,
 ) {
   if (urgent) {
     return isSelected
       ? 'border-red-200/90 bg-[linear-gradient(135deg,rgba(254,242,242,0.98),rgba(255,255,255,0.995))]'
       : 'border-red-200/85 bg-[linear-gradient(135deg,rgba(254,242,242,0.82),rgba(255,255,255,0.995))]'
+  }
+  if (isTerminal) {
+    return isSelected
+      ? 'border-l-4 border-l-destructive border-y-destructive/30 border-r-destructive/30 bg-[linear-gradient(135deg,rgba(254,242,242,0.92),rgba(255,255,255,0.995))]'
+      : 'border-l-4 border-l-destructive/70 border-y-destructive/20 border-r-destructive/20 bg-[linear-gradient(135deg,rgba(254,242,242,0.75),rgba(255,255,255,0.995))]'
   }
   if (workflowCategory === 'active') {
     return isSelected
@@ -998,8 +1185,13 @@ function toneForFeedbackRow(
     : 'border-border/70 bg-[linear-gradient(180deg,rgba(249,250,251,0.96),rgba(255,255,255,0.995))]'
 }
 
-function eyebrowToneForFeedbackRow(urgent: boolean | undefined, workflowCategory: string) {
+function eyebrowToneForFeedbackRow(
+  urgent: boolean | undefined,
+  workflowCategory: string,
+  isTerminal: boolean,
+) {
   if (urgent) return 'bg-red-100 text-red-700'
+  if (isTerminal) return 'bg-destructive/10 text-destructive'
   if (workflowCategory === 'active') return 'bg-amber-100 text-amber-700'
   if (workflowCategory === 'closed') return 'bg-emerald-100 text-emerald-700'
   return 'bg-muted text-muted-foreground'
@@ -1008,9 +1200,11 @@ function eyebrowToneForFeedbackRow(urgent: boolean | undefined, workflowCategory
 function labelForFeedbackRow(
   urgent: boolean | undefined,
   workflowCategory: string,
+  isTerminal: boolean,
   t: (key: string) => string,
 ) {
   if (urgent) return t('feedback.row.priority.urgent')
+  if (isTerminal) return t('feedback.row.priority.terminal')
   if (workflowCategory === 'active') return t('feedback.row.priority.active')
   if (workflowCategory === 'closed') return t('feedback.row.priority.closed')
   return t('feedback.row.priority.new')
@@ -1076,15 +1270,17 @@ function FeedbackStat({
 }: {
   label: string
   value: string
-  tone?: 'default' | 'urgent' | 'active'
+  tone?: 'default' | 'urgent' | 'active' | 'terminal'
   hint?: string
 }) {
   const toneClass =
-    tone === 'urgent'
-      ? 'border-amber-300/55 bg-amber-50/85 text-amber-900'
-      : tone === 'active'
-        ? 'border-emerald-300/55 bg-emerald-50/85 text-emerald-900'
-        : 'border-border/60 bg-background/88 text-foreground'
+    tone === 'terminal'
+      ? 'border-red-300/55 bg-red-50/85 text-red-900'
+      : tone === 'urgent'
+        ? 'border-amber-300/55 bg-amber-50/85 text-amber-900'
+        : tone === 'active'
+          ? 'border-emerald-300/55 bg-emerald-50/85 text-emerald-900'
+          : 'border-border/60 bg-background/88 text-foreground'
   return (
     <div
       className={`rounded-[1.15rem] border px-4 py-3.5 shadow-[0_18px_38px_-34px_rgba(15,23,42,0.24)] ${toneClass}`}
@@ -1229,6 +1425,7 @@ function QueueHeaderSummaryStrip({
   visibleCount,
   readyCount,
   failedCount,
+  terminalCount,
   pendingAiCount,
   oldestVisibleAt,
   priorityItem,
@@ -1237,6 +1434,7 @@ function QueueHeaderSummaryStrip({
   visibleCount: number
   readyCount: number
   failedCount: number
+  terminalCount: number
   pendingAiCount: number
   oldestVisibleAt: string | null
   priorityItem: Feedback | null
@@ -1244,21 +1442,35 @@ function QueueHeaderSummaryStrip({
   const { t } = useTranslation()
 
   const aiSummary =
-    failedCount > 0
-      ? { label: t('feedback.queue.failed'), value: String(failedCount), tone: 'danger' as const }
-      : readyCount > 0
-        ? { label: t('feedback.queue.ready'), value: String(readyCount), tone: 'success' as const }
-        : pendingAiCount > 0
+    terminalCount > 0
+      ? {
+          label: t('feedback.queue_mode.terminal'),
+          value: String(terminalCount),
+          tone: 'danger' as const,
+        }
+      : failedCount > 0
+        ? {
+            label: t('feedback.queue.failed'),
+            value: String(failedCount),
+            tone: 'danger' as const,
+          }
+        : readyCount > 0
           ? {
-              label: t('feedback.queue.pending'),
-              value: String(pendingAiCount),
-              tone: 'warning' as const,
+              label: t('feedback.queue.ready'),
+              value: String(readyCount),
+              tone: 'success' as const,
             }
-          : {
-              label: t('feedback.queue.visible'),
-              value: String(visibleCount),
-              tone: 'default' as const,
-            }
+          : pendingAiCount > 0
+            ? {
+                label: t('feedback.queue.pending'),
+                value: String(pendingAiCount),
+                tone: 'warning' as const,
+              }
+            : {
+                label: t('feedback.queue.visible'),
+                value: String(visibleCount),
+                tone: 'default' as const,
+              }
 
   return (
     <div className="flex flex-wrap items-center gap-2.5">
@@ -1282,9 +1494,15 @@ function QueueHeaderSummaryStrip({
       />
       <HeaderSummaryPill
         eyebrow={t('feedback.queue.actions.title')}
-        title={priorityItem ? `优先处理 #${priorityItem.id}` : '优先处理'}
+        title={
+          priorityItem
+            ? t('feedback.queue.priority_action_with_id', { id: priorityItem.id })
+            : t('feedback.queue.priority_action')
+        }
         body={
-          priorityItem ? `反馈编号 #${priorityItem.id}` : t('feedback.focus_items.selection_idle')
+          priorityItem
+            ? t('feedback.queue.feedback_id', { id: priorityItem.id })
+            : t('feedback.focus_items.selection_idle')
         }
       />
     </div>
@@ -1296,6 +1514,7 @@ function QueueModeBar({
   urgentCount,
   activeCount,
   failedCount,
+  terminalCount,
   readyCount,
   selectedCount,
   isAllSelected,
@@ -1307,6 +1526,7 @@ function QueueModeBar({
   urgentCount: number
   activeCount: number
   failedCount: number
+  terminalCount: number
   readyCount: number
   selectedCount: number
   isAllSelected: boolean
@@ -1373,30 +1593,42 @@ function QueueModeBar({
       <div className="flex flex-wrap items-center gap-2">
         <QueueModeChip
           active={mode === 'all'}
+          mode="all"
           label={t('feedback.queue_mode.all')}
           count={null}
           onClick={() => onChange('all')}
         />
         <QueueModeChip
           active={mode === 'urgent'}
+          mode="urgent"
           label={t('feedback.queue_mode.urgent')}
           count={urgentCount}
           onClick={() => onChange('urgent')}
         />
         <QueueModeChip
           active={mode === 'active'}
+          mode="active"
           label={t('feedback.queue_mode.active')}
           count={activeCount}
           onClick={() => onChange('active')}
         />
         <QueueModeChip
           active={mode === 'failed'}
+          mode="failed"
           label={t('feedback.queue_mode.failed')}
           count={failedCount}
           onClick={() => onChange('failed')}
         />
         <QueueModeChip
+          active={mode === 'terminal'}
+          mode="terminal"
+          label={t('feedback.queue_mode.terminal')}
+          count={terminalCount}
+          onClick={() => onChange('terminal')}
+        />
+        <QueueModeChip
           active={mode === 'ready'}
+          mode="ready"
           label={t('feedback.queue_mode.ready')}
           count={readyCount}
           onClick={() => onChange('ready')}
@@ -1411,6 +1643,7 @@ function QueueActionStrip({
   visibleCount,
   urgentCount,
   failedCount,
+  terminalCount,
   readyCount,
   pendingAiCount,
   priorityItem,
@@ -1423,6 +1656,7 @@ function QueueActionStrip({
   visibleCount: number
   urgentCount: number
   failedCount: number
+  terminalCount: number
   readyCount: number
   pendingAiCount: number
   priorityItem: Feedback | null
@@ -1432,7 +1666,13 @@ function QueueActionStrip({
   variant?: 'card' | 'embedded'
 }) {
   const { t } = useTranslation()
-  const primaryActionLabel = queuePrimaryActionLabel(queueMode, urgentCount, failedCount, t)
+  const primaryActionLabel = queuePrimaryActionLabel(
+    queueMode,
+    urgentCount,
+    failedCount,
+    terminalCount,
+    t,
+  )
   const shouldShowConfigLink = shouldSurfaceRuntimeLink(
     queueMode,
     visibleCount,
@@ -1507,26 +1747,28 @@ function QueueActionStrip({
 
 function QueueModeChip({
   active,
+  mode,
   label,
   count,
   onClick,
 }: {
   active: boolean
+  mode: FeedbackQueueMode
   label: string
   count: null | number
   onClick: () => void
 }) {
+  const toneStyles: Record<FeedbackQueueMode, string> = {
+    all: 'border-border/70 bg-background text-muted-foreground hover:bg-muted/25',
+    urgent: 'border-red-200/80 bg-red-50/45 text-red-700 hover:bg-red-50/70',
+    active: 'border-sky-200/80 bg-sky-50/55 text-sky-700 hover:bg-sky-50/80',
+    failed: 'border-amber-200/80 bg-amber-50/55 text-amber-700 hover:bg-amber-50/80',
+    terminal: 'border-red-300/80 bg-red-50/55 text-red-800 hover:bg-red-50/80',
+    ready: 'border-emerald-200/80 bg-emerald-50/55 text-emerald-700 hover:bg-emerald-50/80',
+  }
   const toneClass = active
     ? 'border-transparent shadow-[0_16px_32px_-24px_rgba(15,23,42,0.45)]'
-    : label.includes('紧急')
-      ? 'border-red-200/80 bg-red-50/45 text-red-700 hover:bg-red-50/70'
-      : label.includes('富化失败')
-        ? 'border-amber-200/80 bg-amber-50/55 text-amber-700 hover:bg-amber-50/80'
-        : label.includes('处理中')
-          ? 'border-sky-200/80 bg-sky-50/55 text-sky-700 hover:bg-sky-50/80'
-          : label.includes('AI 已就绪')
-            ? 'border-emerald-200/80 bg-emerald-50/55 text-emerald-700 hover:bg-emerald-50/80'
-            : 'border-border/70 bg-background text-muted-foreground hover:bg-muted/25'
+    : toneStyles[mode]
   return (
     <Button
       type="button"
@@ -1648,6 +1890,7 @@ function QueueOperatorDeck({
   urgentCount,
   activeCount,
   failedCount,
+  terminalCount,
   readyCount,
   pendingAiCount,
   priorityItem,
@@ -1667,6 +1910,7 @@ function QueueOperatorDeck({
   urgentCount: number
   activeCount: number
   failedCount: number
+  terminalCount: number
   readyCount: number
   pendingAiCount: number
   priorityItem: Feedback | null
@@ -1695,6 +1939,7 @@ function QueueOperatorDeck({
             visibleCount={visibleCount}
             urgentCount={urgentCount}
             failedCount={failedCount}
+            terminalCount={terminalCount}
             readyCount={readyCount}
             pendingAiCount={pendingAiCount}
             priorityItem={priorityItem}
@@ -1711,6 +1956,7 @@ function QueueOperatorDeck({
           urgentCount={urgentCount}
           activeCount={activeCount}
           failedCount={failedCount}
+          terminalCount={terminalCount}
           readyCount={readyCount}
           selectedCount={selectedCount}
           isAllSelected={isAllSelected}
@@ -1732,6 +1978,7 @@ function QueueRail({
   urgentCount,
   readyCount,
   failedCount,
+  terminalCount,
   pendingAiCount,
   sourceCount,
   oldestVisibleAt,
@@ -1744,12 +1991,19 @@ function QueueRail({
   urgentCount: number
   readyCount: number
   failedCount: number
+  terminalCount: number
   pendingAiCount: number
   sourceCount: number
   oldestVisibleAt: string | null
 }) {
   const { t } = useTranslation()
-  const primaryActionLabel = queuePrimaryActionLabel(queueMode, urgentCount, failedCount, t)
+  const primaryActionLabel = queuePrimaryActionLabel(
+    queueMode,
+    urgentCount,
+    failedCount,
+    terminalCount,
+    t,
+  )
   const railMetrics = buildQueueMetricItems({
     queueMode,
     visibleCount,
@@ -2469,21 +2723,33 @@ function queueModeLabel(mode: FeedbackQueueMode, t: (key: string) => string) {
   if (mode === 'urgent') return t('feedback.queue_mode.urgent')
   if (mode === 'active') return t('feedback.queue_mode.active')
   if (mode === 'failed') return t('feedback.queue_mode.failed')
+  if (mode === 'terminal') return t('feedback.queue_mode.terminal')
   if (mode === 'ready') return t('feedback.queue_mode.ready')
   return t('feedback.queue_mode.all')
+}
+
+function enrichmentStatusLabel(status: string, t: (key: string) => string) {
+  if (status === 'pending') return t('feedback.status.pending')
+  if (status === 'enriching') return t('feedback.status.enriching')
+  if (status === 'done') return t('feedback.status.done')
+  if (status === 'failed') return t('feedback.status.failed')
+  return status
 }
 
 function queuePrimaryActionLabel(
   queueMode: FeedbackQueueMode,
   urgentCount: number,
   failedCount: number,
+  terminalCount: number,
   t: (key: string) => string,
 ) {
   if (queueMode === 'urgent') return t('feedback.queue.actions.open_urgent')
   if (queueMode === 'active') return t('feedback.queue.actions.open_active')
   if (queueMode === 'failed') return t('feedback.queue.actions.open_failed')
+  if (queueMode === 'terminal') return t('feedback.queue.actions.open_terminal')
   if (queueMode === 'ready') return t('feedback.queue.actions.open_ready')
   if (urgentCount > 0) return t('feedback.queue.actions.open_urgent')
+  if (terminalCount > 0) return t('feedback.queue.actions.open_terminal')
   if (failedCount > 0) return t('feedback.queue.actions.open_failed')
   return t('feedback.queue.actions.open_priority')
 }
@@ -2616,7 +2882,10 @@ function sortFeedbackItems(items: Feedback[], mode: FeedbackSortMode) {
 function filterFeedbackItemsByQueueMode(items: Feedback[], mode: FeedbackQueueMode) {
   if (mode === 'urgent') return items.filter((item) => item.isUrgent)
   if (mode === 'active') return items.filter((item) => item.workflowState?.category === 'active')
+  // 'failed' and 'terminal' are filtered server-side via enrichment_status + terminal_failed_only
+  // but we still do client-side filtering for any residual items
   if (mode === 'failed') return items.filter((item) => item.enrichmentStatus === 'failed')
+  if (mode === 'terminal') return items.filter(isTerminalFailure)
   if (mode === 'ready') {
     return items.filter(isFeedbackReadyForTriage)
   }
@@ -2643,4 +2912,111 @@ function compareFeedbackByMode(a: Feedback, b: Feedback, mode: FeedbackSortMode)
   }
 
   return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+}
+
+function EnrichmentAttemptsBadge({
+  attempts,
+  isTerminal,
+  nextRetryAt,
+  errorPreview,
+}: {
+  attempts: number
+  isTerminal: boolean
+  nextRetryAt?: string | null
+  errorPreview?: string | null
+}) {
+  const { t } = useTranslation()
+  const nextRetryText = nextRetryAt
+    ? formatDistanceToNow(new Date(nextRetryAt), { addSuffix: true, locale: zhCN })
+    : null
+  const titleParts = [
+    isTerminal
+      ? t('feedback.row.terminal_attempts_hint', { count: attempts })
+      : t('feedback.row.retry_attempts_hint', { count: attempts }),
+  ]
+  if (nextRetryText && !isTerminal) {
+    titleParts.push(t('feedback.row.next_retry_hint', { time: nextRetryText }))
+  }
+  if (errorPreview) {
+    titleParts.push(errorPreview.slice(0, 100) + (errorPreview.length > 100 ? '...' : ''))
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+        isTerminal
+          ? 'bg-destructive/10 text-destructive'
+          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+      }`}
+      title={titleParts.join('\n')}
+    >
+      <AlertCircle className="size-2.5" />
+      {attempts}/{MAX_ENRICHMENT_ATTEMPTS}
+      {nextRetryText && !isTerminal && (
+        <span className="ml-0.5 text-[9px] opacity-75">
+          <Clock3 className="inline size-2" /> {nextRetryText}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function TerminalFailuresSummaryCard({
+  terminalCount,
+  failedCount,
+  onViewTerminal,
+  onRetryAll,
+}: {
+  terminalCount: number
+  failedCount: number
+  onViewTerminal: () => void
+  onRetryAll?: () => void
+}) {
+  const { t } = useTranslation()
+  const retryingCount = failedCount - terminalCount
+
+  return (
+    <Card className="rounded-[1rem] border-destructive/25 bg-[linear-gradient(135deg,rgba(254,242,242,0.6),rgba(255,255,255,0.98))] py-0 shadow-[0_20px_48px_-42px_rgba(185,28,28,0.25)]">
+      <CardContent className="px-5 py-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-destructive/20 bg-background/90 text-destructive">
+              <AlertCircle className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-foreground">
+                {t('feedback.terminal_summary.title')}
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                {t('feedback.terminal_summary.description', { count: terminalCount })}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-destructive/20 bg-destructive/5 px-2.5 py-1 text-xs font-medium text-destructive">
+                  <AlertCircle className="size-3" />
+                  {t('feedback.terminal_summary.terminal_count', { count: terminalCount })}
+                </span>
+                {retryingCount > 0 && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+                    <Clock3 className="size-3" />
+                    {t('feedback.terminal_summary.retrying_count', { count: retryingCount })}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" onClick={onViewTerminal}>
+              <Target className="size-3.5" />
+              {t('feedback.terminal_summary.view_action')}
+            </Button>
+            {onRetryAll && (
+              <Button type="button" size="sm" variant="outline" onClick={onRetryAll}>
+                <RotateCcw className="size-3.5" />
+                {t('feedback.terminal_summary.retry_action')}
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
 }

@@ -56,6 +56,8 @@ func (h *FeedbackHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 		EnrichedDisplayRationale: nullableString(row.EnrichedDisplayRationale),
 		ReplyDraft:               nullableString(row.ReplyDraft),
 		ReplyDraftEnabled:        row.ReplyDraftEnabled,
+		EnrichmentAttempts:       f.EnrichmentAttempts,
+		EnrichmentNextRetryAt:    f.EnrichmentNextRetryAt,
 	})
 	if len(row.SourceMeta) > 0 {
 		var m map[string]any

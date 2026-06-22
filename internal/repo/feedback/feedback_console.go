@@ -33,14 +33,16 @@ type AttrFilter struct {
 // ConsoleListOpts is the filter set the console UI sends. Each field
 // is optional; empty means no filter. Limit is bounded by the handler.
 type ConsoleListOpts struct {
-	Attrs            []AttrFilter // per-dim filters, AND-composed via JSONB containment
-	Urgent           *bool        // nil = no filter; true = is_urgent only; false = not urgent only
-	Q                string       // ILIKE on content + native/display titles
-	Cursor           int64        // last id seen; 0 = first page
-	Limit            int
-	TagID            *string // UUID string; nil = no filter
-	WorkflowStateID  *string // UUID string; nil = no filter
-	WorkflowCategory *string // "open"/"active"/"closed"; nil = no filter
+	Attrs              []AttrFilter // per-dim filters, AND-composed via JSONB containment
+	Urgent             *bool        // nil = no filter; true = is_urgent only; false = not urgent only
+	Q                  string       // ILIKE on content + native/display titles
+	Cursor             int64        // last id seen; 0 = first page
+	Limit              int
+	TagID              *string // UUID string; nil = no filter
+	WorkflowStateID    *string // UUID string; nil = no filter
+	WorkflowCategory   *string // "open"/"active"/"closed"; nil = no filter
+	EnrichmentStatus   *string // "pending" | "enriching" | "done" | "failed"; nil = no filter
+	TerminalFailedOnly *bool   // true = failed AND attempts >= maxEnrichmentAttempts AND next_retry_at IS NULL
 }
 
 // ConsoleListRow is the projection sent to the console list view.
@@ -63,6 +65,8 @@ type ConsoleListRow struct {
 	EnrichmentStatus         string
 	CreatedAt                time.Time
 	WorkflowStateID          *string
+	EnrichmentAttempts       int        // 0-5; number of enrichment attempts made
+	EnrichmentNextRetryAt    *time.Time // nil if terminal or not failed
 }
 
 type queryBuilder struct {
@@ -113,6 +117,14 @@ func (qb *queryBuilder) applyFilters(opts ConsoleListOpts) error {
 	if opts.WorkflowCategory != nil {
 		qb.and("workflow_state_id IN (SELECT id FROM tenant_workflow_states WHERE tenant_id = $1 AND category = " + qb.addArg(ptrext.Indirect(opts.WorkflowCategory)) + ")")
 	}
+	if opts.EnrichmentStatus != nil {
+		qb.and("enrichment_status = " + qb.addArg(ptrext.Indirect(opts.EnrichmentStatus)))
+	}
+	if opts.TerminalFailedOnly != nil && ptrext.Indirect(opts.TerminalFailedOnly) {
+		qb.and("enrichment_status = 'failed'")
+		qb.and("enrichment_attempts >= " + qb.addArg(maxEnrichmentAttempts))
+		qb.and("enrichment_next_retry_at IS NULL")
+	}
 	return nil
 }
 
@@ -139,7 +151,9 @@ func (r *FeedbackRepo) ListForConsole(
 		 classification_confidence,
 		 enrichment_status,
 		 created_at,
-		 workflow_state_id
+		 workflow_state_id,
+		 enrichment_attempts,
+		 enrichment_next_retry_at
 		 FROM user_feedback
 		 ` + qb.where + `
 		 ORDER BY id DESC
@@ -156,19 +170,25 @@ func (r *FeedbackRepo) ListForConsole(
 	for rows.Next() {
 		var row ConsoleListRow
 		var confidence sql.NullFloat64
-		var wsID sql.NullString // ptrext:allow scan-target
+		var wsID sql.NullString    // ptrext:allow scan-target
+		var nextRetry sql.NullTime // ptrext:allow scan-target
 		if err := rows.Scan(
 			&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.Language, &row.PageURL, // ptrext:allow scan-target
 			&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale, // ptrext:allow scan-target
 			&row.EnrichedAttrs, &row.IsUrgent, &confidence, // ptrext:allow scan-target
 			&row.EnrichmentStatus, &row.CreatedAt, // ptrext:allow scan-target
-			&wsID, // ptrext:allow scan-target
+			&wsID,                   // ptrext:allow scan-target
+			&row.EnrichmentAttempts, // ptrext:allow scan-target
+			&nextRetry,              // ptrext:allow scan-target
 		); err != nil {
 			return nil, fmt.Errorf("scan feedback row: %w", err)
 		}
 		row.ClassificationConfidence = nullFloatPtr(confidence)
 		if wsID.Valid {
 			row.WorkflowStateID = ptrext.Of(wsID.String)
+		}
+		if nextRetry.Valid {
+			row.EnrichmentNextRetryAt = ptrext.Of(nextRetry.Time)
 		}
 		out = append(out, row)
 	}
@@ -212,7 +232,8 @@ func (r *FeedbackRepo) GetForConsole(
 ) (*ConsoleDetailRow, error) {
 	var row ConsoleDetailRow
 	var confidence sql.NullFloat64
-	var wsID sql.NullString // ptrext:allow scan-target
+	var wsID sql.NullString    // ptrext:allow scan-target
+	var nextRetry sql.NullTime // ptrext:allow scan-target
 	err := r.pool.QueryRow(
 		ctx, `
 			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
@@ -231,7 +252,9 @@ func (r *FeedbackRepo) GetForConsole(
 		 COALESCE(reply_draft, ''),
 		 reply_draft_generated_at,
 		 COALESCE((SELECT reply_draft_enabled FROM tenants WHERE id = $2), FALSE),
-		 workflow_state_id
+		 workflow_state_id,
+		 enrichment_attempts,
+		 enrichment_next_retry_at
 		 FROM user_feedback
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
@@ -244,7 +267,9 @@ func (r *FeedbackRepo) GetForConsole(
 		&row.EnrichmentError, &row.EnrichedAt, // ptrext:allow scan-target
 		&row.EnrichedRationale, &row.EnrichedDisplayRationale, // ptrext:allow scan-target
 		&row.ReplyDraft, &row.ReplyDraftGeneratedAt, &row.ReplyDraftEnabled, // ptrext:allow scan-target
-		&wsID, // ptrext:allow scan-target
+		&wsID,                   // ptrext:allow scan-target
+		&row.EnrichmentAttempts, // ptrext:allow scan-target
+		&nextRetry,              // ptrext:allow scan-target
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrFeedbackNotFound
@@ -258,6 +283,9 @@ func (r *FeedbackRepo) GetForConsole(
 	row.ClassificationConfidence = nullFloatPtr(confidence)
 	if wsID.Valid {
 		row.WorkflowStateID = ptrext.Of(wsID.String)
+	}
+	if nextRetry.Valid {
+		row.EnrichmentNextRetryAt = ptrext.Of(nextRetry.Time)
 	}
 	return ptrext.Of(row), nil
 }

@@ -1,4 +1,4 @@
-import { ArrowRight, Loader2, Tags, Trash2, X } from 'lucide-react'
+import { ArrowRight, Loader2, RefreshCw, Tags, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { TagCombobox } from '@/components/tag/tag-combobox'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,8 @@ export function SelectionActionBar({
   onBatchRemove,
   onBatchTransition,
   onBatchDelete,
+  onBatchRetryEnrichment,
+  terminalFailureCount,
   onCancel,
   isLoading,
   loadingMessage,
@@ -36,6 +38,8 @@ export function SelectionActionBar({
   onBatchRemove: (tagId: string) => void
   onBatchTransition?: (toStateId: string) => void
   onBatchDelete?: () => void
+  onBatchRetryEnrichment?: () => void
+  terminalFailureCount?: number
   onCancel: () => void
   isLoading?: boolean
   loadingMessage?: string
@@ -125,6 +129,24 @@ export function SelectionActionBar({
           </SelectContent>
         </Select>
       ) : null}
+
+      {/* Retry enrichment button */}
+      {onBatchRetryEnrichment && (terminalFailureCount ?? 0) > 0 && (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-7 gap-1.5 text-xs"
+          onClick={onBatchRetryEnrichment}
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          {t('feedback.batch.retry_enrichment')}
+          {terminalFailureCount !== count && (
+            <span className="rounded-full bg-background/30 px-1.5 py-0.5 text-[10px]">
+              {terminalFailureCount}
+            </span>
+          )}
+        </Button>
+      )}
 
       {/* Delete button */}
       {onBatchDelete && (

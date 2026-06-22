@@ -1430,6 +1430,18 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: enrichmentStatus
+                  in: query
+                  description: 'Filter by enrichment status: "pending" | "enriching" | "done" | "failed"'
+                  schema:
+                    type: string
+                - name: terminalFailedOnly
+                  in: query
+                  description: |-
+                    If true, only return rows where enrichment_status='failed' AND
+                     enrichment_attempts >= maxEnrichmentAttempts AND enrichment_next_retry_at IS NULL.
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     description: OK
@@ -1730,6 +1742,39 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/RegenerateReplyDraftResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/feedback/{id}/retry-enrichment:
+        post:
+            tags:
+                - FeedbackService
+            description: |-
+                POST /fb/v1/console/feedback/{id}/retry-enrichment (console; session auth)
+                 Resets a terminal-failed row so it can be re-enriched.
+            operationId: FeedbackService_RetryEnrichment
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RetryEnrichmentRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RetryEnrichmentResponse'
                 default:
                     description: Default error response
                     content:
@@ -5468,6 +5513,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/WorkflowState'
+                enrichmentAttempts:
+                    type: integer
+                    description: Number of enrichment attempts made (0 = never attempted, max 5)
+                    format: int32
+                enrichmentNextRetryAt:
+                    type: string
+                    description: RFC3339 timestamp of next scheduled retry; absent if terminal or not failed
             description: |-
                 Feedback is a console feedback list row. Post-E3 (metadata-driven
                  Dimensions): the per-row classification lives in `enriched_attrs`, a
@@ -5542,6 +5594,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/WorkflowState'
+                enrichmentAttempts:
+                    type: integer
+                    description: Number of enrichment attempts made (0 = never attempted, max 5)
+                    format: int32
+                enrichmentNextRetryAt:
+                    type: string
+                    description: RFC3339 timestamp of next scheduled retry; absent if terminal or not failed
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         FeedbackFilter:
             type: object
@@ -6931,6 +6990,24 @@ components:
             properties:
                 delivery:
                     $ref: '#/components/schemas/OutboxDelivery'
+        RetryEnrichmentRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+            description: RetryEnrichmentRequest resets a terminal-failed row for re-enrichment (#81).
+        RetryEnrichmentResponse:
+            type: object
+            properties:
+                id:
+                    type: string
+                enrichmentStatus:
+                    type: string
+                enrichmentAttempts:
+                    type: integer
+                    format: int32
+                enrichmentNextRetryAt:
+                    type: string
         ReviewApprovalRequest:
             type: object
             properties:

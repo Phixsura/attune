@@ -500,3 +500,283 @@ func TestPG_UrgentCount(t *testing.T) {
 		t.Errorf("urgent count: got %d, want 1", n)
 	}
 }
+
+// TestPG_ListForConsole_EnrichmentStatusFilter verifies filtering by enrichment_status.
+func TestPG_ListForConsole_EnrichmentStatusFilter(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, pendingID := seedTenantAndRow(t, pool, "pending row")
+	repo := feedback.NewFeedback(pool)
+	ctx := context.Background()
+
+	// Create a done row
+	var doneID int64
+	_ = pool.QueryRow(ctx, `
+		INSERT INTO user_feedback (tenant_id, user_id, source, content, enrichment_status)
+		VALUES ($1, 'u1', 'api', 'done row', 'done')
+		RETURNING id`, tenantID).Scan(&doneID)
+
+	// Create a failed row (not terminal - has future retry)
+	var failedID int64
+	_ = pool.QueryRow(ctx, `
+		INSERT INTO user_feedback (tenant_id, user_id, source, content, enrichment_status, enrichment_attempts, enrichment_next_retry_at)
+		VALUES ($1, 'u1', 'api', 'failed row', 'failed', 2, NOW() + INTERVAL '1 minute')
+		RETURNING id`, tenantID).Scan(&failedID)
+
+	// Filter by pending
+	rows, err := repo.ListForConsole(ctx, tenantID, feedback.ConsoleListOpts{
+		EnrichmentStatus: ptrext.Of("pending"),
+		Limit:            10,
+	})
+	if err != nil {
+		t.Fatalf("ListForConsole(pending): %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != pendingID {
+		t.Errorf("pending filter: got %d rows, want 1 with id=%d", len(rows), pendingID)
+	}
+
+	// Filter by done
+	rows, err = repo.ListForConsole(ctx, tenantID, feedback.ConsoleListOpts{
+		EnrichmentStatus: ptrext.Of("done"),
+		Limit:            10,
+	})
+	if err != nil {
+		t.Fatalf("ListForConsole(done): %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != doneID {
+		t.Errorf("done filter: got %d rows, want 1 with id=%d", len(rows), doneID)
+	}
+
+	// Filter by failed
+	rows, err = repo.ListForConsole(ctx, tenantID, feedback.ConsoleListOpts{
+		EnrichmentStatus: ptrext.Of("failed"),
+		Limit:            10,
+	})
+	if err != nil {
+		t.Fatalf("ListForConsole(failed): %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != failedID {
+		t.Errorf("failed filter: got %d rows, want 1 with id=%d", len(rows), failedID)
+	}
+}
+
+// TestPG_ListForConsole_TerminalFailedOnlyFilter verifies the terminal_failed_only filter.
+func TestPG_ListForConsole_TerminalFailedOnlyFilter(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, _ := seedTenantAndRow(t, pool, "ignore pending")
+	ctx := context.Background()
+	repo := feedback.NewFeedback(pool)
+
+	// Create a failed row with retry scheduled (NOT terminal)
+	var retriableID int64
+	_ = pool.QueryRow(ctx, `
+		INSERT INTO user_feedback (tenant_id, user_id, source, content, enrichment_status, enrichment_attempts, enrichment_next_retry_at)
+		VALUES ($1, 'u1', 'api', 'retriable', 'failed', 3, NOW() + INTERVAL '1 minute')
+		RETURNING id`, tenantID).Scan(&retriableID)
+
+	// Create a terminal failed row (attempts >= 5, no next retry)
+	var terminalID int64
+	_ = pool.QueryRow(ctx, `
+		INSERT INTO user_feedback (tenant_id, user_id, source, content, enrichment_status, enrichment_attempts, enrichment_next_retry_at, enrichment_error)
+		VALUES ($1, 'u1', 'api', 'terminal', 'failed', 5, NULL, 'provider timeout')
+		RETURNING id`, tenantID).Scan(&terminalID)
+
+	// terminal_failed_only should return only the terminal row
+	rows, err := repo.ListForConsole(ctx, tenantID, feedback.ConsoleListOpts{
+		TerminalFailedOnly: ptrext.Of(true),
+		Limit:              10,
+	})
+	if err != nil {
+		t.Fatalf("ListForConsole(terminal_failed_only): %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("terminal_failed_only: got %d rows, want 1", len(rows))
+	}
+	if rows[0].ID != terminalID {
+		t.Errorf("terminal_failed_only: got id=%d, want %d", rows[0].ID, terminalID)
+	}
+
+	// Verify the terminal row has correct metadata
+	if rows[0].EnrichmentAttempts != 5 {
+		t.Errorf("attempts: got %d, want 5", rows[0].EnrichmentAttempts)
+	}
+	if rows[0].EnrichmentNextRetryAt != nil {
+		t.Errorf("next_retry_at should be nil for terminal row, got %v", rows[0].EnrichmentNextRetryAt)
+	}
+
+	// Combining enrichment_status=failed with terminal_failed_only=true should work
+	rows, err = repo.ListForConsole(ctx, tenantID, feedback.ConsoleListOpts{
+		EnrichmentStatus:   ptrext.Of("failed"),
+		TerminalFailedOnly: ptrext.Of(true),
+		Limit:              10,
+	})
+	if err != nil {
+		t.Fatalf("ListForConsole(failed+terminal): %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != terminalID {
+		t.Errorf("failed+terminal filter: got %d rows", len(rows))
+	}
+}
+
+// TestPG_ConsoleDetailRow_EnrichmentMetadata verifies enrichment_attempts and
+// enrichment_next_retry_at are exposed in the detail view.
+func TestPG_ConsoleDetailRow_EnrichmentMetadata(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, id := seedTenantAndRow(t, pool, "detail test")
+	ctx := context.Background()
+	repo := feedback.NewFeedback(pool)
+
+	// Set up a failed row with retry metadata
+	_, err := pool.Exec(ctx, `
+		UPDATE user_feedback
+		SET enrichment_status = 'failed',
+		    enrichment_attempts = 3,
+		    enrichment_next_retry_at = NOW() + INTERVAL '5 minutes',
+		    enrichment_error = 'API rate limited'
+		WHERE id = $1`, id)
+	if err != nil {
+		t.Fatalf("update row: %v", err)
+	}
+
+	detail, err := repo.GetForConsole(ctx, tenantID, id)
+	if err != nil {
+		t.Fatalf("GetForConsole: %v", err)
+	}
+
+	if detail.EnrichmentStatus != "failed" {
+		t.Errorf("status: got %q, want 'failed'", detail.EnrichmentStatus)
+	}
+	if detail.EnrichmentAttempts != 3 {
+		t.Errorf("attempts: got %d, want 3", detail.EnrichmentAttempts)
+	}
+	if detail.EnrichmentNextRetryAt == nil {
+		t.Fatal("next_retry_at should not be nil")
+	}
+	if !detail.EnrichmentNextRetryAt.After(time.Now()) {
+		t.Errorf("next_retry_at should be in the future, got %v", detail.EnrichmentNextRetryAt)
+	}
+	if detail.EnrichmentError != "API rate limited" {
+		t.Errorf("error: got %q, want 'API rate limited'", detail.EnrichmentError)
+	}
+}
+
+// TestPG_RetryEnrichment verifies manual retry resets attempts and schedules immediate retry.
+func TestPG_RetryEnrichment(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, id := seedTenantAndRow(t, pool, "retry test")
+	ctx := context.Background()
+	repo := feedback.NewFeedback(pool)
+
+	// Set up a terminal failed row
+	_, err := pool.Exec(ctx, `
+		UPDATE user_feedback
+		SET enrichment_status = 'failed',
+		    enrichment_attempts = 5,
+		    enrichment_next_retry_at = NULL,
+		    enrichment_error = 'exhausted retries'
+		WHERE id = $1`, id)
+	if err != nil {
+		t.Fatalf("setup terminal row: %v", err)
+	}
+
+	// Verify row is NOT in ListPending (terminal)
+	assertPendingListExcludes(t, repo, id)
+
+	// Retry the row
+	result, err := repo.RetryEnrichment(ctx, tenantID, id)
+	if err != nil {
+		t.Fatalf("RetryEnrichment: %v", err)
+	}
+
+	if result.ID != id {
+		t.Errorf("result.ID: got %d, want %d", result.ID, id)
+	}
+	if result.Status != "failed" {
+		t.Errorf("result.Status: got %q, want 'failed'", result.Status)
+	}
+	if result.Attempts != 0 {
+		t.Errorf("result.Attempts: got %d, want 0", result.Attempts)
+	}
+	if result.NextRetryAt == nil || !result.NextRetryAt.Before(time.Now().Add(time.Second)) {
+		t.Errorf("result.NextRetryAt should be ~NOW, got %v", result.NextRetryAt)
+	}
+
+	// Verify row IS now in ListPending
+	pending, err := repo.ListPending(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	found := false
+	for _, pid := range pending {
+		if pid == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("row %d should be in ListPending after retry, got %v", id, pending)
+	}
+
+	// Verify error was cleared
+	var enrichErr string
+	_ = pool.QueryRow(ctx, "SELECT COALESCE(enrichment_error, '') FROM user_feedback WHERE id = $1", id).Scan(&enrichErr)
+	if enrichErr != "" {
+		t.Errorf("enrichment_error should be cleared, got %q", enrichErr)
+	}
+}
+
+// TestPG_RetryEnrichment_InvalidState verifies retry fails for non-failed rows.
+func TestPG_RetryEnrichment_InvalidState(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, id := seedTenantAndRow(t, pool, "invalid state test")
+	ctx := context.Background()
+	repo := feedback.NewFeedback(pool)
+
+	// Row is in 'pending' state by default
+	_, err := repo.RetryEnrichment(ctx, tenantID, id)
+	if err == nil {
+		t.Fatal("RetryEnrichment should fail for pending row")
+	}
+	if !strings.Contains(err.Error(), "invalid state") && !strings.Contains(err.Error(), "not found") {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Set to done state
+	_, _ = pool.Exec(ctx, `UPDATE user_feedback SET enrichment_status = 'done' WHERE id = $1`, id)
+	_, err = repo.RetryEnrichment(ctx, tenantID, id)
+	if err == nil {
+		t.Fatal("RetryEnrichment should fail for done row")
+	}
+}
+
+// TestPG_RetryEnrichment_WrongTenant verifies retry fails for wrong tenant.
+func TestPG_RetryEnrichment_WrongTenant(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, id := seedTenantAndRow(t, pool, "wrong tenant test")
+	ctx := context.Background()
+	repo := feedback.NewFeedback(pool)
+
+	// Set to failed state
+	_, _ = pool.Exec(ctx, `UPDATE user_feedback SET enrichment_status = 'failed', enrichment_attempts = 5, enrichment_next_retry_at = NULL WHERE id = $1`, id)
+
+	// Try with wrong tenant
+	_, err := repo.RetryEnrichment(ctx, "wrong-tenant-id", id)
+	if err == nil {
+		t.Fatal("RetryEnrichment should fail for wrong tenant")
+	}
+
+	// Verify row was not modified
+	var attempts int
+	_ = pool.QueryRow(ctx, "SELECT enrichment_attempts FROM user_feedback WHERE id = $1", id).Scan(&attempts)
+	if attempts != 5 {
+		t.Errorf("row should not be modified, attempts=%d", attempts)
+	}
+
+	// Correct tenant should work
+	result, err := repo.RetryEnrichment(ctx, tenantID, id)
+	if err != nil {
+		t.Fatalf("RetryEnrichment with correct tenant: %v", err)
+	}
+	if result.Attempts != 0 {
+		t.Errorf("attempts after retry: %d", result.Attempts)
+	}
+}

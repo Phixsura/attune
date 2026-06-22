@@ -414,6 +414,93 @@ describe('FeedbackDetailSheet', () => {
   })
 })
 
+describe('retry enrichment', () => {
+  it('shows retry button for terminal failures and triggers success toast', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-term',
+          content: 'terminal failure content',
+          enrichedTitle: '',
+          enrichedAttrs: {},
+          language: 'en',
+          isUrgent: false,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentStatus: 'failed',
+          enrichmentError: 'LLM provider timeout',
+          enrichmentAttempts: 5,
+          enrichmentNextRetryAt: null,
+        }),
+      ),
+      http.post('/fb/v1/console/feedback/:id/retry-enrichment', () =>
+        HttpResponse.json({
+          id: 'f-term',
+          enrichmentStatus: 'failed',
+          enrichmentAttempts: 0,
+          enrichmentNextRetryAt: '2026-06-22T10:00:00Z',
+        }),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-term"
+        dims={dims}
+        availableTags={[]}
+        workbenchMode="terminal"
+        onOpenChange={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText(/LLM provider timeout/)).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: /重试/ }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+  })
+
+  it('shows error toast when retry fails', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-fail',
+          content: 'retry fail content',
+          enrichedTitle: '',
+          enrichedAttrs: {},
+          language: 'en',
+          isUrgent: false,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentStatus: 'failed',
+          enrichmentError: 'API error',
+          enrichmentAttempts: 5,
+          enrichmentNextRetryAt: null,
+        }),
+      ),
+      http.post('/fb/v1/console/feedback/:id/retry-enrichment', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'server error' }, { status: 500 }),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-fail"
+        dims={dims}
+        availableTags={[]}
+        workbenchMode="terminal"
+        onOpenChange={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText(/API error/)).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: /重试/ }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+  })
+})
+
 // draftRow builds a feedback detail JSON with reply-draft enabled by default.
 function draftRow(id: string, over: Record<string, unknown> = {}) {
   return {

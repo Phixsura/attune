@@ -23,6 +23,10 @@ export interface FeedbackListFilters {
   urgent?: boolean
   tag?: string
   workflowState?: string
+  // Filter by enrichment status: "pending" | "enriching" | "done" | "failed"
+  enrichmentStatus?: string
+  // If true, only return terminal failures (failed + attempts >= 5 + no next_retry)
+  terminalFailedOnly?: boolean
 }
 
 // Infinite query for cursor pagination. Each `attrs` entry becomes a
@@ -40,6 +44,8 @@ export const feedbackListInfiniteQuery = (filters: FeedbackListFilters) =>
       if (filters.tag) params.set('tag', filters.tag)
       if (filters.workflowState) params.set('workflow_state', filters.workflowState)
       if (filters.urgent != null) params.set('urgent', String(filters.urgent))
+      if (filters.enrichmentStatus) params.set('enrichment_status', filters.enrichmentStatus)
+      if (filters.terminalFailedOnly) params.set('terminal_failed_only', 'true')
       if (pageParam) params.set('cursor', pageParam)
       const qs = params.toString()
       const url = `/fb/v1/console/feedback${qs ? `?${qs}` : ''}`
