@@ -112,3 +112,57 @@ func TestOutboxWorker_OwnerUniqueness(t *testing.T) {
 		t.Error("two workers should have unique owners")
 	}
 }
+
+func TestOutboxBackoff(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{0, 30 * time.Second}, // below minimum defaults to first step
+		{1, 30 * time.Second}, // first attempt
+		{2, 2 * time.Minute},  // second attempt
+		{3, 10 * time.Minute}, // third attempt
+		{4, 1 * time.Hour},    // fourth attempt
+		{5, 1 * time.Hour},    // exceeds schedule, caps at last
+		{100, 1 * time.Hour},  // far exceeds schedule, caps at last
+	}
+
+	for _, tt := range tests {
+		name := time.Duration(tt.attempt).String()
+		t.Run(name, func(t *testing.T) {
+			got := outboxBackoff(tt.attempt)
+			if got != tt.want {
+				t.Errorf("outboxBackoff(%d) = %v, want %v", tt.attempt, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTruncateStr(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		s    string
+		n    int
+		want string
+	}{
+		{"empty string", "", 10, ""},
+		{"short string", "hello", 10, "hello"},
+		{"exact length", "hello", 5, "hello"},
+		{"truncate", "hello world", 5, "hello"},
+		{"zero n", "hello", 0, ""},
+		{"unicode safe truncate", "你好世界", 6, "你好"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateStr(tt.s, tt.n)
+			if got != tt.want {
+				t.Errorf("truncateStr(%q, %d) = %q, want %q", tt.s, tt.n, got, tt.want)
+			}
+		})
+	}
+}
