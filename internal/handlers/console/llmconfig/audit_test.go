@@ -204,3 +204,142 @@ func TestChannelTestFailureRecordsAudit(t *testing.T) {
 	require.Equal(t, false, after["ok"])
 	require.Equal(t, "provider_failed", after["failure_reason"])
 }
+
+func TestLlmTargetID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		id       string
+		fallback []string
+		want     string
+	}{
+		{"id present", "abc-123", nil, "abc-123"},
+		{"id with spaces trimmed", "  def-456  ", nil, "def-456"},
+		{"empty id with one fallback", "", []string{"fallback"}, "fallback"},
+		{"empty id with two fallbacks", "", []string{"first", "second"}, "first:second"},
+		{"whitespace id uses fallback", "   ", []string{"fb"}, "fb"},
+		{"empty id no fallback", "", nil, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := llmTargetID(tt.id, tt.fallback...)
+			if got != tt.want {
+				t.Errorf("llmTargetID(%q, %v) = %q, want %q", tt.id, tt.fallback, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLlmChannelSummary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		prefix string
+		row    llmrepo.Channel
+		want   string
+	}{
+		{"with name", "Created", llmrepo.Channel{Name: "OpenAI Primary"}, "Created (OpenAI Primary)"},
+		{"empty name", "Created", llmrepo.Channel{Name: ""}, "Created"},
+		{"prefix only", "Deleted", llmrepo.Channel{}, "Deleted"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := llmChannelSummary(tt.prefix, tt.row)
+			if got != tt.want {
+				t.Errorf("llmChannelSummary(%q, %+v) = %q, want %q", tt.prefix, tt.row, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLlmAbilitySummary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		prefix string
+		row    llmrepo.Ability
+		want   string
+	}{
+		{"with logical model", "Created", llmrepo.Ability{LogicalModel: "gpt-4"}, "Created (gpt-4)"},
+		{"empty logical model", "Created", llmrepo.Ability{LogicalModel: ""}, "Created"},
+		{"prefix only", "Deleted", llmrepo.Ability{}, "Deleted"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := llmAbilitySummary(tt.prefix, tt.row)
+			if got != tt.want {
+				t.Errorf("llmAbilitySummary(%q, %+v) = %q, want %q", tt.prefix, tt.row, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLlmRouteSummary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		prefix string
+		row    llmrepo.Route
+		want   string
+	}{
+		{"with purpose", "Created", llmrepo.Route{Purpose: "enrich"}, "Created (enrich)"},
+		{"empty purpose", "Created", llmrepo.Route{Purpose: ""}, "Created"},
+		{"prefix only", "Deleted", llmrepo.Route{}, "Deleted"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := llmRouteSummary(tt.prefix, tt.row)
+			if got != tt.want {
+				t.Errorf("llmRouteSummary(%q, %+v) = %q, want %q", tt.prefix, tt.row, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChannelTestAuditSnapshot(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		id               string
+		providerModel    string
+		ok               bool
+		err              error
+		wantFailure      string
+		wantFailureExist bool
+	}{
+		{"success", "ch-1", "openai/gpt-4", true, nil, "", false},
+		{"failure with error", "ch-2", "anthropic/claude", false, errors.New("connection refused"), "provider_failed", true},
+		{"failure no error", "ch-3", "azure/gpt-4", false, nil, "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := channelTestAuditSnapshot(tt.id, tt.providerModel, tt.ok, tt.err)
+			if got["channel_id"] != tt.id {
+				t.Errorf("channel_id = %v, want %v", got["channel_id"], tt.id)
+			}
+			if got["provider_model"] != tt.providerModel {
+				t.Errorf("provider_model = %v, want %v", got["provider_model"], tt.providerModel)
+			}
+			if got["ok"] != tt.ok {
+				t.Errorf("ok = %v, want %v", got["ok"], tt.ok)
+			}
+			_, exists := got["failure_reason"]
+			if exists != tt.wantFailureExist {
+				t.Errorf("failure_reason exists = %v, want %v", exists, tt.wantFailureExist)
+			}
+			if tt.wantFailureExist && got["failure_reason"] != tt.wantFailure {
+				t.Errorf("failure_reason = %v, want %v", got["failure_reason"], tt.wantFailure)
+			}
+		})
+	}
+}
