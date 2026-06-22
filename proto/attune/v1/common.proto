@@ -81,6 +81,11 @@ enum ErrorCode {
   REQUEST_IN_PROGRESS   = 49;  // Idempotency key is being processed
   JOB_NOT_FOUND         = 50;  // Async job ID not found
   JOB_ALREADY_CANCELLED = 51;  // Job was already cancelled
+  PROMPT_OUTPUT_LANGUAGE_POLICY_INVALID = 52;
+  PROMPT_TITLE_MAX_CHARS_INVALID        = 53;
+  PROMPT_RATIONALE_MAX_CHARS_INVALID    = 54;
+  PROMPT_TONE_INVALID                   = 55;
+  PROMPT_DOMAIN_GUIDANCE_TOO_LONG       = 56;
 }
 
 // ErrorResponse is the JSON body returned on any 4xx/5xx across attune's HTTP
@@ -173,4 +178,3 @@ message Dimension {
   // Optional generic presentation metadata.
   RendererSpec renderer = 10;
 }
-

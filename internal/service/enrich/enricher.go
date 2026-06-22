@@ -309,14 +309,16 @@ func shouldMarkEnrichFailed(err error) bool {
 
 func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {
 	return ClassifyConfig{
-		TenantID:       row.TenantID,
-		Channel:        row.Source,
-		SourceID:       row.InboundSourceID,
-		SourceTags:     row.SourceTags,
-		Language:       row.Language,
-		DisplayLocale:  displayLocaleForTenantLocale(row.DisplayLocale),
-		PromptTemplate: row.PromptTemplate,
-		Dimensions:     row.Dimensions,
+		TenantID:        row.TenantID,
+		Channel:         row.Source,
+		SourceID:        row.InboundSourceID,
+		SourceTags:      row.SourceTags,
+		Language:        row.Language,
+		DisplayLocale:   displayLocaleForTenantLocale(row.DisplayLocale),
+		PromptTemplate:  row.PromptTemplate,
+		PolicyConfig:    row.PromptPolicy,
+		PromptVersionID: row.PromptVersionID,
+		Dimensions:      row.Dimensions,
 	}
 }
 

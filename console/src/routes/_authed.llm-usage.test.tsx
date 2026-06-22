@@ -53,5 +53,5 @@ describe('_authed.llm-usage route', () => {
     expect(screen.getAllByText('1,200').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('340').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('/1')).toBeInTheDocument()
-  })
+  }, 20_000) // Route-level smoke includes lazy route preload plus async chart data.
 })

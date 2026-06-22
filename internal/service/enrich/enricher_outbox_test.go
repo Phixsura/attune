@@ -2,10 +2,12 @@ package enrich
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
@@ -107,6 +109,69 @@ func TestBuildOutboxEnvelope_StableFieldOrder(t *testing.T) {
 		idx(`"delivered_at"`) > idx(`"trace_id"`) ||
 		idx(`"trace_id"`) > idx(`"feedback"`) {
 		t.Errorf("top-level key order violated: %s", s)
+	}
+}
+
+func TestSemanticRun_RecordsPromptPolicyProvenance(t *testing.T) {
+	s := sampleSnapshot(false)
+	s.Language = LanguageEnglish
+	s.DisplayLocale = "zh-CN"
+	tmpl := "custom {{content}} {{modules}}"
+	cfg := ClassifyConfig{
+		TenantID:        s.TenantID,
+		DisplayLocale:   s.DisplayLocale,
+		PromptTemplate:  ptrext.Of(tmpl),
+		PromptVersionID: "11111111-2222-3333-4444-555555555555",
+		Dimensions:      domain.DimensionSet{sevDim()},
+	}
+	run := ptrext.Of(Enricher{model: "fallback-model"}).semanticRun(s, cfg, classifyResult{
+		Enriched: domain.Enriched{
+			Title:                    "Login fails",
+			Rationale:                "Unicode bug",
+			DisplayTitle:             "登录失败",
+			DisplayRationale:         "Unicode 问题",
+			Attrs:                    map[string]any{"severity": "critical"},
+			ClassificationConfidence: ptrext.Of(0.82),
+		},
+	})
+
+	if !strings.HasPrefix(run.PromptVersion, "enrich.legacy_custom_template@sha256:") {
+		t.Fatalf("prompt version should use canonical legacy identity, got %q", run.PromptVersion)
+	}
+	policy, ok := run.GuardSummary["prompt_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("prompt_policy guard missing: %#v", run.GuardSummary)
+	}
+	if policy["policy_id"] != "enrich.legacy_custom_template" {
+		t.Fatalf("policy_id=%v", policy["policy_id"])
+	}
+	if policy["mode"] != "legacy_custom_override" {
+		t.Fatalf("mode=%v", policy["mode"])
+	}
+	if got, ok := policy["prompt_fingerprint"].(string); !ok || !strings.HasPrefix(got, "sha256:") {
+		t.Fatalf("prompt fingerprint missing: %#v", policy)
+	}
+	if got, ok := policy["schema_fingerprint"].(string); !ok || !strings.HasPrefix(got, "sha256:") {
+		t.Fatalf("schema fingerprint missing: %#v", policy)
+	}
+	if run.PromptVersionID != cfg.PromptVersionID {
+		t.Fatalf("prompt version id=%q", run.PromptVersionID)
+	}
+	if run.GuardSummary["prompt_version_id"] != cfg.PromptVersionID {
+		t.Fatalf("guard prompt_version_id=%v", run.GuardSummary["prompt_version_id"])
+	}
+	warnings, ok := policy["warnings"].([]string)
+	if !ok {
+		t.Fatalf("warnings should be []string, got %T", policy["warnings"])
+	}
+	seenModules := false
+	for _, code := range warnings {
+		if code == "legacy_variable_modules" {
+			seenModules = true
+		}
+	}
+	if !seenModules {
+		t.Fatalf("legacy modules warning missing: %#v", warnings)
 	}
 }
 

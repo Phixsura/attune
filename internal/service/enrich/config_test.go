@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -19,6 +20,12 @@ func TestValidatePromptTemplate_RequiresContentToken(t *testing.T) {
 func TestValidatePromptTemplate_AllowsTokenAnywhere(t *testing.T) {
 	if err := ValidatePromptTemplate("preamble {{content}} epilogue"); err != nil {
 		t.Errorf("template with token should pass: %v", err)
+	}
+}
+
+func TestValidatePromptTemplate_AllowsWhitespaceWrappedContentToken(t *testing.T) {
+	if err := ValidatePromptTemplate("preamble {{ content }} epilogue"); err != nil {
+		t.Errorf("template with whitespace-wrapped token should pass: %v", err)
 	}
 }
 
@@ -96,5 +103,76 @@ func TestErrToMessage_AllBranchesNonEmpty(t *testing.T) {
 func TestErrToMessage_UnknownErrorReturnsEmpty(t *testing.T) {
 	if got := ErrToMessage(errors.New("nope")); got != "" {
 		t.Errorf("unmapped error should return '', got %q", got)
+	}
+}
+
+func TestPromptVersionSummaryExtractsPolicyMetadata(t *testing.T) {
+	created := time.Date(2026, 6, 21, 1, 2, 3, 0, time.UTC)
+	got := promptVersionSummary(tenant.EnrichPromptVersion{
+		ID:             "version-1",
+		PromptTemplate: nil,
+		Dimensions: domain.DimensionSet{{
+			Name: "severity",
+			Kind: domain.DimSingle,
+			Taxonomy: []domain.Taxonomy{{
+				Value:       "high",
+				DisplayName: domain.I18nString{"en": "High"},
+			}},
+		}},
+		PromptVersion: "enrich.default@1",
+		CreatedAt:     created,
+		IsActive:      true,
+		PromptPolicy: map[string]any{
+			"policy_id":      "enrich.default",
+			"policy_version": "1",
+			"mode":           "default",
+			"prompt_source":  "built_in",
+			"warnings": []any{
+				map[string]any{"code": "missing_dimensions"},
+			},
+		},
+	})
+	if got.ID != "version-1" || got.PolicyID != "enrich.default" || got.PolicyVersion != "1" {
+		t.Fatalf("policy metadata lost: %#v", got)
+	}
+	if got.PromptSource != "built_in" || got.Mode != "default" || !got.IsActive {
+		t.Fatalf("summary state lost: %#v", got)
+	}
+	if got.HasTemplate || got.DimensionsN != 1 || got.CreatedAt != created {
+		t.Fatalf("summary config metadata lost: %#v", got)
+	}
+	if len(got.Warnings) != 1 || got.Warnings[0] != "missing_dimensions" {
+		t.Fatalf("warning codes lost: %#v", got.Warnings)
+	}
+	if !strings.HasPrefix(got.PromptFingerprint, "sha256:") {
+		t.Fatalf("prompt fingerprint fallback missing: %#v", got)
+	}
+	if !strings.HasPrefix(got.SchemaFingerprint, "sha256:") {
+		t.Fatalf("schema fingerprint fallback missing: %#v", got)
+	}
+}
+
+func TestPromptVersionSummaryKeepsStoredFingerprints(t *testing.T) {
+	got := promptVersionSummary(tenant.EnrichPromptVersion{
+		ID: "version-1",
+		Dimensions: domain.DimensionSet{{
+			Name: "severity",
+			Kind: domain.DimSingle,
+			Taxonomy: []domain.Taxonomy{{
+				Value:       "high",
+				DisplayName: domain.I18nString{"en": "High"},
+			}},
+		}},
+		PromptVersion: "enrich.default@1",
+		PromptPolicy: map[string]any{
+			"prompt_fingerprint": "sha256:stored_prompt",
+			"schema_fingerprint": "sha256:stored_schema",
+		},
+	})
+	if got.PromptFingerprint != "sha256:stored_prompt" {
+		t.Fatalf("prompt fingerprint changed: %q", got.PromptFingerprint)
+	}
+	if got.SchemaFingerprint != "sha256:stored_schema" {
+		t.Fatalf("schema fingerprint changed: %q", got.SchemaFingerprint)
 	}
 }

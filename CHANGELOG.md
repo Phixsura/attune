@@ -25,6 +25,26 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - New scopes: `mcp:read`, `mcp:write`, `mcp:ingest` (write implies read)
   - Audit actions for all MCP operations
 
+- **Configurable enrichment prompt policy (#107).** Enrichment prompt selection
+  now resolves through a typed policy layer with output-language, title/rationale
+  length, display-field, tone, and domain-guidance knobs; canonical
+  `prompt_version` identities; legacy custom-template compatibility validation;
+  locale-aware default prompt previews; Console-visible policy/contract metadata;
+  immutable saved-version snapshots with rollback activation; and semantic-run
+  provenance tied to the active prompt version snapshot. The Console rollback
+  flow now requires a diff-confirmation step, guards unsaved drafts from
+  background refreshes, drops stale preview responses, exposes load failures
+  with retry, and keeps audit snapshots/role permissions aligned with the new
+  policy fields. The active version pointer is constrained to the owning tenant,
+  and legacy direct config writes clear the active pointer instead of leaving
+  stale rollback provenance. Off-list eval suggestions now run through an
+  explicit POST analyze action instead of GET, and promote-suggested audit
+  failures are treated consistently with other enrich-config mutations. Prompt
+  policy responses and version-history snapshots now expose resolved prompt and
+  schema fingerprints so Console history can be correlated with semantic-run
+  provenance.
+
+
 - **`AttuneOutboxDeadRowsHigh` alert (#32).** The `attune_outbox_dead_rows`
   gauge was dashboard-only; a webhook deleted on the destination side (a common
   self-service action for Discord/Slack channel webhooks) silently piled

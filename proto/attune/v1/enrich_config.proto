@@ -28,10 +28,13 @@ service EnrichConfigService {
       body: "*"
     };
   }
-  // GET /fb/v1/console/enrich-config/eval-suggestions
-  // Returns off-list values the LLM suggested during the most recent eval run.
+  // POST /fb/v1/console/enrich-config/eval-suggestions:analyze
+  // Runs an LLM-backed eval sample and returns off-list suggested values.
   rpc GetEvalSuggestions(GetEvalSuggestionsRequest) returns (GetEvalSuggestionsResponse) {
-    option (google.api.http) = {get: "/fb/v1/console/enrich-config/eval-suggestions"};
+    option (google.api.http) = {
+      post: "/fb/v1/console/enrich-config/eval-suggestions:analyze"
+      body: "*"
+    };
   }
   // POST /fb/v1/console/enrich-config/promote
   // Promotes a suggested value to the dimension taxonomy.
@@ -40,6 +43,19 @@ service EnrichConfigService {
       post: "/fb/v1/console/enrich-config/promote"
       body: "*"
     };
+  }
+  // POST /fb/v1/console/enrich-config/versions/{version_id}:activate
+  // Restores a previous immutable prompt-policy snapshot.
+  rpc ActivateEnrichPromptVersion(ActivateEnrichPromptVersionRequest) returns (ActivateEnrichPromptVersionResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/enrich-config/versions/{version_id}:activate"
+      body: "*"
+    };
+  }
+  // GET /fb/v1/console/enrich-config/versions
+  // Lists immutable prompt-policy snapshots newest first.
+  rpc ListEnrichPromptVersions(ListEnrichPromptVersionsRequest) returns (ListEnrichPromptVersionsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/enrich-config/versions"};
   }
 }
 
@@ -53,6 +69,12 @@ message EnrichConfig {
   // severity + labels) on every fresh tenant; operators may add /
   // remove / edit any dim from here.
   repeated Dimension dimensions = 3;
+  // Resolved prompt policy metadata for the active tenant config.
+  EnrichPromptPolicy prompt_policy = 4;
+  // Recent immutable prompt-policy snapshots, newest first.
+  repeated EnrichPromptVersion prompt_versions = 5;
+  // Operator-authored prompt behavior knobs layered onto the built-in policy.
+  EnrichPromptPolicyConfig policy_config = 6;
 }
 
 message GetEnrichConfigRequest {}
@@ -66,6 +88,7 @@ message UpdateEnrichConfigRequest {
   optional string prompt_template = 1;
   // Empty list clears all dims (LLM still emits title + rationale).
   repeated Dimension dimensions = 2;
+  EnrichPromptPolicyConfig policy_config = 3;
 }
 
 message UpdateEnrichConfigResponse {
@@ -74,10 +97,19 @@ message UpdateEnrichConfigResponse {
 
 message PreviewEnrichPromptRequest {
   string sample_content = 1 [(google.api.field_behavior) = REQUIRED];
+  // Optional unsaved prompt draft; omitted means preview the persisted config.
+  optional string prompt_template = 2;
+  // Optional unsaved Dimension draft; omitted means preview persisted Dimensions.
+  repeated Dimension dimensions = 3;
+  // When true, prompt_template/dimensions are treated as the draft config,
+  // including an intentionally empty dimensions list.
+  bool use_draft_config = 4;
+  EnrichPromptPolicyConfig policy_config = 5;
 }
 
 message PreviewEnrichPromptResponse {
   string rendered_prompt = 1;
+  EnrichPromptPolicy prompt_policy = 2;
 }
 
 // GetEvalSuggestions returns off-list values the LLM suggested during eval.
@@ -120,4 +152,95 @@ message PromoteSuggestedValueRequest {
 message PromoteSuggestedValueResponse {
   // The updated dimension with the new taxonomy value.
   Dimension dimension = 1;
+}
+
+message EnrichPromptPolicy {
+  string policy_id = 1;
+  string policy_version = 2;
+  string prompt_version = 3;
+  string mode = 4;
+  string prompt_source = 5;
+  string template_language = 6;
+  string display_locale = 7;
+  string display_language_name = 8;
+  repeated EnrichPromptVariable variables = 9;
+  repeated EnrichPromptOutput outputs = 10;
+  repeated EnrichPromptWarning warnings = 11;
+  EnrichPromptPolicyConfig policy_config = 12;
+  string prompt_fingerprint = 13;
+  string schema_fingerprint = 14;
+}
+
+message EnrichPromptPolicyConfig {
+  // source_and_display keeps source-language title/rationale plus display fields.
+  // display_only writes all summary fields in the tenant display language.
+  string output_language_policy = 1;
+  int32 title_max_chars = 2;
+  int32 rationale_max_chars = 3;
+  optional bool display_fields_required = 4;
+  // concise or neutral.
+  string tone = 5;
+  string domain_guidance = 6;
+}
+
+message EnrichPromptVariable {
+  string name = 1;
+  bool required = 2;
+  string meaning = 3;
+}
+
+message EnrichPromptOutput {
+  string name = 1;
+  bool required = 2;
+  string language = 3;
+}
+
+message EnrichPromptWarning {
+  string code = 1;
+  string severity = 2;
+  string message = 3;
+}
+
+message EnrichPromptVersion {
+  string id = 1;
+  string prompt_version = 2;
+  string policy_id = 3;
+  string policy_version = 4;
+  string mode = 5;
+  string prompt_source = 6;
+  string created_at = 7;
+  bool is_active = 8;
+  bool has_template = 9;
+  int32 dimensions_count = 10;
+  repeated string warnings = 11;
+  // Snapshot values restored by activation. Admin-only Console API already
+  // exposes the active prompt and dimensions; history includes them so an
+  // operator can inspect a rollback target before activating it.
+  optional string prompt_template = 12;
+  repeated Dimension dimensions = 13;
+  EnrichPromptPolicyConfig policy_config = 14;
+  string prompt_fingerprint = 15;
+  string schema_fingerprint = 16;
+}
+
+message ActivateEnrichPromptVersionRequest {
+  string version_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message ActivateEnrichPromptVersionResponse {
+  EnrichConfig config = 1;
+}
+
+message ListEnrichPromptVersionsRequest {
+  // Cursor from the previous response. It is the last seen version id.
+  optional string cursor = 1;
+  optional int32 limit = 2;
+  // Case-insensitive search across version identity, fingerprints, warnings,
+  // dimensions, and custom prompt body.
+  optional string q = 3;
+}
+
+message ListEnrichPromptVersionsResponse {
+  repeated EnrichPromptVersion versions = 1;
+  optional string next_cursor = 2;
 }

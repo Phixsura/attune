@@ -1153,14 +1153,20 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
-    /fb/v1/console/enrich-config/eval-suggestions:
-        get:
+    /fb/v1/console/enrich-config/eval-suggestions:analyze:
+        post:
             tags:
                 - EnrichConfigService
             description: |-
-                GET /fb/v1/console/enrich-config/eval-suggestions
-                 Returns off-list values the LLM suggested during the most recent eval run.
+                POST /fb/v1/console/enrich-config/eval-suggestions:analyze
+                 Runs an LLM-backed eval sample and returns off-list suggested values.
             operationId: EnrichConfigService_GetEvalSuggestions
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GetEvalSuggestionsRequest'
+                required: true
             responses:
                 "200":
                     description: OK
@@ -1220,6 +1226,78 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/PromoteSuggestedValueResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrich-config/versions:
+        get:
+            tags:
+                - EnrichConfigService
+            description: |-
+                GET /fb/v1/console/enrich-config/versions
+                 Lists immutable prompt-policy snapshots newest first.
+            operationId: EnrichConfigService_ListEnrichPromptVersions
+            parameters:
+                - name: cursor
+                  in: query
+                  description: Cursor from the previous response. It is the last seen version id.
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: q
+                  in: query
+                  description: |-
+                    Case-insensitive search across version identity, fingerprints, warnings,
+                     dimensions, and custom prompt body.
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListEnrichPromptVersionsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/enrich-config/versions/{versionId}:activate:
+        post:
+            tags:
+                - EnrichConfigService
+            description: |-
+                POST /fb/v1/console/enrich-config/versions/{version_id}:activate
+                 Restores a previous immutable prompt-policy snapshot.
+            operationId: EnrichConfigService_ActivateEnrichPromptVersion
+            parameters:
+                - name: versionId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ActivateEnrichPromptVersionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ActivateEnrichPromptVersionResponse'
                 default:
                     description: Default error response
                     content:
@@ -3757,6 +3835,18 @@ components:
                 createdAt:
                     type: string
             description: AI agent configurations
+        ActivateEnrichPromptVersionRequest:
+            required:
+                - versionId
+            type: object
+            properties:
+                versionId:
+                    type: string
+        ActivateEnrichPromptVersionResponse:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/EnrichConfig'
         AddFeedbackTagRequest:
             type: object
             properties:
@@ -4966,6 +5056,148 @@ components:
                         Per-tenant Dimension set. Migration 014 seeds 3 dims (type +
                          severity + labels) on every fresh tenant; operators may add /
                          remove / edit any dim from here.
+                promptPolicy:
+                    allOf:
+                        - $ref: '#/components/schemas/EnrichPromptPolicy'
+                    description: Resolved prompt policy metadata for the active tenant config.
+                promptVersions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EnrichPromptVersion'
+                    description: Recent immutable prompt-policy snapshots, newest first.
+                policyConfig:
+                    allOf:
+                        - $ref: '#/components/schemas/EnrichPromptPolicyConfig'
+                    description: Operator-authored prompt behavior knobs layered onto the built-in policy.
+        EnrichPromptOutput:
+            type: object
+            properties:
+                name:
+                    type: string
+                required:
+                    type: boolean
+                language:
+                    type: string
+        EnrichPromptPolicy:
+            type: object
+            properties:
+                policyId:
+                    type: string
+                policyVersion:
+                    type: string
+                promptVersion:
+                    type: string
+                mode:
+                    type: string
+                promptSource:
+                    type: string
+                templateLanguage:
+                    type: string
+                displayLocale:
+                    type: string
+                displayLanguageName:
+                    type: string
+                variables:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EnrichPromptVariable'
+                outputs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EnrichPromptOutput'
+                warnings:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EnrichPromptWarning'
+                policyConfig:
+                    $ref: '#/components/schemas/EnrichPromptPolicyConfig'
+                promptFingerprint:
+                    type: string
+                schemaFingerprint:
+                    type: string
+        EnrichPromptPolicyConfig:
+            type: object
+            properties:
+                outputLanguagePolicy:
+                    type: string
+                    description: |-
+                        source_and_display keeps source-language title/rationale plus display fields.
+                         display_only writes all summary fields in the tenant display language.
+                titleMaxChars:
+                    type: integer
+                    format: int32
+                rationaleMaxChars:
+                    type: integer
+                    format: int32
+                displayFieldsRequired:
+                    type: boolean
+                tone:
+                    type: string
+                    description: concise or neutral.
+                domainGuidance:
+                    type: string
+        EnrichPromptVariable:
+            type: object
+            properties:
+                name:
+                    type: string
+                required:
+                    type: boolean
+                meaning:
+                    type: string
+        EnrichPromptVersion:
+            type: object
+            properties:
+                id:
+                    type: string
+                promptVersion:
+                    type: string
+                policyId:
+                    type: string
+                policyVersion:
+                    type: string
+                mode:
+                    type: string
+                promptSource:
+                    type: string
+                createdAt:
+                    type: string
+                isActive:
+                    type: boolean
+                hasTemplate:
+                    type: boolean
+                dimensionsCount:
+                    type: integer
+                    format: int32
+                warnings:
+                    type: array
+                    items:
+                        type: string
+                promptTemplate:
+                    type: string
+                    description: |-
+                        Snapshot values restored by activation. Admin-only Console API already
+                         exposes the active prompt and dimensions; history includes them so an
+                         operator can inspect a rollback target before activating it.
+                dimensions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Dimension'
+                policyConfig:
+                    $ref: '#/components/schemas/EnrichPromptPolicyConfig'
+                promptFingerprint:
+                    type: string
+                schemaFingerprint:
+                    type: string
+        EnrichPromptWarning:
+            type: object
+            properties:
+                code:
+                    type: string
+                severity:
+                    type: string
+                message:
+                    type: string
         EnrichmentRuntimeHistoryEntry:
             type: object
             properties:
@@ -5533,6 +5765,10 @@ components:
             properties:
                 runtime:
                     $ref: '#/components/schemas/EnrichmentRuntimeReadModel'
+        GetEvalSuggestionsRequest:
+            type: object
+            properties: {}
+            description: GetEvalSuggestions returns off-list values the LLM suggested during eval.
         GetEvalSuggestionsResponse:
             type: object
             properties:
@@ -6104,6 +6340,15 @@ components:
                         $ref: '#/components/schemas/OutboxDelivery'
                 nextBeforeId:
                     type: string
+        ListEnrichPromptVersionsResponse:
+            type: object
+            properties:
+                versions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EnrichPromptVersion'
+                nextCursor:
+                    type: string
         ListEventSubscriptionsResponse:
             type: object
             properties:
@@ -6515,11 +6760,28 @@ components:
             properties:
                 sampleContent:
                     type: string
+                promptTemplate:
+                    type: string
+                    description: Optional unsaved prompt draft; omitted means preview the persisted config.
+                dimensions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Dimension'
+                    description: Optional unsaved Dimension draft; omitted means preview persisted Dimensions.
+                useDraftConfig:
+                    type: boolean
+                    description: |-
+                        When true, prompt_template/dimensions are treated as the draft config,
+                         including an intentionally empty dimensions list.
+                policyConfig:
+                    $ref: '#/components/schemas/EnrichPromptPolicyConfig'
         PreviewEnrichPromptResponse:
             type: object
             properties:
                 renderedPrompt:
                     type: string
+                promptPolicy:
+                    $ref: '#/components/schemas/EnrichPromptPolicy'
         Project:
             type: object
             properties:
@@ -7228,6 +7490,8 @@ components:
                     items:
                         $ref: '#/components/schemas/Dimension'
                     description: Empty list clears all dims (LLM still emits title + rationale).
+                policyConfig:
+                    $ref: '#/components/schemas/EnrichPromptPolicyConfig'
         UpdateEnrichConfigResponse:
             type: object
             properties:

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -44,6 +45,34 @@ func (h *Handler) recordAudit(
 func enrichConfigSnapshot(v enrich.View) map[string]any {
 	return map[string]any{
 		"prompt_template": v.PromptTemplate,
-		"dimensions":      v.Dimensions,
+		"dimensions":      cloneDimensionSet(v.Dimensions),
+		"policy_config":   v.PolicyConfig,
+		"prompt_policy": map[string]any{
+			"prompt_version": v.PromptPolicy.PromptVersion,
+			"policy_id":      v.PromptPolicy.PolicyID,
+			"policy_version": v.PromptPolicy.PolicyVersion,
+			"mode":           v.PromptPolicy.Mode,
+			"prompt_source":  v.PromptPolicy.PromptSource,
+		},
 	}
+}
+
+func cloneDimensionSet(in domain.DimensionSet) domain.DimensionSet {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(domain.DimensionSet, len(in))
+	for i, d := range in {
+		out[i] = d
+		out[i].Taxonomy = append([]domain.Taxonomy(nil), d.Taxonomy...)
+		out[i].UrgentSet = append([]string(nil), d.UrgentSet...)
+		out[i].Examples = append([]string(nil), d.Examples...)
+		if len(d.Renderer.Values) > 0 {
+			out[i].Renderer.Values = make(map[string]domain.RendererValue, len(d.Renderer.Values))
+			for k, v := range d.Renderer.Values {
+				out[i].Renderer.Values[k] = v
+			}
+		}
+	}
+	return out
 }

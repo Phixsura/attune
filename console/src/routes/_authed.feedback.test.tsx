@@ -141,7 +141,7 @@ describe('_authed.feedback route — user flow smoke', () => {
       expect(screen.getByText('Unicode 规范化问题')).toBeInTheDocument()
     })
     expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
-  })
+  }, 20_000) // Route-level smoke composes lazy routes, queries, and sheet rendering.
 
   it('renders the workflow-state badge on a row via the displayName resolver', async () => {
     // A feedback row carrying a workflowState whose human label lives in

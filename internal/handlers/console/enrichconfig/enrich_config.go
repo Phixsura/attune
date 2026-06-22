@@ -3,6 +3,7 @@ package enrichconfig
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
@@ -27,7 +28,9 @@ func (h *Handler) SetEvalLimiter(l *ratelimit.Limiter) { h.evalLimiter = l }
 type configService interface {
 	Get(ctx context.Context, tenantID string) (enrich.View, error)
 	Update(ctx context.Context, tenantID string, v enrich.View) error
-	Preview(ctx context.Context, tenantID, sampleContent string) (string, error)
+	Preview(ctx context.Context, tenantID string, in enrich.PreviewInput) (enrich.PreviewResult, error)
+	ActivatePromptVersion(ctx context.Context, tenantID string, versionID string) error
+	ListPromptVersions(ctx context.Context, tenantID string, filter enrich.PromptVersionListFilter) (enrich.PromptVersionListResult, error)
 }
 
 // EvalSuggestionsGetter is a function that returns eval suggestions for a tenant.
@@ -72,9 +75,144 @@ func NewHandler(svc *enrich.ConfigService) *Handler {
 func toProtoConfig(v enrich.View) *attunev1.EnrichConfig {
 	return ptrext.Of(attunev1.EnrichConfig{
 		PromptTemplate:        v.PromptTemplate,
-		DefaultPromptTemplate: enrich.DefaultPromptTemplate(),
+		DefaultPromptTemplate: v.DefaultPromptTemplate,
 		Dimensions:            dimsToProto(v.Dimensions),
+		PromptPolicy:          promptPolicyToProto(v.PromptPolicy),
+		PromptVersions:        promptVersionsToProto(v.PromptVersions),
+		PolicyConfig:          policyConfigToProto(v.PolicyConfig),
 	})
+}
+
+func promptPolicyToProto(p enrich.PromptPolicyMetadata) *attunev1.EnrichPromptPolicy {
+	if p.PolicyID == "" {
+		return nil
+	}
+	return ptrext.Of(attunev1.EnrichPromptPolicy{
+		PolicyId:            p.PolicyID,
+		PolicyVersion:       p.PolicyVersion,
+		PromptVersion:       p.PromptVersion,
+		PromptFingerprint:   p.PromptFingerprint,
+		SchemaFingerprint:   p.SchemaFingerprint,
+		Mode:                p.Mode,
+		PromptSource:        p.PromptSource,
+		TemplateLanguage:    p.TemplateLanguage,
+		DisplayLocale:       p.DisplayLocale,
+		DisplayLanguageName: p.DisplayLanguageName,
+		Variables:           promptVariablesToProto(p.Variables),
+		Outputs:             promptOutputsToProto(p.Outputs),
+		Warnings:            promptWarningsToProto(p.Warnings),
+		PolicyConfig:        policyConfigToProto(p.PolicyConfig),
+	})
+}
+
+func policyConfigToProto(p domain.EnrichPromptPolicyConfig) *attunev1.EnrichPromptPolicyConfig {
+	p = domain.NormalizeEnrichPromptPolicyConfig(p)
+	return ptrext.Of(attunev1.EnrichPromptPolicyConfig{
+		OutputLanguagePolicy:  p.OutputLanguagePolicy,
+		TitleMaxChars:         int32(p.TitleMaxChars),
+		RationaleMaxChars:     int32(p.RationaleMaxChars),
+		DisplayFieldsRequired: ptrext.Of(p.DisplayFieldsRequired),
+		Tone:                  p.Tone,
+		DomainGuidance:        p.DomainGuidance,
+	})
+}
+
+func policyConfigFromProto(p *attunev1.EnrichPromptPolicyConfig) domain.EnrichPromptPolicyConfig {
+	if p == nil {
+		return domain.DefaultEnrichPromptPolicyConfig()
+	}
+	in := domain.EnrichPromptPolicyConfig{
+		OutputLanguagePolicy:  p.GetOutputLanguagePolicy(),
+		TitleMaxChars:         int(p.GetTitleMaxChars()),
+		RationaleMaxChars:     int(p.GetRationaleMaxChars()),
+		DisplayFieldsRequired: true,
+		Tone:                  p.GetTone(),
+		DomainGuidance:        p.GetDomainGuidance(),
+	}
+	if p.DisplayFieldsRequired != nil {
+		in.DisplayFieldsRequired = p.GetDisplayFieldsRequired()
+	}
+	return domain.NormalizeEnrichPromptPolicyConfig(in)
+}
+
+func promptVariablesToProto(in []enrich.PromptVariable) []*attunev1.EnrichPromptVariable {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*attunev1.EnrichPromptVariable, 0, len(in))
+	for _, v := range in {
+		out = append(out, ptrext.Of(attunev1.EnrichPromptVariable{
+			Name:     v.Name,
+			Required: v.Required,
+			Meaning:  v.Meaning,
+		}))
+	}
+	return out
+}
+
+func promptOutputsToProto(in []enrich.PromptOutput) []*attunev1.EnrichPromptOutput {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*attunev1.EnrichPromptOutput, 0, len(in))
+	for _, v := range in {
+		out = append(out, ptrext.Of(attunev1.EnrichPromptOutput{
+			Name:     v.Name,
+			Required: v.Required,
+			Language: v.Language,
+		}))
+	}
+	return out
+}
+
+func promptWarningsToProto(in []enrich.PromptWarning) []*attunev1.EnrichPromptWarning {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*attunev1.EnrichPromptWarning, 0, len(in))
+	for _, v := range in {
+		out = append(out, ptrext.Of(attunev1.EnrichPromptWarning{
+			Code:     v.Code,
+			Severity: v.Severity,
+			Message:  v.Message,
+		}))
+	}
+	return out
+}
+
+func promptVersionsToProto(in []enrich.PromptVersionSummary) []*attunev1.EnrichPromptVersion {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*attunev1.EnrichPromptVersion, 0, len(in))
+	for _, v := range in {
+		out = append(out, ptrext.Of(attunev1.EnrichPromptVersion{
+			Id:                v.ID,
+			PromptVersion:     v.PromptVersion,
+			PromptFingerprint: v.PromptFingerprint,
+			SchemaFingerprint: v.SchemaFingerprint,
+			PolicyId:          v.PolicyID,
+			PolicyVersion:     v.PolicyVersion,
+			Mode:              v.Mode,
+			PromptSource:      v.PromptSource,
+			CreatedAt:         formatTime(v.CreatedAt),
+			IsActive:          v.IsActive,
+			HasTemplate:       v.HasTemplate,
+			DimensionsCount:   int32(v.DimensionsN),
+			Warnings:          v.Warnings,
+			PromptTemplate:    v.PromptTemplate,
+			Dimensions:        dimsToProto(v.Dimensions),
+			PolicyConfig:      policyConfigToProto(v.PolicyConfig),
+		}))
+	}
+	return out
+}
+
+func formatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func dimsToProto(dims domain.DimensionSet) []*attunev1.Dimension {

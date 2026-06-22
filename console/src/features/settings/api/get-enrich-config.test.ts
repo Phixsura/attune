@@ -13,13 +13,31 @@ describe('enrichConfigQuery', () => {
             promptTemplate: 'tpl',
             defaultPromptTemplate: 'DEFAULT',
             dimensions: [],
+            promptPolicy: {
+              policyId: 'enrich.default',
+              policyVersion: '1',
+              promptVersion: 'enrich.default@1',
+              mode: 'default',
+              promptSource: 'built_in',
+              templateLanguage: 'en',
+              displayLocale: 'zh-CN',
+              displayLanguageName: 'Simplified Chinese',
+              variables: [],
+              outputs: [],
+              warnings: [],
+            },
           },
         }),
       ),
     )
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const cfg = await qc.fetchQuery(enrichConfigQuery())
-    expect(cfg).toEqual({ promptTemplate: 'tpl', defaultPromptTemplate: 'DEFAULT', dimensions: [] })
+    expect(cfg).toMatchObject({
+      promptTemplate: 'tpl',
+      defaultPromptTemplate: 'DEFAULT',
+      dimensions: [],
+      promptPolicy: { promptVersion: 'enrich.default@1' },
+    })
   })
 
   it('error envelope surfaces (e.g. 500)', async () => {

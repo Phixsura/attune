@@ -16,8 +16,9 @@ import (
 	"github.com/Phixsura/attune/internal/service/enrich"
 )
 
-// GetEvalSuggestions handles GET /fb/v1/console/enrich-config/eval-suggestions.
-// It returns off-list values the LLM suggested during eval.
+// GetEvalSuggestions handles POST
+// /fb/v1/console/enrich-config/eval-suggestions:analyze. It runs an
+// LLM-backed eval sample and returns off-list values the model suggested.
 func (h *Handler) GetEvalSuggestions(
 	ctx *dispatcher.RequestContext[*session.AuthCtx],
 	_ *attunev1.GetEvalSuggestionsRequest,
@@ -112,6 +113,8 @@ func (h *Handler) PromoteSuggestedValue(
 			"failed to get enrich config",
 		)
 	}
+	current.Dimensions = cloneDimensionSet(current.Dimensions)
+	beforeSnapshot := enrichConfigSnapshot(current)
 
 	// Find the dimension
 	dimIdx := -1
@@ -175,10 +178,15 @@ func (h *Handler) PromoteSuggestedValue(
 		ctx,
 		"enrich_config.promote_suggested",
 		"Promoted suggested value to taxonomy",
-		map[string]any{"dimension": dimName, "value": value},
-		nil,
+		beforeSnapshot,
+		enrichConfigSnapshot(current),
 	); err != nil {
 		logext.Errorf(ctx, "[%s] audit write failed,err:%+v", where, err.Error())
+		return dispatcher.Fail[*attunev1.PromoteSuggestedValueResponse](
+			http.StatusInternalServerError,
+			attunev1.ErrorCode_INTERNAL,
+			"failed to write audit log",
+		)
 	}
 
 	return dispatcher.OK(ptrext.Of(attunev1.PromoteSuggestedValueResponse{

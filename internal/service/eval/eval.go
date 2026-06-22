@@ -50,6 +50,7 @@ type enrichedSampler interface {
 // *tenant.TenantRepo satisfies it; tests inject a fake.
 type tenantConfigReader interface {
 	GetEnrichConfig(ctx context.Context, tenantID string) (tenant.EnrichConfig, error)
+	GetEnrichConfigWithLocale(ctx context.Context, tenantID string) (tenant.EnrichConfigWithLocale, error)
 }
 
 // rowClassifier re-runs LLM classification with drop diagnostics.
@@ -164,9 +165,12 @@ func (ev *Evaluator) RunConsistencyForTenant(ctx context.Context, tenantID strin
 func (ev *Evaluator) resolveConfig(ctx context.Context, tenantID string) enrich.ClassifyConfig {
 	cfg := enrich.ClassifyConfig{TenantID: tenantID, Purpose: "eval"}
 	if ev.tenants != nil {
-		if tc, err := ev.tenants.GetEnrichConfig(ctx, tenantID); err == nil {
+		if tc, err := ev.tenants.GetEnrichConfigWithLocale(ctx, tenantID); err == nil {
 			cfg.PromptTemplate = tc.PromptTemplate
 			cfg.Dimensions = tc.Dimensions
+			cfg.PolicyConfig = tc.PromptPolicy
+			cfg.PromptVersionID = tc.ActivePromptVersionID
+			cfg.DisplayLocale = tc.Locale
 		}
 	}
 	return cfg

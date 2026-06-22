@@ -240,6 +240,8 @@ type EnrichInput struct {
 	SourceTags      []string
 	PromptTemplate  *string
 	Dimensions      domain.DimensionSet
+	PromptPolicy    domain.EnrichPromptPolicyConfig
+	PromptVersionID string
 }
 
 // LoadForEnrich returns the columns the LLM prompt and the downstream
@@ -252,6 +254,7 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 	var (
 		in            EnrichInput
 		dimsRaw       []byte
+		policyRaw     []byte
 		inboundSource *uuid.UUID
 	)
 	err := r.pool.QueryRow(
@@ -259,13 +262,14 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 		`SELECT uf.content, uf.source, uf.user_id, COALESCE(uf.language, ''),
 		 COALESCE(t.locale, 'en'), uf.tenant_id, uf.created_at,
 			 uf.inbound_source_id, COALESCE(src.tags, '{}'::text[]),
-		 t.enrich_prompt_template, t.enrich_dimensions
+			 t.enrich_prompt_template, t.enrich_dimensions, t.enrich_prompt_policy,
+			 COALESCE(t.active_enrich_prompt_version_id::text, '')
 		 FROM user_feedback uf
 		 LEFT JOIN tenants t ON t.id = uf.tenant_id
 		 LEFT JOIN inbound_sources src ON src.id = uf.inbound_source_id
 		 WHERE uf.id = $1`, id,
 	).Scan(&in.Content, &in.Source, &in.UserID, &in.Language, &in.DisplayLocale, &in.TenantID, &in.CreatedAt,
-		&inboundSource, &in.SourceTags, &in.PromptTemplate, &dimsRaw)
+		&inboundSource, &in.SourceTags, &in.PromptTemplate, &dimsRaw, &policyRaw, &in.PromptVersionID)
 	if err != nil {
 		return nil, fmt.Errorf("load feedback %d: %w", id, err)
 	}
@@ -276,6 +280,13 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 		if err := json.Unmarshal(dimsRaw, &in.Dimensions); err != nil {
 			return nil, fmt.Errorf("decode enrich dimensions for %d: %w", id, err)
 		}
+	}
+	in.PromptPolicy = domain.DefaultEnrichPromptPolicyConfig()
+	if len(policyRaw) > 0 {
+		if err := json.Unmarshal(policyRaw, &in.PromptPolicy); err != nil {
+			return nil, fmt.Errorf("decode enrich prompt policy for %d: %w", id, err)
+		}
+		in.PromptPolicy = domain.NormalizeEnrichPromptPolicyConfig(in.PromptPolicy)
 	}
 	return ptrext.Of(in), nil
 }

@@ -4,7 +4,7 @@ import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, userEvent, waitFor } from '@/testing/test-utils'
 import { SuggestedValuesPanel } from './suggested-values-panel'
 
-const SUGGESTIONS_URL = '/fb/v1/console/enrich-config/eval-suggestions'
+const SUGGESTIONS_URL = '/fb/v1/console/enrich-config/eval-suggestions:analyze'
 const PROMOTE_URL = '/fb/v1/console/enrich-config/promote'
 
 function suggestionsResponse() {
@@ -22,7 +22,7 @@ describe('SuggestedValuesPanel', () => {
   it('gates the eval behind an explicit Analyze click', async () => {
     let called = false
     server.use(
-      http.get(SUGGESTIONS_URL, () => {
+      http.post(SUGGESTIONS_URL, () => {
         called = true
         return HttpResponse.json(suggestionsResponse())
       }),
@@ -36,7 +36,7 @@ describe('SuggestedValuesPanel', () => {
   })
 
   it('renders candidates after Analyze with count/confidence/impact', async () => {
-    server.use(http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())))
+    server.use(http.post(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())))
     renderWithProviders(<SuggestedValuesPanel canEdit={true} />)
 
     await userEvent.click(screen.getByTestId('analyze-suggestions'))
@@ -51,7 +51,7 @@ describe('SuggestedValuesPanel', () => {
 
   it('renders <1% for a nonzero confidence/impact that rounds to zero', async () => {
     server.use(
-      http.get(SUGGESTIONS_URL, () =>
+      http.post(SUGGESTIONS_URL, () =>
         HttpResponse.json({
           coverage: { modules: 0.999 },
           candidates: [
@@ -72,7 +72,7 @@ describe('SuggestedValuesPanel', () => {
   it('promotes only once when the button is double-clicked', async () => {
     let promoteCalls = 0
     server.use(
-      http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())),
+      http.post(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())),
       http.post(PROMOTE_URL, async () => {
         promoteCalls += 1
         await new Promise((r) => setTimeout(r, 50))
@@ -94,7 +94,7 @@ describe('SuggestedValuesPanel', () => {
   it('promotes a candidate via POST /promote', async () => {
     let promoted: { dimensionName: string; value: string } | null = null
     server.use(
-      http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())),
+      http.post(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())),
       http.post(PROMOTE_URL, async ({ request }) => {
         promoted = (await request.json()) as { dimensionName: string; value: string }
         return HttpResponse.json({ dimension: { name: 'modules', taxonomy: [] } })
@@ -110,11 +110,11 @@ describe('SuggestedValuesPanel', () => {
     expect(promoted).toMatchObject({ dimensionName: 'modules', value: 'checkout' })
   })
 
-  it('drops the promoted candidate without re-running the eval (no second GET)', async () => {
-    let getCalls = 0
+  it('drops the promoted candidate without re-running the eval analysis', async () => {
+    let analyzeCalls = 0
     server.use(
-      http.get(SUGGESTIONS_URL, () => {
-        getCalls += 1
+      http.post(SUGGESTIONS_URL, () => {
+        analyzeCalls += 1
         return HttpResponse.json(suggestionsResponse())
       }),
       http.post(PROMOTE_URL, () =>
@@ -125,7 +125,7 @@ describe('SuggestedValuesPanel', () => {
 
     await userEvent.click(screen.getByTestId('analyze-suggestions'))
     await waitFor(() => expect(screen.getByTestId('promote-checkout')).toBeInTheDocument())
-    expect(getCalls).toBe(1)
+    expect(analyzeCalls).toBe(1)
 
     await userEvent.click(screen.getByTestId('promote-checkout'))
 
@@ -135,12 +135,12 @@ describe('SuggestedValuesPanel', () => {
     )
     expect(screen.getByTestId('suggestion-row-billing')).toBeInTheDocument()
     // crucially, the expensive eval was NOT re-run.
-    expect(getCalls).toBe(1)
+    expect(analyzeCalls).toBe(1)
   })
 
   it('keeps the candidate and shows a toast when promote fails (e.g. 409)', async () => {
     server.use(
-      http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())),
+      http.post(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())),
       http.post(PROMOTE_URL, () =>
         HttpResponse.json({ code: 'VALIDATION', message: 'value already exists' }, { status: 409 }),
       ),
@@ -159,7 +159,7 @@ describe('SuggestedValuesPanel', () => {
   it('shows a read-only hint and no Analyze button when canEdit is false', async () => {
     let called = false
     server.use(
-      http.get(SUGGESTIONS_URL, () => {
+      http.post(SUGGESTIONS_URL, () => {
         called = true
         return HttpResponse.json(suggestionsResponse())
       }),
@@ -173,7 +173,7 @@ describe('SuggestedValuesPanel', () => {
   })
 
   it('renders per-dimension coverage badges after Analyze', async () => {
-    server.use(http.get(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())))
+    server.use(http.post(SUGGESTIONS_URL, () => HttpResponse.json(suggestionsResponse())))
     renderWithProviders(<SuggestedValuesPanel canEdit={true} />)
 
     await userEvent.click(screen.getByTestId('analyze-suggestions'))
@@ -184,7 +184,7 @@ describe('SuggestedValuesPanel', () => {
 
   it('shows coverage even when there are no candidates (all on-list)', async () => {
     server.use(
-      http.get(SUGGESTIONS_URL, () =>
+      http.post(SUGGESTIONS_URL, () =>
         HttpResponse.json({ coverage: { modules: 1 }, candidates: [], recommendations: [] }),
       ),
     )
@@ -199,7 +199,7 @@ describe('SuggestedValuesPanel', () => {
 
   it('shows an empty state when there are no off-list values', async () => {
     server.use(
-      http.get(SUGGESTIONS_URL, () =>
+      http.post(SUGGESTIONS_URL, () =>
         HttpResponse.json({ coverage: {}, candidates: [], recommendations: [] }),
       ),
     )
@@ -211,7 +211,7 @@ describe('SuggestedValuesPanel', () => {
 
   it('shows an error state when the eval fails', async () => {
     server.use(
-      http.get(SUGGESTIONS_URL, () =>
+      http.post(SUGGESTIONS_URL, () =>
         HttpResponse.json({ code: 'INTERNAL', message: 'boom' }, { status: 500 }),
       ),
     )

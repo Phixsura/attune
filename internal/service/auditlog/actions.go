@@ -10,6 +10,7 @@ var validActions = map[string]struct{}{
 	"api_key.rotate":                  {},
 	"digest_subscription.delete":      {},
 	"digest_subscription.upsert":      {},
+	"enrich_config.activate_version":  {},
 	"enrich_config.promote_suggested": {},
 	"enrich_config.update":            {},
 	"enrichment_runtime.reset":        {},
