@@ -187,6 +187,100 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		require.Equal(t, "safari", body["sourceMeta"].(map[string]any)["browser"])
 	})
 
+	t.Run("list with enrichment_status filter", func(t *testing.T) {
+		repo := &fakeFeedbackRepo{
+			listRows: []feedbackrepo.ConsoleListRow{{
+				ID:               456,
+				Content:          "error occurred",
+				Source:           "sdk",
+				EnrichmentStatus: "failed",
+				CreatedAt:        time.Date(2026, 6, 9, 1, 2, 3, 0, time.UTC),
+			}},
+		}
+		h := &FeedbackHandler{repo: repo, tenants: tenants}
+		handler := dispatcher.Bind(
+			"console.FeedbackHandler.List",
+			dispatcher.Query(func() *attunev1.ListFeedbackRequest { return &attunev1.ListFeedbackRequest{} }, BindListRequest),
+			h.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListFeedbackRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(
+			http.MethodGet,
+			"/fb/v1/console/feedback?enrichment_status=failed",
+			"",
+		))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, repo.listOpts.EnrichmentStatus)
+		require.Equal(t, "failed", *repo.listOpts.EnrichmentStatus)
+	})
+
+	t.Run("list with terminal_failed_only filter", func(t *testing.T) {
+		repo := &fakeFeedbackRepo{
+			listRows: []feedbackrepo.ConsoleListRow{{
+				ID:                 789,
+				Content:            "terminal failure",
+				Source:             "api",
+				EnrichmentStatus:   "failed",
+				EnrichmentAttempts: 5,
+				CreatedAt:          time.Date(2026, 6, 9, 1, 2, 3, 0, time.UTC),
+			}},
+		}
+		h := &FeedbackHandler{repo: repo, tenants: tenants}
+		handler := dispatcher.Bind(
+			"console.FeedbackHandler.List",
+			dispatcher.Query(func() *attunev1.ListFeedbackRequest { return &attunev1.ListFeedbackRequest{} }, BindListRequest),
+			h.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListFeedbackRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(
+			http.MethodGet,
+			"/fb/v1/console/feedback?terminal_failed_only=true",
+			"",
+		))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, repo.listOpts.TerminalFailedOnly)
+		require.True(t, *repo.listOpts.TerminalFailedOnly)
+	})
+
+	t.Run("list with combined terminal failure filters", func(t *testing.T) {
+		repo := &fakeFeedbackRepo{
+			listRows: []feedbackrepo.ConsoleListRow{},
+		}
+		h := &FeedbackHandler{repo: repo, tenants: tenants}
+		handler := dispatcher.Bind(
+			"console.FeedbackHandler.List",
+			dispatcher.Query(func() *attunev1.ListFeedbackRequest { return &attunev1.ListFeedbackRequest{} }, BindListRequest),
+			h.List,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListFeedbackRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(
+			http.MethodGet,
+			"/fb/v1/console/feedback?enrichment_status=failed&terminal_failed_only=true&limit=50",
+			"",
+		))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, repo.listOpts.EnrichmentStatus)
+		require.Equal(t, "failed", *repo.listOpts.EnrichmentStatus)
+		require.NotNil(t, repo.listOpts.TerminalFailedOnly)
+		require.True(t, *repo.listOpts.TerminalFailedOnly)
+		require.Equal(t, 50, repo.listOpts.Limit)
+	})
+
 	t.Run("stats", func(t *testing.T) {
 		repo := &fakeFeedbackRepo{
 			usageRows: []feedbackrepo.UsageBucket{
