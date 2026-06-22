@@ -53,6 +53,7 @@ type Config struct {
 	RateLimit     RateLimitConfig
 	OIDC          OIDCConfig
 	Security      SecurityConfig
+	MCP           MCPConfig
 
 	CustomWebhooks []CustomWebhookDest
 
@@ -78,6 +79,13 @@ type Config struct {
 	GDPRDeleteGraceWindow time.Duration
 	ShutdownDrainDelay    time.Duration
 	ShutdownTimeout       time.Duration
+
+	// MCP convenience fields
+	MCPEnabled            bool
+	MCPAccessTokenTTL     time.Duration
+	MCPRefreshTokenTTL    time.Duration
+	MCPRateLimitPerMinute int
+	MCPRateLimitBurst     int
 }
 
 type DatabaseConfig struct {
@@ -171,6 +179,30 @@ type RateLimitConfig struct {
 	Disabled  bool `yaml:"disabled"`
 }
 
+// MCPConfig holds Model Context Protocol server settings.
+type MCPConfig struct {
+	Enabled                 bool               `yaml:"enabled"`
+	OAuth                   MCPOAuthConfig     `yaml:"oauth"`
+	RateLimit               MCPRateLimitConfig `yaml:"rate_limit"`
+	AllowedRedirectPatterns []string           `yaml:"allowed_redirect_patterns"`
+}
+
+// MCPOAuthConfig holds OAuth 2.1 Authorization Server settings.
+type MCPOAuthConfig struct {
+	// JWTSecret is the HS256 signing key for MCP access tokens.
+	// Must be at least 32 bytes when MCP is enabled.
+	JWTSecret       string `yaml:"jwt_secret"`
+	Issuer          string `yaml:"issuer"`
+	AccessTokenTTL  string `yaml:"access_token_ttl"`
+	RefreshTokenTTL string `yaml:"refresh_token_ttl"`
+}
+
+// MCPRateLimitConfig holds MCP-specific rate limiting.
+type MCPRateLimitConfig struct {
+	RequestsPerMinute int `yaml:"requests_per_minute"`
+	Burst             int `yaml:"burst"`
+}
+
 type yamlConfig struct {
 	Port           int                 `yaml:"port"`
 	Database       DatabaseConfig      `yaml:"database"`
@@ -185,6 +217,7 @@ type yamlConfig struct {
 	RateLimit      RateLimitConfig     `yaml:"rate_limit"`
 	OIDC           OIDCConfig          `yaml:"oidc"`
 	Security       SecurityConfig      `yaml:"security"`
+	MCP            MCPConfig           `yaml:"mcp"`
 	CustomWebhooks []CustomWebhookDest `yaml:"custom_webhooks"`
 }
 
@@ -253,6 +286,7 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 		RateLimit:      yc.RateLimit,
 		OIDC:           yc.OIDC,
 		Security:       yc.Security,
+		MCP:            yc.MCP,
 		CustomWebhooks: yc.CustomWebhooks,
 	})
 	c.applyDefaults()
@@ -318,6 +352,22 @@ func (c *Config) parseDerivedFields() error {
 	c.GDPRDeleteGraceWindow = gdprDeleteGrace
 	c.ShutdownDrainDelay = shutdownDrainDelay
 	c.ShutdownTimeout = shutdownTimeout
+
+	// MCP fields
+	c.MCPEnabled = c.MCP.Enabled
+	mcpAccessTTL, err := time.ParseDuration(c.MCP.OAuth.AccessTokenTTL)
+	if err != nil {
+		return fmt.Errorf("mcp.oauth.access_token_ttl: %w", err)
+	}
+	mcpRefreshTTL, err := time.ParseDuration(c.MCP.OAuth.RefreshTokenTTL)
+	if err != nil {
+		return fmt.Errorf("mcp.oauth.refresh_token_ttl: %w", err)
+	}
+	c.MCPAccessTokenTTL = mcpAccessTTL
+	c.MCPRefreshTokenTTL = mcpRefreshTTL
+	c.MCPRateLimitPerMinute = c.MCP.RateLimit.RequestsPerMinute
+	c.MCPRateLimitBurst = c.MCP.RateLimit.Burst
+
 	return nil
 }
 
@@ -364,6 +414,28 @@ func (c *Config) applyDefaults() {
 	}
 	c.applyObservabilityDefaults()
 	c.OIDC.ApplyDefaults()
+	c.applyMCPDefaults()
+}
+
+func (c *Config) applyMCPDefaults() {
+	if c.MCP.OAuth.AccessTokenTTL == "" {
+		c.MCP.OAuth.AccessTokenTTL = "1h"
+	}
+	if c.MCP.OAuth.RefreshTokenTTL == "" {
+		c.MCP.OAuth.RefreshTokenTTL = "168h" // 7 days
+	}
+	if c.MCP.RateLimit.RequestsPerMinute == 0 {
+		c.MCP.RateLimit.RequestsPerMinute = 60
+	}
+	if c.MCP.RateLimit.Burst == 0 {
+		c.MCP.RateLimit.Burst = 10
+	}
+	if len(c.MCP.AllowedRedirectPatterns) == 0 {
+		c.MCP.AllowedRedirectPatterns = []string{
+			"http://127.0.0.1:*",
+			"http://localhost:*",
+		}
+	}
 }
 
 func (c *Config) applyGDPRDefaults() {
@@ -423,6 +495,9 @@ func (c *Config) validate() error {
 	if err := c.validateEnricherConfig(); err != nil {
 		return err
 	}
+	if err := c.validateMCPConfig(); err != nil {
+		return err
+	}
 	return c.validateCustomWebhooks()
 }
 
@@ -477,6 +552,35 @@ func (c *Config) validateEnricherConfig() error {
 	}
 	if c.EnricherLLMBurst < 0 {
 		return fmt.Errorf("config: enricher.llm_burst must be non-negative")
+	}
+	return nil
+}
+
+func (c *Config) validateMCPConfig() error {
+	if !c.MCP.Enabled {
+		return nil
+	}
+	secret := strings.TrimSpace(c.MCP.OAuth.JWTSecret)
+	if secret == "" {
+		return fmt.Errorf("config: mcp.oauth.jwt_secret is required when MCP is enabled")
+	}
+	if len(secret) < 32 {
+		return fmt.Errorf("config: mcp.oauth.jwt_secret must be at least 32 bytes")
+	}
+	if secret == "replace-with-32-or-more-random-characters" {
+		return fmt.Errorf("config: mcp.oauth.jwt_secret must be replaced with a random value")
+	}
+	if c.MCPAccessTokenTTL <= 0 {
+		return fmt.Errorf("config: mcp.oauth.access_token_ttl must be positive")
+	}
+	if c.MCPRefreshTokenTTL <= 0 {
+		return fmt.Errorf("config: mcp.oauth.refresh_token_ttl must be positive")
+	}
+	if c.MCPRateLimitPerMinute <= 0 {
+		return fmt.Errorf("config: mcp.rate_limit.requests_per_minute must be positive")
+	}
+	if c.MCPRateLimitBurst <= 0 {
+		return fmt.Errorf("config: mcp.rate_limit.burst must be positive")
 	}
 	return nil
 }

@@ -91,7 +91,8 @@
     "llm_usage": "LLM 成本",
     "llm_config": "LLM 配置",
     "members": "成员",
-    "outbox_dead": "死信投递"
+    "outbox_dead": "死信投递",
+    "mcp_clients": "MCP 客户端"
   },
   "members": {
     "title": "团队成员",
@@ -1484,5 +1485,39 @@
     "denied": "您没有执行此操作的权限",
     "requires_admin": "此操作需要管理员权限",
     "requires_member": "此操作需要成员权限"
+  },
+  "mcp_clients": {
+    "title": "MCP 客户端",
+    "subtitle": "管理 AI Agent 的 OAuth 客户端凭证，用于 MCP 协议访问 attune 数据。",
+    "create_button": "+ 注册客户端",
+    "created": "客户端已创建",
+    "revoked": "客户端已撤销",
+    "active_count": "个活跃客户端",
+    "empty_title": "还没有 MCP 客户端",
+    "empty_body": "注册一个 OAuth 客户端，让 AI Agent 通过 MCP 协议访问反馈数据。",
+    "table": {
+      "name": "名称",
+      "client_id": "客户端 ID",
+      "scopes": "权限范围",
+      "created": "创建于",
+      "status": "状态",
+      "actions": "操作"
+    },
+    "status": {
+      "active": "可用",
+      "revoked": "已撤销"
+    },
+    "revoke_button": "撤销",
+    "create_dialog": {
+      "title": "注册 MCP 客户端",
+      "description": "为 AI Agent 创建 OAuth 客户端凭证。",
+      "name_label": "客户端名称",
+      "redirect_uri_label": "重定向 URI",
+      "scopes_label": "权限范围"
+    },
+    "revoke_dialog": {
+      "title": "撤销此客户端？",
+      "description": "撤销后，使用此客户端的 Agent 将无法再访问 attune。已撤销的客户端不可恢复。"
+    }
   }
 }

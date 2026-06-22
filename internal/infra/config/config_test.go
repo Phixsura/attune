@@ -514,3 +514,67 @@ func writeConfig(t *testing.T, raw string) string {
 	}
 	return path
 }
+
+func TestLoadPathMCPRequiresJWTSecretWhenEnabled(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nmcp:\n  enabled: true\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected mcp.oauth.jwt_secret validation error")
+	}
+	if !strings.Contains(err.Error(), "mcp.oauth.jwt_secret is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadPathMCPRequiresJWTSecretMinLength(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nmcp:\n  enabled: true\n  oauth:\n    jwt_secret: \"short\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected mcp.oauth.jwt_secret length validation error")
+	}
+	if !strings.Contains(err.Error(), "mcp.oauth.jwt_secret must be at least 32 bytes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadPathMCPRejectsPlaceholderJWTSecret(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nmcp:\n  enabled: true\n  oauth:\n    jwt_secret: \"replace-with-32-or-more-random-characters\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected placeholder jwt_secret validation error")
+	}
+	if !strings.Contains(err.Error(), "mcp.oauth.jwt_secret must be replaced") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadPathMCPDisabledSkipsValidation(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nmcp:\n  enabled: false\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	if err != nil {
+		t.Fatalf("MCP disabled should skip validation: %v", err)
+	}
+}
+
+func TestLoadPathMCPValidConfig(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nmcp:\n  enabled: true\n  oauth:\n    jwt_secret: \"01234567890123456789012345678901\"\n"
+	cfg, err := LoadPath(writeConfig(t, raw))
+	if err != nil {
+		t.Fatalf("valid MCP config should load: %v", err)
+	}
+	if !cfg.MCPEnabled {
+		t.Fatal("MCPEnabled should be true")
+	}
+	if cfg.MCPRateLimitPerMinute != 60 {
+		t.Fatalf("MCPRateLimitPerMinute = %d, want 60", cfg.MCPRateLimitPerMinute)
+	}
+	if cfg.MCPRateLimitBurst != 10 {
+		t.Fatalf("MCPRateLimitBurst = %d, want 10", cfg.MCPRateLimitBurst)
+	}
+	if cfg.MCPAccessTokenTTL != time.Hour {
+		t.Fatalf("MCPAccessTokenTTL = %s, want 1h", cfg.MCPAccessTokenTTL)
+	}
+	if cfg.MCPRefreshTokenTTL != 168*time.Hour {
+		t.Fatalf("MCPRefreshTokenTTL = %s, want 168h", cfg.MCPRefreshTokenTTL)
+	}
+}

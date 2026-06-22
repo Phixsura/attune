@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riandyrn/otelchi"
 	"go.opentelemetry.io/otel/trace"
@@ -25,19 +26,32 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers"
 	"github.com/Phixsura/attune/internal/handlers/console"
+	"github.com/Phixsura/attune/internal/handlers/mcp"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
+	mcpoauth "github.com/Phixsura/attune/internal/mcp/oauth"
+	"github.com/Phixsura/attune/internal/mcp/tools"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
+	"github.com/Phixsura/attune/internal/repo/feedback"
+	"github.com/Phixsura/attune/internal/repo/feedbackaudit"
+	"github.com/Phixsura/attune/internal/repo/feedbacktag"
+	"github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
+	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
+	"github.com/Phixsura/attune/internal/repo/workflowstate"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
+	"github.com/Phixsura/attune/internal/service/ingest"
+	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
 )
 
 // buildRouter wires the chi router: OTel root span + X-Trace-Id, the standard
@@ -57,6 +71,7 @@ func buildRouter(
 	inboundSources *inboundsourcerepo.Repo,
 	adminRepo *admin.Repo,
 	enrichRuntime *enrichruntimesvc.Service,
+	ingestor *ingest.Ingestor,
 ) (chi.Router, error) {
 	const where = "main.buildRouter"
 	r := chi.NewRouter()
@@ -137,7 +152,318 @@ func buildRouter(
 	} else {
 		logext.Infof(ctx, "[%s] console disabled (no CONSOLE_SESSION_KEY)", where)
 	}
+
+	// MCP Server. Mounted under /mcp when enabled. Provides OAuth 2.1
+	// Authorization Server and JSON-RPC 2.0 tool surface for AI agents (#93).
+	if cfg.MCPEnabled {
+		mcpHandler, err := buildMCPHandler(ctx, cfg, pool, ingestor)
+		if err != nil {
+			return nil, fmt.Errorf("build mcp: %w", err)
+		}
+		r.Mount("/mcp", mcpHandler.Routes())
+		logext.Infof(ctx, "[%s] mcp server enabled", where)
+	} else {
+		logext.Infof(ctx, "[%s] mcp server disabled", where)
+	}
+
 	return r, nil
+}
+
+func buildMCPHandler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, ingestor *ingest.Ingestor) (*mcp.Handler, error) {
+	const where = "main.buildMCPHandler"
+
+	jwtSecret := strings.TrimSpace(cfg.MCP.OAuth.JWTSecret)
+	if len(jwtSecret) < 32 {
+		return nil, fmt.Errorf("mcp.oauth.jwt_secret must be at least 32 bytes")
+	}
+
+	issuer := cfg.MCP.OAuth.Issuer
+	if issuer == "" {
+		issuer = cfg.ConsoleBaseURL + "/mcp/oauth"
+	}
+
+	mcpCfg := mcp.Config{
+		BaseURL:            cfg.ConsoleBaseURL,
+		JWTSecret:          []byte(jwtSecret),
+		JWTIssuer:          issuer,
+		RateLimitPerMinute: cfg.MCPRateLimitPerMinute,
+		RateLimitBurst:     cfg.MCPRateLimitBurst,
+		AccessTokenTTL:     cfg.MCPAccessTokenTTL,
+		RefreshTokenTTL:    cfg.MCPRefreshTokenTTL,
+	}
+
+	clientsRepo := mcprepo.NewClients(pool)
+	codesRepo := mcprepo.NewCodes(pool)
+	tokensRepo := mcprepo.NewTokens(pool)
+	sessionsRepo := mcprepo.NewSessions(pool)
+
+	stores := mcp.Stores{
+		Clients:          newMCPClientStore(clientsRepo),
+		Codes:            newMCPCodeStore(codesRepo),
+		Tokens:           newMCPTokenStore(tokensRepo),
+		Sessions:         newMCPSessionStore(sessionsRepo),
+		ClientValidator:  clientsRepo,
+		SessionValidator: sessionsRepo,
+	}
+
+	feedbackRepo := feedback.NewFeedback(pool)
+	workflowRepo := workflowstate.New(pool)
+	tagRepo := feedbacktag.New(pool)
+	tagAssignRepo := feedbacktagassignment.New(pool)
+	auditRepo := feedbackaudit.New(pool)
+	workflowService := workflowsvc.NewService(workflowRepo, auditRepo, pool)
+	auditLogSvc := auditlogsvc.New(auditlogrepo.New(pool))
+
+	deps := ptrext.Of(tools.Deps{
+		Feedback:        feedbackRepo,
+		FeedbackWriter:  feedbackRepo,
+		WorkflowState:   workflowRepo,
+		WorkflowTransit: newMCPWorkflowAdapter(workflowService),
+		Tag:             tagRepo,
+		TagAssign:       tagAssignRepo,
+		Ingestor:        newMCPIngestorAdapter(ingestor),
+		Audit:           newMCPAuditAdapter(auditLogSvc),
+	})
+
+	logext.Infof(ctx, "[%s] built,issuer:%s", where, issuer)
+	return mcp.NewHandler(mcpCfg, stores, deps), nil
+}
+
+type mcpClientStoreAdapter struct {
+	repo *mcprepo.ClientsRepo
+}
+
+func newMCPClientStore(repo *mcprepo.ClientsRepo) *mcpClientStoreAdapter {
+	return ptrext.Of(mcpClientStoreAdapter{repo: repo})
+}
+
+func (a *mcpClientStoreAdapter) GetByID(ctx context.Context, id uuid.UUID) (*mcpoauth.Client, error) {
+	c, err := a.repo.GetActiveByID(ctx, id)
+	if err != nil {
+		return nil, mcpoauth.ErrInvalidClient
+	}
+	return ptrext.Of(mcpoauth.Client{
+		ID:           c.ID,
+		TenantID:     c.TenantID,
+		Name:         c.Name,
+		RedirectURIs: c.RedirectURIs,
+		Scopes:       c.Scopes,
+		CreatedAt:    c.CreatedAt,
+	}), nil
+}
+
+func (a *mcpClientStoreAdapter) ValidateRedirectURI(ctx context.Context, clientID uuid.UUID, uri string) (bool, error) {
+	c, err := a.repo.GetActiveByID(ctx, clientID)
+	if err != nil {
+		return false, nil
+	}
+	for _, allowed := range c.RedirectURIs {
+		if allowed == uri {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+type mcpCodeStoreAdapter struct {
+	repo *mcprepo.CodesRepo
+}
+
+func newMCPCodeStore(repo *mcprepo.CodesRepo) *mcpCodeStoreAdapter {
+	return ptrext.Of(mcpCodeStoreAdapter{repo: repo})
+}
+
+func (a *mcpCodeStoreAdapter) Create(ctx context.Context, code *mcpoauth.AuthCode) error {
+	_, err := a.repo.Create(ctx, mcprepo.CreateCodeParams{
+		Code:          code.Code,
+		ClientID:      code.ClientID,
+		RedirectURI:   code.RedirectURI,
+		Scopes:        code.Scopes,
+		CodeChallenge: code.CodeChallenge,
+		UserID:        code.TenantID,
+		ExpiresAt:     code.ExpiresAt,
+	})
+	return err
+}
+
+func (a *mcpCodeStoreAdapter) Consume(ctx context.Context, code string) (*mcpoauth.AuthCode, error) {
+	c, err := a.repo.Consume(ctx, code)
+	if err != nil {
+		return nil, mcpoauth.ErrInvalidCode
+	}
+	return ptrext.Of(mcpoauth.AuthCode{
+		Code:                c.Code,
+		ClientID:            c.ClientID,
+		TenantID:            c.UserID,
+		RedirectURI:         c.RedirectURI,
+		Scopes:              c.Scopes,
+		CodeChallenge:       c.CodeChallenge,
+		CodeChallengeMethod: "S256",
+		ExpiresAt:           c.ExpiresAt,
+		CreatedAt:           c.CreatedAt,
+	}), nil
+}
+
+type mcpTokenStoreAdapter struct {
+	repo *mcprepo.TokensRepo
+}
+
+func newMCPTokenStore(repo *mcprepo.TokensRepo) *mcpTokenStoreAdapter {
+	return ptrext.Of(mcpTokenStoreAdapter{repo: repo})
+}
+
+func (a *mcpTokenStoreAdapter) Create(ctx context.Context, token *mcpoauth.RefreshToken) error {
+	_, err := a.repo.CreateWithHash(ctx, mcprepo.CreateWithHashParams{
+		TokenHash: token.TokenHash,
+		ClientID:  token.ClientID,
+		SessionID: token.SessionID,
+		Scopes:    token.Scopes,
+		UserID:    token.TenantID,
+		ExpiresAt: token.ExpiresAt,
+	})
+	return err
+}
+
+func (a *mcpTokenStoreAdapter) GetByHash(ctx context.Context, hash string) (*mcpoauth.RefreshToken, error) {
+	t, err := a.repo.GetByHash(ctx, hash)
+	if err != nil {
+		return nil, mcpoauth.ErrInvalidRefreshToken
+	}
+	return ptrext.Of(mcpoauth.RefreshToken{
+		ID:        t.ID,
+		TokenHash: t.TokenHash,
+		ClientID:  t.ClientID,
+		TenantID:  t.UserID,
+		SessionID: t.SessionID,
+		Scopes:    t.Scopes,
+		ExpiresAt: t.ExpiresAt,
+		CreatedAt: t.CreatedAt,
+	}), nil
+}
+
+func (a *mcpTokenStoreAdapter) Revoke(ctx context.Context, id uuid.UUID) error {
+	return a.repo.Revoke(ctx, id)
+}
+
+func (a *mcpTokenStoreAdapter) Consume(ctx context.Context, hash string) (*mcpoauth.RefreshToken, error) {
+	t, err := a.repo.Consume(ctx, hash)
+	if err != nil {
+		return nil, mcpoauth.ErrInvalidRefreshToken
+	}
+	return ptrext.Of(mcpoauth.RefreshToken{
+		ID:        t.ID,
+		TokenHash: t.TokenHash,
+		ClientID:  t.ClientID,
+		TenantID:  t.UserID,
+		SessionID: t.SessionID,
+		Scopes:    t.Scopes,
+		ExpiresAt: t.ExpiresAt,
+		CreatedAt: t.CreatedAt,
+	}), nil
+}
+
+func (a *mcpTokenStoreAdapter) RotateToken(ctx context.Context, oldHash, newHash string, newExpiresAt time.Time) (*mcpoauth.RefreshToken, *mcpoauth.RefreshToken, error) {
+	old, newToken, err := a.repo.RotateToken(ctx, mcprepo.RotateTokenParams{
+		OldTokenHash: oldHash,
+		NewTokenHash: newHash,
+		NewExpiresAt: newExpiresAt,
+	})
+	if err != nil {
+		return nil, nil, mcpoauth.ErrInvalidRefreshToken
+	}
+	return ptrext.Of(mcpoauth.RefreshToken{
+			ID:        old.ID,
+			TokenHash: old.TokenHash,
+			ClientID:  old.ClientID,
+			TenantID:  old.UserID,
+			SessionID: old.SessionID,
+			Scopes:    old.Scopes,
+			ExpiresAt: old.ExpiresAt,
+			CreatedAt: old.CreatedAt,
+		}), ptrext.Of(mcpoauth.RefreshToken{
+			ID:        newToken.ID,
+			TokenHash: newToken.TokenHash,
+			ClientID:  newToken.ClientID,
+			TenantID:  newToken.UserID,
+			SessionID: newToken.SessionID,
+			Scopes:    newToken.Scopes,
+			ExpiresAt: newToken.ExpiresAt,
+			CreatedAt: newToken.CreatedAt,
+		}), nil
+}
+
+type mcpSessionStoreAdapter struct {
+	repo *mcprepo.SessionsRepo
+}
+
+func newMCPSessionStore(repo *mcprepo.SessionsRepo) *mcpSessionStoreAdapter {
+	return ptrext.Of(mcpSessionStoreAdapter{repo: repo})
+}
+
+func (a *mcpSessionStoreAdapter) Create(ctx context.Context, session *mcpoauth.Session) error {
+	_, err := a.repo.Create(ctx, mcprepo.CreateSessionParams{
+		ClientID: session.ClientID,
+		TenantID: session.TenantID,
+		Scopes:   session.Scopes,
+	})
+	return err
+}
+
+func (a *mcpSessionStoreAdapter) Touch(ctx context.Context, id uuid.UUID) error {
+	return a.repo.Touch(ctx, id)
+}
+
+func (a *mcpSessionStoreAdapter) IsActive(ctx context.Context, id uuid.UUID) (bool, error) {
+	return a.repo.IsActive(ctx, id)
+}
+
+type mcpWorkflowAdapter struct {
+	svc *workflowsvc.Service
+}
+
+func newMCPWorkflowAdapter(svc *workflowsvc.Service) *mcpWorkflowAdapter {
+	return ptrext.Of(mcpWorkflowAdapter{svc: svc})
+}
+
+func (a *mcpWorkflowAdapter) Transition(ctx context.Context, tenantID string, feedbackID int64, toStateID, byUser, comment string) error {
+	_, err := a.svc.Transition(ctx, tenantID, feedbackID, toStateID, byUser, comment)
+	return err
+}
+
+type mcpIngestorAdapter struct {
+	ingestor *ingest.Ingestor
+}
+
+func newMCPIngestorAdapter(i *ingest.Ingestor) *mcpIngestorAdapter {
+	return ptrext.Of(mcpIngestorAdapter{ingestor: i})
+}
+
+func (a *mcpIngestorAdapter) Ingest(ctx context.Context, tenantID, userID string, in domain.IngestInput) (int64, error) {
+	return a.ingestor.IngestRow(ctx, tenantID, uuid.Nil, in)
+}
+
+type mcpAuditAdapter struct {
+	svc *auditlogsvc.Service
+}
+
+func newMCPAuditAdapter(svc *auditlogsvc.Service) *mcpAuditAdapter {
+	return ptrext.Of(mcpAuditAdapter{svc: svc})
+}
+
+func (a *mcpAuditAdapter) Record(ctx context.Context, event tools.AuditEvent) error {
+	return a.svc.Record(ctx, auditlogsvc.Event{
+		TenantID: event.TenantID,
+		Actor: auditlogsvc.Actor{
+			Type: "mcp",
+			ID:   event.Actor,
+		},
+		Action:     event.Action,
+		TargetType: event.TargetType,
+		TargetID:   event.TargetID,
+		Summary:    event.Summary,
+		Before:     event.Before,
+		After:      event.After,
+	})
 }
 
 func mountConsoleStatic(ctx context.Context, r chi.Router) {

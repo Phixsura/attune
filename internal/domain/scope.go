@@ -6,7 +6,7 @@ import "errors"
 // Format: "resource:action" (e.g., "feedback:read").
 type Scope string
 
-// Scope constants — 24 total.
+// Scope constants — 27 total.
 const (
 	// Core resources
 	ScopeIngestWrite   Scope = "ingest:write"
@@ -41,6 +41,11 @@ const (
 	ScopeGDPRAdmin    Scope = "gdpr:admin"
 	ScopeMembersAdmin Scope = "members:admin"
 	ScopeAPIKeyAdmin  Scope = "apikey:admin"
+
+	// MCP (Model Context Protocol)
+	ScopeMCPRead   Scope = "mcp:read"
+	ScopeMCPWrite  Scope = "mcp:write"
+	ScopeMCPIngest Scope = "mcp:ingest"
 )
 
 // AllScopes is the complete set of valid scopes.
@@ -57,6 +62,7 @@ var AllScopes = []Scope{
 	ScopeTagsRead, ScopeTagsWrite,
 	ScopeWorkflowRead, ScopeWorkflowWrite,
 	ScopeGDPRAdmin, ScopeMembersAdmin, ScopeAPIKeyAdmin,
+	ScopeMCPRead, ScopeMCPWrite, ScopeMCPIngest,
 }
 
 // scopeHierarchy defines implicit scope grants: write implies read.
@@ -70,6 +76,7 @@ var scopeHierarchy = map[Scope][]Scope{
 	ScopeDigestWrite:   {ScopeDigestRead},
 	ScopeTagsWrite:     {ScopeTagsRead},
 	ScopeWorkflowWrite: {ScopeWorkflowRead},
+	ScopeMCPWrite:      {ScopeMCPRead},
 }
 
 // validScopes is a set for O(1) lookup.

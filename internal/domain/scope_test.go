@@ -56,5 +56,32 @@ func TestParseScopes(t *testing.T) {
 }
 
 func TestAllScopes_Count(t *testing.T) {
-	assert.Equal(t, 24, len(AllScopes), "should have 24 scopes")
+	assert.Equal(t, 27, len(AllScopes), "should have 27 scopes")
+}
+
+func TestMCPScopes(t *testing.T) {
+	t.Run("MCP scopes are valid", func(t *testing.T) {
+		assert.True(t, ScopeMCPRead.IsValid())
+		assert.True(t, ScopeMCPWrite.IsValid())
+		assert.True(t, ScopeMCPIngest.IsValid())
+	})
+
+	t.Run("MCP write implies read", func(t *testing.T) {
+		granted := []Scope{ScopeMCPWrite}
+		assert.True(t, HasScope(granted, ScopeMCPRead))
+		assert.True(t, HasScope(granted, ScopeMCPWrite))
+	})
+
+	t.Run("MCP ingest does not imply read", func(t *testing.T) {
+		granted := []Scope{ScopeMCPIngest}
+		assert.False(t, HasScope(granted, ScopeMCPRead))
+		assert.True(t, HasScope(granted, ScopeMCPIngest))
+	})
+
+	t.Run("MCP read does not imply write or ingest", func(t *testing.T) {
+		granted := []Scope{ScopeMCPRead}
+		assert.True(t, HasScope(granted, ScopeMCPRead))
+		assert.False(t, HasScope(granted, ScopeMCPWrite))
+		assert.False(t, HasScope(granted, ScopeMCPIngest))
+	})
 }

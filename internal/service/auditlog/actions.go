@@ -56,6 +56,47 @@ var validActions = map[string]struct{}{
 	"workflow_state.create":           {},
 	"workflow_state.update":           {},
 	"workflow_transition.replace":     {},
+
+	// MCP tool calls - read operations
+	"mcp.list_feedback":        {},
+	"mcp.get_feedback":         {},
+	"mcp.list_workflow_states": {},
+	"mcp.get_workflow_state":   {},
+	"mcp.list_tags":            {},
+
+	// MCP tool calls - write operations
+	"mcp.update_workflow_state": {},
+	"mcp.add_tag":               {},
+	"mcp.remove_tag":            {},
+	"mcp.set_urgent":            {},
+
+	// MCP tool calls - ingest operations
+	"mcp.submit_feedback": {},
+
+	// MCP tool calls - future expansion (keep for migration compat)
+	"mcp.archive_tag":           {},
+	"mcp.batch_update_status":   {},
+	"mcp.batch_update_tags":     {},
+	"mcp.create_tag":            {},
+	"mcp.get_cluster":           {},
+	"mcp.get_digest":            {},
+	"mcp.get_enrichment_status": {},
+	"mcp.get_usage_stats":       {},
+	"mcp.link_issue":            {},
+	"mcp.list_clusters":         {},
+	"mcp.list_dimensions":       {},
+	"mcp.mark_duplicate":        {},
+	"mcp.reclassify":            {},
+	"mcp.record_signal":         {},
+	"mcp.retry_enrichment":      {},
+	"mcp.search_feedback":       {},
+	"mcp.trigger_digest":        {},
+	"mcp.update_status":         {},
+	"mcp.update_tags":           {},
+
+	// MCP OAuth admin actions
+	"mcp_client.create": {},
+	"mcp_client.revoke": {},
 }
 
 func isKnownAction(action string) bool {
