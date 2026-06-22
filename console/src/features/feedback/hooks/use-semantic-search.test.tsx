@@ -23,11 +23,13 @@ describe('useSemanticSearch', () => {
     server.use(
       http.post('/fb/v1/console/feedback/search', () =>
         HttpResponse.json({
-          results: [
-            { id: 'fb-1', score: 0.95, snippet: 'matching text' },
-            { id: 'fb-2', score: 0.82, snippet: 'another match' },
+          hits: [
+            { feedback: { id: 'fb-1' }, combinedScore: 0.95 },
+            { feedback: { id: 'fb-2' }, combinedScore: 0.82 },
           ],
-          total: 2,
+          embeddingModel: 'text-embedding-3-small',
+          totalWithEmbeddings: 100,
+          usedKeywordFallback: false,
         }),
       ),
     )
@@ -36,14 +38,14 @@ describe('useSemanticSearch', () => {
       wrapper: createWrapper(),
     })
 
-    result.current.mutate({ query: 'test search', limit: 10 })
+    result.current.mutate({ q: 'test search', limit: 10 })
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true)
     })
 
-    expect(result.current.data?.results).toHaveLength(2)
-    expect(result.current.data?.results?.[0].id).toBe('fb-1')
+    expect(result.current.data?.hits).toHaveLength(2)
+    expect(result.current.data?.hits?.[0].feedback?.id).toBe('fb-1')
   })
 
   it('handles error responses', async () => {
@@ -57,7 +59,7 @@ describe('useSemanticSearch', () => {
       wrapper: createWrapper(),
     })
 
-    result.current.mutate({ query: '', limit: 10 })
+    result.current.mutate({ q: '', limit: 10 })
 
     await waitFor(() => {
       expect(result.current.isError).toBe(true)

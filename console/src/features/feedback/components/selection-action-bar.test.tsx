@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SelectionActionBar } from '@/features/feedback/components/selection-action-bar'
+import type { WorkflowState } from '@/proto/attune/v1/workflow'
 import { renderWithProviders, screen } from '@/testing/test-utils'
 
 describe('SelectionActionBar', () => {
@@ -97,27 +98,42 @@ describe('SelectionActionBar', () => {
   })
 
   describe('workflow transition', () => {
-    const workflowStates = [
+    const workflowStates: WorkflowState[] = [
       {
         id: 'state-1',
         name: 'Open',
-        displayName: { en: 'Open', 'zh-CN': '待处理' },
+        displayName: { entries: { en: 'Open', 'zh-CN': '待处理' } },
         color: '#22c55e',
+        category: 'active',
+        position: 0,
+        isDefault: true,
         archived: false,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
       },
       {
         id: 'state-2',
         name: 'Closed',
-        displayName: { en: 'Closed', 'zh-CN': '已关闭' },
+        displayName: { entries: { en: 'Closed', 'zh-CN': '已关闭' } },
         color: '#ef4444',
+        category: 'done',
+        position: 1,
+        isDefault: false,
         archived: false,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
       },
       {
         id: 'state-3',
         name: 'Archived',
-        displayName: { en: 'Archived' },
+        displayName: { entries: { en: 'Archived' } },
         color: '#gray',
+        category: 'done',
+        position: 2,
+        isDefault: false,
         archived: true,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
       },
     ]
 
@@ -156,8 +172,19 @@ describe('SelectionActionBar', () => {
     })
 
     it('falls back to state name when displayName is empty', async () => {
-      const statesWithEmptyDisplay = [
-        { id: 'state-x', name: 'FallbackName', displayName: {}, color: '#000', archived: false },
+      const statesWithEmptyDisplay: WorkflowState[] = [
+        {
+          id: 'state-x',
+          name: 'FallbackName',
+          displayName: { entries: {} },
+          color: '#000',
+          category: 'active',
+          position: 0,
+          isDefault: false,
+          archived: false,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
       ]
       const { user } = renderWithProviders(
         <SelectionActionBar
@@ -173,7 +200,19 @@ describe('SelectionActionBar', () => {
 
   describe('tag operations', () => {
     it('shows remove tag button when removableTags has items', () => {
-      const removableTags = [{ id: 'tag-1', name: 'Bug', color: '#ff0000' }]
+      const removableTags = [
+        {
+          id: 'tag-1',
+          name: 'Bug',
+          color: '#ff0000',
+          description: '',
+          usageCount: 0,
+          archived: false,
+          createdBy: 'user-1',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      ]
       renderWithProviders(<SelectionActionBar {...defaultProps} removableTags={removableTags} />)
       expect(screen.getByRole('button', { name: /移除标签/ })).toBeInTheDocument()
     })
