@@ -160,3 +160,81 @@ func (c fakeClient) Complete(ctx context.Context, req llmclient.CompletionReques
 }
 
 func (c fakeClient) Close() error { return nil }
+
+func TestRouter_NilRouter(t *testing.T) {
+	var router *Router
+	_, err := router.Complete(context.Background(), llmclient.CompletionRequest{})
+	if !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("err = %v; want ErrNotConfigured", err)
+	}
+}
+
+func TestRouter_Close(t *testing.T) {
+	router := New(fakeRepo{}, fakeStore{})
+	if err := router.Close(); err != nil {
+		t.Fatalf("Close() = %v; want nil", err)
+	}
+}
+
+func TestRouter_RepoError(t *testing.T) {
+	router := New(fakeRepo{err: errors.New("db error")}, fakeStore{})
+	_, err := router.Complete(context.Background(), llmclient.CompletionRequest{
+		Guard: llmclient.GuardMetadata{TenantID: "tenant-1", Purpose: "enrich"},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "db error" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRouter_EmptyPurpose(t *testing.T) {
+	router := New(fakeRepo{
+		candidates: []llmrepo.Candidate{},
+		err:        llmrepo.ErrNoCandidates,
+	}, fakeStore{})
+
+	// Test that empty purpose still works (defaults to "enrich" internally)
+	_, err := router.Complete(context.Background(), llmclient.CompletionRequest{
+		Guard: llmclient.GuardMetadata{TenantID: "tenant-1", Purpose: ""},
+	})
+	if !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("err = %v; want ErrNotConfigured", err)
+	}
+}
+
+func TestRouteMetadata(t *testing.T) {
+	c := candidate("test-channel", 2, 100)
+	meta := routeMetadata(c)
+	if meta.ChannelName != "test-channel" {
+		t.Errorf("ChannelName = %q; want test-channel", meta.ChannelName)
+	}
+	if meta.ProviderModel != "test-channel-model" {
+		t.Errorf("ProviderModel = %q; want test-channel-model", meta.ProviderModel)
+	}
+}
+
+func TestCandidateAttempts_PreservesInputOrder(t *testing.T) {
+	// candidateAttempts assumes DB has pre-sorted by priority desc; it groups
+	// same-priority candidates together, so we pass in sorted order.
+	c1 := candidate("first", 3, 1)
+	c2 := candidate("second", 2, 1)
+	c3 := candidate("third", 1, 1)
+
+	attempts := candidateAttempts([]llmrepo.Candidate{c1, c2, c3})
+
+	if len(attempts) != 3 {
+		t.Fatalf("got %d attempts, want 3", len(attempts))
+	}
+	if attempts[0].Channel.Name != "first" {
+		t.Errorf("first attempt %q; want first", attempts[0].Channel.Name)
+	}
+}
+
+func TestCandidateAttempts_EmptySlice(t *testing.T) {
+	attempts := candidateAttempts(nil)
+	if len(attempts) != 0 {
+		t.Fatalf("got %d attempts, want 0", len(attempts))
+	}
+}
