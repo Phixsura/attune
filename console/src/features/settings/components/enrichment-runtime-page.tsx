@@ -7,21 +7,19 @@ import {
   AlertTriangle,
   CheckCircle2,
   CircleHelp,
-  Clock3,
   DatabaseBackup,
   Gauge,
   Loader2,
   RefreshCcw,
   ShieldAlert,
   ShieldCheck,
-  ShieldX,
   SlidersHorizontal,
   TimerReset,
-  Waypoints,
 } from 'lucide-react'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -582,71 +580,100 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
     <>
       <TooltipProvider>
         <section className="min-w-0 space-y-6">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold tracking-tight">
-                {t('settings.enrichment_runtime.title')}
-              </h2>
-              <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                {t('settings.enrichment_runtime.help')}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant={stepUpSatisfied ? 'outline' : 'default'}
-                onClick={() => setStepUpOpen(true)}
-              >
-                <ShieldCheck className="mr-2 h-4 w-4" />
-                {stepUpSatisfied ? t('gdpr.step_up_verified') : t('gdpr.step_up_button')}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => void runtimeQuery.refetch()}
-                disabled={runtimeQuery.isFetching}
-              >
-                {runtimeQuery.isFetching ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="mr-2 h-4 w-4" />
-                )}
-                {t('settings.enrichment_runtime.refresh')}
-              </Button>
-            </div>
-          </div>
+          <PageHero
+            eyebrow={t('shell.groups.configuration')}
+            title={t('settings.enrichment_runtime.title')}
+            subtitle={t('settings.enrichment_runtime.help')}
+            actions={
+              <>
+                <Button
+                  variant={stepUpSatisfied ? 'outline' : 'default'}
+                  onClick={() => setStepUpOpen(true)}
+                >
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  {stepUpSatisfied ? t('gdpr.step_up_verified') : t('gdpr.step_up_button')}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => void runtimeQuery.refetch()}
+                  disabled={runtimeQuery.isFetching}
+                >
+                  {runtimeQuery.isFetching ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="mr-2 h-4 w-4" />
+                  )}
+                  {t('settings.enrichment_runtime.refresh')}
+                </Button>
+              </>
+            }
+            metrics={
+              <>
+                <PageHeroMetric
+                  label={t('settings.enrichment_runtime.metrics.desired_version')}
+                  value={runtime.summary.desiredVersion}
+                  hint={t('settings.enrichment_runtime.revision_meta', {
+                    version: runtime.desiredRevision.version,
+                    specVersion: runtime.desiredRevision.specVersion,
+                  })}
+                />
+                <PageHeroMetric
+                  label={t('settings.enrichment_runtime.metrics.live_instances')}
+                  value={`${runtime.summary.liveInstances}`}
+                  hint={t('settings.enrichment_runtime.metrics.fully_applied_hint', {
+                    count: runtime.summary.fullyAppliedInstances,
+                  })}
+                  tone={runtime.summary.fullyConverged ? 'active' : 'default'}
+                />
+                <PageHeroMetric
+                  label={t('settings.enrichment_runtime.metrics.stale_instances')}
+                  value={`${runtime.summary.staleInstances}`}
+                  hint={t('settings.enrichment_runtime.metrics.expired_hint', {
+                    count: runtime.summary.expiredInstances,
+                  })}
+                  tone={runtime.summary.staleInstances > 0 ? 'urgent' : 'default'}
+                />
+                <PageHeroMetric
+                  label={t('settings.enrichment_runtime.metrics.degraded_instances')}
+                  value={`${runtime.summary.degradedInstances}`}
+                  hint={
+                    runtime.summary.fullyConverged
+                      ? t('settings.enrichment_runtime.metrics.converged')
+                      : t('settings.enrichment_runtime.metrics.not_converged')
+                  }
+                  tone={runtime.summary.degradedInstances > 0 ? 'urgent' : 'default'}
+                />
+              </>
+            }
+          />
 
-          <div className="grid gap-4 xl:grid-cols-[1.25fr,0.75fr]">
-            <Card className="overflow-hidden border-border/70 bg-[linear-gradient(180deg,rgba(255,247,237,0.7),rgba(255,255,255,1)_32%)] shadow-sm">
-              <CardHeader className="space-y-3">
-                <div className="space-y-2">
-                  <div className="inline-flex w-fit items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
-                    <ShieldCheck className="h-3.5 w-3.5" />
-                    Live control plane
-                  </div>
-                  <CardTitle>{t('settings.enrichment_runtime.value_title')}</CardTitle>
-                  <CardDescription className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                    {t('settings.enrichment_runtime.value_body')}
-                  </CardDescription>
-                </div>
-                <div className="grid gap-3 md:grid-cols-3">
-                  {(['capacity', 'stability', 'rollback'] as const).map((key) => (
-                    <div
-                      key={key}
-                      className="rounded-lg border border-border/80 bg-background/95 p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
-                    >
-                      <div className="text-sm font-medium tracking-tight">
-                        {t(`settings.enrichment_runtime.value_cards.${key}.title`)}
-                      </div>
-                      <div className="mt-2 text-sm leading-6 text-muted-foreground">
-                        {t(`settings.enrichment_runtime.value_cards.${key}.body`)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          <div className="grid gap-4 xl:grid-cols-[1.12fr,0.88fr]">
+            <Card className="overflow-hidden border-border/70 bg-[linear-gradient(180deg,rgba(255,247,237,0.62),rgba(255,255,255,0.98)_34%)] shadow-none">
+              <CardHeader className="pb-4">
+                <CardTitle>{t('settings.enrichment_runtime.value_title')}</CardTitle>
+                <CardDescription className="max-w-3xl text-sm leading-6 text-muted-foreground">
+                  {t('settings.enrichment_runtime.value_body')}
+                </CardDescription>
               </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-3">
+                {(['capacity', 'stability', 'rollback'] as const).map((key) => (
+                  <div
+                    key={key}
+                    className="rounded-[1rem] border border-border/80 bg-background/95 p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                  >
+                    <div className="text-sm font-medium tracking-tight">
+                      {t(`settings.enrichment_runtime.value_cards.${key}.title`)}
+                    </div>
+                    <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                      {t(`settings.enrichment_runtime.value_cards.${key}.body`)}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
             </Card>
 
-            <Card className="border-border/70 bg-zinc-50/70 shadow-sm">
-              <CardHeader className="pb-3">
+            <Card className="border-border/70 bg-zinc-50/60 shadow-none">
+              <CardHeader className="pb-4">
                 <CardTitle>{t('settings.enrichment_runtime.playbook_title')}</CardTitle>
                 <CardDescription className="text-sm leading-6 text-muted-foreground">
                   {t('settings.enrichment_runtime.playbook_body')}
@@ -656,7 +683,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                 {(['review', 'change', 'observe', 'rollback'] as const).map((key, index) => (
                   <div
                     key={key}
-                    className="flex gap-3 rounded-lg border border-border/80 bg-background/90 px-3 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                    className="flex gap-3 rounded-[1rem] border border-border/80 bg-background/90 px-3 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
                   >
                     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-950 text-xs font-semibold text-white">
                       {index + 1}
@@ -692,44 +719,6 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
               </AlertDescription>
             </Alert>
           )}
-
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              tone="neutral"
-              icon={Waypoints}
-              label={t('settings.enrichment_runtime.metrics.desired_version')}
-              value={runtime.summary.desiredVersion}
-            />
-            <MetricCard
-              tone="good"
-              icon={CheckCircle2}
-              label={t('settings.enrichment_runtime.metrics.live_instances')}
-              value={`${runtime.summary.liveInstances}`}
-              hint={t('settings.enrichment_runtime.metrics.fully_applied_hint', {
-                count: runtime.summary.fullyAppliedInstances,
-              })}
-            />
-            <MetricCard
-              tone="warn"
-              icon={Clock3}
-              label={t('settings.enrichment_runtime.metrics.stale_instances')}
-              value={`${runtime.summary.staleInstances}`}
-              hint={t('settings.enrichment_runtime.metrics.expired_hint', {
-                count: runtime.summary.expiredInstances,
-              })}
-            />
-            <MetricCard
-              tone={runtime.summary.degradedInstances > 0 ? 'bad' : 'good'}
-              icon={runtime.summary.degradedInstances > 0 ? ShieldX : ShieldCheck}
-              label={t('settings.enrichment_runtime.metrics.degraded_instances')}
-              value={`${runtime.summary.degradedInstances}`}
-              hint={
-                runtime.summary.fullyConverged
-                  ? t('settings.enrichment_runtime.metrics.converged')
-                  : t('settings.enrichment_runtime.metrics.not_converged')
-              }
-            />
-          </div>
 
           <div className="grid gap-4 xl:grid-cols-3">
             {runtimePosture.map((item) => (
@@ -1753,43 +1742,6 @@ function translateRuntimeValidationError(
   t: TFunction,
 ): string | null {
   return key ? t(key) : null
-}
-
-function MetricCard({
-  tone,
-  icon: Icon,
-  label,
-  value,
-  hint,
-}: {
-  tone: 'neutral' | 'good' | 'warn' | 'bad'
-  icon: typeof ShieldCheck
-  label: string
-  value: string
-  hint?: string
-}) {
-  const toneClass =
-    tone === 'good'
-      ? 'border-emerald-200/80 bg-emerald-50/50'
-      : tone === 'warn'
-        ? 'border-amber-200/80 bg-amber-50/50'
-        : tone === 'bad'
-          ? 'border-rose-200/80 bg-rose-50/50'
-          : 'border-border/70 bg-zinc-50/50'
-  return (
-    <Card className={`shadow-[0_1px_2px_rgba(15,23,42,0.04)] ${toneClass}`}>
-      <CardContent className="flex items-start justify-between gap-3 p-4">
-        <div>
-          <div className="text-sm text-muted-foreground">{label}</div>
-          <div className="mt-1 text-2xl font-semibold">{value}</div>
-          {hint ? <div className="mt-1 text-xs text-muted-foreground">{hint}</div> : null}
-        </div>
-        <div className="rounded-full border border-background/80 bg-background/80 p-2">
-          <Icon className="h-4 w-4 text-muted-foreground" />
-        </div>
-      </CardContent>
-    </Card>
-  )
 }
 
 function ConditionChip({ tone, label }: { tone: 'good' | 'warn' | 'bad'; label: string }) {

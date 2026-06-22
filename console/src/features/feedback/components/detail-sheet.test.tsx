@@ -72,11 +72,11 @@ describe('FeedbackDetailSheet', () => {
       <FeedbackDetailSheet id="f-1" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
     )
     // Title, raw content, AI rationale all appear once the query resolves.
-    await waitFor(() => expect(screen.getByText('支付失败')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('支付失败').length).toBeGreaterThanOrEqual(1))
     expect(screen.getByText(/payment failed at checkout/i)).toBeInTheDocument()
     expect(screen.getByText(/AI 中文解读/i)).toBeInTheDocument()
     expect(screen.getByText(/AI rationale/i)).toBeInTheDocument()
-    expect(screen.getByTitle('原文语言：英文')).toBeInTheDocument()
+    expect(screen.getAllByTitle('原文语言：英文').length).toBeGreaterThanOrEqual(1)
   })
 
   it('does not show a source-language rationale block for same-language rows', async () => {
@@ -110,6 +110,129 @@ describe('FeedbackDetailSheet', () => {
     await waitFor(() => expect(screen.getByText('展示侧：支付流程受阻')).toBeInTheDocument())
     expect(screen.queryByText('原语言解读')).toBeNull()
     expect(screen.queryByText('原文侧：支付流程受阻')).toBeNull()
+  })
+
+  it('renders a failure status banner when enrichment failed before classification landed', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-2b',
+          content: '支付失败',
+          enrichedTitle: '',
+          enrichedDisplayTitle: '',
+          enrichedRationale: '',
+          enrichedDisplayRationale: '',
+          enrichedDisplayLocale: 'zh-CN',
+          enrichedAttrs: {},
+          enrichedAt: '',
+          language: 'zh',
+          isUrgent: false,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentError: 'llm: llm_not_configured',
+          classificationConfidence: undefined,
+        }),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-2b" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+    await waitFor(() =>
+      expect(screen.getByText('这条反馈暂时没有可用的 AI 富化结果')).toBeInTheDocument(),
+    )
+    expect(screen.getAllByText('llm: llm_not_configured').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows workbench guidance for active queue context', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-active',
+          content: 'payment failed at checkout',
+          enrichedTitle: 'Payment failed',
+          enrichedDisplayTitle: '支付失败',
+          enrichedRationale: 'AI rationale',
+          enrichedDisplayRationale: 'AI 中文解读',
+          enrichedDisplayLocale: 'zh',
+          enrichedAttrs: { severity: 'P0' },
+          enrichedAt: '2026-06-07T10:30:00Z',
+          language: 'en',
+          isUrgent: false,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentError: '',
+          workflowState: {
+            id: 'ws-1',
+            name: 'in_progress',
+            displayName: { entries: { default: 'In Progress', zh: '处理中' } },
+            color: '#f59e0b',
+            category: 'active',
+            position: 1,
+            isDefault: false,
+            archived: false,
+            createdAt: '2026-06-07T00:00:00Z',
+            updatedAt: '2026-06-07T00:00:00Z',
+          },
+        }),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-active"
+        dims={dims}
+        availableTags={[]}
+        workbenchMode="active"
+        onOpenChange={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText('先推进状态流转')).toBeInTheDocument())
+    expect(screen.getByText('当前工作面：处理中')).toBeInTheDocument()
+  })
+
+  it('shows failure workbench guidance for failed queue context', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-failed',
+          content: 'payment failed at checkout',
+          enrichedTitle: '',
+          enrichedDisplayTitle: '',
+          enrichedRationale: '',
+          enrichedDisplayRationale: '',
+          enrichedDisplayLocale: 'zh',
+          enrichedAttrs: {},
+          enrichedAt: '',
+          language: 'en',
+          isUrgent: false,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentError: 'llm: failed',
+        }),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-failed"
+        dims={dims}
+        availableTags={[]}
+        workbenchMode="failed"
+        onOpenChange={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText('先判断是个例还是配置问题')).toBeInTheDocument())
+    expect(screen.getByText('当前工作面：富化失败')).toBeInTheDocument()
   })
 
   it('shows the reply draft with copy + regenerate when present', async () => {

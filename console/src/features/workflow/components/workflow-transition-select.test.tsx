@@ -94,7 +94,7 @@ describe('WorkflowTransitionSelect', () => {
     renderWithProviders(
       <WorkflowTransitionSelect feedbackId="42" currentState={undefined} allowedNext={[]} />,
     )
-    expect(screen.getByText('尚未配置工作流状态')).toBeInTheDocument()
+    expect(screen.getAllByText('尚未配置工作流状态').length).toBeGreaterThanOrEqual(1)
   })
 
   it('renders transition button disabled when no state selected', () => {

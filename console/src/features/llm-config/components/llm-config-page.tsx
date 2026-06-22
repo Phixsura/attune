@@ -86,6 +86,10 @@ export function LLMConfigPage() {
     llmChannelModelsQuery(selected?.id ?? '', abilityDialog !== null && selected !== null),
   )
   const testModels = useQuery(llmChannelModelsQuery(testTarget?.id ?? '', testTarget !== null))
+  const channelCount = channels.data?.length ?? 0
+  const abilityCount = abilities.data?.length ?? 0
+  const routeCount = routes.data?.length ?? 0
+  const enabledRouteCount = routes.data?.filter((route) => route.enabled).length ?? 0
 
   const refresh = () => {
     void channels.refetch()
@@ -189,209 +193,324 @@ export function LLMConfigPage() {
   })
 
   return (
-    <div>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t('nav.llm_config')}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t('llm_config.subtitle')}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={refresh} title={t('llm_config.actions.refresh')}>
-            <RefreshCw className="size-4" />
-          </Button>
-          {canEdit && (
-            <Button onClick={() => setChannelDialog({ open: true, target: null })}>
-              <Plus className="mr-2 size-4" />
-              {t('llm_config.channels.create')}
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(22rem,0.8fr)]">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('llm_config.channels.title')}</CardTitle>
-            <CardDescription>{channels.data?.length ?? 0}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {channels.isPending ? (
-              <Loading />
-            ) : channels.isError ? (
-              <QueryErrorState
-                message={queryError(channels.error)}
-                onRetry={() => {
-                  void channels.refetch()
-                }}
-              />
-            ) : channels.data && channels.data.length > 0 ? (
-              <ChannelTable
-                channels={channels.data}
-                selectedId={selected?.id ?? ''}
-                testingId={testChannel.isPending ? testChannel.variables?.id : undefined}
-                onSelect={(channel) => setSelectedId(channel.id)}
-                onEdit={
-                  canEdit
-                    ? (channel) => setChannelDialog({ open: true, target: channel })
-                    : undefined
-                }
-                onAbilities={
-                  canEdit
-                    ? (channel) => {
-                        setSelectedId(channel.id)
-                        setAbilityDialog('new')
-                      }
-                    : undefined
-                }
-                onTest={canEdit ? setTestTarget : undefined}
-                onDelete={
-                  canEdit
-                    ? (channel) => setDeleteTarget({ kind: 'channel', row: channel })
-                    : undefined
-                }
-              />
-            ) : (
-              <EmptyState
-                icon={Bot}
-                title={t('llm_config.channels.empty_title')}
-                description={t('llm_config.channels.empty_body')}
-                action={
-                  canEdit
-                    ? {
-                        label: t('llm_config.channels.create'),
-                        onClick: () => setChannelDialog({ open: true, target: null }),
-                      }
-                    : undefined
-                }
-              />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex-row items-start justify-between space-y-0">
-            <div>
-              <CardTitle>{t('llm_config.abilities.title')}</CardTitle>
-              <CardDescription>
-                {selected?.name ?? t('llm_config.abilities.no_channel')}
-              </CardDescription>
+    <div className="space-y-8">
+      <section className="rounded-[1.6rem] border border-border/70 bg-[linear-gradient(135deg,rgba(255,247,237,0.92),rgba(255,255,255,0.96))] px-6 py-6 shadow-[0_24px_70px_-52px_rgba(15,23,42,0.25)] sm:px-7">
+        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+          <div className="max-w-3xl">
+            <div className="text-[11px] font-semibold tracking-[0.22em] text-muted-foreground uppercase">
+              {t('llm_config.eyebrow')}
             </div>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight">{t('nav.llm_config')}</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+              {t('llm_config.subtitle')}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 self-start">
+            <Button variant="outline" onClick={refresh} title={t('llm_config.actions.refresh')}>
+              <RefreshCw className="size-4" />
+            </Button>
             {canEdit && (
-              <Button
-                size="sm"
-                disabled={!selected}
-                onClick={() => setAbilityDialog('new')}
-                title={t('llm_config.abilities.create')}
-              >
-                <Plus className="size-4" />
+              <Button onClick={() => setChannelDialog({ open: true, target: null })}>
+                <Plus className="mr-2 size-4" />
+                {t('llm_config.channels.create')}
               </Button>
             )}
-          </CardHeader>
-          <CardContent>
-            {!selected ? (
-              <EmptyState
-                icon={SlidersHorizontal}
-                title={t('llm_config.abilities.no_channel')}
-                description={t('llm_config.channels.empty_body')}
-              />
-            ) : abilities.isPending ? (
-              <Loading />
-            ) : abilities.isError ? (
-              <QueryErrorState
-                message={queryError(abilities.error)}
-                onRetry={() => {
-                  void abilities.refetch()
-                }}
-              />
-            ) : abilities.data && abilities.data.length > 0 ? (
-              <AbilityTable
-                abilities={abilities.data}
-                onEdit={canEdit ? (ability) => setAbilityDialog(ability) : undefined}
-                onDelete={
-                  canEdit
-                    ? (ability) => setDeleteTarget({ kind: 'ability', row: ability })
-                    : undefined
-                }
-              />
-            ) : (
-              <EmptyState
-                icon={SlidersHorizontal}
-                title={t('llm_config.abilities.empty_title')}
-                description={t('llm_config.abilities.empty_body')}
-                action={
-                  canEdit
-                    ? {
-                        label: t('llm_config.abilities.create'),
-                        onClick: () => setAbilityDialog('new'),
-                      }
-                    : undefined
-                }
-              />
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="mt-6">
-        <CardHeader className="flex-row items-start justify-between space-y-0">
-          <div>
-            <CardTitle>{t('llm_config.routes.title')}</CardTitle>
-            <CardDescription>{routes.data?.length ?? 0}</CardDescription>
           </div>
-          {canEdit && (
-            <Button
-              size="sm"
-              onClick={() => setRouteDialog('new')}
-              title={t('llm_config.routes.create')}
-            >
-              <Plus className="size-4" />
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent>
-          {routes.isPending ? (
-            <Loading />
-          ) : routes.isError ? (
-            <QueryErrorState
-              message={queryError(routes.error)}
-              onRetry={() => {
-                void routes.refetch()
-              }}
-            />
-          ) : routes.data && routes.data.length > 0 ? (
-            <RouteTable
-              routes={routes.data}
-              onEdit={canEdit ? (route) => setRouteDialog(route) : undefined}
-              onDelete={
-                canEdit ? (route) => setDeleteTarget({ kind: 'route', row: route }) : undefined
-              }
-            />
-          ) : (
-            <EmptyState
-              icon={RouteIcon}
-              title={t('llm_config.routes.empty_title')}
-              description={t('llm_config.routes.empty_body')}
-              action={
-                canEdit
-                  ? {
-                      label: t('llm_config.routes.create'),
-                      onClick: () => setRouteDialog('new'),
-                    }
-                  : undefined
-              }
-            />
-          )}
-        </CardContent>
-      </Card>
-
-      {lastTest && (
-        <div className="mt-4 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-          <span className="font-medium">{lastTest.providerModel}</span>
-          <span className="ml-3 text-muted-foreground">
-            {lastTest.inputTokens} / {lastTest.outputTokens} tokens · {lastTest.latencyMs}ms
-          </span>
         </div>
-      )}
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-4">
+          <SummaryPanel
+            label={t('llm_config.summary.channels')}
+            value={String(channelCount)}
+            hint={t('llm_config.summary.channels_hint')}
+          />
+          <SummaryPanel
+            label={t('llm_config.summary.abilities')}
+            value={String(abilityCount)}
+            hint={
+              selected
+                ? t('llm_config.summary.abilities_selected', { name: selected.name })
+                : t('llm_config.summary.abilities_hint')
+            }
+          />
+          <SummaryPanel
+            label={t('llm_config.summary.routes')}
+            value={String(routeCount)}
+            hint={t('llm_config.summary.routes_hint', { count: enabledRouteCount })}
+          />
+          <SummaryPanel
+            label={t('llm_config.summary.selection')}
+            value={selected?.name ?? t('llm_config.summary.selection_empty')}
+            hint={
+              selected
+                ? t('llm_config.summary.selection_hint', { protocol: selected.protocol })
+                : t('llm_config.summary.selection_body')
+            }
+          />
+        </div>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.85fr)]">
+        <div className="space-y-6">
+          <Card className="border-border/70 shadow-none">
+            <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+              <div>
+                <CardTitle>{t('llm_config.channels.title')}</CardTitle>
+                <CardDescription>
+                  {t('llm_config.channels.deck', { count: channelCount })}
+                </CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {channels.isPending ? (
+                <Loading />
+              ) : channels.isError ? (
+                <QueryErrorState
+                  message={queryError(channels.error)}
+                  onRetry={() => {
+                    void channels.refetch()
+                  }}
+                />
+              ) : channels.data && channels.data.length > 0 ? (
+                <ChannelTable
+                  channels={channels.data}
+                  selectedId={selected?.id ?? ''}
+                  testingId={testChannel.isPending ? testChannel.variables?.id : undefined}
+                  onSelect={(channel) => setSelectedId(channel.id)}
+                  onEdit={
+                    canEdit
+                      ? (channel) => setChannelDialog({ open: true, target: channel })
+                      : undefined
+                  }
+                  onAbilities={
+                    canEdit
+                      ? (channel) => {
+                          setSelectedId(channel.id)
+                          setAbilityDialog('new')
+                        }
+                      : undefined
+                  }
+                  onTest={canEdit ? setTestTarget : undefined}
+                  onDelete={
+                    canEdit
+                      ? (channel) => setDeleteTarget({ kind: 'channel', row: channel })
+                      : undefined
+                  }
+                />
+              ) : (
+                <EmptyState
+                  icon={Bot}
+                  title={t('llm_config.channels.empty_title')}
+                  description={t('llm_config.channels.empty_body')}
+                  action={
+                    canEdit
+                      ? {
+                          label: t('llm_config.channels.create'),
+                          onClick: () => setChannelDialog({ open: true, target: null }),
+                        }
+                      : undefined
+                  }
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70 shadow-none">
+            <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+              <div>
+                <CardTitle>{t('llm_config.routes.title')}</CardTitle>
+                <CardDescription>
+                  {t('llm_config.routes.deck', { count: routeCount, enabled: enabledRouteCount })}
+                </CardDescription>
+              </div>
+              {canEdit && (
+                <Button
+                  size="sm"
+                  onClick={() => setRouteDialog('new')}
+                  title={t('llm_config.routes.create')}
+                >
+                  <Plus className="size-4" />
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent>
+              {routes.isPending ? (
+                <Loading />
+              ) : routes.isError ? (
+                <QueryErrorState
+                  message={queryError(routes.error)}
+                  onRetry={() => {
+                    void routes.refetch()
+                  }}
+                />
+              ) : routes.data && routes.data.length > 0 ? (
+                <RouteTable
+                  routes={routes.data}
+                  onEdit={canEdit ? (route) => setRouteDialog(route) : undefined}
+                  onDelete={
+                    canEdit ? (route) => setDeleteTarget({ kind: 'route', row: route }) : undefined
+                  }
+                />
+              ) : (
+                <EmptyState
+                  icon={RouteIcon}
+                  title={t('llm_config.routes.empty_title')}
+                  description={t('llm_config.routes.empty_body')}
+                  action={
+                    canEdit
+                      ? {
+                          label: t('llm_config.routes.create'),
+                          onClick: () => setRouteDialog('new'),
+                        }
+                      : undefined
+                  }
+                />
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-6 xl:sticky xl:top-24 xl:self-start">
+          <Card className="border-border/70 shadow-none">
+            <CardHeader className="space-y-1">
+              <CardTitle>{t('llm_config.focus.title')}</CardTitle>
+              <CardDescription>
+                {selected?.name ?? t('llm_config.focus.no_channel')}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {selected ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <InspectorMetric
+                      label={t('llm_config.focus.protocol')}
+                      value={selected.protocol}
+                    />
+                    <InspectorMetric label={t('llm_config.focus.status')} value={selected.status} />
+                    <InspectorMetric label={t('llm_config.focus.auth')} value={selected.authMode} />
+                    <InspectorMetric
+                      label={t('llm_config.focus.timeout')}
+                      value={`${selected.timeoutSeconds}s`}
+                    />
+                  </div>
+
+                  <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+                    <div className="text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+                      {t('llm_config.focus.endpoint')}
+                    </div>
+                    <div className="mt-2 break-all font-mono text-xs text-foreground/85">
+                      {selected.baseUrl || 'default'}
+                    </div>
+                  </div>
+
+                  {lastTest ? (
+                    <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+                      <div className="text-xs font-semibold tracking-[0.18em] text-emerald-700 uppercase">
+                        {t('llm_config.test.last_result')}
+                      </div>
+                      <div className="mt-2 text-sm font-medium">{lastTest.providerModel}</div>
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        {lastTest.inputTokens} / {lastTest.outputTokens} tokens ·{' '}
+                        {lastTest.latencyMs}ms
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <EmptyState
+                  icon={Bot}
+                  title={t('llm_config.focus.no_channel')}
+                  description={t('llm_config.focus.empty_body')}
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70 shadow-none">
+            <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+              <div>
+                <CardTitle>{t('llm_config.abilities.title')}</CardTitle>
+                <CardDescription>
+                  {selected?.name ?? t('llm_config.abilities.no_channel')}
+                </CardDescription>
+              </div>
+              {canEdit && (
+                <Button
+                  size="sm"
+                  disabled={!selected}
+                  onClick={() => setAbilityDialog('new')}
+                  title={t('llm_config.abilities.create')}
+                >
+                  <Plus className="size-4" />
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent>
+              {!selected ? (
+                <EmptyState
+                  icon={SlidersHorizontal}
+                  title={t('llm_config.abilities.no_channel')}
+                  description={t('llm_config.channels.empty_body')}
+                />
+              ) : abilities.isPending ? (
+                <Loading />
+              ) : abilities.isError ? (
+                <QueryErrorState
+                  message={queryError(abilities.error)}
+                  onRetry={() => {
+                    void abilities.refetch()
+                  }}
+                />
+              ) : abilities.data && abilities.data.length > 0 ? (
+                <AbilityTable
+                  abilities={abilities.data}
+                  onEdit={canEdit ? (ability) => setAbilityDialog(ability) : undefined}
+                  onDelete={
+                    canEdit
+                      ? (ability) => setDeleteTarget({ kind: 'ability', row: ability })
+                      : undefined
+                  }
+                />
+              ) : (
+                <EmptyState
+                  icon={SlidersHorizontal}
+                  title={t('llm_config.abilities.empty_title')}
+                  description={t('llm_config.abilities.empty_body')}
+                  action={
+                    canEdit
+                      ? {
+                          label: t('llm_config.abilities.create'),
+                          onClick: () => setAbilityDialog('new'),
+                        }
+                      : undefined
+                  }
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70 bg-muted/10 shadow-none">
+            <CardHeader className="space-y-1">
+              <CardTitle>{t('llm_config.playbook.title')}</CardTitle>
+              <CardDescription>{t('llm_config.playbook.description')}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {[
+                t('llm_config.playbook.step_1'),
+                t('llm_config.playbook.step_2'),
+                t('llm_config.playbook.step_3'),
+              ].map((step) => (
+                <div
+                  key={step}
+                  className="rounded-xl border border-border/70 bg-background/80 px-3 py-3 text-sm text-muted-foreground"
+                >
+                  {step}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      </section>
 
       <ChannelDialog
         open={channelDialog.open}
@@ -504,4 +623,27 @@ function deleteBody(
     purpose: target.row.purpose,
     scope: target.row.tenantId || t('llm_config.routes.global'),
   })
+}
+
+function SummaryPanel({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="rounded-[1.25rem] border border-border/70 bg-background/86 px-4 py-4 shadow-[0_18px_50px_-42px_rgba(15,23,42,0.25)]">
+      <div className="text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+        {label}
+      </div>
+      <div className="mt-3 text-2xl font-semibold tracking-tight">{value}</div>
+      <p className="mt-1 text-sm text-muted-foreground">{hint}</p>
+    </div>
+  )
+}
+
+function InspectorMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/15 px-3 py-3">
+      <div className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+        {label}
+      </div>
+      <div className="mt-2 text-sm font-medium text-foreground">{value}</div>
+    </div>
+  )
 }

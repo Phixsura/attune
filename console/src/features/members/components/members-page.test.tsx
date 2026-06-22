@@ -36,7 +36,7 @@ vi.mock('@/features/session/hooks/use-permissions', () => ({
 const TEXT = {
   invite: '邀请成员',
   loading: '加载中…',
-  pending: '待确认',
+  pending: '等待接受',
   noMembers: '暂无成员',
 }
 
@@ -83,10 +83,81 @@ describe('MembersPage', () => {
     renderWithProviders(<MembersPage />)
 
     await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 1, name: '团队成员' })).toBeInTheDocument()
       expect(screen.getByText('admin@example.com')).toBeInTheDocument()
     })
     expect(screen.getByText('member@example.com')).toBeInTheDocument()
     expect(screen.getByText('pending@example.com')).toBeInTheDocument()
+  })
+
+  it('renders the summary metrics from member state', async () => {
+    setupMembersResponse(mockMembers)
+    renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument()
+    })
+
+    const totalCard = screen.getByRole('group', { name: '总成员' })
+    const activeCard = screen.getByRole('group', { name: '活跃成员' })
+    const pendingCard = screen.getByRole('group', { name: '待接受邀请' })
+
+    expect(within(totalCard).getByText('3')).toBeInTheDocument()
+    expect(within(totalCard).getByText('共 3 位成员')).toBeInTheDocument()
+    expect(within(activeCard).getByText('2')).toBeInTheDocument()
+    expect(within(activeCard).getByText('已接受邀请并可访问当前租户的成员。')).toBeInTheDocument()
+    expect(within(pendingCard).getByText('1')).toBeInTheDocument()
+    expect(within(pendingCard).getByText('尚未完成首次登录确认的邀请。')).toBeInTheDocument()
+  })
+
+  it('filters the page down to pending invitations', async () => {
+    setupMembersResponse(mockMembers)
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('member@example.com')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '待处理邀请' }))
+
+    expect(screen.queryByText('member@example.com')).not.toBeInTheDocument()
+    expect(screen.getByText('pending@example.com')).toBeInTheDocument()
+  })
+
+  it('filters members by search query', async () => {
+    setupMembersResponse(mockMembers)
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('member@example.com')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByRole('textbox', { name: '搜索成员和邀请' }), 'pending@')
+
+    expect(screen.queryByText('member@example.com')).not.toBeInTheDocument()
+    expect(screen.getByText('pending@example.com')).toBeInTheDocument()
+  })
+
+  it('warns when the tenant only has one active admin', async () => {
+    setupMembersResponse([
+      {
+        id: 'm1',
+        memberType: 'admin',
+        userId: 'admin-user',
+        email: 'admin@example.com',
+        role: 'admin',
+        roleSource: 'bootstrap',
+        invitedAt: '1700000000',
+        acceptedAt: '1700000001',
+      },
+    ])
+    renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('当前仅剩 1 位活跃管理员。为避免失去租户管理权限，请至少保留两位管理员。'),
+      ).toBeInTheDocument()
+    })
   })
 
   it('shows pending badge for invite members', async () => {
@@ -96,7 +167,7 @@ describe('MembersPage', () => {
     await waitFor(() => {
       expect(screen.getByText('pending@example.com')).toBeInTheDocument()
     })
-    // The pending member should show pending text (待确认)
+    // The pending member should show pending invitation state.
     const pendingTexts = screen.getAllByText(TEXT.pending)
     expect(pendingTexts.length).toBeGreaterThan(0)
   })
@@ -117,7 +188,7 @@ describe('MembersPage', () => {
     renderWithProviders(<MembersPage />)
 
     // Should show loading indicator before data loads (加载中)
-    expect(screen.getByText(TEXT.loading)).toBeInTheDocument()
+    expect(screen.getAllByText(TEXT.loading).length).toBeGreaterThan(0)
   })
 
   it('opens invite dialog when invite button clicked', async () => {
@@ -144,8 +215,8 @@ describe('MembersPage', () => {
     })
 
     // Check member type badges are present
-    expect(screen.getByText('oidc_user')).toBeInTheDocument()
-    expect(screen.getByText('invite')).toBeInTheDocument()
+    expect(screen.getByText('SSO 成员')).toBeInTheDocument()
+    expect(screen.getAllByText('待接受邀请').length).toBeGreaterThan(0)
   })
 })
 
@@ -256,11 +327,7 @@ describe('MembersPage remove dialog', () => {
     })
 
     // Find trash buttons and click one for a non-admin member
-    const trashButtons = screen.getAllByRole('button', { name: '' })
-    // Click the second trash button (for member-user, not admin)
-    const memberTrashButton = trashButtons.find((btn) =>
-      btn.closest('tr')?.textContent?.includes('member@example.com'),
-    )
+    const memberTrashButton = screen.getByRole('button', { name: '移除成员 member@example.com' })
     if (memberTrashButton) {
       await user.click(memberTrashButton)
     }
@@ -282,9 +349,9 @@ describe('MembersPage role badges', () => {
     })
 
     // Check role sources are displayed
-    expect(screen.getByText('bootstrap')).toBeInTheDocument()
-    expect(screen.getByText('idp')).toBeInTheDocument()
-    expect(screen.getByText('manual')).toBeInTheDocument()
+    expect(screen.getByText('系统初始化')).toBeInTheDocument()
+    expect(screen.getByText('身份提供方')).toBeInTheDocument()
+    expect(screen.getByText('手动分配')).toBeInTheDocument()
   })
 })
 
@@ -297,9 +364,9 @@ describe('MembersPage role select', () => {
       expect(screen.getByText('admin@example.com')).toBeInTheDocument()
     })
 
-    // Role selects should be present (one for each member)
+    // Only manageable members expose an editable role select.
     const selectTriggers = screen.getAllByRole('combobox')
-    expect(selectTriggers.length).toBeGreaterThanOrEqual(3)
+    expect(selectTriggers.length).toBeGreaterThanOrEqual(1)
   })
 })
 
@@ -355,10 +422,7 @@ describe('MembersPage mutations', () => {
 
     await waitFor(() => expect(screen.getByText('member@example.com')).toBeInTheDocument())
 
-    const trashButtons = screen.getAllByRole('button', { name: '' })
-    const memberTrash = trashButtons.find((b) =>
-      b.closest('tr')?.textContent?.includes('member@example.com'),
-    )
+    const memberTrash = screen.getByRole('button', { name: '移除成员 member@example.com' })
     expect(memberTrash).toBeDefined()
     if (memberTrash) await user.click(memberTrash)
 
@@ -487,9 +551,7 @@ describe('MembersPage mutation errors', () => {
     const { user } = renderWithProviders(<MembersPage />)
 
     await waitFor(() => expect(screen.getByText('member@example.com')).toBeInTheDocument())
-    const trash = screen
-      .getAllByRole('button', { name: '' })
-      .find((b) => b.closest('tr')?.textContent?.includes('member@example.com'))
+    const trash = screen.getByRole('button', { name: '移除成员 member@example.com' })
     if (trash) await user.click(trash)
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: '移除' }))

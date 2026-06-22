@@ -1,12 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { Check, Copy, Loader2, RefreshCw, Sparkles } from 'lucide-react'
+import { AlertCircle, Check, Copy, Loader2, RefreshCw, Sparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Sheet,
   SheetContent,
@@ -15,6 +16,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import { WorkflowStateBadge } from '@/components/workflow/workflow-state-badge'
 import {
   type FeedbackDetail,
   feedbackDetailQuery,
@@ -28,6 +30,8 @@ import { cn } from '@/lib/utils'
 import type { Dimension } from '@/proto/attune/v1/common'
 import type { Tag } from '@/proto/attune/v1/tag'
 
+type FeedbackWorkbenchMode = 'all' | 'urgent' | 'active' | 'failed' | 'ready'
+
 // `dims` is supplied by the parent route so this component does not
 // cross feature boundaries (the dim set is owned by the settings
 // feature). The route already calls enrichConfigQuery once for the
@@ -37,6 +41,7 @@ export function FeedbackDetailSheet({
   id,
   dims,
   availableTags,
+  workbenchMode = 'all',
   onOpenChange,
   renderWorkflowTransition,
   renderAuditLog,
@@ -44,6 +49,7 @@ export function FeedbackDetailSheet({
   id: string | null
   dims: Dimension[]
   availableTags: Tag[]
+  workbenchMode?: FeedbackWorkbenchMode
   onOpenChange: (v: boolean) => void
   renderWorkflowTransition?: (data: FeedbackDetail) => React.ReactNode
   renderAuditLog?: (data: FeedbackDetail) => React.ReactNode
@@ -53,8 +59,8 @@ export function FeedbackDetailSheet({
   const detail = useQuery({ ...feedbackDetailQuery(id ?? ''), enabled: open })
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-2xl">
-        <SheetHeader className="gap-2 border-b px-6 pt-6 pb-4 pr-12">
+      <SheetContent className="w-full gap-0 overflow-y-auto bg-muted/10 sm:max-w-3xl">
+        <SheetHeader className="sticky top-0 z-10 gap-3 border-b bg-background/96 px-6 pt-6 pb-5 pr-12 backdrop-blur">
           <SheetTitle>
             <span className="inline-flex items-center gap-2">
               <UrgentDot urgent={detail.data?.isUrgent} />
@@ -69,6 +75,13 @@ export function FeedbackDetailSheet({
               sr-only line so Radix still has an aria-describedby target. */}
           {detail.data && (
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
+              {workbenchMode !== 'all' ? (
+                <span className="inline-flex items-center rounded-full border border-border/60 bg-muted/20 px-2 py-1 text-[11px] font-medium text-foreground">
+                  {t('feedback.detail.workbench_mode', {
+                    mode: workbenchModeLabel(workbenchMode, (key) => String(t(key))),
+                  })}
+                </span>
+              ) : null}
               {dims.map((dim) => (
                 <DimensionChips
                   key={dim.name}
@@ -92,7 +105,7 @@ export function FeedbackDetailSheet({
             {t('feedback.detail.sheet_summary')}
           </SheetDescription>
         </SheetHeader>
-        <div className="space-y-6 px-6 py-6 text-sm">
+        <div className="space-y-5 px-6 py-6 text-sm">
           {detail.isPending && (
             <div className="flex justify-center py-8 text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -104,6 +117,7 @@ export function FeedbackDetailSheet({
               data={detail.data}
               dims={dims}
               availableTags={availableTags}
+              workbenchMode={workbenchMode}
               renderWorkflowTransition={renderWorkflowTransition}
               renderAuditLog={renderAuditLog}
             />
@@ -118,12 +132,14 @@ function DetailBody({
   data,
   dims,
   availableTags,
+  workbenchMode,
   renderWorkflowTransition,
   renderAuditLog,
 }: {
   data: FeedbackDetail
   dims: Dimension[]
   availableTags: Tag[]
+  workbenchMode: FeedbackWorkbenchMode
   renderWorkflowTransition?: (data: FeedbackDetail) => React.ReactNode
   renderAuditLog?: (data: FeedbackDetail) => React.ReactNode
 }) {
@@ -131,24 +147,135 @@ function DetailBody({
   const displayOf = useDisplayName()
   const attrs = (data.enrichedAttrs ?? {}) as Record<string, unknown>
   const displayRationale = data.enrichedDisplayRationale || data.enrichedRationale
+  const hasClassifiedAttrs = dims.some((dim) => {
+    const value = attrs[dim.name]
+    if (Array.isArray(value)) return value.length > 0
+    return typeof value === 'string' ? value.length > 0 : value != null
+  })
+  const hasClassificationSignal =
+    hasClassifiedAttrs || data.classificationConfidence != null || Boolean(displayRationale)
   const showNativeRationale =
     data.enrichedRationale &&
     data.enrichedDisplayRationale &&
     languagesDiffer(data.language, data.enrichedDisplayLocale) &&
     data.enrichedRationale !== data.enrichedDisplayRationale
+  const summaryState = detailSummaryState(data, hasClassificationSignal, t)
+  const workbenchCue = detailWorkbenchCue(workbenchMode, hasClassificationSignal, t)
   return (
-    <div className="space-y-7">
-      <Section label={t('feedback.detail.raw_content')}>
-        <p className="whitespace-pre-wrap break-words">{data.content}</p>
-      </Section>
+    <div className="space-y-5">
+      <Card className="border-border/60 shadow-none">
+        <CardHeader className="gap-3 pb-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <CardTitle className="text-base">{t('feedback.detail.sheet_summary')}</CardTitle>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground text-pretty">
+                {data.enrichedDisplayTitle || data.enrichedTitle || data.content}
+              </p>
+            </div>
+            <DetailBadge tone={summaryState.tone} label={summaryState.label} />
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <SummaryItem
+            label={t('feedback.detail.source')}
+            value={data.source || '—'}
+            mono={false}
+          />
+          <SummaryItem
+            label={t('feedback.table.language')}
+            valueNode={<LanguageBadge language={data.language} />}
+          />
+          <SummaryItem
+            label={t('feedback.detail.workflow_state')}
+            valueNode={
+              data.workflowState ? (
+                <WorkflowStateBadge state={data.workflowState} />
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )
+            }
+          />
+          <SummaryItem
+            label={t('feedback.detail.ai_state')}
+            valueNode={<DetailBadge tone={summaryState.tone} label={summaryState.label} compact />}
+          />
+          <SummaryItem
+            label={t('feedback.detail.confidence')}
+            valueNode={<ConfidenceIndicator confidence={data.classificationConfidence} />}
+          />
+          <SummaryItem
+            label={t('feedback.detail.enrichedAt')}
+            value={
+              data.enrichedAt
+                ? format(new Date(data.enrichedAt), 'PPP HH:mm:ss', { locale: zhCN })
+                : '—'
+            }
+          />
+        </CardContent>
+      </Card>
 
-      {data.replyDraftEnabled ? (
-        <ReplyDraftSection
-          id={String(data.id)}
-          draft={data.replyDraft ?? ''}
-          generatedAt={data.replyDraftGeneratedAt ?? ''}
+      {!hasClassificationSignal && (
+        <DetailStateBanner
+          tone={data.enrichmentError ? 'error' : 'muted'}
+          title={
+            data.enrichmentError
+              ? t('feedback.detail.enrichment_failed_title')
+              : t('feedback.detail.pending_classification_title')
+          }
+          body={
+            data.enrichmentError
+              ? t('feedback.detail.enrichment_failed_body')
+              : t('feedback.detail.pending_classification_body')
+          }
+          detail={data.enrichmentError || undefined}
+        />
+      )}
+
+      {workbenchCue ? (
+        <DetailWorkbenchBanner
+          eyebrow={t('feedback.detail.workbench_title')}
+          title={workbenchCue.title}
+          body={workbenchCue.body}
+          tone={workbenchCue.tone}
         />
       ) : null}
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+        <Section label={t('feedback.detail.raw_content')}>
+          <p className="whitespace-pre-wrap break-words leading-7">{data.content}</p>
+        </Section>
+
+        {dims.length > 0 && (
+          <Section label={t('feedback.detail.attrs')}>
+            {hasClassificationSignal ? (
+              <dl className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <dt className="w-28 shrink-0 text-xs text-muted-foreground">
+                    {t('feedback.detail.confidence')}
+                  </dt>
+                  <dd className="flex-1 text-sm">
+                    <ConfidenceIndicator confidence={data.classificationConfidence} />
+                  </dd>
+                </div>
+                {dims.map((dim) => (
+                  <div key={dim.name} className="flex items-start gap-3">
+                    <dt className="w-28 shrink-0 text-xs text-muted-foreground">
+                      {displayOf(dim.displayName) || dim.name}
+                    </dt>
+                    <dd className="flex-1 text-sm">
+                      <DimensionChips dim={dim} value={attrs[dim.name]} />
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-4 text-sm text-muted-foreground">
+                {t('feedback.row.no_classification')}
+              </div>
+            )}
+          </Section>
+        )}
+      </div>
 
       {displayRationale ? (
         <Section label={t('feedback.detail.ai_rationale')}>
@@ -166,85 +293,70 @@ function DetailBody({
         </Section>
       ) : null}
 
-      {dims.length > 0 && (
-        <Section label={t('feedback.detail.attrs')}>
-          <dl className="space-y-3">
-            <div className="flex items-start gap-3">
-              <dt className="w-28 shrink-0 text-xs text-muted-foreground">
-                {t('feedback.detail.confidence')}
-              </dt>
-              <dd className="flex-1 text-sm">
-                <ConfidenceIndicator confidence={data.classificationConfidence} />
-              </dd>
-            </div>
-            {dims.map((dim) => (
-              <div key={dim.name} className="flex items-start gap-3">
-                <dt className="w-28 shrink-0 text-xs text-muted-foreground">
-                  {displayOf(dim.displayName) || dim.name}
-                </dt>
-                <dd className="flex-1 text-sm">
-                  <DimensionChips dim={dim} value={attrs[dim.name]} />
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </Section>
-      )}
-
-      <FeedbackTagSection
-        feedbackId={String(data.id)}
-        tags={data.tags ?? []}
-        availableTags={availableTags}
-      />
-
-      {renderWorkflowTransition && (
-        <Section label={t('feedback.detail.workflow_state')}>
-          {renderWorkflowTransition(data)}
-        </Section>
-      )}
-
-      {renderAuditLog && (
-        <Section label={t('feedback.detail.audit_log')}>{renderAuditLog(data)}</Section>
-      )}
-
-      <Section label={t('feedback.detail.source')}>
-        <p className="font-mono text-xs text-muted-foreground">
-          {data.source} · userId={data.userId || '—'}
-          {data.pageUrl && ` · ${data.pageUrl}`}
-        </p>
-      </Section>
-
-      {data.sourceMeta && Object.keys(data.sourceMeta).length > 0 ? (
-        <Section label={t('feedback.detail.sourceMeta')}>
-          <pre className="overflow-x-auto rounded-md border bg-muted/40 p-2 text-xs">
-            {JSON.stringify(data.sourceMeta, null, 2)}
-          </pre>
-        </Section>
+      {data.replyDraftEnabled ? (
+        <ReplyDraftSection
+          id={String(data.id)}
+          draft={data.replyDraft ?? ''}
+          generatedAt={data.replyDraftGeneratedAt ?? ''}
+        />
       ) : null}
 
-      {data.attachments && data.attachments.length > 0 ? (
-        <Section label={t('feedback.detail.attachments')}>
-          <pre className="overflow-x-auto rounded-md border bg-muted/40 p-2 text-xs">
-            {JSON.stringify(data.attachments, null, 2)}
-          </pre>
-        </Section>
-      ) : null}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.92fr)]">
+        <div className="space-y-5">
+          <Section label={t('tags.feedback_section.title')}>
+            <FeedbackTagSection
+              feedbackId={String(data.id)}
+              tags={data.tags ?? []}
+              availableTags={availableTags}
+              hideHeader
+            />
+          </Section>
 
-      {data.enrichmentError ? (
-        <Section label={t('feedback.detail.enrichmentError')}>
-          <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-            {data.enrichmentError}
-          </p>
-        </Section>
-      ) : null}
+          {renderWorkflowTransition && (
+            <Section label={t('feedback.detail.workflow_state')}>
+              {renderWorkflowTransition(data)}
+            </Section>
+          )}
 
-      {data.enrichedAt ? (
-        <Section label={t('feedback.detail.enrichedAt')}>
-          <p className="text-xs text-muted-foreground">
-            {format(new Date(data.enrichedAt), 'PPP HH:mm:ss', { locale: zhCN })}
-          </p>
-        </Section>
-      ) : null}
+          {data.enrichmentError && hasClassificationSignal ? (
+            <Section label={t('feedback.detail.enrichmentError')}>
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                {data.enrichmentError}
+              </p>
+            </Section>
+          ) : null}
+        </div>
+
+        <div className="space-y-5">
+          <Section label={t('feedback.detail.source')}>
+            <dl className="space-y-3">
+              <FactRow label={t('feedback.detail.source')} value={data.source || '—'} mono />
+              <FactRow label="userId" value={data.userId || '—'} mono />
+              {data.pageUrl ? (
+                <FactRow label="URL" value={data.pageUrl} className="break-all" />
+              ) : null}
+              {data.enrichedAt ? (
+                <FactRow
+                  label={t('feedback.detail.enrichedAt')}
+                  value={format(new Date(data.enrichedAt), 'PPP HH:mm:ss', { locale: zhCN })}
+                />
+              ) : null}
+            </dl>
+          </Section>
+
+          {data.sourceMeta && Object.keys(data.sourceMeta).length > 0 ? (
+            <JsonSection label={t('feedback.detail.sourceMeta')} value={data.sourceMeta} />
+          ) : null}
+
+          {data.attachments && data.attachments.length > 0 ? (
+            <JsonSection label={t('feedback.detail.attachments')} value={data.attachments} />
+          ) : null}
+
+          {renderAuditLog && (
+            <Section label={t('feedback.detail.audit_log')}>{renderAuditLog(data)}</Section>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -407,11 +519,241 @@ function DraftSkeleton() {
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <h4 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+    <section className="rounded-xl border border-border/60 bg-background p-4">
+      <h4 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </h4>
       {children}
+    </section>
+  )
+}
+
+function SummaryItem({
+  label,
+  value,
+  valueNode,
+  mono,
+}: {
+  label: string
+  value?: string
+  valueNode?: React.ReactNode
+  mono?: boolean
+}) {
+  return (
+    <div className="space-y-1.5 rounded-lg border border-border/50 bg-muted/10 px-3 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        {label}
+      </div>
+      <div className={cn('text-sm text-foreground', mono && 'font-mono text-xs')}>
+        {valueNode ?? value}
+      </div>
     </div>
+  )
+}
+
+function DetailBadge({
+  tone,
+  label,
+  compact = false,
+}: {
+  tone: 'default' | 'error' | 'success' | 'muted'
+  label: string
+  compact?: boolean
+}) {
+  const toneClass =
+    tone === 'error'
+      ? 'border-destructive/20 bg-destructive/5 text-destructive'
+      : tone === 'success'
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : tone === 'muted'
+          ? 'border-border/60 bg-muted/10 text-muted-foreground'
+          : 'border-border/60 bg-background text-foreground'
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full border font-medium',
+        compact ? 'px-2 py-1 text-[11px]' : 'px-2.5 py-1.5 text-xs',
+        toneClass,
+      )}
+    >
+      {label}
+    </span>
+  )
+}
+
+function FactRow({
+  label,
+  value,
+  mono,
+  className,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+  className?: string
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <dt className="w-24 shrink-0 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+        {label}
+      </dt>
+      <dd
+        className={cn(
+          'min-w-0 flex-1 text-sm text-foreground',
+          mono && 'font-mono text-xs',
+          className,
+        )}
+      >
+        {value}
+      </dd>
+    </div>
+  )
+}
+
+function DetailStateBanner({
+  tone,
+  title,
+  body,
+  detail,
+}: {
+  tone: 'error' | 'muted'
+  title: string
+  body: string
+  detail?: string
+}) {
+  const toneClass =
+    tone === 'error'
+      ? 'border-destructive/25 bg-destructive/[0.04]'
+      : 'border-border/60 bg-muted/12'
+  const iconClass = tone === 'error' ? 'text-destructive' : 'text-muted-foreground'
+  return (
+    <div className={`rounded-xl border px-4 py-4 ${toneClass}`}>
+      <div className="flex items-start gap-3">
+        <div
+          className={`flex size-9 shrink-0 items-center justify-center rounded-2xl border border-current/10 bg-background/85 ${iconClass}`}
+        >
+          <AlertCircle className="size-4" />
+        </div>
+        <div className="min-w-0">
+          <h4 className="text-sm font-semibold text-foreground">{title}</h4>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground text-pretty">{body}</p>
+          {detail ? (
+            <p className="mt-3 rounded-lg border border-border/50 bg-background/80 px-3 py-2 font-mono text-xs text-muted-foreground">
+              {detail}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DetailWorkbenchBanner({
+  eyebrow,
+  title,
+  body,
+  tone,
+}: {
+  eyebrow: string
+  title: string
+  body: string
+  tone: 'default' | 'warning' | 'danger' | 'success'
+}) {
+  const toneClass =
+    tone === 'danger'
+      ? 'border-amber-200/80 bg-amber-50/65'
+      : tone === 'warning'
+        ? 'border-sky-200/80 bg-sky-50/65'
+        : tone === 'success'
+          ? 'border-emerald-200/80 bg-emerald-50/65'
+          : 'border-border/60 bg-muted/[0.06]'
+  return (
+    <div className={`rounded-xl border px-4 py-4 ${toneClass}`}>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        {eyebrow}
+      </div>
+      <div className="mt-1 text-sm font-semibold text-foreground">{title}</div>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground text-pretty">{body}</p>
+    </div>
+  )
+}
+
+function detailSummaryState(
+  data: FeedbackDetail,
+  hasClassificationSignal: boolean,
+  t: (key: string) => string,
+) {
+  if (data.enrichmentError) {
+    return { tone: 'error' as const, label: t('feedback.row.classification_failed') }
+  }
+  if (hasClassificationSignal) {
+    return { tone: 'success' as const, label: t('feedback.row.classification_ready') }
+  }
+  if (data.enrichmentStatus === 'enriching') {
+    return { tone: 'muted' as const, label: t('feedback.row.classification_enriching') }
+  }
+  if (data.enrichmentStatus === 'pending') {
+    return { tone: 'muted' as const, label: t('feedback.row.classification_pending') }
+  }
+  return { tone: 'muted' as const, label: t('feedback.row.unclassified_short') }
+}
+
+function workbenchModeLabel(mode: FeedbackWorkbenchMode, t: (key: string) => string) {
+  if (mode === 'urgent') return t('feedback.queue_mode.urgent')
+  if (mode === 'active') return t('feedback.queue_mode.active')
+  if (mode === 'failed') return t('feedback.queue_mode.failed')
+  if (mode === 'ready') return t('feedback.queue_mode.ready')
+  return t('feedback.queue_mode.all')
+}
+
+function detailWorkbenchCue(
+  mode: FeedbackWorkbenchMode,
+  hasClassificationSignal: boolean,
+  t: (key: string) => string,
+) {
+  if (mode === 'all') return null
+  if (mode === 'failed') {
+    return {
+      tone: 'danger' as const,
+      title: t('feedback.detail.workbench_failed_title'),
+      body: t('feedback.detail.workbench_failed_body'),
+    }
+  }
+  if (mode === 'active') {
+    return {
+      tone: 'warning' as const,
+      title: t('feedback.detail.workbench_active_title'),
+      body: t('feedback.detail.workbench_active_body'),
+    }
+  }
+  if (mode === 'urgent') {
+    return {
+      tone: 'danger' as const,
+      title: t('feedback.detail.workbench_urgent_title'),
+      body: t('feedback.detail.workbench_urgent_body'),
+    }
+  }
+  if (mode === 'ready') {
+    return {
+      tone: hasClassificationSignal ? ('success' as const) : ('warning' as const),
+      title: t('feedback.detail.workbench_ready_title'),
+      body: hasClassificationSignal
+        ? t('feedback.detail.workbench_ready_body')
+        : t('feedback.detail.workbench_ready_missing_body'),
+    }
+  }
+  return null
+}
+
+function JsonSection({ label, value }: { label: string; value: unknown }) {
+  return (
+    <Section label={label}>
+      <details className="group">
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">详情</summary>
+        <pre className="mt-3 overflow-x-auto rounded-md border bg-muted/30 p-3 text-xs">
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      </details>
+    </Section>
   )
 }

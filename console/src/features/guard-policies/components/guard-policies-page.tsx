@@ -4,6 +4,7 @@ import { Loader2, Pencil, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -74,6 +75,9 @@ export function GuardPoliciesPage() {
   const [deleting, setDeleting] = useState<GuardPolicy | null>(null)
 
   const policies = list.data ?? []
+  const tenantCount = policies.filter((policy) => policy.scope !== 'system').length
+  const enabledCount = policies.filter((policy) => policy.enabled).length
+  const overrideCount = policies.filter((policy) => policy.kind === 'override').length
   const writePending = create.isPending || patch.isPending || del.isPending
 
   const preview = () => {
@@ -127,112 +131,160 @@ export function GuardPoliciesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t('nav.guard_policies')}</h1>
-          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            {t('guard_policies.subtitle')}
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-2">
-          <Button type="button" variant="outline" onClick={() => list.refetch()}>
-            <RotateCcw className="h-4 w-4" />
-            {t('guard_policies.refresh')}
-          </Button>
-          {canEdit && (
-            <Button type="button" onClick={() => setCreateOpen(true)}>
-              <Plus className="h-4 w-4" />
-              {t('guard_policies.create')}
+      <PageHero
+        eyebrow={t('shell.groups.administration')}
+        title={t('nav.guard_policies')}
+        subtitle={t('guard_policies.subtitle')}
+        actions={
+          <>
+            <Button type="button" variant="outline" onClick={() => list.refetch()}>
+              <RotateCcw className="h-4 w-4" />
+              {t('guard_policies.refresh')}
             </Button>
-          )}
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('guard_policies.effective_title')}</CardTitle>
-          <CardDescription>{t('guard_policies.effective_help')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-4">
-            <Field label={t('guard_policies.channel')} htmlFor="guard-channel">
-              <Select value={channel} onValueChange={setChannel}>
-                <SelectTrigger id="guard-channel" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CHANNELS.filter((value) => value !== 'all').map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {formatEnum(t, 'channels', value)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label={t('guard_policies.purpose')} htmlFor="guard-purpose">
-              <Select value={purpose} onValueChange={setPurpose}>
-                <SelectTrigger id="guard-purpose" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PURPOSES.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {formatEnum(t, 'purposes', value)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label={t('guard_policies.source_id')} htmlFor="guard-source-id">
-              <Input
-                id="guard-source-id"
-                value={sourceId}
-                placeholder="source UUID"
-                onChange={(e) => setSourceId(e.target.value)}
-              />
-            </Field>
-            <Field label={t('guard_policies.source_tags')} htmlFor="guard-tags">
-              <Input
-                id="guard-tags"
-                value={sourceTags}
-                placeholder="regulated, vip"
-                onChange={(e) => setSourceTags(e.target.value)}
-              />
-            </Field>
-          </div>
-          <Button type="button" onClick={preview} disabled={resolve.isPending}>
-            {resolve.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
+            {canEdit && (
+              <Button type="button" onClick={() => setCreateOpen(true)}>
+                <Plus className="h-4 w-4" />
+                {t('guard_policies.create')}
+              </Button>
             )}
-            {t('guard_policies.preview')}
-          </Button>
-          {resolve.data ? <RulesTable rules={resolve.data.rules} /> : null}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('guard_policies.policies_title')}</CardTitle>
-          <CardDescription>{t('guard_policies.policies_help')}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {list.isPending ? (
-            <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              {t('app.loading')}
-            </div>
-          ) : (
-            <PolicyList
-              policies={policies}
-              onEdit={canEdit ? setEditing : undefined}
-              onDelete={canEdit ? setDeleting : undefined}
-              writePending={writePending}
+          </>
+        }
+        metrics={
+          <>
+            <PageHeroMetric
+              label={t('guard_policies.summary.total')}
+              value={String(policies.length)}
+              hint={t('guard_policies.summary.total_hint')}
             />
-          )}
-        </CardContent>
-      </Card>
+            <PageHeroMetric
+              label={t('guard_policies.summary.tenant')}
+              value={String(tenantCount)}
+              hint={t('guard_policies.summary.tenant_hint')}
+            />
+            <PageHeroMetric
+              label={t('guard_policies.summary.enabled')}
+              value={String(enabledCount)}
+              hint={t('guard_policies.summary.enabled_hint')}
+            />
+            <PageHeroMetric
+              label={t('guard_policies.summary.override')}
+              value={String(overrideCount)}
+              hint={t('guard_policies.summary.override_hint')}
+            />
+          </>
+        }
+      />
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
+        <div className="space-y-6">
+          <Card className="border-border/70 shadow-none">
+            <CardHeader className="border-b border-border/60 bg-muted/15">
+              <CardTitle>{t('guard_policies.effective_title')}</CardTitle>
+              <CardDescription>{t('guard_policies.effective_help')}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-6">
+              <div className="grid gap-4 md:grid-cols-4">
+                <Field label={t('guard_policies.channel')} htmlFor="guard-channel">
+                  <Select value={channel} onValueChange={setChannel}>
+                    <SelectTrigger id="guard-channel" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CHANNELS.filter((value) => value !== 'all').map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {formatEnum(t, 'channels', value)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label={t('guard_policies.purpose')} htmlFor="guard-purpose">
+                  <Select value={purpose} onValueChange={setPurpose}>
+                    <SelectTrigger id="guard-purpose" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PURPOSES.map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {formatEnum(t, 'purposes', value)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label={t('guard_policies.source_id')} htmlFor="guard-source-id">
+                  <Input
+                    id="guard-source-id"
+                    value={sourceId}
+                    placeholder="source UUID"
+                    onChange={(e) => setSourceId(e.target.value)}
+                  />
+                </Field>
+                <Field label={t('guard_policies.source_tags')} htmlFor="guard-tags">
+                  <Input
+                    id="guard-tags"
+                    value={sourceTags}
+                    placeholder="regulated, vip"
+                    onChange={(e) => setSourceTags(e.target.value)}
+                  />
+                </Field>
+              </div>
+              <Button type="button" onClick={preview} disabled={resolve.isPending}>
+                {resolve.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {t('guard_policies.preview')}
+              </Button>
+              {resolve.data ? <RulesTable rules={resolve.data.rules} /> : null}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70 shadow-none">
+            <CardHeader className="border-b border-border/60 bg-muted/15">
+              <CardTitle>{t('guard_policies.policies_title')}</CardTitle>
+              <CardDescription>{t('guard_policies.policies_help')}</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6">
+              {list.isPending ? (
+                <div className="flex items-center justify-center py-8 text-muted-foreground">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {t('app.loading')}
+                </div>
+              ) : (
+                <PolicyList
+                  policies={policies}
+                  onEdit={canEdit ? setEditing : undefined}
+                  onDelete={canEdit ? setDeleting : undefined}
+                  writePending={writePending}
+                />
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="border-border/70 shadow-none">
+          <CardHeader className="border-b border-border/60 bg-muted/15">
+            <CardTitle>{t('guard_policies.playbook_title')}</CardTitle>
+            <CardDescription>{t('guard_policies.playbook_description')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-6">
+            <PlaybookRow
+              title={t('guard_policies.playbook.scope_title')}
+              body={t('guard_policies.playbook.scope_body')}
+            />
+            <PlaybookRow
+              title={t('guard_policies.playbook.action_title')}
+              body={t('guard_policies.playbook.action_body')}
+            />
+            <PlaybookRow
+              title={t('guard_policies.playbook.preview_title')}
+              body={t('guard_policies.playbook.preview_body')}
+            />
+          </CardContent>
+        </Card>
+      </div>
 
       <PolicyDialog
         mode="create"
@@ -256,6 +308,15 @@ export function GuardPoliciesPage() {
         onConfirm={deletePolicy}
         pending={del.isPending}
       />
+    </div>
+  )
+}
+
+function PlaybookRow({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-[1rem] border border-border/70 bg-background/85 px-4 py-3.5">
+      <div className="text-sm font-semibold text-foreground">{title}</div>
+      <div className="mt-1 text-sm leading-6 text-muted-foreground">{body}</div>
     </div>
   )
 }

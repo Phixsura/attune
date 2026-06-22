@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
+import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -41,6 +42,10 @@ export function ApiKeysPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
   const [issued, setIssued] = useState<NewApiKey | null>(null)
+  const keys = list.data ?? []
+  const activeCount = keys.filter((key) => key.isActive).length
+  const revokedCount = keys.length - activeCount
+  const recentlyUsedCount = keys.filter((key) => Boolean(key.lastUsedAt)).length
 
   const handleCreate = (params: CreateApiKeyParams) => {
     return create.mutateAsync(params, {
@@ -64,51 +69,101 @@ export function ApiKeysPage() {
   })
 
   return (
-    <div>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t('nav.api_keys')}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t('api_keys.subtitle')}</p>
-        </div>
-        {canEdit && (
-          <Button onClick={() => setCreateOpen(true)}>{t('api_keys.create_button')}</Button>
-        )}
-      </div>
+    <div className="space-y-6">
+      <PageHero
+        eyebrow={t('shell.groups.integrations')}
+        title={t('nav.api_keys')}
+        subtitle={t('api_keys.subtitle')}
+        actions={
+          canEdit ? (
+            <Button onClick={() => setCreateOpen(true)}>{t('api_keys.create_button')}</Button>
+          ) : undefined
+        }
+        metrics={
+          <>
+            <PageHeroMetric
+              label={t('api_keys.summary.total')}
+              value={String(keys.length)}
+              hint={t('api_keys.summary.total_hint')}
+            />
+            <PageHeroMetric
+              label={t('api_keys.summary.active')}
+              value={String(activeCount)}
+              hint={t('api_keys.summary.active_hint')}
+            />
+            <PageHeroMetric
+              label={t('api_keys.summary.revoked')}
+              value={String(revokedCount)}
+              hint={t('api_keys.summary.revoked_hint')}
+            />
+            <PageHeroMetric
+              label={t('api_keys.summary.recent')}
+              value={String(recentlyUsedCount)}
+              hint={t('api_keys.summary.recent_hint')}
+            />
+          </>
+        }
+      />
 
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>{t('nav.api_keys')}</CardTitle>
-          <CardDescription>{list.data?.length ?? 0}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {list.isPending ? (
-            <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              {t('app.loading')}
-            </div>
-          ) : list.data && list.data.length > 0 ? (
-            <KeyTable
-              keys={list.data}
-              onRevoke={canEdit ? (k) => setRevokeTarget(k) : undefined}
-              revokingId={revoke.isPending ? revokeTarget?.id : undefined}
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+        <Card className="border-border/70 shadow-none">
+          <CardHeader className="border-b border-border/60 bg-muted/15">
+            <CardTitle>{t('api_keys.registry_title')}</CardTitle>
+            <CardDescription>
+              {t('api_keys.registry_description', { count: keys.length })}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-6">
+            {list.isPending ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                {t('app.loading')}
+              </div>
+            ) : keys.length > 0 ? (
+              <KeyTable
+                keys={keys}
+                onRevoke={canEdit ? (k) => setRevokeTarget(k) : undefined}
+                revokingId={revoke.isPending ? revokeTarget?.id : undefined}
+              />
+            ) : (
+              <EmptyState
+                icon={Key}
+                title={t('api_keys.empty_title')}
+                description={t('api_keys.empty_body')}
+                action={
+                  canEdit
+                    ? {
+                        label: t('api_keys.create_button'),
+                        onClick: () => setCreateOpen(true),
+                      }
+                    : undefined
+                }
+              />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70 shadow-none">
+          <CardHeader className="border-b border-border/60 bg-muted/15">
+            <CardTitle>{t('api_keys.playbook_title')}</CardTitle>
+            <CardDescription>{t('api_keys.playbook_description')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-6">
+            <PlaybookRow
+              title={t('api_keys.playbook.issue_title')}
+              body={t('api_keys.playbook.issue_body')}
             />
-          ) : (
-            <EmptyState
-              icon={Key}
-              title={t('api_keys.empty_title')}
-              description={t('api_keys.empty_body')}
-              action={
-                canEdit
-                  ? {
-                      label: t('api_keys.create_button'),
-                      onClick: () => setCreateOpen(true),
-                    }
-                  : undefined
-              }
+            <PlaybookRow
+              title={t('api_keys.playbook.review_title')}
+              body={t('api_keys.playbook.review_body')}
             />
-          )}
-        </CardContent>
-      </Card>
+            <PlaybookRow
+              title={t('api_keys.playbook.revoke_title')}
+              body={t('api_keys.playbook.revoke_body')}
+            />
+          </CardContent>
+        </Card>
+      </div>
 
       <CreateKeyDialog
         open={createOpen}
@@ -123,6 +178,15 @@ export function ApiKeysPage() {
         onConfirm={() => revokeTarget && handleRevoke.mutate(revokeTarget.id)}
         pending={handleRevoke.isPending}
       />
+    </div>
+  )
+}
+
+function PlaybookRow({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-[1rem] border border-border/70 bg-background/85 px-4 py-3.5">
+      <div className="text-sm font-semibold text-foreground">{title}</div>
+      <div className="mt-1 text-sm leading-6 text-muted-foreground">{body}</div>
     </div>
   )
 }

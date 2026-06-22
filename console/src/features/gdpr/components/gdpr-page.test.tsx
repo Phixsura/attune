@@ -199,6 +199,8 @@ describe('GDPRPage', () => {
       expect(screen.getByText('GDPR 数据请求')).toBeInTheDocument()
     })
 
+    expect(screen.getAllByText('待执行删除').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('敏感操作保护')).toBeInTheDocument()
     expect(screen.getByText('请求历史与保留策略')).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByTestId('gdpr-request-row-req-delete-1')).toBeInTheDocument()

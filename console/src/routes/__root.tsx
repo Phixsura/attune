@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
+import { ThemeProvider } from 'next-themes'
 import { lazy, Suspense } from 'react'
 import { Toaster } from 'sonner'
 
@@ -47,11 +48,13 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
-      <Toaster richColors closeButton position="top-right" />
-      <Suspense>
-        <DevtoolsBundle />
-      </Suspense>
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <Outlet />
+        <Toaster richColors closeButton position="top-right" />
+        <Suspense>
+          <DevtoolsBundle />
+        </Suspense>
+      </ThemeProvider>
     </QueryClientProvider>
   )
 }

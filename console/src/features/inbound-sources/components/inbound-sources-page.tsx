@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
 import { Loading } from '@/components/loading'
+import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -48,6 +49,10 @@ export function InboundSourcesPage() {
   const [rotateTarget, setRotateTarget] = useState<InboundSource | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<InboundSource | null>(null)
   const [reveal, setReveal] = useState<RevealState | null>(null)
+  const sources = list.data ?? []
+  const healthyCount = sources.filter((source) => source.enabled && !source.lastError).length
+  const pausedCount = sources.filter((source) => !source.enabled).length
+  const errorCount = sources.filter((source) => source.enabled && Boolean(source.lastError)).length
 
   const handleCreate = (body: InboundSourceCreate) =>
     create.mutateAsync(body, {
@@ -112,49 +117,96 @@ export function InboundSourcesPage() {
       : undefined
 
   return (
-    <div>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t('nav.inbound_sources')}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {t('inbound_sources.subtitle')}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+    <div className="space-y-6">
+      <PageHero
+        eyebrow={t('shell.groups.integrations')}
+        title={t('nav.inbound_sources')}
+        subtitle={t('inbound_sources.subtitle')}
+        actions={
           <Button onClick={() => setCreateOpen(true)}>{t('inbound_sources.create_button')}</Button>
-        </div>
-      </div>
+        }
+        metrics={
+          <>
+            <PageHeroMetric
+              label={t('inbound_sources.summary.total')}
+              value={String(sources.length)}
+              hint={t('inbound_sources.summary.total_hint')}
+            />
+            <PageHeroMetric
+              label={t('inbound_sources.summary.healthy')}
+              value={String(healthyCount)}
+              hint={t('inbound_sources.summary.healthy_hint')}
+            />
+            <PageHeroMetric
+              label={t('inbound_sources.summary.paused')}
+              value={String(pausedCount)}
+              hint={t('inbound_sources.summary.paused_hint')}
+            />
+            <PageHeroMetric
+              label={t('inbound_sources.summary.errors')}
+              value={String(errorCount)}
+              hint={t('inbound_sources.summary.errors_hint')}
+              tone={errorCount > 0 ? 'urgent' : 'default'}
+            />
+          </>
+        }
+      />
 
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>{t('nav.inbound_sources')}</CardTitle>
-          <CardDescription>{list.data?.length ?? 0}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {list.isPending ? (
-            <Loading />
-          ) : list.data && list.data.length > 0 ? (
-            <SourcesTable
-              sources={list.data}
-              togglingId={togglingId}
-              onRotate={(s) => setRotateTarget(s)}
-              onPause={handlePause}
-              onResume={handleResume}
-              onDelete={(s) => setDeleteTarget(s)}
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+        <Card className="border-border/70 shadow-none">
+          <CardHeader className="border-b border-border/60 bg-muted/15">
+            <CardTitle>{t('inbound_sources.registry_title')}</CardTitle>
+            <CardDescription>
+              {t('inbound_sources.registry_description', { count: sources.length })}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-6">
+            {list.isPending ? (
+              <Loading />
+            ) : sources.length > 0 ? (
+              <SourcesTable
+                sources={sources}
+                togglingId={togglingId}
+                onRotate={(s) => setRotateTarget(s)}
+                onPause={handlePause}
+                onResume={handleResume}
+                onDelete={(s) => setDeleteTarget(s)}
+              />
+            ) : (
+              <EmptyState
+                icon={InboxIcon}
+                title={t('inbound_sources.empty_title')}
+                description={t('inbound_sources.empty_body')}
+                action={{
+                  label: t('inbound_sources.create_button'),
+                  onClick: () => setCreateOpen(true),
+                }}
+              />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70 shadow-none">
+          <CardHeader className="border-b border-border/60 bg-muted/15">
+            <CardTitle>{t('inbound_sources.playbook_title')}</CardTitle>
+            <CardDescription>{t('inbound_sources.playbook_description')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-6">
+            <PlaybookRow
+              title={t('inbound_sources.playbook.segmentation_title')}
+              body={t('inbound_sources.playbook.segmentation_body')}
             />
-          ) : (
-            <EmptyState
-              icon={InboxIcon}
-              title={t('inbound_sources.empty_title')}
-              description={t('inbound_sources.empty_body')}
-              action={{
-                label: t('inbound_sources.create_button'),
-                onClick: () => setCreateOpen(true),
-              }}
+            <PlaybookRow
+              title={t('inbound_sources.playbook.rotation_title')}
+              body={t('inbound_sources.playbook.rotation_body')}
             />
-          )}
-        </CardContent>
-      </Card>
+            <PlaybookRow
+              title={t('inbound_sources.playbook.pause_title')}
+              body={t('inbound_sources.playbook.pause_body')}
+            />
+          </CardContent>
+        </Card>
+      </div>
 
       <CreateInboundSourceDialog
         open={createOpen}
@@ -181,6 +233,15 @@ export function InboundSourcesPage() {
         secretHex={reveal?.secretHex ?? ''}
         curlExample={reveal?.curlExample}
       />
+    </div>
+  )
+}
+
+function PlaybookRow({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-[1rem] border border-border/70 bg-background/85 px-4 py-3.5">
+      <div className="text-sm font-semibold text-foreground">{title}</div>
+      <div className="mt-1 text-sm leading-6 text-muted-foreground">{body}</div>
     </div>
   )
 }

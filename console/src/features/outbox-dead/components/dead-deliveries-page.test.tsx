@@ -44,6 +44,8 @@ describe('DeadDeliveriesPage', () => {
     await waitFor(() => {
       expect(screen.getByText('https://example.com/hook')).toBeInTheDocument()
     })
+    expect(screen.getByText('异常投递队列')).toBeInTheDocument()
+    expect(screen.getByText('排障建议')).toBeInTheDocument()
     // failure kind enum → "HTTP 5xx" badge, http code → "HTTP 503" badge.
     expect(screen.getByText('HTTP 5xx')).toBeInTheDocument()
     expect(screen.getByText('HTTP 503')).toBeInTheDocument()

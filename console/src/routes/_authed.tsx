@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { meQuery } from '@/features/session/api/get-me'
-import { TopBar } from '@/features/session/components/topbar'
+import { AuthedShell } from '@/features/session/components/authed-shell'
 
 // _authed.* routes share this layout. The loader runs /me once at
 // router-context boot; if it 401s we redirect to /login with the
@@ -37,11 +37,8 @@ function AuthedLayout() {
     return null
   }
   return (
-    <div className="flex min-h-screen flex-col">
-      <TopBar me={me.data} />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
-        <Outlet />
-      </main>
-    </div>
+    <AuthedShell me={me.data}>
+      <Outlet />
+    </AuthedShell>
   )
 }
