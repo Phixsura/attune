@@ -261,6 +261,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Dimensions editor lost new/persisted identity on remount, and the
+  Settings page silently dropped unsaved drafts (#90).** Row identity and
+  the "new (identifier editable) vs persisted (locked)" flag were tracked
+  in component-instance `useRef` (`WeakMap` + `Set`), so any genuine editor
+  remount reclassified an unsaved dimension as persisted and locked its
+  Name. The stated repro actually tripped a second bug: the Classification
+  Settings route blind-synced `dimensions` from the query cache on remount
+  and on every `refetchOnWindowFocus`, discarding in-progress edits. Both
+  are fixed by moving identity into the working data — a client-only `_key`
+  + `_isNew` (minted once at row creation, stripped before the wire) shared
+  by the Dimension and Taxonomy layers via `src/lib/editable-rows.ts` — and
+  by seeding the edit model once (gated child + `useState` initializer)
+  instead of a `useEffect` re-sync. Also fixes duplicate DOM ids on
+  empty/duplicate names, the divergent `readOnly`/`disabled` lock semantics
+  (now uniformly read-only), the value-keyed urgent-set chips, and adds
+  focus management on add (WCAG 2.4.3). See
+  `docs/proposals/2026/06/2026-06-22-dimensions-editor-identity-remount.md`.
+
 - **Batch delete API body was double-stringified (#81).** The
   `useBatchDeleteFeedback` hook passed an already-stringified JSON body
   to the API client, which stringified it again. Fixed to pass the object

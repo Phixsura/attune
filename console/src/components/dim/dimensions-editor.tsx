@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
-import { useId, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { I18nInput } from '@/components/dim/i18n-input'
 import { Button } from '@/components/ui/button'
@@ -13,104 +13,69 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  type EditableDimension,
+  type EditableTaxonomy,
+  newDimension,
+  newTaxonomy,
+} from '@/lib/editable-rows'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import { cn } from '@/lib/utils'
-import type { Dimension, Taxonomy } from '@/proto/attune/v1/common'
 
-// dimRefKey is a wire-safe identity for a Dimension *during editing*. It
-// isn't the Dimension.Name (which would be empty on a brand-new card) and
-// it isn't the array index (unstable across remove operations). Instead,
-// the editor maintains a WeakMap of Dimension objects → opaque ids; new
-// cards get a fresh id, persisted cards reuse one tied to the loaded
-// reference. This is what differentiates a persisted dim (Name + Kind
-// locked) from a brand-new one (Name + Kind editable) — independent of
-// the operator's chosen Name.
-type DimRefKey = string
-
-// DimensionsEditor is the Settings page's editor surface. It is
-// metadata-driven: any number of Dimensions, each with i18n
-// DisplayName and per-Taxonomy i18n. Stable identifiers (Dimension.Name,
-// Taxonomy.Value) become read-only once the row exists — renaming is
-// done via delete + recreate, preserving wire/SQL stability.
-//
-// State management lives at the route level (the parent owns the
-// edited list and the dirty bit). This component just reports edits
-// up via onChange.
+// DimensionsEditor is the Settings page's editor surface. It is a pure,
+// controlled view over EditableDimension[]: row identity (`_key`) and the
+// new-vs-persisted flag (`_isNew`) live in the data the parent owns, so they
+// survive remount and are immune to what the operator types (issue #90).
+// Stable identifiers (Dimension.Name, Taxonomy.Value) are read-only once the
+// row is persisted — renaming is delete + recreate, preserving wire/SQL
+// stability. The parent seeds the model once and strips `_key`/`_isNew` before
+// sending to the server.
 export function DimensionsEditor({
   value,
   onChange,
   disabled = false,
 }: {
-  value: Dimension[]
-  onChange: (next: Dimension[]) => void
+  value: EditableDimension[]
+  onChange: (next: EditableDimension[]) => void
   disabled?: boolean
 }) {
   const { t } = useTranslation()
-  const baseId = useId()
-  // WeakMap: Dimension reference → stable opaque id. Each Dimension
-  // object created locally (addDim) goes into newDimIds; dims loaded
-  // from the server are tracked too but classified as "not new".
-  const refs = useRef<WeakMap<Dimension, DimRefKey>>(new WeakMap())
-  const newDimIds = useRef<Set<DimRefKey>>(new Set())
-  const seqRef = useRef(0)
+  const addBtnRef = useRef<HTMLButtonElement>(null)
 
-  const idOf = (dim: Dimension): DimRefKey => {
-    const existing = refs.current.get(dim)
-    if (existing) return existing
-    seqRef.current += 1
-    const id = `${baseId}-${seqRef.current}`
-    refs.current.set(dim, id)
-    return id
-  }
-
-  const updateDim = (i: number, patch: Partial<Dimension>) => {
-    const prev = value[i]
+  const updateDim = (i: number, patch: Partial<EditableDimension>) => {
     const next = [...value]
-    const merged = { ...prev, ...patch }
-    next[i] = merged
-    // Identity transfers: the merged object is "the same dim" as prev
-    // for the purposes of new-vs-persisted classification.
-    const id = refs.current.get(prev)
-    if (id) {
-      refs.current.set(merged, id)
-      if (newDimIds.current.has(id)) {
-        // remains new
-      }
-    }
+    next[i] = { ...next[i], ...patch }
     onChange(next)
   }
-  const addDim = () => {
-    const fresh = emptyDimension()
-    const id = idOf(fresh)
-    newDimIds.current.add(id)
-    onChange([...value, fresh])
-  }
+  const addDim = () => onChange([...value, newDimension()])
   const removeDim = (i: number) => {
-    const dropped = value[i]
-    const id = refs.current.get(dropped)
-    if (id) newDimIds.current.delete(id)
     onChange(value.filter((_, idx) => idx !== i))
+    // Don't drop keyboard focus to <body> (WCAG 2.4.3): the removed card's
+    // controls are gone, so move focus to the still-mounted Add button.
+    addBtnRef.current?.focus()
   }
 
   return (
     <div className="space-y-4">
-      {value.map((dim, i) => {
-        const id = idOf(dim)
-        const isNew = newDimIds.current.has(id)
-        return (
-          <DimensionCard
-            // Stable per-card id — survives Name edits and array reordering.
-            key={id}
-            dim={dim}
-            isNew={isNew}
-            disabled={disabled}
-            onChange={(patch) => updateDim(i, patch)}
-            onRemove={() => removeDim(i)}
-          />
-        )
-      })}
+      {value.map((dim, i) => (
+        <DimensionCard
+          // Stable per-card key from the row's own identity — survives Name
+          // edits, array reordering, and remount.
+          key={dim._key}
+          dim={dim}
+          disabled={disabled}
+          onChange={(patch) => updateDim(i, patch)}
+          onRemove={() => removeDim(i)}
+        />
+      ))}
       {!disabled && (
-        <Button type="button" variant="outline" onClick={addDim} data-testid="dim-editor-add-dim">
+        <Button
+          ref={addBtnRef}
+          type="button"
+          variant="outline"
+          onClick={addDim}
+          data-testid="dim-editor-add-dim"
+        >
           <Plus className="h-4 w-4 mr-1" />
           {t('dim.editor.add_dim')}
         </Button>
@@ -121,76 +86,80 @@ export function DimensionsEditor({
 
 function DimensionCard({
   dim,
-  isNew,
   disabled = false,
   onChange,
   onRemove,
 }: {
-  dim: Dimension
-  isNew: boolean
+  dim: EditableDimension
   disabled?: boolean
-  onChange: (patch: Partial<Dimension>) => void
+  onChange: (patch: Partial<EditableDimension>) => void
   onRemove: () => void
 }) {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
+  // A freshly-added card opens so the operator can fill it in immediately.
+  const [open, setOpen] = useState(dim._isNew)
   const displayOf = useDisplayName()
-  // Same identity trick as the parent: track newly-added Taxonomy
-  // entries by object reference so Value editability survives renames
-  // and array reorders, without needing a "value_*" placeholder prefix.
-  const baseId = useId()
-  const taxRefs = useRef<WeakMap<Taxonomy, string>>(new WeakMap())
-  const newTaxIds = useRef<Set<string>>(new Set())
-  const taxSeq = useRef(0)
-  const taxIdOf = (tax: Taxonomy): string => {
-    const existing = taxRefs.current.get(tax)
-    if (existing) return existing
-    taxSeq.current += 1
-    const id = `${baseId}-tax-${taxSeq.current}`
-    taxRefs.current.set(tax, id)
-    return id
-  }
+  const nameRef = useRef<HTMLInputElement>(null)
+  const focusedRef = useRef(false)
+  const addValueBtnRef = useRef<HTMLButtonElement>(null)
 
-  const setTaxonomy = (taxonomy: Taxonomy[]) => onChange({ taxonomy })
+  // The identifier is locked for persisted rows and whenever editing is
+  // disabled. One semantic for both Name and Kind: read-only, focusable,
+  // announced — never `disabled` (which drops the control from the tab order).
+  const locked = !dim._isNew || disabled
+  const key = dim._key
+  const contentId = `dim-card-content-${key}`
+
+  // Focus a brand-new card's Name input once, so adding a dimension lands the
+  // caret where the operator types next (WCAG 2.4.3) — guarded to fire once.
+  useEffect(() => {
+    if (dim._isNew && !focusedRef.current && open) {
+      focusedRef.current = true
+      nameRef.current?.focus()
+    }
+  }, [dim._isNew, open])
+
+  const setTaxonomy = (taxonomy: EditableTaxonomy[]) => onChange({ taxonomy })
   const setUrgentSet = (urgentSet: string[]) => onChange({ urgentSet })
 
-  const addTaxonomy = () => {
-    const fresh: Taxonomy = { value: '', displayName: { entries: { default: '' } }, examples: [] }
-    const id = taxIdOf(fresh)
-    newTaxIds.current.add(id)
-    setTaxonomy([...dim.taxonomy, fresh])
-  }
+  const addTaxonomy = () => setTaxonomy([...dim.taxonomy, newTaxonomy()])
 
   return (
     <Card>
-      <CardHeader
-        className="cursor-pointer select-none py-3"
-        onClick={() => setOpen((v) => !v)}
-        data-testid="dim-card-header"
-      >
+      <CardHeader className="select-none py-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0">
-              {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </Button>
+          {/* The whole title row is the disclosure control: a real <button>
+              whose text content (title + machine name) names it per-card, with
+              aria-expanded for state and aria-controls only while the panel is
+              actually mounted. */}
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-controls={open ? contentId : undefined}
+            data-testid="dim-card-header"
+            className="flex flex-1 cursor-pointer items-center gap-2 min-w-0 text-left"
+          >
+            {open ? (
+              <ChevronDown className="h-4 w-4 shrink-0" />
+            ) : (
+              <ChevronRight className="h-4 w-4 shrink-0" />
+            )}
             <span className="font-medium truncate" data-testid="dim-card-title">
               {displayOf(dim.displayName) || dim.name || t('dim.editor.unnamed')}
             </span>
             <span className="font-mono text-xs text-muted-foreground truncate">
               ({dim.name || '?'}, {dim.kind})
             </span>
-          </div>
+          </button>
           {!disabled && (
             <Button
               type="button"
               variant="ghost"
               size="sm"
               className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
-              onClick={(e) => {
-                e.stopPropagation()
-                onRemove()
-              }}
-              aria-label={t('dim.editor.delete_dim')}
+              onClick={onRemove}
+              aria-label={`${t('dim.editor.delete_dim')}: ${dim.name || t('dim.editor.unnamed')}`}
               data-testid="dim-editor-delete-dim"
             >
               <Trash2 className="h-4 w-4" />
@@ -199,36 +168,53 @@ function DimensionCard({
         </div>
       </CardHeader>
       {open && (
-        <CardContent className="space-y-4 pt-0">
+        <CardContent id={contentId} className="space-y-4 pt-0">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor={`dim-name-${dim.name}`}>{t('dim.editor.name_label')}</Label>
+              <Label htmlFor={`dim-name-${key}`}>{t('dim.editor.name_label')}</Label>
               <Input
-                id={`dim-name-${dim.name}`}
+                ref={nameRef}
+                id={`dim-name-${key}`}
+                aria-describedby={`dim-name-help-${key}`}
                 value={dim.name}
-                readOnly={!isNew || disabled}
+                readOnly={locked}
                 onChange={(e) => onChange({ name: e.target.value })}
                 placeholder="lowercase_only"
-                className={cn('font-mono text-sm', (!isNew || disabled) && 'opacity-70')}
+                className={cn('font-mono text-sm', locked && 'opacity-70')}
               />
-              <p className="text-xs text-muted-foreground">{t('dim.editor.name_help')}</p>
+              <p id={`dim-name-help-${key}`} className="text-xs text-muted-foreground">
+                {t('dim.editor.name_help')}
+              </p>
             </div>
             <div className="space-y-2">
-              <Label>{t('dim.editor.kind_label')}</Label>
-              <Select
-                value={dim.kind}
-                onValueChange={(v) => onChange({ kind: v })}
-                disabled={!isNew || disabled}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="single">{t('dim.editor.kind_single')}</SelectItem>
-                  <SelectItem value="multi">{t('dim.editor.kind_multi')}</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">{t('dim.editor.kind_help')}</p>
+              <Label htmlFor={`dim-kind-${key}`}>{t('dim.editor.kind_label')}</Label>
+              {locked ? (
+                // Persisted Kind is immutable: show it as a read-only field
+                // (focusable + announced), consistent with the locked Name.
+                <Input
+                  id={`dim-kind-${key}`}
+                  aria-describedby={`dim-kind-help-${key}`}
+                  data-testid="dim-kind-readonly"
+                  readOnly
+                  value={
+                    dim.kind === 'multi' ? t('dim.editor.kind_multi') : t('dim.editor.kind_single')
+                  }
+                  className="text-sm opacity-70"
+                />
+              ) : (
+                <Select value={dim.kind} onValueChange={(v) => onChange({ kind: v })}>
+                  <SelectTrigger id={`dim-kind-${key}`} aria-describedby={`dim-kind-help-${key}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="single">{t('dim.editor.kind_single')}</SelectItem>
+                    <SelectItem value="multi">{t('dim.editor.kind_multi')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              <p id={`dim-kind-help-${key}`} className="text-xs text-muted-foreground">
+                {t('dim.editor.kind_help')}
+              </p>
             </div>
           </div>
 
@@ -247,7 +233,14 @@ function DimensionCard({
             <div className="flex items-center justify-between">
               <Label>{t('dim.editor.taxonomy_label')}</Label>
               {!disabled && (
-                <Button type="button" variant="ghost" size="sm" onClick={addTaxonomy}>
+                <Button
+                  ref={addValueBtnRef}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={addTaxonomy}
+                  data-testid="dim-editor-add-value"
+                >
                   <Plus className="h-3 w-3 mr-1" />
                   {t('dim.editor.add_value')}
                 </Button>
@@ -263,36 +256,50 @@ function DimensionCard({
                 : t('dim.editor.taxonomy_help_single')}
             </p>
             <div className="space-y-3 pl-3 border-l-2 border-border">
-              {dim.taxonomy.map((tax, taxIdx) => {
-                const id = taxIdOf(tax)
-                const isNewTax = newTaxIds.current.has(id)
-                return (
-                  <TaxonomyRow
-                    key={id}
-                    tax={tax}
-                    isNew={isNewTax}
-                    disabled={disabled}
-                    onChange={(patch) => {
-                      const prev = dim.taxonomy[taxIdx]
-                      const merged = { ...prev, ...patch }
-                      // Carry the identity (and "new" flag) over to the
-                      // merged object so Value remains editable across edits.
-                      const prevId = taxRefs.current.get(prev)
-                      if (prevId) taxRefs.current.set(merged, prevId)
-                      const next = [...dim.taxonomy]
-                      next[taxIdx] = merged
+              {dim.taxonomy.map((tax, taxIdx) => (
+                <TaxonomyRow
+                  key={tax._key}
+                  tax={tax}
+                  disabled={disabled}
+                  onChange={(patch) => {
+                    const prev = dim.taxonomy[taxIdx]
+                    const next = [...dim.taxonomy]
+                    next[taxIdx] = { ...prev, ...patch }
+                    // Urgent membership is value-addressed; when a (still-new)
+                    // value is renamed in place, remap/drop the matching entry
+                    // so urgentSet never holds a dangling value.
+                    if (
+                      patch.value !== undefined &&
+                      patch.value !== prev.value &&
+                      dim.urgentSet.includes(prev.value)
+                    ) {
+                      const renamed = patch.value
+                      const urgentSet = [
+                        ...new Set(
+                          dim.urgentSet
+                            .map((v) => (v === prev.value ? renamed : v))
+                            .filter((v) => v !== ''),
+                        ),
+                      ]
+                      onChange({ taxonomy: next, urgentSet })
+                    } else {
                       setTaxonomy(next)
-                    }}
-                    onRemove={() => {
-                      const dropped = dim.taxonomy[taxIdx]
-                      const droppedId = taxRefs.current.get(dropped)
-                      if (droppedId) newTaxIds.current.delete(droppedId)
-                      setTaxonomy(dim.taxonomy.filter((_, i) => i !== taxIdx))
-                      setUrgentSet(dim.urgentSet.filter((v) => v !== tax.value))
-                    }}
-                  />
-                )
-              })}
+                    }
+                  }}
+                  onRemove={() => {
+                    // Single atomic patch: two sequential onChange calls would
+                    // both read the same captured `value` and the second
+                    // (urgentSet) would clobber the first (taxonomy), leaving
+                    // the value undeleted.
+                    onChange({
+                      taxonomy: dim.taxonomy.filter((_, i) => i !== taxIdx),
+                      urgentSet: dim.urgentSet.filter((v) => v !== tax.value),
+                    })
+                    // Don't drop focus to <body> (WCAG 2.4.3).
+                    addValueBtnRef.current?.focus()
+                  }}
+                />
+              ))}
               {dim.taxonomy.length === 0 && (
                 <p className="text-xs italic text-muted-foreground">
                   {dim.kind === 'multi'
@@ -303,17 +310,27 @@ function DimensionCard({
             </div>
           </div>
 
-          {dim.taxonomy.length > 0 && (
-            <div className="space-y-2">
-              <Label>{t('dim.editor.urgent_set_label')}</Label>
+          {dim.taxonomy.some((tax) => tax.value !== '') && (
+            // <fieldset>/<legend> group the toggle chips under their label for
+            // assistive tech (the semantic form of role="group").
+            <fieldset className="m-0 space-y-2 border-0 p-0">
+              <legend className="text-sm font-medium leading-none">
+                {t('dim.editor.urgent_set_label')}
+              </legend>
               <p className="text-xs text-muted-foreground">{t('dim.editor.urgent_set_help')}</p>
               <div className="flex flex-wrap gap-2">
                 {dim.taxonomy.map((tax) => {
+                  // A not-yet-named value can't be urgent — urgentSet is
+                  // value-addressed on the wire, so an empty value is ineligible.
+                  if (!tax.value) return null
                   const checked = dim.urgentSet.includes(tax.value)
                   return (
                     <button
-                      key={tax.value}
+                      // Key on the row's stable identity, not its (possibly
+                      // duplicate) Value.
+                      key={tax._key}
                       type="button"
+                      aria-pressed={checked}
                       disabled={disabled}
                       onClick={() =>
                         setUrgentSet(
@@ -335,7 +352,7 @@ function DimensionCard({
                   )
                 })}
               </div>
-            </div>
+            </fieldset>
           )}
         </CardContent>
       )}
@@ -345,30 +362,31 @@ function DimensionCard({
 
 function TaxonomyRow({
   tax,
-  isNew,
   disabled = false,
   onChange,
   onRemove,
 }: {
-  tax: Taxonomy
-  isNew: boolean
+  tax: EditableTaxonomy
   disabled?: boolean
-  onChange: (patch: Partial<Taxonomy>) => void
+  onChange: (patch: Partial<EditableTaxonomy>) => void
   onRemove: () => void
 }) {
   const { t } = useTranslation()
+  const locked = !tax._isNew || disabled
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <Input
+          id={`tax-value-${tax._key}`}
+          // Stable label — interpolating the live value would re-announce the
+          // focused input on every keystroke; the value is conveyed by the
+          // input's own value to AT.
+          aria-label={t('dim.editor.value_label')}
           value={tax.value}
-          readOnly={!isNew || disabled}
+          readOnly={locked}
           onChange={(e) => onChange({ value: e.target.value })}
           placeholder="stable_value"
-          className={cn(
-            'h-8 max-w-[200px] font-mono text-sm',
-            (!isNew || disabled) && 'opacity-70',
-          )}
+          className={cn('h-8 max-w-[200px] font-mono text-sm', locked && 'opacity-70')}
         />
         {!disabled && (
           <Button
@@ -377,7 +395,7 @@ function TaxonomyRow({
             size="sm"
             className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
             onClick={onRemove}
-            aria-label={t('dim.editor.remove_value')}
+            aria-label={`${t('dim.editor.remove_value')} ${tax.value}`.trim()}
             data-testid="dim-editor-remove-value"
           >
             <Trash2 className="h-3 w-3" />
@@ -395,21 +413,4 @@ function TaxonomyRow({
       </div>
     </div>
   )
-}
-
-// emptyDimension returns the blank-slate Dimension a fresh editor card
-// starts with. Name + DisplayName are empty; the operator types them
-// before Save. The identity-tracking WeakMap (newDimIds) is what marks
-// the row as "new" — not a `dim_<n>` placeholder name like before.
-function emptyDimension(): Dimension {
-  return {
-    name: '',
-    displayName: { entries: { default: '' } },
-    kind: 'single',
-    taxonomy: [],
-    urgentSet: [],
-    required: false,
-    examples: [],
-    extractionHint: '',
-  }
 }

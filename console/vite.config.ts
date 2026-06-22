@@ -87,6 +87,7 @@ export default defineConfig({
       // file doesn't silently lower the project bar.
       thresholds: {
         'src/lib/api-client.ts': { lines: 90, statements: 90, branches: 80, functions: 90 },
+        'src/lib/editable-rows.ts': { lines: 90, statements: 90, branches: 80, functions: 90 },
         'src/lib/i18n-resolve.ts': { lines: 90, statements: 90, branches: 80, functions: 90 },
         'src/features/session/api/get-me.ts': { lines: 90, statements: 90 },
         'src/features/feedback/api/list-feedback-infinite.ts': { lines: 90 },

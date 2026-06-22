@@ -17,6 +17,7 @@ import {
   useAnalyzeEvalSuggestions,
 } from '@/features/settings/api/get-eval-suggestions'
 import { usePromoteSuggestedValue } from '@/features/settings/api/promote-suggested-value'
+import type { I18nString } from '@/proto/attune/v1/common'
 
 // formatPct renders a 0–1 ratio as a percent. A nonzero ratio that would
 // round to "0%" is shown as "<1%" so a real candidate never appears to have
@@ -32,7 +33,17 @@ function formatPct(ratio: number): string {
 // the fetch is gated behind an explicit "Analyze" click. Each candidate can be
 // promoted into the dimension taxonomy in one click; on success it disappears
 // from the list and coverage rises.
-export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
+export function SuggestedValuesPanel({
+  canEdit,
+  onPromoted,
+}: {
+  canEdit: boolean
+  // Called after a value is persisted server-side, so the parent can fold it
+  // into the Dimensions editor draft without a full re-seed (which would
+  // clobber unsaved edits). The displayName is the exact one POSTed/stored, so
+  // the draft mirrors server truth.
+  onPromoted?: (dimensionName: string, value: string, displayName: I18nString) => void
+}) {
   const { t } = useTranslation()
   const [analyzed, setAnalyzed] = useState(false)
   const analyze = useAnalyzeEvalSuggestions()
@@ -49,11 +60,8 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
     inFlight.current = true
     setPromoting(`${dim}:${value}`)
     try {
-      await promote.mutateAsync({
-        dimensionName: dim,
-        value,
-        displayName: { entries: { 'zh-CN': value } },
-      })
+      const displayName: I18nString = { entries: { 'zh-CN': value } }
+      await promote.mutateAsync({ dimensionName: dim, value, displayName })
       setData((current) =>
         current
           ? {
@@ -65,6 +73,7 @@ export function SuggestedValuesPanel({ canEdit }: { canEdit: boolean }) {
             }
           : current,
       )
+      onPromoted?.(dim, value, displayName)
       toast.success(t('settings.suggestions.promoted', { value }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.suggestions.promote_failed'))
