@@ -30,13 +30,15 @@ export function EmptyState({
       className={cn('flex flex-col items-center justify-center gap-3 py-12 text-center', className)}
     >
       {Icon && (
-        <div className="rounded-full bg-primary/10 p-3 text-primary">
+        <div className="rounded-[1.15rem] border border-primary/10 bg-[linear-gradient(180deg,rgba(255,247,237,0.95),rgba(255,255,255,0.92))] p-3.5 text-primary shadow-[0_18px_36px_-28px_rgba(234,88,12,0.45)]">
           <Icon className="h-6 w-6" />
         </div>
       )}
       <div className="space-y-1">
-        <p className="text-sm font-medium text-foreground">{title}</p>
-        {description && <p className="max-w-md text-sm text-muted-foreground">{description}</p>}
+        <p className="text-base font-semibold tracking-tight text-foreground">{title}</p>
+        {description && (
+          <p className="max-w-md text-sm leading-6 text-muted-foreground">{description}</p>
+        )}
       </div>
       {action && (
         <Button onClick={action.onClick} className="mt-2">

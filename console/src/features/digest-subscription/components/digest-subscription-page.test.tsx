@@ -30,6 +30,9 @@ describe('DigestSubscriptionPage', () => {
     await waitFor(() => {
       expect((screen.getByTestId('digest-send-hour') as HTMLInputElement).value).toBe('9')
     })
+    expect(screen.getByText('摘要编排面板')).toBeInTheDocument()
+    expect(screen.getByText('摘要治理建议')).toBeInTheDocument()
+    expect(screen.getByText('这个开关同时控制反馈聚类能力')).toBeInTheDocument()
     expect(screen.queryByTestId('digest-weekday')).toBeNull()
   })
 

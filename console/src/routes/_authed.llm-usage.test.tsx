@@ -1,7 +1,6 @@
 import { HttpResponse, http } from 'msw'
-import { Suspense } from 'react'
 import { describe, expect, it } from 'vitest'
-import { Route as LLMUsageRoute } from '@/routes/_authed.llm-usage'
+import { LLMUsagePage } from '@/routes/_authed.llm-usage'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 
@@ -34,21 +33,13 @@ describe('_authed.llm-usage route', () => {
       ),
     )
 
-    const LLMUsagePage = LLMUsageRoute.options.component as React.ComponentType & {
-      preload?: () => Promise<unknown>
-    }
-    if (!LLMUsagePage) throw new Error('LLM usage component missing on Route.options')
-    if (LLMUsagePage.preload) await LLMUsagePage.preload()
-
-    renderWithProviders(
-      <Suspense fallback={null}>
-        <LLMUsagePage />
-      </Suspense>,
-    )
+    renderWithProviders(<LLMUsagePage />)
 
     await waitFor(() => {
       expect(screen.getByText('gpt-5.5')).toBeInTheDocument()
     })
+    expect(screen.getByText('涉及模型')).toBeInTheDocument()
+    expect(screen.getByText('分析建议')).toBeInTheDocument()
     expect(screen.getAllByText('$0.0162').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('1,200').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('340').length).toBeGreaterThanOrEqual(1)

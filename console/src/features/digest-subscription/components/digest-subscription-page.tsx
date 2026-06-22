@@ -3,8 +3,9 @@ import { Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -89,144 +90,224 @@ export function DigestSubscriptionPage() {
   }
 
   const exists = q.data != null
+  const frequencyLabel =
+    frequency === 'weekly' ? t('digest.frequency_weekly') : t('digest.frequency_daily')
+  const digestStateLabel = enabled ? t('digest.status_enabled') : t('digest.status_disabled')
+  const clusteringLabel = clusteringEnabled
+    ? t('digest.status_enabled')
+    : t('digest.status_disabled')
 
   return (
     <section className="min-w-0 space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold tracking-tight">{t('digest.title')}</h2>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{t('digest.subtitle')}</p>
-      </div>
-
-      <Card>
-        <CardContent className="space-y-5 pt-6">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              data-testid="digest-enabled"
+      <PageHero
+        eyebrow={t('shell.groups.integrations')}
+        title={t('digest.title')}
+        subtitle={t('digest.subtitle')}
+        metrics={
+          <>
+            <PageHeroMetric
+              label={t('digest.summary.enabled')}
+              value={digestStateLabel}
+              hint={t('digest.summary.enabled_hint')}
             />
-            {t('digest.enabled_field')}
-          </label>
-
-          <div className="space-y-2">
-            <Label htmlFor="digest-frequency">{t('digest.frequency_field')}</Label>
-            <Select value={frequency} onValueChange={(v) => setFrequency(v as Frequency)}>
-              <SelectTrigger id="digest-frequency" data-testid="digest-frequency">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="daily">{t('digest.frequency_daily')}</SelectItem>
-                <SelectItem value="weekly">{t('digest.frequency_weekly')}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="digest-send-hour">{t('digest.send_hour_field')}</Label>
-            <Input
-              id="digest-send-hour"
-              type="number"
-              min={0}
-              max={23}
-              value={sendHour}
-              onChange={(e) => setSendHour(Number(e.target.value) || 0)}
-              data-testid="digest-send-hour"
+            <PageHeroMetric
+              label={t('digest.summary.frequency')}
+              value={frequencyLabel}
+              hint={t('digest.summary.frequency_hint')}
             />
-            <p className="text-xs text-muted-foreground">{t('digest.send_hour_help')}</p>
-          </div>
+            <PageHeroMetric
+              label={t('digest.summary.llm')}
+              value={String(llmMin)}
+              hint={t('digest.summary.llm_hint')}
+            />
+            <PageHeroMetric
+              label={t('digest.summary.clustering')}
+              value={clusteringLabel}
+              hint={t('digest.summary.clustering_hint')}
+            />
+          </>
+        }
+      />
 
-          {frequency === 'weekly' ? (
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+        <Card className="border-border/70 shadow-none">
+          <CardHeader className="border-b border-border/60 bg-muted/15">
+            <CardTitle>{t('digest.editor_title')}</CardTitle>
+            <CardDescription>{t('digest.editor_description')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5 pt-6">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+                data-testid="digest-enabled"
+              />
+              {t('digest.enabled_field')}
+            </label>
+
             <div className="space-y-2">
-              <Label htmlFor="digest-weekday">{t('digest.weekday_field')}</Label>
-              <Select value={String(byweekday)} onValueChange={(v) => setByweekday(Number(v))}>
-                <SelectTrigger id="digest-weekday" data-testid="digest-weekday">
+              <Label htmlFor="digest-frequency">{t('digest.frequency_field')}</Label>
+              <Select value={frequency} onValueChange={(v) => setFrequency(v as Frequency)}>
+                <SelectTrigger id="digest-frequency" data-testid="digest-frequency">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {WEEKDAYS.map((d) => (
-                    <SelectItem key={d} value={String(d)}>
-                      {t(`digest.weekday.${d}`)}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="daily">{t('digest.frequency_daily')}</SelectItem>
+                  <SelectItem value="weekly">{t('digest.frequency_weekly')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-          ) : null}
 
-          <div className="space-y-2">
-            <Label htmlFor="digest-llm-min">{t('digest.llm_min_field')}</Label>
-            <Input
-              id="digest-llm-min"
-              type="number"
-              min={1}
-              value={llmMin}
-              onChange={(e) => setLlmMin(Number(e.target.value) || 6)}
-              data-testid="digest-llm-min"
+            <div className="space-y-2">
+              <Label htmlFor="digest-send-hour">{t('digest.send_hour_field')}</Label>
+              <Input
+                id="digest-send-hour"
+                type="number"
+                min={0}
+                max={23}
+                value={sendHour}
+                onChange={(e) => setSendHour(Number(e.target.value) || 0)}
+                data-testid="digest-send-hour"
+              />
+              <p className="text-xs text-muted-foreground">{t('digest.send_hour_help')}</p>
+            </div>
+
+            {frequency === 'weekly' ? (
+              <div className="space-y-2">
+                <Label htmlFor="digest-weekday">{t('digest.weekday_field')}</Label>
+                <Select value={String(byweekday)} onValueChange={(v) => setByweekday(Number(v))}>
+                  <SelectTrigger id="digest-weekday" data-testid="digest-weekday">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WEEKDAYS.map((d) => (
+                      <SelectItem key={d} value={String(d)}>
+                        {t(`digest.weekday.${d}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+
+            <div className="space-y-2">
+              <Label htmlFor="digest-llm-min">{t('digest.llm_min_field')}</Label>
+              <Input
+                id="digest-llm-min"
+                type="number"
+                min={1}
+                value={llmMin}
+                onChange={(e) => setLlmMin(Number(e.target.value) || 6)}
+                data-testid="digest-llm-min"
+              />
+              <p className="text-xs text-muted-foreground">{t('digest.llm_min_help')}</p>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={sendOnEmpty}
+                onChange={(e) => setSendOnEmpty(e.target.checked)}
+                data-testid="digest-send-on-empty"
+              />
+              {t('digest.send_on_empty_field')}
+            </label>
+
+            <div className="space-y-2">
+              <Label htmlFor="digest-theme-prompt">{t('digest.theme_prompt_field')}</Label>
+              <Input
+                id="digest-theme-prompt"
+                value={themePrompt}
+                onChange={(e) => setThemePrompt(e.target.value)}
+                placeholder={t('digest.theme_prompt_placeholder')}
+                data-testid="digest-theme-prompt"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={clusteringEnabled}
+                onChange={(e) => setClusteringEnabled(e.target.checked)}
+                data-testid="digest-clustering-enabled"
+              />
+              {t('digest.clustering_enabled_field')}
+            </label>
+            <p className="text-xs text-muted-foreground">{t('digest.clustering_enabled_help')}</p>
+            <div className="rounded-[1rem] border border-border/70 bg-muted/10 px-4 py-3.5">
+              <div className="text-sm font-semibold text-foreground">
+                {t('digest.clustering_surface_title')}
+              </div>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                {t('digest.clustering_surface_body')}
+              </p>
+              <div className="mt-3">
+                <Button asChild size="sm" variant="ghost" className="h-8 px-0">
+                  <a href="/feedback/clusters">{t('digest.clustering_surface_action')}</a>
+                </Button>
+              </div>
+            </div>
+
+            {q.data?.nextRunAt ? (
+              <p className="text-xs text-muted-foreground" data-testid="digest-next-run">
+                {t('digest.next_run')}: {q.data.nextRunAt}
+              </p>
+            ) : null}
+
+            <div className="flex items-center justify-between pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleDelete}
+                disabled={!exists || del.isPending}
+                data-testid="digest-delete"
+              >
+                {t('digest.delete_button')}
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSave}
+                disabled={upsert.isPending}
+                data-testid="digest-save"
+              >
+                {upsert.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                {t('common.save')}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70 shadow-none">
+          <CardHeader className="border-b border-border/60 bg-muted/15">
+            <CardTitle>{t('digest.playbook_title')}</CardTitle>
+            <CardDescription>{t('digest.playbook_description')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-6">
+            <PlaybookRow
+              title={t('digest.playbook.cadence_title')}
+              body={t('digest.playbook.cadence_body')}
             />
-            <p className="text-xs text-muted-foreground">{t('digest.llm_min_help')}</p>
-          </div>
-
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={sendOnEmpty}
-              onChange={(e) => setSendOnEmpty(e.target.checked)}
-              data-testid="digest-send-on-empty"
+            <PlaybookRow
+              title={t('digest.playbook.quality_title')}
+              body={t('digest.playbook.quality_body')}
             />
-            {t('digest.send_on_empty_field')}
-          </label>
-
-          <div className="space-y-2">
-            <Label htmlFor="digest-theme-prompt">{t('digest.theme_prompt_field')}</Label>
-            <Input
-              id="digest-theme-prompt"
-              value={themePrompt}
-              onChange={(e) => setThemePrompt(e.target.value)}
-              placeholder={t('digest.theme_prompt_placeholder')}
-              data-testid="digest-theme-prompt"
+            <PlaybookRow
+              title={t('digest.playbook.delivery_title')}
+              body={t('digest.playbook.delivery_body')}
             />
-          </div>
-
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={clusteringEnabled}
-              onChange={(e) => setClusteringEnabled(e.target.checked)}
-              data-testid="digest-clustering-enabled"
-            />
-            {t('digest.clustering_enabled_field')}
-          </label>
-          <p className="text-xs text-muted-foreground">{t('digest.clustering_enabled_help')}</p>
-
-          {q.data?.nextRunAt ? (
-            <p className="text-xs text-muted-foreground" data-testid="digest-next-run">
-              {t('digest.next_run')}: {q.data.nextRunAt}
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <div className="flex items-center justify-between">
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={handleDelete}
-          disabled={!exists || del.isPending}
-          data-testid="digest-delete"
-        >
-          {t('digest.delete_button')}
-        </Button>
-        <Button
-          type="button"
-          onClick={handleSave}
-          disabled={upsert.isPending}
-          data-testid="digest-save"
-        >
-          {upsert.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-          {t('common.save')}
-        </Button>
+          </CardContent>
+        </Card>
       </div>
     </section>
+  )
+}
+
+function PlaybookRow({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-[1rem] border border-border/70 bg-background/85 px-4 py-3.5">
+      <div className="text-sm font-semibold text-foreground">{title}</div>
+      <div className="mt-1 text-sm leading-6 text-muted-foreground">{body}</div>
+    </div>
   )
 }

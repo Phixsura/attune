@@ -676,7 +676,7 @@ describe('EnrichmentRuntimePage', () => {
     const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
 
     expect(await screen.findByText('富化运行时控制面')).toBeInTheDocument()
-    expect(screen.getByText('Live control plane')).toBeInTheDocument()
+    expect(screen.getByText('这不是参数页，而是富化运行时的在线控制台')).toBeInTheDocument()
     expect(screen.getByText('phjdeMacBook-Pro')).toBeInTheDocument()
     expect(
       screen.queryByText('attune-c43e0420-6bcf-4ef1-9584-5759bdb271aa'),
@@ -739,7 +739,7 @@ describe('EnrichmentRuntimePage', () => {
         },
       })
     })
-    expect(await screen.findByText('目标版本 15 · schema v1')).toBeInTheDocument()
+    expect((await screen.findAllByText('目标版本 15 · schema v1')).length).toBeGreaterThanOrEqual(1)
   })
 
   it('opens runtime-specific step-up copy and verifies by password when recent auth is missing', async () => {

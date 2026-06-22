@@ -1,8 +1,7 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { guardPoliciesQuery } from '@/features/guard-policies/api/guard-policies'
-import { GuardPoliciesPage } from '@/features/guard-policies/components/guard-policies-page'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/_authed/guard-policies')({
-  component: GuardPoliciesPage,
-  loader: ({ context }) => context.queryClient.ensureQueryData(guardPoliciesQuery()),
+  beforeLoad: () => {
+    throw redirect({ to: '/administration/guard-policies' })
+  },
 })

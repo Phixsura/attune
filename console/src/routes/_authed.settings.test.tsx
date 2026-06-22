@@ -1,89 +1,72 @@
-import { describe, expect, it, vi } from 'vitest'
-import { PromptVersionHistory } from '@/routes/_authed.settings'
-import { renderWithProviders, screen, within } from '@/testing/test-utils'
+import { QueryClient } from '@tanstack/react-query'
+import { isRedirect } from '@tanstack/react-router'
+import { HttpResponse, http } from 'msw'
+import { describe, expect, it } from 'vitest'
+import { Route as SettingsRoute } from '@/routes/_authed.settings'
+import { server } from '@/testing/mocks/server'
 
-const dim = (name: string) => ({
-  name,
-  displayName: { entries: {} },
-  kind: 'single',
-  taxonomy: [],
-  urgentSet: [],
-  required: false,
-  examples: [],
-  extractionHint: '',
-})
+type BeforeLoadFn = NonNullable<typeof SettingsRoute.options.beforeLoad>
+type BeforeLoadCtx = Parameters<BeforeLoadFn>[0]
 
-describe('PromptVersionHistory', () => {
-  it('shows a diff confirmation before activating an inactive version', async () => {
-    const onActivate = vi.fn()
-    const { user } = renderWithProviders(
-      <PromptVersionHistory
-        activating={false}
-        canEdit={true}
-        onActivate={onActivate}
-        versions={[
-          {
-            id: 'active-version',
-            promptVersion: 'enrich.default@1',
-            promptFingerprint: 'sha256:active',
-            schemaFingerprint: 'sha256:schema-active',
-            policyId: 'enrich.default',
-            policyVersion: '1',
-            mode: 'default',
-            promptSource: 'built_in',
-            createdAt: '2026-06-21T00:00:00Z',
-            isActive: true,
-            hasTemplate: false,
-            dimensionsCount: 1,
-            warnings: [],
-            dimensions: [dim('severity')],
-            policyConfig: {
-              outputLanguagePolicy: 'source_and_display',
-              titleMaxChars: 30,
-              rationaleMaxChars: 30,
-              displayFieldsRequired: true,
-              tone: 'concise',
-              domainGuidance: '',
-            },
-          },
-          {
-            id: 'target-version',
-            promptVersion: 'enrich.legacy_custom_template@sha256:abc',
-            promptFingerprint: 'sha256:target',
-            schemaFingerprint: 'sha256:schema-target',
-            policyId: 'enrich.legacy_custom_template',
-            policyVersion: 'sha256:abc',
-            mode: 'legacy_custom_override',
-            promptSource: 'custom_template',
-            createdAt: '2026-06-21T01:00:00Z',
-            isActive: false,
-            hasTemplate: true,
-            promptTemplate: 'custom {{content}}',
-            dimensionsCount: 1,
-            warnings: ['missing_dimensions'],
-            dimensions: [dim('type')],
-            policyConfig: {
-              outputLanguagePolicy: 'display_only',
-              titleMaxChars: 60,
-              rationaleMaxChars: 30,
-              displayFieldsRequired: true,
-              tone: 'neutral',
-              domainGuidance: '',
-            },
-          },
-        ]}
-      />,
-    )
+interface ThrownRedirect {
+  options: { to: string; statusCode?: number }
+}
 
-    await user.click(screen.getByRole('button', { name: '激活此版本' }))
+function makeContext(section?: string): BeforeLoadCtx {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return {
+    context: { queryClient },
+    search: section ? { section } : {},
+  } as BeforeLoadCtx
+}
 
-    expect(onActivate).not.toHaveBeenCalled()
-    const dialog = screen.getByRole('dialog', { name: '激活历史提示词版本' })
-    expect(within(dialog).getByText('影响摘要')).toBeInTheDocument()
-    expect(within(dialog).getByText('提示词模板会变化。')).toBeInTheDocument()
-    expect(within(dialog).getByText('新增 1，删除 1，保留 0')).toBeInTheDocument()
+async function callBeforeLoad(section?: string): Promise<unknown> {
+  const beforeLoad = SettingsRoute.options.beforeLoad as BeforeLoadFn
+  server.use(
+    http.get('/fb/v1/console/me', () =>
+      HttpResponse.json({
+        tenant: { id: 't', name: 'T', slug: 't', locale: 'zh-CN', timezone: 'UTC' },
+        user: { openId: 'u', name: 'U', role: 'admin' },
+        csrfToken: 'tok',
+      }),
+    ),
+  )
 
-    await user.click(within(dialog).getByTestId('prompt-version-activate-confirm'))
-    expect(onActivate).toHaveBeenCalledWith('target-version')
+  try {
+    await beforeLoad(makeContext(section))
+    return null
+  } catch (err) {
+    return err
+  }
+}
+
+describe('_authed.settings legacy section redirects', () => {
+  it.each([
+    ['classification', '/configuration/classification'],
+    ['llm', '/configuration/llm'],
+    ['enrichment-runtime', '/configuration/enrichment-runtime'],
+    ['enrichment_runtime', '/configuration/enrichment-runtime'],
+    ['digest', '/integrations/digests'],
+    ['digest_subscription', '/integrations/digests'],
+    ['audit', '/administration/audit-log'],
+    ['audit_log', '/administration/audit-log'],
+    ['members', '/administration/members'],
+    ['gdpr', '/administration/gdpr'],
+    ['tags', '/configuration/tags'],
+    ['workflow', '/configuration/workflow'],
+  ])('redirects section=%s to %s', async (section, to) => {
+    const thrown = await callBeforeLoad(section)
+    expect(isRedirect(thrown)).toBe(true)
+    const redirect = thrown as ThrownRedirect
+    expect(redirect.options.to).toBe(to)
+  })
+
+  it('falls back to classification for unknown sections', async () => {
+    const thrown = await callBeforeLoad('unknown')
+    expect(isRedirect(thrown)).toBe(true)
+    const redirect = thrown as ThrownRedirect
+    expect(redirect.options.to).toBe('/configuration/classification')
   })
 })

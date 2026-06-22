@@ -6,8 +6,8 @@ import { LLMConfigPage } from './llm-config-page'
 test('renders managed LLM config surfaces', async () => {
   renderWithProviders(<LLMConfigPage />)
 
-  expect(await screen.findAllByText('Primary')).toHaveLength(2)
-  expect(await screen.findAllByText('enrich-default')).toHaveLength(2)
+  expect((await screen.findAllByText('Primary')).length).toBeGreaterThanOrEqual(2)
+  expect((await screen.findAllByText('enrich-default')).length).toBeGreaterThanOrEqual(2)
   expect(await screen.findByText('gpt-4o-mini')).toBeInTheDocument()
   expect(await screen.findByText('Routes')).toBeInTheDocument()
 })

@@ -1,9 +1,23 @@
 import { HttpResponse, http } from 'msw'
-import { Suspense } from 'react'
-import { describe, expect, it } from 'vitest'
-import { Route as FeedbackRoute } from '@/routes/_authed.feedback'
+import type { ReactNode } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import { FeedbackRoutePage } from '@/routes/-feedback-route-page'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+
+vi.mock('@tanstack/react-router', async () => {
+  const actual =
+    await vi.importActual<typeof import('@tanstack/react-router')>('@tanstack/react-router')
+
+  return {
+    ...actual,
+    Link: ({ children, to, ...props }: { children: ReactNode; to?: string }) => (
+      <a href={to ?? '#'} {...props}>
+        {children}
+      </a>
+    ),
+  }
+})
 
 // Route-level smoke test for the feedback page. The unit tests cover
 // individual hooks + components in isolation; this test covers the
@@ -11,7 +25,7 @@ import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 // enrichConfigQuery → dims, feedbackListInfiniteQuery → table,
 // row click → detail sheet open, detail query → sheet content.
 //
-// Without this, a regression like "FeedbackPage forgot to pass dims
+// Without this, a regression like "FeedbackRoutePage forgot to pass dims
 // to DimensionChips" would land green: the components are tested
 // but their integration on the page is not.
 
@@ -103,26 +117,19 @@ describe('_authed.feedback route — user flow smoke', () => {
       ),
     )
 
-    // Route.options.component is wrapped by TanStack Router's lazy()
-    // (a side effect of `autoCodeSplitting: true` in vite.config). The
-    // wrapper exposes a .preload() that resolves the inner module;
-    // call it before render so React doesn't suspend on first paint.
-    const FeedbackPage = FeedbackRoute.options.component as React.ComponentType & {
-      preload?: () => Promise<unknown>
-    }
-    if (!FeedbackPage) throw new Error('FeedbackPage component missing on Route.options')
-    if (FeedbackPage.preload) await FeedbackPage.preload()
-
-    const { user } = renderWithProviders(
-      <Suspense fallback={null}>
-        <FeedbackPage />
-      </Suspense>,
-    )
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
 
     // Wait for the list query to land + render the row title.
     await waitFor(() => {
       expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
     })
+    expect(screen.getByRole('heading', { name: '反馈' })).toBeInTheDocument()
+    expect(screen.getByText('筛选视角')).toBeInTheDocument()
+    expect(screen.getAllByText('反馈队列').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('当前工作面').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('推荐视角')).toBeInTheDocument()
+    expect(screen.getByText('队列体征')).toBeInTheDocument()
+    expect(screen.getByText('操作上下文')).toBeInTheDocument()
     // Dim column header rendered from enrich-config dims. Two
     // matches expected: one in the stats card title, one in the
     // table column header.
@@ -142,6 +149,228 @@ describe('_authed.feedback route — user flow smoke', () => {
     })
     expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
   }, 20_000) // Route-level smoke composes lazy routes, queries, and sheet rendering.
+
+  it('queue rail primary action opens the current highest-priority feedback', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/:id', ({ params }) =>
+        HttpResponse.json({ ...detailFixture, id: params.id }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/feedback/:id/audit', ({ params }) =>
+        HttpResponse.json({ entries: [], feedbackId: params.id }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '打开紧急反馈' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '打开紧急反馈' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 规范化问题')).toBeInTheDocument()
+    })
+  })
+
+  it('recommended lane can switch into urgent scope before manual filtering', async () => {
+    const calmItem = {
+      ...itemFixture,
+      id: '102',
+      enrichedDisplayTitle: '普通反馈',
+      enrichedTitle: 'Normal feedback',
+      content: 'just a normal suggestion',
+      isUrgent: false,
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        const url = new URL(request.url)
+        const urgent = url.searchParams.get('urgent')
+        return HttpResponse.json({
+          items: urgent === 'true' ? [itemFixture] : [itemFixture, calmItem],
+          nextCursor: undefined,
+        })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('普通反馈')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '切到紧急视角' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('普通反馈')).toBeNull()
+    })
+    expect(screen.getByText('仅查看紧急反馈')).toBeInTheDocument()
+  })
+
+  it('recommended lane also offers a direct-open shortcut for the priority feedback', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/:id', ({ params }) =>
+        HttpResponse.json({ ...detailFixture, id: params.id }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/feedback/:id/audit', ({ params }) =>
+        HttpResponse.json({ entries: [], feedbackId: params.id }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '直接打开优先反馈' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '直接打开优先反馈' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 规范化问题')).toBeInTheDocument()
+    })
+  })
+
+  it('active filter chips can be removed individually', async () => {
+    const workflowState = {
+      id: 'ws-1',
+      name: 'open',
+      displayName: { entries: { default: 'Open', zh: '待处理' } },
+      color: '#3b82f6',
+      category: 'open',
+      position: 0,
+      isDefault: true,
+      archived: false,
+      createdAt: '2026-06-07T00:00:00Z',
+      updatedAt: '2026-06-07T00:00:00Z',
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        const url = new URL(request.url)
+        const hasSeverity = url.searchParams.get('severity') === 'P0'
+        const hasUrgent = url.searchParams.get('urgent') === 'true'
+        const hasQuery = url.searchParams.get('q') === 'unicode'
+        const hasWorkflow = url.searchParams.get('workflow_state') === 'ws-1'
+        return HttpResponse.json({
+          items:
+            hasSeverity || hasUrgent || hasQuery || hasWorkflow ? [itemFixture] : [itemFixture],
+          nextCursor: undefined,
+        })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () =>
+        HttpResponse.json({ states: [workflowState] }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByRole('searchbox'), 'unicode')
+    await user.click(screen.getByRole('button', { name: '仅看紧急' }))
+    await user.click(screen.getAllByRole('combobox')[0])
+    await user.click(screen.getByRole('option', { name: 'P0' }))
+    await user.click(screen.getAllByRole('combobox')[1])
+    await user.click(screen.getByRole('option', { name: '待处理' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('仅查看紧急反馈')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByLabelText('关键词搜索 unicode'))
+    await waitFor(() => {
+      expect(screen.queryByLabelText('关键词搜索 unicode')).toBeNull()
+    })
+
+    await user.click(screen.getByLabelText('紧急信号 仅查看紧急反馈'))
+    await waitFor(() => {
+      expect(screen.queryByLabelText('紧急信号 仅查看紧急反馈')).toBeNull()
+    })
+  })
 
   it('renders the workflow-state badge on a row via the displayName resolver', async () => {
     // A feedback row carrying a workflowState whose human label lives in
@@ -190,15 +419,7 @@ describe('_authed.feedback route — user flow smoke', () => {
       ),
     )
 
-    const FeedbackPage = FeedbackRoute.options.component as React.ComponentType & {
-      preload?: () => Promise<unknown>
-    }
-    if (FeedbackPage.preload) await FeedbackPage.preload()
-    renderWithProviders(
-      <Suspense fallback={null}>
-        <FeedbackPage />
-      </Suspense>,
-    )
+    renderWithProviders(<FeedbackRoutePage />)
 
     // The row badge resolves the zh display name ("待处理"), never "open".
     await waitFor(() => {
@@ -207,11 +428,7 @@ describe('_authed.feedback route — user flow smoke', () => {
     expect(screen.queryByText('open')).not.toBeInTheDocument()
   })
 
-  it('500 from /feedback → empty state (not crash) — documents current behavior', async () => {
-    // Backend errors currently render as "no feedback" rather than a
-    // distinct error UI — debatable UX, but it's the actual behavior
-    // and this test locks it in so a change is intentional. If/when
-    // an error UI lands, this test FAILS and gets updated alongside.
+  it('500 from /feedback renders a retryable error state instead of an empty list', async () => {
     server.use(
       http.get('/fb/v1/console/enrich-config', () =>
         HttpResponse.json({
@@ -236,22 +453,626 @@ describe('_authed.feedback route — user flow smoke', () => {
         HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
       ),
     )
-    const FeedbackPage = FeedbackRoute.options.component as React.ComponentType & {
-      preload?: () => Promise<unknown>
-    }
-    if (FeedbackPage.preload) await FeedbackPage.preload()
-    renderWithProviders(
-      <Suspense fallback={null}>
-        <FeedbackPage />
-      </Suspense>,
-    )
-    // The empty-state copy is i18n-controlled; wait for it via the
-    // EmptyState's Inbox icon's `lucide-inbox` data attribute (stable
-    // across i18n). The point of this assertion is "page rendered,
-    // didn't crash, didn't show a Toast/Error UI".
+    renderWithProviders(<FeedbackRoutePage />)
     await waitFor(() => {
-      const emptyIcon = document.querySelector('svg.lucide-inbox')
-      expect(emptyIcon).not.toBeNull()
+      expect(screen.getByText('反馈列表暂时无法加载')).toBeInTheDocument()
     })
+    expect(screen.getByRole('button', { name: '重新加载' })).toBeInTheDocument()
+    expect(screen.queryByText('还没有反馈')).toBeNull()
+  })
+
+  it('filtered zero-state stays a search refinement state instead of onboarding', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        const url = new URL(request.url)
+        const q = url.searchParams.get('q') ?? ''
+        return HttpResponse.json({
+          items: q ? [] : [itemFixture],
+          nextCursor: undefined,
+        })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByRole('searchbox'), 'no-hit')
+
+    await waitFor(() => {
+      expect(screen.getByText('当前筛选没有命中反馈')).toBeInTheDocument()
+    })
+    expect(screen.getAllByRole('button', { name: '清空筛选' }).length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText('还没有反馈')).toBeNull()
+    expect(screen.queryByText('先签发 API key')).toBeNull()
+  })
+
+  it('quick urgent scope narrows the queue to urgent feedback only', async () => {
+    const calmItem = {
+      ...itemFixture,
+      id: '102',
+      enrichedDisplayTitle: '普通反馈',
+      enrichedTitle: 'Normal feedback',
+      content: 'just a normal suggestion',
+      isUrgent: false,
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        const url = new URL(request.url)
+        const urgent = url.searchParams.get('urgent')
+        return HttpResponse.json({
+          items: urgent === 'true' ? [itemFixture] : [itemFixture, calmItem],
+          nextCursor: undefined,
+        })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('普通反馈')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '仅看紧急' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('普通反馈')).toBeNull()
+    })
+    expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    expect(screen.getByText('仅查看紧急反馈')).toBeInTheDocument()
+  })
+
+  it('triage order can reprioritize the visible queue', async () => {
+    const activeItem = {
+      ...itemFixture,
+      id: '102',
+      enrichedDisplayTitle: '处理中反馈',
+      enrichedTitle: 'Active feedback',
+      createdAt: '2026-06-06T08:30:00Z',
+      isUrgent: false,
+      workflowState: {
+        id: 'ws-1',
+        name: 'in_progress',
+        displayName: { entries: { default: 'In Progress', zh: '处理中' } },
+        color: '#f59e0b',
+        category: 'active',
+        position: 1,
+        isDefault: false,
+        archived: false,
+        createdAt: '2026-06-07T00:00:00Z',
+        updatedAt: '2026-06-07T00:00:00Z',
+      },
+    }
+    const newestItem = {
+      ...itemFixture,
+      id: '103',
+      enrichedDisplayTitle: '最新普通反馈',
+      enrichedTitle: 'Newest calm feedback',
+      createdAt: '2026-06-08T08:30:00Z',
+      isUrgent: false,
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture, activeItem, newestItem], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '3',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '3' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('最新普通反馈')).toBeInTheDocument()
+    })
+
+    const rowButtonsBefore = screen
+      .getAllByRole('button')
+      .filter((button) => button.textContent?.includes('#') && button.textContent?.includes('/'))
+    expect(rowButtonsBefore[0]).toHaveTextContent('最新普通反馈')
+
+    await user.click(screen.getByRole('combobox', { name: '分诊顺序' }))
+    await user.click(screen.getByRole('option', { name: '紧急优先' }))
+
+    const rowButtonsUrgent = screen
+      .getAllByRole('button')
+      .filter((button) => button.textContent?.includes('#') && button.textContent?.includes('/'))
+    expect(rowButtonsUrgent[0]).toHaveTextContent('Unicode 密码登录失败')
+
+    await user.click(screen.getByRole('combobox', { name: '分诊顺序' }))
+    await user.click(screen.getByRole('option', { name: '处理中优先' }))
+
+    const rowButtonsActive = screen
+      .getAllByRole('button')
+      .filter((button) => button.textContent?.includes('#') && button.textContent?.includes('/'))
+    expect(rowButtonsActive[0]).toHaveTextContent('处理中反馈')
+  })
+
+  it('non-default triage order appears as a removable active chip', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('combobox', { name: '分诊顺序' }))
+    await user.click(screen.getByRole('option', { name: '紧急优先' }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('分诊顺序 紧急优先')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByLabelText('分诊顺序 紧急优先'))
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('分诊顺序 紧急优先')).toBeNull()
+    })
+  })
+
+  it('queue mode can narrow the visible list to a local failed subqueue', async () => {
+    const readyItem = {
+      ...itemFixture,
+      id: '102',
+      enrichedDisplayTitle: '已就绪反馈',
+      enrichedTitle: 'Ready feedback',
+      isUrgent: false,
+    }
+    const failedItem = {
+      ...itemFixture,
+      id: '103',
+      enrichedDisplayTitle: '失败反馈',
+      enrichedTitle: 'Failed feedback',
+      isUrgent: false,
+      enrichmentStatus: 'failed',
+      classificationConfidence: undefined,
+      enrichedAttrs: {},
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture, readyItem, failedItem], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '3',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '2' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('已就绪反馈')).toBeInTheDocument()
+      expect(screen.getByText('失败反馈')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '富化失败1' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('失败反馈')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('已就绪反馈')).toBeNull()
+    expect(screen.queryByText('Unicode 密码登录失败')).toBeNull()
+    expect(screen.getByLabelText('当前子队列 富化失败')).toBeInTheDocument()
+    expect(
+      screen.getByText('当前视角下共有 1 条反馈，支持批量处理和深入排查。'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('当前姿态')).toBeInTheDocument()
+    expect(screen.getByText('失败排障')).toBeInTheDocument()
+    expect(screen.queryByText('紧急优先')).toBeNull()
+  })
+
+  it('queue posture stays aligned with the active local queue instead of failed AI status', async () => {
+    const activeFailedItem = {
+      ...itemFixture,
+      id: '102',
+      enrichedDisplayTitle: '处理中失败反馈',
+      enrichedTitle: 'Active failed feedback',
+      isUrgent: false,
+      enrichmentStatus: 'failed',
+      classificationConfidence: undefined,
+      enrichedAttrs: {},
+      workflowState: {
+        id: 'ws-1',
+        name: 'in_progress',
+        displayName: { entries: { default: 'In Progress', zh: '处理中' } },
+        color: '#f59e0b',
+        category: 'active',
+        position: 1,
+        isDefault: false,
+        archived: false,
+        createdAt: '2026-06-07T00:00:00Z',
+        updatedAt: '2026-06-07T00:00:00Z',
+      },
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [activeFailedItem], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('处理中失败反馈')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '处理中1' }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('当前子队列 处理中')).toBeInTheDocument()
+    })
+    expect(screen.getByText('当前姿态')).toBeInTheDocument()
+    expect(screen.getByText('处理中推进')).toBeInTheDocument()
+    expect(screen.queryByText('失败排障')).toBeNull()
+  })
+
+  it('queue mode active chip can be removed to restore the broader local queue', async () => {
+    const failedItem = {
+      ...itemFixture,
+      id: '103',
+      enrichedDisplayTitle: '失败反馈',
+      enrichedTitle: 'Failed feedback',
+      isUrgent: false,
+      enrichmentStatus: 'failed',
+      classificationConfidence: undefined,
+      enrichedAttrs: {},
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture, failedItem], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('失败反馈')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '富化失败1' }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('当前子队列 富化失败')).toBeInTheDocument()
+      expect(screen.queryByText('Unicode 密码登录失败')).toBeNull()
+    })
+
+    await user.click(screen.getByLabelText('当前子队列 富化失败'))
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('当前子队列 富化失败')).toBeNull()
+    })
+    expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+  })
+
+  it('queue mode zero-result state explains when a local subqueue has no matching rows', async () => {
+    const activeItem = {
+      ...itemFixture,
+      id: '102',
+      enrichedDisplayTitle: '处理中反馈',
+      enrichedTitle: 'Active feedback',
+      isUrgent: false,
+      workflowState: {
+        id: 'ws-1',
+        name: 'in_progress',
+        displayName: { entries: { default: 'In Progress', zh: '处理中' } },
+        color: '#f59e0b',
+        category: 'active',
+        position: 1,
+        isDefault: false,
+        archived: false,
+        createdAt: '2026-06-07T00:00:00Z',
+        updatedAt: '2026-06-07T00:00:00Z',
+      },
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture, activeItem], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '2' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('处理中反馈')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '富化失败0' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('富化失败 子队列当前没有命中反馈')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: '回到全部子队列' })).toBeInTheDocument()
+    expect(screen.queryByText('处理中反馈')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: '回到全部子队列' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('处理中反馈')).toBeInTheDocument()
+    })
+  })
+
+  it('queue mode updates recommendation copy and direct action to match the active work surface', async () => {
+    const activeItem = {
+      ...itemFixture,
+      id: '102',
+      enrichedDisplayTitle: '处理中反馈',
+      enrichedTitle: 'Active feedback',
+      isUrgent: false,
+      workflowState: {
+        id: 'ws-1',
+        name: 'in_progress',
+        displayName: { entries: { default: 'In Progress', zh: '处理中' } },
+        color: '#f59e0b',
+        category: 'active',
+        position: 1,
+        isDefault: false,
+        archived: false,
+        createdAt: '2026-06-07T00:00:00Z',
+        updatedAt: '2026-06-07T00:00:00Z',
+      },
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture, activeItem], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '2' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('处理中反馈')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '处理中1' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('先推进这批处理中反馈')).toBeInTheDocument()
+    })
+    expect(screen.getAllByRole('button', { name: '打开处理中反馈' }).length).toBeGreaterThanOrEqual(
+      1,
+    )
+    expect(screen.getByText('先推进正在流转的条目')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '去检查富化运行时' })).toBeNull()
+    expect(screen.getByText('处理中推进')).toBeInTheDocument()
+    expect(screen.getByText('输出稳定')).toBeInTheDocument()
+    expect(screen.queryByText('来源覆盖')).toBeNull()
+  })
+
+  it('ai ready lane only counts feedback with usable ai output', async () => {
+    const readyItem = {
+      ...itemFixture,
+      id: '102',
+      enrichedDisplayTitle: 'AI 已就绪反馈',
+      enrichedTitle: 'Ready feedback',
+      isUrgent: false,
+    }
+    const shallowItem = {
+      ...itemFixture,
+      id: '103',
+      enrichedDisplayTitle: '',
+      enrichedTitle: '',
+      classificationConfidence: undefined,
+      enrichedAttrs: {},
+      enrichmentStatus: 'done',
+      isUrgent: false,
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [readyItem, shallowItem], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('AI 已就绪反馈')).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: 'AI 已就绪1' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'AI 已就绪1' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('AI 已就绪反馈')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('#103')).toBeNull()
   })
 })

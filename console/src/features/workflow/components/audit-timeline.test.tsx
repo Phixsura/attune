@@ -99,7 +99,7 @@ describe('AuditTimeline', () => {
     await waitFor(() => {
       expect(screen.getByText('state')).toBeInTheDocument()
     })
-    expect(screen.getByText('Alice ·')).toBeInTheDocument()
+    expect(screen.getByText('Alice')).toBeInTheDocument()
   })
 
   it('renders multiple entries as an ordered list', async () => {

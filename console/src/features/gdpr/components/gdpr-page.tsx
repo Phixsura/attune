@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
+import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -277,417 +278,469 @@ export function GDPRPage() {
   return (
     <>
       <section className="space-y-6">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{t('gdpr.title')}</h1>
-            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{t('gdpr.subtitle')}</p>
-          </div>
-          <Button
-            variant={stepUpSatisfied ? 'outline' : 'default'}
-            onClick={() => setStepUpOpen(true)}
-          >
-            <ShieldCheck className="mr-2 h-4 w-4" />
-            {stepUpSatisfied ? t('gdpr.step_up_verified') : t('gdpr.step_up_button')}
-          </Button>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('gdpr.subject_title')}</CardTitle>
-            <CardDescription>{t('gdpr.subject_help')}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="gdpr-subject-key">{t('gdpr.subject_label')}</Label>
-              <Input
-                id="gdpr-subject-key"
-                data-testid="gdpr-subject-key"
-                value={subjectKey}
-                onChange={(e) => setSubjectKey(e.target.value)}
-                placeholder={t('gdpr.subject_placeholder')}
+        <PageHero
+          eyebrow={t('shell.groups.administration')}
+          title={t('gdpr.title')}
+          subtitle={t('gdpr.subtitle')}
+          actions={
+            <Button
+              variant={stepUpSatisfied ? 'outline' : 'default'}
+              onClick={() => setStepUpOpen(true)}
+            >
+              <ShieldCheck className="mr-2 h-4 w-4" />
+              {stepUpSatisfied ? t('gdpr.step_up_verified') : t('gdpr.step_up_button')}
+            </Button>
+          }
+          metrics={
+            <>
+              <PageHeroMetric
+                label={t('gdpr.ops_queued')}
+                value={String(operationsQuery.data?.queuedRequestCount ?? 0)}
+                hint={t('gdpr.ops_help')}
               />
-            </div>
-            <p className="text-xs leading-5 text-muted-foreground">{t('gdpr.subject_hint')}</p>
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-6 xl:grid-cols-[1.3fr,0.9fr]">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('gdpr.ops_title')}</CardTitle>
-              <CardDescription>{t('gdpr.ops_help')}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                <MetricCard
-                  label={t('gdpr.ops_step_up_window')}
-                  value={formatSeconds(operationsQuery.data?.stepUp?.ttlSeconds)}
-                />
-                <MetricCard
-                  label={t('gdpr.ops_export_ttl')}
-                  value={formatSeconds(operationsQuery.data?.exportTtlSeconds)}
-                />
-                <MetricCard
-                  label={t('gdpr.ops_audit_retention')}
-                  value={t('gdpr.ops_days', {
-                    count: operationsQuery.data?.auditRetentionDays ?? 0,
-                  })}
-                />
-                <MetricCard
-                  label={t('gdpr.ops_prune_interval')}
-                  value={formatSeconds(operationsQuery.data?.auditPruneIntervalSeconds)}
-                />
-                <MetricCard
-                  label={t('gdpr.ops_delete_grace_window')}
-                  value={formatSeconds(operationsQuery.data?.deleteGraceWindowSeconds)}
-                />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-4">
-                <MetricCard
-                  label={t('gdpr.ops_queued')}
-                  value={String(operationsQuery.data?.queuedRequestCount ?? 0)}
-                />
-                <MetricCard
-                  label={t('gdpr.ops_active')}
-                  value={String(operationsQuery.data?.activeRequestCount ?? 0)}
-                />
-                <MetricCard
-                  label={t('gdpr.ops_ready_exports')}
-                  value={String(operationsQuery.data?.readyExportCount ?? 0)}
-                />
-                <MetricCard
-                  label={t('gdpr.ops_scheduled_deletes')}
-                  value={String(operationsQuery.data?.scheduledDeleteCount ?? 0)}
-                />
-              </div>
-              <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
-                <div>{t('gdpr.ops_hashed_audit')}</div>
-                <div className="mt-1">{t('gdpr.ops_backups')}</div>
-                <div className="mt-1">{t('gdpr.ops_aggregate_residue')}</div>
-                <div className="mt-1">
-                  {operationsQuery.data?.legalHoldSupported
-                    ? t('gdpr.ops_legal_hold_supported')
-                    : t('gdpr.ops_legal_hold_unsupported')}
-                </div>
-                <div className="mt-1">
-                  {operationsQuery.data?.nextExportExpiryAt
-                    ? t('gdpr.ops_next_expiry', {
-                        value: formatTimestamp(operationsQuery.data.nextExportExpiryAt),
-                      })
-                    : t('gdpr.ops_next_expiry_empty')}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-amber-500/20">
-            <CardHeader>
-              <CardTitle>{t('gdpr.guardrail_title')}</CardTitle>
-              <CardDescription>{t('gdpr.guardrail_help')}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-md border px-3 py-2 text-sm">
-                <div className="flex items-center gap-2 font-medium">
-                  <Lock className="h-4 w-4" />
-                  {stepUpSatisfied ? t('gdpr.step_up_verified') : t('gdpr.step_up_pending')}
-                </div>
-                <div className="mt-1 text-muted-foreground">
-                  {stepUp?.expiresAt
+              <PageHeroMetric
+                label={t('gdpr.ops_ready_exports')}
+                value={String(operationsQuery.data?.readyExportCount ?? 0)}
+                hint={t('gdpr.export_help')}
+              />
+              <PageHeroMetric
+                label={t('gdpr.ops_scheduled_deletes')}
+                value={String(operationsQuery.data?.scheduledDeleteCount ?? 0)}
+                hint={t('gdpr.delete_help')}
+                tone={(operationsQuery.data?.scheduledDeleteCount ?? 0) > 0 ? 'urgent' : 'default'}
+              />
+              <PageHeroMetric
+                label={t('gdpr.ops_step_up_window')}
+                value={stepUpSatisfied ? t('gdpr.step_up_verified') : t('gdpr.step_up_pending')}
+                hint={
+                  stepUp?.expiresAt
                     ? t('gdpr.step_up_expires_at', { value: formatTimestamp(stepUp.expiresAt) })
-                    : t('gdpr.step_up_needed')}
-                </div>
-              </div>
-              <div className="space-y-2 rounded-md border border-destructive/20 bg-destructive/5 p-3 text-sm">
-                <div className="flex items-center gap-2 font-medium text-destructive">
-                  <AlertTriangle className="h-4 w-4" />
-                  {t('gdpr.guardrail_warning_title')}
-                </div>
-                <p className="leading-6 text-muted-foreground">
-                  {t('gdpr.guardrail_warning_body')}
-                </p>
-                <p className="leading-6 text-muted-foreground">
-                  {t('gdpr.guardrail_recovery_body')}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                    : t('gdpr.step_up_needed')
+                }
+                tone={stepUpSatisfied ? 'default' : 'active'}
+              />
+            </>
+          }
+        />
 
-        <div className="grid gap-6 xl:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('gdpr.export_title')}</CardTitle>
-              <CardDescription>{t('gdpr.export_help')}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm leading-6 text-muted-foreground">{t('gdpr.export_body')}</p>
-              <Button onClick={() => void handleExport()} disabled={!canExport || exportBusy}>
-                {exportBusy ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="mr-2 h-4 w-4" />
-                )}
-                {exportBusy ? t('gdpr.exporting') : t('gdpr.export_button')}
-              </Button>
-              {exportStatusQuery.data ? (
-                <div className="rounded-md border bg-muted/20 p-3 text-sm">
-                  <div className="font-medium">
-                    {t('gdpr.export_status_label')}: {exportSummary?.statusLabel}
-                  </div>
-                  <div className="mt-1 text-muted-foreground">
-                    {t('gdpr.export_job_id')}: {exportStatusQuery.data.jobId}
-                  </div>
-                  <div className="mt-1 text-muted-foreground">
-                    {t('gdpr.export_counts')}: {exportSummary?.counts}
-                  </div>
-                  {exportStatusQuery.data.archiveFilename ? (
-                    <div className="mt-1 text-muted-foreground">
-                      {t('gdpr.export_filename')}: {exportStatusQuery.data.archiveFilename}
-                    </div>
-                  ) : null}
-                  {exportStatusQuery.data.error ? (
-                    <div className="mt-2 text-destructive">{exportStatusQuery.data.error}</div>
-                  ) : null}
-                  {exportStatusQuery.data.status ===
-                  GdprExportStatus.GDPR_EXPORT_STATUS_COMPLETED ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => void handleDownload()}
-                        disabled={isDownloading}
-                      >
-                        {isDownloading ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <Download className="mr-2 h-4 w-4" />
-                        )}
-                        {t('gdpr.export_download_button')}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => handleRevokeExport(exportStatusQuery.data.jobId)}
-                        disabled={revokingJobId === exportStatusQuery.data.jobId}
-                      >
-                        {revokingJobId === exportStatusQuery.data.jobId ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <ShieldX className="mr-2 h-4 w-4" />
-                        )}
-                        {t('gdpr.revoke_export_button')}
-                      </Button>
-                    </div>
-                  ) : null}
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+          <div className="space-y-6">
+            <Card className="border-border/70 shadow-none">
+              <CardHeader className="border-b border-border/60 bg-muted/15">
+                <CardTitle>{t('gdpr.subject_title')}</CardTitle>
+                <CardDescription>{t('gdpr.subject_help')}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-6">
+                <div className="space-y-2">
+                  <Label htmlFor="gdpr-subject-key">{t('gdpr.subject_label')}</Label>
+                  <Input
+                    id="gdpr-subject-key"
+                    data-testid="gdpr-subject-key"
+                    value={subjectKey}
+                    onChange={(e) => setSubjectKey(e.target.value)}
+                    placeholder={t('gdpr.subject_placeholder')}
+                  />
                 </div>
-              ) : null}
-            </CardContent>
-          </Card>
+                <p className="text-xs leading-5 text-muted-foreground">{t('gdpr.subject_hint')}</p>
+              </CardContent>
+            </Card>
 
-          <Card className="border-destructive/25">
-            <CardHeader>
-              <CardTitle>{t('gdpr.delete_title')}</CardTitle>
-              <CardDescription>{t('gdpr.delete_help')}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm leading-6 text-muted-foreground">{t('gdpr.delete_body')}</p>
-              <div className="space-y-2">
-                <Label htmlFor="gdpr-confirm-subject-key">{t('gdpr.confirm_label')}</Label>
-                <Input
-                  id="gdpr-confirm-subject-key"
-                  data-testid="gdpr-confirm-subject-key"
-                  value={confirmSubjectKey}
-                  onChange={(e) => setConfirmSubjectKey(e.target.value)}
-                  placeholder={normalizedSubjectKey || t('gdpr.confirm_placeholder')}
-                />
-              </div>
-              <Button
-                data-testid="gdpr-delete-submit"
-                variant="destructive"
-                onClick={handleDelete}
-                disabled={!canDelete || deleteMutation.isPending || !deleteConfirmed}
-              >
-                {deleteMutation.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="mr-2 h-4 w-4" />
-                )}
-                {deleteMutation.isPending ? t('common.deleting') : t('gdpr.delete_button')}
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card>
-          <CardHeader className="gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <CardTitle>{t('gdpr.request_center_title')}</CardTitle>
-              <CardDescription>{t('gdpr.request_center_help')}</CardDescription>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {(
-                [
-                  ['', t('gdpr.filter_all')],
-                  ['export', t('gdpr.filter_export')],
-                  ['delete', t('gdpr.filter_delete')],
-                ] as const
-              ).map(([value, label]) => (
-                <Button
-                  key={value || 'all'}
-                  variant={requestFilter === value ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setRequestFilter(value)}
-                >
-                  {label}
-                </Button>
-              ))}
-              <Button variant="outline" size="sm" onClick={() => void refreshCenter()}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                {t('gdpr.refresh')}
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('gdpr.request_col_type')}</TableHead>
-                  <TableHead>{t('gdpr.request_col_subject')}</TableHead>
-                  <TableHead>{t('gdpr.request_col_status')}</TableHead>
-                  <TableHead>{t('gdpr.request_col_counts')}</TableHead>
-                  <TableHead>{t('gdpr.request_col_timing')}</TableHead>
-                  <TableHead className="text-right">{t('gdpr.request_col_action')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {requests.map((item) => (
-                  <TableRow key={item.requestId} data-testid={`gdpr-request-row-${item.requestId}`}>
-                    <TableCell className="font-medium">
-                      {requestTypeLabel(item.requestType, t)}
-                    </TableCell>
-                    <TableCell>
-                      <div>{item.subjectDisplay || item.subjectKey}</div>
-                      <div className="font-mono text-xs text-muted-foreground">
-                        {item.subjectKey}
+            <div className="grid gap-6 xl:grid-cols-2">
+              <Card className="border-border/70 shadow-none">
+                <CardHeader className="border-b border-border/60 bg-muted/15">
+                  <CardTitle>{t('gdpr.export_title')}</CardTitle>
+                  <CardDescription>{t('gdpr.export_help')}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-6">
+                  <p className="text-sm leading-6 text-muted-foreground">{t('gdpr.export_body')}</p>
+                  <Button onClick={() => void handleExport()} disabled={!canExport || exportBusy}>
+                    {exportBusy ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="mr-2 h-4 w-4" />
+                    )}
+                    {exportBusy ? t('gdpr.exporting') : t('gdpr.export_button')}
+                  </Button>
+                  {exportStatusQuery.data ? (
+                    <div className="rounded-md border bg-muted/20 p-3 text-sm">
+                      <div className="font-medium">
+                        {t('gdpr.export_status_label')}: {exportSummary?.statusLabel}
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>{requestStatusLabel(item.status, t)}</div>
-                      {item.archiveFilename ? (
-                        <div className="text-xs text-muted-foreground">{item.archiveFilename}</div>
-                      ) : null}
-                      {item.error ? (
-                        <div className="text-xs text-destructive">{item.error}</div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {item.feedbackCount}/{item.tagAssignmentCount}/{item.feedbackAuditCount}/
-                      {item.llmAuditCount}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      <div>{formatTimestamp(item.createdAt)}</div>
-                      {item.executeAfter ? (
-                        <div>
-                          {t('gdpr.request_execute_after', {
-                            value: formatTimestamp(item.executeAfter),
-                          })}
+                      <div className="mt-1 text-muted-foreground">
+                        {t('gdpr.export_job_id')}: {exportStatusQuery.data.jobId}
+                      </div>
+                      <div className="mt-1 text-muted-foreground">
+                        {t('gdpr.export_counts')}: {exportSummary?.counts}
+                      </div>
+                      {exportStatusQuery.data.archiveFilename ? (
+                        <div className="mt-1 text-muted-foreground">
+                          {t('gdpr.export_filename')}: {exportStatusQuery.data.archiveFilename}
                         </div>
                       ) : null}
-                      {item.cancelledAt ? (
-                        <div>
-                          {t('gdpr.request_cancelled_at', {
-                            value: formatTimestamp(item.cancelledAt),
-                          })}
+                      {exportStatusQuery.data.error ? (
+                        <div className="mt-2 text-destructive">{exportStatusQuery.data.error}</div>
+                      ) : null}
+                      {exportStatusQuery.data.status ===
+                      GdprExportStatus.GDPR_EXPORT_STATUS_COMPLETED ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => void handleDownload()}
+                            disabled={isDownloading}
+                          >
+                            {isDownloading ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Download className="mr-2 h-4 w-4" />
+                            )}
+                            {t('gdpr.export_download_button')}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => handleRevokeExport(exportStatusQuery.data.jobId)}
+                            disabled={revokingJobId === exportStatusQuery.data.jobId}
+                          >
+                            {revokingJobId === exportStatusQuery.data.jobId ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <ShieldX className="mr-2 h-4 w-4" />
+                            )}
+                            {t('gdpr.revoke_export_button')}
+                          </Button>
                         </div>
                       ) : null}
-                      {item.revokedAt ? (
-                        <div>
-                          {t('gdpr.request_revoked_at', {
-                            value: formatTimestamp(item.revokedAt),
-                          })}
-                        </div>
-                      ) : null}
-                      {item.expiresAt ? (
-                        <div>
-                          {t('gdpr.request_expiry', { value: formatTimestamp(item.expiresAt) })}
-                        </div>
-                      ) : null}
-                      {item.downloadedAt ? (
-                        <div>
-                          {t('gdpr.request_downloaded', {
-                            value: formatTimestamp(item.downloadedAt),
-                          })}
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {canCancelRequest(item.status, item.requestType) ? (
-                        <Button
-                          data-testid={`gdpr-cancel-request-${item.requestId}`}
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCancelRequest(item.requestId)}
-                          disabled={
-                            cancellingRequestId === item.requestId ||
-                            cancelRequestMutation.isPending
-                          }
-                        >
-                          {cancellingRequestId === item.requestId ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : null}
-                          {t('gdpr.cancel_delete_button')}
-                        </Button>
-                      ) : canRevokeRequest(item.status, item.requestType) ? (
-                        <Button
-                          data-testid={`gdpr-revoke-export-${item.requestId}`}
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleRevokeExport(item.requestId)}
-                          disabled={
-                            revokingJobId === item.requestId || revokeExportMutation.isPending
-                          }
-                        >
-                          {revokingJobId === item.requestId ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <ShieldX className="mr-2 h-4 w-4" />
-                          )}
-                          {t('gdpr.revoke_export_button')}
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">
-                          {t('gdpr.request_action_none')}
-                        </span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!requests.length ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={6}
-                      className="py-8 text-center text-sm text-muted-foreground"
-                    >
-                      {t('gdpr.request_center_empty')}
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-            {requestsQuery.hasNextPage ? (
-              <div className="mt-4 flex justify-center">
-                <Button
-                  variant="outline"
-                  onClick={() => void requestsQuery.fetchNextPage()}
-                  disabled={requestsQuery.isFetchingNextPage}
-                >
-                  {requestsQuery.isFetchingNextPage ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    </div>
                   ) : null}
-                  {t('gdpr.load_more')}
-                </Button>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+                </CardContent>
+              </Card>
+
+              <Card className="border-destructive/25 shadow-none">
+                <CardHeader className="border-b border-destructive/15 bg-destructive/[0.03]">
+                  <CardTitle>{t('gdpr.delete_title')}</CardTitle>
+                  <CardDescription>{t('gdpr.delete_help')}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-6">
+                  <p className="text-sm leading-6 text-muted-foreground">{t('gdpr.delete_body')}</p>
+                  <div className="space-y-2">
+                    <Label htmlFor="gdpr-confirm-subject-key">{t('gdpr.confirm_label')}</Label>
+                    <Input
+                      id="gdpr-confirm-subject-key"
+                      data-testid="gdpr-confirm-subject-key"
+                      value={confirmSubjectKey}
+                      onChange={(e) => setConfirmSubjectKey(e.target.value)}
+                      placeholder={normalizedSubjectKey || t('gdpr.confirm_placeholder')}
+                    />
+                  </div>
+                  <Button
+                    data-testid="gdpr-delete-submit"
+                    variant="destructive"
+                    onClick={handleDelete}
+                    disabled={!canDelete || deleteMutation.isPending || !deleteConfirmed}
+                  >
+                    {deleteMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="mr-2 h-4 w-4" />
+                    )}
+                    {deleteMutation.isPending ? t('common.deleting') : t('gdpr.delete_button')}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="border-border/70 shadow-none">
+              <CardHeader className="border-b border-border/60 bg-muted/15">
+                <CardTitle>{t('gdpr.request_center_title')}</CardTitle>
+                <CardDescription>{t('gdpr.request_center_help')}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('gdpr.request_col_type')}</TableHead>
+                      <TableHead>{t('gdpr.request_col_subject')}</TableHead>
+                      <TableHead>{t('gdpr.request_col_status')}</TableHead>
+                      <TableHead>{t('gdpr.request_col_counts')}</TableHead>
+                      <TableHead>{t('gdpr.request_col_timing')}</TableHead>
+                      <TableHead className="text-right">{t('gdpr.request_col_action')}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {requests.map((item) => (
+                      <TableRow
+                        key={item.requestId}
+                        data-testid={`gdpr-request-row-${item.requestId}`}
+                      >
+                        <TableCell className="font-medium">
+                          {requestTypeLabel(item.requestType, t)}
+                        </TableCell>
+                        <TableCell>
+                          <div>{item.subjectDisplay || item.subjectKey}</div>
+                          <div className="font-mono text-xs text-muted-foreground">
+                            {item.subjectKey}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>{requestStatusLabel(item.status, t)}</div>
+                          {item.archiveFilename ? (
+                            <div className="text-xs text-muted-foreground">
+                              {item.archiveFilename}
+                            </div>
+                          ) : null}
+                          {item.error ? (
+                            <div className="text-xs text-destructive">{item.error}</div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {item.feedbackCount}/{item.tagAssignmentCount}/{item.feedbackAuditCount}/
+                          {item.llmAuditCount}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          <div>{formatTimestamp(item.createdAt)}</div>
+                          {item.executeAfter ? (
+                            <div>
+                              {t('gdpr.request_execute_after', {
+                                value: formatTimestamp(item.executeAfter),
+                              })}
+                            </div>
+                          ) : null}
+                          {item.cancelledAt ? (
+                            <div>
+                              {t('gdpr.request_cancelled_at', {
+                                value: formatTimestamp(item.cancelledAt),
+                              })}
+                            </div>
+                          ) : null}
+                          {item.revokedAt ? (
+                            <div>
+                              {t('gdpr.request_revoked_at', {
+                                value: formatTimestamp(item.revokedAt),
+                              })}
+                            </div>
+                          ) : null}
+                          {item.expiresAt ? (
+                            <div>
+                              {t('gdpr.request_expiry', { value: formatTimestamp(item.expiresAt) })}
+                            </div>
+                          ) : null}
+                          {item.downloadedAt ? (
+                            <div>
+                              {t('gdpr.request_downloaded', {
+                                value: formatTimestamp(item.downloadedAt),
+                              })}
+                            </div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {canCancelRequest(item.status, item.requestType) ? (
+                            <Button
+                              data-testid={`gdpr-cancel-request-${item.requestId}`}
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleCancelRequest(item.requestId)}
+                              disabled={
+                                cancellingRequestId === item.requestId ||
+                                cancelRequestMutation.isPending
+                              }
+                            >
+                              {cancellingRequestId === item.requestId ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : null}
+                              {t('gdpr.cancel_delete_button')}
+                            </Button>
+                          ) : canRevokeRequest(item.status, item.requestType) ? (
+                            <Button
+                              data-testid={`gdpr-revoke-export-${item.requestId}`}
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRevokeExport(item.requestId)}
+                              disabled={
+                                revokingJobId === item.requestId || revokeExportMutation.isPending
+                              }
+                            >
+                              {revokingJobId === item.requestId ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                <ShieldX className="mr-2 h-4 w-4" />
+                              )}
+                              {t('gdpr.revoke_export_button')}
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              {t('gdpr.request_action_none')}
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {!requests.length ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={6}
+                          className="py-8 text-center text-sm text-muted-foreground"
+                        >
+                          {t('gdpr.request_center_empty')}
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </TableBody>
+                </Table>
+                {requestsQuery.hasNextPage ? (
+                  <div className="mt-4 flex justify-center">
+                    <Button
+                      variant="outline"
+                      onClick={() => void requestsQuery.fetchNextPage()}
+                      disabled={requestsQuery.isFetchingNextPage}
+                    >
+                      {requestsQuery.isFetchingNextPage ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : null}
+                      {t('gdpr.load_more')}
+                    </Button>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+            <Card className="border-border/70 shadow-none">
+              <CardHeader className="border-b border-border/60 bg-muted/15">
+                <CardTitle>{t('gdpr.ops_title')}</CardTitle>
+                <CardDescription>{t('gdpr.ops_help')}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-6">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  <MetricCard
+                    label={t('gdpr.ops_step_up_window')}
+                    value={formatSeconds(operationsQuery.data?.stepUp?.ttlSeconds)}
+                  />
+                  <MetricCard
+                    label={t('gdpr.ops_export_ttl')}
+                    value={formatSeconds(operationsQuery.data?.exportTtlSeconds)}
+                  />
+                  <MetricCard
+                    label={t('gdpr.ops_audit_retention')}
+                    value={t('gdpr.ops_days', {
+                      count: operationsQuery.data?.auditRetentionDays ?? 0,
+                    })}
+                  />
+                  <MetricCard
+                    label={t('gdpr.ops_prune_interval')}
+                    value={formatSeconds(operationsQuery.data?.auditPruneIntervalSeconds)}
+                  />
+                  <MetricCard
+                    label={t('gdpr.ops_delete_grace_window')}
+                    value={formatSeconds(operationsQuery.data?.deleteGraceWindowSeconds)}
+                  />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <MetricCard
+                    label={t('gdpr.ops_queued')}
+                    value={String(operationsQuery.data?.queuedRequestCount ?? 0)}
+                  />
+                  <MetricCard
+                    label={t('gdpr.ops_active')}
+                    value={String(operationsQuery.data?.activeRequestCount ?? 0)}
+                  />
+                  <MetricCard
+                    label={t('gdpr.ops_ready_exports')}
+                    value={String(operationsQuery.data?.readyExportCount ?? 0)}
+                  />
+                  <MetricCard
+                    label={t('gdpr.ops_scheduled_deletes')}
+                    value={String(operationsQuery.data?.scheduledDeleteCount ?? 0)}
+                  />
+                </div>
+                <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+                  <div>{t('gdpr.ops_hashed_audit')}</div>
+                  <div className="mt-1">{t('gdpr.ops_backups')}</div>
+                  <div className="mt-1">{t('gdpr.ops_aggregate_residue')}</div>
+                  <div className="mt-1">
+                    {operationsQuery.data?.legalHoldSupported
+                      ? t('gdpr.ops_legal_hold_supported')
+                      : t('gdpr.ops_legal_hold_unsupported')}
+                  </div>
+                  <div className="mt-1">
+                    {operationsQuery.data?.nextExportExpiryAt
+                      ? t('gdpr.ops_next_expiry', {
+                          value: formatTimestamp(operationsQuery.data.nextExportExpiryAt),
+                        })
+                      : t('gdpr.ops_next_expiry_empty')}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-amber-500/20 shadow-none">
+              <CardHeader className="border-b border-amber-500/15 bg-amber-50/40">
+                <CardTitle>{t('gdpr.guardrail_title')}</CardTitle>
+                <CardDescription>{t('gdpr.guardrail_help')}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-6">
+                <div className="rounded-md border px-3 py-2 text-sm">
+                  <div className="flex items-center gap-2 font-medium">
+                    <Lock className="h-4 w-4" />
+                    {stepUpSatisfied ? t('gdpr.step_up_verified') : t('gdpr.step_up_pending')}
+                  </div>
+                  <div className="mt-1 text-muted-foreground">
+                    {stepUp?.expiresAt
+                      ? t('gdpr.step_up_expires_at', { value: formatTimestamp(stepUp.expiresAt) })
+                      : t('gdpr.step_up_needed')}
+                  </div>
+                </div>
+                <div className="space-y-2 rounded-md border border-destructive/20 bg-destructive/5 p-3 text-sm">
+                  <div className="flex items-center gap-2 font-medium text-destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    {t('gdpr.guardrail_warning_title')}
+                  </div>
+                  <p className="leading-6 text-muted-foreground">
+                    {t('gdpr.guardrail_warning_body')}
+                  </p>
+                  <p className="leading-6 text-muted-foreground">
+                    {t('gdpr.guardrail_recovery_body')}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/70 shadow-none">
+              <CardHeader className="border-b border-border/60 bg-muted/15">
+                <div>
+                  <CardTitle>{t('gdpr.filter_all')}</CardTitle>
+                  <CardDescription>{t('gdpr.request_center_help')}</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-6">
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      ['', t('gdpr.filter_all')],
+                      ['export', t('gdpr.filter_export')],
+                      ['delete', t('gdpr.filter_delete')],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <Button
+                      key={value || 'all'}
+                      variant={requestFilter === value ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setRequestFilter(value)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                  <Button variant="outline" size="sm" onClick={() => void refreshCenter()}>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    {t('gdpr.refresh')}
+                  </Button>
+                </div>
+                <div className="rounded-md border border-border/70 bg-background/85 px-4 py-3 text-sm text-muted-foreground">
+                  {t('gdpr.guardrail_help')}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </section>
 
       <Dialog open={stepUpOpen} onOpenChange={setStepUpOpen}>

@@ -205,6 +205,8 @@ describe('GuardPoliciesPage user flows', () => {
     await waitFor(() => {
       expect(screen.getByText('tenant pii')).toBeInTheDocument()
     })
+    expect(screen.getByText('策略总数')).toBeInTheDocument()
+    expect(screen.getByText('策略治理建议')).toBeInTheDocument()
     expect(screen.getByText(/渠道: API/)).toBeInTheDocument()
     expect(screen.getAllByText('pii').length).toBeGreaterThanOrEqual(1)
 

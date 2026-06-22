@@ -15,6 +15,7 @@ export function useUpsertDigestSubscription() {
       api<DigestSubscription>('/fb/v1/console/digest-subscription', { method: 'PUT', body }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['console', 'digest-subscription'] })
+      qc.invalidateQueries({ queryKey: ['console', 'clusters'] })
     },
   })
 }

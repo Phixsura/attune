@@ -3,6 +3,7 @@ export const auditActionOptions = [
   'api_key.revoke',
   'digest_subscription.delete',
   'digest_subscription.upsert',
+  'enrich_config.activate_version',
   'enrich_config.update',
   'feedback.batch_delete',
   'feedback_job.cancel',

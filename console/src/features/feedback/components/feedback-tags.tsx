@@ -10,10 +10,12 @@ export function FeedbackTagSection({
   feedbackId,
   tags,
   availableTags,
+  hideHeader = false,
 }: {
   feedbackId: string
   tags: Tag[]
   availableTags: Tag[]
+  hideHeader?: boolean
 }) {
   const { t } = useTranslation()
   const addTag = useAddFeedbackTag(feedbackId)
@@ -45,9 +47,13 @@ export function FeedbackTagSection({
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {t('tags.feedback_section.title')}
-        </h4>
+        {!hideHeader ? (
+          <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {t('tags.feedback_section.title')}
+          </h4>
+        ) : (
+          <div />
+        )}
         <TagCombobox availableTags={unassigned} onSelect={handleSelect} onCreate={handleCreate} />
       </div>
 

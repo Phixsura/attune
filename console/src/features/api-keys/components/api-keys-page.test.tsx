@@ -44,6 +44,8 @@ describe('ApiKeysPage user flow', () => {
     await waitFor(() => {
       expect(screen.getByText('prod ingest')).toBeInTheDocument()
     })
+    expect(screen.getByText('Key 总数')).toBeInTheDocument()
+    expect(screen.getByText('Key 治理建议')).toBeInTheDocument()
     expect(screen.getByText('ak_live_1234…')).toBeInTheDocument()
     expect(screen.getByText('可用')).toBeInTheDocument()
 

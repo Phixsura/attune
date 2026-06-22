@@ -82,6 +82,8 @@ describe('WorkflowSettingsPage', () => {
     })
     expect(screen.getAllByText('In Progress').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Done').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('状态总数')).toBeInTheDocument()
+    expect(screen.getByText('状态治理建议')).toBeInTheDocument()
   })
 
   it('shows empty state and auto-seeds when no states exist', async () => {

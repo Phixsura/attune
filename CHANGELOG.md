@@ -87,6 +87,119 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   `Transport.Send` and `TestSend`. Block Kit header/section text is
   truncated to Slack's hard limits (150/3000 chars, rune-safe).
 
+### Changed
+
+- **Console navigation now uses a production-style app shell (#144).** The
+  authenticated Console moved from a flat top navigation plus oversized
+  `Settings` page to a grouped sidebar/drawer shell with canonical homes for
+  Feedback, Analytics, Configuration, Integrations, and Administration. Legacy
+  routes such as `/settings?section=...`, `/usage`, `/llm-usage`, `/llm-config`,
+  `/api-keys`, `/inbound-sources`, `/notify-targets`, `/guard-policies`,
+  `/outbox-dead`, and `/clusters` now redirect to the new canonical paths
+  (for example `/analytics/usage`, `/configuration/llm`, and
+  `/feedback/clusters`). The shell also now wires a real theme provider and
+  toggle instead of shipping dormant dark-mode-only tokens. The tenant members
+  surface was also upgraded from a flat CRUD table into a governance-oriented
+  page with active-member vs pending-invite separation, search/filter controls,
+  admin continuity guardrails, and explicit pending-invitation revocation. The
+  feedback workbench was likewise rebuilt around an operator layout: an
+  overview hero, dedicated filter rail, clearer monthly signal summary, a
+  stronger work queue, and a sticky focus panel that keeps batch-selection and
+  active scope visible while triaging. This overhaul now also applies a shared
+  hero/metric language to weak Console surfaces such as Usage and Clusters,
+  replacing giant empty slabs and low-signal cards with clearer top-of-page
+  state summaries, denser filter controls, and more intentional empty states.
+  The semantic-clusters flow is now also wired end-to-end: when clustering is
+  disabled, `/feedback/clusters` points operators directly to the digest
+  settings surface that controls the tenant-level clustering flag, and that
+  settings page now explicitly explains its impact on the clusters workspace so
+  the feature no longer reads like a dead-end disabled module.
+  The shared authenticated shell now keeps the desktop navigation rail in its
+  own scroll container, so long settings menus stop dragging the full page
+  when operators move through administration-heavy surfaces such as GDPR.
+  Workflow, tagging, classification, and enrichment-runtime pages now follow
+  the same production-style pattern, pairing concise page-level metrics with
+  governance guidance instead of shipping raw form stacks as the primary UI.
+  Integration and administration surfaces such as API keys, inbound sources,
+  notify targets, and guard policies now use the same operational layout, so
+  teams get consistent summaries, ownership cues, and runbook-style guidance
+  before acting on a live control surface. GDPR and LLM-cost views were also
+  upgraded into the same information hierarchy so high-risk request handling
+  and spend analysis no longer fall back to flat legacy admin layouts. The
+  audit-log surface now behaves like an actual investigation workbench rather
+  than a card list: operators get quick presets, full target-id filtering, a
+  local spotlight search over the loaded slice, grouped day buckets, sharable
+  URL-backed investigation state, one-click narrowing by action/actor/target,
+  history-aware detail navigation, removable active-scope chips for both server
+  and local search constraints, keyboard-friendly focus/open shortcuts, inline
+  current-focus browsing across the visible stream, a new "current slice
+  signals" layer that surfaces repeated actions/actors/targets/change-paths as
+  one-click facets, explicit "why this matched" hints whenever a local
+  spotlight is active, clickable field-path chips that can relaunch the local
+  spotlight directly from either the stream or the detail drawer, compact-by-
+  default filter and signal surfaces so the event stream stays above the fold,
+  clearer absolute timestamps inside repetitive rows, a richer investigation
+  workspace around the currently selected event, a current-scope strip that
+  explains what slice is on screen, burst summaries that call out adjacent
+  repeated activity before operators read each row, compact follow-on rows
+  inside repeated bursts so long runs stop reading like a wall of duplicate
+  cards, redundant burst actions that disappear once the current scope already
+  matches them, burst-aware workspace controls that show where the current
+  event sits inside a repeated run, one-click jump/expand controls for that
+  run, and inline reset affordances that let operators widen the investigation
+  without hunting back through the filter rail, plus a dedicated detail drawer
+  that surfaces request metadata and field-level change summaries without
+  forcing users to expand one bulky row at a time. The
+  feedback landing page was then tightened again into a true list-first
+  triage workspace: the oversized hero was removed in favor of a compact
+  header plus inline queue metrics, search/filter controls now live in a
+  single operator toolbar, live scope moved to a side rail, and the feedback
+  rows themselves were flattened so the queue reads like a serious workbench
+  instead of a dashboard made of stacked cards. The empty queue now ships a
+  structured first-run onboarding state with direct links to API-key and
+  classification setup, while feedback-list failures render a distinct,
+  retryable error surface instead of degrading into a misleading "no data"
+  view. Filtered zero-result views are also now distinguished from first-run
+  onboarding, so narrowing the queue no longer falsely implies that feedback
+  ingestion has not been configured. Queue rows and the right-side detail sheet
+  now also surface enrichment readiness more clearly: list rows show explicit
+  classification-status pills, and detail views render a dedicated failed /
+  pending AI-state banner instead of collapsing low-signal feedback into empty
+  cards. The detail sheet's lower half is now organized as an actual case
+  workspace, separating operator actions (tags, workflow) from supporting
+  context (source facts, metadata, audit trail) so the panel reads like a
+  usable work surface rather than a stack of generic sections. The upper half
+  now also behaves more like a case overview: AI state and workflow status are
+  surfaced directly in the summary block, and raw content / classification now
+  share a tighter side-by-side review layout on wider screens. Workflow
+  transitions and audit history inside the sheet were also upgraded from thin
+  inline controls into denser operator surfaces, with clearer next-state
+  guidance, structured comments, and more readable old→new change records. The
+  queue itself now reads more like an operational workbench too: list content
+  stays as the primary surface while a dedicated right-side rail keeps current
+  scope, queue health, and next-step guidance visible during triage. The list
+  header now also exposes recommended triage lanes, quick scopes, and removable
+  active-filter chips so operators can both narrow and unwind queue state
+  without leaving the main work surface. Queue order itself is now an explicit
+  triage control too, with switchable newest / urgent / in-progress modes for
+  the same visible set of feedback rows. Operators can now also drop the
+  currently loaded queue into local subqueues such as urgent, in-progress,
+  failed enrichment, and AI-ready, so they can tighten the visible work surface
+  without firing a fresh server-side filter roundtrip or losing the broader
+  filter context. When one of those local subqueues has zero matching rows, the
+  workbench now renders a dedicated local-empty recovery state instead of
+  degrading into a blank queue body, so operators can step back to the broader
+  subqueue or clear the full filter stack intentionally. The queue's
+  recommendation banner, direct-action block, and triage playbook now also
+  react to the active local work surface itself, so switching into urgent,
+  in-progress, failed, or AI-ready lanes no longer leaves stale generic advice
+  on the page. The right-side queue rail now also summarizes the current work
+  surface as explicit posture and AI-health signals instead of only showing raw
+  counters, the AI-ready lane now uses a stricter “usable AI output” definition
+  rather than any partial enrichment artifact, and runtime-remediation links are
+  only surfaced when the current queue truly looks like a configuration/runtime
+  problem instead of appearing on every lane that merely contains a failed row.
+
 ### Security
 
 - **Dead-queue console surface no longer leaks token-in-URL webhook
