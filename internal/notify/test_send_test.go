@@ -117,11 +117,12 @@ func TestTestSend_DefaultTimeout(t *testing.T) {
 }
 
 // registerStubAdapter registers a minimal EventChannel for testing and
-// cleans it up after the test via ResetForTest indirection.
+// cleans it up after the test. Uses UnregisterForTest to remove only this
+// specific adapter, which is safe for parallel tests.
 func registerStubAdapter(t *testing.T, id string) {
 	t.Helper()
 	outbound.Register(&stubChannel{id: id})
-	t.Cleanup(outbound.ResetForTest)
+	t.Cleanup(func() { outbound.UnregisterForTest(id) })
 }
 
 type stubChannel struct {

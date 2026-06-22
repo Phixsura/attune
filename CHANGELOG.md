@@ -261,6 +261,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Batch delete API body was double-stringified (#81).** The
+  `useBatchDeleteFeedback` hook passed an already-stringified JSON body
+  to the API client, which stringified it again. Fixed to pass the object
+  directly.
+
+- **Parallel test race in `internal/notify` (#81).** `ResetForTest()`
+  cleared the entire outbound adapter registry, causing random failures
+  when parallel tests interleaved. Added `UnregisterForTest(id)` to remove
+  only the specific test adapter, making parallel tests safe.
+
 - **Lark adapter `truncate` is now rune-safe (#32).** It used byte slicing
   (`s[:n]`), which split multibyte UTF-8 mid-rune — corrupting CJK/emoji titles
   and risking an upstream 400 — and appended `"..."` past `n`. Replaced with the

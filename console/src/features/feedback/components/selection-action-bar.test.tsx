@@ -95,4 +95,62 @@ describe('SelectionActionBar', () => {
     await user.click(cancelBtn)
     expect(onCancel).toHaveBeenCalledTimes(1)
   })
+
+  describe('retry enrichment', () => {
+    it('shows retry button when onBatchRetryEnrichment provided and terminalFailureCount > 0', async () => {
+      const onBatchRetryEnrichment = vi.fn()
+      const { user } = renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          onBatchRetryEnrichment={onBatchRetryEnrichment}
+          terminalFailureCount={3}
+        />,
+      )
+      const retryBtn = screen.getByRole('button', { name: /重试/ })
+      await user.click(retryBtn)
+      expect(onBatchRetryEnrichment).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not show retry button when terminalFailureCount is 0', () => {
+      renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          onBatchRetryEnrichment={vi.fn()}
+          terminalFailureCount={0}
+        />,
+      )
+      expect(screen.queryByRole('button', { name: /重试/ })).not.toBeInTheDocument()
+    })
+
+    it('does not show retry button when onBatchRetryEnrichment not provided', () => {
+      renderWithProviders(<SelectionActionBar {...defaultProps} terminalFailureCount={3} />)
+      expect(screen.queryByRole('button', { name: /重试/ })).not.toBeInTheDocument()
+    })
+
+    it('shows count badge when terminalFailureCount differs from total count', () => {
+      renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          count={10}
+          onBatchRetryEnrichment={vi.fn()}
+          terminalFailureCount={3}
+        />,
+      )
+      expect(screen.getByText('3')).toBeInTheDocument()
+    })
+
+    it('does not show count badge when terminalFailureCount equals total count', () => {
+      renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          count={5}
+          onBatchRetryEnrichment={vi.fn()}
+          terminalFailureCount={5}
+        />,
+      )
+      const retryBtn = screen.getByRole('button', { name: /重试/ })
+      expect(retryBtn).toBeInTheDocument()
+      expect(screen.queryByText('5')).not.toBeInTheDocument()
+    })
+  })
 })
