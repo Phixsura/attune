@@ -96,6 +96,94 @@ describe('SelectionActionBar', () => {
     expect(onCancel).toHaveBeenCalledTimes(1)
   })
 
+  describe('workflow transition', () => {
+    const workflowStates = [
+      {
+        id: 'state-1',
+        name: 'Open',
+        displayName: { en: 'Open', 'zh-CN': '待处理' },
+        color: '#22c55e',
+        archived: false,
+      },
+      {
+        id: 'state-2',
+        name: 'Closed',
+        displayName: { en: 'Closed', 'zh-CN': '已关闭' },
+        color: '#ef4444',
+        archived: false,
+      },
+      {
+        id: 'state-3',
+        name: 'Archived',
+        displayName: { en: 'Archived' },
+        color: '#gray',
+        archived: true,
+      },
+    ]
+
+    it('shows transition select when workflowStates and onBatchTransition provided', () => {
+      renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          workflowStates={workflowStates}
+          onBatchTransition={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('combobox')).toBeInTheDocument()
+    })
+
+    it('does not show transition select when workflowStates empty', () => {
+      renderWithProviders(
+        <SelectionActionBar {...defaultProps} workflowStates={[]} onBatchTransition={vi.fn()} />,
+      )
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    })
+
+    it('does not show transition select when onBatchTransition not provided', () => {
+      renderWithProviders(<SelectionActionBar {...defaultProps} workflowStates={workflowStates} />)
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    })
+
+    it('filters out archived states', () => {
+      renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          workflowStates={workflowStates}
+          onBatchTransition={vi.fn()}
+        />,
+      )
+      expect(screen.queryByText('Archived')).not.toBeInTheDocument()
+    })
+
+    it('falls back to state name when displayName is empty', async () => {
+      const statesWithEmptyDisplay = [
+        { id: 'state-x', name: 'FallbackName', displayName: {}, color: '#000', archived: false },
+      ]
+      const { user } = renderWithProviders(
+        <SelectionActionBar
+          {...defaultProps}
+          workflowStates={statesWithEmptyDisplay}
+          onBatchTransition={vi.fn()}
+        />,
+      )
+      await user.click(screen.getByRole('combobox'))
+      expect(screen.getByText('FallbackName')).toBeInTheDocument()
+    })
+  })
+
+  describe('tag operations', () => {
+    it('shows remove tag button when removableTags has items', () => {
+      const removableTags = [{ id: 'tag-1', name: 'Bug', color: '#ff0000' }]
+      renderWithProviders(<SelectionActionBar {...defaultProps} removableTags={removableTags} />)
+      expect(screen.getByRole('button', { name: /移除标签/ })).toBeInTheDocument()
+    })
+
+    it('does not show remove tag button when removableTags is empty', () => {
+      renderWithProviders(<SelectionActionBar {...defaultProps} removableTags={[]} />)
+      expect(screen.queryByRole('button', { name: /移除标签/ })).not.toBeInTheDocument()
+    })
+  })
+
   describe('retry enrichment', () => {
     it('shows retry button when onBatchRetryEnrichment provided and terminalFailureCount > 0', async () => {
       const onBatchRetryEnrichment = vi.fn()

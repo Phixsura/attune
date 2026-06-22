@@ -186,3 +186,34 @@ func TestChannels_Capabilities(t *testing.T) {
 		}
 	}
 }
+
+func TestUnregisterForTest(t *testing.T) {
+	ResetForTest()
+	defer ResetForTest()
+
+	Register(ptrext.Of(stubEventChannel{id: "to-remove"}))
+	Register(ptrext.Of(stubEventChannel{id: "to-keep"}))
+
+	if ch := LookupEvent("to-remove"); ch == nil {
+		t.Fatal("expected to-remove to be registered")
+	}
+	if ch := LookupEvent("to-keep"); ch == nil {
+		t.Fatal("expected to-keep to be registered")
+	}
+
+	UnregisterForTest("to-remove")
+
+	if ch := LookupEvent("to-remove"); ch != nil {
+		t.Error("expected to-remove to be unregistered, but it's still present")
+	}
+	if ch := LookupEvent("to-keep"); ch == nil {
+		t.Error("expected to-keep to remain registered")
+	}
+}
+
+func TestUnregisterForTest_NonExistent(t *testing.T) {
+	ResetForTest()
+	defer ResetForTest()
+
+	UnregisterForTest("does-not-exist")
+}
