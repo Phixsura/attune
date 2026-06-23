@@ -172,9 +172,15 @@ func runMigrationsLocked(ctx context.Context, conn *pgxpool.Conn) error {
 			return err
 		}
 
-		// After applying 070, extended columns become available
+		// After applying 070, extended columns become available.
+		// Backfill checksums for all previously-applied migrations.
 		if !hasExtendedCols {
-			hasExtendedCols = hasExtendedColumns(ctx, conn)
+			if hasExtendedColumns(ctx, conn) {
+				hasExtendedCols = true
+				if err := backfillChecksums(ctx, conn, names); err != nil {
+					logext.Warnf(ctx, "[%s] checksum backfill failed,err:%+v", where, err.Error())
+				}
+			}
 		}
 
 		duration := time.Since(start)
@@ -269,6 +275,29 @@ func recordMigrationSQL() string {
 // that don't have the extended columns.
 func recordMigrationLegacySQL() string {
 	return fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable)
+}
+
+// backfillChecksums updates all applied migrations that have empty checksum.
+// Called once after 070 is applied to populate checksums for 001-070.
+func backfillChecksums(ctx context.Context, conn *pgxpool.Conn, names []string) error {
+	const where = "database.backfillChecksums"
+	for i, name := range names {
+		version := i + 1
+		body, err := migrationFS.ReadFile("migrations/" + name)
+		if err != nil {
+			continue
+		}
+		checksum := Checksum(body)
+		_, err = conn.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s SET checksum = $2, applied_by = COALESCE(NULLIF(applied_by, ''), $3)
+			WHERE version = $1 AND checksum = ''
+		`, trackerTable), version, checksum, Version)
+		if err != nil {
+			return fmt.Errorf("backfill version %d: %w", version, err)
+		}
+	}
+	logext.Infof(ctx, "[%s] OK,count:%d", where, len(names))
+	return nil
 }
 
 // MigrationCount returns the number of embedded migration SQL files.

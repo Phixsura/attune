@@ -29,8 +29,11 @@ RUN go mod download
 COPY . .
 
 ARG TARGETOS TARGETARCH
+ARG VERSION=unknown
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /attune ./cmd/attune
+    go build -trimpath \
+    -ldflags="-s -w -X 'github.com/Phixsura/attune/internal/infra/database.Version=${VERSION}'" \
+    -o /attune ./cmd/attune
 
 # ── Stage 3: runtime (distroless static, nonroot, no shell) ──
 # ca-certificates + tzdata are baked in; runs as uid 65532.
