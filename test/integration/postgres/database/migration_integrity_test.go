@@ -506,3 +506,193 @@ func TestMigrations_ChecksumStatusWithLegacy(t *testing.T) {
 	require.Equal(t, database.MigrationCount()-1, status.Total, "total should exclude empty checksums")
 	require.Equal(t, status.Total, status.Verified, "all non-empty checksums should match")
 }
+
+func TestMigrations_RunMigrations_AlreadyApplied(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	// First run
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Second run - should be idempotent
+	err = database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Third run - still idempotent
+	err = database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+}
+
+func TestMigrations_StatusMigrationDetails(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	status, err := database.GetMigrationStatus(ctx, pool)
+	require.NoError(t, err)
+
+	// Check first and last migration details
+	require.NotEmpty(t, status.Migrations)
+
+	first := status.Migrations[0]
+	require.Equal(t, 1, first.Version)
+	require.Equal(t, "001_init.sql", first.Filename)
+	require.Equal(t, "applied", first.Status)
+	require.NotNil(t, first.AppliedAt)
+
+	last := status.Migrations[len(status.Migrations)-1]
+	require.Equal(t, database.MigrationCount(), last.Version)
+	require.Equal(t, "applied", last.Status)
+}
+
+func TestMigrations_VerifyChecksumsConn(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// All checksums should be valid
+	err = database.VerifyChecksums(ctx, pool)
+	require.NoError(t, err)
+}
+
+func TestMigrations_CheckPgvector_WithClustering(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Enable clustering for a tenant
+	_, err = pool.Exec(ctx, `
+		INSERT INTO tenants (slug, name, clustering_enabled)
+		VALUES ('test-cluster', 'Test Cluster', TRUE)
+	`)
+	require.NoError(t, err)
+
+	// CheckPgvector should still pass (pgvector is installed)
+	err = database.CheckPgvector(ctx, pool)
+	require.NoError(t, err)
+}
+
+func TestMigrations_GetPendingMigrations_Partial(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	// Delete half the migrations
+	_, err := pool.Exec(ctx, `DELETE FROM schema_migrations_feedback WHERE version > 35`)
+	require.NoError(t, err)
+
+	pending, err := database.GetPendingMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Should have migrations 36 to 71
+	require.Equal(t, database.MigrationCount()-35, len(pending))
+	require.Equal(t, 36, pending[0].Version)
+}
+
+func TestMigrations_Checksums_Consistency(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Get all stored checksums
+	rows, err := pool.Query(ctx, `SELECT version, checksum FROM schema_migrations_feedback ORDER BY version`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	names, err := database.LoadMigrationNames()
+	require.NoError(t, err)
+
+	for rows.Next() {
+		var version int
+		var checksum string
+		err := rows.Scan(&version, &checksum)
+		require.NoError(t, err)
+
+		// Compute expected checksum
+		expected, err := database.ComputeChecksum(names[version-1])
+		require.NoError(t, err)
+
+		require.Equal(t, expected, checksum, "checksum mismatch for version %d", version)
+	}
+}
+
+func TestMigrations_ConfirmLarkDelete_NoLarkRows(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// No lark-* rows exist, so ConfirmLarkDelete should pass without opt-in
+	err = database.ConfirmLarkDelete(ctx, pool, false)
+	require.NoError(t, err)
+}
+
+func TestMigrations_ConfirmLarkDelete_WithOptIn(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// With opt-in, should always pass
+	err = database.ConfirmLarkDelete(ctx, pool, true)
+	require.NoError(t, err)
+}
+
+func TestMigrations_ConfirmLarkDelete_WithLarkRows(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Create a tenant first
+	var tenantID string
+	err = pool.QueryRow(ctx, `
+		INSERT INTO tenants (slug, name) VALUES ('lark-test', 'Lark Test') RETURNING id
+	`).Scan(&tenantID)
+	require.NoError(t, err)
+
+	// Insert lark-* feedback rows
+	_, err = pool.Exec(ctx, `
+		INSERT INTO user_feedback (tenant_id, user_id, source, content)
+		VALUES ($1, 'u1', 'lark-webhook', 'test content')
+	`, tenantID)
+	require.NoError(t, err)
+
+	// Without opt-in, should fail
+	err = database.ConfirmLarkDelete(ctx, pool, false)
+	require.Error(t, err)
+	require.ErrorIs(t, err, database.ErrDestructiveMigrationGuard)
+
+	// With opt-in, should pass
+	err = database.ConfirmLarkDelete(ctx, pool, true)
+	require.NoError(t, err)
+}
