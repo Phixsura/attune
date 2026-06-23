@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Migration checksum ledger and integrity verification (#150).** Enterprise-
+  grade migration tracking for production deployments. Includes:
+  - SHA-256 checksum verification for all applied migrations (drift detection)
+  - Duplicate numeric prefix detection at startup (fails before any apply)
+  - Execution metadata: `duration_ms`, `applied_by` (binary version), `success`
+  - New CLI commands: `attune migrations status`, `verify`, `dry-run`
+  - New preflight check: `migration:integrity` (checksums + duplicates)
+  - CI lint script: `scripts/lint-migrations.sh` (naming, no-tx validation)
+  - Recovery procedures documented in `docs/private-deploy.md`
+  - Renumbered MCP migrations 058-062 to 065-069 to eliminate prefix collisions
+
 - **Production readiness preflight (#149).** New `attune doctor` CLI command and
   `/fb/v1/console/system/preflight` HTTP endpoint that run 11 production
   readiness checks (config, database connectivity, pgvector, migration state,

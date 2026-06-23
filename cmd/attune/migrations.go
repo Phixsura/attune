@@ -1,0 +1,320 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
+)
+
+func init() {
+	subcommands["migrations"] = runMigrationsCmd
+}
+
+func runMigrationsCmd(args []string) error {
+	if len(args) == 0 {
+		return printMigrationsUsage()
+	}
+
+	switch args[0] {
+	case "status":
+		return runMigrationsStatus(args[1:])
+	case "verify":
+		return runMigrationsVerify(args[1:])
+	case "dry-run":
+		return runMigrationsDryRun(args[1:])
+	case "-h", "--help", "help":
+		return printMigrationsUsage()
+	default:
+		return fmt.Errorf("unknown subcommand: %s\n\nRun 'attune migrations help' for usage", args[0])
+	}
+}
+
+func printMigrationsUsage() error {
+	fmt.Fprint(os.Stderr, `attune migrations
+
+Usage:
+  attune migrations status [--format text|json] [--pending]  Show migration status
+  attune migrations verify [--format text|json]              Verify checksums and naming
+  attune migrations dry-run                                  Preview pending SQL
+
+Flags:
+  --format    Output format: text (default) or json
+  --pending   Show only pending migrations (status only)
+`)
+	return nil
+}
+
+func runMigrationsStatus(args []string) error {
+	fs := flag.NewFlagSet("migrations status", flag.ContinueOnError)
+	format := fs.String("format", "text", "Output format: text or json")
+	pendingOnly := fs.Bool("pending", false, "Show only pending migrations")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := connectDatabase(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	status, err := database.GetMigrationStatus(ctx, pool)
+	if err != nil {
+		return fmt.Errorf("get migration status: %w", err)
+	}
+
+	if ptrext.Indirect(format) == "json" {
+		return outputJSON(status)
+	}
+	return printMigrationStatusText(status, ptrext.Indirect(pendingOnly))
+}
+
+func connectDatabase(ctx context.Context) (*pgxpool.Pool, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	pool, err := database.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("connect to database: %w", err)
+	}
+	return pool, nil
+}
+
+func outputJSON(v any) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
+func printMigrationStatusText(status database.MigrationStatus, pendingOnly bool) error {
+	fmt.Printf("Migration Status (%d total, %d applied, %d pending)\n\n",
+		status.Total, status.Applied, status.Pending)
+
+	if !pendingOnly && status.Applied > 0 {
+		printAppliedMigrations(status.Migrations)
+	}
+
+	if status.Pending > 0 {
+		printPendingMigrations(status.Migrations)
+	}
+
+	printChecksumStatus(status.Checksums)
+	printDuplicateStatus(status.Duplicates)
+	return nil
+}
+
+func printAppliedMigrations(migrations []database.MigrationDetail) {
+	fmt.Println("Applied:")
+	for _, m := range migrations {
+		if m.Status != "applied" {
+			continue
+		}
+		printAppliedMigration(m)
+	}
+	fmt.Println()
+}
+
+func printAppliedMigration(m database.MigrationDetail) {
+	appliedAt := formatAppliedAt(m.AppliedAt)
+	duration := formatDuration(m.DurationMs)
+	appliedBy := ptrext.IndirectOr(m.AppliedBy, "")
+	filename := truncateFilename(m.Filename, 45)
+
+	fmt.Printf("  %03d %-45s  %s  %6s  %s\n",
+		m.Version, filename, appliedAt, duration, appliedBy)
+}
+
+func formatAppliedAt(appliedAt *string) string {
+	if appliedAt == nil {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, ptrext.Indirect(appliedAt))
+	if err != nil {
+		return ""
+	}
+	return t.Format("2006-01-02 15:04:05")
+}
+
+func formatDuration(durationMs *int) string {
+	if durationMs == nil {
+		return ""
+	}
+	return fmt.Sprintf("%dms", ptrext.Indirect(durationMs))
+}
+
+func truncateFilename(filename string, maxLen int) string {
+	if len(filename) <= maxLen {
+		return filename
+	}
+	return filename[:maxLen-3] + "..."
+}
+
+func printPendingMigrations(migrations []database.MigrationDetail) {
+	fmt.Println("Pending:")
+	for _, m := range migrations {
+		if m.Status == "pending" {
+			fmt.Printf("  %03d %s\n", m.Version, m.Filename)
+		}
+	}
+	fmt.Println()
+}
+
+func printChecksumStatus(checksums database.ChecksumStatus) {
+	if checksums.Total == 0 {
+		return
+	}
+	fmt.Printf("Checksums: %d/%d verified\n", checksums.Verified, checksums.Total)
+	for _, d := range checksums.Drifted {
+		fmt.Printf("  DRIFTED: %03d %s (stored: %s, computed: %s)\n",
+			d.Version, d.Filename, d.Stored, d.Computed)
+	}
+}
+
+func printDuplicateStatus(duplicates []database.DuplicatePrefix) {
+	if len(duplicates) == 0 {
+		fmt.Println("Duplicates: none")
+		return
+	}
+	fmt.Println("Duplicates: DETECTED")
+	for _, d := range duplicates {
+		fmt.Printf("  %03d: %s\n", d.Prefix, strings.Join(d.Files, ", "))
+	}
+}
+
+func runMigrationsVerify(args []string) error {
+	fs := flag.NewFlagSet("migrations verify", flag.ContinueOnError)
+	format := fs.String("format", "text", "Output format: text or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := connectDatabase(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	results := runVerificationChecks(ctx, pool)
+
+	if ptrext.Indirect(format) == "json" {
+		return outputJSON(results)
+	}
+	return printVerificationResults(results)
+}
+
+type verificationResults struct {
+	Duplicates      bool   `json:"duplicates"`
+	DuplicatesError string `json:"duplicates_error,omitempty"`
+	Checksums       bool   `json:"checksums"`
+	ChecksumsError  string `json:"checksums_error,omitempty"`
+	NoTx            bool   `json:"no_tx"`
+	NoTxError       string `json:"no_tx_error,omitempty"`
+	Passed          bool   `json:"passed"`
+}
+
+func runVerificationChecks(ctx context.Context, pool *pgxpool.Pool) verificationResults {
+	names, _ := database.LoadMigrationNames()
+
+	dupErr := database.DetectDuplicatePrefixes(names)
+	checksumErr := database.VerifyChecksums(ctx, pool)
+	noTxErr := database.VerifyNoTxDirectives(names)
+
+	results := verificationResults{
+		Duplicates: dupErr == nil,
+		Checksums:  checksumErr == nil,
+		NoTx:       noTxErr == nil,
+		Passed:     dupErr == nil && checksumErr == nil && noTxErr == nil,
+	}
+	if dupErr != nil {
+		results.DuplicatesError = dupErr.Error()
+	}
+	if checksumErr != nil {
+		results.ChecksumsError = checksumErr.Error()
+	}
+	if noTxErr != nil {
+		results.NoTxError = noTxErr.Error()
+	}
+	return results
+}
+
+func printVerificationResults(results verificationResults) error {
+	fmt.Println("Verifying migrations...")
+
+	printCheckResult("Duplicates", results.Duplicates, results.DuplicatesError)
+	printCheckResult("Checksums", results.Checksums, results.ChecksumsError)
+	printCheckResult("No-tx directives", results.NoTx, results.NoTxError)
+
+	if !results.Passed {
+		fmt.Println("\nVerification FAILED.")
+		os.Exit(1)
+	}
+	fmt.Println("\nAll checks passed.")
+	return nil
+}
+
+func printCheckResult(name string, passed bool, errMsg string) {
+	if passed {
+		fmt.Printf("  %s: OK\n", name)
+		return
+	}
+	fmt.Printf("  %s: FAIL\n", name)
+	for _, line := range strings.Split(errMsg, "\n") {
+		fmt.Printf("    %s\n", line)
+	}
+}
+
+func runMigrationsDryRun(args []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := connectDatabase(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	pending, err := database.GetPendingMigrations(ctx, pool)
+	if err != nil {
+		return fmt.Errorf("get pending migrations: %w", err)
+	}
+
+	if len(pending) == 0 {
+		fmt.Println("No pending migrations.")
+		return nil
+	}
+
+	fmt.Printf("Pending migrations (%d):\n\n", len(pending))
+	for _, m := range pending {
+		printPendingMigrationSQL(m)
+	}
+	fmt.Println("No changes applied. Run 'attune server' to apply.")
+	return nil
+}
+
+func printPendingMigrationSQL(m database.MigrationFile) {
+	noTxMarker := ""
+	if m.NoTx {
+		noTxMarker = " [no-transaction]"
+	}
+	fmt.Printf("-- %03d %s%s\n", m.Version, m.Name, noTxMarker)
+	fmt.Printf("-- checksum: %s\n", m.Checksum)
+	fmt.Println(string(m.Body))
+	fmt.Println()
+}

@@ -101,6 +101,7 @@ Usage:
  attune --config ./config.yaml server
  attune server Run the HTTP server (default)
  attune doctor [--format text|json] [--warn-exit] Production readiness preflight
+ attune migrations status|verify|dry-run Migration integrity (#150)
  attune tenant create --slug <s> [--name <n>] Create a new tenant
  attune keys issue --tenant <slug> [--label <s>] Mint an API key
  attune eval --mode <m> [--tenant <slug>] ... AI accuracy report (--tenant required for export-for-human / score-human)

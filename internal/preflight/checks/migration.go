@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/preflight"
 )
 
@@ -13,6 +14,11 @@ func init() {
 		Name:     "migration:pending",
 		Category: preflight.CategoryMigration,
 		Run:      checkMigrationPending,
+	})
+	preflight.Register(preflight.Check{
+		Name:     "migration:integrity",
+		Category: preflight.CategoryMigration,
+		Run:      checkMigrationIntegrity,
 	})
 }
 
@@ -64,3 +70,45 @@ var migrationTotal atomic.Int32
 
 // SetMigrationTotal stores the expected migration count (called once at startup).
 func SetMigrationTotal(n int) { migrationTotal.Store(int32(n)) }
+
+// checkMigrationIntegrity verifies checksums and duplicate prefix detection.
+func checkMigrationIntegrity(ctx context.Context, env *preflight.Environment) preflight.Result {
+	r := preflight.Result{
+		Name:     "migration:integrity",
+		Category: preflight.CategoryMigration,
+	}
+
+	// Check for duplicate prefixes (doesn't need database)
+	names, err := database.LoadMigrationNames()
+	if err != nil {
+		r.Status = preflight.StatusFail
+		r.Message = "Cannot load migration file list"
+		r.Remediation = "Check that the binary is built correctly."
+		return r
+	}
+
+	if err := database.DetectDuplicatePrefixes(names); err != nil {
+		r.Status = preflight.StatusFail
+		r.Message = "Duplicate migration prefixes detected"
+		r.Remediation = "Renumber migrations to ensure unique prefixes. Run 'attune migrations verify' for details."
+		return r
+	}
+
+	// Check checksums (needs database)
+	if env.Pool == nil {
+		r.Status = preflight.StatusSkipped
+		r.Message = "Database pool not available; skipping checksum verification"
+		return r
+	}
+
+	if err := database.VerifyChecksums(ctx, env.Pool); err != nil {
+		r.Status = preflight.StatusFail
+		r.Message = "Migration checksum drift detected"
+		r.Remediation = "Restore original migration files or update stored checksums. See docs/private-deploy.md for recovery steps."
+		return r
+	}
+
+	r.Status = preflight.StatusPass
+	r.Message = "All migration files verified (no duplicates, checksums match)"
+	return r
+}

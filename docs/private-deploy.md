@@ -714,6 +714,111 @@ fixed vocabulary and enforces it with a post-parse filter.
 
 ---
 
+## Migration management
+
+attune applies SQL migrations automatically on startup. Starting with v0.9.0,
+migrations include integrity tracking (checksums, execution metadata) for
+enterprise-grade auditability.
+
+### Pre-deploy verification
+
+Before deploying, verify migration integrity:
+
+```bash
+attune migrations verify
+```
+
+This checks:
+- No duplicate numeric prefixes
+- All applied migrations match embedded files (checksum)
+- No-transaction migrations are correctly formatted
+
+### Status inspection
+
+View current migration state:
+
+```bash
+attune migrations status                  # Full status
+attune migrations status --format json    # Machine-readable
+attune migrations status --pending        # Pending only
+```
+
+### Dry-run
+
+Preview pending migrations without applying:
+
+```bash
+attune migrations dry-run
+```
+
+### Recovery procedures
+
+#### Checksum drift
+
+If startup fails with "migration checksum drift":
+
+1. **Investigate.** Determine why the file changed:
+   ```bash
+   git log -p -- internal/infra/database/migrations/NNN_*.sql
+   ```
+
+2. **If the change was intentional and safe** (whitespace, comment):
+   ```sql
+   -- Calculate new checksum
+   -- On Linux: sha256sum internal/infra/database/migrations/NNN_name.sql
+   -- On macOS: shasum -a 256 internal/infra/database/migrations/NNN_name.sql
+
+   UPDATE schema_migrations_feedback
+   SET checksum = '<new-sha256-hex>'
+   WHERE filename = 'NNN_name.sql';
+   ```
+
+3. **If the database state is correct but the file is wrong,** restore from git:
+   ```bash
+   git checkout <commit> -- internal/infra/database/migrations/NNN_name.sql
+   ```
+
+4. **If both are inconsistent,** restore from backup and reapply migrations.
+
+#### Missing migration file
+
+If startup fails with "migration applied but file missing":
+
+1. The binary was built from a different source than what's in the database.
+2. Restore the migration file from the branch that was deployed, or
+3. Rebuild the binary from the correct source.
+
+#### Duplicate prefixes (development only)
+
+If lint fails with "duplicate migration prefixes":
+
+1. Renumber one of the conflicting files:
+   ```bash
+   git mv internal/infra/database/migrations/058_foo.sql \
+          internal/infra/database/migrations/070_foo.sql
+   ```
+
+2. If already applied, update the tracker:
+   ```sql
+   UPDATE schema_migrations_feedback
+   SET version = 70, filename = '070_foo.sql'
+   WHERE filename = '058_foo.sql';
+   ```
+
+### Expand-contract pattern
+
+For breaking schema changes, use the expand-contract pattern:
+
+1. **Expand** (migration N): Add new column/table, nullable or with default
+2. **Deploy code** that writes to both old and new
+3. **Backfill** (migration N+1 or background job): Populate new from old
+4. **Deploy code** that reads only from new
+5. **Contract** (migration N+2): Remove old column/table
+
+This ensures zero-downtime deploys with rollback capability at each step.
+
+---
+
 ## References
 
 - [`deploy/README.md`](../deploy/README.md) -- compose kit quick-reference.

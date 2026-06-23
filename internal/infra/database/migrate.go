@@ -12,6 +12,9 @@
 // The tracker table `schema_migrations_feedback` is the attune-local
 // version-bookkeeping table — name preserved so existing prod tracker
 // rows survive a redeploy.
+//
+// #150: Migration integrity tracking adds checksum verification, duplicate
+// prefix detection, and execution metadata (duration, binary version).
 package database
 
 import (
@@ -19,13 +22,19 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
 )
+
+// Version is the binary version, set via ldflags:
+//
+//	-X 'github.com/Phixsura/attune/internal/infra/database.Version=v0.9.0'
+//
+// Used for audit trail in migration records.
+var Version = "unknown"
 
 // noTxDirective marks a migration that must run OUTSIDE a transaction (e.g.
 // CREATE INDEX CONCURRENTLY, which Postgres forbids inside a transaction
@@ -96,6 +105,8 @@ func releaseMigrationLock(conn *pgxpool.Conn) {
 func runMigrationsLocked(ctx context.Context, conn *pgxpool.Conn) error {
 	const where = "database.RunMigrations"
 	logext.Infof(ctx, "[%s] start", where)
+
+	// 1. Ensure tracker table exists (base schema, new columns added by 070)
 	if _, err := conn.Exec(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			version INT PRIMARY KEY,
@@ -106,18 +117,29 @@ func runMigrationsLocked(ctx context.Context, conn *pgxpool.Conn) error {
 		return fmt.Errorf("create %s: %w", trackerTable, err)
 	}
 
-	entries, err := migrationFS.ReadDir("migrations")
+	// 2. Load embedded migrations
+	names, err := LoadMigrationNames()
 	if err != nil {
-		logext.Errorf(ctx, "[%s] read migrations dir failed,err:%+v", where, err.Error())
-		return fmt.Errorf("read migrations dir: %w", err)
+		logext.Errorf(ctx, "[%s] load migration names failed,err:%+v", where, err.Error())
+		return err
 	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() {
-			names = append(names, e.Name())
-		}
+
+	// 3. Detect duplicate prefixes (fail before any apply)
+	if err := DetectDuplicatePrefixes(names); err != nil {
+		logext.Errorf(ctx, "[%s] duplicate prefixes,err:%+v", where, err.Error())
+		return err
 	}
-	sort.Strings(names)
+
+	// 4. Verify checksums of already-applied migrations
+	if err := VerifyChecksumsConn(ctx, conn); err != nil {
+		logext.Errorf(ctx, "[%s] checksum verification failed,err:%+v", where, err.Error())
+		return err
+	}
+
+	// 5. Apply pending migrations
+	// Track whether extended columns exist (checksum/duration_ms/applied_by).
+	// Pre-070 databases don't have them; 070 adds them.
+	hasExtendedCols := hasExtendedColumns(ctx, conn)
 
 	for i, name := range names {
 		version := i + 1
@@ -138,21 +160,43 @@ func runMigrationsLocked(ctx context.Context, conn *pgxpool.Conn) error {
 			logext.Errorf(ctx, "[%s] read file failed,file:%s,err:%+v", where, name, err.Error())
 			return fmt.Errorf("read %s: %w", name, err)
 		}
+
+		checksum := Checksum(body)
+		start := time.Now()
+
 		if isNoTxMigration(body) {
-			if err := applyMigrationNoTx(ctx, conn, version, name, body); err != nil {
+			if err := applyMigrationNoTx(ctx, conn, version, name, body, checksum, start, hasExtendedCols); err != nil {
 				return err
 			}
-		} else if err := applyMigrationTx(ctx, conn, version, name, body); err != nil {
+		} else if err := applyMigrationTx(ctx, conn, version, name, body, checksum, start, hasExtendedCols); err != nil {
 			return err
 		}
-		logext.Infof(ctx, "[%s] applied,version:%d,file:%s", where, version, name)
+
+		// After applying 070, extended columns become available
+		if !hasExtendedCols {
+			hasExtendedCols = hasExtendedColumns(ctx, conn)
+		}
+
+		duration := time.Since(start)
+		logext.Infof(ctx, "[%s] applied,version:%d,file:%s,duration:%v", where, version, name, duration)
 	}
 	logext.Infof(ctx, "[%s] OK", where)
 	return nil
 }
 
+// hasExtendedColumns checks if the tracker table has the checksum column.
+func hasExtendedColumns(ctx context.Context, conn *pgxpool.Conn) bool {
+	var exists bool
+	err := conn.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'schema_migrations_feedback' AND column_name = 'checksum'
+		)`).Scan(&exists)
+	return err == nil && exists
+}
+
 // applyMigrationTx runs a migration and records it atomically in one transaction.
-func applyMigrationTx(ctx context.Context, conn *pgxpool.Conn, version int, name string, body []byte) error {
+func applyMigrationTx(ctx context.Context, conn *pgxpool.Conn, version int, name string, body []byte, checksum string, start time.Time, hasExtendedCols bool) error {
 	const where = "database.applyMigrationTx"
 	tx, err := conn.Begin(ctx)
 	if err != nil {
@@ -164,10 +208,17 @@ func applyMigrationTx(ctx context.Context, conn *pgxpool.Conn, version int, name
 		logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
 		return fmt.Errorf("apply %s: %w", name, err)
 	}
-	if _, err := tx.Exec(ctx, recordMigrationSQL(), version, name); err != nil {
+	duration := time.Since(start)
+	var recordErr error
+	if hasExtendedCols {
+		_, recordErr = tx.Exec(ctx, recordMigrationSQL(), version, name, checksum, int(duration.Milliseconds()), Version)
+	} else {
+		_, recordErr = tx.Exec(ctx, recordMigrationLegacySQL(), version, name)
+	}
+	if recordErr != nil {
 		_ = tx.Rollback(ctx)
-		logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, err.Error())
-		return fmt.Errorf("record %s: %w", name, err)
+		logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, recordErr.Error())
+		return fmt.Errorf("record %s: %w", name, recordErr)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		logext.Errorf(ctx, "[%s] commit failed,version:%d,err:%+v", where, version, err.Error())
@@ -181,20 +232,42 @@ func applyMigrationTx(ctx context.Context, conn *pgxpool.Conn, version int, name
 // atomic, so the body must be idempotent (see noTxDirective). conn.Exec with no
 // args uses the simple protocol, which does not open an implicit transaction
 // block — required for CONCURRENTLY.
-func applyMigrationNoTx(ctx context.Context, conn *pgxpool.Conn, version int, name string, body []byte) error {
+func applyMigrationNoTx(ctx context.Context, conn *pgxpool.Conn, version int, name string, body []byte, checksum string, start time.Time, hasExtendedCols bool) error {
 	const where = "database.applyMigrationNoTx"
 	if _, err := conn.Exec(ctx, string(body)); err != nil {
 		logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
 		return fmt.Errorf("apply %s (no-tx): %w", name, err)
 	}
-	if _, err := conn.Exec(ctx, recordMigrationSQL(), version, name); err != nil {
-		logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, err.Error())
-		return fmt.Errorf("record %s (no-tx): %w", name, err)
+	duration := time.Since(start)
+	var recordErr error
+	if hasExtendedCols {
+		_, recordErr = conn.Exec(ctx, recordMigrationSQL(), version, name, checksum, int(duration.Milliseconds()), Version)
+	} else {
+		_, recordErr = conn.Exec(ctx, recordMigrationLegacySQL(), version, name)
+	}
+	if recordErr != nil {
+		logext.Errorf(ctx, "[%s] record failed,file:%s,err:%+v", where, name, recordErr.Error())
+		return fmt.Errorf("record %s (no-tx): %w", name, recordErr)
 	}
 	return nil
 }
 
+// recordMigrationSQL returns the INSERT statement for recording a migration.
+// Uses the extended schema with checksum/duration/applied_by columns.
 func recordMigrationSQL() string {
+	return fmt.Sprintf(`
+		INSERT INTO %s (version, filename, checksum, duration_ms, applied_by)
+		VALUES ($1, $2, COALESCE($3, ''), $4, COALESCE($5, ''))
+		ON CONFLICT (version) DO UPDATE SET
+			checksum = COALESCE(EXCLUDED.checksum, ''),
+			duration_ms = EXCLUDED.duration_ms,
+			applied_by = COALESCE(EXCLUDED.applied_by, '')
+	`, trackerTable)
+}
+
+// recordMigrationLegacySQL returns the INSERT statement for pre-070 databases
+// that don't have the extended columns.
+func recordMigrationLegacySQL() string {
 	return fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable)
 }
 
