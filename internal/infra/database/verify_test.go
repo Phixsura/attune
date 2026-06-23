@@ -3,6 +3,8 @@ package database
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestErrChecksumDrift_Error(t *testing.T) {
@@ -236,4 +238,108 @@ func TestChecksumDrift_Fields(t *testing.T) {
 	if d.Computed != "def456..." {
 		t.Errorf("Computed = %s, want def456...", d.Computed)
 	}
+}
+
+func TestChecksumStatus_Fields(t *testing.T) {
+	t.Parallel()
+
+	status := ChecksumStatus{
+		Verified: 70,
+		Total:    71,
+		Drifted: []ChecksumDrift{
+			{Version: 50, Filename: "050_test.sql", Stored: "aaa", Computed: "bbb"},
+		},
+	}
+
+	require.Equal(t, 70, status.Verified)
+	require.Equal(t, 71, status.Total)
+	require.Len(t, status.Drifted, 1)
+}
+
+func TestErrMissingFile_Fields(t *testing.T) {
+	t.Parallel()
+
+	err := ErrMissingFile{
+		Version:  42,
+		Filename: "042_test.sql",
+	}
+
+	require.Equal(t, 42, err.Version)
+	require.Equal(t, "042_test.sql", err.Filename)
+}
+
+func TestErrManifestReorder_Fields(t *testing.T) {
+	t.Parallel()
+
+	err := ErrManifestReorder{
+		Stored:   "abc123",
+		Computed: "def456",
+	}
+
+	require.Equal(t, "abc123", err.Stored)
+	require.Equal(t, "def456", err.Computed)
+}
+
+func TestErrChecksumDrift_SingleDrift(t *testing.T) {
+	t.Parallel()
+
+	err := ErrChecksumDrift{
+		Drifted: []ChecksumDrift{
+			{Version: 1, Filename: "001_init.sql", Stored: "aaa", Computed: "bbb"},
+		},
+	}
+
+	msg := err.Error()
+	require.Contains(t, msg, "001")
+	require.Contains(t, msg, "001_init.sql")
+	require.Contains(t, msg, "stored:")
+	require.Contains(t, msg, "computed:")
+	require.Contains(t, msg, "Possible causes")
+}
+
+func TestErrChecksumDrift_ManyDrifts(t *testing.T) {
+	t.Parallel()
+
+	drifted := make([]ChecksumDrift, 5)
+	for i := 0; i < 5; i++ {
+		drifted[i] = ChecksumDrift{
+			Version:  i + 1,
+			Filename: strings.Repeat("x", 10) + ".sql",
+			Stored:   "stored",
+			Computed: "computed",
+		}
+	}
+
+	err := ErrChecksumDrift{Drifted: drifted}
+	msg := err.Error()
+
+	// Should contain all versions
+	for i := 1; i <= 5; i++ {
+		require.Contains(t, msg, "stored")
+	}
+}
+
+func TestErrMissingFile_ErrorFormat(t *testing.T) {
+	t.Parallel()
+
+	err := ErrMissingFile{Version: 99, Filename: "099_missing.sql"}
+	msg := err.Error()
+
+	require.Contains(t, msg, "migration 099")
+	require.Contains(t, msg, "099_missing.sql")
+	require.Contains(t, msg, "was applied but file is missing")
+}
+
+func TestErrManifestReorder_TruncatesLongHashes(t *testing.T) {
+	t.Parallel()
+
+	longHash := strings.Repeat("a", 64)
+	err := ErrManifestReorder{
+		Stored:   longHash,
+		Computed: longHash,
+	}
+
+	msg := err.Error()
+	// Should use ChecksumShort to truncate
+	require.Contains(t, msg, "aaaaaaaaaaaa...")
 }

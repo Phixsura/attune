@@ -1,6 +1,10 @@
 package database
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestChecksum(t *testing.T) {
 	tests := []struct {
@@ -168,4 +172,101 @@ func TestManifestHash_MissingFile(t *testing.T) {
 	if err == nil {
 		t.Error("ManifestHash should error on missing file")
 	}
+}
+
+func TestComputeChecksum(t *testing.T) {
+	t.Parallel()
+
+	// Test with real embedded migration
+	names, err := LoadMigrationNames()
+	require.NoError(t, err)
+	require.NotEmpty(t, names)
+
+	checksum, err := ComputeChecksum(names[0])
+	require.NoError(t, err)
+	require.Len(t, checksum, 64, "checksum should be SHA-256 hex")
+
+	// Verify deterministic
+	checksum2, err := ComputeChecksum(names[0])
+	require.NoError(t, err)
+	require.Equal(t, checksum, checksum2)
+}
+
+func TestComputeChecksum_MissingFile(t *testing.T) {
+	t.Parallel()
+
+	_, err := ComputeChecksum("nonexistent_migration.sql")
+	require.Error(t, err)
+}
+
+func TestChecksum_KnownValue(t *testing.T) {
+	t.Parallel()
+
+	// Test against known SHA-256 value
+	// SHA-256 of "hello" = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+	got := Checksum([]byte("hello"))
+	want := "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+	require.Equal(t, want, got)
+}
+
+func TestChecksum_EmptyInput(t *testing.T) {
+	t.Parallel()
+
+	// SHA-256 of empty string = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+	got := Checksum([]byte{})
+	want := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	require.Equal(t, want, got)
+}
+
+func TestChecksumShort_ExactlyTwelve(t *testing.T) {
+	t.Parallel()
+
+	input := "123456789012" // exactly 12 chars
+	got := ChecksumShort(input)
+	require.Equal(t, input, got, "should not truncate at exactly 12 chars")
+}
+
+func TestChecksumShort_ThirteenChars(t *testing.T) {
+	t.Parallel()
+
+	input := "1234567890123" // 13 chars
+	got := ChecksumShort(input)
+	require.Equal(t, "123456789012...", got, "should truncate at 13 chars")
+}
+
+func TestChecksumShort_Empty(t *testing.T) {
+	t.Parallel()
+
+	got := ChecksumShort("")
+	require.Equal(t, "", got)
+}
+
+func TestManifestHash_SingleMigration(t *testing.T) {
+	t.Parallel()
+
+	names, err := LoadMigrationNames()
+	require.NoError(t, err)
+	require.NotEmpty(t, names)
+
+	// Hash of single migration
+	h, err := ManifestHash(names[:1])
+	require.NoError(t, err)
+	require.Len(t, h, 64)
+}
+
+func TestManifestHash_ContentMatters(t *testing.T) {
+	t.Parallel()
+
+	names, err := LoadMigrationNames()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(names), 2)
+
+	// Hash should differ for different files even with same prefix
+	h1, err := ManifestHash(names[:1])
+	require.NoError(t, err)
+
+	h2, err := ManifestHash(names[1:2])
+	require.NoError(t, err)
+
+	require.NotEqual(t, h1, h2, "different migrations should have different hashes")
 }
