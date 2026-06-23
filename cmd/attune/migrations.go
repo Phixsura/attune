@@ -32,6 +32,8 @@ func runMigrationsCmd(args []string) error {
 		return runMigrationsVerify(args[1:])
 	case "dry-run":
 		return runMigrationsDryRun(args[1:])
+	case "repair":
+		return runMigrationsRepair(args[1:])
 	case "-h", "--help", "help":
 		return printMigrationsUsage()
 	default:
@@ -46,6 +48,7 @@ Usage:
   attune migrations status [--format text|json] [--pending]  Show migration status
   attune migrations verify [--format text|json]              Verify checksums and naming
   attune migrations dry-run                                  Preview pending SQL
+  attune migrations repair --version N [--force]             Repair dirty/failed migration
 
 Flags:
   --format    Output format: text (default) or json
@@ -317,4 +320,119 @@ func printPendingMigrationSQL(m database.MigrationFile) {
 	fmt.Printf("-- checksum: %s\n", m.Checksum)
 	fmt.Println(string(m.Body))
 	fmt.Println()
+}
+
+func confirmPrompt(question string) bool {
+	fmt.Printf("%s [y/N] ", question)
+	var answer string
+	if _, err := fmt.Scanln(&answer); err != nil {
+		return false
+	}
+	return answer == "y" || answer == "Y"
+}
+
+type repairOpts struct {
+	version int
+	force   bool
+}
+
+func parseRepairFlags(args []string) (repairOpts, error) {
+	fs := flag.NewFlagSet("migrations repair", flag.ContinueOnError)
+	version := fs.Int("version", 0, "Migration version to repair (required)")
+	force := fs.Bool("force", false, "Skip confirmation prompt")
+	if err := fs.Parse(args); err != nil {
+		return repairOpts{}, err
+	}
+	return repairOpts{version: ptrext.Indirect(version), force: ptrext.Indirect(force)}, nil
+}
+
+func runMigrationsRepair(args []string) error {
+	opts, err := parseRepairFlags(args)
+	if err != nil {
+		return err
+	}
+	if opts.version == 0 {
+		return fmt.Errorf("--version is required\n\nUsage: attune migrations repair --version N [--force]")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := connectDatabase(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	filename, success, err := queryMigrationState(ctx, pool, opts.version)
+	if err != nil {
+		return err
+	}
+
+	if !confirmRepair(opts.version, filename, success, opts.force) {
+		return nil
+	}
+
+	return executeRepair(ctx, pool, opts.version)
+}
+
+func queryMigrationState(ctx context.Context, pool *pgxpool.Pool, version int) (string, bool, error) {
+	var filename string
+	var success bool
+	err := pool.QueryRow(ctx, `
+		SELECT filename, success FROM schema_migrations_feedback WHERE version = $1
+	`, version).Scan(&filename, &success)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return "", false, fmt.Errorf("migration version %d not found in tracker", version)
+		}
+		return "", false, fmt.Errorf("query migration: %w", err)
+	}
+	return filename, success, nil
+}
+
+func confirmRepair(version int, filename string, success, force bool) bool {
+	if success {
+		fmt.Printf("Migration %d (%s) is already marked successful.\n", version, filename)
+		if !force {
+			return confirmPrompt("Recalculate checksum anyway?")
+		}
+	} else {
+		fmt.Printf("Migration %d (%s) is in DIRTY state (success=FALSE).\n", version, filename)
+		if !force {
+			return confirmPrompt("Mark as successful and recalculate checksum?")
+		}
+	}
+	return true
+}
+
+func executeRepair(ctx context.Context, pool *pgxpool.Pool, version int) error {
+	names, err := database.LoadMigrationNames()
+	if err != nil {
+		return fmt.Errorf("load migration names: %w", err)
+	}
+
+	if version < 1 || version > len(names) {
+		return fmt.Errorf("version %d out of range (1-%d)", version, len(names))
+	}
+
+	name := names[version-1]
+	checksum, err := database.ComputeChecksum(name)
+	if err != nil {
+		return fmt.Errorf("compute checksum: %w", err)
+	}
+
+	_, err = pool.Exec(ctx, `
+		UPDATE schema_migrations_feedback
+		SET success = TRUE, checksum = $2, applied_by = COALESCE(NULLIF(applied_by, ''), $3)
+		WHERE version = $1
+	`, version, checksum, database.Version)
+	if err != nil {
+		return fmt.Errorf("update migration: %w", err)
+	}
+
+	fmt.Printf("Repaired migration %d:\n", version)
+	fmt.Printf("  success:  TRUE\n")
+	fmt.Printf("  checksum: %s\n", checksum)
+	return nil
 }
