@@ -90,6 +90,7 @@ type runtimeServices struct {
 	enrichRunner     *enrich.Runner
 	enrichRuntime    *enrichruntimesvc.Service
 	ingestor         *ingest.Ingestor
+	sources          domain.SourceSet
 }
 
 // ── server ────────────────────────────────────────────────────────────────
@@ -184,7 +185,7 @@ func runServer() error {
 	batchJobWorker := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, cfg.ConsoleBaseURL, cfg.GDPRExportTTL)
 	defer batchJobWorker.Stop()
 
-	ingestHandler := handlers.NewIngestHandler(runtimeDeps.ingestor)
+	ingestHandler := handlers.NewIngestHandler(runtimeDeps.ingestor, runtimeDeps.sources)
 
 	inb, err := setupInbound(
 		ctx,
@@ -203,7 +204,7 @@ func runServer() error {
 	r, err := buildRouter(
 		ctx, cfg, ingestHandler, runtimeDeps.apiKeys, pool, ready, runtimeDeps.llm,
 		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo, runtimeDeps.enrichRuntime,
-		runtimeDeps.ingestor,
+		runtimeDeps.ingestor, runtimeDeps.sources,
 	)
 	if err != nil {
 		return err
@@ -257,12 +258,26 @@ func setupRuntimeServices(
 	})
 	llm := llmauditsvc.NewClient(rateLimitedLLM, llmauditrepo.New(pool))
 
+	// Assemble the injected source vocabulary once, after adapter init()s have
+	// populated the registry. A reserved-name collision is a fatal config error;
+	// the error propagates to main.go which owns the logext.Errorf + os.Exit.
+	srcSet, err := buildSourceSet()
+	if err != nil {
+		return runtimeServices{}, fmt.Errorf("assemble source set: %w", err)
+	}
+	// Startup visibility (mirrors setupInbound's "adapters:N" line): the source
+	// vocabulary is immutable after boot and bounds ingest validation, the
+	// metric label, and guard-policy targets, so surface which sources are live.
+	logext.Infof(ctx, "[main.setupRuntimeServices] source vocabulary assembled,sources:%d,channels:%v",
+		len(srcSet.All()), srcSet.All())
+
 	feedbackRepo := feedback.NewFeedback(pool)
 	apikeyRepo := apikeyrepo.NewAPIKey(pool)
 	tenantRepo := tenant.NewTenant(pool)
 	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
 	outboxRepo := outboxrepo.NewOutbox(pool)
 	enricher := enrich.NewEnricher(feedbackRepo, llm, "")
+	enricher.SetSourceSet(srcSet)
 	enrichRunner := enrich.NewRunner(feedbackRepo, enricher, enrich.RunnerConfig{
 		QueueLen:      cfg.EnricherQueueLen,
 		Workers:       cfg.EnricherWorkers,
@@ -299,7 +314,8 @@ func setupRuntimeServices(
 		enricher:         enricher,
 		enrichRunner:     enrichRunner,
 		enrichRuntime:    enrichRuntime,
-		ingestor:         ingest.NewIngestor(feedbackRepo, enrichRunner),
+		ingestor:         ingest.NewIngestor(feedbackRepo, enrichRunner, srcSet),
+		sources:          srcSet,
 	}, nil
 }
 

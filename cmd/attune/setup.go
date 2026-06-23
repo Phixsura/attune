@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
@@ -175,6 +176,7 @@ func buildConsoleRouter(
 	adminRepo *admin.Repo,
 	llm llmclient.LLMClient,
 	enrichRuntime *enrichruntimesvc.Service,
+	sources domain.SourceSet,
 ) (chi.Router, error) {
 	if cfg.ConsoleBaseURL == "" {
 		return nil, fmt.Errorf("console requires console.base_url")
@@ -211,7 +213,7 @@ func buildConsoleRouter(
 	if enrichRuntime != nil {
 		enrichmentRuntimeHandler = console.NewEnrichmentRuntimeHandler(enrichRuntime, cfg.GDPRStepUpTTL)
 	}
-	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool)))
+	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool), sources))
 	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
 	llmConfig := console.NewLLMConfigHandler(llmconfigsvc.NewService(llmconfigrepo.New(pool), secrets))
 	clustersHandler := console.NewClustersHandler(embeddingrepo.NewTaskRepo(pool))

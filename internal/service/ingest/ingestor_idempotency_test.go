@@ -20,7 +20,7 @@ func keyedInput(content string) domain.IngestInput {
 func TestIngestRow_IdempotentReplayReturnsSameRowWithoutReinserting(t *testing.T) {
 	repo := ptrext.Of(fakeFeedbackRepo{insertID: 42})
 	submitter := ptrext.Of(fakeSubmitter{})
-	ingestor := NewIngestor(repo, submitter)
+	ingestor := NewIngestor(repo, submitter, nil)
 
 	first, err := ingestor.IngestRow(context.Background(), "t1", uuid.Nil, keyedInput("checkout broke"))
 	if err != nil {
@@ -44,7 +44,7 @@ func TestIngestRow_IdempotentReplayReturnsSameRowWithoutReinserting(t *testing.T
 
 func TestIngestRow_SameKeyDifferentBodyIsConflict(t *testing.T) {
 	repo := ptrext.Of(fakeFeedbackRepo{insertID: 1})
-	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{}))
+	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{}), nil)
 
 	if _, err := ingestor.IngestRow(context.Background(), "t1", uuid.Nil, keyedInput("first body")); err != nil {
 		t.Fatalf("first IngestRow err = %v", err)
@@ -57,7 +57,7 @@ func TestIngestRow_SameKeyDifferentBodyIsConflict(t *testing.T) {
 
 func TestIngestRow_MalformedKeyRejected(t *testing.T) {
 	repo := ptrext.Of(fakeFeedbackRepo{insertID: 1})
-	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{}))
+	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{}), nil)
 
 	in := domain.IngestInput{Content: "x", Source: "api", IdempotencyKey: "short"} // < 8 chars
 	_, err := ingestor.IngestRow(context.Background(), "t1", uuid.Nil, in)
@@ -71,7 +71,7 @@ func TestIngestRow_MalformedKeyRejected(t *testing.T) {
 
 func TestIngestRow_NoKeyUsesPlainInsert(t *testing.T) {
 	repo := ptrext.Of(fakeFeedbackRepo{insertID: 9})
-	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{}))
+	ingestor := NewIngestor(repo, ptrext.Of(fakeSubmitter{}), nil)
 
 	id, err := ingestor.IngestRow(context.Background(), "t1", uuid.Nil, domain.IngestInput{Content: "x", Source: "api"})
 	if err != nil || id != 9 {

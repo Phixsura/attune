@@ -151,13 +151,14 @@ type attuneEnvelope struct {
 }
 
 type attuneFeedback struct {
-	ID          int64          `json:"id"`
-	TenantID    string         `json:"tenant_id"`
-	Content     string         `json:"content"`
-	Source      string         `json:"source"`
-	UserID      string         `json:"user_id"`
-	SubmittedAt string         `json:"submitted_at"`
-	Enriched    attuneEnriched `json:"enriched"`
+	ID            int64          `json:"id"`
+	TenantID      string         `json:"tenant_id"`
+	Content       string         `json:"content"`
+	Source        string         `json:"source"`
+	SourceDisplay string         `json:"source_display"`
+	UserID        string         `json:"user_id"`
+	SubmittedAt   string         `json:"submitted_at"`
+	Enriched      attuneEnriched `json:"enriched"`
 }
 
 type attuneEnriched struct {
@@ -211,7 +212,14 @@ func buildIssueBody(env attuneEnvelope) ([]byte, error) {
 	if e.IsUrgent {
 		title = "[Urgent] " + title
 	}
-	sourceLabel := fmt.Sprintf("%s (`%s`)", domain.SourceDisplayName(f.Source), f.Source)
+	// Prefer the registry-resolved label carried on the envelope (picks up a
+	// channel's custom display); fall back to the pure shim for old in-flight
+	// rows enqueued before source_display existed.
+	display := f.SourceDisplay
+	if display == "" {
+		display = domain.SourceDisplayName(f.Source)
+	}
+	sourceLabel := fmt.Sprintf("%s (`%s`)", display, f.Source)
 	body := fmt.Sprintf(
 		"> Forwarded automatically from Attune user feedback.\n\n"+
 			"| Field | Value |\n"+

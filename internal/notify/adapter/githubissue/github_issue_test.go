@@ -4,8 +4,44 @@ package githubissue
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
+
+// TestBuildIssueBody_SourceLabel covers the source label across the three
+// envelope cases: a registry-resolved source_display is used verbatim; an empty
+// source_display falls back to the pure SourceDisplayName shim; and a source not
+// in the live vocabulary (a retired/queued token) renders the raw key without
+// erroring — the read-path graceful-degradation guarantee.
+func TestBuildIssueBody_SourceLabel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name          string
+		source        string
+		sourceDisplay string
+		want          string
+	}{
+		{"registry display used", "webhook", "Webhook", "Webhook (`webhook`)"},
+		{"fallback to shim when display absent", "api", "", "API client (`api`)"},
+		{"retired token renders raw, no panic", "rss-retired", "", "rss-retired (`rss-retired`)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			env := attuneEnvelope{Feedback: attuneFeedback{
+				ID: 1, Source: c.source, SourceDisplay: c.sourceDisplay,
+				Enriched: attuneEnriched{Title: "t", EnrichedAt: "2026-06-23T00:00:00Z"},
+			}}
+			body, err := buildIssueBody(env)
+			if err != nil {
+				t.Fatalf("buildIssueBody: %v", err)
+			}
+			if !strings.Contains(string(body), c.want) {
+				t.Errorf("body missing source label %q; got:\n%s", c.want, body)
+			}
+		})
+	}
+}
 
 func TestParseGitHubRepoURL(t *testing.T) {
 	t.Parallel()

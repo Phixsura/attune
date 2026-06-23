@@ -67,7 +67,7 @@ func (e *Enricher) buildOutboxPlan(
 		return outboxPlan{}, fmt.Errorf("list notify targets: %w", err)
 	}
 	plan.targets = selectOutboxTargets(allTargets, s)
-	plan.payload, err = buildOutboxEnvelope(s, plan.traceID)
+	plan.payload, err = buildOutboxEnvelope(s, plan.traceID, e.sourceDisplay(s.Source))
 	if err != nil {
 		logext.Errorf(ctx, "[%s] build envelope failed,feedback_id:%d,err:%+v",
 			where, s.ID, err.Error())
@@ -351,7 +351,13 @@ func extractTraceID(ctx context.Context) string {
 //
 // The #34 outbound framework uses content-hash signing which is field-order
 // independent. json.Marshal preserves struct field order for readability.
-func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
+// sourceDisplay is the registry-resolved human label for s.Source, computed
+// upstream where the SourceSet is injected (the renderers are stateless and
+// cannot reach it). Carried on the envelope as an additive optional field; the
+// github-issue renderers fall back to domain.SourceDisplayName when it is absent
+// (old in-flight rows). Validation happens at ingest only — never re-validate
+// s.Source here against the live set.
+func buildOutboxEnvelope(s domain.Snapshot, traceID, sourceDisplay string) ([]byte, error) {
 	type enrichedOut struct {
 		Title            string         `json:"title"`
 		DisplayTitle     string         `json:"display_title,omitempty"`
@@ -363,14 +369,15 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 		EnrichedAt       string         `json:"enriched_at"`
 	}
 	type feedbackOut struct {
-		ID          int64       `json:"id"`
-		TenantID    string      `json:"tenant_id"`
-		Content     string      `json:"content"`
-		Source      string      `json:"source"`
-		UserID      string      `json:"user_id"`
-		Language    string      `json:"language,omitempty"`
-		SubmittedAt string      `json:"submitted_at"`
-		Enriched    enrichedOut `json:"enriched"`
+		ID            int64       `json:"id"`
+		TenantID      string      `json:"tenant_id"`
+		Content       string      `json:"content"`
+		Source        string      `json:"source"`
+		SourceDisplay string      `json:"source_display,omitempty"`
+		UserID        string      `json:"user_id"`
+		Language      string      `json:"language,omitempty"`
+		SubmittedAt   string      `json:"submitted_at"`
+		Enriched      enrichedOut `json:"enriched"`
 	}
 	type envelopeOut struct {
 		Version     string      `json:"version"`
@@ -391,13 +398,14 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID string) ([]byte, error) {
 		DeliveredAt: at,
 		TraceID:     traceID,
 		Feedback: feedbackOut{
-			ID:          s.ID,
-			TenantID:    s.TenantID,
-			Content:     s.Content,
-			Source:      s.Source,
-			UserID:      s.UserID,
-			Language:    s.Language,
-			SubmittedAt: submittedAt, // #82: actual ingest time, not enrichment time
+			ID:            s.ID,
+			TenantID:      s.TenantID,
+			Content:       s.Content,
+			Source:        s.Source,
+			SourceDisplay: sourceDisplay,
+			UserID:        s.UserID,
+			Language:      s.Language,
+			SubmittedAt:   submittedAt, // #82: actual ingest time, not enrichment time
 			Enriched: enrichedOut{
 				Title:            s.Title,
 				DisplayTitle:     s.DisplayTitle,

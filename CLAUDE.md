@@ -176,8 +176,35 @@ The CI depguard rules (`.golangci.yml` → `inbound-boundary` +
 - The framework absorbs four execution modes — push (webhook), poll
   (email IMAP / RSS), schedule (cron crawler), stream (MQ / WebSocket /
   firehose) — behind the same `Adapter { Channel, Start, Shutdown }`
-  port. Adding a channel = adding a package + one blank-import line +
-  one `domain.ValidSources` entry (#95 will fold the third away).
+  port. Adding a channel = adding a package + one blank-import line. The
+  source vocabulary is registry-driven (#95): each adapter declares its
+  channel + display label at its `inbound.Register(channel, display,
+  factory)` call, and `cmd/attune` assembles the injected
+  `domain.SourceSet` (the reserved `domain` core sources ∪ registered
+  channels) — no core source map to edit. A channel that collides with a
+  reserved core source (`api`/`web`/`mcp`/`other`) is a fatal boot error.
+
+### Source identifier stability — append-only (#95)
+
+A `source` string (an adapter `Channel()` or a `domain` core source) is a
+**frozen storage + wire token**: it is persisted in `user_feedback.source`
+(`TEXT`, no DB `CHECK`) and emitted verbatim on the outbound envelope, then
+rendered asynchronously. The vocabulary is therefore **append-only**:
+
+- Never rename a source in place, never repurpose its meaning, never
+  hard-`DELETE` rows that carry it. The valid set only grows.
+- Removal is **soft**: drop it from write-path validation only after it is
+  absent from `user_feedback.source` **and** every queued `notify_outbox`
+  envelope, and keep it resolvable on the read path (the
+  `domain.SourceDisplayName` fallback). A bare rename is a rejection-grade
+  change; if a rename is ever truly needed, add a *new* token + an explicit
+  alias. Migration `015_drop_lark.sql`'s `DELETE FROM user_feedback` is the
+  anti-example — never repeat it.
+- Validate at **write** (ingest) only; the outbox worker and renderers treat
+  `feedback.source` as opaque and never re-validate it against the live set
+  (a queued envelope may carry a source retired between enqueue and delivery).
+
+`TestSourceVocabulary_AppendOnly` (frozen golden) gates this.
 
 For the full layout, see [`README.md`](README.md).
 

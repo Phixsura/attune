@@ -72,6 +72,7 @@ func buildRouter(
 	adminRepo *admin.Repo,
 	enrichRuntime *enrichruntimesvc.Service,
 	ingestor *ingest.Ingestor,
+	sources domain.SourceSet,
 ) (chi.Router, error) {
 	const where = "main.buildRouter"
 	r := chi.NewRouter()
@@ -140,7 +141,7 @@ func buildRouter(
 	// proxy forwards external traffic here. Disabled gracefully
 	// when ConsoleSessionKey is empty (single-process dev defaults).
 	if cfg.ConsoleSessionKey != "" {
-		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, adminRepo, llm, enrichRuntime)
+		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, adminRepo, llm, enrichRuntime, sources)
 		if err != nil {
 			return nil, fmt.Errorf("build console: %w", err)
 		}

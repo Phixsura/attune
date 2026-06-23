@@ -57,11 +57,18 @@ type Store interface {
 }
 
 type Service struct {
-	store Store
+	store   Store
+	sources domain.SourceSet // injected union; validates Target.Channels
 }
 
-func NewService(store Store) *Service {
-	return ptrext.Of(Service{store: store})
+// NewService wires the Console guard-policy service. sources is the injected
+// SourceSet used to validate a policy target's channels; a nil set falls back
+// to domain.DefaultSourceSet.
+func NewService(store Store, sources domain.SourceSet) *Service {
+	if sources == nil {
+		sources = domain.DefaultSourceSet()
+	}
+	return ptrext.Of(Service{store: store, sources: sources})
 }
 
 func (s *Service) List(ctx context.Context, tenantID string) ([]llmguard.Policy, error) {
@@ -71,7 +78,7 @@ func (s *Service) List(ctx context.Context, tenantID string) ([]llmguard.Policy,
 func (s *Service) ReplaceTenantPolicies(
 	ctx context.Context, tenantID, actor string, policies []llmguard.Policy,
 ) ([]llmguard.Policy, error) {
-	if err := validatePolicies(policies); err != nil {
+	if err := s.validatePolicies(policies); err != nil {
 		return nil, err
 	}
 	normalized := normalizeTenantPolicies(policies)
@@ -84,7 +91,7 @@ func (s *Service) ReplaceTenantPolicies(
 func (s *Service) CreatePolicy(
 	ctx context.Context, tenantID, actor string, policy llmguard.Policy,
 ) (llmguard.Policy, error) {
-	if err := validatePolicy(policy); err != nil {
+	if err := s.validatePolicy(policy); err != nil {
 		return llmguard.Policy{}, err
 	}
 	normalized := normalizeTenantPolicy(policy)
@@ -94,7 +101,7 @@ func (s *Service) CreatePolicy(
 func (s *Service) UpdatePolicy(
 	ctx context.Context, tenantID, actor, id string, policy llmguard.Policy,
 ) (llmguard.Policy, error) {
-	if err := validatePolicy(policy); err != nil {
+	if err := s.validatePolicy(policy); err != nil {
 		return llmguard.Policy{}, err
 	}
 	normalized := normalizeTenantPolicy(policy)
@@ -113,19 +120,19 @@ func (s *Service) Resolve(ctx context.Context, meta llmclient.GuardMetadata) (ll
 	return s.store.Resolve(ctx, meta)
 }
 
-func validatePolicies(policies []llmguard.Policy) error {
+func (s *Service) validatePolicies(policies []llmguard.Policy) error {
 	if len(policies) > MaxPolicies {
 		return ErrPolicyLimit
 	}
 	for _, p := range policies {
-		if err := validatePolicy(p); err != nil {
+		if err := s.validatePolicy(p); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validatePolicy(p llmguard.Policy) error {
+func (s *Service) validatePolicy(p llmguard.Policy) error {
 	name := strings.TrimSpace(p.Name)
 	if name == "" {
 		return ErrPolicyNameRequired
@@ -139,7 +146,7 @@ func validatePolicy(p llmguard.Policy) error {
 	if p.Priority < 0 || p.Priority > MaxPriority {
 		return ErrPriorityInvalid
 	}
-	if err := validateTarget(p.Target); err != nil {
+	if err := s.validateTarget(p.Target); err != nil {
 		return err
 	}
 	if len(p.Rules) > MaxRulesPerPolicy {
@@ -192,12 +199,12 @@ func normalizeTenantPolicy(p llmguard.Policy) llmguard.Policy {
 	return p
 }
 
-func validateTarget(t llmguard.Target) error {
+func (s *Service) validateTarget(t llmguard.Target) error {
 	if t.TenantID != "" {
 		return ErrTargetInvalid
 	}
-	if !validValueList(t.Channels, domain.ValidSources) {
-		return ErrTargetInvalid
+	if err := s.validateTargetChannels(t.Channels); err != nil {
+		return err
 	}
 	if !validUUIDList(t.SourceIDs) ||
 		!validTokenList(t.SourceTags) ||
@@ -246,17 +253,26 @@ func validAction(a llmguard.Action) bool {
 	}
 }
 
-func validValueList(values []string, allowed map[string]bool) bool {
+// validateTargetChannels checks every guard-policy target channel is a known
+// source via the injected SourceSet. A count/shape failure returns the bare
+// ErrTargetInvalid sentinel; an unknown channel returns it wrapped with the
+// offending value and the valid set, so the operator sees what to fix. Only the
+// channel branch is enriched — the target's other fields keep their opaque
+// sentinel so a UUID/tag/purpose failure is never masked by a source-list message.
+func (s *Service) validateTargetChannels(values []string) error {
 	if len(values) > MaxTargetValues {
-		return false
+		return ErrTargetInvalid
 	}
 	for _, raw := range values {
 		value := strings.TrimSpace(raw)
-		if value == "" || len(value) > MaxTargetValueBytes || !allowed[value] {
-			return false
+		if value == "" || len(value) > MaxTargetValueBytes {
+			return ErrTargetInvalid
+		}
+		if !s.sources.Has(value) {
+			return fmt.Errorf("%w: source %q is not a known source (valid: %s)", ErrTargetInvalid, value, strings.Join(s.sources.All(), ", "))
 		}
 	}
-	return true
+	return nil
 }
 
 func validUUIDList(values []string) bool {
@@ -368,7 +384,11 @@ func ErrToMessage(err error) string {
 	case errors.Is(err, ErrEntityInvalid):
 		return "guard policy entity is invalid"
 	case errors.Is(err, ErrTargetInvalid):
-		return "guard policy target is invalid"
+		// err.Error() is the bare sentinel text for shape failures, or the
+		// enriched "… source %q is not a known source (valid: …)" for an
+		// unknown channel (validateTargetChannels). Surfacing it tells the
+		// operator the offending value + valid set without masking other causes.
+		return err.Error()
 	case errors.Is(err, ErrReplacementInvalid):
 		return fmt.Sprintf("guard policy replacement must be at most %d bytes and use safe template characters", MaxReplacementBytes)
 	case errors.Is(err, ErrPriorityInvalid):
