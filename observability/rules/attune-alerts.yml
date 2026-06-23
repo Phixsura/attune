@@ -190,6 +190,38 @@ groups:
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxdeadrowshigh"
           action: "Open Console > Dead deliveries, inspect destination_type and last_error, fix or remove the target, then manually retry."
 
+  - name: attune.alerts.migrations
+    rules:
+      - alert: AttuneMigrationsPending
+        expr: attune_migration_pending > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Pending migrations detected"
+          description: "{{ $value }} migrations pending on {{ $labels.instance }}. This means the binary has new migrations that were not applied at startup."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunemigrationspending"
+          action: "Check migration runner logs for failures, verify database connectivity, and confirm the migration files are valid SQL."
+
+      - alert: AttuneMigrationChecksumDrift
+        # No `for`: the 1h increase window is itself the debounce. A single drift
+        # event is operator-actionable — a migration file was edited after being
+        # applied, which is a release hygiene violation.
+        expr: increase(attune_migration_checksum_drift_total[1h]) > 0
+        labels:
+          severity: critical
+          service: attune
+        annotations:
+          summary: "Migration file modified after apply"
+          description: "Checksum drift detected on {{ $labels.instance }}. A migration file was edited after being applied to the database, or the binary was built from different source than what's recorded."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunemigrationchecksumdrift"
+          action: "Identify the drifted migration by comparing embedded checksums in the binary with schema_migrations table. Roll back to the original file content or create a remediation migration."
+
   - name: attune.alerts.security
     rules:
       - alert: AttuneAuthorizationDenialsHigh

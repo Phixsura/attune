@@ -69,3 +69,103 @@ func TestChecksumShort(t *testing.T) {
 		})
 	}
 }
+
+func TestManifestHash(t *testing.T) {
+	// ManifestHash uses embedded migration files, so we test basic properties
+	names, err := LoadMigrationNames()
+	if err != nil {
+		t.Fatalf("LoadMigrationNames: %v", err)
+	}
+	if len(names) == 0 {
+		t.Skip("no embedded migrations")
+	}
+
+	t.Run("deterministic", func(t *testing.T) {
+		h1, err := ManifestHash(names)
+		if err != nil {
+			t.Fatalf("ManifestHash: %v", err)
+		}
+		h2, err := ManifestHash(names)
+		if err != nil {
+			t.Fatalf("ManifestHash: %v", err)
+		}
+		if h1 != h2 {
+			t.Errorf("ManifestHash not deterministic: %s != %s", h1, h2)
+		}
+	})
+
+	t.Run("hex_format", func(t *testing.T) {
+		h, err := ManifestHash(names)
+		if err != nil {
+			t.Fatalf("ManifestHash: %v", err)
+		}
+		if len(h) != 64 {
+			t.Errorf("ManifestHash length = %d, want 64", len(h))
+		}
+		for _, c := range h {
+			isDigit := c >= '0' && c <= '9'
+			isHexLower := c >= 'a' && c <= 'f'
+			if !isDigit && !isHexLower {
+				t.Errorf("ManifestHash contains non-hex char: %c", c)
+			}
+		}
+	})
+
+	t.Run("order_sensitive", func(t *testing.T) {
+		if len(names) < 2 {
+			t.Skip("need at least 2 migrations to test order sensitivity")
+		}
+		h1, err := ManifestHash(names)
+		if err != nil {
+			t.Fatalf("ManifestHash: %v", err)
+		}
+		// Reverse the order
+		reversed := make([]string, len(names))
+		for i, name := range names {
+			reversed[len(names)-1-i] = name
+		}
+		h2, err := ManifestHash(reversed)
+		if err != nil {
+			t.Fatalf("ManifestHash reversed: %v", err)
+		}
+		if h1 == h2 {
+			t.Error("ManifestHash should be order-sensitive")
+		}
+	})
+
+	t.Run("subset_differs", func(t *testing.T) {
+		if len(names) < 2 {
+			t.Skip("need at least 2 migrations to test subset difference")
+		}
+		h1, err := ManifestHash(names)
+		if err != nil {
+			t.Fatalf("ManifestHash: %v", err)
+		}
+		// Use only first half
+		h2, err := ManifestHash(names[:len(names)/2])
+		if err != nil {
+			t.Fatalf("ManifestHash subset: %v", err)
+		}
+		if h1 == h2 {
+			t.Error("ManifestHash should differ for subsets")
+		}
+	})
+}
+
+func TestManifestHash_EmptyList(t *testing.T) {
+	h, err := ManifestHash([]string{})
+	if err != nil {
+		t.Fatalf("ManifestHash empty: %v", err)
+	}
+	// SHA-256 of empty input
+	if len(h) != 64 {
+		t.Errorf("ManifestHash empty length = %d, want 64", len(h))
+	}
+}
+
+func TestManifestHash_MissingFile(t *testing.T) {
+	_, err := ManifestHash([]string{"nonexistent_migration.sql"})
+	if err == nil {
+		t.Error("ManifestHash should error on missing file")
+	}
+}

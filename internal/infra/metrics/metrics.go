@@ -662,6 +662,52 @@ var WorkerPanics = prometheus.NewCounterVec(
 	[]string{"worker"},
 )
 
+// ---------- Migration metrics (#149) ----------
+
+// MigrationAppliedTotal counts migration files applied by the startup runner.
+// Labels: version (numeric prefix), filename. A non-zero count for a given
+// version indicates that migration was applied during this process lifetime.
+var MigrationAppliedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_migration_applied_total",
+		Help: "Migrations applied by the startup runner.",
+	},
+	[]string{"version", "filename"},
+)
+
+// MigrationApplyDuration tracks wall time per migration. Use the histogram's
+// p95 to size deployment timeouts and detect regressions from large backfills.
+var MigrationApplyDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_migration_apply_duration_seconds",
+		Help:    "Migration apply latency per version.",
+		Buckets: prometheus.ExponentialBuckets(0.01, 4, 8), // 10ms..2.6h
+	},
+	[]string{"version"},
+)
+
+// MigrationPending gauges the current count of unapplied migrations at startup.
+// After RunMigrations completes, this should be 0. A persistent non-zero value
+// indicates migrations are failing or the binary has new migrations not yet
+// applied.
+var MigrationPending = prometheus.NewGauge(
+	prometheus.GaugeOpts{
+		Name: "attune_migration_pending",
+		Help: "Number of unapplied migrations at startup.",
+	},
+)
+
+// MigrationChecksumDriftTotal counts checksum mismatches detected during
+// verification. Any non-zero value is operator-actionable — a migration file
+// was edited after being applied, or the binary was built from different
+// source than what's in the database.
+var MigrationChecksumDriftTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "attune_migration_checksum_drift_total",
+		Help: "Migration checksum mismatches detected during verification.",
+	},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -741,6 +787,10 @@ var allMetrics = []prometheus.Collector{
 	AuditRowsPrunedTotal,
 	AuditPruneDurationSeconds,
 	WorkerPanics,
+	MigrationAppliedTotal,
+	MigrationApplyDuration,
+	MigrationPending,
+	MigrationChecksumDriftTotal,
 }
 
 // RegisteredMetricNames returns the attune metric families registered by this
@@ -811,6 +861,10 @@ func RegisteredMetricNames() []string {
 		"attune_audit_rows_pruned_total",
 		"attune_audit_prune_duration_seconds",
 		"attune_worker_panics_total",
+		"attune_migration_applied_total",
+		"attune_migration_apply_duration_seconds",
+		"attune_migration_pending",
+		"attune_migration_checksum_drift_total",
 	}
 }
 

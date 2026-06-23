@@ -304,3 +304,46 @@ the alert until you know why denials occurred without audit writes.
 
 Recovery: audit rows are written again for relevant actions and the alert is
 inactive for at least one 30-minute evaluation window.
+
+## AttuneMigrationsPending
+
+Impact: the binary has unapplied migrations that were not applied at startup.
+Schema changes are not yet in effect, which may cause runtime errors or missing
+features.
+
+Confirm:
+
+```promql
+attune_migration_pending
+```
+
+Inspect the migration runner logs for errors. Common causes: a migration SQL
+syntax error, database connectivity issues, lock contention from long-running
+transactions, or insufficient privileges. If the migration requires manual
+intervention (data backfill, constraint addition on large tables), apply it
+out-of-band and restart the process.
+
+Recovery: pending count is zero after the migrations are applied or the
+deployment is rolled back.
+
+## AttuneMigrationChecksumDrift
+
+Impact: a migration file was edited after being applied to the database. This is
+a release hygiene violation — the schema may differ from what the source code
+expects, or different binary builds may have different schema expectations.
+
+Confirm:
+
+```promql
+increase(attune_migration_checksum_drift_total[1h])
+```
+
+Compare the embedded checksums in the running binary (`attune migrate list`)
+with the `checksum` column in `schema_migrations`. Identify which migration
+drifted and why. If the edit was intentional (a post-apply fix), create a
+remediation migration that either applies the fix idempotently or records the
+new checksum. If the edit was accidental, restore the original file content and
+rebuild.
+
+Recovery: no new checksum drift events and the alert is inactive for at least
+one 1-hour evaluation window.

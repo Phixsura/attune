@@ -6,7 +6,29 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Phixsura/attune/internal/infra/metrics"
 )
+
+// ErrManifestReorder is returned when the manifest hash differs but all
+// individual checksums match, indicating migration reordering.
+type ErrManifestReorder struct {
+	Stored   string
+	Computed string
+}
+
+func (e ErrManifestReorder) Error() string {
+	return fmt.Sprintf("migration reordering detected:\n"+
+		"  stored manifest:   %s\n"+
+		"  computed manifest: %s\n\n"+
+		"This happens when migrations are reordered (e.g., inserting a new file\n"+
+		"between existing ones). Migration order must match the order in which\n"+
+		"they were originally applied.\n\n"+
+		"Recovery options:\n"+
+		"  - Restore original migration order from git history\n"+
+		"  - If reordering was intentional, update stored manifest (see docs/private-deploy.md)",
+		ChecksumShort(e.Stored), ChecksumShort(e.Computed))
+}
 
 // ChecksumDrift represents a mismatch between stored and computed checksum.
 type ChecksumDrift struct {
@@ -119,6 +141,7 @@ func VerifyChecksumsConn(ctx context.Context, conn *pgxpool.Conn) error {
 	}
 
 	if len(drifted) > 0 {
+		metrics.MigrationChecksumDriftTotal.Add(float64(len(drifted)))
 		return ErrChecksumDrift{Drifted: drifted}
 	}
 	return nil
@@ -195,4 +218,86 @@ func GetChecksumStatus(ctx context.Context, pool *pgxpool.Pool) (ChecksumStatus,
 	}
 
 	return status, rows.Err()
+}
+
+// VerifyManifestHash compares the stored manifest hash against the computed one.
+// Returns nil if they match, ErrManifestReorder if different, or nil if no
+// manifest is stored yet (pre-071 database or fresh install).
+func VerifyManifestHash(ctx context.Context, pool *pgxpool.Pool) error {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire connection: %w", err)
+	}
+	defer conn.Release()
+
+	return VerifyManifestHashConn(ctx, conn)
+}
+
+// VerifyManifestHashConn verifies manifest hash using an existing connection.
+func VerifyManifestHashConn(ctx context.Context, conn *pgxpool.Conn) error {
+	// Check if manifest table exists (for pre-071 databases)
+	var hasTable bool
+	err := conn.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_name = 'schema_migrations_manifest'
+		)`).Scan(&hasTable)
+	if err != nil {
+		return fmt.Errorf("check manifest table: %w", err)
+	}
+	if !hasTable {
+		// Pre-071 database, no manifest to verify
+		return nil
+	}
+
+	var stored string
+	err = conn.QueryRow(ctx,
+		`SELECT hash FROM schema_migrations_manifest WHERE id = 1`).Scan(&stored)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			// No manifest stored yet
+			return nil
+		}
+		return fmt.Errorf("query manifest hash: %w", err)
+	}
+
+	names, err := LoadMigrationNames()
+	if err != nil {
+		return fmt.Errorf("load migration names: %w", err)
+	}
+
+	computed, err := ManifestHash(names)
+	if err != nil {
+		return fmt.Errorf("compute manifest hash: %w", err)
+	}
+
+	if stored != computed {
+		return ErrManifestReorder{Stored: stored, Computed: computed}
+	}
+	return nil
+}
+
+// StoreManifestHash saves the current manifest hash to the database.
+// Called after all migrations are applied.
+func StoreManifestHash(ctx context.Context, conn *pgxpool.Conn, hash string) error {
+	_, err := conn.Exec(ctx, `
+		INSERT INTO schema_migrations_manifest (id, hash, updated_at)
+		VALUES (1, $1, NOW())
+		ON CONFLICT (id) DO UPDATE SET hash = EXCLUDED.hash, updated_at = NOW()
+	`, hash)
+	if err != nil {
+		return fmt.Errorf("store manifest hash: %w", err)
+	}
+	return nil
+}
+
+// hasManifestTable checks if the manifest table exists.
+func hasManifestTable(ctx context.Context, conn *pgxpool.Conn) bool {
+	var exists bool
+	err := conn.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_name = 'schema_migrations_manifest'
+		)`).Scan(&exists)
+	return err == nil && exists
 }

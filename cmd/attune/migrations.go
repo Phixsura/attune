@@ -34,6 +34,8 @@ func runMigrationsCmd(args []string) error {
 		return runMigrationsDryRun(args[1:])
 	case "repair":
 		return runMigrationsRepair(args[1:])
+	case "baseline":
+		return runMigrationsBaseline(args[1:])
 	case "-h", "--help", "help":
 		return printMigrationsUsage()
 	default:
@@ -49,6 +51,7 @@ Usage:
   attune migrations verify [--format text|json]              Verify checksums and naming
   attune migrations dry-run                                  Preview pending SQL
   attune migrations repair --version N [--force]             Repair dirty/failed migration
+  attune migrations baseline --version N [--force]           Baseline existing database
 
 Flags:
   --format    Output format: text (default) or json
@@ -434,5 +437,121 @@ func executeRepair(ctx context.Context, pool *pgxpool.Pool, version int) error {
 	fmt.Printf("Repaired migration %d:\n", version)
 	fmt.Printf("  success:  TRUE\n")
 	fmt.Printf("  checksum: %s\n", checksum)
+	return nil
+}
+
+type baselineOpts struct {
+	version int
+	force   bool
+}
+
+func parseBaselineFlags(args []string) (baselineOpts, error) {
+	fs := flag.NewFlagSet("migrations baseline", flag.ContinueOnError)
+	version := fs.Int("version", 0, "Baseline version (marks 1..N as applied)")
+	force := fs.Bool("force", false, "Skip confirmation prompt")
+	if err := fs.Parse(args); err != nil {
+		return baselineOpts{}, err
+	}
+	return baselineOpts{version: ptrext.Indirect(version), force: ptrext.Indirect(force)}, nil
+}
+
+func runMigrationsBaseline(args []string) error {
+	opts, err := parseBaselineFlags(args)
+	if err != nil {
+		return err
+	}
+	if opts.version == 0 {
+		return fmt.Errorf("--version is required\n\nUsage: attune migrations baseline --version N [--force]")
+	}
+
+	names, err := database.LoadMigrationNames()
+	if err != nil {
+		return fmt.Errorf("load migrations: %w", err)
+	}
+
+	if opts.version < 1 || opts.version > len(names) {
+		return fmt.Errorf("version %d out of range (1-%d)", opts.version, len(names))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := connectDatabase(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	existing, err := countExistingMigrations(ctx, pool)
+	if err != nil {
+		return err
+	}
+
+	if existing > 0 {
+		return fmt.Errorf("database already has %d migrations tracked; baseline only works on fresh databases", existing)
+	}
+
+	if !opts.force {
+		fmt.Printf("This will mark migrations 1-%d as applied without running them.\n", opts.version)
+		fmt.Printf("Only use this for adopting an existing database that was migrated externally.\n\n")
+		if !confirmPrompt(fmt.Sprintf("Baseline to version %d?", opts.version)) {
+			return nil
+		}
+	}
+
+	return executeBaseline(ctx, pool, names, opts.version)
+}
+
+func countExistingMigrations(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+	var count int
+	err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM schema_migrations_feedback
+	`).Scan(&count)
+	if err != nil {
+		if strings.Contains(err.Error(), "does not exist") {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("count migrations: %w", err)
+	}
+	return count, nil
+}
+
+func executeBaseline(ctx context.Context, pool *pgxpool.Pool, names []string, targetVersion int) error {
+	// Ensure tracker table exists with extended columns
+	_, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS schema_migrations_feedback (
+			version INT PRIMARY KEY,
+			filename TEXT NOT NULL,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			checksum TEXT NOT NULL DEFAULT '',
+			duration_ms INT NOT NULL DEFAULT 0,
+			applied_by TEXT NOT NULL DEFAULT '',
+			success BOOLEAN NOT NULL DEFAULT TRUE
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create tracker: %w", err)
+	}
+
+	for i := 0; i < targetVersion; i++ {
+		version := i + 1
+		name := names[i]
+		checksum, err := database.ComputeChecksum(name)
+		if err != nil {
+			return fmt.Errorf("compute checksum for %s: %w", name, err)
+		}
+
+		_, err = pool.Exec(ctx, `
+			INSERT INTO schema_migrations_feedback (version, filename, checksum, duration_ms, applied_by, success)
+			VALUES ($1, $2, $3, 0, $4, TRUE)
+			ON CONFLICT (version) DO NOTHING
+		`, version, name, checksum, "baseline:"+database.Version)
+		if err != nil {
+			return fmt.Errorf("insert baseline %d: %w", version, err)
+		}
+	}
+
+	fmt.Printf("Baselined %d migrations (1-%d).\n", targetVersion, targetVersion)
+	fmt.Printf("The database is now ready for normal migration management.\n")
 	return nil
 }

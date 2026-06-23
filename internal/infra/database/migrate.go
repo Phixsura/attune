@@ -22,10 +22,12 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
@@ -154,6 +156,11 @@ func runPreflightChecks(ctx context.Context, conn *pgxpool.Conn, names []string)
 		return err
 	}
 
+	if err := VerifyManifestHashConn(ctx, conn); err != nil {
+		logext.Errorf(ctx, "[%s] manifest hash verification failed,err:%+v", where, err.Error())
+		return err
+	}
+
 	if hasExtendedColumns(ctx, conn) {
 		if err := detectDirtyMigrations(ctx, conn); err != nil {
 			logext.Errorf(ctx, "[%s] dirty migration detected,err:%+v", where, err.Error())
@@ -166,6 +173,20 @@ func runPreflightChecks(ctx context.Context, conn *pgxpool.Conn, names []string)
 func applyPendingMigrations(ctx context.Context, conn *pgxpool.Conn, names []string) error {
 	const where = "database.RunMigrations"
 	hasExtendedCols := hasExtendedColumns(ctx, conn)
+
+	// Count pending migrations for the gauge.
+	pendingCount := 0
+	for i := range names {
+		version := i + 1
+		applied, err := isMigrationApplied(ctx, conn, version)
+		if err != nil {
+			return err
+		}
+		if !applied {
+			pendingCount++
+		}
+	}
+	metrics.MigrationPending.Set(float64(pendingCount))
 
 	for i, name := range names {
 		version := i + 1
@@ -187,6 +208,22 @@ func applyPendingMigrations(ctx context.Context, conn *pgxpool.Conn, names []str
 			if err := backfillChecksums(ctx, conn, names); err != nil {
 				logext.Warnf(ctx, "[%s] checksum backfill failed,err:%+v", where, err.Error())
 			}
+		}
+	}
+
+	// All migrations applied; set pending to 0.
+	metrics.MigrationPending.Set(0)
+
+	// Store manifest hash after all migrations are applied.
+	// This creates or updates the hash for reordering detection on next startup.
+	if hasManifestTable(ctx, conn) {
+		manifestHash, err := ManifestHash(names)
+		if err != nil {
+			logext.Warnf(ctx, "[%s] compute manifest hash failed,err:%+v", where, err.Error())
+		} else if err := StoreManifestHash(ctx, conn, manifestHash); err != nil {
+			logext.Warnf(ctx, "[%s] store manifest hash failed,err:%+v", where, err.Error())
+		} else {
+			logext.Infof(ctx, "[%s] manifest hash stored,hash:%s", where, ChecksumShort(manifestHash))
 		}
 	}
 	return nil
@@ -223,7 +260,12 @@ func applySingleMigration(ctx context.Context, conn *pgxpool.Conn, version int, 
 		return err
 	}
 
-	logext.Infof(ctx, "[%s] applied,version:%d,file:%s,duration:%v", where, version, name, time.Since(start))
+	duration := time.Since(start)
+	versionStr := strconv.Itoa(version)
+	metrics.MigrationAppliedTotal.WithLabelValues(versionStr, name).Inc()
+	metrics.MigrationApplyDuration.WithLabelValues(versionStr).Observe(duration.Seconds())
+
+	logext.Infof(ctx, "[%s] applied,version:%d,file:%s,duration:%v", where, version, name, duration)
 	return nil
 }
 
