@@ -794,3 +794,129 @@ func TestMigrations_GetChecksumStatus_EmptyDB(t *testing.T) {
 	require.Equal(t, 0, status.Total)
 	require.Equal(t, 0, status.Verified)
 }
+
+func TestMigrations_VerifyManifestHash_EmptyManifest(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Delete manifest hash
+	_, err = pool.Exec(ctx, `DELETE FROM schema_migrations_manifest`)
+	require.NoError(t, err)
+
+	// VerifyManifestHash should pass (no stored hash)
+	err = database.VerifyManifestHash(ctx, pool)
+	require.NoError(t, err)
+}
+
+func TestMigrations_StoreManifestHash_Idempotent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	var hash1 string
+	err = pool.QueryRow(ctx, `SELECT hash FROM schema_migrations_manifest WHERE id = 1`).Scan(&hash1)
+	require.NoError(t, err)
+
+	// Run again
+	err = database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	var hash2 string
+	err = pool.QueryRow(ctx, `SELECT hash FROM schema_migrations_manifest WHERE id = 1`).Scan(&hash2)
+	require.NoError(t, err)
+
+	require.Equal(t, hash1, hash2)
+}
+
+func TestMigrations_DetectDirtyMigrations_NoDirty(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	err = database.DetectDirtyMigrations(ctx, pool)
+	require.NoError(t, err)
+}
+
+func TestMigrations_GetMigrationStatus_Complete(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	status, err := database.GetMigrationStatus(ctx, pool)
+	require.NoError(t, err)
+
+	require.Equal(t, database.MigrationCount(), status.Total)
+	require.Equal(t, database.MigrationCount(), status.Applied)
+	require.Equal(t, 0, status.Pending)
+}
+
+func TestMigrations_GetPendingMigrations_None(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	pending, err := database.GetPendingMigrations(ctx, pool)
+	require.NoError(t, err)
+	require.Empty(t, pending)
+}
+
+func TestMigrations_VerifyChecksumsConn_WithDrift(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Corrupt a checksum
+	_, err = pool.Exec(ctx, `UPDATE schema_migrations_feedback SET checksum = 'bad' WHERE version = 5`)
+	require.NoError(t, err)
+
+	err = database.VerifyChecksums(ctx, pool)
+	require.Error(t, err)
+
+	var driftErr database.ErrChecksumDrift
+	require.True(t, errors.As(err, &driftErr))
+}
+
+func TestMigrations_VerifyManifestHashConn_WithReorder(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Corrupt manifest hash
+	_, err = pool.Exec(ctx, `UPDATE schema_migrations_manifest SET hash = 'bad_hash' WHERE id = 1`)
+	require.NoError(t, err)
+
+	err = database.VerifyManifestHash(ctx, pool)
+	require.Error(t, err)
+
+	var reorderErr database.ErrManifestReorder
+	require.True(t, errors.As(err, &reorderErr))
+}
