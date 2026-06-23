@@ -2,6 +2,7 @@ package checks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -19,6 +20,16 @@ func init() {
 		Name:     "migration:integrity",
 		Category: preflight.CategoryMigration,
 		Run:      checkMigrationIntegrity,
+	})
+	preflight.Register(preflight.Check{
+		Name:     "migration:dirty",
+		Category: preflight.CategoryMigration,
+		Run:      checkMigrationDirty,
+	})
+	preflight.Register(preflight.Check{
+		Name:     "migration:manifest",
+		Category: preflight.CategoryMigration,
+		Run:      checkMigrationManifest,
 	})
 }
 
@@ -110,5 +121,69 @@ func checkMigrationIntegrity(ctx context.Context, env *preflight.Environment) pr
 
 	r.Status = preflight.StatusPass
 	r.Message = "All migration files verified (no duplicates, checksums match)"
+	return r
+}
+
+// checkMigrationDirty checks for migrations that started but didn't complete.
+func checkMigrationDirty(ctx context.Context, env *preflight.Environment) preflight.Result {
+	r := preflight.Result{
+		Name:     "migration:dirty",
+		Category: preflight.CategoryMigration,
+	}
+
+	if env.Pool == nil {
+		r.Status = preflight.StatusSkipped
+		r.Message = "Database pool not available"
+		return r
+	}
+
+	err := database.DetectDirtyMigrations(ctx, env.Pool)
+	if err != nil {
+		var dirtyErr database.ErrDirtyMigration
+		if errors.As(err, &dirtyErr) {
+			r.Status = preflight.StatusFail
+			r.Message = fmt.Sprintf("Migration in dirty state (success=FALSE): version %d (%s)", dirtyErr.Version, dirtyErr.Filename)
+			r.Remediation = fmt.Sprintf("Run 'attune migrations repair --version %d'", dirtyErr.Version)
+			return r
+		}
+		r.Status = preflight.StatusFail
+		r.Message = fmt.Sprintf("Failed to check dirty migrations: %v", err)
+		return r
+	}
+
+	r.Status = preflight.StatusPass
+	r.Message = "No dirty migrations found"
+	return r
+}
+
+// checkMigrationManifest verifies migration ordering hasn't changed.
+func checkMigrationManifest(ctx context.Context, env *preflight.Environment) preflight.Result {
+	r := preflight.Result{
+		Name:     "migration:manifest",
+		Category: preflight.CategoryMigration,
+	}
+
+	if env.Pool == nil {
+		r.Status = preflight.StatusSkipped
+		r.Message = "Database pool not available"
+		return r
+	}
+
+	err := database.VerifyManifestHash(ctx, env.Pool)
+	if err != nil {
+		var reorderErr database.ErrManifestReorder
+		if errors.As(err, &reorderErr) {
+			r.Status = preflight.StatusFail
+			r.Message = "Migration reordering detected"
+			r.Remediation = "Restore original migration order from git history"
+			return r
+		}
+		r.Status = preflight.StatusFail
+		r.Message = fmt.Sprintf("Failed to verify manifest hash: %v", err)
+		return r
+	}
+
+	r.Status = preflight.StatusPass
+	r.Message = "Migration manifest verified"
 	return r
 }

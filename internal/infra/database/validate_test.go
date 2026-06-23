@@ -2,6 +2,7 @@ package database
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -102,5 +103,93 @@ func TestCountSemicolons(t *testing.T) {
 				t.Errorf("countSemicolons() = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestErrNoTxViolation_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      ErrNoTxViolation
+		contains []string
+	}{
+		{
+			name: "single violation",
+			err: ErrNoTxViolation{
+				Violations: []NoTxViolation{
+					{Filename: "070_add_idx.sql", Reason: "multiple statements (3 semicolons)"},
+				},
+			},
+			contains: []string{
+				"no-transaction migration violations",
+				"070_add_idx.sql",
+				"multiple statements (3 semicolons)",
+				"must be single-statement and idempotent",
+			},
+		},
+		{
+			name: "multiple violations",
+			err: ErrNoTxViolation{
+				Violations: []NoTxViolation{
+					{Filename: "050_idx_a.sql", Reason: "no idempotency guard"},
+					{Filename: "051_idx_b.sql", Reason: "multiple statements (2 semicolons)"},
+				},
+			},
+			contains: []string{
+				"050_idx_a.sql",
+				"no idempotency guard",
+				"051_idx_b.sql",
+				"multiple statements (2 semicolons)",
+			},
+		},
+		{
+			name: "empty violations list",
+			err:  ErrNoTxViolation{Violations: []NoTxViolation{}},
+			contains: []string{
+				"no-transaction migration violations",
+				"must be single-statement and idempotent",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := tc.err.Error()
+			if msg == "" {
+				t.Fatal("error message should not be empty")
+			}
+			for _, substr := range tc.contains {
+				if !strings.Contains(msg, substr) {
+					t.Errorf("error message missing %q\ngot: %s", substr, msg)
+				}
+			}
+		})
+	}
+}
+
+func TestNoTxViolation_Fields(t *testing.T) {
+	// Verify struct fields are accessible and properly typed
+	v := NoTxViolation{
+		Filename: "070_concurrent_idx.sql",
+		Reason:   "no idempotency guard (IF NOT EXISTS / IF EXISTS / CONCURRENTLY)",
+	}
+	if v.Filename != "070_concurrent_idx.sql" {
+		t.Errorf("Filename = %s, want 070_concurrent_idx.sql", v.Filename)
+	}
+	if v.Reason == "" {
+		t.Error("Reason should not be empty")
+	}
+}
+
+func TestDuplicatePrefix_Fields(t *testing.T) {
+	// Verify struct fields are accessible and properly typed
+	d := DuplicatePrefix{
+		Prefix: 58,
+		Files:  []string{"058_foo.sql", "058_bar.sql"},
+	}
+	if d.Prefix != 58 {
+		t.Errorf("Prefix = %d, want 58", d.Prefix)
+	}
+	if len(d.Files) != 2 {
+		t.Errorf("Files length = %d, want 2", len(d.Files))
 	}
 }

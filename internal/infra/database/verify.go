@@ -2,9 +2,11 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/infra/metrics"
@@ -254,7 +256,7 @@ func VerifyManifestHashConn(ctx context.Context, conn *pgxpool.Conn) error {
 	err = conn.QueryRow(ctx,
 		`SELECT hash FROM schema_migrations_manifest WHERE id = 1`).Scan(&stored)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			// No manifest stored yet
 			return nil
 		}

@@ -817,6 +817,190 @@ For breaking schema changes, use the expand-contract pattern:
 
 This ensures zero-downtime deploys with rollback capability at each step.
 
+#### Dirty state recovery
+
+A migration is in "dirty" state when it started but did not complete (e.g., the
+process crashed mid-apply). On next startup, attune detects this and refuses to
+continue.
+
+**Error message format:**
+
+```
+dirty migration detected: version 42 (042_add_index.sql) started but did not complete
+
+This indicates a previous migration attempt crashed or was interrupted.
+
+Recovery options:
+  1. If the migration partially applied, manually verify database state
+  2. Run 'attune migrations repair --version 42' to mark it resolved
+  3. If safe to retry, delete the row: DELETE FROM schema_migrations_feedback WHERE version = 42
+```
+
+**Recovery steps:**
+
+1. Inspect the database to determine how much of the migration applied:
+   ```sql
+   \d+ table_name  -- check if column/index exists
+   ```
+
+2. If the migration fully applied (just the tracker didn't update):
+   ```bash
+   attune migrations repair --version 42
+   ```
+
+3. If partially applied, either:
+   - Manually complete the remaining statements, then repair
+   - Manually undo the partial changes, delete the tracker row, and let it
+     re-apply:
+     ```sql
+     DELETE FROM schema_migrations_feedback WHERE version = 42;
+     ```
+
+#### Manifest hash mismatch
+
+The manifest hash detects migration reordering—inserting a new migration between
+existing ones or renumbering files after they've been applied. Migrations must
+be applied in the same order they were originally recorded.
+
+**Error message format:**
+
+```
+migration reordering detected:
+  stored manifest:   a1b2c3d4
+  computed manifest: e5f6g7h8
+
+This happens when migrations are reordered (e.g., inserting a new file
+between existing ones). Migration order must match the order in which
+they were originally applied.
+
+Recovery options:
+  - Restore original migration order from git history
+  - If reordering was intentional, update stored manifest (see docs/private-deploy.md)
+```
+
+**Recovery steps:**
+
+1. If the reordering was accidental, restore the original order from git:
+   ```bash
+   git log -p -- internal/infra/database/migrations/
+   ```
+
+2. If reordering was intentional and safe (e.g., renumbering gaps), update the
+   stored manifest:
+   ```sql
+   -- First compute the new manifest hash
+   -- Run: attune migrations verify --format json | jq .manifest_hash
+   UPDATE schema_migrations_manifest SET hash = '<new-hash>', updated_at = NOW() WHERE id = 1;
+   ```
+
+### Repair command
+
+Marks a dirty or failed migration as successfully applied and recalculates its
+checksum from the current embedded file.
+
+```bash
+attune migrations repair --version N [--force]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--version N` | Migration version to repair (required) |
+| `--force` | Skip confirmation prompt |
+
+**When to use:**
+
+- Migration crashed after applying SQL but before updating tracker
+- You manually verified/completed a partial migration
+- Migration file was intentionally modified after apply (recalculate checksum)
+
+**What it does:**
+
+1. Sets `success = TRUE` in the tracker
+2. Recalculates and stores the checksum from the current embedded file
+3. Records the repair operation in `applied_by`
+
+### Baseline command
+
+Records migrations 1..N as already applied without executing them. Use this to
+adopt an existing database that was migrated externally (e.g., manual SQL or
+another migration tool).
+
+```bash
+attune migrations baseline --version N [--force]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--version N` | Target version—marks migrations 1 through N as applied (required) |
+| `--force` | Skip confirmation prompt |
+
+**Safety:** Baseline only works on databases with an empty tracker table. If any
+migrations are already tracked, the command fails. This prevents accidental
+re-baselining of a production database.
+
+**What it does:**
+
+1. Creates the tracker table if missing
+2. Inserts records for migrations 1..N with current checksums
+3. Marks all as `success = TRUE` with `applied_by = baseline:<version>`
+
+### CLI reference
+
+All migration commands use `--config` to locate the database (same as `attune server`).
+
+```bash
+attune migrations status [--format text|json] [--pending]
+attune migrations verify [--format text|json]
+attune migrations dry-run
+attune migrations repair --version N [--force]
+attune migrations baseline --version N [--force]
+```
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Failure (error printed to stderr) |
+
+**JSON output examples:**
+
+`attune migrations status --format json`:
+```json
+{
+  "total": 72,
+  "applied": 72,
+  "pending": 0,
+  "migrations": [
+    {
+      "version": 1,
+      "filename": "001_initial.sql",
+      "status": "applied",
+      "applied_at": "2024-01-15T10:30:00Z",
+      "checksum": "a1b2c3d4e5f6...",
+      "duration_ms": 45,
+      "applied_by": "attune/v0.9.0"
+    }
+  ],
+  "checksums": {
+    "total": 72,
+    "verified": 72,
+    "drifted": []
+  },
+  "duplicates": []
+}
+```
+
+`attune migrations verify --format json`:
+```json
+{
+  "duplicates": true,
+  "checksums": true,
+  "no_tx": true,
+  "passed": true
+}
+```
+
 ---
 
 ## References

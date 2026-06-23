@@ -21,10 +21,12 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/infra/metrics"
@@ -206,7 +208,8 @@ func applyPendingMigrations(ctx context.Context, conn *pgxpool.Conn, names []str
 		if !hasExtendedCols && hasExtendedColumns(ctx, conn) {
 			hasExtendedCols = true
 			if err := backfillChecksums(ctx, conn, names); err != nil {
-				logext.Warnf(ctx, "[%s] checksum backfill failed,err:%+v", where, err.Error())
+				logext.Errorf(ctx, "[%s] checksum backfill failed,err:%+v", where, err.Error())
+				return fmt.Errorf("backfill checksums: %w", err)
 			}
 		}
 	}
@@ -217,15 +220,25 @@ func applyPendingMigrations(ctx context.Context, conn *pgxpool.Conn, names []str
 	// Store manifest hash after all migrations are applied.
 	// This creates or updates the hash for reordering detection on next startup.
 	if hasManifestTable(ctx, conn) {
-		manifestHash, err := ManifestHash(names)
-		if err != nil {
-			logext.Warnf(ctx, "[%s] compute manifest hash failed,err:%+v", where, err.Error())
-		} else if err := StoreManifestHash(ctx, conn, manifestHash); err != nil {
-			logext.Warnf(ctx, "[%s] store manifest hash failed,err:%+v", where, err.Error())
-		} else {
-			logext.Infof(ctx, "[%s] manifest hash stored,hash:%s", where, ChecksumShort(manifestHash))
+		if err := storeManifestHashSafe(ctx, conn, names); err != nil {
+			return err
 		}
 	}
+	return nil
+}
+
+func storeManifestHashSafe(ctx context.Context, conn *pgxpool.Conn, names []string) error {
+	const where = "database.RunMigrations"
+	manifestHash, err := ManifestHash(names)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] compute manifest hash failed,err:%+v", where, err.Error())
+		return fmt.Errorf("compute manifest hash: %w", err)
+	}
+	if err := StoreManifestHash(ctx, conn, manifestHash); err != nil {
+		logext.Errorf(ctx, "[%s] store manifest hash failed,err:%+v", where, err.Error())
+		return fmt.Errorf("store manifest hash: %w", err)
+	}
+	logext.Infof(ctx, "[%s] manifest hash stored,hash:%s", where, ChecksumShort(manifestHash))
 	return nil
 }
 
@@ -304,12 +317,30 @@ func detectDirtyMigrations(ctx context.Context, conn *pgxpool.Conn) error {
 		SELECT version, filename FROM %s WHERE success = FALSE LIMIT 1
 	`, trackerTable)).Scan(&version, &filename)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		return fmt.Errorf("check dirty migrations: %w", err)
 	}
 	return ErrDirtyMigration{Version: version, Filename: filename}
+}
+
+// DetectDirtyMigrations checks for migrations in dirty state (success=FALSE).
+// Returns ErrDirtyMigration if found, nil otherwise.
+// Skips check if the database lacks extended columns (pre-070).
+func DetectDirtyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire connection: %w", err)
+	}
+	defer conn.Release()
+
+	if !hasExtendedColumns(ctx, conn) {
+		// Pre-070 database, no success column to check
+		return nil
+	}
+
+	return detectDirtyMigrations(ctx, conn)
 }
 
 // applyMigrationTx runs a migration and records it atomically in one transaction.
