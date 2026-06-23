@@ -169,6 +169,7 @@ type Router struct {
 	oidc               *consoleoidc.Handler
 	members            *member.Handler
 	mcpClients         *consolemcpclient.Handler
+	preflight          http.Handler
 	admins             adminReader
 	rbac               *rbac.Middleware
 }
@@ -312,6 +313,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountNotifyTargets(m)
 	r.mountOutbox(m)
 	r.mountMCPClients(m)
+	r.mountPreflight(m)
 	r.mountDigestSubscription(m)
 	r.mountFeedback(m)
 	m.Group(func(u chi.Router) {
@@ -2280,4 +2282,20 @@ func (r *Router) authProviders(w http.ResponseWriter, req *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// SetPreflightHandler sets the system preflight handler for production
+// readiness checks (#149).
+func (r *Router) SetPreflightHandler(h http.Handler) {
+	r.preflight = h
+}
+
+func (r *Router) mountPreflight(m chi.Router) {
+	if r.preflight == nil {
+		return
+	}
+	m.Route("/system", func(s chi.Router) {
+		s.Use(r.requireAdmin)
+		s.Get("/preflight", r.preflight.ServeHTTP)
+	})
 }

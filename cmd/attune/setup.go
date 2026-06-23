@@ -16,7 +16,9 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
+	"github.com/Phixsura/attune/internal/handlers/console/system"
 	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
@@ -63,6 +65,9 @@ import (
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
 	"github.com/Phixsura/attune/internal/service/semanticsearch"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
+
+	"github.com/Phixsura/attune/internal/preflight"
+	preflightchecks "github.com/Phixsura/attune/internal/preflight/checks"
 )
 
 // syncCustomWebhooks upserts every entry in cfg.CustomWebhooks into
@@ -242,11 +247,9 @@ func buildConsoleRouter(
 	batchSvc := feedbackbatch.New(feedbackRepo, idempotencyRepo, jobRepo, batchRateLimiter, batchConcurrency)
 	batchHandler := console.NewBatchHandler(batchSvc)
 
-	// Semantic search service dependencies.
-	searchRouter := llmrouter.New(llmconfigrepo.New(pool), secrets)
-	searchSvc := semanticsearch.New(feedbackRepo, searchRouter,
-		ratelimit.NewMemorySlidingLimiter(), semanticsearch.NewPGCache(pool))
-	searchHandler := console.NewSearchHandler(searchSvc)
+	searchHandler := console.NewSearchHandler(semanticsearch.New(feedbackRepo,
+		llmrouter.New(llmconfigrepo.New(pool), secrets),
+		ratelimit.NewMemorySlidingLimiter(), semanticsearch.NewPGCache(pool)))
 
 	// Job handler uses batch service (implements jobService interface).
 	jobHandler := feedbackjob.NewHandler(batchSvc)
@@ -281,6 +284,7 @@ func buildConsoleRouter(
 	)
 	attachOutboxHandler(router, pool, auditLogSvc)
 	attachMCPClientHandler(router, pool, auditLogSvc)
+	attachPreflightHandler(router, cfg, pool)
 	return router.Mount(), nil
 }
 
@@ -291,6 +295,13 @@ func attachOutboxHandler(router *console.Router, pool *pgxpool.Pool, audit *audi
 	h := console.NewOutboxHandler(outboxrepo.NewOutbox(pool))
 	h.SetAuditLogger(audit)
 	router.SetOutboxHandler(h)
+}
+
+// attachPreflightHandler wires the production readiness preflight handler (#149).
+func attachPreflightHandler(router *console.Router, cfg *config.Config, pool *pgxpool.Pool) {
+	env := ptrext.Of(preflight.Environment{Cfg: cfg, Pool: pool})
+	preflightchecks.SetMigrationTotal(database.MigrationCount())
+	router.SetPreflightHandler(system.NewPreflightHandler(env))
 }
 
 // attachMCPClientHandler wires the MCP OAuth client console handler (#93).
