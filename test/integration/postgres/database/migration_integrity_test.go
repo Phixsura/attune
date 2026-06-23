@@ -920,3 +920,221 @@ func TestMigrations_VerifyManifestHashConn_WithReorder(t *testing.T) {
 	var reorderErr database.ErrManifestReorder
 	require.True(t, errors.As(err, &reorderErr))
 }
+
+func TestMigrations_RunMigrations_ChecksumDriftBlocks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Corrupt a checksum
+	_, err = pool.Exec(ctx, `UPDATE schema_migrations_feedback SET checksum = 'corrupted' WHERE version = 3`)
+	require.NoError(t, err)
+
+	// RunMigrations should fail on preflight check
+	err = database.RunMigrations(ctx, pool)
+	require.Error(t, err)
+
+	var driftErr database.ErrChecksumDrift
+	require.True(t, errors.As(err, &driftErr))
+}
+
+func TestMigrations_RunMigrations_ManifestReorderBlocks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Corrupt manifest hash
+	_, err = pool.Exec(ctx, `UPDATE schema_migrations_manifest SET hash = 'wrong' WHERE id = 1`)
+	require.NoError(t, err)
+
+	// RunMigrations should fail on preflight check
+	err = database.RunMigrations(ctx, pool)
+	require.Error(t, err)
+
+	var reorderErr database.ErrManifestReorder
+	require.True(t, errors.As(err, &reorderErr))
+}
+
+func TestMigrations_RunMigrations_DirtyMigrationBlocks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Mark an existing migration as dirty (success=FALSE)
+	_, err = pool.Exec(ctx, `UPDATE schema_migrations_feedback SET success = FALSE WHERE version = 5`)
+	require.NoError(t, err)
+
+	// RunMigrations should fail on dirty migration detection
+	err = database.RunMigrations(ctx, pool)
+	require.Error(t, err)
+
+	var dirtyErr database.ErrDirtyMigration
+	require.True(t, errors.As(err, &dirtyErr))
+	require.Equal(t, 5, dirtyErr.Version)
+}
+
+func TestMigrations_DetectDirtyMigrations_Found(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Mark an existing migration as dirty
+	_, err = pool.Exec(ctx, `UPDATE schema_migrations_feedback SET success = FALSE WHERE version = 10`)
+	require.NoError(t, err)
+
+	err = database.DetectDirtyMigrations(ctx, pool)
+	require.Error(t, err)
+
+	var dirtyErr database.ErrDirtyMigration
+	require.True(t, errors.As(err, &dirtyErr))
+	require.Equal(t, 10, dirtyErr.Version)
+}
+
+func TestMigrations_GetChecksumStatus_AllVerified(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	status, err := database.GetChecksumStatus(ctx, pool)
+	require.NoError(t, err)
+
+	require.Equal(t, database.MigrationCount(), status.Total)
+	require.Equal(t, database.MigrationCount(), status.Verified)
+	require.Empty(t, status.Drifted)
+}
+
+func TestMigrations_GetChecksumStatus_WithMismatch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Corrupt checksum
+	_, err = pool.Exec(ctx, `UPDATE schema_migrations_feedback SET checksum = 'wrong' WHERE version = 10`)
+	require.NoError(t, err)
+
+	status, err := database.GetChecksumStatus(ctx, pool)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, len(status.Drifted))
+	require.Equal(t, 10, status.Drifted[0].Version)
+}
+
+func TestMigrations_HasExtendedColumns(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// After migration 070, should have extended columns
+	// This is tested implicitly by DetectDirtyMigrations working
+	err = database.DetectDirtyMigrations(ctx, pool)
+	require.NoError(t, err)
+}
+
+func TestMigrations_IsMigrationApplied(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Check via status
+	status, err := database.GetMigrationStatus(ctx, pool)
+	require.NoError(t, err)
+
+	for _, m := range status.Migrations {
+		require.Equal(t, "applied", m.Status)
+	}
+}
+
+func TestMigrations_ApplySingleMigration_AlreadyApplied(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	// Run migrations twice - second run should skip all
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	var count1 int
+	err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM schema_migrations_feedback`).Scan(&count1)
+	require.NoError(t, err)
+
+	err = database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	var count2 int
+	err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM schema_migrations_feedback`).Scan(&count2)
+	require.NoError(t, err)
+
+	require.Equal(t, count1, count2, "no new migrations should be applied")
+}
+
+func TestMigrations_CheckPgvector_NoClustering(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// No clustering enabled - should pass
+	err = database.CheckPgvector(ctx, pool)
+	require.NoError(t, err)
+}
+
+func TestMigrations_QueryAppliedMigrations_Extended(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	status, err := database.GetMigrationStatus(ctx, pool)
+	require.NoError(t, err)
+
+	// All applied migrations should have at least AppliedAt
+	var appliedCount int
+	for _, m := range status.Migrations {
+		if m.Status == "applied" {
+			appliedCount++
+			require.NotNil(t, m.AppliedAt, "migration %d should have AppliedAt", m.Version)
+			// Checksum may be empty for very old legacy rows, but fresh deploy has them
+			require.NotNil(t, m.Checksum, "migration %d should have Checksum", m.Version)
+		}
+	}
+	require.Equal(t, database.MigrationCount(), appliedCount)
+}
