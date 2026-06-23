@@ -696,3 +696,101 @@ func TestMigrations_ConfirmLarkDelete_WithLarkRows(t *testing.T) {
 	err = database.ConfirmLarkDelete(ctx, pool, true)
 	require.NoError(t, err)
 }
+
+func TestMigrations_ScanMigrationRow_LegacyFormat(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Get status should work with extended columns
+	status, err := database.GetMigrationStatus(ctx, pool)
+	require.NoError(t, err)
+	require.NotEmpty(t, status.Migrations)
+
+	// First migration should have all extended fields
+	first := status.Migrations[0]
+	require.NotNil(t, first.AppliedAt)
+	// Checksum may be nil for legacy rows, but should exist for fresh deploy
+	require.NotNil(t, first.Checksum)
+}
+
+func TestMigrations_QueryAppliedVersions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	// Delete some migrations to test partial state
+	_, err := pool.Exec(ctx, `DELETE FROM schema_migrations_feedback WHERE version > 50`)
+	require.NoError(t, err)
+
+	// Get pending should show versions 51+
+	pending, err := database.GetPendingMigrations(ctx, pool)
+	require.NoError(t, err)
+	require.Equal(t, database.MigrationCount()-50, len(pending))
+}
+
+func TestMigrations_StoreManifestHash(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Verify manifest hash is stored
+	var hash string
+	err = pool.QueryRow(ctx, `SELECT hash FROM schema_migrations_manifest WHERE id = 1`).Scan(&hash)
+	require.NoError(t, err)
+	require.Len(t, hash, 64)
+
+	// Compute expected hash
+	names, err := database.LoadMigrationNames()
+	require.NoError(t, err)
+	expectedHash, err := database.ManifestHash(names)
+	require.NoError(t, err)
+	require.Equal(t, expectedHash, hash)
+}
+
+func TestMigrations_BackfillChecksums(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Verify all checksums are filled after fresh deploy
+	var emptyCount int
+	err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM schema_migrations_feedback WHERE checksum = ''`).Scan(&emptyCount)
+	require.NoError(t, err)
+	require.Equal(t, 0, emptyCount, "fresh deploy should have all checksums filled")
+
+	// Verify all checksums are non-empty
+	var withChecksum int
+	err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM schema_migrations_feedback WHERE checksum != ''`).Scan(&withChecksum)
+	require.NoError(t, err)
+	require.Equal(t, database.MigrationCount(), withChecksum)
+}
+
+func TestMigrations_GetChecksumStatus_EmptyDB(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	// Delete all migrations
+	_, err := pool.Exec(ctx, `DELETE FROM schema_migrations_feedback`)
+	require.NoError(t, err)
+
+	status, err := database.GetChecksumStatus(ctx, pool)
+	require.NoError(t, err)
+	require.Equal(t, 0, status.Total)
+	require.Equal(t, 0, status.Verified)
+}
