@@ -47,53 +47,56 @@ func TestAsLogParamMarshalError(t *testing.T) {
 	}
 }
 
-func TestInfof(t *testing.T) {
-	t.Parallel()
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, nil))
-	slog.SetDefault(logger)
+// TestLogFunctions tests Infof, Warnf, Errorf sequentially because they call
+// slog.SetDefault which modifies global state.
+func TestLogFunctions(t *testing.T) {
+	// NOT parallel — these tests modify slog.SetDefault global state
 
-	Infof(context.Background(), "test %s %d", "message", 42)
+	t.Run("Infof", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		slog.SetDefault(logger)
 
-	output := buf.String()
-	if !strings.Contains(output, "test message 42") {
-		t.Errorf("Infof output = %q, want to contain 'test message 42'", output)
-	}
-	if !strings.Contains(output, "INFO") {
-		t.Errorf("Infof output = %q, want to contain 'INFO'", output)
-	}
-}
+		Infof(context.Background(), "test %s %d", "message", 42)
 
-func TestWarnf(t *testing.T) {
-	t.Parallel()
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, nil))
-	slog.SetDefault(logger)
+		output := buf.String()
+		if !strings.Contains(output, "test message 42") {
+			t.Errorf("Infof output = %q, want to contain 'test message 42'", output)
+		}
+		if !strings.Contains(output, "INFO") {
+			t.Errorf("Infof output = %q, want to contain 'INFO'", output)
+		}
+	})
 
-	Warnf(context.Background(), "warning %s", "test")
+	t.Run("Warnf", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		slog.SetDefault(logger)
 
-	output := buf.String()
-	if !strings.Contains(output, "warning test") {
-		t.Errorf("Warnf output = %q, want to contain 'warning test'", output)
-	}
-	if !strings.Contains(output, "WARN") {
-		t.Errorf("Warnf output = %q, want to contain 'WARN'", output)
-	}
-}
+		Warnf(context.Background(), "warning %s", "test")
 
-func TestErrorf(t *testing.T) {
-	t.Parallel()
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, nil))
-	slog.SetDefault(logger)
+		output := buf.String()
+		if !strings.Contains(output, "warning test") {
+			t.Errorf("Warnf output = %q, want to contain 'warning test'", output)
+		}
+		if !strings.Contains(output, "WARN") {
+			t.Errorf("Warnf output = %q, want to contain 'WARN'", output)
+		}
+	})
 
-	Errorf(context.Background(), "error %d", 500)
+	t.Run("Errorf", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		slog.SetDefault(logger)
 
-	output := buf.String()
-	if !strings.Contains(output, "error 500") {
-		t.Errorf("Errorf output = %q, want to contain 'error 500'", output)
-	}
-	if !strings.Contains(output, "ERROR") {
-		t.Errorf("Errorf output = %q, want to contain 'ERROR'", output)
-	}
+		Errorf(context.Background(), "error %d", 500)
+
+		output := buf.String()
+		if !strings.Contains(output, "error 500") {
+			t.Errorf("Errorf output = %q, want to contain 'error 500'", output)
+		}
+		if !strings.Contains(output, "ERROR") {
+			t.Errorf("Errorf output = %q, want to contain 'ERROR'", output)
+		}
+	})
 }

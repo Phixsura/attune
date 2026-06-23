@@ -17,7 +17,7 @@ func TestMigrations_FreshDB_HasChecksums(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	pool := testdb.New(t)
+	pool := testdb.NewPool(t)
 
 	// Run migrations
 	err := database.RunMigrations(ctx, pool)
@@ -40,7 +40,7 @@ func TestMigrations_ChecksumDriftDetected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	pool := testdb.New(t)
+	pool := testdb.NewPool(t)
 
 	// Run migrations first
 	err := database.RunMigrations(ctx, pool)
@@ -86,7 +86,7 @@ func TestMigrations_StatusShowsAllMigrations(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	pool := testdb.New(t)
+	pool := testdb.NewPool(t)
 
 	// Run migrations
 	err := database.RunMigrations(ctx, pool)
@@ -107,7 +107,7 @@ func TestMigrations_DryRunShowsPending(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	pool := testdb.New(t)
+	pool := testdb.NewPool(t)
 
 	// Don't run migrations, just create tracker table
 	_, err := pool.Exec(ctx, `
