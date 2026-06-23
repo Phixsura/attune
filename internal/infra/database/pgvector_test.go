@@ -96,3 +96,19 @@ func TestCheckPgvectorVersion_BoundaryConditions(t *testing.T) {
 	err = checkPgvectorVersion("10.20.30")
 	require.NoError(t, err)
 }
+
+func TestCheckPgvectorVersion_NonNumericParts(t *testing.T) {
+	t.Parallel()
+
+	// Non-numeric major
+	err := checkPgvectorVersion("abc.5.0")
+	require.NoError(t, err, "non-numeric major should assume ok")
+
+	// Non-numeric minor
+	err = checkPgvectorVersion("0.xyz.0")
+	require.NoError(t, err, "non-numeric minor should assume ok")
+
+	// Both non-numeric
+	err = checkPgvectorVersion("abc.xyz")
+	require.NoError(t, err, "both non-numeric should assume ok")
+}
