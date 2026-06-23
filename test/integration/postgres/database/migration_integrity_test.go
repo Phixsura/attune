@@ -1138,3 +1138,114 @@ func TestMigrations_QueryAppliedMigrations_Extended(t *testing.T) {
 	}
 	require.Equal(t, database.MigrationCount(), appliedCount)
 }
+
+func TestMigrations_StoreManifestHash_Fresh(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	// Delete manifest table content before running
+	_, _ = pool.Exec(ctx, `TRUNCATE schema_migrations_manifest`)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Verify manifest was stored
+	var hash string
+	err = pool.QueryRow(ctx, `SELECT hash FROM schema_migrations_manifest WHERE id = 1`).Scan(&hash)
+	require.NoError(t, err)
+	require.Len(t, hash, 64)
+}
+
+func TestMigrations_EnsureTrackerTable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Verify tracker table exists with expected columns
+	var count int
+	err = pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM information_schema.columns
+		WHERE table_name = 'schema_migrations_feedback'
+		AND column_name IN ('version', 'filename', 'applied_at', 'checksum', 'duration_ms', 'applied_by', 'success')
+	`).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 7, count, "tracker table should have 7 expected columns")
+}
+
+func TestMigrations_ReleaseMigrationLock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	// Running migrations multiple times tests lock acquire/release
+	for i := 0; i < 3; i++ {
+		err := database.RunMigrations(ctx, pool)
+		require.NoError(t, err)
+	}
+
+	// Lock should be released after each run
+	// We can verify by checking that we can acquire a new connection
+	conn, err := pool.Acquire(ctx)
+	require.NoError(t, err)
+	conn.Release()
+}
+
+func TestMigrations_CheckPgvector_Version(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Get pgvector version
+	var version string
+	err = pool.QueryRow(ctx, `SELECT extversion FROM pg_extension WHERE extname = 'vector'`).Scan(&version)
+	require.NoError(t, err)
+	require.NotEmpty(t, version)
+
+	// CheckPgvector should pass
+	err = database.CheckPgvector(ctx, pool)
+	require.NoError(t, err)
+}
+
+func TestMigrations_LoadMigrationNames_All(t *testing.T) {
+	t.Parallel()
+
+	names, err := database.LoadMigrationNames()
+	require.NoError(t, err)
+
+	// Should have 71 migrations
+	require.Len(t, names, 71)
+
+	// First and last
+	require.Equal(t, "001_init.sql", names[0])
+	require.Equal(t, "071_manifest_hash.sql", names[70])
+
+	// All should be .sql files
+	for _, n := range names {
+		require.True(t, len(n) > 4 && n[len(n)-4:] == ".sql", "should be .sql file: %s", n)
+	}
+}
+
+func TestMigrations_VerifyChecksums_PreExtendedColumns(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// All checksums should match
+	err = database.VerifyChecksums(ctx, pool)
+	require.NoError(t, err)
+}
