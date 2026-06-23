@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
-- **Migration checksum ledger and integrity verification (#150).** Enterprise-
-  grade migration tracking for production deployments. Includes:
+- **Migration checksum ledger and integrity verification (#150).** World-class
+  migration tracking for production deployments, matching Flyway/Prisma/Atlas
+  capabilities. Includes:
   - SHA-256 checksum verification for all applied migrations (drift detection)
+  - Manifest hash for reordering detection (linear hash chain, Atlas pattern)
+  - Dirty state detection with two-phase write (success=FALSE marker)
   - Duplicate numeric prefix detection at startup (fails before any apply)
   - Execution metadata: `duration_ms`, `applied_by` (binary version), `success`
-  - New CLI commands: `attune migrations status`, `verify`, `dry-run`
+  - CLI commands: `status`, `verify`, `dry-run`, `repair`, `baseline`
+  - Prometheus metrics: `attune_migration_*` (applied, duration, pending, drift)
+  - Grafana dashboard panels and alert rules for migration monitoring
   - New preflight check: `migration:integrity` (checksums + duplicates)
   - CI lint script: `scripts/lint-migrations.sh` (naming, no-tx validation)
   - Recovery procedures documented in `docs/private-deploy.md`
