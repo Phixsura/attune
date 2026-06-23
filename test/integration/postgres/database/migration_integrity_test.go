@@ -107,19 +107,15 @@ func TestMigrations_DryRunShowsPending(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	pool := testdb.NewPool(t)
+	pool := testdb.NewPool(t) // Already migrated
 
-	// Don't run migrations, just create tracker table
-	_, err := pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS schema_migrations_feedback (
-			version INT PRIMARY KEY,
-			filename TEXT NOT NULL,
-			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)
-	`)
+	// Clear all migration records to simulate a fresh state with tracker table
+	_, err := pool.Exec(ctx, `DELETE FROM schema_migrations_feedback`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `DELETE FROM schema_migrations_manifest`)
 	require.NoError(t, err)
 
-	// Get pending migrations
+	// Get pending migrations - all should be pending now
 	pending, err := database.GetPendingMigrations(ctx, pool)
 	require.NoError(t, err)
 
