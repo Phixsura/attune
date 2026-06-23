@@ -70,6 +70,11 @@ func GetMigrationStatus(ctx context.Context, pool *pgxpool.Pool) (MigrationStatu
 }
 
 func queryAppliedMigrations(ctx context.Context, conn *pgxpool.Conn) (map[int]MigrationDetail, error) {
+	// Check if tracker table exists (fresh database has no migrations)
+	if !trackerTableExists(ctx, conn) {
+		return make(map[int]MigrationDetail), nil
+	}
+
 	hasExtended := hasExtendedColumns(ctx, conn)
 	query := buildMigrationQuery(hasExtended)
 
@@ -179,6 +184,11 @@ func GetPendingMigrations(ctx context.Context, pool *pgxpool.Pool) ([]MigrationF
 }
 
 func queryAppliedVersions(ctx context.Context, conn *pgxpool.Conn) (map[int]bool, error) {
+	// Check if tracker table exists (fresh database has no migrations)
+	if !trackerTableExists(ctx, conn) {
+		return make(map[int]bool), nil
+	}
+
 	rows, err := conn.Query(ctx, `SELECT version FROM schema_migrations_feedback`)
 	if err != nil {
 		return nil, fmt.Errorf("query applied: %w", err)
@@ -218,4 +228,15 @@ func buildPendingMigrations(names []string, appliedSet map[int]bool) ([]Migratio
 		})
 	}
 	return pending, nil
+}
+
+// trackerTableExists checks if the migration tracker table exists.
+func trackerTableExists(ctx context.Context, conn *pgxpool.Conn) bool {
+	var exists bool
+	err := conn.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_name = 'schema_migrations_feedback'
+		)`).Scan(&exists)
+	return err == nil && exists
 }

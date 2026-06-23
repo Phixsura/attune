@@ -230,6 +230,8 @@ type verificationResults struct {
 	DuplicatesError string `json:"duplicates_error,omitempty"`
 	Checksums       bool   `json:"checksums"`
 	ChecksumsError  string `json:"checksums_error,omitempty"`
+	Manifest        bool   `json:"manifest"`
+	ManifestError   string `json:"manifest_error,omitempty"`
 	NoTx            bool   `json:"no_tx"`
 	NoTxError       string `json:"no_tx_error,omitempty"`
 	Passed          bool   `json:"passed"`
@@ -240,19 +242,24 @@ func runVerificationChecks(ctx context.Context, pool *pgxpool.Pool) verification
 
 	dupErr := database.DetectDuplicatePrefixes(names)
 	checksumErr := database.VerifyChecksums(ctx, pool)
+	manifestErr := database.VerifyManifestHash(ctx, pool)
 	noTxErr := database.VerifyNoTxDirectives(names)
 
 	results := verificationResults{
 		Duplicates: dupErr == nil,
 		Checksums:  checksumErr == nil,
+		Manifest:   manifestErr == nil,
 		NoTx:       noTxErr == nil,
-		Passed:     dupErr == nil && checksumErr == nil && noTxErr == nil,
+		Passed:     dupErr == nil && checksumErr == nil && manifestErr == nil && noTxErr == nil,
 	}
 	if dupErr != nil {
 		results.DuplicatesError = dupErr.Error()
 	}
 	if checksumErr != nil {
 		results.ChecksumsError = checksumErr.Error()
+	}
+	if manifestErr != nil {
+		results.ManifestError = manifestErr.Error()
 	}
 	if noTxErr != nil {
 		results.NoTxError = noTxErr.Error()
@@ -265,6 +272,7 @@ func printVerificationResults(results verificationResults) error {
 
 	printCheckResult("Duplicates", results.Duplicates, results.DuplicatesError)
 	printCheckResult("Checksums", results.Checksums, results.ChecksumsError)
+	printCheckResult("Manifest hash", results.Manifest, results.ManifestError)
 	printCheckResult("No-tx directives", results.NoTx, results.NoTxError)
 
 	if !results.Passed {
