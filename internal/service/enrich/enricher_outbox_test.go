@@ -28,7 +28,7 @@ func sampleSnapshot(urgent bool) domain.Snapshot {
 }
 
 func TestBuildOutboxEnvelope_Version2WithAttrs(t *testing.T) {
-	payload, err := buildOutboxEnvelope(sampleSnapshot(true), "trace-abc")
+	payload, err := buildOutboxEnvelope(sampleSnapshot(true), "trace-abc", "API client")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -46,6 +46,12 @@ func TestBuildOutboxEnvelope_Version2WithAttrs(t *testing.T) {
 		t.Errorf("trace_id: %v", got["trace_id"])
 	}
 	fb := got["feedback"].(map[string]any)
+	if fb["source"] != "api" {
+		t.Errorf("source: %v", fb["source"])
+	}
+	if fb["source_display"] != "API client" {
+		t.Errorf("source_display: %v; want %q", fb["source_display"], "API client")
+	}
 	enriched := fb["enriched"].(map[string]any)
 	if enriched["title"] != "title" {
 		t.Errorf("title")
@@ -66,7 +72,7 @@ func TestBuildOutboxEnvelope_Version2WithAttrs(t *testing.T) {
 func TestBuildOutboxEnvelope_NilAttrsBecomesEmptyObject(t *testing.T) {
 	s := sampleSnapshot(false)
 	s.Attrs = nil
-	payload, err := buildOutboxEnvelope(s, "")
+	payload, err := buildOutboxEnvelope(s, "", domain.SourceDisplayName(s.Source))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,10 +93,32 @@ func TestBuildOutboxEnvelope_NilAttrsBecomesEmptyObject(t *testing.T) {
 	}
 }
 
+// TestBuildOutboxEnvelope_EmptySourceDisplayOmitted pins the omitempty contract:
+// when no display is resolved (an old in-flight row, or an enricher built without
+// a SourceSet), source_display must be ABSENT from the envelope so the
+// github-issue renderers fall back to domain.SourceDisplayName. A regression from
+// `omitempty` to a plain tag would emit "source_display":"" and defeat that
+// fallback's `if sourceDisplay == ""` check.
+func TestBuildOutboxEnvelope_EmptySourceDisplayOmitted(t *testing.T) {
+	t.Parallel()
+	payload, err := buildOutboxEnvelope(sampleSnapshot(false), "trace", "")
+	if err != nil {
+		t.Fatalf("buildOutboxEnvelope: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	fb := got["feedback"].(map[string]any)
+	if _, present := fb["source_display"]; present {
+		t.Errorf("empty source_display should be omitted (omitempty), but key is present: %v", fb["source_display"])
+	}
+}
+
 func TestBuildOutboxEnvelope_StableFieldOrder(t *testing.T) {
 	// Customer verifiers may rely on canonical JSON. encoding/json preserves
 	// struct field order; this snapshots the top-level key sequence.
-	payload, _ := buildOutboxEnvelope(sampleSnapshot(true), "t")
+	payload, _ := buildOutboxEnvelope(sampleSnapshot(true), "t", "API client")
 	s := string(payload)
 	// version, event_type, delivered_at, trace_id, feedback
 	idx := func(needle string) int {

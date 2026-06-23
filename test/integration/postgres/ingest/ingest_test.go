@@ -48,7 +48,7 @@ func TestPG_IngestEnrichQueuesAndDrainsOutbox(t *testing.T) {
 
 	feedbackRepo := feedback.NewFeedback(pool)
 	rawContent := "Payment form fails after submit, contact alice@example.com"
-	id, err := ingest.NewIngestor(feedbackRepo, nil).IngestRow(ctx, tenantID, uuid.New(), domain.IngestInput{
+	id, err := ingest.NewIngestor(feedbackRepo, nil, nil).IngestRow(ctx, tenantID, uuid.New(), domain.IngestInput{
 		Content:    rawContent,
 		Source:     "api",
 		SourceUser: "user-1",
@@ -108,7 +108,7 @@ func TestPG_SourceOverrideRequiresTrustedInboundSourceID(t *testing.T) {
 		llmguard.NewClient(adapterLLM, guardpolicy.New(pool)),
 		"fake-model",
 	)
-	adapterID, err := ingest.NewIngestor(feedbackRepo, nil).IngestRow(ctx, tenantID, uuid.Nil, domain.IngestInput{
+	adapterID, err := ingest.NewIngestor(feedbackRepo, nil, nil).IngestRow(ctx, tenantID, uuid.Nil, domain.IngestInput{
 		Content: "trusted webhook contact alice@example.com",
 		Source:  "webhook",
 		SourceMeta: map[string]any{
@@ -129,7 +129,7 @@ func TestPG_SourceOverrideRequiresTrustedInboundSourceID(t *testing.T) {
 		llmguard.NewClient(publicLLM, guardpolicy.New(pool)),
 		"fake-model",
 	)
-	publicID, err := ingest.NewIngestor(feedbackRepo, nil).IngestRow(ctx, tenantID, uuid.New(), domain.IngestInput{
+	publicID, err := ingest.NewIngestor(feedbackRepo, nil, nil).IngestRow(ctx, tenantID, uuid.New(), domain.IngestInput{
 		Content: "public spoof contact alice@example.com",
 		Source:  "webhook",
 		SourceMeta: map[string]any{
@@ -152,7 +152,7 @@ func TestPG_IngestWithoutSourceUserFallsBackToComposedUserIDForSubject(t *testin
 	feedbackRepo := feedback.NewFeedback(pool)
 	keyID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
 
-	id, err := ingest.NewIngestor(feedbackRepo, nil).IngestRow(ctx, tenantID, keyID, domain.IngestInput{
+	id, err := ingest.NewIngestor(feedbackRepo, nil, nil).IngestRow(ctx, tenantID, keyID, domain.IngestInput{
 		Content: "anonymous-but-addressable feedback",
 		Source:  "api",
 	})

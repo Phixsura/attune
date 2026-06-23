@@ -4,6 +4,7 @@ package guardpolicy
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -13,7 +14,7 @@ import (
 
 func TestReplaceTenantPolicies_NormalizesTenantAndDefaultsPriority(t *testing.T) {
 	store := &fakeStore{}
-	svc := NewService(store)
+	svc := NewService(store, nil)
 	_, err := svc.ReplaceTenantPolicies(context.Background(), "tenant-1", "user-1", []llmguard.Policy{{
 		ID:       "3b0b7a04-8778-4fa0-9152-0fc365f36fb7",
 		TenantID: "spoofed",
@@ -41,7 +42,7 @@ func TestReplaceTenantPolicies_NormalizesTenantAndDefaultsPriority(t *testing.T)
 }
 
 func TestReplaceTenantPolicies_RejectsTargetTenantSpoofing(t *testing.T) {
-	svc := NewService(&fakeStore{})
+	svc := NewService(&fakeStore{}, nil)
 	_, err := svc.ReplaceTenantPolicies(context.Background(), "tenant-1", "user-1", []llmguard.Policy{{
 		Name:    "Target spoof",
 		Kind:    llmguard.KindDefault,
@@ -57,7 +58,7 @@ func TestReplaceTenantPolicies_RejectsTargetTenantSpoofing(t *testing.T) {
 }
 
 func TestReplaceTenantPolicies_RejectsUnsupportedReservedActions(t *testing.T) {
-	svc := NewService(&fakeStore{})
+	svc := NewService(&fakeStore{}, nil)
 	_, err := svc.ReplaceTenantPolicies(context.Background(), "tenant-1", "user-1", []llmguard.Policy{{
 		Name:    "Tokenize later",
 		Kind:    llmguard.KindDefault,
@@ -72,7 +73,7 @@ func TestReplaceTenantPolicies_RejectsUnsupportedReservedActions(t *testing.T) {
 }
 
 func TestReplaceTenantPolicies_RejectsUnsafeReplacement(t *testing.T) {
-	svc := NewService(&fakeStore{})
+	svc := NewService(&fakeStore{}, nil)
 	_, err := svc.ReplaceTenantPolicies(context.Background(), "tenant-1", "user-1", []llmguard.Policy{{
 		Name:    "Unsafe replacement",
 		Kind:    llmguard.KindDefault,
@@ -91,7 +92,7 @@ func TestReplaceTenantPolicies_RejectsUnsafeReplacement(t *testing.T) {
 }
 
 func TestReplaceTenantPolicies_RejectsInvalidTarget(t *testing.T) {
-	svc := NewService(&fakeStore{})
+	svc := NewService(&fakeStore{}, nil)
 	_, err := svc.ReplaceTenantPolicies(context.Background(), "tenant-1", "user-1", []llmguard.Policy{{
 		Name:    "Typo channel",
 		Kind:    llmguard.KindDefault,
@@ -106,9 +107,42 @@ func TestReplaceTenantPolicies_RejectsInvalidTarget(t *testing.T) {
 	}
 }
 
+// TestValidateTarget_UnknownChannelSurfacesValidList verifies the channel
+// branch surfaces the offending value + the valid set (registry-driven), so an
+// operator who typos a channel sees what to fix — without masking the target's
+// other failure causes, which keep the bare sentinel.
+func TestValidateTarget_UnknownChannelSurfacesValidList(t *testing.T) {
+	svc := NewService(&fakeStore{}, nil)
+	_, err := svc.ReplaceTenantPolicies(context.Background(), "tenant-1", "user-1", []llmguard.Policy{{
+		Name:    "Typo channel",
+		Kind:    llmguard.KindDefault,
+		Enabled: true,
+		Target:  llmguard.Target{Channels: []string{"emial"}},
+		Rules: []llmguard.Rule{{
+			Guard: "pii", Stage: llmguard.StageLLMInput, Entities: []string{"email"}, Action: llmguard.ActionRedact,
+		}},
+	}})
+	if !errors.Is(err, ErrTargetInvalid) {
+		t.Fatalf("err = %v, want ErrTargetInvalid", err)
+	}
+	msg := ErrToMessage(err)
+	if !strings.Contains(msg, `"emial"`) || !strings.Contains(msg, "valid:") {
+		t.Errorf("ErrToMessage = %q; want it to name the offending value and the valid set", msg)
+	}
+	// A non-channel target failure must keep the opaque sentinel message.
+	_, err = svc.ReplaceTenantPolicies(context.Background(), "tenant-1", "user-1", []llmguard.Policy{{
+		Name: "Tenant spoof", Kind: llmguard.KindDefault, Enabled: true,
+		Target: llmguard.Target{TenantID: "other"},
+		Rules:  []llmguard.Rule{{Guard: "pii", Stage: llmguard.StageLLMInput, Entities: []string{"email"}, Action: llmguard.ActionRedact}},
+	}})
+	if got := ErrToMessage(err); got != "guard policy target is invalid" {
+		t.Errorf("non-channel target failure message = %q; want the bare sentinel (no masking)", got)
+	}
+}
+
 func TestCreatePolicy_NormalizesBeforeStore(t *testing.T) {
 	store := &fakeStore{}
-	svc := NewService(store)
+	svc := NewService(store, nil)
 	got, err := svc.CreatePolicy(context.Background(), "tenant-1", "user-1", llmguard.Policy{
 		TenantID: "spoofed",
 		Name:     "  Source privacy  ",
@@ -133,7 +167,7 @@ func TestCreatePolicy_NormalizesBeforeStore(t *testing.T) {
 func TestUpdatePolicy_UsesPathIDAndNormalizes(t *testing.T) {
 	const pathID = "7b3685c9-0798-4f68-901b-46ea8cc15da2"
 	store := &fakeStore{}
-	svc := NewService(store)
+	svc := NewService(store, nil)
 	got, err := svc.UpdatePolicy(context.Background(), "tenant-1", "user-1", pathID, llmguard.Policy{
 		ID:      "1d41f02a-7749-47d9-9608-db976f3c1094",
 		Name:    "  Channel override  ",
@@ -158,7 +192,7 @@ func TestUpdatePolicy_UsesPathIDAndNormalizes(t *testing.T) {
 func TestDeletePolicy_PassesTenantAndID(t *testing.T) {
 	const id = "7b3685c9-0798-4f68-901b-46ea8cc15da2"
 	store := &fakeStore{}
-	svc := NewService(store)
+	svc := NewService(store, nil)
 	if err := svc.DeletePolicy(context.Background(), "tenant-1", id); err != nil {
 		t.Fatalf("DeletePolicy: %v", err)
 	}
@@ -171,7 +205,7 @@ func TestResolveDefaultsPurposeToEnrich(t *testing.T) {
 	store := &fakeStore{plan: llmguard.Plan{Rules: []llmguard.Rule{{
 		Guard: "pii", Stage: llmguard.StageLLMInput, Entities: []string{"email"}, Action: llmguard.ActionRedact,
 	}}}}
-	svc := NewService(store)
+	svc := NewService(store, nil)
 	_, err := svc.Resolve(context.Background(), llmclient.GuardMetadata{TenantID: "tenant-1"})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)

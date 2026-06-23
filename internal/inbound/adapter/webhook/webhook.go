@@ -17,7 +17,7 @@ import (
 )
 
 func init() {
-	inbound.Register(channelName, NewAdapter)
+	inbound.Register(channelName, "Webhook", NewAdapter)
 }
 
 // nowFn — overrideable in tests; production uses time.Now.

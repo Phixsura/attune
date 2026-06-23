@@ -104,6 +104,7 @@ func buildIssueBody(env *outbound.Envelope) ([]byte, error) {
 	content, _ := fb["content"].(string)
 	userID, _ := fb["user_id"].(string)
 	source, _ := fb["source"].(string)
+	sourceDisplay, _ := fb["source_display"].(string)
 	enrichedAt, _ := fb["enriched_at"].(string)
 	isUrgent, _ := fb["is_urgent"].(bool)
 	rationale, _ := fb["rationale"].(string)
@@ -123,7 +124,12 @@ func buildIssueBody(env *outbound.Envelope) ([]byte, error) {
 		title = "[Urgent] " + title
 	}
 
-	sourceLabel := fmt.Sprintf("%s (`%s`)", domain.SourceDisplayName(source), source)
+	// Prefer the registry-resolved label carried on the envelope; fall back to
+	// the pure shim for old in-flight rows enqueued before source_display.
+	if sourceDisplay == "" {
+		sourceDisplay = domain.SourceDisplayName(source)
+	}
+	sourceLabel := fmt.Sprintf("%s (`%s`)", sourceDisplay, source)
 	body := fmt.Sprintf(
 		"> Forwarded automatically from Attune user feedback.\n\n"+
 			"| Field | Value |\n"+

@@ -21,7 +21,7 @@ const Channel = "email"
 const channelName = Channel
 
 func init() {
-	inbound.Register(channelName, NewAdapter)
+	inbound.Register(channelName, "Email", NewAdapter)
 }
 
 type adapter struct {

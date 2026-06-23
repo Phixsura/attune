@@ -51,6 +51,7 @@ type Enricher struct {
 	targets       *notifytarget.NotifyTargetRepo // optional, paired with outbox
 	embeddingTask *embeddingrepo.TaskRepo        // optional embedding task outbox
 	draftTask     *replydraftrepo.DraftTaskRepo  // optional reply-draft task outbox
+	sources       domain.SourceSet               // injected union; resolves the envelope's source_display label
 }
 
 type classifyResult struct {
@@ -71,6 +72,22 @@ type ClassifyResult struct {
 // and let the DB-managed LLM router resolve model/channel by purpose.
 func NewEnricher(r *feedback.FeedbackRepo, llm llmclient.LLMClient, model string) *Enricher {
 	return ptrext.Of(Enricher{repo: r, llm: llm, model: model})
+}
+
+// SetSourceSet injects the registry-derived SourceSet used to stamp the
+// envelope's source_display label. Unset (or nil) falls back to
+// domain.DefaultSourceSet, so an enricher built for eval/tests still renders.
+func (e *Enricher) SetSourceSet(sources domain.SourceSet) { e.sources = sources }
+
+// sourceDisplay resolves a source's human label via the injected set, falling
+// back to the default set when unset. Never empty (raw key for an unknown
+// source), so a retired/unknown token still renders downstream.
+func (e *Enricher) sourceDisplay(source string) string {
+	set := e.sources
+	if set == nil {
+		set = domain.DefaultSourceSet()
+	}
+	return set.Display(source)
 }
 
 // SetOutbox wires at-least-once delivery for raw-webhook destinations.

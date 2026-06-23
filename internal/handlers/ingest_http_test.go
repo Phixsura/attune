@@ -48,7 +48,7 @@ func (okVerifier) LookupWithScopesAndIP(_ context.Context, _, _ string) (string,
 func ingestTestServer(ing *fakeIngestor) http.Handler {
 	r := chi.NewRouter()
 	r.Use(apikey.Middleware(okVerifier{}))
-	r.Mount("/", NewIngestHandler(ing).Routes())
+	r.Mount("/", NewIngestHandler(ing, nil).Routes())
 	return r
 }
 

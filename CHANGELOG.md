@@ -106,6 +106,29 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 
+- **Source vocabulary is now registry-driven (#95).** Adding an inbound channel
+  no longer requires editing a hardcoded map in the core `domain` package — the
+  valid source set and its display labels are assembled once at startup from
+  `domain.CoreSources` (the never-an-adapter sources `api`/`web`/`mcp`/`other`)
+  unioned with each self-registered inbound adapter's channel, and injected as an
+  immutable `domain.SourceSet` into the ingest validator, the
+  `attune_ingest_total` source-label bound, and the guard-policy target
+  validator. Adapters now declare their human label at the registration site
+  (`inbound.Register(channel, display, factory)`), and the resolved label travels
+  on the outbound envelope as an additive `source_display` field (the
+  github-issue renderers fall back to the existing label shim for older queued
+  rows). `CoreSources` keys are reserved: an adapter channel that collides with
+  one is a fatal boot error (the assembly returns an error that propagates to the
+  process exit, so the collision/duplicate guards are unit-testable) rather than
+  a silent shadow. The reserved core map is unexported behind `domain.CoreSources()`
+  / `IsReservedSource` so it can't be mutated by an importer, and `inbound.Register`
+  now rejects a nil factory, empty channel, or empty display at the call site. The
+  source-validation error now lists the valid sources, and the guard-policy channel
+  error names the offending value. `domain.ValidSources` is removed;
+  `domain.SourceDisplayName` is retained as the permanent read-path fallback. No new source values are
+  introduced and the existing six are preserved verbatim (the source string is an
+  append-only storage + wire token).
+
 - **Console navigation now uses a production-style app shell (#144).** The
   authenticated Console moved from a flat top navigation plus oversized
   `Settings` page to a grouped sidebar/drawer shell with canonical homes for

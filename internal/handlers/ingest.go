@@ -32,10 +32,14 @@ type ingestRower interface {
 // IngestHandler serves POST /v1/feedback/ingest.
 type IngestHandler struct {
 	ingestor ingestRower
+	sources  domain.SourceSet // injected union; bounds the metric source label
 }
 
-func NewIngestHandler(ingestor ingestRower) *IngestHandler {
-	return ptrext.Of(IngestHandler{ingestor: ingestor})
+func NewIngestHandler(ingestor ingestRower, sources domain.SourceSet) *IngestHandler {
+	if sources == nil {
+		sources = domain.DefaultSourceSet()
+	}
+	return ptrext.Of(IngestHandler{ingestor: ingestor, sources: sources})
 }
 
 func (h *IngestHandler) Routes() chi.Router {
@@ -122,22 +126,25 @@ func (h *IngestHandler) ingestError(
 ) (dispatcher.Result[*attunev1.IngestResponse], error) {
 	switch {
 	case errors.Is(err, ingest.ErrIdempotencyConflict):
-		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(source), "conflict").Inc()
+		metrics.IngestTotal.WithLabelValues(tenantID, h.boundedSource(source), "conflict").Inc()
 		return dispatcher.Fail[*attunev1.IngestResponse](
-			http.StatusConflict, attunev1.ErrorCode_IDEMPOTENCY_CONFLICT, err.Error())
+			http.StatusConflict, attunev1.ErrorCode_IDEMPOTENCY_CONFLICT, err.Error(),
+		)
 	default:
-		metrics.IngestTotal.WithLabelValues(tenantID, boundedSource(source), "validate_err").Inc()
+		metrics.IngestTotal.WithLabelValues(tenantID, h.boundedSource(source), "validate_err").Inc()
 		return dispatcher.Fail[*attunev1.IngestResponse](
-			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
+			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error(),
+		)
 	}
 }
 
 // boundedSource keeps attune_ingest_total's `source` label bounded to known
 // sources. On the validate_err path we'd otherwise record the raw client value,
 // an unbounded-cardinality vector (proposal #6). Mirrors how the JSON-decode and
-// auth paths record "unknown".
-func boundedSource(s string) string {
-	if domain.ValidSources[s] {
+// auth paths record "unknown". Reads the injected SourceSet so a registry-added
+// channel is treated as known without editing this function.
+func (h *IngestHandler) boundedSource(s string) string {
+	if h.sources.Has(s) {
 		return s
 	}
 	return "invalid"

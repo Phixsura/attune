@@ -39,6 +39,7 @@ var idempotencyKeyRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{8,64}$`)
 type Ingestor struct {
 	repo      feedbackInserter
 	submitter enrich.Submitter
+	sources   domain.SourceSet // injected union; validates in.Source
 }
 
 type feedbackInserter interface {
@@ -57,8 +58,13 @@ type feedbackInserter interface {
 	) (int64, bool, error)
 }
 
-func NewIngestor(r feedbackInserter, submitter enrich.Submitter) *Ingestor {
-	return ptrext.Of(Ingestor{repo: r, submitter: submitter})
+// NewIngestor wires the ingest pipeline. sources is the injected SourceSet used
+// to validate in.Source; a nil set falls back to domain.DefaultSourceSet.
+func NewIngestor(r feedbackInserter, submitter enrich.Submitter, sources domain.SourceSet) *Ingestor {
+	if sources == nil {
+		sources = domain.DefaultSourceSet()
+	}
+	return ptrext.Of(Ingestor{repo: r, submitter: submitter, sources: sources})
 }
 
 // IngestRow validates input, persists it, and fires off best-effort
@@ -73,7 +79,7 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 	const where = "service.Ingestor.IngestRow"
 	logext.Infof(ctx, "[%s] start,tenant_id:%s,key_id:%s,source:%s,content_len:%d,idempotent:%t",
 		where, tenantID, keyID, in.Source, len(in.Content), in.IdempotencyKey != "")
-	if err := in.Validate(); err != nil {
+	if err := in.Validate(i.sources); err != nil {
 		logext.Warnf(ctx, "[%s] reject: validation,tenant_id:%s,source:%s,err:%s",
 			where, tenantID, in.Source, err.Error())
 		return 0, err

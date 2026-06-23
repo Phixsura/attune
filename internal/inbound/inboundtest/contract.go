@@ -44,6 +44,24 @@ func TestAdapterContract(t *testing.T, factory inbound.Factory) {
 		}
 	})
 
+	// DisplayNonEmpty runs FIRST (before DuplicateRegisterPanics resets the
+	// registry) and reads the live snapshot the adapter's own init() populated:
+	// an adapter that forgets the display arg on Register(channel, display, …)
+	// fails its own conformance run. cmd/attune's assembly test is the robust
+	// backstop across the full registry.
+	t.Run("DisplayNonEmpty", func(t *testing.T) {
+		ch := factory().Channel()
+		for _, e := range inbound.Factories() {
+			if e.Channel == ch {
+				if e.Display == "" {
+					t.Errorf("adapter channel %q registered with an empty Display label", ch)
+				}
+				return
+			}
+		}
+		t.Errorf("channel %q not found in the registry; the adapter's init() must Register it with a display label", ch)
+	})
+
 	t.Run("StartShutdownOK", func(t *testing.T) {
 		a := factory()
 		deps := DepsFor(nil, nil, nil)
@@ -92,12 +110,12 @@ func TestAdapterContract(t *testing.T, factory inbound.Factory) {
 	t.Run("DuplicateRegisterPanics", func(t *testing.T) {
 		inbound.ResetForTest()
 		ch := factory().Channel()
-		inbound.Register(ch, factory)
+		inbound.Register(ch, "Test", factory)
 		defer func() {
 			if r := recover(); r == nil {
 				t.Errorf("Register(%q, …) did not panic on duplicate", ch)
 			}
 		}()
-		inbound.Register(ch, factory)
+		inbound.Register(ch, "Test", factory)
 	})
 }

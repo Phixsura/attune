@@ -4,10 +4,41 @@ package githubissue
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
+
+// TestBuildIssueBody_SourceLabel covers the source label across the three
+// envelope cases: the registry-resolved source_display is used verbatim; an
+// absent source_display falls back to the pure SourceDisplayName shim; and a
+// source not in the live vocabulary renders the raw key without erroring.
+func TestBuildIssueBody_SourceLabel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		feedback map[string]any
+		want     string
+	}{
+		{"registry display used", map[string]any{"id": 1.0, "title": "t", "source": "webhook", "source_display": "Webhook"}, "Webhook (`webhook`)"},
+		{"fallback to shim when display absent", map[string]any{"id": 1.0, "title": "t", "source": "api"}, "API client (`api`)"},
+		{"retired token renders raw, no panic", map[string]any{"id": 1.0, "title": "t", "source": "rss-retired"}, "rss-retired (`rss-retired`)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			body, err := buildIssueBody(ptrext.Of(outbound.Envelope{Feedback: c.feedback}))
+			if err != nil {
+				t.Fatalf("buildIssueBody: %v", err)
+			}
+			if !strings.Contains(string(body), c.want) {
+				t.Errorf("body missing source label %q; got:\n%s", c.want, body)
+			}
+		})
+	}
+}
 
 func TestParseGitHubRepoURL(t *testing.T) {
 	t.Parallel()

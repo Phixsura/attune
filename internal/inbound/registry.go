@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,14 +16,39 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
-// Factory — adapter package's init() calls Register(channel, factory).
+// channelShapeRE is the narrow allow-list for a channel name: ASCII lowercase
+// letters, digits, underscore, and hyphen. Each excluded character class is a
+// concrete defect vector at the persisted + wire boundary:
+//   - control chars (NUL etc.): PG TEXT rejects NUL on INSERT, so a NUL-bearing
+//     channel would crash every ingest with that source;
+//   - whitespace / slash / dot: structural characters that confuse operator UIs,
+//     URL routing, and audit logs;
+//   - non-ASCII (zero-width space, bidi overrides, Unicode lookalikes): the
+//     homoglyph / spoofing class on a persisted identity token.
+//
+// The lowercase invariant is also enforced by the regex (no [A-Z]). Adapters
+// declare channels at compile time, so this is a developer-facing boot panic,
+// not a hot-path check.
+var channelShapeRE = regexp.MustCompile(`^[a-z0-9_-]+$`)
+
+// Factory — adapter package's init() calls Register(channel, display, factory).
 type Factory func() Adapter
 
 // Entry — what Factories() returns. Named struct (not anonymous) so the
-// public API is consumable: range, map, sort, etc.
+// public API is consumable: range, map, sort, etc. Display is the human label
+// the adapter declares at its Register call; cmd/attune folds it into the
+// injected SourceSet so a channel's label travels with the channel (#95).
 type Entry struct {
 	Channel string
+	Display string
 	Factory Factory
+}
+
+// registration is the per-channel record the registry holds: the constructor
+// plus the declared display label.
+type registration struct {
+	display string
+	factory Factory
 }
 
 // DefaultShutdownTimeout — applied when an Adapter does NOT implement
@@ -32,18 +59,49 @@ const DefaultShutdownTimeout = 15 * time.Second
 
 var (
 	mu        sync.RWMutex
-	factories = map[string]Factory{}
+	factories = map[string]registration{}
 )
 
-// Register — called from each adapter package's init(). Panics on
-// duplicate channel name (compile-time-equivalent guarantee).
-func Register(channel string, factory Factory) {
+// Register — called from each adapter package's init(). channel is the source
+// enum the adapter owns; display is its human label (folded into the injected
+// SourceSet by cmd/attune). Panics on duplicate channel name
+// (compile-time-equivalent guarantee).
+func Register(channel, display string, factory Factory) {
+	// Registration-time invariants (the database/sql.Register / gob.Register /
+	// Caddy.RegisterModule discipline): channel is a FROZEN persisted + wire
+	// token, so a malformed one is a permanent storage-contract defect, and a
+	// nil factory would otherwise detonate as an unattributed nil-deref deep in
+	// Manager.StartAll. These are init-time programmer errors → panic with
+	// attribution to the bad call site.
+	if factory == nil {
+		panic("inbound: nil factory for channel " + channel)
+	}
+	if channel == "" {
+		panic("inbound: empty channel")
+	}
+	// Narrow allow-list at the single write point: closes case-collision (no
+	// uppercase), NUL / whitespace / structural-char persistence defects, and
+	// the zero-width / bidi-override homoglyph class — all real adversarial-
+	// review findings — with one boot-time check. See channelShapeRE.
+	if !channelShapeRE.MatchString(channel) {
+		panic(fmt.Sprintf("inbound: channel %q must match %s (source is a persisted + wire token)", channel, channelShapeRE.String()))
+	}
+	if strings.TrimSpace(display) == "" {
+		panic(fmt.Sprintf("inbound: channel %q registered with empty or whitespace-only display", channel))
+	}
+	// Display invariants: NUL is rejected by PG TEXT on INSERT; newlines and
+	// carriage-returns corrupt the GitHub-issue markdown table row (one row =
+	// one line) that the renderers produce. Tab is included for the same
+	// structural-corruption reason.
+	if strings.ContainsAny(display, "\x00\n\r\t") {
+		panic(fmt.Sprintf("inbound: channel %q display %q contains control / structural characters (NUL / CR / LF / tab)", channel, display))
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if _, exists := factories[channel]; exists {
 		panic(fmt.Sprintf("inbound: channel %q already registered", channel))
 	}
-	factories[channel] = factory
+	factories[channel] = registration{display: display, factory: factory}
 }
 
 // ResetForTest — clears the registry. Test fixtures use it to deduplicate
@@ -63,7 +121,7 @@ func ResetForTest() {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	factories = map[string]Factory{}
+	factories = map[string]registration{}
 }
 
 // Factories — snapshot for cmd/attune. Returns a sorted slice for
@@ -72,8 +130,8 @@ func Factories() []Entry {
 	mu.RLock()
 	defer mu.RUnlock()
 	out := make([]Entry, 0, len(factories))
-	for ch, f := range factories {
-		out = append(out, Entry{Channel: ch, Factory: f})
+	for ch, r := range factories {
+		out = append(out, Entry{Channel: ch, Display: r.display, Factory: r.factory})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Channel < out[j].Channel })
 	return out
