@@ -330,3 +330,73 @@ func TestDetectDuplicatePrefixes_ThreeWayDuplicate(t *testing.T) {
 	require.Len(t, dupErr.Duplicates, 1)
 	require.Len(t, dupErr.Duplicates[0].Files, 3)
 }
+
+func TestVerifyNoTxDirectives_WithRealMigrations(t *testing.T) {
+	t.Parallel()
+
+	names, err := LoadMigrationNames()
+	require.NoError(t, err)
+
+	err = VerifyNoTxDirectives(names)
+	require.NoError(t, err, "embedded migrations should have valid no-tx directives")
+}
+
+func TestVerifyNoTxDirectives_NonexistentFile(t *testing.T) {
+	t.Parallel()
+
+	err := VerifyNoTxDirectives([]string{"nonexistent_file.sql"})
+	require.NoError(t, err)
+}
+
+func TestVerifyNoTxDirectives_NoNoTxMigrations(t *testing.T) {
+	t.Parallel()
+
+	names, err := LoadMigrationNames()
+	require.NoError(t, err)
+
+	err = VerifyNoTxDirectives(names[:10])
+	require.NoError(t, err)
+}
+
+func TestErrNoTxViolation_MultipleViolations(t *testing.T) {
+	t.Parallel()
+
+	err := ErrNoTxViolation{
+		Violations: []NoTxViolation{
+			{Filename: "001_a.sql", Reason: "multiple statements (3 semicolons)"},
+			{Filename: "002_b.sql", Reason: "no idempotency guard"},
+			{Filename: "003_c.sql", Reason: "multiple statements (2 semicolons)"},
+		},
+	}
+
+	msg := err.Error()
+	require.Contains(t, msg, "001_a.sql")
+	require.Contains(t, msg, "002_b.sql")
+	require.Contains(t, msg, "003_c.sql")
+	require.Contains(t, msg, "multiple statements")
+	require.Contains(t, msg, "no idempotency guard")
+}
+
+func TestLoadMigrationNames_Sorted(t *testing.T) {
+	t.Parallel()
+
+	names, err := LoadMigrationNames()
+	require.NoError(t, err)
+	require.NotEmpty(t, names)
+
+	// Verify sorted
+	for i := 1; i < len(names); i++ {
+		require.True(t, names[i-1] < names[i], "names should be sorted: %s < %s", names[i-1], names[i])
+	}
+
+	// Verify first migration
+	require.Equal(t, "001_init.sql", names[0])
+}
+
+func TestLoadMigrationNames_Count(t *testing.T) {
+	t.Parallel()
+
+	names, err := LoadMigrationNames()
+	require.NoError(t, err)
+	require.Equal(t, MigrationCount(), len(names))
+}

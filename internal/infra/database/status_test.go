@@ -260,3 +260,70 @@ func TestMigrationDetail_OptionalFields(t *testing.T) {
 	require.NotNil(t, applied.AppliedBy)
 	require.NotNil(t, applied.Checksum)
 }
+
+func TestBuildPendingMigrations_NonexistentFile(t *testing.T) {
+	t.Parallel()
+
+	// Test with a nonexistent file - should error
+	_, err := buildPendingMigrations([]string{"999_nonexistent.sql"}, map[int]bool{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "999_nonexistent.sql")
+}
+
+func TestMigrationFile_AllFields(t *testing.T) {
+	t.Parallel()
+
+	names, err := LoadMigrationNames()
+	require.NoError(t, err)
+
+	pending, err := buildPendingMigrations(names[:1], map[int]bool{})
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+
+	m := pending[0]
+	require.Equal(t, 1, m.Version)
+	require.Equal(t, "001_init.sql", m.Name)
+	require.NotEmpty(t, m.Body)
+	require.Len(t, m.Checksum, 64)
+	require.False(t, m.NoTx, "first migration should not be no-tx")
+}
+
+func TestBuildMigrationStatus_EmptyAppliedMap(t *testing.T) {
+	t.Parallel()
+
+	names := []string{"001_init.sql", "002_foo.sql", "003_bar.sql"}
+	status := buildMigrationStatus(names, map[int]MigrationDetail{})
+
+	require.Equal(t, 3, status.Total)
+	require.Equal(t, 0, status.Applied)
+	require.Equal(t, 3, status.Pending)
+
+	for _, m := range status.Migrations {
+		require.Equal(t, "pending", m.Status)
+	}
+}
+
+func TestBuildMigrationQuery_Legacy(t *testing.T) {
+	t.Parallel()
+
+	query := buildMigrationQuery(false)
+	require.Contains(t, query, "SELECT")
+	require.Contains(t, query, "version")
+	require.Contains(t, query, "filename")
+	require.Contains(t, query, "applied_at")
+	require.NotContains(t, query, "duration_ms")
+	require.NotContains(t, query, "checksum")
+}
+
+func TestBuildMigrationQuery_Extended(t *testing.T) {
+	t.Parallel()
+
+	query := buildMigrationQuery(true)
+	require.Contains(t, query, "SELECT")
+	require.Contains(t, query, "version")
+	require.Contains(t, query, "filename")
+	require.Contains(t, query, "applied_at")
+	require.Contains(t, query, "duration_ms")
+	require.Contains(t, query, "checksum")
+	require.Contains(t, query, "applied_by")
+}
