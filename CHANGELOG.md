@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Production readiness preflight (#149).** New `attune doctor` CLI command and
+  `/fb/v1/console/system/preflight` HTTP endpoint that run 11 production
+  readiness checks (config, database connectivity, pgvector, migration state,
+  Tink keyset, session key, OIDC reachability, metrics registry, enricher
+  workers). Output follows IETF health-check semantics (pass/warn/fail) with
+  actionable remediation text. Includes Console "System Readiness" admin page
+  with collapsible category cards and status indicators.
+
 - **Terminal enrichment failure visibility (#81).** Operators can now filter and
   manually retry feedback rows that have exhausted the enrichment retry budget
   (5 attempts). Includes:

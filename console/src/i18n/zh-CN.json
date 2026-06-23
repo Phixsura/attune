@@ -93,7 +93,8 @@
     "llm_config": "LLM 配置",
     "members": "成员",
     "outbox_dead": "死信投递",
-    "mcp_clients": "MCP 客户端"
+    "mcp_clients": "MCP 客户端",
+    "system_readiness": "系统就绪"
   },
   "shell": {
     "primary_nav": "主导航",
@@ -2336,5 +2337,46 @@
       "title": "撤销此客户端？",
       "description": "撤销后，使用此客户端的 Agent 将无法再访问 attune。已撤销的客户端不可恢复。"
     }
+  },
+  "system_readiness": {
+    "subtitle": "生产就绪预检 — 验证基础设施配置、数据库、加密、认证和 worker 状态。",
+    "overall_pass": "所有检查通过",
+    "overall_warn": "部分检查有告警",
+    "overall_fail": "存在失败检查项",
+    "refresh": "刷新",
+    "category": {
+      "config": "配置",
+      "database": "数据库",
+      "migration": "迁移",
+      "encryption": "加密",
+      "auth": "认证",
+      "metrics": "指标",
+      "worker": "Worker"
+    },
+    "status": {
+      "pass": "通过",
+      "warn": "告警",
+      "fail": "失败",
+      "skipped": "跳过"
+    },
+    "metric": {
+      "total": "检查总数",
+      "total_hint": "已注册的预检项目",
+      "pass": "通过",
+      "pass_hint": "全部达标的检查",
+      "warn": "告警",
+      "warn_hint": "需要关注的检查",
+      "fail": "失败",
+      "fail_hint": "耗时 {{elapsed}}"
+    },
+    "n_passed": "{{count}} 项通过",
+    "n_checks": "{{count}} 项检查",
+    "summary": "{{total}} 项检查: {{pass}} 通过, {{warn}} 告警, {{fail}} 失败",
+    "summary_inline": "共 {{total}} 项检查 · 耗时 {{elapsed}}",
+    "issues_title": "需要关注",
+    "details_title": "检查明细",
+    "remediation_label": "修复建议",
+    "elapsed": "耗时 {{elapsed}}",
+    "error_loading": "加载预检报告失败"
   }
 }

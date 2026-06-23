@@ -14,6 +14,7 @@ import {
   Settings2,
   ShieldCheck,
   ShieldEllipsis,
+  Stethoscope,
   Users,
   Workflow,
 } from 'lucide-react'
@@ -193,6 +194,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     icon: ShieldEllipsis,
     labelKey: 'nav.outbox_dead',
     path: '/administration/dead-deliveries',
+    adminOnly: true,
+  },
+  {
+    group: 'administration',
+    icon: Stethoscope,
+    labelKey: 'nav.system_readiness',
+    path: '/administration/system-readiness',
     adminOnly: true,
   },
 ]

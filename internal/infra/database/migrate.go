@@ -198,6 +198,21 @@ func recordMigrationSQL() string {
 	return fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable)
 }
 
+// MigrationCount returns the number of embedded migration SQL files.
+func MigrationCount() int {
+	entries, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			n++
+		}
+	}
+	return n
+}
+
 // isNoTxMigration reports whether a migration must run outside a transaction.
 // The directive must be on the FIRST line (as a SQL comment) so a stray mention
 // of the string inside another migration's body can't silently flip it.
