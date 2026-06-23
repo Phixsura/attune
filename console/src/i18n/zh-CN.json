@@ -953,7 +953,8 @@
       "taxonomy_empty_single": "未配置值——AI 输出将自由识别字符串",
       "taxonomy_empty_multi": "未配置值——AI 自由出多个短字符串（GitHub label 风格）",
       "urgent_set_label": "Urgent Set（紧急路由）",
-      "urgent_set_help": "命中这里任一值的反馈，is_urgent 自动设为 true（推送到雷达）"
+      "urgent_set_help": "命中这里任一值的反馈，is_urgent 自动设为 true（推送到雷达）",
+      "value_label": "可选值的稳定标识"
     },
     "i18n": {
       "add_locale": "添加语言",
