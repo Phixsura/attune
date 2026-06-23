@@ -396,3 +396,113 @@ func TestMigrations_StatusElapsedTime(t *testing.T) {
 	require.NotEmpty(t, status.Elapsed)
 	require.Contains(t, status.Elapsed, "ms", "elapsed should contain ms")
 }
+
+func TestMigrations_VerifyNoTxDirectives(t *testing.T) {
+	// Test that all embedded migrations pass the no-tx directive check
+	names, err := database.LoadMigrationNames()
+	require.NoError(t, err)
+
+	err = database.VerifyNoTxDirectives(names)
+	require.NoError(t, err)
+}
+
+func TestMigrations_ComputeChecksum(t *testing.T) {
+	names, err := database.LoadMigrationNames()
+	require.NoError(t, err)
+	require.NotEmpty(t, names)
+
+	// Compute checksum for first migration
+	checksum, err := database.ComputeChecksum(names[0])
+	require.NoError(t, err)
+	require.Len(t, checksum, 64)
+
+	// Should be deterministic
+	checksum2, err := database.ComputeChecksum(names[0])
+	require.NoError(t, err)
+	require.Equal(t, checksum, checksum2)
+}
+
+func TestMigrations_ManifestHash(t *testing.T) {
+	names, err := database.LoadMigrationNames()
+	require.NoError(t, err)
+
+	hash, err := database.ManifestHash(names)
+	require.NoError(t, err)
+	require.Len(t, hash, 64)
+
+	// Should be deterministic
+	hash2, err := database.ManifestHash(names)
+	require.NoError(t, err)
+	require.Equal(t, hash, hash2)
+
+	// Different order should produce different hash
+	reversed := make([]string, len(names))
+	for i, n := range names {
+		reversed[len(names)-1-i] = n
+	}
+	hashReversed, err := database.ManifestHash(reversed)
+	require.NoError(t, err)
+	require.NotEqual(t, hash, hashReversed, "manifest hash should be order-sensitive")
+}
+
+func TestMigrations_DetectDuplicatePrefixes(t *testing.T) {
+	// Real migrations should have no duplicates
+	names, err := database.LoadMigrationNames()
+	require.NoError(t, err)
+
+	err = database.DetectDuplicatePrefixes(names)
+	require.NoError(t, err)
+
+	// Synthetic duplicates should be detected
+	dupes := []string{"001_a.sql", "001_b.sql", "002_c.sql"}
+	err = database.DetectDuplicatePrefixes(dupes)
+	require.Error(t, err)
+}
+
+func TestMigrations_MigrationCount(t *testing.T) {
+	count := database.MigrationCount()
+	require.Equal(t, 71, count, "should have 71 migrations")
+
+	names, err := database.LoadMigrationNames()
+	require.NoError(t, err)
+	require.Equal(t, count, len(names))
+}
+
+func TestMigrations_NoTxMigrationExists(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Check that migration 056 (no-tx) was applied
+	var version int
+	err = pool.QueryRow(ctx, `SELECT version FROM schema_migrations_feedback WHERE version = 56`).Scan(&version)
+	require.NoError(t, err)
+	require.Equal(t, 56, version)
+}
+
+func TestMigrations_ChecksumStatusWithLegacy(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool := testdb.NewPool(t)
+
+	err := database.RunMigrations(ctx, pool)
+	require.NoError(t, err)
+
+	// Clear checksum for one migration (simulate legacy)
+	_, err = pool.Exec(ctx, `UPDATE schema_migrations_feedback SET checksum = '' WHERE version = 1`)
+	require.NoError(t, err)
+
+	status, err := database.GetChecksumStatus(ctx, pool)
+	require.NoError(t, err)
+
+	// Total counts only migrations with non-empty checksums
+	// Verified counts migrations where stored checksum matches computed
+	// With one empty checksum, total = 70, verified = 70
+	require.Equal(t, database.MigrationCount()-1, status.Total, "total should exclude empty checksums")
+	require.Equal(t, status.Total, status.Verified, "all non-empty checksums should match")
+}
