@@ -238,12 +238,6 @@ func TestRestoreDrill_PgvectorSampleQuery(t *testing.T) {
 // seeded source DB, then attune provisions an ephemeral DB, restores the dump
 // into it (psql), measures the RTO, verifies, and tears it down.
 func TestRestoreDrill_OrchestratedRestore(t *testing.T) {
-	if _, err := exec.LookPath("psql"); err != nil {
-		t.Skip("psql not in PATH; skipping orchestration test")
-	}
-	if _, err := exec.LookPath("pg_dump"); err != nil {
-		t.Skip("pg_dump not in PATH; skipping orchestration test")
-	}
 	ctx := context.Background()
 	source := testdb.NewPool(t)
 	store := newStore(t)
@@ -264,16 +258,13 @@ func TestRestoreDrill_OrchestratedRestore(t *testing.T) {
 	srcConn := source.Config().ConnString()
 	dumpFile := filepath.Join(t.TempDir(), "backup.sql")
 	if out, err := exec.CommandContext(ctx, "pg_dump", srcConn, "-f", dumpFile).CombinedOutput(); err != nil {
-		// e.g. a pg_dump client older than the pg17 test server, or no network
-		// to it — an environment limit, not a code bug.
-		t.Skipf("pg_dump unavailable/incompatible: %v: %s", err, out)
+		t.Fatalf("pg_dump: %v: %s", err, out)
 	}
 
 	rep, err := restoredrill.RestoreAndDrill(ctx, srcConn, dumpFile, "psql", store,
 		restoredrill.Options{BackupRef: "orchestrated"})
 	if err != nil {
-		// CREATE DATABASE permission or an incompatible psql — environment limit.
-		t.Skipf("orchestrated restore unavailable in this environment: %v", err)
+		t.Fatalf("RestoreAndDrill: %v", err)
 	}
 	if rep.Status == restoredrill.StatusFail {
 		t.Fatalf("orchestrated drill FAILED: %+v", rep.Checks)
@@ -286,20 +277,14 @@ func TestRestoreDrill_OrchestratedRestore(t *testing.T) {
 }
 
 func TestRestoreDrill_VerifyBackupArtifact(t *testing.T) {
-	if _, err := exec.LookPath("pg_basebackup"); err != nil {
-		t.Skip("pg_basebackup not in PATH")
-	}
-	if _, err := exec.LookPath("pg_verifybackup"); err != nil {
-		t.Skip("pg_verifybackup not in PATH")
-	}
 	ctx := context.Background()
-	source := testdb.NewPool(t)
+	source := testdb.NewReplicaPool(t) // pg_basebackup needs a replication connection
 	srcConn := source.Config().ConnString()
 
 	dir := filepath.Join(t.TempDir(), "base")
 	if out, err := exec.CommandContext(ctx, "pg_basebackup",
-		"-d", srcConn, "-D", dir, "-X", "stream", "--no-sync").CombinedOutput(); err != nil {
-		t.Skipf("pg_basebackup unavailable (likely replication/pg_hba not enabled on the test container): %v: %s", err, out)
+		"-d", srcConn, "-D", dir, "-X", "stream", "--no-sync", "-c", "fast").CombinedOutput(); err != nil {
+		t.Fatalf("pg_basebackup: %v: %s", err, out)
 	}
 
 	// A clean backup artifact verifies.
