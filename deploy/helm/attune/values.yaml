@@ -290,3 +290,36 @@ helmTest:
     repository: busybox
     tag: 1.37.0
     pullPolicy: IfNotPresent
+
+# ── Restore drill (#151) ─────────────────────────────────────────────────────
+# Opt-in scheduled CronJob that verifies an already-restored database is
+# recoverable (schema, row counts, pgvector, decryptability of managed secrets)
+# and records the result so the System Readiness page can surface it. Point
+# targetDatabaseURL at a restored, throwaway database — e.g. a CloudNativePG
+# recovery Cluster or an ephemeral database you restore a backup into. The drill
+# never touches production beyond appending its result row.
+#
+# SECURITY: target/baselineDatabaseURL are passed as CronJob pod ARGS, which are
+# visible via `kubectl describe pod` and stored in etcd. Prefer a throwaway
+# target whose credentials are low-value and short-lived, restrict RBAC/etcd
+# access, and rotate the target DB password. (The Tink keyset and the production
+# DB URL used for --record stay in the mounted config Secret, not in args.)
+restoreDrill:
+  enabled: false
+  schedule: "0 2 * * 0" # weekly, Sunday 02:00
+  # Restored (throwaway) database to verify. Required when enabled.
+  targetDatabaseURL: ""
+  # Live database URL for row-count comparison (optional; usually the production
+  # DB — the same value as config.render.databaseURL).
+  baselineDatabaseURL: ""
+  # Operator label for the backup under test (recorded as audit evidence).
+  backupRef: ""
+  # RPO/RTO SLA targets (Go durations, e.g. 24h / 30m). Empty = no target. The
+  # recovery_objectives check warns if the measured RPO/RTO exceeds them. Pass
+  # --backup-taken-at / --restore-duration from the restore step to measure them.
+  rpoTarget: ""
+  rtoTarget: ""
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  activeDeadlineSeconds: 1800
+  resources: {}

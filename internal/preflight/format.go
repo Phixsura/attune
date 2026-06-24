@@ -67,6 +67,8 @@ func categoryTitle(c Category) string {
 		return "Database"
 	case CategoryMigration:
 		return "Migration"
+	case CategoryBackup:
+		return "Backup"
 	case CategoryEncryption:
 		return "Encryption"
 	case CategoryAuth:

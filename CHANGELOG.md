@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Backup and restore drill with decryptability verification (#151).** A
+  repeatable, backup-tool-agnostic drill that verifies an already-restored
+  PostgreSQL database is actually recoverable — without production traffic.
+  Includes:
+  - New `attune restore-drill run --target <url> [--baseline-url <url>]
+    [--backup-ref <s>] [--record]` CLI command, and `attune restore-drill
+    status` for audit retrieval.
+  - Verifier battery (`internal/restoredrill`): connectivity, schema/migration
+    state (reuses checksum + manifest + dirty verifiers, with version-skew
+    awareness — an older backup warns rather than fails), pgvector extension +
+    sample similarity query, row counts vs. a live baseline, and **sample Tink
+    decryption of real managed secrets** (LLM credentials with AAD binding, and
+    the two-level webhook/email inbound envelopes) — failing loudly on
+    keyset/restore drift. Decrypted plaintext is never logged or reported.
+  - Whole-population key validation: every distinct `llm_channels` key id must
+    be resident in the live keyset (catches drift beyond the bounded sample);
+    the report states sampled-of-total counts with no silent truncation.
+  - Opt-in `--deep` tier: index validity + amcheck `bt_index_parent_check`
+    B-Tree structural verification. Plus `--warn-exit` and structured logging.
+  - Recovery objectives: `--backup-taken-at` / `--restore-duration` measure RPO
+    (data-loss window) and RTO (restore time), graded against `--rpo-target` /
+    `--rto-target` SLAs by a `recovery_objectives` check (warns when breached),
+    persisted as `rpo_seconds`/`rto_seconds` for audit. `attune restore-drill
+    history` shows the trend; `attune_restore_drill_last_rto_seconds` exposes it.
+  - Push-button restore: `--restore-from <file> --admin-url <url>` provisions an
+    ephemeral database, restores the backup into it (`psql` for plain SQL,
+    `pg_restore` for custom/dir/tar — password passed via `PG*` env, never argv),
+    auto-measures the RTO, runs the full battery, and tears the ephemeral DB
+    down. Requires `psql`/`pg_restore` in the runtime.
+  - Pre-restore artifact verification: `attune restore-drill verify-backup <dir>`
+    runs `pg_verifybackup` against a `pg_basebackup` directory, catching a
+    corrupt/incomplete backup before any restore.
+  - Broad silent-restore-failure detection: `constraints` (baseline-relative —
+    restore-introduced `NOT VALID` constraints), `sequences` (serial/identity
+    sequence behind its column max → next insert collides), `encoding` (non-UTF8
+    target corrupts multibyte text), `materialized_views` (unpopulated after
+    restore), and `extensions` (baseline-relative — extension lost in restore).
+  - Structured JSON `DrillReport` suitable as audit evidence, recorded
+    (append-only) to the new `restore_drill_runs` table (migration 072).
+  - New preflight check `backup:restore_drill` (new `backup` category) surfaces
+    the latest drill result in `attune doctor` and the Console System Readiness
+    page, graded by recency.
+  - Server-side derived metrics `attune_restore_drill_last_success_timestamp_seconds`
+    and `attune_restore_drill_runs_total{status}` (read from `restore_drill_runs`
+    at scrape time), an `AttuneRestoreDrillStale` alert + runbook, and an
+    opt-in Helm CronJob (`restoreDrill.enabled`) for in-cluster drills.
+
 - **Migration checksum ledger and integrity verification (#150).** World-class
   migration tracking for production deployments, matching Flyway/Prisma/Atlas
   capabilities. Includes:

@@ -24,6 +24,7 @@ const CATEGORY_ORDER: PreflightCategory[] = [
   'config',
   'database',
   'migration',
+  'backup',
   'encryption',
   'auth',
   'metrics',

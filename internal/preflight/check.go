@@ -30,6 +30,7 @@ const (
 	CategoryConfig     Category = "config"
 	CategoryDatabase   Category = "database"
 	CategoryMigration  Category = "migration"
+	CategoryBackup     Category = "backup"
 	CategoryEncryption Category = "encryption"
 	CategoryAuth       Category = "auth"
 	CategoryMetrics    Category = "metrics"
@@ -41,6 +42,7 @@ var AllCategories = []Category{
 	CategoryConfig,
 	CategoryDatabase,
 	CategoryMigration,
+	CategoryBackup,
 	CategoryEncryption,
 	CategoryAuth,
 	CategoryMetrics,

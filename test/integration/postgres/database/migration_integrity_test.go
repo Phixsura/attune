@@ -461,7 +461,7 @@ func TestMigrations_DetectDuplicatePrefixes(t *testing.T) {
 
 func TestMigrations_MigrationCount(t *testing.T) {
 	count := database.MigrationCount()
-	require.Equal(t, 71, count, "should have 71 migrations")
+	require.Equal(t, 72, count, "should have 72 migrations")
 
 	names, err := database.LoadMigrationNames()
 	require.NoError(t, err)
@@ -600,7 +600,7 @@ func TestMigrations_GetPendingMigrations_Partial(t *testing.T) {
 	pending, err := database.GetPendingMigrations(ctx, pool)
 	require.NoError(t, err)
 
-	// Should have migrations 36 to 71
+	// Should have migrations 36 to 72
 	require.Equal(t, database.MigrationCount()-35, len(pending))
 	require.Equal(t, 36, pending[0].Version)
 }
@@ -1223,8 +1223,8 @@ func TestMigrations_LoadMigrationNames_All(t *testing.T) {
 	names, err := database.LoadMigrationNames()
 	require.NoError(t, err)
 
-	// Should have 71 migrations
-	require.Len(t, names, 71)
+	// Should have 72 migrations
+	require.Len(t, names, 72)
 
 	// First and last
 	require.Equal(t, "001_init.sql", names[0])

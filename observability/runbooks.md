@@ -347,3 +347,35 @@ rebuild.
 
 Recovery: no new checksum drift events and the alert is inactive for at least
 one 1-hour evaluation window.
+
+## AttuneRestoreDrillStale
+
+Impact: the most recent passing backup/restore drill is more than 8 days old, so
+the recoverability of the latest backup — including the decryptability of managed
+secrets — is unverified. This is a process lapse, not a live outage.
+
+Confirm:
+
+```promql
+time() - max(attune_restore_drill_last_success_timestamp_seconds)
+```
+
+Run a drill against a restored throwaway database and record it (the DSNs omit
+the password — supply it via `PGPASSWORD` or `~/.pgpass`):
+
+```bash
+attune --config ./config.yaml restore-drill run \
+  --target "postgres://attune@restore-target:5432/attune?sslmode=disable" \
+  --baseline-url "postgres://attune@attune-postgres:5432/attune?sslmode=disable" \
+  --record
+```
+
+If drills are meant to run in-cluster, check the `restoreDrill` CronJob
+(`restoreDrill.enabled=true` in the Helm values) and its last Job's logs. See
+the "Restore drills" section in `docs/private-deploy.md`. A drill that has never
+run surfaces as a warning on the Console System Readiness page
+(`backup:restore_drill`) rather than firing this alert.
+
+Recovery: a fresh `attune restore-drill run --record` completes with status
+`pass` (or `warn`), advancing
+`attune_restore_drill_last_success_timestamp_seconds`.

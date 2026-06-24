@@ -100,6 +100,9 @@ exposition plus the portable assets in this directory.
 | `attune_migration_apply_duration_seconds` | histogram | `version` | migration apply latency per version (#149) |
 | `attune_migration_pending` | gauge | — | number of unapplied migrations at startup (#149) |
 | `attune_migration_checksum_drift_total` | counter | — | migration checksum mismatches detected during verification (#149) |
+| `attune_restore_drill_last_success_timestamp_seconds` | gauge | — | unix timestamp of the most recent non-failing restore drill, derived from `restore_drill_runs` at scrape time (#151) |
+| `attune_restore_drill_runs_total` | counter | `status` | restore drills recorded, by status (#151) |
+| `attune_restore_drill_last_rto_seconds` | gauge | — | measured restore duration (RTO) of the most recent drill that recorded one (#151) |
 
 Label values:
 
