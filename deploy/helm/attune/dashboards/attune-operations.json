@@ -46,7 +46,7 @@
         "y": 0
       },
       "options": {
-        "content": "**Targets:** Outbox lag \u003c= 60s · Batch p95 stays bounded · Search p95 \u003c= 1s · Claim contention near zero\n\n**Flow:** backlog summary -\u003e workflow/batch health -\u003e idempotency/search -\u003e delivery and contention.",
+        "content": "**Targets:** Outbox lag \u003c= 60s · Batch p95 stays bounded · Search p95 \u003c= 1s · Claim contention near zero · Migration pending = 0 · Checksum drift = 0\n\n**Flow:** backlog summary -\u003e workflow/batch health -\u003e idempotency/search -\u003e delivery and contention -\u003e database migrations.",
         "mode": "markdown"
       }
     },
@@ -880,6 +880,316 @@
           "expr": "(sum by (worker) (increase(attune_worker_panics_total[$__range]))) or vector(0)",
           "legendFormat": "worker panics / {{worker}}",
           "refId": "E"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "Database migrations",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Pending migrations",
+      "description": "Unapplied migrations at last startup. Non-zero after startup means migrations are failing or the binary has new migrations not yet applied.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 59
+      },
+      "targets": [
+        {
+          "expr": "(attune_migration_pending) or vector(0)",
+          "legendFormat": "Pending migrations",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "displayName": "Pending migrations",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Checksum drift",
+      "description": "Migration files modified after apply. Should always be zero — any non-zero value is a release hygiene violation requiring investigation.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 59
+      },
+      "targets": [
+        {
+          "expr": "((increase(attune_migration_checksum_drift_total[$__range])) or vector(0)) or vector(0)",
+          "legendFormat": "Checksum drift",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "displayName": "Checksum drift",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Migrations applied",
+      "description": "Migrations applied in the selected range. Non-zero values expected only after deployments with schema changes.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 59
+      },
+      "targets": [
+        {
+          "expr": "((sum(increase(attune_migration_applied_total[$__range]))) or vector(0)) or vector(0)",
+          "legendFormat": "Migrations applied",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "displayName": "Migrations applied",
+          "noValue": "0",
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Apply p95",
+      "description": "P95 migration apply duration. Use this to size deployment timeouts and detect regressions from large backfills.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 59
+      },
+      "targets": [
+        {
+          "expr": "((histogram_quantile(0.95, sum by (le) (rate(attune_migration_apply_duration_seconds_bucket[$__rate_interval])))) or vector(0)) or vector(0)",
+          "legendFormat": "Apply p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "displayName": "Apply p95",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 30
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Migration history",
+      "description": "Migration apply rate and duration over time. Spikes indicate deployments with schema changes.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 63
+      },
+      "targets": [
+        {
+          "expr": "(sum by (version) (rate(attune_migration_applied_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "applied / v{{version}}",
+          "refId": "A"
+        },
+        {
+          "expr": "(histogram_quantile(0.95, sum by (le) (rate(attune_migration_apply_duration_seconds_bucket[$__rate_interval])))) or vector(0)",
+          "legendFormat": "duration p95",
+          "refId": "B"
+        },
+        {
+          "expr": "(attune_migration_pending) or vector(0)",
+          "legendFormat": "pending",
+          "refId": "C"
+        },
+        {
+          "expr": "(increase(attune_migration_checksum_drift_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "checksum drift",
+          "refId": "D"
         }
       ],
       "fieldConfig": {

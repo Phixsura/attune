@@ -96,6 +96,10 @@ exposition plus the portable assets in this directory.
 | `attune_inbound_latency_seconds` | histogram | `channel`, `tenant`, `source_slug` | end-to-end inbound processing latency (#66) |
 | `attune_inbound_source_state` | gauge | `channel`, `tenant`, `source_slug`, `state` | inbound source state, 1 when active (#66) |
 | `attune_inbound_poll_lag_seconds` | gauge | `channel`, `tenant`, `source_slug` | seconds since last successful poll for poll-mode sources (#66) |
+| `attune_migration_applied_total` | counter | `version`, `filename` | migrations applied by the startup runner (#149) |
+| `attune_migration_apply_duration_seconds` | histogram | `version` | migration apply latency per version (#149) |
+| `attune_migration_pending` | gauge | — | number of unapplied migrations at startup (#149) |
+| `attune_migration_checksum_drift_total` | counter | — | migration checksum mismatches detected during verification (#149) |
 
 Label values:
 

@@ -230,6 +230,18 @@ jobs:
           persist-credentials: false
       - run: bash scripts/lint-artifacts.sh --strict
 
+  # ── lint-migrations: migration integrity (CLAUDE.md §1; issue #150) ────────
+  # Pure bash — no Go toolchain. Checks duplicate prefixes, no-tx format, naming.
+  lint-migrations:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - run: bash scripts/lint-migrations.sh
+
   # ── lint-rawptr: bans bare *p / &x — funnel via internal/pkg/ptrext  ──────
   # AST-aware Go linter (cmd/lint-rawptr/). Type-position *T, &xs[i],
   # out-param &arg (json.Unmarshal / *Row.Scan / flag.*Var / errors.As / …),
@@ -932,7 +944,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-artifacts, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, sdk-node, sdk-go, changelog, docker-build, compose-config, helm-chart, proto]
+    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-artifacts, lint-migrations, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, sdk-node, sdk-go, changelog, docker-build, compose-config, helm-chart, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:

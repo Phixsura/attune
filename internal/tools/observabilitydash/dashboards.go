@@ -189,7 +189,7 @@ func aiPipelineDashboard() dashboard {
 func operationsDashboard() dashboard {
 	d := newDashboard("attune-operations", "Attune Operations", "attune-operations.json", []string{"operations"}, tenantVar("attune_workflow_transitions_total"))
 	d.Panels = []panel{
-		textPanel(1, "Operations lens", "How to read background system health.", "**Targets:** Outbox lag <= 60s · Batch p95 stays bounded · Search p95 <= 1s · Claim contention near zero\n\n**Flow:** backlog summary -> workflow/batch health -> idempotency/search -> delivery and contention.", gp(0, 0, 24, 4)),
+		textPanel(1, "Operations lens", "How to read background system health.", "**Targets:** Outbox lag <= 60s · Batch p95 stays bounded · Search p95 <= 1s · Claim contention near zero · Migration pending = 0 · Checksum drift = 0\n\n**Flow:** backlog summary -> workflow/batch health -> idempotency/search -> delivery and contention -> database migrations.", gp(0, 0, 24, 4)),
 		rowPanel(2, "Backlog summary", 2),
 		statDesc(3, "Workflow transitions", "Workflow transitions in the selected range. Sudden drops can mean workers stopped or feature traffic disappeared.", zero(`sum(increase(attune_workflow_transitions_total{tenant=~"$tenant"}[$__range]))`), "short", gp(0, 3, 4, 4), nil),
 		statDesc(4, "Batch jobs claimed", "Batch jobs claimed by workers. If this is flat while backlog exists, workers are not picking up work.", zero(`sum(increase(attune_batch_jobs_claimed_total{tenant=~"$tenant"}[$__range]))`), "short", gp(4, 3, 4, 4), nil),
@@ -240,6 +240,17 @@ func operationsDashboard() dashboard {
 			targetExpr("D", `attune_outbox_dead_rows`, "dead deliveries"),
 			targetExpr("E", `sum by (worker) (increase(attune_worker_panics_total[$__range]))`, "worker panics / {{worker}}"),
 		}, "short", gp(0, 43, 24, 8)),
+		rowPanel(22, "Database migrations", 51),
+		statDesc(23, "Pending migrations", "Unapplied migrations at last startup. Non-zero after startup means migrations are failing or the binary has new migrations not yet applied.", `attune_migration_pending`, "short", gp(0, 52, 6, 4), greenWarnRed(1, 5)),
+		statDesc(24, "Checksum drift", "Migration files modified after apply. Should always be zero — any non-zero value is a release hygiene violation requiring investigation.", zero(`increase(attune_migration_checksum_drift_total[$__range])`), "short", gp(6, 52, 6, 4), greenRed(1)),
+		statDesc(25, "Migrations applied", "Migrations applied in the selected range. Non-zero values expected only after deployments with schema changes.", zero(`sum(increase(attune_migration_applied_total[$__range]))`), "short", gp(12, 52, 6, 4), nil),
+		statDesc(26, "Apply p95", "P95 migration apply duration. Use this to size deployment timeouts and detect regressions from large backfills.", zero(`histogram_quantile(0.95, sum by (le) (rate(attune_migration_apply_duration_seconds_bucket[$__rate_interval])))`), "s", gp(18, 52, 6, 4), greenWarnRed(30, 300)),
+		seriesDesc(27, "Migration history", "Migration apply rate and duration over time. Spikes indicate deployments with schema changes.", []target{
+			targetExpr("A", `sum by (version) (rate(attune_migration_applied_total[$__rate_interval]))`, "applied / v{{version}}"),
+			targetExpr("B", `histogram_quantile(0.95, sum by (le) (rate(attune_migration_apply_duration_seconds_bucket[$__rate_interval])))`, "duration p95"),
+			targetExpr("C", `attune_migration_pending`, "pending"),
+			targetExpr("D", `increase(attune_migration_checksum_drift_total[$__rate_interval])`, "checksum drift"),
+		}, "short", gp(0, 56, 24, 8)),
 	}
 	d.Panels = layoutSixCardDashboard(d.Panels, 7, 7)
 	return d

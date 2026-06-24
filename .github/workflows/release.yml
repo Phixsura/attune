@@ -64,7 +64,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            APP_VERSION=${{ steps.meta.outputs.version }}
+            VERSION=${{ steps.meta.outputs.version }}
           cache-from: type=gha # best-effort reuse of the ci.yml docker-build cache
 
       - name: Package Helm chart
