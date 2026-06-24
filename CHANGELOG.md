@@ -19,13 +19,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - Verifier battery (`internal/restoredrill`): connectivity, schema/migration
     state (reuses checksum + manifest + dirty verifiers, with version-skew
     awareness — an older backup warns rather than fails), pgvector extension +
-    sample similarity query, row counts vs. a live baseline, and **sample Tink
-    decryption of real managed secrets** (LLM credentials with AAD binding, and
-    the two-level webhook/email inbound envelopes) — failing loudly on
-    keyset/restore drift. Decrypted plaintext is never logged or reported.
-  - Whole-population key validation: every distinct `llm_channels` key id must
-    be resident in the live keyset (catches drift beyond the bounded sample);
-    the report states sampled-of-total counts with no silent truncation.
+    sample similarity query, row counts vs. a live baseline, and **full-population
+    Tink decryption of every real managed secret** (LLM credentials with AAD
+    binding, and the two-level webhook/email inbound envelopes) — failing loudly
+    on keyset/restore drift. No sampling, so drift cannot hide in an unchecked
+    row. Decrypted plaintext is never logged or reported.
+  - Whole-population key guard: every distinct `llm_channels` key id must be
+    resident AND enabled in the live keyset (a fast pre-check before the
+    full-population decryption); the report states decrypted-of-total counts.
   - Opt-in `--deep` tier: index validity + amcheck `bt_index_parent_check`
     B-Tree structural verification. Plus `--warn-exit` and structured logging.
   - Recovery objectives: `--backup-taken-at` / `--restore-duration` measure RPO

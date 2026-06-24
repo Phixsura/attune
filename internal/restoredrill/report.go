@@ -30,7 +30,7 @@ const (
 // non-sensitive context for audit evidence and MUST NOT contain decrypted
 // plaintext. Detail shapes by check:
 //   - row_counts:          {restored, baseline}  (per-table counts)
-//   - decryptability:      {llm_total, llm_sampled, inbound_total, inbound_sampled, decrypted}
+//   - decryptability:      {llm_total, llm_checked, inbound_total, inbound_checked, decrypted}
 //   - schema:              {total, applied, pending}
 //   - recovery_objectives: {rpo_seconds, rto_seconds, rpo_target_seconds, rto_target_seconds}
 //   - deep:                {indexes_checked, indexes_total}

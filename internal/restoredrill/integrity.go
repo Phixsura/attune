@@ -95,13 +95,24 @@ func gatherSequences(ctx context.Context, pool *pgxpool.Pool) CheckResult {
 		}
 	}
 	var behind []string
+	checked := 0
 	for _, sr := range refs {
 		ok, isBehind := sequenceBehind(ctx, pool, sr)
 		if !ok {
 			continue
 		}
+		checked++
 		if isBehind {
 			behind = append(behind, sr.schema+"."+sr.seq)
+		}
+	}
+	// If sequences exist but none could be read (e.g. the drill role lacks
+	// privileges), the check verified nothing — fail rather than pass vacuously.
+	if len(refs) > 0 && checked == 0 {
+		return CheckResult{
+			Name:    "sequences",
+			Status:  StatusFail,
+			Message: fmt.Sprintf("could not read any of %d sequence(s) on the restored database — sequence state is unverified", len(refs)),
 		}
 	}
 	return evaluateSequences(behind)

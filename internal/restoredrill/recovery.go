@@ -70,16 +70,25 @@ func humanDur(d time.Duration) string {
 	return d.Round(time.Second).String()
 }
 
+// secondsPtr reports a MEASURED duration (nil = not measured). A measured value
+// is always reported, rounded to whole seconds and never collapsed to nil, so
+// the persisted RPO/RTO matches the rounded human-readable message and a real
+// sub-second restore is not mistaken for "never measured".
 func secondsPtr(d *time.Duration) *int64 {
 	if d == nil {
 		return nil
 	}
-	return secondsOf(ptrext.Indirect(d))
+	secs := int64(ptrext.Indirect(d).Round(time.Second) / time.Second)
+	if secs < 0 {
+		secs = 0
+	}
+	return ptrext.Of(secs)
 }
 
+// secondsOf reports a TARGET duration; 0 (or less) means "no target" → nil.
 func secondsOf(d time.Duration) *int64 {
 	if d <= 0 {
 		return nil
 	}
-	return ptrext.Of(int64(d / time.Second))
+	return ptrext.Of(int64(d.Round(time.Second) / time.Second))
 }

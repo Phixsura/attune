@@ -8,6 +8,7 @@ package restoredrill
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +37,45 @@ func newStore(t *testing.T) *secretstore.TinkStore {
 		t.Fatalf("new store: %v", err)
 	}
 	return s
+}
+
+// TestRestoreDrill_DecryptabilityCatchesUnsampledDrift proves the
+// whole-population fix: one undecryptable inbound source among many must FAIL
+// the decryptability check. Under the old unordered LIMIT 5 sample the bad row
+// was frequently missed → false PASS. Full-population verification always finds
+// it.
+func TestRestoreDrill_DecryptabilityCatchesUnsampledDrift(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	store := newStore(t)      // the live keyset
+	otherStore := newStore(t) // a different keyset (drift)
+
+	tenantID := uuid.NewString()
+	mustExec(t, ctx, pool, `INSERT INTO tenants (id, slug, name) VALUES ($1, $2, $3)`,
+		tenantID, "t-"+tenantID[:8], "Drift Tenant")
+
+	// 12 healthy webhook sources sealed with the live keyset.
+	for i := 0; i < 12; i++ {
+		cfg := mustEncrypt(t, store, mustMarshal(t, map[string][]byte{
+			"secret_current_encrypted": mustEncrypt(t, store, []byte("good")),
+		}))
+		name := fmt.Sprintf("wh-%d", i)
+		mustExec(t, ctx, pool, `INSERT INTO inbound_sources (id, tenant_id, channel, name, slug, config)
+			VALUES (gen_random_uuid(), $1, 'webhook', $2, $2, $3)`, tenantID, name, cfg)
+	}
+	// One source whose outer envelope was sealed with a DIFFERENT keyset — it
+	// cannot be decrypted with the live keyset.
+	bad := mustEncrypt(t, otherStore, mustMarshal(t, map[string][]byte{
+		"secret_current_encrypted": mustEncrypt(t, store, []byte("x")),
+	}))
+	mustExec(t, ctx, pool, `INSERT INTO inbound_sources (id, tenant_id, channel, name, slug, config)
+		VALUES (gen_random_uuid(), $1, 'webhook', 'wh-bad', 'wh-bad', $2)`, tenantID, bad)
+
+	rep := restoredrill.Run(ctx, pool, store, time.Now(), restoredrill.Options{})
+	dc := findCheck(t, rep, "decryptability")
+	if dc.Status != restoredrill.StatusFail {
+		t.Fatalf("decryptability with 1 undecryptable source among 13 = %q, want fail (sampling would have missed it)", dc.Status)
+	}
 }
 
 func TestRestoreDrill_PassesOnSeededRestore(t *testing.T) {

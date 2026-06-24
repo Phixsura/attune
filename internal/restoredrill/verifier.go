@@ -22,10 +22,7 @@ import (
 // secret-bearing tables so a comparison also covers managed-secret rows.
 var CountedTables = []string{"tenants", "user_feedback", "inbound_sources", "llm_channels"}
 
-const (
-	connectTimeout = 10 * time.Second
-	sampleLimit    = 5
-)
+const connectTimeout = 10 * time.Second
 
 // Options configures a drill run.
 type Options struct {
@@ -202,6 +199,11 @@ func sampleKNN(ctx context.Context, pool *pgxpool.Pool) (ran bool, err error) {
 	if err != nil {
 		return false, err
 	}
+	// The probe row is itself embedded, so a working HNSW index must return at
+	// least itself; zero hits means the index answered nothing despite data.
+	if hits == 0 {
+		return false, fmt.Errorf("similarity query returned no neighbours despite %d embedded row(s)", embedded)
+	}
 	return true, nil
 }
 
@@ -237,22 +239,24 @@ func countTables(ctx context.Context, pool *pgxpool.Pool) (map[string]int64, err
 }
 
 // decryptDetail is the non-sensitive evidence for the decryptability check:
-// population sizes and how many were sampled/decrypted. Never carries plaintext.
+// population sizes and how many were decrypted. Never carries plaintext. The
+// check decrypts the FULL managed-secret population (these tables are
+// low-cardinality by design), so checked == total on a healthy restore.
 type decryptDetail struct {
 	LLMTotal       int `json:"llm_total"`
-	LLMSampled     int `json:"llm_sampled"`
+	LLMChecked     int `json:"llm_checked"`
 	InboundTotal   int `json:"inbound_total"`
-	InboundSampled int `json:"inbound_sampled"`
+	InboundChecked int `json:"inbound_checked"`
 	Decrypted      int `json:"decrypted"`
 }
 
 // checkDecryptability proves managed secrets in the restored DB are recoverable
-// with the live keyset, two ways: (1) a WHOLE-POPULATION guard — every distinct
-// llm_channels key id must be resident in the live keyset, catching keyset/
-// restore drift even in rows the sampler never touches; and (2) a deep SAMPLE
-// that actually decrypts a bounded sample of LLM credentials (AAD-bound) and
-// inbound webhook/email two-level envelopes. A single failure fails loudly. It
-// never returns or logs decrypted plaintext.
+// with the live keyset. It (1) runs a WHOLE-POPULATION key guard — every distinct
+// llm_channels key id must be resident AND ENABLED in the live keyset — then
+// (2) DECRYPTS THE FULL POPULATION of LLM credentials (AAD-bound) and inbound
+// webhook/email two-level envelopes. There is no sampling: every managed secret
+// is verified, so drift cannot hide in an unsampled row. A single failure fails
+// loudly. It never returns or logs decrypted plaintext.
 func checkDecryptability(ctx context.Context, pool *pgxpool.Pool, store *secretstore.TinkStore) CheckResult {
 	r := CheckResult{Name: "decryptability"}
 	if store == nil {
@@ -261,7 +265,7 @@ func checkDecryptability(ctx context.Context, pool *pgxpool.Pool, store *secrets
 		return r
 	}
 
-	// (1) Whole-population key-reference validation.
+	// (1) Whole-population key-reference guard (fast fail on obvious drift).
 	referenced, err := distinctLLMKeyRefs(ctx, pool)
 	if err != nil {
 		r.Status = StatusFail
@@ -270,7 +274,7 @@ func checkDecryptability(ctx context.Context, pool *pgxpool.Pool, store *secrets
 	}
 	if missing := missingKeyRefs(referenced, liveKeyIDs(store)); len(missing) > 0 {
 		r.Status = StatusFail
-		r.Message = fmt.Sprintf("%d managed key id(s) referenced by llm_channels are absent from the live keyset (%s) — the restored database and keyset have drifted",
+		r.Message = fmt.Sprintf("%d managed key id(s) referenced by llm_channels are absent or disabled in the live keyset (%s) — the restored database and keyset have drifted",
 			len(missing), strings.Join(missing, ", "))
 		return r
 	}
@@ -292,25 +296,25 @@ func checkDecryptability(ctx context.Context, pool *pgxpool.Pool, store *secrets
 		return r
 	}
 
-	// (2) Deep sample decryption.
-	llmSampled, llmOK, llmErr, qerr := sampleDecryptLLM(ctx, pool, store)
+	// (2) Decrypt the FULL population — no sampling.
+	llmChecked, llmOK, llmErr, qerr := verifyDecryptAllLLM(ctx, pool, store)
 	if qerr != nil {
 		r.Status = StatusFail
-		r.Message = "error sampling llm_channels on the restored database"
+		r.Message = "error reading llm_channels on the restored database"
 		return r
 	}
-	inSampled, inOK, inErr, qerr := sampleDecryptInbound(ctx, pool, store)
+	inChecked, inOK, inErr, qerr := verifyDecryptAllInbound(ctx, pool, store)
 	if qerr != nil {
 		r.Status = StatusFail
-		r.Message = "error sampling inbound_sources on the restored database"
+		r.Message = "error reading inbound_sources on the restored database"
 		return r
 	}
 
-	sampled := llmSampled + inSampled
+	checked := llmChecked + inChecked
 	decrypted := llmOK + inOK
 	r.Detail = decryptDetail{
-		LLMTotal: llmTotal, LLMSampled: llmSampled,
-		InboundTotal: inboundTotal, InboundSampled: inSampled, Decrypted: decrypted,
+		LLMTotal: llmTotal, LLMChecked: llmChecked,
+		InboundTotal: inboundTotal, InboundChecked: inChecked, Decrypted: decrypted,
 	}
 	firstErr := llmErr
 	if firstErr == nil {
@@ -318,17 +322,17 @@ func checkDecryptability(ctx context.Context, pool *pgxpool.Pool, store *secrets
 	}
 
 	switch {
-	case sampled == 0:
+	case checked == 0:
 		r.Status = StatusSkip
 		r.Message = "no managed secrets present to verify"
 	case firstErr != nil:
 		r.Status = StatusFail
-		r.Message = fmt.Sprintf("%d/%d sampled managed secret(s) failed to decrypt — the restored database and the live keyset have drifted (%v)",
-			sampled-decrypted, sampled, firstErr)
+		r.Message = fmt.Sprintf("%d/%d managed secret(s) failed to decrypt — the restored database and the live keyset have drifted (%v)",
+			checked-decrypted, checked, firstErr)
 	default:
 		r.Status = StatusPass
-		r.Message = fmt.Sprintf("decrypted %d/%d sampled secret(s) of %d total; validated %d llm key reference(s) against the live keyset",
-			decrypted, sampled, llmTotal+inboundTotal, len(referenced))
+		r.Message = fmt.Sprintf("decrypted all %d managed secret(s) with the live keyset (%d llm + %d inbound)",
+			checked, llmChecked, inChecked)
 	}
 	return r
 }
@@ -355,11 +359,18 @@ func distinctLLMKeyRefs(ctx context.Context, pool *pgxpool.Pool) ([]string, erro
 	return out, rows.Err()
 }
 
+// liveKeyIDs returns the ids of keys that can actually DECRYPT — only ENABLED
+// keys. Tink decrypts solely with enabled keys, so a referenced key that is
+// present-but-DISABLED/DESTROYED cannot recover its ciphertext and must count as
+// drift, not as resident. Filtering by status is what makes the whole-population
+// guard a real safety net rather than a membership check.
 func liveKeyIDs(store *secretstore.TinkStore) []string {
 	keys := store.Keys()
 	out := make([]string, 0, len(keys))
 	for _, k := range keys {
-		out = append(out, k.KeyID)
+		if k.Status == "ENABLED" {
+			out = append(out, k.KeyID)
+		}
 	}
 	return out
 }
@@ -372,13 +383,12 @@ func countQuery(ctx context.Context, pool *pgxpool.Pool, sql string) (int, error
 	return n, nil
 }
 
-// sampleDecryptLLM decrypts a bounded sample of LLM credentials. queryErr is a
-// fatal sampling error; firstErr is the first decryption failure (drift).
-func sampleDecryptLLM(ctx context.Context, pool *pgxpool.Pool, store *secretstore.TinkStore) (sampled, decrypted int, firstErr, queryErr error) {
+// verifyDecryptAllLLM decrypts EVERY LLM credential. queryErr is a fatal read
+// error; firstErr is the first decryption failure (drift).
+func verifyDecryptAllLLM(ctx context.Context, pool *pgxpool.Pool, store *secretstore.TinkStore) (checked, decrypted int, firstErr, queryErr error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, credential_key_id, credential_ciphertext FROM llm_channels
-		WHERE credential_ciphertext IS NOT NULL AND octet_length(credential_ciphertext) > 0
-		LIMIT $1`, sampleLimit)
+		WHERE credential_ciphertext IS NOT NULL AND octet_length(credential_ciphertext) > 0`)
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -387,9 +397,9 @@ func sampleDecryptLLM(ctx context.Context, pool *pgxpool.Pool, store *secretstor
 		var id, keyID string
 		var ct []byte
 		if err := rows.Scan(&id, &keyID, &ct); err != nil {
-			return sampled, decrypted, firstErr, err
+			return checked, decrypted, firstErr, err
 		}
-		sampled++
+		checked++
 		if e := decryptLLMChannel(store, id, keyID, ct); e != nil {
 			if firstErr == nil {
 				firstErr = e
@@ -398,16 +408,15 @@ func sampleDecryptLLM(ctx context.Context, pool *pgxpool.Pool, store *secretstor
 			decrypted++
 		}
 	}
-	return sampled, decrypted, firstErr, rows.Err()
+	return checked, decrypted, firstErr, rows.Err()
 }
 
-// sampleDecryptInbound decrypts a bounded sample of webhook/email two-level
-// inbound config envelopes.
-func sampleDecryptInbound(ctx context.Context, pool *pgxpool.Pool, store *secretstore.TinkStore) (sampled, decrypted int, firstErr, queryErr error) {
+// verifyDecryptAllInbound decrypts EVERY webhook/email two-level inbound config
+// envelope.
+func verifyDecryptAllInbound(ctx context.Context, pool *pgxpool.Pool, store *secretstore.TinkStore) (checked, decrypted int, firstErr, queryErr error) {
 	rows, err := pool.Query(ctx, `
 		SELECT channel, config FROM inbound_sources
-		WHERE config IS NOT NULL AND octet_length(config) > 0 AND channel IN ('webhook', 'email')
-		LIMIT $1`, sampleLimit)
+		WHERE config IS NOT NULL AND octet_length(config) > 0 AND channel IN ('webhook', 'email')`)
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -416,7 +425,7 @@ func sampleDecryptInbound(ctx context.Context, pool *pgxpool.Pool, store *secret
 		var channel string
 		var cfg []byte
 		if err := rows.Scan(&channel, &cfg); err != nil {
-			return sampled, decrypted, firstErr, err
+			return checked, decrypted, firstErr, err
 		}
 		var e error
 		switch channel {
@@ -427,7 +436,7 @@ func sampleDecryptInbound(ctx context.Context, pool *pgxpool.Pool, store *secret
 		default:
 			continue
 		}
-		sampled++
+		checked++
 		if e != nil {
 			if firstErr == nil {
 				firstErr = e
@@ -436,5 +445,5 @@ func sampleDecryptInbound(ctx context.Context, pool *pgxpool.Pool, store *secret
 			decrypted++
 		}
 	}
-	return sampled, decrypted, firstErr, rows.Err()
+	return checked, decrypted, firstErr, rows.Err()
 }

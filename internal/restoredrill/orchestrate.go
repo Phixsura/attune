@@ -93,19 +93,26 @@ func dropEphemeral(admin *pgxpool.Pool, name string) {
 	}
 }
 
-// runRestore shells to psql or pg_restore. The connection is passed via PG*
-// environment variables so the password never appears in argv (ps-visible).
+// runRestore shells to psql or pg_restore, restoring ATOMICALLY: with
+// --single-transaction any object error rolls the whole restore back and exits
+// non-zero, so a partial restore can never be left behind and reported as a
+// passing drill. The connection is passed as a URI with the password stripped
+// into PGPASSWORD — the secret never appears in argv (ps-visible), while every
+// other DSN parameter (sslmode, sslrootcert, options, …) is preserved.
 func runRestore(ctx context.Context, dbURL, file, tool string) error {
-	env, dbname, err := pgEnv(dbURL)
+	connURI, env, err := restoreConn(dbURL)
 	if err != nil {
 		return err
 	}
 	var cmd *exec.Cmd
 	switch tool {
 	case "pg_restore":
-		cmd = exec.CommandContext(ctx, "pg_restore", "--no-owner", "--no-privileges", "--exit-on-error", "-d", dbname, file)
+		// --single-transaction implies --exit-on-error and makes it atomic.
+		cmd = exec.CommandContext(ctx, "pg_restore",
+			"--no-owner", "--no-privileges", "--single-transaction", "-d", connURI, file)
 	case "psql", "":
-		cmd = exec.CommandContext(ctx, "psql", "-v", "ON_ERROR_STOP=1", "-f", file)
+		cmd = exec.CommandContext(ctx, "psql",
+			"-v", "ON_ERROR_STOP=1", "--single-transaction", "-d", connURI, "-f", file)
 	default:
 		return fmt.Errorf("unknown restore tool %q (use psql or pg_restore)", tool)
 	}
@@ -117,35 +124,26 @@ func runRestore(ctx context.Context, dbURL, file, tool string) error {
 	return nil
 }
 
-func pgEnv(rawURL string) (env []string, dbname string, err error) {
-	u, err := url.Parse(rawURL)
+// restoreConn splits dbURL into a connection URI safe for argv (password
+// removed) and an environment carrying the password via PGPASSWORD. libpq parses
+// the URI and honors every query parameter, so the restore connection matches
+// exactly what the operator specified — including mutual-TLS (sslrootcert/
+// sslcert/sslkey) and libpq options that PG*-env reconstruction would drop.
+func restoreConn(dbURL string) (connURI string, env []string, err error) {
+	u, err := url.Parse(dbURL)
 	if err != nil {
-		return nil, "", fmt.Errorf("parse restore url: %w", err)
+		return "", nil, fmt.Errorf("parse restore url: %w", err)
 	}
-	port := u.Port()
-	if port == "" {
-		port = "5432"
-	}
-	dbname = strings.TrimPrefix(u.Path, "/")
-	// Only set PG* vars that are present — an explicit empty PGPASSWORD/PGUSER
-	// would override peer-auth / .pgpass, which differs from leaving it unset.
-	env = append(os.Environ(), "PGPORT="+port)
-	if h := u.Hostname(); h != "" {
-		env = append(env, "PGHOST="+h)
-	}
-	if usr := u.User.Username(); usr != "" {
-		env = append(env, "PGUSER="+usr)
-	}
+	env = os.Environ()
 	if pass, ok := u.User.Password(); ok {
 		env = append(env, "PGPASSWORD="+pass)
+		if usr := u.User.Username(); usr != "" {
+			u.User = url.User(usr) // drop the password from the argv-visible URI
+		} else {
+			u.User = nil
+		}
 	}
-	if dbname != "" {
-		env = append(env, "PGDATABASE="+dbname)
-	}
-	if sm := u.Query().Get("sslmode"); sm != "" {
-		env = append(env, "PGSSLMODE="+sm)
-	}
-	return env, dbname, nil
+	return u.String(), env, nil
 }
 
 func lastLines(s string, n int) string {

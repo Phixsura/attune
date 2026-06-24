@@ -37,31 +37,37 @@ func TestWithDatabase(t *testing.T) {
 	}
 }
 
-func TestPgEnv(t *testing.T) {
-	env, db, err := pgEnv(dsn("user:secret", "host:5433", "mydb?sslmode=require"))
+func TestRestoreConn(t *testing.T) {
+	// Password goes to PGPASSWORD; the argv URI keeps user/host/db AND every
+	// query parameter (incl. mutual-TLS), but never the password.
+	uri, env, err := restoreConn(dsn("user:secret", "host:5433", "mydb?sslmode=verify-full&sslrootcert=/ca.crt&options=-csearch_path=x"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if db != "mydb" {
-		t.Fatalf("dbname = %q", db)
+	if got := envVal(env, "PGPASSWORD"); got != "secret" {
+		t.Fatalf("PGPASSWORD = %q, want secret", got)
 	}
-	for k, want := range map[string]string{
-		"PGHOST": "host", "PGPORT": "5433", "PGUSER": "user",
-		"PGPASSWORD": "secret", "PGDATABASE": "mydb", "PGSSLMODE": "require",
-	} {
-		if got := envVal(env, k); got != want {
-			t.Fatalf("%s = %q, want %q", k, got, want)
+	if strings.Contains(uri, "secret") {
+		t.Fatalf("password leaked into argv URI: %q", uri)
+	}
+	for _, want := range []string{"user@host:5433", "/mydb", "sslmode=verify-full", "sslrootcert=", "options="} {
+		if !strings.Contains(uri, want) {
+			t.Fatalf("URI %q dropped %q (would break the restore connection)", uri, want)
 		}
 	}
 }
 
-func TestPgEnv_DefaultPort(t *testing.T) {
-	env, _, err := pgEnv(dsn("user", "host", "db"))
+func TestRestoreConn_NoPassword(t *testing.T) {
+	// No password in the URL → no PGPASSWORD override (peer / .pgpass auth).
+	uri, env, err := restoreConn(dsn("user", "host", "db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := envVal(env, "PGPORT"); got != "5432" {
-		t.Fatalf("default PGPORT = %q, want 5432", got)
+	if got := envVal(env, "PGPASSWORD"); got != "" {
+		t.Fatalf("unexpected PGPASSWORD %q for a password-less URL", got)
+	}
+	if !strings.Contains(uri, "user@host") {
+		t.Fatalf("URI = %q, want user@host preserved", uri)
 	}
 }
 
