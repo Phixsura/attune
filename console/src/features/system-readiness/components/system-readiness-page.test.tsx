@@ -16,6 +16,12 @@ const allPassReport: PreflightReport = {
     { name: 'auth:session_key', category: 'auth', status: 'pass', message: 'Present' },
     { name: 'metrics:registry', category: 'metrics', status: 'pass', message: 'Healthy' },
     { name: 'worker:enricher', category: 'worker', status: 'pass', message: '3 workers' },
+    {
+      name: 'backup:restore_drill',
+      category: 'backup',
+      status: 'pass',
+      message: 'Last restore drill passed (today)',
+    },
   ],
 }
 
@@ -83,6 +89,7 @@ describe('SystemReadinessPage', () => {
     })
     expect(screen.getByText('数据库')).toBeInTheDocument()
     expect(screen.getByText('Worker')).toBeInTheDocument()
+    expect(screen.getByText('备份')).toBeInTheDocument()
   })
 
   it('hides issues section when all checks pass', async () => {

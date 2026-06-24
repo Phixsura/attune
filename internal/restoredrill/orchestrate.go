@@ -93,6 +93,12 @@ func withDatabase(rawURL, db string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse admin url: %w", err)
 	}
+	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		// A keyword/value DSN (host=… password=…) would be silently mangled by
+		// url.Parse, dropping the host/credentials. Require the URL form so the
+		// rewrite is correct and the password is never stranded in argv.
+		return "", fmt.Errorf("--admin-url must be a postgres:// URL, not a keyword/value DSN (scheme %q)", u.Scheme)
+	}
 	u.Path = "/" + db
 	return u.String(), nil
 }
@@ -147,6 +153,11 @@ func restoreConn(dbURL string) (connURI string, env []string, err error) {
 	u, err := url.Parse(dbURL)
 	if err != nil {
 		return "", nil, fmt.Errorf("parse restore url: %w", err)
+	}
+	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		// Reject keyword/value DSNs: url.Parse can't find the password in them, so
+		// it would be left inside the argv-visible connection string.
+		return "", nil, fmt.Errorf("restore url must be a postgres:// URL (scheme %q)", u.Scheme)
 	}
 	env = os.Environ()
 	if pass, ok := u.User.Password(); ok {

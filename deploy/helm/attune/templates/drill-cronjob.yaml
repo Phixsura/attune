@@ -15,6 +15,7 @@ metadata:
 spec:
   schedule: {{ .Values.restoreDrill.schedule | quote }}
   concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.restoreDrill.startingDeadlineSeconds }}
   successfulJobsHistoryLimit: {{ .Values.restoreDrill.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ .Values.restoreDrill.failedJobsHistoryLimit }}
   jobTemplate:

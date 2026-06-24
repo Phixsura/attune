@@ -321,5 +321,19 @@ restoreDrill:
   rtoTarget: ""
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  activeDeadlineSeconds: 1800
-  resources: {}
+  # Pod wall-clock backstop. Must EXCEED the in-process 30m drill timeout so the
+  # drill self-terminates with a recorded verdict before the kubelet SIGKILLs it
+  # mid-run (which would leave no record and read as a recoverability failure).
+  activeDeadlineSeconds: 2100
+  # If a scheduled run is missed (controller down, or a prior run still active),
+  # still start it within this window rather than silently dropping the weekly
+  # drill until the next slot.
+  startingDeadlineSeconds: 3600
+  # A bounded default so a large-DB drill is sized, not OOM-evicted (which would
+  # read as a recoverability failure). Override for very large databases.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi

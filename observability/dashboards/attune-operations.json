@@ -1234,7 +1234,7 @@
       "id": 29,
       "type": "stat",
       "title": "Time since last drill success",
-      "description": "Age of the most recent passing backup/restore drill. Red beyond 8 days means recent backups are unverified — this is the AttuneRestoreDrillStale alert's signal. 'No data' means no drill has ever passed (the backup:restore_drill preflight check warns).",
+      "description": "Age of the most recent non-failing (pass or warn) backup/restore drill. Red beyond 8 days means recent backups are unverified — this is the AttuneRestoreDrillStale alert's signal. A near-zero epoch value means no drill has ever succeeded (the backup:restore_drill preflight check warns).",
       "gridPos": {
         "h": 4,
         "w": 8,

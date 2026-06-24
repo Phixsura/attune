@@ -26,6 +26,6 @@ CREATE INDEX IF NOT EXISTS idx_restore_drill_runs_ran_at
 COMMENT ON TABLE restore_drill_runs IS
     'Append-only history of backup/restore drills (#151), written by attune restore-drill run --record.';
 COMMENT ON COLUMN restore_drill_runs.status IS
-    'Drill verdict: pass | warn | fail.';
+    'Drill verdict: pass | warn | fail | skipped.';
 COMMENT ON COLUMN restore_drill_runs.report IS
     'Full DrillReport JSON for audit evidence; never contains decrypted plaintext.';

@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | **Issue** | [#151](https://github.com/Phixsura/attune/issues/151) |
-| **Status** | Accepted |
+| **Status** | Implemented |
 | **Started** | 2026-06-24 |
 | **Related** | [#149](https://github.com/Phixsura/attune/issues/149) (preflight — surfaces the drill), [#150](https://github.com/Phixsura/attune/issues/150) (migration checksum ledger — reused verifiers), [#66](https://github.com/Phixsura/attune/issues/66) (inbound framework — `inbound_sources` secrets), [#93](https://github.com/Phixsura/attune/issues/93) (MCP / managed LLM secrets), [2026-06-23-production-readiness-preflight.md](./2026-06-23-production-readiness-preflight.md), [2026-06-23-migration-checksum-ledger.md](./2026-06-23-migration-checksum-ledger.md) |
 
@@ -341,7 +341,7 @@ dashboard + README, no `_count` suffix):
 - `attune_restore_drill_runs_total{status}` — counter.
 - `attune_restore_drill_last_success_timestamp_seconds` — gauge (drives the
   alert + the readiness freshness grade).
-- `attune_restore_drill_duration_seconds` — gauge (RTO signal).
+- `attune_restore_drill_last_rto_seconds` — gauge (RTO signal).
 
 An alert `AttuneRestoreDrillStale` fires when
 `time() - attune_restore_drill_last_success_timestamp_seconds` exceeds the

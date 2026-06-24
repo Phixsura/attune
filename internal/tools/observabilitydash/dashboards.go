@@ -252,7 +252,7 @@ func operationsDashboard() dashboard {
 			targetExpr("D", `increase(attune_migration_checksum_drift_total[$__rate_interval])`, "checksum drift"),
 		}, "short", gp(0, 56, 24, 8)),
 		rowPanel(28, "Backup recoverability", 64),
-		statDesc(29, "Time since last drill success", "Age of the most recent passing backup/restore drill. Red beyond 8 days means recent backups are unverified — this is the AttuneRestoreDrillStale alert's signal. 'No data' means no drill has ever passed (the backup:restore_drill preflight check warns).", `time() - max(attune_restore_drill_last_success_timestamp_seconds)`, "s", gp(0, 65, 8, 4), greenWarnRed(7*24*3600, 8*24*3600)),
+		statDesc(29, "Time since last drill success", "Age of the most recent non-failing (pass or warn) backup/restore drill. Red beyond 8 days means recent backups are unverified — this is the AttuneRestoreDrillStale alert's signal. A near-zero epoch value means no drill has ever succeeded (the backup:restore_drill preflight check warns).", `time() - max(attune_restore_drill_last_success_timestamp_seconds)`, "s", gp(0, 65, 8, 4), greenWarnRed(7*24*3600, 8*24*3600)),
 		statDesc(30, "Last restore time (RTO)", "Measured restore duration of the most recent drill that recorded one. Trends time-to-recover against your RTO objective.", `attune_restore_drill_last_rto_seconds`, "s", gp(8, 65, 8, 4), nil),
 		seriesDesc(31, "Restore drills by outcome", "Recorded restore drills by status. A rising fail count — or the absence of recent pass/warn — means the latest backups may not be recoverable.", []target{
 			targetExpr("A", `attune_restore_drill_runs_total`, "{{status}}"),

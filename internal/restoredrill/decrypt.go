@@ -68,9 +68,12 @@ func decryptInboundWebhook(store *secretstore.TinkStore, config []byte) error {
 	if err != nil {
 		return fmt.Errorf("webhook config envelope: %w", err)
 	}
+	defer zero(outer)
 	var s inboundWebhookSecrets
 	if err := json.Unmarshal(outer, &s); err != nil {
-		return fmt.Errorf("webhook config envelope json: %w", err)
+		// Static error: a wrapped json error would echo decrypted envelope bytes
+		// into the report/audit ledger.
+		return errors.New("webhook config envelope is not valid JSON")
 	}
 	if len(s.SecretCurrentEncrypted) == 0 {
 		return errors.New("webhook config: no current secret in envelope")
@@ -100,9 +103,11 @@ func decryptInboundEmail(store *secretstore.TinkStore, config []byte) error {
 	if err != nil {
 		return fmt.Errorf("email config envelope: %w", err)
 	}
+	defer zero(outer)
 	var s inboundEmailSecrets
 	if err := json.Unmarshal(outer, &s); err != nil {
-		return fmt.Errorf("email config envelope json: %w", err)
+		// Static error: a wrapped json error would echo decrypted envelope bytes.
+		return errors.New("email config envelope is not valid JSON")
 	}
 	if len(s.PasswordEncrypted) == 0 {
 		return errors.New("email config: no password in envelope")

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/metrics"
+	"github.com/Phixsura/attune/internal/restoredrill"
 )
 
 func TestRegisteredMetricsHaveDashboardCoverage(t *testing.T) {
@@ -249,6 +250,7 @@ type alertRule struct {
 func registeredMetricNames() []string {
 	names := append([]string{}, metrics.RegisteredMetricNames()...)
 	names = append(names, inbound.RegisteredMetricNames()...)
+	names = append(names, restoredrill.RegisteredMetricNames()...)
 	slices.Sort(names)
 	return names
 }

@@ -53,6 +53,17 @@ type metricsCollector struct {
 	lastAt   time.Time
 }
 
+// RegisteredMetricNames lists the restore-drill metric names so the dashboard /
+// README drift gate covers them — they are registered from this package, not the
+// central internal/infra/metrics catalog, so they must be unioned in explicitly.
+func RegisteredMetricNames() []string {
+	return []string{
+		"attune_restore_drill_last_success_timestamp_seconds",
+		"attune_restore_drill_runs_total",
+		"attune_restore_drill_last_rto_seconds",
+	}
+}
+
 // RegisterMetrics wires the derived restore-drill collector into reg. Call once
 // from server startup with the production pool. No-op if pool is nil.
 func RegisterMetrics(reg prometheus.Registerer, pool *pgxpool.Pool) {
