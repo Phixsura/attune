@@ -101,3 +101,39 @@ tests:
               description: 3 outbox delivery(s) are in the terminal 'dead' state. A webhook may be deleted/misconfigured (e.g. a removed Discord/Slack channel webhook).
               runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxdeadrowshigh
               summary: Attune has deliveries stuck in the dead queue
+
+  # Restore-drill staleness — the only alert that makes a lapsed drill visible.
+  # 5m series interval keeps the gauge fresh (under the lookback) so `for: 1h`
+  # accumulates; a last success older than 8d fires after the 1h pending window.
+  - interval: 5m
+    input_series:
+      - series: 'attune_restore_drill_last_success_timestamp_seconds'
+        values: '100x2520' # last success at epoch 100, held ~8.75 days
+    alert_rule_test:
+      - eval_time: 10h # time()-100 well under 8d → quiet
+        alertname: AttuneRestoreDrillStale
+        exp_alerts: []
+      - eval_time: 200h # > 8d since last success, pending 1h satisfied → fires
+        alertname: AttuneRestoreDrillStale
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneRestoreDrillStale
+              service: attune
+              severity: warning
+            exp_annotations:
+              summary: No successful restore drill in over 8 days
+              description: The most recent passing backup/restore drill is more than 8 days old. Recoverability of the latest backup is unverified.
+              dashboard: Attune Operations
+              dashboard_url: /d/attune-operations/attune-operations
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunerestoredrillstale
+              action: Run 'attune restore-drill run --target <restored-db-url> --record', or check the restore-drill CronJob (restoreDrill.enabled). See docs/private-deploy.md.
+
+  # Never-run: the > 0 guard suppresses the alert (the preflight check warns instead).
+  - interval: 5m
+    input_series:
+      - series: 'attune_restore_drill_last_success_timestamp_seconds'
+        values: '0x2520'
+    alert_rule_test:
+      - eval_time: 200h
+        alertname: AttuneRestoreDrillStale
+        exp_alerts: []

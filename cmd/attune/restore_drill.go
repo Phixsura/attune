@@ -207,10 +207,11 @@ func finalizeDrill(ctx context.Context, prodURL string, report restoredrill.Dril
 	}
 	if doRecord {
 		if err := recordDrill(ctx, prodURL, report); err != nil {
-			if report.Status == restoredrill.StatusFail {
-				return fmt.Errorf("restore drill FAILED (and recording it also failed: %w)", err)
-			}
-			return err
+			// Recording is audit bookkeeping — a record failure must never flip a
+			// passing drill to a failure exit, nor mask a FAILED verdict. Log it;
+			// the drill verdict dominates the exit code, and the next preflight
+			// check surfaces the missing record as staleness.
+			logext.Warnf(ctx, "[restore-drill] failed to record result,status:%s,err:%+v", report.Status, err)
 		}
 	}
 	switch report.Status {

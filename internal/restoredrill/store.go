@@ -20,11 +20,21 @@ func Record(ctx context.Context, prod *pgxpool.Pool, rep DrillReport) error {
 	if err != nil {
 		return fmt.Errorf("marshal report: %w", err)
 	}
+	// Fail closed: a status outside the enum would either violate the table's
+	// CHECK (opaque error) or, worse, corrupt this append-only audit ledger.
+	// Coerce an unrecognized/unset status to "fail" so a malformed report is
+	// recorded as a failure, never as a silently-acceptable row.
+	status := string(rep.Status)
+	switch rep.Status {
+	case StatusPass, StatusWarn, StatusFail, StatusSkip:
+	default:
+		status = string(StatusFail)
+	}
 	_, err = prod.Exec(ctx, `
 		INSERT INTO restore_drill_runs
 			(ran_at, status, backup_ref, schema_version, duration_ms, rpo_seconds, rto_seconds, report, attune_version)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		rep.StartedAt, string(rep.Status), rep.BackupRef, rep.SchemaVersion,
+		rep.StartedAt, status, rep.BackupRef, rep.SchemaVersion,
 		rep.DurationMS, rep.RPOSeconds, rep.RTOSeconds, payload, rep.AttuneVersion)
 	if err != nil {
 		return fmt.Errorf("insert restore_drill_runs: %w", err)

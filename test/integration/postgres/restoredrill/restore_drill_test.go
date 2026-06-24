@@ -340,6 +340,26 @@ func TestRestoreDrill_VerifyBackupArtifact(t *testing.T) {
 	}
 }
 
+// TestRestoreDrill_RecordCoercesInvalidStatus: a report whose status is outside
+// the enum must be recorded fail-closed (as "fail"), never rejected by the CHECK
+// constraint nor stored verbatim into the append-only audit ledger.
+func TestRestoreDrill_RecordCoercesInvalidStatus(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+
+	rep := restoredrill.DrillReport{Status: restoredrill.Status("bogus"), StartedAt: time.Now()}
+	if err := restoredrill.Record(ctx, pool, rep); err != nil {
+		t.Fatalf("record invalid-status report: %v", err)
+	}
+	last, ok, err := restoredrill.ReadLast(ctx, pool)
+	if err != nil || !ok {
+		t.Fatalf("read last: ok=%v err=%v", ok, err)
+	}
+	if last.Status != restoredrill.StatusFail {
+		t.Fatalf("invalid status recorded as %q, want fail (fail-closed)", last.Status)
+	}
+}
+
 func TestRestoreDrill_DeadPoolErrors(t *testing.T) {
 	ctx := context.Background()
 	pool, cleanup, err := testdb.OpenPool()

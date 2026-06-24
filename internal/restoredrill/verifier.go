@@ -132,14 +132,19 @@ func gatherSchema(ctx context.Context, pool *pgxpool.Pool) (CheckResult, int) {
 			Message: "cannot read migration state from the restored database",
 		}, 0
 	}
-	var maxApplied int
-	if err := pool.QueryRow(ctx,
-		`SELECT COALESCE(MAX(version), 0) FROM schema_migrations_feedback`).Scan(&maxApplied); err != nil {
-		return CheckResult{
-			Name:    "schema",
-			Status:  StatusFail,
-			Message: "cannot read applied migration version from the restored database",
-		}, 0
+	// status.Applied > 0 implies the tracker table exists and has rows (a missing
+	// or empty tracker yields Applied == 0), so this raw read is safe — and on
+	// such a DB MaxApplied legitimately stays 0 (never newer-than-binary).
+	maxApplied := 0
+	if status.Applied > 0 {
+		if err := pool.QueryRow(ctx,
+			`SELECT COALESCE(MAX(version), 0) FROM schema_migrations_feedback`).Scan(&maxApplied); err != nil {
+			return CheckResult{
+				Name:    "schema",
+				Status:  StatusFail,
+				Message: "cannot read applied migration version from the restored database",
+			}, 0
+		}
 	}
 	in := schemaInputs{
 		Total:       status.Total,
