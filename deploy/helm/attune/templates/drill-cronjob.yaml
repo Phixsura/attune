@@ -1,0 +1,88 @@
+{{- if .Values.restoreDrill.enabled }}
+{{- /*
+Restore-drill CronJob (#151). Runs `attune restore-drill run` on a schedule
+against an operator-provided, already-restored throwaway database, recording the
+result to production so the System Readiness page can surface it. Reuses the app
+image and the config Secret (for the Tink keyset + production DB URL). It makes
+no Kubernetes API calls, so it needs no extra RBAC.
+*/ -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "attune.fullname" . }}-restore-drill
+  labels:
+    {{- include "attune.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.restoreDrill.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.restoreDrill.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.restoreDrill.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.restoreDrill.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ .Values.restoreDrill.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "attune.selectorLabels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "attune.serviceAccountName" . }}
+          automountServiceAccountToken: false
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: restore-drill
+              image: {{ include "attune.image" . | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args:
+                - --config
+                - {{ include "attune.configPath" . | quote }}
+                - restore-drill
+                - run
+                - --target
+                - {{ required "restoreDrill.targetDatabaseURL is required when restoreDrill.enabled=true" .Values.restoreDrill.targetDatabaseURL | quote }}
+                {{- with .Values.restoreDrill.baselineDatabaseURL }}
+                - --baseline-url
+                - {{ . | quote }}
+                {{- end }}
+                {{- with .Values.restoreDrill.backupRef }}
+                - --backup-ref
+                - {{ . | quote }}
+                {{- end }}
+                {{- with .Values.restoreDrill.rpoTarget }}
+                - --rpo-target
+                - {{ . | quote }}
+                {{- end }}
+                {{- with .Values.restoreDrill.rtoTarget }}
+                - --rto-target
+                - {{ . | quote }}
+                {{- end }}
+                - --record
+              {{- with .Values.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.restoreDrill.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: config
+                  mountPath: {{ .Values.config.mountPath | quote }}
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: config
+              secret:
+                secretName: {{ include "attune.configSecretName" . }}
+                items:
+                  - key: {{ .Values.config.secretKey }}
+                    path: {{ .Values.config.secretKey }}
+            - name: tmp
+              emptyDir: {}
+{{- end }}

@@ -222,6 +222,24 @@ groups:
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunemigrationchecksumdrift"
           action: "Identify the drifted migration by comparing embedded checksums in the binary with schema_migrations table. Roll back to the original file content or create a remediation migration."
 
+      - alert: AttuneRestoreDrillStale
+        # Warning, not critical: a stale drill is a process lapse, not an outage.
+        # Guarded on > 0 so a never-run drill does not page — the preflight
+        # backup:restore_drill check surfaces that as a warning instead. The 8d
+        # window tolerates one missed weekly run.
+        expr: max(attune_restore_drill_last_success_timestamp_seconds) > 0 and (time() - max(attune_restore_drill_last_success_timestamp_seconds)) > 8 * 24 * 3600
+        for: 1h
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "No successful restore drill in over 8 days"
+          description: "The most recent passing backup/restore drill is more than 8 days old. Recoverability of the latest backup is unverified."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunerestoredrillstale"
+          action: "Run 'attune restore-drill run --target <restored-db-url> --record', or check the restore-drill CronJob (restoreDrill.enabled). See docs/private-deploy.md."
+
   - name: attune.alerts.security
     rules:
       - alert: AttuneAuthorizationDenialsHigh

@@ -140,6 +140,28 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+      - name: Install PostgreSQL 17 tools (match the pg17 service; incl. pg_waldump)
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          # Don't auto-create/start a local cluster — the pg17 service already owns :5432.
+          sudo install -d /etc/postgresql-common
+          echo "create_main_cluster = false" | sudo tee /etc/postgresql-common/createcluster.conf > /dev/null
+          sudo apt-get update
+          # postgresql-17 pulls in postgresql-client-17 and adds pg_waldump,
+          # which pg_verifybackup needs to validate streamed WAL.
+          sudo apt-get install -y postgresql-17
+      - name: Enable replication on the Postgres service (for the pg_basebackup verify-backup test)
+        run: |
+          cid="$(docker ps --filter 'ancestor=pgvector/pgvector:pg17' --format '{{.ID}}' | head -1)"
+          if [ -z "$cid" ]; then echo "::error::pg17 service container not found"; exit 1; fi
+          docker exec "$cid" sh -c 'echo "host replication all all scram-sha-256" >> "$PGDATA/pg_hba.conf"'
+          docker exec "$cid" psql -U attune -d attune -c 'SELECT pg_reload_conf();'
       - name: Integration tests (real Postgres)
         env:
           ATTUNE_TEST_DATABASE_HOST: localhost
@@ -148,6 +170,7 @@ jobs:
           ATTUNE_TEST_DATABASE_USER: attune
           ATTUNE_TEST_DATABASE_PASSWORD: attune
         run: |
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
           db_userinfo="${ATTUNE_TEST_DATABASE_USER}:${ATTUNE_TEST_DATABASE_PASSWORD}"
           db_host="${ATTUNE_TEST_DATABASE_HOST}:${ATTUNE_TEST_DATABASE_PORT}"
           ATTUNE_TEST_DATABASE_URL="postgres://${db_userinfo}@${db_host}/${ATTUNE_TEST_DATABASE_NAME}?sslmode=disable"

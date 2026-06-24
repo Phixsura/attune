@@ -50,6 +50,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
+	"github.com/Phixsura/attune/internal/restoredrill"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	digestsvc "github.com/Phixsura/attune/internal/service/digest"
@@ -140,6 +141,11 @@ func runServer() error {
 	if err := database.CheckPgvector(ctx, pool); err != nil {
 		return fmt.Errorf("pgvector check: %w", err)
 	}
+
+	// Derive restore-drill metrics from restore_drill_runs at scrape time (#151):
+	// the drill runs in a CronJob the scraper never sees, so the long-lived
+	// server exposes the durable result.
+	restoredrill.RegisterMetrics(metrics.Registry, pool)
 
 	secrets, err := secretstore.NewTinkStoreFromJSONWithLegacy(
 		cfg.Secrets.TinkKeyset,

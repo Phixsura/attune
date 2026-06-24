@@ -559,6 +559,113 @@ cat backup.sql | docker compose exec -T postgres psql -U attune attune
 For automated backups, schedule the `pg_dump` command via cron or your
 preferred backup tool.
 
+### Restore drills (#151)
+
+A backup you have never restored is not a backup. attune ships a drill that
+proves a *restored* database is actually recoverable — schema/migration state,
+row counts, the pgvector extension, and, critically, that the managed
+Tink-encrypted secrets in it (LLM credentials, webhook signing secrets, inbound
+IMAP passwords) can still be decrypted with your live keyset. The drill never
+sends production traffic; it verifies a throwaway restored database and never
+logs decrypted plaintext.
+
+**1. Restore the backup into a throwaway database** (never production):
+
+```bash
+createdb -U attune attune_restore_test
+pg_dump -U attune attune | psql -U attune attune_restore_test   # or restore a real backup file
+```
+
+**2. Run the drill** against the restored database. The drill reads your live
+keyset and production DB URL from `--config`. The example DSNs below omit the
+password — supply it via `PGPASSWORD` or `~/.pgpass`:
+
+```bash
+attune --config ./config.yaml restore-drill run \
+  --target  "postgres://attune@localhost:5432/attune_restore_test?sslmode=disable" \
+  --baseline-url "postgres://attune@localhost:5432/attune?sslmode=disable" \
+  --backup-ref "backup-$(date +%Y%m%d)" \
+  --backup-taken-at "2026-06-24T02:00:00Z" \
+  --restore-duration 4m12s \
+  --rpo-target 24h --rto-target 30m \
+  --record
+```
+
+`--backup-taken-at` (when the backup was taken) yields the **RPO** (data-loss
+window); `--restore-duration` (measured by your restore step) is the **RTO**.
+Both are graded against `--rpo-target` / `--rto-target` by the
+`recovery_objectives` check, which warns — not fails — when a target is breached
+(the data is still recoverable, just outside SLA). They are persisted for audit
+and trended by `attune restore-drill history`.
+
+```
+attune restore drill — recoverability report
+
+  ✓ connectivity     connected to the restored database
+  ✓ schema           24/24 migrations applied, checksums + manifest OK
+  ✓ pgvector         pgvector 0.8.3 present; sample similarity query OK
+  ✓ row_counts       restored counts within RPO band of live across 4 table(s)
+  ✓ decryptability   5/5 managed secret samples decrypted with the live keyset
+
+Overall: PASS  (verify 4200ms)
+```
+
+The command exits non-zero if the drill **fails** (e.g. a `decryptability`
+failure means the restored database and your keyset have drifted — restore the
+keyset that was active when those rows were written). `--record` appends the
+full JSON report to the `restore_drill_runs` table in production; that report is
+your audit evidence. Retrieve the latest with `attune restore-drill status` or
+view it on the Console **System Readiness** page (the `backup:restore_drill`
+check, which warns if no drill has run in the last 7 days), and via
+`attune doctor`.
+
+The drill runs a 12-check battery (connectivity, schema, pgvector, row counts,
+decryptability, constraints, sequences, encoding, materialized views,
+extensions, recovery objectives). Add `--deep` for an extra structural tier
+(index validity + amcheck B-Tree verification; slower). To let attune perform
+the restore itself instead of pointing at a pre-restored DB, use the
+**push-button** mode:
+
+```bash
+attune --config ./config.yaml restore-drill run \
+  --restore-from /backups/attune-$(date +%Y%m%d).sql \
+  --admin-url "postgres://attune@localhost:5432/postgres?sslmode=disable" \
+  --rpo-target 24h --rto-target 30m --record
+```
+
+It provisions an ephemeral database, restores the backup (`psql` for plain SQL,
+`pg_restore` for custom/dir/tar), **auto-measures the RTO**, runs the battery,
+and drops the ephemeral DB. To check a `pg_basebackup` artifact's integrity
+before restoring, run `attune restore-drill verify-backup <dir>`
+(`pg_verifybackup`). These modes need `psql` / `pg_restore` / `pg_verifybackup`
+in the runtime.
+
+**3. Tear down** the throwaway database: `dropdb -U attune attune_restore_test`.
+
+> The keyset is *not* in the database — keep it backed up alongside it. A
+> database backup without the matching Tink keyset cannot decrypt any managed
+> secret. See "Rotating the Tink keyset" below.
+
+For Kubernetes, the Helm chart ships an opt-in scheduled CronJob
+(`restoreDrill.enabled=true`) that runs the drill against a restored target you
+provide — for example a CloudNativePG recovery `Cluster`, which bootstraps a
+fresh isolated cluster from a base backup + WAL by construction:
+
+```yaml
+restoreDrill:
+  enabled: true
+  schedule: "0 2 * * 0"
+  targetDatabaseURL:   "postgres://attune@attune-restore:5432/attune?sslmode=disable"
+  baselineDatabaseURL: "postgres://attune@attune-postgres:5432/attune?sslmode=disable"
+```
+
+The shipped CronJob runs the **verify-only** mode (`--target`) — it verifies a
+database you have already restored (e.g. a CloudNativePG recovery `Cluster`).
+The push-button (`--restore-from`) and `verify-backup` modes need the PostgreSQL
+client tools, which the default attune image does not bundle; to schedule those
+in-cluster, run them from a custom Job built on an image that adds
+`postgresql-client`.
+
 ---
 
 ## Rotating the Tink keyset

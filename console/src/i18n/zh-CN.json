@@ -2348,6 +2348,7 @@
       "config": "配置",
       "database": "数据库",
       "migration": "迁移",
+      "backup": "备份",
       "encryption": "加密",
       "auth": "认证",
       "metrics": "指标",

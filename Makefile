@@ -79,7 +79,7 @@ test-live-list: ## Show which live backends would run given current env.
 # Requires Docker locally; CI runs this against a Postgres service container.
 .PHONY: test-integration
 
-test-integration: ## IO tier — real Postgres. Needs Docker or ATTUNE_TEST_DATABASE_URL.
+test-integration: ## IO tier — real Postgres. Needs Docker or ATTUNE_TEST_DATABASE_URL + PostgreSQL 17 client tools (pg_dump/psql/pg_basebackup/pg_verifybackup) for the restore-drill tests.
 	go test -tags=integration -count=1 -p 1 -timeout=10m ./test/integration/postgres/...
 
 # ── CI pre-flight (docs/ci-troubleshooting.md) ───────────────────────────

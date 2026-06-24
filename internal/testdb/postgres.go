@@ -6,6 +6,7 @@ package testdb
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -23,6 +24,17 @@ import (
 
 const serviceContainerDSNEnv = "ATTUNE_TEST_DATABASE_URL"
 
+// withDatabase returns dsn with its database (the URL path) replaced by dbName,
+// preserving scheme, credentials, host, and query parameters.
+func withDatabase(dsn, dbName string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", fmt.Errorf("parse dsn: %w", err)
+	}
+	u.Path = "/" + dbName
+	return u.String(), nil
+}
+
 // NewPool returns a migrated, isolated PostgreSQL pool for one integration
 // test. In CI, ATTUNE_TEST_DATABASE_URL points at the Postgres service
 // container and NewPool creates a temporary database per test. Locally, when
@@ -37,17 +49,38 @@ func NewPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// NewReplicaPool is like NewPool but guarantees the server accepts replication
+// connections from outside the container — required by tests that run
+// pg_basebackup (the restore-drill verify-backup test). In service-container
+// mode (CI) replication is enabled globally by the harness; locally it is
+// enabled on the throwaway container.
+func NewReplicaPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool, cleanup, err := openPool(true)
+	if err != nil {
+		t.Fatalf("open replication-enabled postgres pool: %v", err)
+	}
+	t.Cleanup(cleanup)
+	return pool
+}
+
 // OpenPool returns a migrated PostgreSQL pool plus a cleanup callback. It is
 // intended for package-level integration fixtures that want to reuse one
 // database across multiple tests.
 func OpenPool() (*pgxpool.Pool, func(), error) {
-	if dsn := os.Getenv(serviceContainerDSNEnv); dsn != "" {
-		return openServicePool(dsn)
-	}
-	return openContainerPool()
+	return openPool(false)
 }
 
-func openContainerPool() (*pgxpool.Pool, func(), error) {
+func openPool(replication bool) (*pgxpool.Pool, func(), error) {
+	if dsn := os.Getenv(serviceContainerDSNEnv); dsn != "" {
+		// Service-container mode (CI): replication is enabled globally by the CI
+		// harness, so there is nothing per-pool to do here.
+		return openServicePool(dsn)
+	}
+	return openContainerPool(replication)
+}
+
+func openContainerPool(replication bool) (*pgxpool.Pool, func(), error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	var pool *pgxpool.Pool
@@ -85,11 +118,37 @@ func openContainerPool() (*pgxpool.Pool, func(), error) {
 		return nil, nil, fmt.Errorf("connect postgres pool: %w", err)
 	}
 
+	if replication {
+		if err := enableReplication(ctx, pg, pool); err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("enable replication: %w", err)
+		}
+	}
+
 	if err := database.RunMigrations(context.Background(), pool); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("run migrations: %w", err)
 	}
 	return pool, cleanup, nil
+}
+
+// enableReplication appends a replication entry to the container's pg_hba.conf
+// and reloads it, so pg_basebackup can open a replication connection from
+// outside the container (the image's default pg_hba allows replication only
+// from 127.0.0.1, but the runner connects over the bridge network).
+func enableReplication(ctx context.Context, c testcontainers.Container, pool *pgxpool.Pool) error {
+	code, _, err := c.Exec(ctx, []string{"sh", "-c",
+		`echo "host replication all all scram-sha-256" >> /var/lib/postgresql/data/pg_hba.conf`})
+	if err != nil {
+		return fmt.Errorf("append pg_hba: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("append pg_hba: exit %d", code)
+	}
+	if _, err := pool.Exec(ctx, "SELECT pg_reload_conf()"); err != nil {
+		return fmt.Errorf("reload pg_hba: %w", err)
+	}
+	return nil
 }
 
 func openServicePool(adminDSN string) (*pgxpool.Pool, func(), error) {
@@ -115,12 +174,20 @@ func openServicePool(adminDSN string) (*pgxpool.Pool, func(), error) {
 		admin.Close()
 	}
 
-	cfg, err := pgxpool.ParseConfig(adminDSN)
+	// Build the per-test DSN as a real connection string (not adminDSN with a
+	// ConnConfig database override) so pool.Config().ConnString() reflects the
+	// per-test database. External tools (pg_dump, pg_basebackup) and any other
+	// DSN consumer then target the seeded test DB, not the base admin one.
+	perTestDSN, err := withDatabase(adminDSN, dbName)
 	if err != nil {
 		dropDB()
-		return nil, nil, fmt.Errorf("parse service postgres dsn: %w", err)
+		return nil, nil, fmt.Errorf("build per-test dsn: %w", err)
 	}
-	cfg.ConnConfig.Config.Database = dbName
+	cfg, err := pgxpool.ParseConfig(perTestDSN)
+	if err != nil {
+		dropDB()
+		return nil, nil, fmt.Errorf("parse per-test dsn: %w", err)
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		dropDB()

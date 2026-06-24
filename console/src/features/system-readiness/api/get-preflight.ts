@@ -7,6 +7,7 @@ export type PreflightCategory =
   | 'config'
   | 'database'
   | 'migration'
+  | 'backup'
   | 'encryption'
   | 'auth'
   | 'metrics'

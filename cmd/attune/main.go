@@ -102,6 +102,7 @@ Usage:
  attune server Run the HTTP server (default)
  attune doctor [--format text|json] [--warn-exit] Production readiness preflight
  attune migrations status|verify|dry-run Migration integrity (#150)
+ attune restore-drill run|status Verify a restored backup is recoverable + decryptable (#151)
  attune tenant create --slug <s> [--name <n>] Create a new tenant
  attune keys issue --tenant <slug> [--label <s>] Mint an API key
  attune eval --mode <m> [--tenant <slug>] ... AI accuracy report (--tenant required for export-for-human / score-human)
