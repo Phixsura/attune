@@ -15,6 +15,8 @@ func TestAggregate(t *testing.T) {
 		{"pass over skip", []Status{StatusSkip, StatusPass}, StatusPass},
 		{"warn beats pass", []Status{StatusPass, StatusWarn, StatusPass}, StatusWarn},
 		{"fail beats all", []Status{StatusPass, StatusWarn, StatusFail, StatusSkip}, StatusFail},
+		{"unknown status fails closed", []Status{StatusPass, Status("bogus")}, StatusFail},
+		{"empty status fails closed", []Status{StatusPass, Status("")}, StatusFail},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

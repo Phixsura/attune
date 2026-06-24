@@ -35,6 +35,13 @@ func TestEvaluateRowCounts(t *testing.T) {
 			want:     StatusPass,
 		},
 		{
+			name:     "partial data loss warns (far below live, not empty)",
+			restored: map[string]int64{"user_feedback": 1, "tenants": 2},
+			baseline: map[string]int64{"user_feedback": 10000, "tenants": 2},
+			want:     StatusWarn,
+			wantMsg:  "far below",
+		},
+		{
 			name:     "exceeding live baseline warns",
 			restored: map[string]int64{"user_feedback": 12, "tenants": 2},
 			baseline: map[string]int64{"user_feedback": 10, "tenants": 2},

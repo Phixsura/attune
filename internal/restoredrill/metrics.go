@@ -127,6 +127,11 @@ func (c *metricsCollector) query() ([]prometheus.Metric, error) {
 		out = append(out, prometheus.MustNewConstMetric(descLastRTO, prometheus.GaugeValue, rto))
 	}
 
+	// Seed every known status to 0 so its series always exists — otherwise a
+	// brand-new install has no `…runs_total{status="fail"}` series at all, and
+	// increase()/alerts on it can never fire (they can't see the 0→1 step on a
+	// series that springs into being at 1).
+	counts := map[string]float64{"pass": 0, "warn": 0, "fail": 0, "skipped": 0}
 	rows, err := c.pool.Query(ctx, `SELECT status, count(*) FROM restore_drill_runs GROUP BY status`)
 	if err != nil {
 		return nil, err
@@ -138,10 +143,13 @@ func (c *metricsCollector) query() ([]prometheus.Metric, error) {
 		if err := rows.Scan(&status, &n); err != nil {
 			return nil, err
 		}
-		out = append(out, prometheus.MustNewConstMetric(descRunsTotal, prometheus.CounterValue, n, status))
+		counts[status] = n
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	for _, status := range []string{"pass", "warn", "fail", "skipped"} {
+		out = append(out, prometheus.MustNewConstMetric(descRunsTotal, prometheus.CounterValue, counts[status], status))
 	}
 	return out, nil
 }

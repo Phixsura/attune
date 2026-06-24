@@ -19,8 +19,17 @@ func TestClassifySchema(t *testing.T) {
 	}{
 		{
 			name: "current and verified passes",
-			in:   schemaInputs{Total: 24, Applied: 24, Pending: 0},
+			in:   schemaInputs{Total: 24, Applied: 24, Pending: 0, MaxApplied: 24},
 			want: StatusPass,
+		},
+		{
+			name: "newer-than-binary fails even with empty checksum (no ErrMissingFile)",
+			// Backup is at version 25 but this binary carries 24, and the checksum
+			// ledger did NOT flag it (empty-checksum future row). The independent
+			// max-version guard must still FAIL rather than report healthy.
+			in:      schemaInputs{Total: 24, Applied: 24, Pending: 0, MaxApplied: 25},
+			want:    StatusFail,
+			wantMsg: "newer attune",
 		},
 		{
 			name: "older backup warns (recoverable, applies on boot)",

@@ -22,6 +22,9 @@ func TestGradeRestoreDrill(t *testing.T) {
 		{"recorded warn warns", true, restoredrill.StatusWarn, time.Hour, preflight.StatusWarn},
 		{"recent pass passes", true, restoredrill.StatusPass, 2 * 24 * time.Hour, preflight.StatusPass},
 		{"stale pass warns", true, restoredrill.StatusPass, 30 * 24 * time.Hour, preflight.StatusWarn},
+		{"skipped does not pass", true, restoredrill.StatusSkip, time.Hour, preflight.StatusWarn},
+		{"unknown status does not pass", true, restoredrill.Status("bogus"), time.Hour, preflight.StatusWarn},
+		{"future timestamp warns", true, restoredrill.StatusPass, -time.Hour, preflight.StatusWarn},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -16,6 +16,10 @@ type schemaInputs struct {
 	Total   int
 	Applied int
 	Pending int
+	// MaxApplied is the highest migration version in the restored DB's tracker
+	// table — read directly, independent of this binary and of the checksum
+	// ledger, so a future migration with an empty checksum is still detected.
+	MaxApplied int
 	// ChecksumErr is nil, database.ErrChecksumDrift, or database.ErrMissingFile.
 	ChecksumErr error
 	// DirtyErr is nil or database.ErrDirtyMigration.
@@ -75,6 +79,18 @@ func classifySchema(in schemaInputs) CheckResult {
 	if in.ChecksumErr != nil {
 		r.Status = StatusFail
 		r.Message = "could not verify migration checksums on the restored DB"
+		return r
+	}
+
+	// Independent of the checksum ledger (which inspects only non-empty-checksum
+	// rows), a restored DB whose highest applied version exceeds what this binary
+	// carries was taken by a NEWER attune — catches the empty-checksum future row
+	// that would otherwise slip past ErrMissingFile and be reported healthy.
+	if in.MaxApplied > in.Total {
+		r.Status = StatusFail
+		r.Message = fmt.Sprintf("restored DB is at migration version %d but this binary carries only %d — "+
+			"the backup was taken by a newer attune; run the drill with a matching or newer binary",
+			in.MaxApplied, in.Total)
 		return r
 	}
 

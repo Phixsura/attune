@@ -15,11 +15,19 @@ type rowCountsDetail struct {
 	Baseline map[string]int64 `json:"baseline,omitempty"`
 }
 
+// rowCountFloor: a restore holding less than this fraction of live's rows is a
+// suspicious shortfall — too large to explain by a normal RPO gap, more likely
+// partial data loss. Graded WARN (not FAIL) because, without the backup age and
+// write rate, the drill cannot be certain it is loss vs. a long RPO window.
+const rowCountFloor = 0.5
+
 // evaluateRowCounts grades the restored core-table counts against a live
 // baseline. A restore is older than live by construction, so the assertion is
 // an RPO band, not equality:
 //
 //   - A table that has rows in live but is EMPTY in the restore is data loss → fail.
+//   - A table whose restored count is FAR below live (< rowCountFloor) is a
+//     suspicious shortfall → warn (possible partial data loss).
 //   - A table whose restored count EXCEEDS live means the backup is newer than
 //     the baseline (or live was pruned) → warn.
 //   - Otherwise the counts are within band → pass.
@@ -37,12 +45,14 @@ func evaluateRowCounts(restored, baseline map[string]int64) CheckResult {
 		return r
 	}
 
-	var lost, over []string
+	var lost, short, over []string
 	for t, b := range baseline {
 		rc := restored[t]
 		switch {
 		case b > 0 && rc == 0:
 			lost = append(lost, t)
+		case b > 0 && float64(rc) < float64(b)*rowCountFloor:
+			short = append(short, t)
 		case rc > b:
 			over = append(over, t)
 		}
@@ -52,6 +62,13 @@ func evaluateRowCounts(restored, baseline map[string]int64) CheckResult {
 		r.Status = StatusFail
 		r.Message = fmt.Sprintf("data loss: live has rows but the restore is empty for: %s",
 			strings.Join(lost, ", "))
+		return r
+	}
+	if len(short) > 0 {
+		sort.Strings(short)
+		r.Status = StatusWarn
+		r.Message = fmt.Sprintf("restored row count is far below live (< %.0f%%) for: %s — possible partial data loss or a large RPO gap; verify",
+			rowCountFloor*100, strings.Join(short, ", "))
 		return r
 	}
 	if len(over) > 0 {

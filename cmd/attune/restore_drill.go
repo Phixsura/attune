@@ -101,6 +101,11 @@ func runRestoreDrillRun(args []string) error {
 	if useOrchestration && ptrext.Indirect(adminURL) == "" {
 		return fmt.Errorf("--admin-url is required with --restore-from")
 	}
+	if useOrchestration {
+		if t := ptrext.Indirect(restoreTool); t != "psql" && t != "pg_restore" {
+			return fmt.Errorf("--restore-tool must be psql or pg_restore, got %q", t)
+		}
+	}
 
 	// Generous: the orchestration path restores a full backup before verifying.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -189,25 +194,24 @@ func runDrill(ctx context.Context, useOrchestration bool, adminURL, restoreFrom,
 	return restoredrill.Run(ctx, targetPool, store, time.Now(), opts), nil
 }
 
-// finalizeDrill optionally records the result, prints it, and maps the verdict
-// to an exit code.
+// finalizeDrill prints the result FIRST (so a recording failure can never
+// swallow the verdict the operator needs to see), optionally records it, then
+// maps the verdict to an exit code. The drill verdict always dominates the exit.
 func finalizeDrill(ctx context.Context, prodURL string, report restoredrill.DrillReport, doRecord bool, format string, warnExit bool) error {
-	if doRecord {
-		prodPool, err := database.NewPool(ctx, prodURL)
-		if err != nil {
-			return fmt.Errorf("connect to production database for recording: %w", err)
-		}
-		defer prodPool.Close()
-		if err := restoredrill.Record(ctx, prodPool, report); err != nil {
-			return fmt.Errorf("record drill result: %w", err)
-		}
-	}
 	if format == "json" {
 		if err := outputJSON(report); err != nil {
 			return err
 		}
 	} else {
 		printRestoreDrillReport(report)
+	}
+	if doRecord {
+		if err := recordDrill(ctx, prodURL, report); err != nil {
+			if report.Status == restoredrill.StatusFail {
+				return fmt.Errorf("restore drill FAILED (and recording it also failed: %w)", err)
+			}
+			return err
+		}
 	}
 	switch report.Status {
 	case restoredrill.StatusFail:
@@ -216,6 +220,18 @@ func finalizeDrill(ctx context.Context, prodURL string, report restoredrill.Dril
 		if warnExit {
 			return fmt.Errorf("restore drill passed with WARNINGS")
 		}
+	}
+	return nil
+}
+
+func recordDrill(ctx context.Context, prodURL string, report restoredrill.DrillReport) error {
+	prodPool, err := database.NewPool(ctx, prodURL)
+	if err != nil {
+		return fmt.Errorf("connect to production database for recording: %w", err)
+	}
+	defer prodPool.Close()
+	if err := restoredrill.Record(ctx, prodPool, report); err != nil {
+		return fmt.Errorf("record drill result: %w", err)
 	}
 	return nil
 }

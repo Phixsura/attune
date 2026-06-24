@@ -56,6 +56,8 @@ func gradeRestoreDrill(ok bool, status restoredrill.Status, age, freshness time.
 		return r
 	}
 	switch status {
+	case restoredrill.StatusPass:
+		// graded by freshness below — the only path to a readiness PASS
 	case restoredrill.StatusFail:
 		r.Status = preflight.StatusFail
 		r.Message = fmt.Sprintf("Last restore drill FAILED (%s)", agoString(age))
@@ -65,6 +67,19 @@ func gradeRestoreDrill(ok bool, status restoredrill.Status, age, freshness time.
 		r.Status = preflight.StatusWarn
 		r.Message = fmt.Sprintf("Last restore drill passed with warnings (%s)", agoString(age))
 		r.Remediation = "Inspect with 'attune restore-drill status'."
+		return r
+	default:
+		// StatusSkip or any unrecognized status: the drill did NOT establish
+		// recoverability, so it must not be reported as a pass.
+		r.Status = preflight.StatusWarn
+		r.Message = fmt.Sprintf("Last restore drill did not verify recoverability (status %q, %s)", status, agoString(age))
+		r.Remediation = "Run a drill that verifies a restored target: attune restore-drill run --target <restored-db-url> --record."
+		return r
+	}
+	if age < 0 {
+		r.Status = preflight.StatusWarn
+		r.Message = "Last restore drill has a future timestamp — clock skew or bad ran_at data"
+		r.Remediation = "Check the recorder's clock; inspect with 'attune restore-drill status'."
 		return r
 	}
 	if age > freshness {

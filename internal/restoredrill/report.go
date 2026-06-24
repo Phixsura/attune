@@ -61,11 +61,17 @@ type DrillReport struct {
 
 // Aggregate returns the worst status among results, ranked
 // fail > warn > pass > skipped. Empty or all-skipped input yields StatusSkip.
+// An unrecognized or unset status fails CLOSED (returns StatusFail): for a
+// recoverability gate, an un-graded check must never be silently ignored.
 func Aggregate(results []CheckResult) Status {
 	worst := StatusSkip
 	rank := map[Status]int{StatusSkip: 0, StatusPass: 1, StatusWarn: 2, StatusFail: 3}
 	for _, r := range results {
-		if rank[r.Status] > rank[worst] {
+		ri, ok := rank[r.Status]
+		if !ok {
+			return StatusFail
+		}
+		if ri > rank[worst] {
 			worst = r.Status
 		}
 	}

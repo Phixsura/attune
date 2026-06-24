@@ -26,8 +26,12 @@ func VerifyBackupArtifact(ctx context.Context, backupDir string) error {
 	if !fi.IsDir() {
 		return fmt.Errorf("backup path %q is not a directory", backupDir)
 	}
-	if _, err := os.Stat(filepath.Join(backupDir, "backup_manifest")); err != nil {
+	mi, err := os.Stat(filepath.Join(backupDir, "backup_manifest"))
+	if err != nil {
 		return fmt.Errorf("no backup_manifest in %q (not a pg_basebackup directory): %w", backupDir, err)
+	}
+	if mi.Size() == 0 {
+		return fmt.Errorf("backup_manifest in %q is empty (incomplete backup)", backupDir)
 	}
 	out, err := exec.CommandContext(ctx, "pg_verifybackup", backupDir).CombinedOutput()
 	if err != nil {

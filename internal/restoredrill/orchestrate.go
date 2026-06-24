@@ -51,7 +51,21 @@ func RestoreAndDrill(ctx context.Context, adminURL, backupFile, restoreTool stri
 
 	restoreStart := time.Now()
 	if err := runRestore(ctx, ephemeralURL, backupFile, restoreTool); err != nil {
-		return DrillReport{}, fmt.Errorf("restore into ephemeral database: %w", err)
+		// The restore itself failing IS the headline evidence of non-recoverability.
+		// Return it as a FAILED report (not a bare error) so the caller still
+		// records (--record) and prints it, and the readiness surface reflects it.
+		return DrillReport{
+			Status:     StatusFail,
+			StartedAt:  restoreStart,
+			DurationMS: time.Since(restoreStart).Milliseconds(),
+			BackupRef:  opts.BackupRef,
+			Checks: []CheckResult{{
+				Name:    "restore",
+				Status:  StatusFail,
+				Message: fmt.Sprintf("restore into the ephemeral database failed: %v", err),
+			}},
+			AttuneVersion: database.Version,
+		}, nil
 	}
 	rto := time.Since(restoreStart)
 	opts.RestoreDuration = ptrext.Of(rto)

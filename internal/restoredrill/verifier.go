@@ -51,7 +51,12 @@ type Options struct {
 // started at startedAt. Either may be nil when not supplied.
 func (o Options) recoveryDurations(startedAt time.Time) (rpo, rto *time.Duration) {
 	if o.BackupTakenAt != nil {
-		rpo = ptrext.Of(startedAt.Sub(ptrext.Indirect(o.BackupTakenAt)))
+		d := startedAt.Sub(ptrext.Indirect(o.BackupTakenAt))
+		if d < 0 {
+			d = 0 // backup timestamp ahead of drill start (clock skew) — clamp so
+			// the persisted RPO and the human-readable message agree.
+		}
+		rpo = ptrext.Of(d)
 	}
 	return rpo, o.RestoreDuration
 }
@@ -127,10 +132,20 @@ func gatherSchema(ctx context.Context, pool *pgxpool.Pool) (CheckResult, int) {
 			Message: "cannot read migration state from the restored database",
 		}, 0
 	}
+	var maxApplied int
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM schema_migrations_feedback`).Scan(&maxApplied); err != nil {
+		return CheckResult{
+			Name:    "schema",
+			Status:  StatusFail,
+			Message: "cannot read applied migration version from the restored database",
+		}, 0
+	}
 	in := schemaInputs{
 		Total:       status.Total,
 		Applied:     status.Applied,
 		Pending:     status.Pending,
+		MaxApplied:  maxApplied,
 		ChecksumErr: database.VerifyChecksums(ctx, pool),
 		DirtyErr:    database.DetectDirtyMigrations(ctx, pool),
 		ManifestErr: database.VerifyManifestHash(ctx, pool),
@@ -188,8 +203,19 @@ func sampleKNN(ctx context.Context, pool *pgxpool.Pool) (ran bool, err error) {
 	if embedded == 0 {
 		return false, nil
 	}
+	// Run the probe with seq-scan disabled so the HNSW index must answer it — a
+	// corrupt or missing index then surfaces instead of being masked by a
+	// sequential scan that happens to return the same rows.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan = off`); err != nil {
+		return false, err
+	}
 	var hits int
-	err = pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT count(*) FROM (
 			SELECT id FROM user_feedback
 			WHERE embedding IS NOT NULL
@@ -310,6 +336,7 @@ func checkDecryptability(ctx context.Context, pool *pgxpool.Pool, store *secrets
 		return r
 	}
 
+	total := llmTotal + inboundTotal
 	checked := llmChecked + inChecked
 	decrypted := llmOK + inOK
 	r.Detail = decryptDetail{
@@ -322,9 +349,14 @@ func checkDecryptability(ctx context.Context, pool *pgxpool.Pool, store *secrets
 	}
 
 	switch {
-	case checked == 0:
+	case total == 0:
 		r.Status = StatusSkip
 		r.Message = "no managed secrets present to verify"
+	case checked < total:
+		// The population exists but the decrypt pass did not cover all of it
+		// (count vs. scanned disagree) — fail closed rather than skip.
+		r.Status = StatusFail
+		r.Message = fmt.Sprintf("%d managed secret(s) present but only %d could be read/verified", total, checked)
 	case firstErr != nil:
 		r.Status = StatusFail
 		r.Message = fmt.Sprintf("%d/%d managed secret(s) failed to decrypt — the restored database and the live keyset have drifted (%v)",
