@@ -7,7 +7,9 @@ package batchjob
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -71,6 +73,10 @@ type Worker struct {
 	feedbackRepo FeedbackBatchStore
 	config       Config
 
+	// owner uniquely identifies this worker instance so heartbeat refresh
+	// and completion only touch jobs this instance holds.
+	owner string
+
 	wg     sync.WaitGroup
 	stopCh chan struct{}
 }
@@ -101,10 +107,14 @@ func New(
 		config.BatchSize = DefaultBatchSize
 	}
 
+	hostname, _ := os.Hostname()
+	owner := fmt.Sprintf("batch-%s-%d", hostname, os.Getpid())
+
 	return ptrext.Of(Worker{
 		jobRepo:      jobRepo,
 		feedbackRepo: feedbackRepo,
 		config:       config,
+		owner:        owner,
 		stopCh:       make(chan struct{}),
 	})
 }
@@ -112,8 +122,8 @@ func New(
 // Start begins the worker pool. Call Stop() to shut down gracefully.
 func (w *Worker) Start(ctx context.Context) {
 	const where = "worker.batchjob.Start"
-	logext.Infof(ctx, "[%s] starting batch job worker,workers:%d,poll_interval:%s",
-		where, w.config.NumWorkers, w.config.PollInterval)
+	logext.Infof(ctx, "[%s] starting batch job worker,owner:%s,workers:%d,poll_interval:%s",
+		where, w.owner, w.config.NumWorkers, w.config.PollInterval)
 
 	// Start worker goroutines.
 	for i := 0; i < w.config.NumWorkers; i++ {
@@ -126,10 +136,24 @@ func (w *Worker) Start(ctx context.Context) {
 	go w.recoverStuckJobs(ctx)
 }
 
-// Stop gracefully shuts down all workers. Blocks until all workers exit.
+// Stop gracefully shuts down all workers. Blocks until all workers exit
+// or until the 30-second timeout elapses. Logs a warning if timeout fires.
 func (w *Worker) Stop() {
 	close(w.stopCh)
-	w.wg.Wait()
+
+	done := make(chan struct{})
+	go func() {
+		w.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All workers exited cleanly.
+	case <-time.After(30 * time.Second):
+		logext.Warnf(context.Background(), "[worker.batchjob.Stop] drain timeout,some workers did not exit")
+		metrics.WorkerDrainTotal.WithLabelValues("batchjob", "timeout").Inc()
+	}
 }
 
 // work is the main loop for a single worker goroutine.
@@ -163,7 +187,7 @@ func (w *Worker) processNextJob(ctx context.Context) error {
 	const where = "worker.batchjob.processNextJob"
 
 	// Claim the next available job.
-	job, err := w.jobRepo.Claim(ctx)
+	job, err := w.jobRepo.Claim(ctx, w.owner)
 	if err != nil {
 		return fmt.Errorf("claim job: %w", err)
 	}
@@ -177,24 +201,31 @@ func (w *Worker) processNextJob(ctx context.Context) error {
 
 	metrics.BatchJobsClaimed.WithLabelValues(job.TenantID).Inc()
 
-	// Start heartbeat goroutine.
-	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
-	go w.heartbeat(heartbeatCtx, job.ID)
-	defer cancelHeartbeat()
+	// Create a cancellable context for job execution.
+	// If heartbeat detects lease lost, it cancels this context to abort early.
+	jobCtx, cancelJob := context.WithCancel(ctx)
+	defer cancelJob()
+
+	// Start heartbeat goroutine — pass cancelJob so it can abort processing on lease lost.
+	go w.heartbeat(ctx, job.ID, cancelJob)
 
 	// Execute the job.
 	start := time.Now()
-	result, execErr := w.executeJob(ctx, job)
+	result, execErr := w.executeJob(jobCtx, job)
 	duration := time.Since(start)
-
-	// Cancel heartbeat before completing.
-	cancelHeartbeat()
 
 	// Complete or fail the job.
 	if execErr != nil {
+		if errors.Is(execErr, context.Canceled) {
+			logext.Warnf(ctx, "[%s] job aborted (lease lost),job_id:%s", where, job.ID)
+			metrics.BatchJobsCompleted.WithLabelValues(job.TenantID, "lease_lost").Inc()
+			return nil
+		}
 		logext.Errorf(ctx, "[%s] job failed,job_id:%s,err:%+v", where, job.ID, execErr.Error())
-		if failErr := w.jobRepo.Fail(ctx, job.ID, execErr.Error()); failErr != nil {
+		if n, failErr := w.jobRepo.Fail(ctx, job.ID, w.owner, execErr.Error()); failErr != nil {
 			logext.Errorf(ctx, "[%s] mark job failed error,job_id:%s,err:%+v", where, job.ID, failErr.Error())
+		} else if n == 0 {
+			logext.Warnf(ctx, "[%s] job re-claimed by another worker,job_id:%s", where, job.ID)
 		}
 		metrics.BatchJobsCompleted.WithLabelValues(job.TenantID, "failed").Inc()
 		return nil
@@ -204,13 +235,18 @@ func (w *Worker) processNextJob(ctx context.Context) error {
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] marshal result failed,job_id:%s,err:%+v", where, job.ID, err.Error())
-		_ = w.jobRepo.Fail(ctx, job.ID, "marshal result: "+err.Error())
+		_, _ = w.jobRepo.Fail(ctx, job.ID, w.owner, "marshal result: "+err.Error())
 		metrics.BatchJobsCompleted.WithLabelValues(job.TenantID, "failed").Inc()
 		return nil
 	}
 
-	if err := w.jobRepo.Complete(ctx, job.ID, resultJSON); err != nil {
+	n, err := w.jobRepo.Complete(ctx, job.ID, w.owner, resultJSON)
+	if err != nil {
 		logext.Errorf(ctx, "[%s] complete job error,job_id:%s,err:%+v", where, job.ID, err.Error())
+		return nil
+	}
+	if n == 0 {
+		logext.Warnf(ctx, "[%s] job re-claimed by another worker,job_id:%s", where, job.ID)
 		return nil
 	}
 
@@ -281,7 +317,7 @@ func (w *Worker) executeJob(ctx context.Context, job *feedbackjob.Job) (*jobResu
 		processed += len(chunk)
 
 		// Update progress.
-		if err := w.jobRepo.UpdateProgress(ctx, job.ID, processed); err != nil {
+		if err := w.jobRepo.UpdateProgress(ctx, job.ID, w.owner, processed); err != nil {
 			logext.Warnf(ctx, "[%s] update progress failed,job_id:%s,err:%+v", where, job.ID, err.Error())
 		}
 	}
@@ -325,7 +361,8 @@ func (w *Worker) executeOperation(
 }
 
 // heartbeat periodically updates the job's heartbeat timestamp.
-func (w *Worker) heartbeat(ctx context.Context, jobID string) {
+// If lease is lost (another worker re-claimed), it calls cancelJob to abort processing early.
+func (w *Worker) heartbeat(ctx context.Context, jobID string, cancelJob context.CancelFunc) {
 	const where = "worker.batchjob.heartbeat"
 
 	ticker := time.NewTicker(w.config.HeartbeatInterval)
@@ -336,8 +373,18 @@ func (w *Worker) heartbeat(ctx context.Context, jobID string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := w.jobRepo.Heartbeat(ctx, jobID); err != nil {
+			// Use background context to avoid racing with parent cancellation.
+			n, err := w.jobRepo.Heartbeat(context.Background(), jobID, w.owner)
+			if err != nil {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("batch_job", "error").Inc()
 				logext.Warnf(ctx, "[%s] heartbeat failed,job_id:%s,err:%+v", where, jobID, err.Error())
+			} else if n == 0 {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("batch_job", "lost").Inc()
+				logext.Warnf(ctx, "[%s] job re-claimed by another worker,job_id:%s — aborting", where, jobID)
+				cancelJob() // Abort processing early
+				return
+			} else {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("batch_job", "ok").Inc()
 			}
 		}
 	}

@@ -37,6 +37,10 @@ import (
 // keeps its own 60s timeout — embeddings are a single fast round-trip.)
 const chatHTTPTimeout = 120 * time.Second
 
+// maxLLMResponseBody limits LLM API response size to prevent DoS from
+// malicious or buggy providers. 10 MiB is generous for any text completion.
+const maxLLMResponseBody = 10 << 20 // 10 MiB
+
 // LLMClient is the single abstraction the rest of attune depends on.
 // Each backend file implements this interface; cmd/attune/setup.go
 // wires one concrete instance at boot.

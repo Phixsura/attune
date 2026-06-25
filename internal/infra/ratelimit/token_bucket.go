@@ -14,14 +14,16 @@ import (
 )
 
 type tokenBucketEntry struct {
-	mu        sync.Mutex
-	limiter   *rate.Limiter
-	perMinute int
-	burst     int
+	mu         sync.Mutex
+	limiter    *rate.Limiter
+	perMinute  int
+	burst      int
+	lastAccess time.Time // for cleanup
 }
 
 // MemoryTokenBucketLimiter is an in-process per-key token bucket limiter.
 // It supports dynamic per-key RPM/burst reconfiguration on each request.
+// Call StartCleanup to periodically evict idle keys and prevent unbounded memory.
 type MemoryTokenBucketLimiter struct {
 	buckets sync.Map // key -> *tokenBucketEntry
 	nowFunc func() time.Time
@@ -68,14 +70,17 @@ func (m *MemoryTokenBucketLimiter) AllowWithInfo(
 
 func (m *MemoryTokenBucketLimiter) limiterFor(key string, now time.Time, perMinute, burst int) *rate.Limiter {
 	entryAny, _ := m.buckets.LoadOrStore(key, ptrext.Of(tokenBucketEntry{
-		limiter:   rate.NewLimiter(ratePerSecond(perMinute), burst),
-		perMinute: perMinute,
-		burst:     burst,
+		limiter:    rate.NewLimiter(ratePerSecond(perMinute), burst),
+		perMinute:  perMinute,
+		burst:      burst,
+		lastAccess: now,
 	}))
 	entry := entryAny.(*tokenBucketEntry)
 
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+
+	entry.lastAccess = now
 
 	if perMinute != entry.perMinute || burst != entry.burst {
 		if perMinute > entry.perMinute || burst > entry.burst {
@@ -90,6 +95,39 @@ func (m *MemoryTokenBucketLimiter) limiterFor(key string, now time.Time, perMinu
 	}
 
 	return entry.limiter
+}
+
+// StartCleanup runs a background goroutine that periodically evicts keys
+// that have been idle for longer than maxIdleTime. Call this at startup
+// to prevent unbounded memory growth in long-running services.
+func (m *MemoryTokenBucketLimiter) StartCleanup(ctx context.Context, interval, maxIdleTime time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.cleanup(maxIdleTime)
+			}
+		}
+	}()
+}
+
+func (m *MemoryTokenBucketLimiter) cleanup(maxIdleTime time.Duration) {
+	now := m.nowFunc()
+	cutoff := now.Add(-maxIdleTime)
+	m.buckets.Range(func(key, value any) bool {
+		entry := value.(*tokenBucketEntry)
+		entry.mu.Lock()
+		idle := entry.lastAccess.Before(cutoff)
+		entry.mu.Unlock()
+		if idle {
+			m.buckets.Delete(key)
+		}
+		return true
+	})
 }
 
 func ratePerSecond(perMinute int) rate.Limit {

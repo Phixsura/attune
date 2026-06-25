@@ -48,9 +48,10 @@ func (g *ReadableIDGenerator) NewIDs(ctx context.Context) (trace.TraceID, trace.
 	if err == nil && len(tsBytes) == 7 {
 		copy(tid[:7], tsBytes)
 	}
-	// trailing 9 bytes are random
+	// trailing 9 bytes are random — crypto/rand.Read only fails on
+	// catastrophic system issues (entropy pool exhaustion), so we proceed
+	// with whatever we got rather than failing trace generation entirely.
 	_, _ = rand.Read(tid[7:])
-
 	_, _ = rand.Read(sid[:])
 	return tid, sid
 }

@@ -85,7 +85,7 @@ func (m *mockJobRepo) List(ctx context.Context, tenantID string, status *feedbac
 	return result, "", nil
 }
 
-func (m *mockJobRepo) Claim(ctx context.Context) (*feedbackjob.Job, error) {
+func (m *mockJobRepo) Claim(ctx context.Context, owner string) (*feedbackjob.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.claimErr != nil {
@@ -103,7 +103,7 @@ func (m *mockJobRepo) Claim(ctx context.Context) (*feedbackjob.Job, error) {
 	return job, nil
 }
 
-func (m *mockJobRepo) UpdateProgress(ctx context.Context, jobID string, progress int) error {
+func (m *mockJobRepo) UpdateProgress(ctx context.Context, jobID, owner string, progress int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.progressCalls = append(m.progressCalls, struct {
@@ -113,35 +113,35 @@ func (m *mockJobRepo) UpdateProgress(ctx context.Context, jobID string, progress
 	return nil
 }
 
-func (m *mockJobRepo) Complete(ctx context.Context, jobID string, result []byte) error {
+func (m *mockJobRepo) Complete(ctx context.Context, jobID, owner string, result []byte) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.completeCalls = append(m.completeCalls, struct {
 		JobID  string
 		Result []byte
 	}{jobID, result})
-	return nil
+	return 1, nil
 }
 
-func (m *mockJobRepo) Fail(ctx context.Context, jobID string, errMsg string) error {
+func (m *mockJobRepo) Fail(ctx context.Context, jobID, owner string, errMsg string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.failCalls = append(m.failCalls, struct {
 		JobID  string
 		ErrMsg string
 	}{jobID, errMsg})
-	return nil
+	return 1, nil
 }
 
 func (m *mockJobRepo) Cancel(ctx context.Context, tenantID, jobID string) error {
 	return nil
 }
 
-func (m *mockJobRepo) Heartbeat(ctx context.Context, jobID string) error {
+func (m *mockJobRepo) Heartbeat(ctx context.Context, jobID, owner string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.heartbeatCalls = append(m.heartbeatCalls, jobID)
-	return nil
+	return 1, nil
 }
 
 func (m *mockJobRepo) RecoverStuck(ctx context.Context, staleThreshold time.Duration) (int64, error) {

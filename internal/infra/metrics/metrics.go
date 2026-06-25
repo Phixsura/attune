@@ -662,6 +662,88 @@ var WorkerPanics = prometheus.NewCounterVec(
 	[]string{"worker"},
 )
 
+// WorkerDrainTotal counts graceful shutdown drain events by worker and outcome.
+// status ∈ {clean, timeout, abandoned}. A "clean" drain means all in-flight
+// work completed before the timeout; "timeout" means the drain deadline passed
+// with work still running; "abandoned" means the worker couldn't track in-flight
+// work (legacy code path).
+var WorkerDrainTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_worker_drain_total",
+		Help: "Graceful shutdown drain events by worker and outcome.",
+	},
+	[]string{"worker", "status"},
+)
+
+// WorkerInFlight gauges the number of items currently being processed by each
+// worker type. Used for shutdown drain visibility and capacity planning.
+var WorkerInFlight = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_worker_in_flight",
+		Help: "Items currently being processed by each worker type.",
+	},
+	[]string{"worker"},
+)
+
+// WorkerStaleClaimsRecovered counts stale claims recovered on worker boot.
+// Non-zero after the boot window indicates a worker crashed with in-flight work.
+var WorkerStaleClaimsRecovered = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_worker_stale_claims_recovered_total",
+		Help: "Stale claims recovered on worker boot.",
+	},
+	[]string{"worker"},
+)
+
+// WorkerHeartbeatTotal counts heartbeat refresh attempts by worker and outcome.
+// outcome ∈ {ok, error, lost}. "lost" means the task was re-claimed by another worker.
+var WorkerHeartbeatTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_worker_heartbeat_total",
+		Help: "Heartbeat refresh attempts by worker.",
+	},
+	[]string{"worker", "outcome"},
+)
+
+// AdvisoryLockTotal counts advisory lock acquire attempts by lock name and outcome.
+// outcome ∈ {acquired, busy, error}.
+var AdvisoryLockTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_advisory_lock_total",
+		Help: "Advisory lock acquire attempts.",
+	},
+	[]string{"lock", "outcome"},
+)
+
+// ---------- Circuit breaker metrics ----------
+
+// CircuitBreakerResults counts circuit breaker call outcomes.
+var CircuitBreakerResults = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_circuit_breaker_results_total",
+		Help: "Circuit breaker call outcomes.",
+	},
+	[]string{"name", "result"},
+)
+
+// CircuitBreakerRejected counts requests rejected by open circuit.
+var CircuitBreakerRejected = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_circuit_breaker_rejected_total",
+		Help: "Requests rejected by open circuit breaker.",
+	},
+	[]string{"name"},
+)
+
+// CircuitBreakerTransitions counts state transitions.
+var CircuitBreakerTransitions = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_circuit_breaker_transitions_total",
+		Help: "Circuit breaker state transitions.",
+	},
+	[]string{"name", "from", "to"},
+)
+
 // ---------- Migration metrics (#149) ----------
 
 // MigrationAppliedTotal counts migration files applied by the startup runner.
@@ -706,6 +788,27 @@ var MigrationChecksumDriftTotal = prometheus.NewCounter(
 		Name: "attune_migration_checksum_drift_total",
 		Help: "Migration checksum mismatches detected during verification.",
 	},
+)
+
+// ---------- Dependency health metrics ----------
+
+// DependencyHealthCheckTotal counts dependency health check outcomes.
+var DependencyHealthCheckTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_dependency_health_check_total",
+		Help: "Dependency health check outcomes.",
+	},
+	[]string{"dependency", "result"},
+)
+
+// DependencyHealthCheckDuration tracks health check latency.
+var DependencyHealthCheckDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_dependency_health_check_duration_seconds",
+		Help:    "Dependency health check latency.",
+		Buckets: prometheus.ExponentialBuckets(0.001, 2, 12), // 1ms..4s
+	},
+	[]string{"dependency"},
 )
 
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
@@ -787,10 +890,20 @@ var allMetrics = []prometheus.Collector{
 	AuditRowsPrunedTotal,
 	AuditPruneDurationSeconds,
 	WorkerPanics,
+	WorkerDrainTotal,
+	WorkerInFlight,
+	WorkerStaleClaimsRecovered,
+	WorkerHeartbeatTotal,
+	AdvisoryLockTotal,
+	CircuitBreakerResults,
+	CircuitBreakerRejected,
+	CircuitBreakerTransitions,
 	MigrationAppliedTotal,
 	MigrationApplyDuration,
 	MigrationPending,
 	MigrationChecksumDriftTotal,
+	DependencyHealthCheckTotal,
+	DependencyHealthCheckDuration,
 }
 
 // RegisteredMetricNames returns the attune metric families registered by this
@@ -861,10 +974,20 @@ func RegisteredMetricNames() []string {
 		"attune_audit_rows_pruned_total",
 		"attune_audit_prune_duration_seconds",
 		"attune_worker_panics_total",
+		"attune_worker_drain_total",
+		"attune_worker_in_flight",
+		"attune_worker_stale_claims_recovered_total",
+		"attune_worker_heartbeat_total",
+		"attune_advisory_lock_total",
+		"attune_circuit_breaker_results_total",
+		"attune_circuit_breaker_rejected_total",
+		"attune_circuit_breaker_transitions_total",
 		"attune_migration_applied_total",
 		"attune_migration_apply_duration_seconds",
 		"attune_migration_pending",
 		"attune_migration_checksum_drift_total",
+		"attune_dependency_health_check_total",
+		"attune_dependency_health_check_duration_seconds",
 	}
 }
 

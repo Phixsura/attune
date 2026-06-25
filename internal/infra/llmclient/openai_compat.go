@@ -159,7 +159,7 @@ func (b *OpenAICompatBackend) Complete(
 	}
 	defer resp.Body.Close()
 
-	respBytes, err := io.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxLLMResponseBody))
 	if err != nil {
 		logext.Errorf(ctx, "[%s] read body err,user_id:%s,model:%s,status:%d,err:%+v",
 			where, req.UserID, req.Model, resp.StatusCode, err.Error())

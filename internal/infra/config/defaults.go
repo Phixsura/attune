@@ -45,3 +45,12 @@ var (
 	DefaultGDPRStepUpTTL         = 15 * time.Minute
 	DefaultGDPRDeleteGraceWindow = 15 * time.Minute
 )
+
+// Worker defaults
+const (
+	DefaultWorkerHeartbeatInterval = 90 * time.Second
+	DefaultWorkerStaleDuration     = 5 * time.Minute
+	DefaultWorkerDrainTimeout      = 30 * time.Second
+	DefaultWorkerPollInterval      = 5 * time.Second
+	DefaultWorkerMaxAttempts       = 5
+)

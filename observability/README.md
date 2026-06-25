@@ -92,6 +92,14 @@ exposition plus the portable assets in this directory.
 | `attune_audit_rows_pruned_total` | counter | — | immutable audit-log rows pruned by retention policy (#39) |
 | `attune_audit_prune_duration_seconds` | histogram | — | audit-log retention prune latency (#39) |
 | `attune_worker_panics_total` | counter | `worker` | recovered panics in supervised background workers (#64) |
+| `attune_worker_drain_total` | counter | `worker`, `status` | graceful shutdown drain events by worker and outcome (#155) |
+| `attune_worker_in_flight` | gauge | `worker` | items currently being processed by each worker type (#155) |
+| `attune_worker_stale_claims_recovered_total` | counter | `worker` | stale claims recovered on worker boot (#155) |
+| `attune_worker_heartbeat_total` | counter | `worker`, `outcome` | heartbeat refresh attempts by worker (#155) |
+| `attune_advisory_lock_total` | counter | `lock`, `outcome` | advisory lock acquire attempts (#155) |
+| `attune_circuit_breaker_results_total` | counter | `name`, `result` | circuit breaker call outcomes (#155) |
+| `attune_circuit_breaker_rejected_total` | counter | `name` | requests rejected by open circuit breaker (#155) |
+| `attune_circuit_breaker_transitions_total` | counter | `name`, `from`, `to` | circuit breaker state transitions (#155) |
 | `attune_inbound_total` | counter | `channel`, `tenant`, `source_slug`, `result` | channel-agnostic inbound events by source (#66) |
 | `attune_inbound_latency_seconds` | histogram | `channel`, `tenant`, `source_slug` | end-to-end inbound processing latency (#66) |
 | `attune_inbound_source_state` | gauge | `channel`, `tenant`, `source_slug`, `state` | inbound source state, 1 when active (#66) |
@@ -100,6 +108,8 @@ exposition plus the portable assets in this directory.
 | `attune_migration_apply_duration_seconds` | histogram | `version` | migration apply latency per version (#149) |
 | `attune_migration_pending` | gauge | — | number of unapplied migrations at startup (#149) |
 | `attune_migration_checksum_drift_total` | counter | — | migration checksum mismatches detected during verification (#149) |
+| `attune_dependency_health_check_total` | counter | `dependency`, `result` | dependency health check outcomes (#155) |
+| `attune_dependency_health_check_duration_seconds` | histogram | `dependency` | dependency health check latency (#155) |
 | `attune_restore_drill_last_success_timestamp_seconds` | gauge | — | unix timestamp of the most recent non-failing restore drill, derived from `restore_drill_runs` at scrape time (#151) |
 | `attune_restore_drill_runs_total` | counter | `status` | restore drills recorded, by status (#151) |
 | `attune_restore_drill_last_rto_seconds` | gauge | — | measured restore duration (RTO) of the most recent drill that recorded one (#151) |

@@ -14,6 +14,19 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 )
 
+// OIDC configuration errors.
+var (
+	ErrOIDCIssuerRequired   = errors.New("oidc.issuer_url required when oidc.enabled")
+	ErrOIDCClientIDRequired = errors.New("oidc.client_id required")
+	ErrOIDCRedirectRequired = errors.New("oidc.redirect_uri required")
+	ErrOIDCIssuerNotHTTPS   = errors.New("oidc.issuer_url must use HTTPS (set insecure_skip_verify for dev)")
+	ErrOIDCIssuerMetadata   = errors.New("oidc.issuer_url cannot be a cloud metadata endpoint")
+	ErrOIDCIssuerPrivate    = errors.New("oidc.issuer_url cannot be a private IP (set insecure_skip_verify for internal IdP)")
+	ErrOIDCRedirectNotHTTPS = errors.New("oidc.redirect_uri must use HTTPS in production")
+	ErrOIDCScopeOpenID      = errors.New("oidc.scopes must include 'openid'")
+	ErrOIDCScopeEmail       = errors.New("oidc.scopes should include 'email' for user identification")
+)
+
 // RoleMappingEntry defines a single role → groups mapping (evaluated in order).
 type RoleMappingEntry struct {
 	Role   string   `yaml:"role"`
@@ -77,13 +90,13 @@ func (c *OIDCConfig) Validate() error {
 
 func (c *OIDCConfig) validateRequired() error {
 	if c.IssuerURL == "" {
-		return errors.New("oidc.issuer_url required when oidc.enabled")
+		return ErrOIDCIssuerRequired
 	}
 	if c.ClientID == "" {
-		return errors.New("oidc.client_id required")
+		return ErrOIDCClientIDRequired
 	}
 	if c.RedirectURI == "" {
-		return errors.New("oidc.redirect_uri required")
+		return ErrOIDCRedirectRequired
 	}
 	return nil
 }
@@ -94,13 +107,13 @@ func (c *OIDCConfig) validateIssuerURL() error {
 		return fmt.Errorf("oidc.issuer_url invalid: %w", err)
 	}
 	if issuer.Scheme != "https" && !c.InsecureSkipVerify && !isLoopback(issuer.Host) {
-		return errors.New("oidc.issuer_url must use HTTPS (set insecure_skip_verify for dev)")
+		return ErrOIDCIssuerNotHTTPS
 	}
 	if isCloudMetadataHost(issuer.Host) {
-		return errors.New("oidc.issuer_url cannot be a cloud metadata endpoint")
+		return ErrOIDCIssuerMetadata
 	}
 	if isPrivateHost(issuer.Host) && !c.InsecureSkipVerify {
-		return errors.New("oidc.issuer_url cannot be a private IP (set insecure_skip_verify for internal IdP)")
+		return ErrOIDCIssuerPrivate
 	}
 	return nil
 }

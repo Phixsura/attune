@@ -233,12 +233,20 @@ func operationsDashboard() dashboard {
 			targetExpr("D", `sum by (result) (rate(attune_embedding_cache_hits_total{tenant=~"$tenant"}[$__rate_interval]))`, "cache / {{result}}"),
 		}, "short", gp(12, 34, 12, 8)),
 		rowPanel(20, "Delivery and contention", 42),
-		seriesDesc(21, "Delivery and contention", "Delivery failures, outbox lag, and claim contention. This is the final split between destination failure and worker capacity.", []target{
+		seriesDesc(21, "Delivery and contention", "Delivery failures, outbox lag, claim contention, and worker health. This is the final split between destination failure and worker capacity.", []target{
 			targetExpr("A", `sum by (destination_type, reason) (rate(attune_notify_failures_total[$__rate_interval]))`, "notify / {{destination_type}} / {{reason}}"),
 			targetExpr("B", `attune_outbox_lag_seconds`, "outbox lag"),
 			targetExpr("C", `rate(attune_claim_contention_total[$__rate_interval])`, "claim contention"),
 			targetExpr("D", `attune_outbox_dead_rows`, "dead deliveries"),
 			targetExpr("E", `sum by (worker) (increase(attune_worker_panics_total[$__range]))`, "worker panics / {{worker}}"),
+			targetExpr("F", `sum by (worker) (attune_worker_in_flight)`, "in-flight / {{worker}}"),
+			targetExpr("G", `sum by (worker, status) (rate(attune_worker_drain_total[$__rate_interval]))`, "drain / {{worker}} / {{status}}"),
+			targetExpr("H", `sum by (worker) (rate(attune_worker_stale_claims_recovered_total[$__rate_interval]))`, "stale recovered / {{worker}}"),
+			targetExpr("I", `sum by (worker, outcome) (rate(attune_worker_heartbeat_total[$__rate_interval]))`, "heartbeat / {{worker}} / {{outcome}}"),
+			targetExpr("J", `sum by (lock, outcome) (rate(attune_advisory_lock_total[$__rate_interval]))`, "advisory lock / {{lock}} / {{outcome}}"),
+			targetExpr("K", `sum by (name, result) (rate(attune_circuit_breaker_results_total[$__rate_interval]))`, "circuit / {{name}} / {{result}}"),
+			targetExpr("L", `sum by (name) (rate(attune_circuit_breaker_rejected_total[$__rate_interval]))`, "circuit rejected / {{name}}"),
+			targetExpr("M", `sum by (name, from, to) (increase(attune_circuit_breaker_transitions_total[$__range]))`, "circuit state / {{name}} / {{from}}→{{to}}"),
 		}, "short", gp(0, 43, 24, 8)),
 		rowPanel(22, "Database migrations", 51),
 		statDesc(23, "Pending migrations", "Unapplied migrations at last startup. Non-zero after startup means migrations are failing or the binary has new migrations not yet applied.", `attune_migration_pending`, "short", gp(0, 52, 6, 4), greenWarnRed(1, 5)),
@@ -251,12 +259,17 @@ func operationsDashboard() dashboard {
 			targetExpr("C", `attune_migration_pending`, "pending"),
 			targetExpr("D", `increase(attune_migration_checksum_drift_total[$__rate_interval])`, "checksum drift"),
 		}, "short", gp(0, 56, 24, 8)),
-		rowPanel(28, "Backup recoverability", 64),
-		statDesc(29, "Time since last drill success", "Age of the most recent non-failing (pass or warn) backup/restore drill. Red beyond 8 days means recent backups are unverified — this is the AttuneRestoreDrillStale alert's signal. A near-zero epoch value means no drill has ever succeeded (the backup:restore_drill preflight check warns).", `time() - max(attune_restore_drill_last_success_timestamp_seconds)`, "s", gp(0, 65, 8, 4), greenWarnRed(7*24*3600, 8*24*3600)),
-		statDesc(30, "Last restore time (RTO)", "Measured restore duration of the most recent drill that recorded one. Trends time-to-recover against your RTO objective.", `attune_restore_drill_last_rto_seconds`, "s", gp(8, 65, 8, 4), nil),
-		seriesDesc(31, "Restore drills by outcome", "Recorded restore drills by status. A rising fail count — or the absence of recent pass/warn — means the latest backups may not be recoverable.", []target{
+		rowPanel(28, "Dependency health", 64),
+		seriesDesc(29, "Dependency health checks", "Health check outcomes and latency for upstream dependencies. Use this to detect connectivity issues before they impact user traffic.", []target{
+			targetExpr("A", `sum by (dependency, result) (rate(attune_dependency_health_check_total[$__rate_interval]))`, "{{dependency}} / {{result}}"),
+			targetExpr("B", `histogram_quantile(0.95, sum by (le, dependency) (rate(attune_dependency_health_check_duration_seconds_bucket[$__rate_interval])))`, "{{dependency}} p95"),
+		}, "short", gp(0, 65, 24, 8)),
+		rowPanel(30, "Backup recoverability", 73),
+		statDesc(31, "Time since last drill success", "Age of the most recent non-failing (pass or warn) backup/restore drill. Red beyond 8 days means recent backups are unverified — this is the AttuneRestoreDrillStale alert's signal. A near-zero epoch value means no drill has ever succeeded (the backup:restore_drill preflight check warns).", `time() - max(attune_restore_drill_last_success_timestamp_seconds)`, "s", gp(0, 74, 8, 4), greenWarnRed(7*24*3600, 8*24*3600)),
+		statDesc(32, "Last restore time (RTO)", "Measured restore duration of the most recent drill that recorded one. Trends time-to-recover against your RTO objective.", `attune_restore_drill_last_rto_seconds`, "s", gp(8, 74, 8, 4), nil),
+		seriesDesc(33, "Restore drills by outcome", "Recorded restore drills by status. A rising fail count — or the absence of recent pass/warn — means the latest backups may not be recoverable.", []target{
 			targetExpr("A", `attune_restore_drill_runs_total`, "{{status}}"),
-		}, "short", gp(16, 65, 8, 8)),
+		}, "short", gp(16, 74, 8, 8)),
 	}
 	d.Panels = layoutSixCardDashboard(d.Panels, 7, 7)
 	return d

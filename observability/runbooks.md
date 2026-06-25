@@ -379,3 +379,153 @@ run surfaces as a warning on the Console System Readiness page
 Recovery: a fresh `attune restore-drill run --record` completes with status
 `pass` (or `warn`), advancing
 `attune_restore_drill_last_success_timestamp_seconds`.
+
+## AttuneWorkerHeartbeatLost
+
+Impact: workers are losing task leases before completing processing. This causes
+wasted work (partial LLM calls, partial deliveries) and increased task latency
+as tasks are re-processed by other workers.
+
+Confirm:
+
+```promql
+sum by (worker) (increase(attune_worker_heartbeat_total{outcome="lost"}[10m]))
+```
+
+Check if task processing time regularly exceeds the stale claim threshold (5
+minutes). Common causes:
+
+1. **Long LLM calls** — complex enrichment or embedding prompts taking > 5m
+2. **Network issues** — database connectivity problems preventing heartbeat refresh
+3. **Resource contention** — worker CPU/memory pressure slowing processing
+4. **Destination timeouts** — slow webhook endpoints delaying outbox delivery
+
+Recovery: heartbeat lost rate returns to near-zero for 10 minutes. If the cause
+is long processing, consider:
+- Breaking large tasks into smaller units
+- Increasing the stale claim threshold (staleDuration) if appropriate
+- Adding more worker replicas to reduce per-task latency
+
+## AttuneWorkerDrainTimeout
+
+Impact: worker shutdown did not complete gracefully within 30 seconds. In-flight
+tasks may have been abandoned mid-processing and will be re-claimed after the
+stale claim threshold.
+
+Confirm:
+
+```promql
+sum by (worker) (increase(attune_worker_drain_total{outcome="timeout"}[30m]))
+```
+
+Check for stuck tasks by querying queue tables for rows with `status='processing'`
+and `claimed_at` older than the stale threshold. Common causes:
+
+1. **Stuck LLM calls** — provider not responding, no timeout configured
+2. **Stuck database queries** — lock contention or slow queries
+3. **Many in-flight tasks** — drain timeout too short for batch size
+
+Recovery: drain timeout rate returns to zero. For persistent issues:
+- Add context timeouts to long-running operations
+- Reduce batch size to lower in-flight count at shutdown
+- Increase drain timeout if 30s is genuinely insufficient
+
+## AttuneWorkerStaleClaimsHigh
+
+Impact: workers are crashing or failing to heartbeat, leaving claimed tasks
+stranded until the next worker boot recovers them. This adds latency equal to
+the stale claim threshold (5 minutes) plus recovery poll interval.
+
+Confirm:
+
+```promql
+sum by (worker) (increase(attune_worker_stale_claims_recovered_total[1h]))
+```
+
+Check for worker OOM kills, panics, or network partitions. The stale claim
+recovery log shows which tasks were recovered:
+
+```bash
+kubectl logs -l app=attune | grep "reset stale claims"
+```
+
+Common causes:
+
+1. **Worker crashes** — panics, OOM, SIGKILL without graceful shutdown
+2. **Network partition** — worker alive but can't reach database for heartbeat
+3. **Clock skew** — significant time drift between workers and database
+
+Recovery: stale claim recovery rate returns to near-zero for 1 hour. Address the
+underlying cause (memory limits, panic bugs, network stability).
+
+## AttuneEnrichmentLatencyHigh
+
+Impact: enrichment is taking longer than expected, which delays feedback processing
+and may cause visible delays in the user-facing workflow.
+
+Confirm:
+
+```promql
+histogram_quantile(0.95, sum by (le) (rate(attune_enrich_duration_seconds_bucket[5m])))
+```
+
+Check LLM provider status pages. Compare latency by model in Attune AI Pipeline >
+Enrichment latency. If one model is slow, check its capacity and error rate.
+
+Recovery: enrichment p95 returns below 30s for 10 minutes.
+
+## AttuneSearchLatencyHigh
+
+Impact: search queries are slow, causing visible delays in the feedback search UI.
+
+Confirm:
+
+```promql
+histogram_quantile(0.95, sum by (le, type) (rate(attune_search_query_duration_seconds_bucket[5m])))
+```
+
+Check pg_stat_statements for slow queries:
+
+```sql
+SELECT query, mean_exec_time, calls
+FROM pg_stat_statements
+WHERE query LIKE '%user_feedback%' OR query LIKE '%embedding%'
+ORDER BY mean_exec_time DESC LIMIT 10;
+```
+
+Consider VACUUM ANALYZE on large tables. Verify embedding indexes are current.
+
+Recovery: search p95 returns below 1s for 10 minutes.
+
+## AttuneCircuitBreakerOpen
+
+Impact: requests to the affected upstream are fast-failing. This protects the system
+but means the upstream service is degraded.
+
+Confirm:
+
+```promql
+sum by (name) (increase(attune_circuit_breaker_transitions_total{to="open"}[10m]))
+```
+
+Check the upstream provider's status page. The circuit will automatically transition
+to half-open after the configured open duration (default 30s) and test with a single
+request. If that succeeds, it closes.
+
+Recovery: circuit transitions to closed. If repeatedly opening, address the root cause.
+
+## AttuneEmbeddingQueueDepthHigh
+
+Impact: embedding tasks are backing up, which delays cluster assignments and
+semantic search availability for new feedback.
+
+Confirm:
+
+```promql
+max(attune_embed_queue_depth)
+```
+
+Check embedding worker logs for errors. Verify provider connectivity. If workers
+are healthy but queue is growing, scale horizontally.
+
+Recovery: queue depth returns to near zero for 10 minutes.

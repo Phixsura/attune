@@ -58,3 +58,31 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	}
 	return pool, nil
 }
+
+// PoolHealth returns health information about a connection pool.
+type PoolHealth struct {
+	TotalConns        int32 `json:"total_conns"`
+	AcquiredConns     int32 `json:"acquired_conns"`
+	IdleConns         int32 `json:"idle_conns"`
+	ConstructingConns int32 `json:"constructing_conns"`
+	MaxConns          int32 `json:"max_conns"`
+	Healthy           bool  `json:"healthy"`
+}
+
+// CheckPoolHealth returns the health status of a connection pool.
+func CheckPoolHealth(pool *pgxpool.Pool) PoolHealth {
+	stat := pool.Stat()
+	return PoolHealth{
+		TotalConns:        stat.TotalConns(),
+		AcquiredConns:     stat.AcquiredConns(),
+		IdleConns:         stat.IdleConns(),
+		ConstructingConns: stat.ConstructingConns(),
+		MaxConns:          stat.MaxConns(),
+		Healthy:           stat.TotalConns() > 0 || stat.ConstructingConns() > 0,
+	}
+}
+
+// Ping verifies the database connection is alive.
+func Ping(ctx context.Context, pool *pgxpool.Pool) error {
+	return pool.Ping(ctx)
+}

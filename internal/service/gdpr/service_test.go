@@ -185,16 +185,32 @@ func (s *schedulingRepo) ClaimNextExportJob(context.Context) (*gdprrepo.ExportJo
 	return nil, nil
 }
 
+func (s *schedulingRepo) ClaimNextExportJobWithOwner(context.Context, string) (*gdprrepo.ExportJob, error) {
+	return nil, nil
+}
+
 func (s *schedulingRepo) HeartbeatExportJob(context.Context, string) error {
 	return nil
+}
+
+func (s *schedulingRepo) HeartbeatExportJobWithOwner(context.Context, string, string) (int64, error) {
+	return 1, nil
 }
 
 func (s *schedulingRepo) CompleteExportJob(context.Context, string, string, string, []byte, gdprrepo.Counts, time.Time) error {
 	return nil
 }
 
+func (s *schedulingRepo) CompleteExportJobWithOwner(context.Context, string, string, string, string, []byte, gdprrepo.Counts, time.Time) (int64, error) {
+	return 1, nil
+}
+
 func (s *schedulingRepo) FailExportJob(context.Context, string, string) error {
 	return nil
+}
+
+func (s *schedulingRepo) FailExportJobWithOwner(context.Context, string, string, string) (int64, error) {
+	return 1, nil
 }
 
 func (s *schedulingRepo) ExpireReadyExportJobs(context.Context, time.Time) (int64, error) {

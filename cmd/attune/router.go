@@ -27,6 +27,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers"
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/handlers/mcp"
+	"github.com/Phixsura/attune/internal/handlers/security"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -95,6 +96,8 @@ func buildRouter(
 	// resolution is done by nethardening.ClientIP honoring security.trusted_proxy_hops
 	// (see apikey.MiddlewareWithProxies), so RemoteAddr must stay the true peer.
 	r.Use(middleware.Recoverer)
+	r.Use(security.Headers)       // X-Frame-Options, X-Content-Type-Options, etc.
+	r.Use(middleware.Compress(5)) // gzip responses > 500 bytes
 	r.Use(middleware.Timeout(305 * time.Second))
 	mountHealth(r, ready)
 	// Prometheus scrape endpoint. Restrict to internal CIDR via nginx
@@ -112,8 +115,10 @@ func buildRouter(
 		}
 
 		// Auth verify endpoint - requires valid API key but no specific scope.
+		// Rate-limited to prevent brute-force attacks.
 		r.Group(func(r chi.Router) {
 			r.Use(apikey.MiddlewareWithProxies(apiKeys, cfg.Security.TrustedProxyHops))
+			r.Use(rateLimiter.Middleware)
 			authVerify := handlers.NewAuthVerifyHandler(apikeyrepo.NewAPIKey(pool))
 			r.Get("/auth/verify", dispatcher.Bind(
 				"handlers.AuthVerifyHandler.Verify",
@@ -612,6 +617,25 @@ func (r *drainAwareReadiness) Ping(ctx context.Context) error {
 func mountHealth(r chi.Router, ready readinessChecker) {
 	r.Get("/healthz", dispatcher.HealthzHandler())
 	r.Get("/readyz", readyzHandler(ready))
+	r.Get("/startupz", startupzHandler(ready))
+}
+
+// startupzHandler is like readyzHandler but with a longer timeout for slow
+// startups (migration, warming). Kubernetes startup probes use this.
+func startupzHandler(ready readinessChecker) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if ready == nil {
+			writeNotReady(req.Context(), w)
+			return
+		}
+		ctx, cancel := context.WithTimeout(req.Context(), 30*time.Second)
+		defer cancel()
+		if err := ready.Ping(ctx); err != nil {
+			writeNotReady(req.Context(), w)
+			return
+		}
+		dispatcher.WriteText(w, http.StatusOK, "ok")
+	}
 }
 
 func readyzHandler(ready readinessChecker) http.HandlerFunc {

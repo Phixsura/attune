@@ -195,10 +195,18 @@ func (r *FeedbackRepo) PurgeExpiredIdempotencyKeys(ctx context.Context, retentio
 // stale claim window.
 // Returns true iff this caller now owns the row.
 func (r *FeedbackRepo) TryClaim(ctx context.Context, id int64) (bool, error) {
+	return r.TryClaimWithOwner(ctx, id, "")
+}
+
+// TryClaimWithOwner is like TryClaim but also sets enrichment_claimed_by.
+// This enables fencing so MarkDone/MarkFailed only succeed if this worker
+// still holds the claim.
+func (r *FeedbackRepo) TryClaimWithOwner(ctx context.Context, id int64, owner string) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE user_feedback
 		SET enrichment_status = 'enriching',
 		 enrichment_claimed_at = NOW(),
+		 enrichment_claimed_by = $4,
 		 enrichment_error = NULL,
 		 enrichment_next_retry_at = NULL
 		WHERE id = $1
@@ -210,7 +218,7 @@ func (r *FeedbackRepo) TryClaim(ctx context.Context, id int64) (bool, error) {
 		 OR (enrichment_status = 'enriching'
 		     AND enrichment_claimed_at < NOW() - make_interval(secs => $3))
 		 )`,
-		id, maxEnrichmentAttempts, int(staleEnrichmentClaimWindow.Seconds()))
+		id, maxEnrichmentAttempts, int(staleEnrichmentClaimWindow.Seconds()), owner)
 	if err != nil {
 		return false, fmt.Errorf("claim feedback %d: %w", id, err)
 	}
@@ -329,8 +337,30 @@ const markDoneSQL = `
 		 enrichment_attempts = 0,
 		 enrichment_next_retry_at = NULL,
 		 enrichment_claimed_at = NULL,
+		 enrichment_claimed_by = NULL,
 		 enriched_at = NOW()
 		WHERE id = $10`
+
+// markDoneWithOwnerSQL adds claimed_by fencing to markDoneSQL.
+const markDoneWithOwnerSQL = `
+		UPDATE user_feedback
+		SET enriched_title = $1,
+		 enriched_attrs = $2::jsonb,
+		 is_urgent = $3,
+		 enriched_rationale = $4,
+		 language = NULLIF($5, ''),
+		 enriched_display_title = NULLIF($6, ''),
+		 enriched_display_rationale = NULLIF($7, ''),
+		 enriched_display_locale = NULLIF($8, ''),
+		 classification_confidence = $9,
+		 enrichment_status = 'done',
+		 enrichment_error = NULL,
+		 enrichment_attempts = 0,
+		 enrichment_next_retry_at = NULL,
+		 enrichment_claimed_at = NULL,
+		 enrichment_claimed_by = NULL,
+		 enriched_at = NOW()
+		WHERE id = $10 AND enrichment_claimed_by = $11`
 
 // MarkDone persists the LLM classification and flips the row to 'done'.
 // Single-statement; no outer tx needed. Use MarkDoneTx when this
@@ -371,6 +401,26 @@ func (r *FeedbackRepo) MarkDoneTx(ctx context.Context, tx pgx.Tx, id int64, e do
 		return fmt.Errorf("update enrichment row %d (tx): %w", id, err)
 	}
 	return nil
+}
+
+// MarkDoneTxWithOwner is like MarkDoneTx but includes claimed_by fencing.
+// Returns rows affected (0 if the row was re-claimed by another worker).
+func (r *FeedbackRepo) MarkDoneTxWithOwner(ctx context.Context, tx pgx.Tx, id int64, owner string, e domain.Enriched, metas ...EnrichmentMetadata) (int64, error) {
+	attrsJSON, err := marshalAttrs(e.Attrs)
+	if err != nil {
+		return 0, err
+	}
+	meta := mergeEnrichmentMetadata(metas)
+	tag, err := tx.Exec(
+		ctx, markDoneWithOwnerSQL,
+		e.Title, attrsJSON, e.IsUrgent, e.Rationale, meta.Language,
+		e.DisplayTitle, e.DisplayRationale, meta.DisplayLocale,
+		e.ClassificationConfidence, id, owner,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("update enrichment row %d (tx): %w", id, err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func mergeEnrichmentMetadata(metas []EnrichmentMetadata) EnrichmentMetadata {
@@ -433,10 +483,17 @@ func (r *FeedbackRepo) BeginTx(ctx context.Context) (pgx.Tx, error) {
 // row's tenant, so the caller can record attune_enrichment_terminal_failures_total
 // (#64). On a DB error it returns (false, "").
 func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) (terminal bool, tenant string) {
-	const where = "repo.FeedbackRepo.MarkFailed"
-	if err := r.pool.QueryRow(
-		ctx,
-		`UPDATE user_feedback
+	return r.MarkFailedWithOwner(ctx, id, "", errMsg)
+}
+
+// MarkFailedWithOwner is like MarkFailed but includes claimed_by fencing.
+// If owner is non-empty, only updates if enrichment_claimed_by matches.
+func (r *FeedbackRepo) MarkFailedWithOwner(ctx context.Context, id int64, owner, errMsg string) (terminal bool, tenant string) {
+	const where = "repo.FeedbackRepo.MarkFailedWithOwner"
+	var sql string
+	var args []any
+	if owner == "" {
+		sql = `UPDATE user_feedback
 		    SET enrichment_status = 'failed',
 		        enrichment_error = $1,
 		        enrichment_attempts = enrichment_attempts + 1,
@@ -447,12 +504,36 @@ func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) 
 		            $5
 		          ))
 		        END,
-		        enrichment_claimed_at = NULL
+		        enrichment_claimed_at = NULL,
+		        enrichment_claimed_by = NULL
 		  WHERE id = $2
-		  RETURNING enrichment_attempts >= $3, tenant_id`,
-		pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
-		int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()),
-	).Scan(&terminal, &tenant); err != nil {
+		  RETURNING enrichment_attempts >= $3, tenant_id`
+		args = []any{
+			pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
+			int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()),
+		}
+	} else {
+		sql = `UPDATE user_feedback
+		    SET enrichment_status = 'failed',
+		        enrichment_error = $1,
+		        enrichment_attempts = enrichment_attempts + 1,
+		        enrichment_next_retry_at = CASE
+		          WHEN enrichment_attempts + 1 >= $3 THEN NULL
+		          ELSE NOW() + make_interval(secs => LEAST(
+		            $4 * CAST(POWER(2, LEAST(enrichment_attempts, 10)) AS INTEGER),
+		            $5
+		          ))
+		        END,
+		        enrichment_claimed_at = NULL,
+		        enrichment_claimed_by = NULL
+		  WHERE id = $2 AND enrichment_claimed_by = $6
+		  RETURNING enrichment_attempts >= $3, tenant_id`
+		args = []any{
+			pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
+			int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()), owner,
+		}
+	}
+	if err := r.pool.QueryRow(ctx, sql, args...).Scan(&terminal, &tenant); err != nil {
 		// Row gone (concurrent erase / terminal transition) is benign — don't
 		// log it as an error; only real DB failures are error-worthy.
 		if !errors.Is(err, pgx.ErrNoRows) {

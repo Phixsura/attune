@@ -172,8 +172,8 @@ func TestPG_JobListByStatus(t *testing.T) {
 	_, _ = e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 10)
 
 	// Claim and complete one. (Complete only works on running jobs.)
-	_, _ = e.jobs.Claim(e.ctx) // Claims job1 (FIFO order).
-	_ = e.jobs.Complete(e.ctx, job1.ID, []byte(`{"succeeded":10}`))
+	_, _ = e.jobs.Claim(e.ctx, "test-worker") // Claims job1 (FIFO order).
+	_, _ = e.jobs.Complete(e.ctx, job1.ID, "test-worker", []byte(`{"succeeded":10}`))
 
 	// List only completed.
 	status := feedbackjob.StatusCompleted
@@ -235,7 +235,7 @@ func TestPG_JobClaim(t *testing.T) {
 	}
 
 	// Claim it.
-	claimed, err := e.jobs.Claim(e.ctx)
+	claimed, err := e.jobs.Claim(e.ctx, "test-worker")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestPG_JobClaim(t *testing.T) {
 	}
 
 	// Try to claim again - should get nil (no more queued jobs).
-	second, err := e.jobs.Claim(e.ctx)
+	second, err := e.jobs.Claim(e.ctx, "test-worker")
 	if err != nil {
 		t.Fatalf("second Claim: %v", err)
 	}
@@ -276,13 +276,13 @@ func TestPG_JobClaimFIFO(t *testing.T) {
 	job2, _ := e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte(`{"order":2}`), 10)
 
 	// First claim should get job1.
-	claimed1, _ := e.jobs.Claim(e.ctx)
+	claimed1, _ := e.jobs.Claim(e.ctx, "test-worker")
 	if claimed1.ID != job1.ID {
 		t.Errorf("first claimed = %s, want %s (FIFO)", claimed1.ID, job1.ID)
 	}
 
 	// Second claim should get job2.
-	claimed2, _ := e.jobs.Claim(e.ctx)
+	claimed2, _ := e.jobs.Claim(e.ctx, "test-worker")
 	if claimed2.ID != job2.ID {
 		t.Errorf("second claimed = %s, want %s (FIFO)", claimed2.ID, job2.ID)
 	}
@@ -293,10 +293,10 @@ func TestPG_JobUpdateProgress(t *testing.T) {
 	e := setup(t)
 
 	job, _ := e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 100)
-	_, _ = e.jobs.Claim(e.ctx) // Move to running.
+	_, _ = e.jobs.Claim(e.ctx, "test-worker") // Move to running.
 
 	// Update progress.
-	err := e.jobs.UpdateProgress(e.ctx, job.ID, 50)
+	err := e.jobs.UpdateProgress(e.ctx, job.ID, "test-worker", 50)
 	if err != nil {
 		t.Fatalf("UpdateProgress: %v", err)
 	}
@@ -316,12 +316,12 @@ func TestPG_JobComplete(t *testing.T) {
 	e := setup(t)
 
 	job, _ := e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 10)
-	_, _ = e.jobs.Claim(e.ctx)
+	_, _ = e.jobs.Claim(e.ctx, "test-worker")
 
 	result := map[string]int{"succeeded": 8, "failed": 2}
 	resultJSON, _ := json.Marshal(result)
 
-	err := e.jobs.Complete(e.ctx, job.ID, resultJSON)
+	_, err := e.jobs.Complete(e.ctx, job.ID, "test-worker", resultJSON)
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -351,9 +351,9 @@ func TestPG_JobFail(t *testing.T) {
 	e := setup(t)
 
 	job, _ := e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 10)
-	_, _ = e.jobs.Claim(e.ctx)
+	_, _ = e.jobs.Claim(e.ctx, "test-worker")
 
-	err := e.jobs.Fail(e.ctx, job.ID, "something went wrong")
+	_, err := e.jobs.Fail(e.ctx, job.ID, "test-worker", "something went wrong")
 	if err != nil {
 		t.Fatalf("Fail: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestPG_JobCancelRunning(t *testing.T) {
 	e := setup(t)
 
 	job, _ := e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 10)
-	_, _ = e.jobs.Claim(e.ctx) // Move to running.
+	_, _ = e.jobs.Claim(e.ctx, "test-worker") // Move to running.
 
 	err := e.jobs.Cancel(e.ctx, e.tenantID, job.ID)
 	if err != nil {
@@ -410,8 +410,8 @@ func TestPG_JobCancelCompleted(t *testing.T) {
 	e := setup(t)
 
 	job, _ := e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 10)
-	_, _ = e.jobs.Claim(e.ctx)
-	_ = e.jobs.Complete(e.ctx, job.ID, []byte("{}"))
+	_, _ = e.jobs.Claim(e.ctx, "test-worker")
+	_, _ = e.jobs.Complete(e.ctx, job.ID, "test-worker", []byte("{}"))
 
 	err := e.jobs.Cancel(e.ctx, e.tenantID, job.ID)
 	if !errors.Is(err, feedbackjob.ErrJobNotCancellable) {
@@ -424,7 +424,7 @@ func TestPG_JobHeartbeat(t *testing.T) {
 	e := setup(t)
 
 	job, _ := e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 10)
-	_, _ = e.jobs.Claim(e.ctx)
+	_, _ = e.jobs.Claim(e.ctx, "test-worker")
 
 	// Get initial heartbeat.
 	got1, _ := e.jobs.Get(e.ctx, e.tenantID, job.ID)
@@ -434,7 +434,7 @@ func TestPG_JobHeartbeat(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Update heartbeat.
-	err := e.jobs.Heartbeat(e.ctx, job.ID)
+	_, err := e.jobs.Heartbeat(e.ctx, job.ID, "test-worker")
 	if err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestPG_JobRecoverStuck(t *testing.T) {
 
 	// Create and claim a job.
 	job, _ := e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 10)
-	_, _ = e.jobs.Claim(e.ctx)
+	_, _ = e.jobs.Claim(e.ctx, "test-worker")
 
 	// Manually set heartbeat to be old (simulating stuck job).
 	_, err := e.pool.Exec(e.ctx,
@@ -489,7 +489,7 @@ func TestPG_JobRecoverNotStuck(t *testing.T) {
 
 	// Create and claim a job (heartbeat will be fresh).
 	_, _ = e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 10)
-	_, _ = e.jobs.Claim(e.ctx)
+	_, _ = e.jobs.Claim(e.ctx, "test-worker")
 
 	// Try to recover with 5 minute threshold.
 	count, err := e.jobs.RecoverStuck(e.ctx, 5*time.Minute)
@@ -516,7 +516,7 @@ func TestPG_JobLifecycle(t *testing.T) {
 	}
 
 	// 2. Claim job.
-	claimed, err := e.jobs.Claim(e.ctx)
+	claimed, err := e.jobs.Claim(e.ctx, "test-worker")
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestPG_JobLifecycle(t *testing.T) {
 
 	// 3. Update progress.
 	for progress := 25; progress <= 75; progress += 25 {
-		if err := e.jobs.UpdateProgress(e.ctx, job.ID, progress); err != nil {
+		if err := e.jobs.UpdateProgress(e.ctx, job.ID, "test-worker", progress); err != nil {
 			t.Fatalf("UpdateProgress(%d): %v", progress, err)
 		}
 		got, _ := e.jobs.Get(e.ctx, e.tenantID, job.ID)
@@ -537,7 +537,7 @@ func TestPG_JobLifecycle(t *testing.T) {
 
 	// 4. Complete job.
 	result := []byte(`{"succeeded":95,"failed":5}`)
-	if err := e.jobs.Complete(e.ctx, job.ID, result); err != nil {
+	if _, err := e.jobs.Complete(e.ctx, job.ID, "test-worker", result); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 

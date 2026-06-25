@@ -169,11 +169,11 @@ func (m *mockJobStore) List(ctx context.Context, tenantID string, status *feedba
 	return result, nextCursor, nil
 }
 
-func (m *mockJobStore) Claim(ctx context.Context) (*feedbackjob.Job, error) {
+func (m *mockJobStore) Claim(ctx context.Context, owner string) (*feedbackjob.Job, error) {
 	return nil, nil
 }
 
-func (m *mockJobStore) UpdateProgress(ctx context.Context, jobID string, progress int) error {
+func (m *mockJobStore) UpdateProgress(ctx context.Context, jobID, owner string, progress int) error {
 	job, ok := m.jobs[jobID]
 	if !ok {
 		return feedbackjob.ErrNotFound
@@ -182,24 +182,24 @@ func (m *mockJobStore) UpdateProgress(ctx context.Context, jobID string, progres
 	return nil
 }
 
-func (m *mockJobStore) Complete(ctx context.Context, jobID string, result []byte) error {
+func (m *mockJobStore) Complete(ctx context.Context, jobID, owner string, result []byte) (int64, error) {
 	job, ok := m.jobs[jobID]
 	if !ok {
-		return feedbackjob.ErrNotFound
+		return 0, feedbackjob.ErrNotFound
 	}
 	job.Status = feedbackjob.StatusCompleted
 	job.Result = result
-	return nil
+	return 1, nil
 }
 
-func (m *mockJobStore) Fail(ctx context.Context, jobID string, errMsg string) error {
+func (m *mockJobStore) Fail(ctx context.Context, jobID, owner string, errMsg string) (int64, error) {
 	job, ok := m.jobs[jobID]
 	if !ok {
-		return feedbackjob.ErrNotFound
+		return 0, feedbackjob.ErrNotFound
 	}
 	job.Status = feedbackjob.StatusFailed
 	job.Error = errMsg
-	return nil
+	return 1, nil
 }
 
 func (m *mockJobStore) Cancel(ctx context.Context, tenantID, jobID string) error {
@@ -217,8 +217,8 @@ func (m *mockJobStore) Cancel(ctx context.Context, tenantID, jobID string) error
 	return nil
 }
 
-func (m *mockJobStore) Heartbeat(ctx context.Context, jobID string) error {
-	return nil
+func (m *mockJobStore) Heartbeat(ctx context.Context, jobID, owner string) (int64, error) {
+	return 1, nil
 }
 
 func (m *mockJobStore) RecoverStuck(ctx context.Context, staleThreshold time.Duration) (int64, error) {

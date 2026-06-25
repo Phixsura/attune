@@ -9,6 +9,193 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **HA worker leases and queue-drain safety (#155).** Standardizes background
+  worker safety for multi-replica deploys:
+  - `claimed_by` column across all worker task tables (reply_draft_task,
+    embedding_task, digest_runs, batch_jobs, notify_outbox, gdpr_export_jobs,
+    gdpr_requests) so heartbeat refresh only touches rows this worker instance
+    holds — prevents stale replica A from extending a row that replica B
+    legitimately re-claimed
+  - `enrichment_claimed_by` column on user_feedback for enricher fencing
+  - Fencing tokens on all MarkDone/MarkFailed/MarkDelivered/MarkDead/Complete/Fail
+    methods — `WHERE claimed_by = $owner` prevents re-claimed tasks from being
+    clobbered by slow original worker completing after lease expired
+  - BatchJobWorker now uses full fencing: Claim/Heartbeat/UpdateProgress/Complete/
+    Fail all check claimed_by
+  - GDPR Worker now uses full fencing: ClaimNextExportJobWithOwner, HeartbeatExport
+    JobWithOwner, CompleteExportJobWithOwner, FailExportJobWithOwner all check
+    claimed_by; added drain support and lease lost early exit
+  - Heartbeat goroutine in DraftWorker, EmbeddingWorker, DigestWorker, BatchJob
+    Worker, GDPRWorker (90s/30s interval); uses `context.Background()` to avoid
+    racing with parent context cancellation
+  - **Lease lost early exit (Temporal pattern):** when heartbeat detects another
+    worker re-claimed the task, it cancels the processing context immediately —
+    aborts in-flight LLM/API calls rather than wasting tokens on work that will
+    be discarded. New `lease_lost` metric label tracks these aborts.
+  - Graceful shutdown drain with 30s timeout in all workers — SIGTERM waits for
+    in-flight work before returning, so rolling deploys don't leave tasks
+    half-processed
+  - BatchJobWorker Stop() now has 30s timeout to prevent indefinite blocking
+  - Unified `workerdrain` package eliminates ~100 lines of duplicate drain code
+    across workers
+  - Advisory locks for singleton pruners (audit, idempotency-key, MCP) so only
+    one replica runs each pruner during overlapping replicas; uses dedicated
+    connection to hold session-level lock correctly in connection pool
+  - New metrics: `attune_worker_drain_total`, `attune_worker_in_flight`,
+    `attune_worker_stale_claims_recovered_total`, `attune_worker_heartbeat_total`,
+    `attune_advisory_lock_total`
+  - Worker startup logs now include `owner` identifier for multi-replica tracing
+  - New Prometheus alerts: `AttuneWorkerHeartbeatLost`, `AttuneWorkerDrainTimeout`,
+    `AttuneWorkerStaleClaimsHigh` with corresponding runbook entries
+  - Worker configuration now configurable via `workers.*` YAML block:
+    `heartbeat_interval`, `stale_duration`, `drain_timeout`, `poll_interval`,
+    `max_attempts`
+  - HA integration tests for concurrent claiming, fencing, heartbeat, and stale
+    claim recovery
+  - Circuit breaker for LLM clients: fast-fails when upstream providers are
+    unhealthy, preventing cascading failures and wasted tokens. Configurable
+    failure threshold, success threshold, open duration, and half-open
+    concurrency. New metrics: `attune_circuit_breaker_results_total`,
+    `attune_circuit_breaker_rejected_total`, `attune_circuit_breaker_transitions_total`
+  - `/startupz` endpoint for Kubernetes startup probes (30s timeout vs /readyz 2s)
+  - gzip compression middleware for HTTP responses
+  - Token bucket limiter cleanup goroutine to prevent unbounded memory growth
+  - LLM response body size limits (10 MiB for chat, 50 MiB for embeddings)
+  - Benchmark tests for rate limiters
+  - New Prometheus alerts: `AttuneEnrichmentLatencyHigh`, `AttuneSearchLatencyHigh`,
+    `AttuneCircuitBreakerOpen`, `AttuneEmbeddingQueueDepthHigh`
+  - `safegoroutine` package for panic-safe goroutine launching with automatic
+    recovery and metrics
+  - Worker config validation ensuring heartbeat_interval < stale_duration
+  - Dependency health check metrics: `attune_dependency_health_check_total`,
+    `attune_dependency_health_check_duration_seconds`
+  - Fuzz tests for rate limiters
+  - `errwrap` package for consistent error wrapping
+  - Refactored `parseDerivedFields` into focused helper functions (reduced CCN)
+  - Typed OIDC configuration errors for better error handling
+  - Rate limiting on `/auth/verify` endpoint to prevent brute-force
+  - Database migrations:
+    - `079_fix_foreign_key_cascades.sql`: adds ON DELETE to orphan-prone FKs
+    - `080_add_unique_constraints.sql`: unique indexes for slug/name columns
+    - `081_add_missing_indexes.sql`: FK indexes for query performance
+  - Service layer tests for apikey and guardpolicy packages
+
+- **Security headers and code quality improvements (#155).**
+  - Security headers middleware (`internal/handlers/security/headers.go`):
+    - X-Frame-Options: DENY
+    - X-Content-Type-Options: nosniff
+    - X-XSS-Protection: 1; mode=block
+    - Referrer-Policy: strict-origin-when-cross-origin
+    - Permissions-Policy: geolocation=(), microphone=(), camera=()
+    - Content-Security-Policy for Console SPA
+  - Safe query parameter parsing (`internal/handlers/queryparams/params.go`):
+    - Type-safe Bool, Int, Int64, String, Enum, Duration, Time parsers
+    - Built-in bounds checking and default values
+  - Log sanitization utilities (`internal/pkg/logsanitize/sanitize.go`):
+    - Prevents log injection via newlines/control characters
+    - Safe truncation with length limits
+  - Error wrapping utilities (`internal/pkg/errwrap/wrap.go`):
+    - Nil-safe Wrap/Wrapf helpers
+    - Shorthand Is/As/Join/New/Newf functions
+  - Generic slice utilities (`internal/pkg/sliceutil/sliceutil.go`):
+    - Map, Filter, Contains, Unique, Chunk, First, Last
+  - Generic map utilities (`internal/pkg/maputil/maputil.go`):
+    - Keys, Values, Merge, FilterKeys, FilterValues, GetOr
+  - String utilities (`internal/pkg/stringutil/stringutil.go`):
+    - Truncate, TruncateWords, IsBlank, FirstNonEmpty
+    - ToSnakeCase, ToCamelCase, RemovePrefix, RemoveSuffix
+  - Time utilities (`internal/pkg/timeutil/timeutil.go`):
+    - Now, Unix, ParseRFC3339, FormatRFC3339 with explicit UTC
+    - StartOfDay, EndOfDay, DaysAgo, DaysFromNow
+  - HTTP utilities (`internal/pkg/httputil/httputil.go`):
+    - WriteJSON, WriteError, WriteNoContent helpers
+    - IsSuccess, IsClientError, IsServerError, IsRetryable predicates
+  - Database table name constants (`internal/repo/tables.go`)
+  - Digest worker test coverage
+  - Default configuration constants (`internal/pkg/defaults/defaults.go`):
+    - HTTP, Worker, Database, LLM, OIDC, Retry, Cache, RateLimit timeouts
+    - Batch sizes and string limits
+  - Error code constants (`internal/pkg/errorcode/codes.go`):
+    - Standardized client/server error codes
+    - ErrorResponse type for API responses
+  - LRU cache with TTL (`internal/pkg/cache/lru.go`):
+    - Thread-safe generic LRU cache
+    - Automatic TTL expiration and cleanup
+  - HTTP retry utility (`internal/pkg/httpretry/retry.go`):
+    - Configurable retry with exponential backoff
+    - Retryable status code detection
+  - pgx rows utility (`internal/pkg/pgxutil/rows.go`):
+    - CollectRows, CollectOne, ForEachRow helpers
+    - Automatic rows.Close() handling
+  - Database pool health check (`internal/infra/database/pool.go`):
+    - CheckPoolHealth returns connection stats
+    - Ping verifies database connectivity
+  - Service package doc.go files for 10 packages
+  - Benchmark tests for sliceutil
+  - Fuzz tests for stringutil
+  - CORS middleware (`internal/handlers/cors/cors.go`):
+    - Configurable allowed origins, methods, headers
+    - Preflight handling with caching
+    - Credentials support
+  - Rate limit headers (`internal/handlers/ratelimitheaders/headers.go`):
+    - X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
+    - RateLimit-* headers (IETF draft standard)
+    - Retry-After header support
+  - Cursor pagination (`internal/pkg/pagination/cursor.go`):
+    - Base64-encoded cursor with ID/timestamp
+    - Generic Page[T] type
+    - SQL condition generation
+  - Feature flags (`internal/pkg/featureflag/flags.go`):
+    - Thread-safe flag store
+    - Context propagation
+    - Global store singleton
+  - Config reload (`internal/pkg/configreload/reload.go`):
+    - SIGHUP signal watching
+    - Debounced reload callbacks
+    - Atomic Value[T] wrapper
+  - RFC 7807 Problem Details (`internal/pkg/problemdetails/problem.go`):
+    - Standardized error responses
+    - Extension fields support
+    - Common problem constructors
+  - ETag support (`internal/handlers/etag/etag.go`):
+    - Strong/weak ETag generation
+    - If-None-Match / If-Match handling
+    - 304 Not Modified responses
+  - Request timeout middleware (`internal/handlers/timeout/timeout.go`):
+    - Context-based timeout enforcement
+    - Optional 503 response on timeout
+  - Request validation middleware (`internal/handlers/requestvalidation/`):
+    - Content-Type / Accept validation
+    - Content-Length limits
+    - Required header checks
+    - HTTP method restrictions
+
+- **Beyond-industry capabilities (#155).**
+  - Adaptive rate limiting (`internal/infra/ratelimit/adaptive.go`):
+    - AIMD (Additive Increase Multiplicative Decrease) algorithm
+    - CPU/latency/success-rate aware throttling
+    - Load shedding with automatic adjustment
+  - Chaos engineering framework (`internal/pkg/chaos/chaos.go`):
+    - Fault injection: latency, errors, panics, timeouts, partitions
+    - Probability-based fault triggering
+    - HTTP middleware for chaos testing
+    - Experiment runner for controlled chaos
+  - Canary release controller (`internal/pkg/canary/canary.go`):
+    - Traffic percentage routing with auto-progression
+    - Metrics-based auto-rollback (error rate, latency)
+    - A/B testing with statistical comparison
+    - Release state management
+  - SLO automation (`internal/pkg/slo/slo.go`):
+    - Service Level Objective tracking
+    - Error budget calculation and monitoring
+    - Window-based SLI measurement
+    - Policy-driven alerting and degradation
+  - Zero-trust authorization (`internal/pkg/zerotrust/zerotrust.go`):
+    - Principal-based access control
+    - Policy evaluation with conditions (MFA, device trust)
+    - Resource/action matching with glob patterns
+    - HTTP middleware for request authorization
+
 - **MCP governance controls and admin surface (#153).** Expands the MCP server
   from scope-only access into a governed access plane. Includes:
   - Centralized MCP tool metadata catalog with runtime risk/data classification
@@ -2238,3 +2425,4 @@ authored — wire-stable, never auto-renamed.
 [Unreleased]: https://github.com/Phixsura/attune/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/Phixsura/attune/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Phixsura/attune/releases/tag/v0.1.0
+

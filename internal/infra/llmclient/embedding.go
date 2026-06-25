@@ -15,6 +15,10 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
+// maxEmbeddingResponseBody limits embedding API response size to prevent DoS.
+// Embedding responses can be large (many vectors), but 50MB is generous.
+const maxEmbeddingResponseBody = 50 << 20 // 50 MiB
+
 // EmbeddingClient is the single abstraction for embedding generation.
 // Embedding is structurally different from chat completions: batch texts
 // in, batch vectors out, with dimension control.
@@ -132,7 +136,7 @@ func (c *OpenAIEmbeddingClient) Embed(
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxEmbeddingResponseBody))
 	if err != nil {
 		return EmbeddingResponse{}, fmt.Errorf("read response: %w", err)
 	}

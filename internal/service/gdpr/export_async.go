@@ -9,9 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/pkg/subjectkey"
+	"github.com/Phixsura/attune/internal/pkg/workerdrain"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	gdprrepo "github.com/Phixsura/attune/internal/repo/gdpr"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
@@ -30,9 +33,13 @@ type exportJobStore interface {
 	GetExportJob(ctx context.Context, tenantID, jobID string) (*gdprrepo.ExportJob, error)
 	RevokeExportJob(ctx context.Context, tenantID, jobID string) (*gdprrepo.ExportJob, error)
 	ClaimNextExportJob(ctx context.Context) (*gdprrepo.ExportJob, error)
+	ClaimNextExportJobWithOwner(ctx context.Context, owner string) (*gdprrepo.ExportJob, error)
 	HeartbeatExportJob(ctx context.Context, jobID string) error
+	HeartbeatExportJobWithOwner(ctx context.Context, jobID, owner string) (int64, error)
 	CompleteExportJob(ctx context.Context, jobID, subjectDisplay, archiveFilename string, archive []byte, counts gdprrepo.Counts, expiresAt time.Time) error
+	CompleteExportJobWithOwner(ctx context.Context, jobID, owner, subjectDisplay, archiveFilename string, archive []byte, counts gdprrepo.Counts, expiresAt time.Time) (int64, error)
 	FailExportJob(ctx context.Context, jobID, errMsg string) error
+	FailExportJobWithOwner(ctx context.Context, jobID, owner, errMsg string) (int64, error)
 	ExpireReadyExportJobs(ctx context.Context, now time.Time) (int64, error)
 	MarkExportJobDownloaded(ctx context.Context, tenantID, jobID string) (*gdprrepo.ExportJob, error)
 }
@@ -158,6 +165,12 @@ type Worker struct {
 	deleteExecutor deleteExecutor
 	audit          auditRecorder
 	exportTTL      time.Duration
+
+	// owner uniquely identifies this worker instance for fencing.
+	owner string
+
+	// drain tracks in-flight work for graceful shutdown.
+	drain *workerdrain.Drainer
 }
 
 type WorkerOption func(*Worker)
@@ -173,6 +186,8 @@ func WithWorkerExportTTL(ttl time.Duration) WorkerOption {
 func NewWorker(repo repo, jobStore exportJobStore, audit auditRecorder, opts ...WorkerOption) *Worker {
 	deleteStore, _ := jobStore.(deleteRequestStore)
 	deleteExecutor, _ := repo.(deleteExecutor)
+	d := workerdrain.New("gdpr")
+	d.SetTimeout(30 * time.Second)
 	worker := ptrext.Of(Worker{
 		repo:           repo,
 		jobStore:       jobStore,
@@ -180,6 +195,8 @@ func NewWorker(repo repo, jobStore exportJobStore, audit auditRecorder, opts ...
 		deleteExecutor: deleteExecutor,
 		audit:          audit,
 		exportTTL:      DefaultExportTTL,
+		owner:          "gdpr-" + uuid.NewString(),
+		drain:          d,
 	})
 	for _, opt := range opts {
 		opt(worker)
@@ -189,7 +206,7 @@ func NewWorker(repo repo, jobStore exportJobStore, audit auditRecorder, opts ...
 
 func (w *Worker) Run(ctx context.Context) {
 	const where = "service.gdpr.Worker.Run"
-	logext.Infof(ctx, "[%s] started,poll_interval:%s", where, DefaultExportPollLoop)
+	logext.Infof(ctx, "[%s] started,owner:%s,poll_interval:%s", where, w.owner, DefaultExportPollLoop)
 	poll := time.NewTicker(DefaultExportPollLoop)
 	expiry := time.NewTicker(DefaultExportExpiryPoll)
 	defer poll.Stop()
@@ -198,7 +215,8 @@ func (w *Worker) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			logext.Infof(ctx, "[%s] stopping", where)
+			logext.Infof(ctx, "[%s] stopping,waiting for in-flight work", where)
+			w.drain.Drain(ctx)
 			return
 		case <-poll.C:
 			if err := w.processNextExport(ctx); err != nil {
@@ -216,28 +234,39 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) processNextExport(ctx context.Context) error {
-	job, err := w.jobStore.ClaimNextExportJob(ctx)
+	job, err := w.jobStore.ClaimNextExportJobWithOwner(ctx, w.owner)
 	if err != nil || job == nil {
 		return err
 	}
 
-	heartbeatCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go w.heartbeat(heartbeatCtx, job.ID)
+	// Track in-flight work for graceful shutdown drain.
+	w.drain.Enter()
+	defer w.drain.Leave()
 
-	data, err := w.repo.Export(ctx, job.TenantID, job.SubjectKey)
+	// Create cancellable context for lease lost early exit.
+	jobCtx, cancelJob := context.WithCancel(ctx)
+	defer cancelJob()
+
+	go w.heartbeat(ctx, job.ID, cancelJob)
+
+	data, err := w.repo.Export(jobCtx, job.TenantID, job.SubjectKey)
 	if err != nil {
-		_ = w.jobStore.FailExportJob(ctx, job.ID, err.Error())
+		if errors.Is(err, context.Canceled) {
+			logext.Warnf(ctx, "[gdpr.Worker.processNextExport] job aborted (lease lost),job_id:%s", job.ID)
+			return nil
+		}
+		_, _ = w.jobStore.FailExportJobWithOwner(ctx, job.ID, w.owner, err.Error())
 		return err
 	}
 	archive, err := buildZIP(job.TenantID, data)
 	if err != nil {
-		_ = w.jobStore.FailExportJob(ctx, job.ID, err.Error())
+		_, _ = w.jobStore.FailExportJobWithOwner(ctx, job.ID, w.owner, err.Error())
 		return err
 	}
-	if err := w.jobStore.CompleteExportJob(
+	if n, err := w.jobStore.CompleteExportJobWithOwner(
 		ctx,
 		job.ID,
+		w.owner,
 		data.SubjectDisplay,
 		zipFilename(job.SubjectKey, data.GeneratedAt),
 		archive,
@@ -245,6 +274,9 @@ func (w *Worker) processNextExport(ctx context.Context) error {
 		time.Now().UTC().Add(w.exportTTL),
 	); err != nil {
 		return err
+	} else if n == 0 {
+		logext.Warnf(ctx, "[gdpr.Worker.processNextExport] job re-claimed by another worker,job_id:%s", job.ID)
+		return nil
 	}
 	if w.audit != nil {
 		if err := w.audit.Record(ctx, auditlogsvc.Event{
@@ -307,7 +339,8 @@ func (w *Worker) processNextDelete(ctx context.Context) error {
 	return nil
 }
 
-func (w *Worker) heartbeat(ctx context.Context, jobID string) {
+func (w *Worker) heartbeat(ctx context.Context, jobID string, cancelJob context.CancelFunc) {
+	const where = "gdpr.Worker.heartbeat"
 	ticker := time.NewTicker(DefaultExportHeartbeat)
 	defer ticker.Stop()
 	for {
@@ -315,7 +348,15 @@ func (w *Worker) heartbeat(ctx context.Context, jobID string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_ = w.jobStore.HeartbeatExportJob(ctx, jobID)
+			// Use background context to avoid racing with parent cancellation.
+			n, err := w.jobStore.HeartbeatExportJobWithOwner(context.Background(), jobID, w.owner)
+			if err != nil {
+				logext.Warnf(ctx, "[%s] heartbeat failed,job_id:%s,err:%+v", where, jobID, err.Error())
+			} else if n == 0 {
+				logext.Warnf(ctx, "[%s] job re-claimed by another worker,job_id:%s — aborting", where, jobID)
+				cancelJob() // Abort processing early
+				return
+			}
 		}
 	}
 }

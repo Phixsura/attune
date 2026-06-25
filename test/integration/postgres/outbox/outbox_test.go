@@ -278,9 +278,15 @@ func TestRetryOne_WrongTenantAndMissing(t *testing.T) {
 
 func TestMarkFailedAndDead_PersistStructuredReason(t *testing.T) {
 	e := setup(t)
-	id := e.insert(t, e.tenant, seed{status: "pending"})
+	id := e.insert(t, e.tenant, seed{status: "pending", claimed: true})
 
-	if err := e.repo.MarkFailed(e.ctx, id, "timed out", "timeout", 0, 30*time.Second); err != nil {
+	// Set claimed_by so MarkFailed can match it
+	_, err := e.pool.Exec(e.ctx, `UPDATE notify_outbox SET claimed_by = 'test-worker' WHERE id = $1`, id)
+	if err != nil {
+		t.Fatalf("set claimed_by: %v", err)
+	}
+
+	if _, err := e.repo.MarkFailed(e.ctx, id, "test-worker", "timed out", "timeout", 0, 30*time.Second); err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}
 	row, _ := e.repo.GetByID(e.ctx, e.tenant, id)
@@ -288,7 +294,13 @@ func TestMarkFailedAndDead_PersistStructuredReason(t *testing.T) {
 		t.Fatalf("mark failed persistence wrong: %+v", row)
 	}
 
-	if err := e.repo.MarkDead(e.ctx, id, "client rejected", "http_4xx", 404); err != nil {
+	// For MarkDead, need to re-claim the row first (status stays 'failed', just set claimed_by)
+	_, err = e.pool.Exec(e.ctx, `UPDATE notify_outbox SET claimed_by = 'test-worker' WHERE id = $1`, id)
+	if err != nil {
+		t.Fatalf("reclaim for dead: %v", err)
+	}
+
+	if _, err := e.repo.MarkDead(e.ctx, id, "test-worker", "client rejected", "http_4xx", 404); err != nil {
 		t.Fatalf("mark dead: %v", err)
 	}
 	row, _ = e.repo.GetByID(e.ctx, e.tenant, id)

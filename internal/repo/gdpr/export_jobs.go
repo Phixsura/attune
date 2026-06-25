@@ -129,6 +129,11 @@ func (r *Repo) GetExportJob(ctx context.Context, tenantID, jobID string) (*Expor
 }
 
 func (r *Repo) ClaimNextExportJob(ctx context.Context) (*ExportJob, error) {
+	return r.ClaimNextExportJobWithOwner(ctx, "")
+}
+
+// ClaimNextExportJobWithOwner claims the next queued export job with owner for fencing.
+func (r *Repo) ClaimNextExportJobWithOwner(ctx context.Context, owner string) (*ExportJob, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin export claim tx: %w", err)
@@ -153,9 +158,10 @@ func (r *Repo) ClaimNextExportJob(ctx context.Context) (*ExportJob, error) {
 	_, err = tx.Exec(
 		ctx, `
 		UPDATE gdpr_export_jobs
-		SET status = 'running', started_at = NOW(), claimed_at = NOW(), last_heartbeat = NOW()
+		SET status = 'running', started_at = NOW(), claimed_at = NOW(),
+		    claimed_by = $2, last_heartbeat = NOW()
 		WHERE id = $1`,
-		job.ID,
+		job.ID, owner,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("claim gdpr export job update: %w", err)
@@ -163,9 +169,9 @@ func (r *Repo) ClaimNextExportJob(ctx context.Context) (*ExportJob, error) {
 	if _, err := tx.Exec(
 		ctx, `
 		UPDATE gdpr_requests
-		SET status = 'running', started_at = NOW()
+		SET status = 'running', started_at = NOW(), claimed_at = NOW(), claimed_by = $2
 		WHERE id = $1`,
-		job.ID,
+		job.ID, owner,
 	); err != nil {
 		return nil, fmt.Errorf("claim gdpr request update: %w", err)
 	}
@@ -182,20 +188,29 @@ func (r *Repo) ClaimNextExportJob(ctx context.Context) (*ExportJob, error) {
 }
 
 func (r *Repo) HeartbeatExportJob(ctx context.Context, jobID string) error {
-	tag, err := r.pool.Exec(
-		ctx, `
-		UPDATE gdpr_export_jobs
-		SET last_heartbeat = NOW()
-		WHERE id = $1 AND status = 'running'`,
-		jobID,
-	)
+	_, err := r.HeartbeatExportJobWithOwner(ctx, jobID, "")
+	return err
+}
+
+// HeartbeatExportJobWithOwner refreshes the heartbeat with owner fencing.
+// Returns rows affected (0 if job was re-claimed by another worker).
+func (r *Repo) HeartbeatExportJobWithOwner(ctx context.Context, jobID, owner string) (int64, error) {
+	var sql string
+	var args []any
+	if owner == "" {
+		sql = `UPDATE gdpr_export_jobs SET last_heartbeat = NOW()
+		       WHERE id = $1 AND status = 'running'`
+		args = []any{jobID}
+	} else {
+		sql = `UPDATE gdpr_export_jobs SET last_heartbeat = NOW()
+		       WHERE id = $1 AND status = 'running' AND claimed_by = $2`
+		args = []any{jobID, owner}
+	}
+	tag, err := r.pool.Exec(ctx, sql, args...)
 	if err != nil {
-		return fmt.Errorf("heartbeat gdpr export job: %w", err)
+		return 0, fmt.Errorf("heartbeat gdpr export job: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrExportJobNotFound
-	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 func (r *Repo) CompleteExportJob(
@@ -205,37 +220,57 @@ func (r *Repo) CompleteExportJob(
 	counts Counts,
 	expiresAt time.Time,
 ) error {
+	_, err := r.CompleteExportJobWithOwner(ctx, jobID, "", subjectDisplay, archiveFilename, archive, counts, expiresAt)
+	return err
+}
+
+// CompleteExportJobWithOwner completes with owner fencing. Returns rows affected.
+func (r *Repo) CompleteExportJobWithOwner(
+	ctx context.Context,
+	jobID, owner, subjectDisplay, archiveFilename string,
+	archive []byte,
+	counts Counts,
+	expiresAt time.Time,
+) (int64, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin complete export tx: %w", err)
+		return 0, fmt.Errorf("begin complete export tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	tag, err := tx.Exec(
-		ctx, `
-		UPDATE gdpr_export_jobs
-		SET status = 'completed',
-		    subject_display = $2,
-		    archive = $3,
-		    archive_filename = $4,
-		    feedback_count = $5,
-		    tag_assignment_count = $6,
-		    feedback_audit_count = $7,
-		    llm_audit_count = $8,
-		    completed_at = NOW(),
-		    expires_at = $9,
-		    claimed_at = NULL,
-		    error = ''
-		WHERE id = $1 AND status = 'running'`,
-		jobID, subjectDisplay, archive, archiveFilename,
-		counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
-		expiresAt.UTC(),
-	)
+	var sql string
+	var args []any
+	if owner == "" {
+		sql = `UPDATE gdpr_export_jobs
+		       SET status = 'completed', subject_display = $2, archive = $3, archive_filename = $4,
+		           feedback_count = $5, tag_assignment_count = $6, feedback_audit_count = $7,
+		           llm_audit_count = $8, completed_at = NOW(), expires_at = $9,
+		           claimed_at = NULL, claimed_by = NULL, error = ''
+		       WHERE id = $1 AND status = 'running'`
+		args = []any{
+			jobID, subjectDisplay, archive, archiveFilename,
+			counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
+			expiresAt.UTC(),
+		}
+	} else {
+		sql = `UPDATE gdpr_export_jobs
+		       SET status = 'completed', subject_display = $2, archive = $3, archive_filename = $4,
+		           feedback_count = $5, tag_assignment_count = $6, feedback_audit_count = $7,
+		           llm_audit_count = $8, completed_at = NOW(), expires_at = $9,
+		           claimed_at = NULL, claimed_by = NULL, error = ''
+		       WHERE id = $1 AND status = 'running' AND claimed_by = $10`
+		args = []any{
+			jobID, subjectDisplay, archive, archiveFilename,
+			counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
+			expiresAt.UTC(), owner,
+		}
+	}
+	tag, err := tx.Exec(ctx, sql, args...)
 	if err != nil {
-		return fmt.Errorf("complete gdpr export job: %w", err)
+		return 0, fmt.Errorf("complete gdpr export job: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrExportJobNotFound
+		return 0, nil
 	}
 	if _, err := tx.Exec(
 		ctx, `
@@ -249,53 +284,70 @@ func (r *Repo) CompleteExportJob(
 		    llm_audit_count = $7,
 		    completed_at = NOW(),
 		    expires_at = $8,
+		    claimed_at = NULL, claimed_by = NULL,
 		    error = ''
 		WHERE id = $1`,
 		jobID, subjectDisplay, archiveFilename,
 		counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
 		expiresAt.UTC(),
 	); err != nil {
-		return fmt.Errorf("complete gdpr request: %w", err)
+		return 0, fmt.Errorf("complete gdpr request: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit complete export tx: %w", err)
+		return 0, fmt.Errorf("commit complete export tx: %w", err)
 	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 func (r *Repo) FailExportJob(ctx context.Context, jobID, errMsg string) error {
+	_, err := r.FailExportJobWithOwner(ctx, jobID, "", errMsg)
+	return err
+}
+
+// FailExportJobWithOwner fails with owner fencing. Returns rows affected.
+func (r *Repo) FailExportJobWithOwner(ctx context.Context, jobID, owner, errMsg string) (int64, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin fail export tx: %w", err)
+		return 0, fmt.Errorf("begin fail export tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	tag, err := tx.Exec(
-		ctx, `
-		UPDATE gdpr_export_jobs
-		SET status = 'failed', error = $2, completed_at = NOW(), claimed_at = NULL
-		WHERE id = $1 AND status = 'running'`,
-		jobID, pgxutil.Truncate(errMsg, 1000),
-	)
+	var sql string
+	var args []any
+	if owner == "" {
+		sql = `UPDATE gdpr_export_jobs
+		       SET status = 'failed', error = $2, completed_at = NOW(),
+		           claimed_at = NULL, claimed_by = NULL
+		       WHERE id = $1 AND status = 'running'`
+		args = []any{jobID, pgxutil.Truncate(errMsg, 1000)}
+	} else {
+		sql = `UPDATE gdpr_export_jobs
+		       SET status = 'failed', error = $2, completed_at = NOW(),
+		           claimed_at = NULL, claimed_by = NULL
+		       WHERE id = $1 AND status = 'running' AND claimed_by = $3`
+		args = []any{jobID, pgxutil.Truncate(errMsg, 1000), owner}
+	}
+	tag, err := tx.Exec(ctx, sql, args...)
 	if err != nil {
-		return fmt.Errorf("fail gdpr export job: %w", err)
+		return 0, fmt.Errorf("fail gdpr export job: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrExportJobNotFound
+		return 0, nil
 	}
 	if _, err := tx.Exec(
 		ctx, `
 		UPDATE gdpr_requests
-		SET status = 'failed', error = $2, completed_at = NOW()
+		SET status = 'failed', error = $2, completed_at = NOW(),
+		    claimed_at = NULL, claimed_by = NULL
 		WHERE id = $1`,
 		jobID, pgxutil.Truncate(errMsg, 1000),
 	); err != nil {
-		return fmt.Errorf("fail gdpr request: %w", err)
+		return 0, fmt.Errorf("fail gdpr request: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit fail export tx: %w", err)
+		return 0, fmt.Errorf("commit fail export tx: %w", err)
 	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 func (r *Repo) ExpireReadyExportJobs(ctx context.Context, now time.Time) (int64, error) {

@@ -160,7 +160,7 @@ func doModelRequest(req *http.Request) ([]byte, error) {
 		return nil, safeModelTransportError(err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxLLMResponseBody))
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}

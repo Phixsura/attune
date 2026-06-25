@@ -172,23 +172,26 @@ func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int, owner string) ([]Out
 
 // MarkDelivered flips a row to status='delivered' and stamps
 // delivered_at. Idempotent: a second call on the same id is a no-op.
-func (r *OutboxRepo) MarkDelivered(ctx context.Context, id int64) error {
-	_, err := r.pool.Exec(ctx, `
+// MarkDelivered marks a row as successfully delivered. Returns 0 rows if
+// another worker re-claimed the row (fencing token check via claimed_by).
+func (r *OutboxRepo) MarkDelivered(ctx context.Context, id int64, owner string) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
 		UPDATE notify_outbox
 		 SET status = 'delivered',
 		 delivered_at = NOW(),
 		 claimed_at = NULL,
+		 claimed_by = NULL,
 		 last_error = NULL
-		 WHERE id = $1`, id)
+		 WHERE id = $1 AND claimed_by = $2`, id, owner)
 	if err != nil {
-		return fmt.Errorf("mark delivered %d: %w", id, err)
+		return 0, fmt.Errorf("mark delivered %d: %w", id, err)
 	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 // MarkFailed records a retryable failure: increment attempts, schedule
 // next_retry_at by exponential backoff, clear claimed_at so a worker
-// can pick it up again.
+// can pick it up again. Returns 0 rows if another worker re-claimed the row.
 //
 // Prior version used `($3 || ' seconds')::INTERVAL` for the delay —
 // pgx5 strict-mode rejects binding int into a TEXT parameter
@@ -199,55 +202,60 @@ func (r *OutboxRepo) MarkDelivered(ctx context.Context, id int64) error {
 func (r *OutboxRepo) MarkFailed(
 	ctx context.Context,
 	id int64,
+	owner string,
 	errMsg, failureKind string,
 	httpStatus int,
 	nextDelay time.Duration,
-) error {
+) (int64, error) {
 	const where = "repo.OutboxRepo.MarkFailed"
-	_, err := r.pool.Exec(ctx, `
+	tag, err := r.pool.Exec(ctx, `
 		UPDATE notify_outbox
 		 SET status = 'failed',
 		 attempts = attempts + 1,
 		 last_error = $2,
-		 failure_kind = $4,
-		 http_status = $5,
+		 failure_kind = $5,
+		 http_status = $6,
 		 next_retry_at = NOW() + make_interval(secs => $3),
-		 claimed_at = NULL
-		 WHERE id = $1`,
-		id, pgxutil.Truncate(errMsg, 1000), int(nextDelay.Seconds()),
+		 claimed_at = NULL,
+		 claimed_by = NULL
+		 WHERE id = $1 AND claimed_by = $4`,
+		id, pgxutil.Truncate(errMsg, 1000), int(nextDelay.Seconds()), owner,
 		nullStr(failureKind), nullInt(httpStatus))
 	if err != nil {
 		logext.Errorf(ctx, "[%s] mark failed,id:%d,err:%+v", where, id, err.Error())
-		return fmt.Errorf("mark failed %d: %w", id, err)
+		return 0, fmt.Errorf("mark failed %d: %w", id, err)
 	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 // MarkDead writes a terminal failure: status='dead', stores the reason
 // so the console can review. Caller invokes this on
 // ErrTerminal from the notifier OR when attempts exceeds the max.
+// Returns 0 rows if another worker re-claimed the row.
 func (r *OutboxRepo) MarkDead(
 	ctx context.Context,
 	id int64,
+	owner string,
 	reason, failureKind string,
 	httpStatus int,
-) error {
+) (int64, error) {
 	const where = "repo.OutboxRepo.MarkDead"
-	_, err := r.pool.Exec(ctx, `
+	tag, err := r.pool.Exec(ctx, `
 		UPDATE notify_outbox
 		 SET status = 'dead',
 		 dead_reason = $2,
-		 failure_kind = $3,
-		 http_status = $4,
-		 claimed_at = NULL
-		 WHERE id = $1`, id, pgxutil.Truncate(reason, 1000),
+		 failure_kind = $4,
+		 http_status = $5,
+		 claimed_at = NULL,
+		 claimed_by = NULL
+		 WHERE id = $1 AND claimed_by = $3`, id, pgxutil.Truncate(reason, 1000), owner,
 		nullStr(failureKind), nullInt(httpStatus))
 	if err != nil {
 		logext.Errorf(ctx, "[%s] mark dead failed,id:%d,err:%+v", where, id, err.Error())
-		return fmt.Errorf("mark dead %d: %w", id, err)
+		return 0, fmt.Errorf("mark dead %d: %w", id, err)
 	}
 	logext.Infof(ctx, "[%s] OK,id:%d,reason:%s", where, id, pgxutil.Truncate(reason, 200))
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 // PruneStalePending is a one-shot ops cleanup: mark every pending/failed

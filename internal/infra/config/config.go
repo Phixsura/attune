@@ -45,6 +45,7 @@ type Config struct {
 	Database      DatabaseConfig
 	Migrations    MigrationsConfig
 	Enricher      EnricherConfig
+	Workers       WorkersConfig
 	Audit         AuditConfig
 	GDPR          GDPRConfig
 	Console       ConsoleConfig
@@ -88,6 +89,13 @@ type Config struct {
 	MCPRefreshTokenTTL    time.Duration
 	MCPRateLimitPerMinute int
 	MCPRateLimitBurst     int
+
+	// Worker convenience fields
+	WorkerHeartbeatInterval time.Duration
+	WorkerStaleDuration     time.Duration
+	WorkerDrainTimeout      time.Duration
+	WorkerPollInterval      time.Duration
+	WorkerMaxAttempts       int
 }
 
 type DatabaseConfig struct {
@@ -106,6 +114,15 @@ type EnricherConfig struct {
 	BatchWindow string  `yaml:"batch_window"`
 	LLMMaxQPS   float64 `yaml:"llm_max_qps"`
 	LLMBurst    int     `yaml:"llm_burst"`
+}
+
+// WorkersConfig holds background worker tuning parameters.
+type WorkersConfig struct {
+	HeartbeatInterval string `yaml:"heartbeat_interval"` // e.g. "90s"
+	StaleDuration     string `yaml:"stale_duration"`     // e.g. "5m"
+	DrainTimeout      string `yaml:"drain_timeout"`      // e.g. "30s"
+	PollInterval      string `yaml:"poll_interval"`      // e.g. "5s"
+	MaxAttempts       int    `yaml:"max_attempts"`       // default 5
 }
 
 type AuditConfig struct {
@@ -303,6 +320,29 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 }
 
 func (c *Config) parseDerivedFields() error {
+	if err := c.parseEnricherFields(); err != nil {
+		return err
+	}
+	if err := c.parseAuditFields(); err != nil {
+		return err
+	}
+	if err := c.parseGDPRFields(); err != nil {
+		return err
+	}
+	if err := c.parseShutdownFields(); err != nil {
+		return err
+	}
+	c.parseSimpleFields() // must come before parseMCPFields (uses ConsoleBaseURL)
+	if err := c.parseMCPFields(); err != nil {
+		return err
+	}
+	if err := c.parseWorkerFields(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Config) parseEnricherFields() error {
 	d, err := time.ParseDuration(c.Enricher.Interval)
 	if err != nil {
 		return fmt.Errorf("enricher.interval: %w", err)
@@ -311,10 +351,27 @@ func (c *Config) parseDerivedFields() error {
 	if err != nil {
 		return fmt.Errorf("enricher.batch_window: %w", err)
 	}
+	c.EnricherInterval = d
+	c.EnricherBatch = c.Enricher.Batch
+	c.EnricherQueueLen = c.Enricher.QueueLen
+	c.EnricherWorkers = c.Enricher.Workers
+	c.EnricherBatchWindow = batchWindow
+	c.EnricherLLMMaxQPS = c.Enricher.LLMMaxQPS
+	c.EnricherLLMBurst = c.Enricher.LLMBurst
+	return nil
+}
+
+func (c *Config) parseAuditFields() error {
 	pruneInterval, err := time.ParseDuration(c.Audit.PruneInterval)
 	if err != nil {
 		return fmt.Errorf("audit.prune_interval: %w", err)
 	}
+	c.AuditRetention = time.Duration(c.Audit.RetentionDays) * 24 * time.Hour
+	c.AuditPruneInterval = pruneInterval
+	return nil
+}
+
+func (c *Config) parseGDPRFields() error {
 	gdprExportTTL, err := time.ParseDuration(c.GDPR.ExportTTL)
 	if err != nil {
 		return fmt.Errorf("gdpr.export_ttl: %w", err)
@@ -327,6 +384,13 @@ func (c *Config) parseDerivedFields() error {
 	if err != nil {
 		return fmt.Errorf("gdpr.delete_grace_window: %w", err)
 	}
+	c.GDPRExportTTL = gdprExportTTL
+	c.GDPRStepUpTTL = gdprStepUpTTL
+	c.GDPRDeleteGraceWindow = gdprDeleteGrace
+	return nil
+}
+
+func (c *Config) parseShutdownFields() error {
 	shutdownDrainDelay, err := time.ParseDuration(c.Shutdown.DrainDelay)
 	if err != nil {
 		return fmt.Errorf("shutdown.drain_delay: %w", err)
@@ -335,28 +399,12 @@ func (c *Config) parseDerivedFields() error {
 	if err != nil {
 		return fmt.Errorf("shutdown.timeout: %w", err)
 	}
-	c.DatabaseURL = strings.TrimSpace(c.Database.URL)
-	c.EnricherInterval = d
-	c.EnricherBatch = c.Enricher.Batch
-	c.EnricherQueueLen = c.Enricher.QueueLen
-	c.EnricherWorkers = c.Enricher.Workers
-	c.EnricherBatchWindow = batchWindow
-	c.EnricherLLMMaxQPS = c.Enricher.LLMMaxQPS
-	c.EnricherLLMBurst = c.Enricher.LLMBurst
-	c.ConsoleSessionKey = strings.TrimSpace(c.Console.SessionKey)
-	c.ConsoleBaseURL = strings.TrimSpace(c.Console.BaseURL)
-	c.RateLimitPerMinute = c.RateLimit.PerMinute
-	c.RateLimitBurst = c.RateLimit.Burst
-	c.RateLimitDisabled = c.RateLimit.Disabled
-	c.AuditRetention = time.Duration(c.Audit.RetentionDays) * 24 * time.Hour
-	c.AuditPruneInterval = pruneInterval
-	c.GDPRExportTTL = gdprExportTTL
-	c.GDPRStepUpTTL = gdprStepUpTTL
-	c.GDPRDeleteGraceWindow = gdprDeleteGrace
 	c.ShutdownDrainDelay = shutdownDrainDelay
 	c.ShutdownTimeout = shutdownTimeout
+	return nil
+}
 
-	// MCP fields
+func (c *Config) parseMCPFields() error {
 	c.MCPEnabled = c.MCP.Enabled
 	c.MCPPublicBaseURL = deriveMCPPublicBaseURL(c.MCP.PublicBaseURL, c.MCP.OAuth.Issuer, c.ConsoleBaseURL)
 	mcpAccessTTL, err := time.ParseDuration(c.MCP.OAuth.AccessTokenTTL)
@@ -371,8 +419,41 @@ func (c *Config) parseDerivedFields() error {
 	c.MCPRefreshTokenTTL = mcpRefreshTTL
 	c.MCPRateLimitPerMinute = c.MCP.RateLimit.RequestsPerMinute
 	c.MCPRateLimitBurst = c.MCP.RateLimit.Burst
-
 	return nil
+}
+
+func (c *Config) parseWorkerFields() error {
+	workerHeartbeat, err := time.ParseDuration(c.Workers.HeartbeatInterval)
+	if err != nil {
+		return fmt.Errorf("workers.heartbeat_interval: %w", err)
+	}
+	workerStale, err := time.ParseDuration(c.Workers.StaleDuration)
+	if err != nil {
+		return fmt.Errorf("workers.stale_duration: %w", err)
+	}
+	workerDrain, err := time.ParseDuration(c.Workers.DrainTimeout)
+	if err != nil {
+		return fmt.Errorf("workers.drain_timeout: %w", err)
+	}
+	workerPoll, err := time.ParseDuration(c.Workers.PollInterval)
+	if err != nil {
+		return fmt.Errorf("workers.poll_interval: %w", err)
+	}
+	c.WorkerHeartbeatInterval = workerHeartbeat
+	c.WorkerStaleDuration = workerStale
+	c.WorkerDrainTimeout = workerDrain
+	c.WorkerPollInterval = workerPoll
+	c.WorkerMaxAttempts = c.Workers.MaxAttempts
+	return nil
+}
+
+func (c *Config) parseSimpleFields() {
+	c.DatabaseURL = strings.TrimSpace(c.Database.URL)
+	c.ConsoleSessionKey = strings.TrimSpace(c.Console.SessionKey)
+	c.ConsoleBaseURL = strings.TrimSpace(c.Console.BaseURL)
+	c.RateLimitPerMinute = c.RateLimit.PerMinute
+	c.RateLimitBurst = c.RateLimit.Burst
+	c.RateLimitDisabled = c.RateLimit.Disabled
 }
 
 func (c *Config) applyDefaults() {
@@ -418,7 +499,26 @@ func (c *Config) applyDefaults() {
 	}
 	c.applyObservabilityDefaults()
 	c.OIDC.ApplyDefaults()
+	c.applyWorkerDefaults()
 	c.applyMCPDefaults()
+}
+
+func (c *Config) applyWorkerDefaults() {
+	if c.Workers.HeartbeatInterval == "" {
+		c.Workers.HeartbeatInterval = DefaultWorkerHeartbeatInterval.String()
+	}
+	if c.Workers.StaleDuration == "" {
+		c.Workers.StaleDuration = DefaultWorkerStaleDuration.String()
+	}
+	if c.Workers.DrainTimeout == "" {
+		c.Workers.DrainTimeout = DefaultWorkerDrainTimeout.String()
+	}
+	if c.Workers.PollInterval == "" {
+		c.Workers.PollInterval = DefaultWorkerPollInterval.String()
+	}
+	if c.Workers.MaxAttempts == 0 {
+		c.Workers.MaxAttempts = DefaultWorkerMaxAttempts
+	}
 }
 
 func (c *Config) applyMCPDefaults() {
@@ -499,6 +599,9 @@ func (c *Config) validate() error {
 	if err := c.validateEnricherConfig(); err != nil {
 		return err
 	}
+	if err := c.validateWorkerConfig(); err != nil {
+		return err
+	}
 	if err := c.validateMCPConfig(); err != nil {
 		return err
 	}
@@ -556,6 +659,29 @@ func (c *Config) validateEnricherConfig() error {
 	}
 	if c.EnricherLLMBurst < 0 {
 		return fmt.Errorf("config: enricher.llm_burst must be non-negative")
+	}
+	return nil
+}
+
+func (c *Config) validateWorkerConfig() error {
+	if c.WorkerHeartbeatInterval <= 0 {
+		return fmt.Errorf("config: workers.heartbeat_interval must be positive")
+	}
+	if c.WorkerStaleDuration <= 0 {
+		return fmt.Errorf("config: workers.stale_duration must be positive")
+	}
+	if c.WorkerDrainTimeout <= 0 {
+		return fmt.Errorf("config: workers.drain_timeout must be positive")
+	}
+	if c.WorkerPollInterval <= 0 {
+		return fmt.Errorf("config: workers.poll_interval must be positive")
+	}
+	if c.WorkerMaxAttempts <= 0 {
+		return fmt.Errorf("config: workers.max_attempts must be positive")
+	}
+	if c.WorkerHeartbeatInterval >= c.WorkerStaleDuration {
+		return fmt.Errorf("config: workers.heartbeat_interval (%v) must be less than workers.stale_duration (%v)",
+			c.WorkerHeartbeatInterval, c.WorkerStaleDuration)
 	}
 	return nil
 }
