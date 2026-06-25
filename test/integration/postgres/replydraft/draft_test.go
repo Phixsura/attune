@@ -217,7 +217,8 @@ func TestRetryBackoff_NotReclaimableUntilDue(t *testing.T) {
 	claimed, err := repo.TryClaim(ctx, time.Minute) // attempts -> 1
 	require.NoError(t, err)
 	require.Equal(t, fb, claimed.FeedbackID)
-	require.NoError(t, repo.MarkFailed(ctx, claimed.ID, errors.New("transient"), 5))
+	_, err = repo.MarkFailed(ctx, claimed.ID, "test-worker", errors.New("transient"), 5)
+	require.NoError(t, err)
 
 	// Backoff in effect: not immediately re-claimable.
 	_, err = repo.TryClaim(ctx, time.Minute)
@@ -249,7 +250,8 @@ func TestRetryBackoff_ExhaustedIsTerminal(t *testing.T) {
 	claimed, err := repo.TryClaim(ctx, time.Minute) // attempts -> 1
 	require.NoError(t, err)
 	// maxAttempts=1 → this failure exhausts it.
-	require.NoError(t, repo.MarkFailed(ctx, claimed.ID, errors.New("permanent"), 1))
+	_, err = repo.MarkFailed(ctx, claimed.ID, "test-worker", errors.New("permanent"), 1)
+	require.NoError(t, err)
 
 	var status string
 	var nextRetryAt *time.Time

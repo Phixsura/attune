@@ -280,7 +280,7 @@ func TestMarkFailedAndDead_PersistStructuredReason(t *testing.T) {
 	e := setup(t)
 	id := e.insert(t, e.tenant, seed{status: "pending"})
 
-	if err := e.repo.MarkFailed(e.ctx, id, "timed out", "timeout", 0, 30*time.Second); err != nil {
+	if _, err := e.repo.MarkFailed(e.ctx, id, "test-worker", "timed out", "timeout", 0, 30*time.Second); err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}
 	row, _ := e.repo.GetByID(e.ctx, e.tenant, id)
@@ -288,7 +288,7 @@ func TestMarkFailedAndDead_PersistStructuredReason(t *testing.T) {
 		t.Fatalf("mark failed persistence wrong: %+v", row)
 	}
 
-	if err := e.repo.MarkDead(e.ctx, id, "client rejected", "http_4xx", 404); err != nil {
+	if _, err := e.repo.MarkDead(e.ctx, id, "test-worker", "client rejected", "http_4xx", 404); err != nil {
 		t.Fatalf("mark dead: %v", err)
 	}
 	row, _ = e.repo.GetByID(e.ctx, e.tenant, id)
