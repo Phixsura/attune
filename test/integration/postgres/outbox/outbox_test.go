@@ -278,7 +278,7 @@ func TestRetryOne_WrongTenantAndMissing(t *testing.T) {
 
 func TestMarkFailedAndDead_PersistStructuredReason(t *testing.T) {
 	e := setup(t)
-	id := e.insert(t, e.tenant, seed{status: "processing", claimed: true})
+	id := e.insert(t, e.tenant, seed{status: "pending", claimed: true})
 
 	// Set claimed_by so MarkFailed can match it
 	_, err := e.pool.Exec(e.ctx, `UPDATE notify_outbox SET claimed_by = 'test-worker' WHERE id = $1`, id)
@@ -294,8 +294,8 @@ func TestMarkFailedAndDead_PersistStructuredReason(t *testing.T) {
 		t.Fatalf("mark failed persistence wrong: %+v", row)
 	}
 
-	// For MarkDead, need to re-claim the row first
-	_, err = e.pool.Exec(e.ctx, `UPDATE notify_outbox SET status = 'processing', claimed_by = 'test-worker' WHERE id = $1`, id)
+	// For MarkDead, need to re-claim the row first (status stays 'failed', just set claimed_by)
+	_, err = e.pool.Exec(e.ctx, `UPDATE notify_outbox SET claimed_by = 'test-worker' WHERE id = $1`, id)
 	if err != nil {
 		t.Fatalf("reclaim for dead: %v", err)
 	}
