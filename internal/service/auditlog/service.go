@@ -180,6 +180,11 @@ func ActorFromRequest(actorType, actorID string, req *http.Request) Actor {
 		Type: strings.TrimSpace(actorType),
 		ID:   strings.TrimSpace(actorID),
 	}
+	if actor.Type == "" && actor.ID != "" {
+		// Legacy admin console sessions intentionally omitted UserType; normalize
+		// them here so admin-side audit rows remain attributable.
+		actor.Type = "admin"
+	}
 	if req == nil {
 		return actor
 	}

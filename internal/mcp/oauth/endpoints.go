@@ -29,6 +29,7 @@ var (
 	ErrInvalidCode         = errors.New("invalid or expired code")
 	ErrInvalidRefreshToken = errors.New("invalid refresh token")
 	ErrInvalidScope        = errors.New("requested scope exceeds client authorization")
+	ErrInvalidTarget       = errors.New("requested resource is not served by this authorization server")
 	ErrPKCERequired        = errors.New("PKCE required")
 	ErrPKCEFailed          = errors.New("PKCE verification failed")
 )
@@ -66,12 +67,15 @@ type SessionStore interface {
 
 // Client represents an OAuth client (public client, no secret - uses PKCE).
 type Client struct {
-	ID           uuid.UUID
-	TenantID     string
-	Name         string
-	RedirectURIs []string
-	Scopes       []string
-	CreatedAt    time.Time
+	ID             uuid.UUID
+	TenantID       string
+	Name           string
+	RedirectURIs   []string
+	Scopes         []string
+	ToolPolicyMode string
+	RateLimitRPM   *int
+	RateLimitBurst *int
+	CreatedAt      time.Time
 }
 
 // AuthCode represents an authorization code.
@@ -168,6 +172,7 @@ type AuthorizeRequest struct {
 	RedirectURI         string
 	ResponseType        string
 	Scope               string
+	Resource            string
 	State               string
 	CodeChallenge       string
 	CodeChallengeMethod string
@@ -176,6 +181,7 @@ type AuthorizeRequest struct {
 // AuthorizeResponse represents an authorization response.
 type AuthorizeResponse struct {
 	Code        string
+	Issuer      string
 	State       string
 	RedirectURI string
 }
@@ -183,7 +189,7 @@ type AuthorizeResponse struct {
 // validateAuthRequest performs input length and format validation.
 func validateAuthRequest(req AuthorizeRequest) error {
 	if len(req.ClientID) > 36 || len(req.RedirectURI) > 2048 ||
-		len(req.Scope) > 1024 || len(req.State) > 256 || len(req.CodeChallenge) > 128 {
+		len(req.Scope) > 1024 || len(req.Resource) > 2048 || len(req.State) > 256 || len(req.CodeChallenge) > 128 {
 		return ErrInvalidRequest
 	}
 	if req.ResponseType != "code" {
@@ -222,6 +228,9 @@ func (s *AuthServer) Authorize(ctx context.Context, req AuthorizeRequest) (*Auth
 	if err := validateAuthRequest(req); err != nil {
 		return nil, err
 	}
+	if err := s.validateResource(req.Resource); err != nil {
+		return nil, err
+	}
 
 	scopes := parseScopes(req.Scope)
 	if len(scopes) == 0 {
@@ -254,6 +263,7 @@ func (s *AuthServer) Authorize(ctx context.Context, req AuthorizeRequest) (*Auth
 
 	return ptrext.Of(AuthorizeResponse{
 		Code:        code,
+		Issuer:      s.signer.Issuer(),
 		State:       req.State,
 		RedirectURI: req.RedirectURI,
 	}), nil
@@ -267,6 +277,7 @@ type TokenRequest struct {
 	ClientID     string
 	CodeVerifier string
 	RefreshToken string
+	Resource     string
 }
 
 // TokenResponse represents a token response.
@@ -317,6 +328,9 @@ func (s *AuthServer) tokenFromCode(ctx context.Context, req TokenRequest) (*Toke
 	if !VerifyCodeChallenge(authCode.CodeChallenge, req.CodeVerifier, authCode.CodeChallengeMethod) {
 		logext.Warnf(ctx, "[%s] PKCE verification failed,client_id:%s", where, authCode.ClientID)
 		return nil, ErrPKCEFailed
+	}
+	if err := s.validateResource(req.Resource); err != nil {
+		return nil, err
 	}
 
 	session := ptrext.Of(Session{
@@ -398,6 +412,9 @@ func (s *AuthServer) tokenFromRefresh(ctx context.Context, req TokenRequest) (*T
 		logext.Warnf(ctx, "[%s] client_id mismatch,req:%s,token:%s", where, req.ClientID, rt.ClientID)
 		return nil, ErrInvalidClient
 	}
+	if err := s.validateResource(req.Resource); err != nil {
+		return nil, err
+	}
 
 	// Verify session is still active before issuing new tokens
 	active, err := s.sessions.IsActive(ctx, rt.SessionID)
@@ -454,6 +471,7 @@ func (s *AuthServer) ServeAuthorize(w http.ResponseWriter, r *http.Request) {
 		RedirectURI:         q.Get("redirect_uri"),
 		ResponseType:        q.Get("response_type"),
 		Scope:               q.Get("scope"),
+		Resource:            q.Get("resource"),
 		State:               q.Get("state"),
 		CodeChallenge:       q.Get("code_challenge"),
 		CodeChallengeMethod: q.Get("code_challenge_method"),
@@ -514,6 +532,7 @@ func (s *AuthServer) ServeToken(w http.ResponseWriter, r *http.Request) {
 		ClientID:     r.FormValue("client_id"),
 		CodeVerifier: r.FormValue("code_verifier"),
 		RefreshToken: r.FormValue("refresh_token"),
+		Resource:     r.FormValue("resource"),
 	}
 
 	resp, err := s.Token(r.Context(), req)
@@ -536,6 +555,9 @@ func (s *AuthServer) ServeToken(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrInvalidScope):
 			code = "invalid_scope"
 			desc = "invalid scope"
+		case errors.Is(err, ErrInvalidTarget):
+			code = "invalid_target"
+			desc = "requested resource is not served by this authorization server"
 		}
 		writeTokenError(w, code, desc)
 		return
@@ -625,6 +647,8 @@ func mapAuthError(err error) (code, description string) {
 		return "invalid_request", "PKCE is required"
 	case errors.Is(err, ErrInvalidScope):
 		return "invalid_scope", "requested scope exceeds authorization"
+	case errors.Is(err, ErrInvalidTarget):
+		return "invalid_target", "requested resource is not served by this authorization server"
 	default:
 		return "access_denied", "authorization denied"
 	}
@@ -639,6 +663,9 @@ func redirectWithCode(w http.ResponseWriter, r *http.Request, resp *AuthorizeRes
 
 	q := u.Query()
 	q.Set("code", resp.Code)
+	if resp.Issuer != "" {
+		q.Set("iss", resp.Issuer)
+	}
 	if resp.State != "" {
 		q.Set("state", resp.State)
 	}
@@ -655,4 +682,16 @@ func writeTokenError(w http.ResponseWriter, code, description string) {
 		"error":             code,
 		"error_description": description,
 	})
+}
+
+func (s *AuthServer) validateResource(resource string) error {
+	resource = strings.TrimSpace(resource)
+	if resource == "" {
+		return nil
+	}
+	expected := strings.TrimRight(strings.TrimSpace(s.baseURL), "/") + "/mcp/v1"
+	if resource != expected {
+		return ErrInvalidTarget
+	}
+	return nil
 }

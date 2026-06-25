@@ -283,7 +283,7 @@ func buildConsoleRouter(
 		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
 	attachOutboxHandler(router, pool, auditLogSvc)
-	attachMCPClientHandler(router, pool, auditLogSvc)
+	attachMCPClientHandler(router, cfg, pool, auditLogSvc)
 	attachPreflightHandler(router, cfg, pool)
 	return router.Mount(), nil
 }
@@ -305,13 +305,15 @@ func attachPreflightHandler(router *console.Router, cfg *config.Config, pool *pg
 }
 
 // attachMCPClientHandler wires the MCP OAuth client console handler (#93).
-func attachMCPClientHandler(router *console.Router, pool *pgxpool.Pool, audit *auditlogsvc.Service) {
+func attachMCPClientHandler(router *console.Router, cfg *config.Config, pool *pgxpool.Pool, audit *auditlogsvc.Service) {
 	h := console.NewMCPClientHandler(
 		mcprepo.NewClients(pool),
 		mcprepo.NewTokens(pool),
 		mcprepo.NewSessions(pool),
+		mcprepo.NewToolPolicies(pool),
 	)
 	h.SetAuditLogger(audit)
+	h.SetConnectionProfile(cfg.MCPPublicBaseURL, cfg.MCP.OAuth.Issuer)
 	router.SetMCPClientHandler(h)
 }
 

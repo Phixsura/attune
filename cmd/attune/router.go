@@ -33,6 +33,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	mcpoauth "github.com/Phixsura/attune/internal/mcp/oauth"
+	"github.com/Phixsura/attune/internal/mcp/policy"
 	"github.com/Phixsura/attune/internal/mcp/tools"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -161,6 +162,9 @@ func buildRouter(
 		if err != nil {
 			return nil, fmt.Errorf("build mcp: %w", err)
 		}
+		if err := mcpHandler.MountWellKnownRoutes(r); err != nil {
+			return nil, fmt.Errorf("mount mcp discovery: %w", err)
+		}
 		r.Mount("/mcp", mcpHandler.Routes())
 		logext.Infof(ctx, "[%s] mcp server enabled", where)
 	} else {
@@ -178,13 +182,14 @@ func buildMCPHandler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool
 		return nil, fmt.Errorf("mcp.oauth.jwt_secret must be at least 32 bytes")
 	}
 
+	publicBaseURL := cfg.MCPPublicBaseURL
 	issuer := cfg.MCP.OAuth.Issuer
 	if issuer == "" {
-		issuer = cfg.ConsoleBaseURL + "/mcp/oauth"
+		issuer = publicBaseURL + "/mcp/oauth"
 	}
 
 	mcpCfg := mcp.Config{
-		BaseURL:            cfg.ConsoleBaseURL,
+		PublicBaseURL:      publicBaseURL,
 		JWTSecret:          []byte(jwtSecret),
 		JWTIssuer:          issuer,
 		RateLimitPerMinute: cfg.MCPRateLimitPerMinute,
@@ -197,14 +202,17 @@ func buildMCPHandler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool
 	codesRepo := mcprepo.NewCodes(pool)
 	tokensRepo := mcprepo.NewTokens(pool)
 	sessionsRepo := mcprepo.NewSessions(pool)
+	toolPoliciesRepo := mcprepo.NewToolPolicies(pool)
 
 	stores := mcp.Stores{
 		Clients:          newMCPClientStore(clientsRepo),
 		Codes:            newMCPCodeStore(codesRepo),
 		Tokens:           newMCPTokenStore(tokensRepo),
 		Sessions:         newMCPSessionStore(sessionsRepo),
+		ToolPolicies:     newMCPToolPolicyStore(toolPoliciesRepo),
 		ClientValidator:  clientsRepo,
 		SessionValidator: sessionsRepo,
+		SessionActivity:  sessionsRepo,
 	}
 
 	feedbackRepo := feedback.NewFeedback(pool)
@@ -244,12 +252,15 @@ func (a *mcpClientStoreAdapter) GetByID(ctx context.Context, id uuid.UUID) (*mcp
 		return nil, mcpoauth.ErrInvalidClient
 	}
 	return ptrext.Of(mcpoauth.Client{
-		ID:           c.ID,
-		TenantID:     c.TenantID,
-		Name:         c.Name,
-		RedirectURIs: c.RedirectURIs,
-		Scopes:       c.Scopes,
-		CreatedAt:    c.CreatedAt,
+		ID:             c.ID,
+		TenantID:       c.TenantID,
+		Name:           c.Name,
+		RedirectURIs:   c.RedirectURIs,
+		Scopes:         c.Scopes,
+		ToolPolicyMode: c.ToolPolicyMode,
+		RateLimitRPM:   c.RateLimitRPM,
+		RateLimitBurst: c.RateLimitBurst,
+		CreatedAt:      c.CreatedAt,
 	}), nil
 }
 
@@ -402,12 +413,18 @@ func newMCPSessionStore(repo *mcprepo.SessionsRepo) *mcpSessionStoreAdapter {
 }
 
 func (a *mcpSessionStoreAdapter) Create(ctx context.Context, session *mcpoauth.Session) error {
-	_, err := a.repo.Create(ctx, mcprepo.CreateSessionParams{
+	created, err := a.repo.Create(ctx, mcprepo.CreateSessionParams{
 		ClientID: session.ClientID,
 		TenantID: session.TenantID,
 		Scopes:   session.Scopes,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	session.ID = created.ID
+	session.CreatedAt = created.CreatedAt
+	session.LastUsed = created.LastActiveAt
+	return nil
 }
 
 func (a *mcpSessionStoreAdapter) Touch(ctx context.Context, id uuid.UUID) error {
@@ -416,6 +433,29 @@ func (a *mcpSessionStoreAdapter) Touch(ctx context.Context, id uuid.UUID) error 
 
 func (a *mcpSessionStoreAdapter) IsActive(ctx context.Context, id uuid.UUID) (bool, error) {
 	return a.repo.IsActive(ctx, id)
+}
+
+type mcpToolPolicyStoreAdapter struct {
+	repo *mcprepo.ToolPoliciesRepo
+}
+
+func newMCPToolPolicyStore(repo *mcprepo.ToolPoliciesRepo) *mcpToolPolicyStoreAdapter {
+	return ptrext.Of(mcpToolPolicyStoreAdapter{repo: repo})
+}
+
+func (a *mcpToolPolicyStoreAdapter) GetByClientAndTool(ctx context.Context, clientID uuid.UUID, toolName string) (*policy.ToolPolicy, error) {
+	p, err := a.repo.GetByClientAndTool(ctx, clientID, toolName)
+	if errors.Is(err, mcprepo.ErrToolPolicyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ptrext.Of(policy.ToolPolicy{
+		Effect:         p.Effect,
+		RateLimitRPM:   p.RateLimitRPM,
+		RateLimitBurst: p.RateLimitBurst,
+	}), nil
 }
 
 type mcpWorkflowAdapter struct {
@@ -455,8 +495,10 @@ func (a *mcpAuditAdapter) Record(ctx context.Context, event tools.AuditEvent) er
 	return a.svc.Record(ctx, auditlogsvc.Event{
 		TenantID: event.TenantID,
 		Actor: auditlogsvc.Actor{
-			Type: "mcp",
-			ID:   event.Actor,
+			Type:      "mcp",
+			ID:        event.Actor,
+			IP:        event.ActorIP,
+			UserAgent: event.UserAgent,
 		},
 		Action:     event.Action,
 		TargetType: event.TargetType,

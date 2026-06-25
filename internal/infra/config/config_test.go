@@ -565,6 +565,9 @@ func TestLoadPathMCPValidConfig(t *testing.T) {
 	if !cfg.MCPEnabled {
 		t.Fatal("MCPEnabled should be true")
 	}
+	if cfg.MCPPublicBaseURL != "https://attune.example.com" {
+		t.Fatalf("MCPPublicBaseURL = %q, want console base URL fallback", cfg.MCPPublicBaseURL)
+	}
 	if cfg.MCPRateLimitPerMinute != 60 {
 		t.Fatalf("MCPRateLimitPerMinute = %d, want 60", cfg.MCPRateLimitPerMinute)
 	}
@@ -576,5 +579,39 @@ func TestLoadPathMCPValidConfig(t *testing.T) {
 	}
 	if cfg.MCPRefreshTokenTTL != 168*time.Hour {
 		t.Fatalf("MCPRefreshTokenTTL = %s, want 168h", cfg.MCPRefreshTokenTTL)
+	}
+}
+
+func TestLoadPathMCPUsesExplicitPublicBaseURL(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nmcp:\n  enabled: true\n  public_base_url: \"https://mcp.attune.example.com\"\n  oauth:\n    jwt_secret: \"01234567890123456789012345678901\"\n"
+	cfg, err := LoadPath(writeConfig(t, raw))
+	if err != nil {
+		t.Fatalf("valid MCP config with explicit public base URL should load: %v", err)
+	}
+	if cfg.MCPPublicBaseURL != "https://mcp.attune.example.com" {
+		t.Fatalf("MCPPublicBaseURL = %q", cfg.MCPPublicBaseURL)
+	}
+}
+
+func TestLoadPathMCPDerivesPublicBaseURLFromIssuer(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nmcp:\n  enabled: true\n  oauth:\n    issuer: \"https://api.attune.example.com\"\n    jwt_secret: \"01234567890123456789012345678901\"\n"
+	cfg, err := LoadPath(writeConfig(t, raw))
+	if err != nil {
+		t.Fatalf("valid MCP config with issuer-derived public base URL should load: %v", err)
+	}
+	if cfg.MCPPublicBaseURL != "https://api.attune.example.com" {
+		t.Fatalf("MCPPublicBaseURL = %q", cfg.MCPPublicBaseURL)
+	}
+}
+
+func TestLoadPathMCPRequiresPublicBaseURLWhenConsoleDisabled(t *testing.T) {
+	raw := strings.Replace(validConfigYAML(t, validTinkKeyset(t)), "console:\n  base_url: \"https://attune.example.com\"\n  session_key: \"01234567890123456789012345678901\"\n  bootstrap_admin:\n    email: \"admin@example.com\"\n    password: \"correct horse battery staple\"\n", "", 1) +
+		"\nmcp:\n  enabled: true\n  oauth:\n    jwt_secret: \"01234567890123456789012345678901\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	if err == nil {
+		t.Fatal("expected mcp.public_base_url validation error")
+	}
+	if !strings.Contains(err.Error(), "mcp.public_base_url or console.base_url is required") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

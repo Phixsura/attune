@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -82,6 +83,7 @@ type Config struct {
 
 	// MCP convenience fields
 	MCPEnabled            bool
+	MCPPublicBaseURL      string
 	MCPAccessTokenTTL     time.Duration
 	MCPRefreshTokenTTL    time.Duration
 	MCPRateLimitPerMinute int
@@ -182,6 +184,7 @@ type RateLimitConfig struct {
 // MCPConfig holds Model Context Protocol server settings.
 type MCPConfig struct {
 	Enabled                 bool               `yaml:"enabled"`
+	PublicBaseURL           string             `yaml:"public_base_url"`
 	OAuth                   MCPOAuthConfig     `yaml:"oauth"`
 	RateLimit               MCPRateLimitConfig `yaml:"rate_limit"`
 	AllowedRedirectPatterns []string           `yaml:"allowed_redirect_patterns"`
@@ -355,6 +358,7 @@ func (c *Config) parseDerivedFields() error {
 
 	// MCP fields
 	c.MCPEnabled = c.MCP.Enabled
+	c.MCPPublicBaseURL = deriveMCPPublicBaseURL(c.MCP.PublicBaseURL, c.MCP.OAuth.Issuer, c.ConsoleBaseURL)
 	mcpAccessTTL, err := time.ParseDuration(c.MCP.OAuth.AccessTokenTTL)
 	if err != nil {
 		return fmt.Errorf("mcp.oauth.access_token_ttl: %w", err)
@@ -582,6 +586,12 @@ func (c *Config) validateMCPConfig() error {
 	if c.MCPRateLimitBurst <= 0 {
 		return fmt.Errorf("config: mcp.rate_limit.burst must be positive")
 	}
+	if c.MCPPublicBaseURL == "" {
+		return fmt.Errorf("config: mcp.public_base_url or console.base_url is required when MCP is enabled")
+	}
+	if _, err := url.ParseRequestURI(c.MCPPublicBaseURL); err != nil {
+		return fmt.Errorf("config: mcp.public_base_url must be a valid URL")
+	}
 	return nil
 }
 
@@ -610,4 +620,23 @@ func (c *Config) validateConsole() error {
 		return fmt.Errorf("config: console.bootstrap_admin.password must be replaced before startup")
 	}
 	return nil
+}
+
+func deriveMCPPublicBaseURL(explicit, issuer, consoleBaseURL string) string {
+	if base := strings.TrimRight(strings.TrimSpace(explicit), "/"); base != "" {
+		return base
+	}
+	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
+	if issuer != "" {
+		if parsed, err := url.ParseRequestURI(issuer); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+			path := strings.TrimSuffix(parsed.Path, "/")
+			switch {
+			case path == "":
+				return parsed.Scheme + "://" + parsed.Host
+			case strings.HasSuffix(path, "/mcp/oauth"):
+				return parsed.Scheme + "://" + parsed.Host + strings.TrimSuffix(path, "/mcp/oauth")
+			}
+		}
+	}
+	return strings.TrimRight(consoleBaseURL, "/")
 }

@@ -109,6 +109,7 @@ security:
 # like Claude to read/write feedback data via OAuth 2.1 + PKCE flow.
 # mcp:
 #   enabled: true
+#   public_base_url: "https://mcp.attune.example.com" # Optional; defaults to console.base_url
 #   oauth:
 #     # At least 32 random characters for JWT signing. Generate with:
 #     #   openssl rand -base64 32

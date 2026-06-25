@@ -18,14 +18,17 @@ var ErrClientNotFound = errors.New("mcp oauth client not found")
 
 // Client represents an MCP OAuth client (registered agent).
 type Client struct {
-	ID           uuid.UUID
-	TenantID     string
-	Name         string
-	RedirectURIs []string
-	Scopes       []string
-	CreatedAt    time.Time
-	CreatedBy    string
-	RevokedAt    *time.Time
+	ID             uuid.UUID
+	TenantID       string
+	Name           string
+	RedirectURIs   []string
+	Scopes         []string
+	ToolPolicyMode string
+	RateLimitRPM   *int
+	RateLimitBurst *int
+	CreatedAt      time.Time
+	CreatedBy      string
+	RevokedAt      *time.Time
 }
 
 // CreateClientParams holds parameters for creating a new OAuth client.
@@ -35,6 +38,14 @@ type CreateClientParams struct {
 	RedirectURIs []string
 	Scopes       []string
 	CreatedBy    string
+}
+
+// UpdateClientGovernanceParams holds mutable governance settings for a client.
+type UpdateClientGovernanceParams struct {
+	ID             uuid.UUID
+	ToolPolicyMode string
+	RateLimitRPM   *int
+	RateLimitBurst *int
 }
 
 // ClientsRepo handles MCP OAuth client persistence.
@@ -52,11 +63,13 @@ func (r *ClientsRepo) Create(ctx context.Context, p CreateClientParams) (*Client
 	const q = `
 		INSERT INTO mcp_oauth_clients (tenant_id, name, redirect_uris, scopes, created_by)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, tenant_id, name, redirect_uris, scopes, created_at, created_by, revoked_at
+		RETURNING id, tenant_id, name, redirect_uris, scopes, tool_policy_mode,
+		          rate_limit_rpm, rate_limit_burst, created_at, created_by, revoked_at
 	`
 	var c Client
 	err := r.pool.QueryRow(ctx, q, p.TenantID, p.Name, p.RedirectURIs, p.Scopes, p.CreatedBy).Scan(
-		&c.ID, &c.TenantID, &c.Name, &c.RedirectURIs, &c.Scopes, &c.CreatedAt, &c.CreatedBy, &c.RevokedAt,
+		&c.ID, &c.TenantID, &c.Name, &c.RedirectURIs, &c.Scopes, &c.ToolPolicyMode,
+		&c.RateLimitRPM, &c.RateLimitBurst, &c.CreatedAt, &c.CreatedBy, &c.RevokedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -67,13 +80,15 @@ func (r *ClientsRepo) Create(ctx context.Context, p CreateClientParams) (*Client
 // GetByID retrieves a client by ID.
 func (r *ClientsRepo) GetByID(ctx context.Context, id uuid.UUID) (*Client, error) {
 	const q = `
-		SELECT id, tenant_id, name, redirect_uris, scopes, created_at, created_by, revoked_at
+		SELECT id, tenant_id, name, redirect_uris, scopes, tool_policy_mode,
+		       rate_limit_rpm, rate_limit_burst, created_at, created_by, revoked_at
 		FROM mcp_oauth_clients
 		WHERE id = $1
 	`
 	var c Client
 	err := r.pool.QueryRow(ctx, q, id).Scan(
-		&c.ID, &c.TenantID, &c.Name, &c.RedirectURIs, &c.Scopes, &c.CreatedAt, &c.CreatedBy, &c.RevokedAt,
+		&c.ID, &c.TenantID, &c.Name, &c.RedirectURIs, &c.Scopes, &c.ToolPolicyMode,
+		&c.RateLimitRPM, &c.RateLimitBurst, &c.CreatedAt, &c.CreatedBy, &c.RevokedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrClientNotFound
@@ -87,13 +102,15 @@ func (r *ClientsRepo) GetByID(ctx context.Context, id uuid.UUID) (*Client, error
 // GetActiveByID retrieves an active (non-revoked) client by ID.
 func (r *ClientsRepo) GetActiveByID(ctx context.Context, id uuid.UUID) (*Client, error) {
 	const q = `
-		SELECT id, tenant_id, name, redirect_uris, scopes, created_at, created_by, revoked_at
+		SELECT id, tenant_id, name, redirect_uris, scopes, tool_policy_mode,
+		       rate_limit_rpm, rate_limit_burst, created_at, created_by, revoked_at
 		FROM mcp_oauth_clients
 		WHERE id = $1 AND revoked_at IS NULL
 	`
 	var c Client
 	err := r.pool.QueryRow(ctx, q, id).Scan(
-		&c.ID, &c.TenantID, &c.Name, &c.RedirectURIs, &c.Scopes, &c.CreatedAt, &c.CreatedBy, &c.RevokedAt,
+		&c.ID, &c.TenantID, &c.Name, &c.RedirectURIs, &c.Scopes, &c.ToolPolicyMode,
+		&c.RateLimitRPM, &c.RateLimitBurst, &c.CreatedAt, &c.CreatedBy, &c.RevokedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrClientNotFound
@@ -107,7 +124,8 @@ func (r *ClientsRepo) GetActiveByID(ctx context.Context, id uuid.UUID) (*Client,
 // ListByTenant returns all clients for a tenant.
 func (r *ClientsRepo) ListByTenant(ctx context.Context, tenantID string) ([]Client, error) {
 	const q = `
-		SELECT id, tenant_id, name, redirect_uris, scopes, created_at, created_by, revoked_at
+		SELECT id, tenant_id, name, redirect_uris, scopes, tool_policy_mode,
+		       rate_limit_rpm, rate_limit_burst, created_at, created_by, revoked_at
 		FROM mcp_oauth_clients
 		WHERE tenant_id = $1
 		ORDER BY created_at DESC
@@ -121,7 +139,10 @@ func (r *ClientsRepo) ListByTenant(ctx context.Context, tenantID string) ([]Clie
 	var clients []Client
 	for rows.Next() {
 		var c Client
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.Name, &c.RedirectURIs, &c.Scopes, &c.CreatedAt, &c.CreatedBy, &c.RevokedAt); err != nil {
+		if err := rows.Scan(
+			&c.ID, &c.TenantID, &c.Name, &c.RedirectURIs, &c.Scopes, &c.ToolPolicyMode,
+			&c.RateLimitRPM, &c.RateLimitBurst, &c.CreatedAt, &c.CreatedBy, &c.RevokedAt,
+		); err != nil {
 			return nil, err
 		}
 		clients = append(clients, c)
@@ -140,6 +161,32 @@ func (r *ClientsRepo) Revoke(ctx context.Context, id uuid.UUID) error {
 		return ErrClientNotFound
 	}
 	return nil
+}
+
+// UpdateGovernance updates mutable governance settings for one client.
+func (r *ClientsRepo) UpdateGovernance(ctx context.Context, p UpdateClientGovernanceParams) (*Client, error) {
+	const q = `
+		UPDATE mcp_oauth_clients
+		SET tool_policy_mode = $2,
+		    rate_limit_rpm = $3,
+		    rate_limit_burst = $4
+		WHERE id = $1
+		  AND revoked_at IS NULL
+		RETURNING id, tenant_id, name, redirect_uris, scopes, tool_policy_mode,
+		          rate_limit_rpm, rate_limit_burst, created_at, created_by, revoked_at
+	`
+	var c Client
+	err := r.pool.QueryRow(ctx, q, p.ID, p.ToolPolicyMode, p.RateLimitRPM, p.RateLimitBurst).Scan(
+		&c.ID, &c.TenantID, &c.Name, &c.RedirectURIs, &c.Scopes, &c.ToolPolicyMode,
+		&c.RateLimitRPM, &c.RateLimitBurst, &c.CreatedAt, &c.CreatedBy, &c.RevokedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrClientNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ptrext.Of(c), nil
 }
 
 // IsRevoked checks if a client has been revoked.

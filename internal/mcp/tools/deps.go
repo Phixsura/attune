@@ -57,6 +57,8 @@ type Ingestor interface {
 type AuditEvent struct {
 	TenantID   string
 	Actor      string
+	ActorIP    string
+	UserAgent  string
 	Action     string
 	TargetType string
 	TargetID   string

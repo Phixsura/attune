@@ -96,8 +96,14 @@ var validActions = map[string]struct{}{
 	"mcp.update_tags":           {},
 
 	// MCP OAuth admin actions
-	"mcp_client.create": {},
-	"mcp_client.revoke": {},
+	"mcp_client.create":             {},
+	"mcp_client.revoke":             {},
+	"mcp_client.update":             {},
+	"mcp_client.tool_policy_update": {},
+	"mcp_refresh_grant.revoke":      {},
+	"mcp_session.revoke":            {},
+	"mcp_tool.authorize_denied":     {},
+	"mcp_tool.rate_limited":         {},
 }
 
 func isKnownAction(action string) bool {

@@ -28,22 +28,61 @@ type auditRecorder interface {
 	Record(ctx context.Context, event auditlogsvc.Event) error
 }
 
+type clientStore interface {
+	ListByTenant(ctx context.Context, tenantID string) ([]mcprepo.Client, error)
+	Create(ctx context.Context, p mcprepo.CreateClientParams) (*mcprepo.Client, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*mcprepo.Client, error)
+	Revoke(ctx context.Context, id uuid.UUID) error
+	UpdateGovernance(ctx context.Context, p mcprepo.UpdateClientGovernanceParams) (*mcprepo.Client, error)
+}
+
+type tokenStore interface {
+	Revoke(ctx context.Context, id uuid.UUID) error
+	RevokeByClient(ctx context.Context, clientID uuid.UUID) (int64, error)
+	RevokeBySession(ctx context.Context, sessionID uuid.UUID) (int64, error)
+	ListByClient(ctx context.Context, clientID uuid.UUID) ([]mcprepo.RefreshToken, error)
+}
+
+type sessionStore interface {
+	CloseByClient(ctx context.Context, clientID uuid.UUID) (int64, error)
+	CloseWithReason(ctx context.Context, id uuid.UUID, reason, closedBy string) error
+	GetByID(ctx context.Context, id uuid.UUID) (*mcprepo.Session, error)
+	ListByClient(ctx context.Context, clientID uuid.UUID) ([]mcprepo.Session, error)
+}
+
+type toolPolicyStore interface {
+	ListByClient(ctx context.Context, clientID uuid.UUID) ([]mcprepo.ToolPolicy, error)
+	ReplaceByClient(ctx context.Context, clientID uuid.UUID, policies []mcprepo.UpsertToolPolicyParams) error
+}
+
 // Handler implements MCP OAuth client management endpoints.
 type Handler struct {
-	clients  *mcprepo.ClientsRepo
-	tokens   *mcprepo.TokensRepo
-	sessions *mcprepo.SessionsRepo
-	audit    auditRecorder
+	clients      clientStore
+	tokens       tokenStore
+	sessions     sessionStore
+	toolPolicies toolPolicyStore
+	audit        auditRecorder
+	connection   *ConnectionProfile
 }
 
 // NewHandler creates a new MCP client handler.
-func NewHandler(clients *mcprepo.ClientsRepo, tokens *mcprepo.TokensRepo, sessions *mcprepo.SessionsRepo) *Handler {
-	return ptrext.Of(Handler{clients: clients, tokens: tokens, sessions: sessions})
+func NewHandler(clients clientStore, tokens tokenStore, sessions sessionStore, toolPolicies toolPolicyStore) *Handler {
+	return ptrext.Of(Handler{
+		clients:      clients,
+		tokens:       tokens,
+		sessions:     sessions,
+		toolPolicies: toolPolicies,
+	})
 }
 
 // SetAuditLogger configures the audit logger for tracking client operations.
 func (h *Handler) SetAuditLogger(audit auditRecorder) {
 	h.audit = audit
+}
+
+// SetConnectionProfile configures the public MCP connection details exposed to Console admins.
+func (h *Handler) SetConnectionProfile(publicBaseURL, issuer string) {
+	h.connection = newConnectionProfile(publicBaseURL, issuer)
 }
 
 // ListRequest is the request shape for listing MCP clients.
@@ -56,13 +95,16 @@ type ListResponse struct {
 
 // ClientDTO is the wire representation of an MCP OAuth client.
 type ClientDTO struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	RedirectURIs []string `json:"redirect_uris"`
-	Scopes       []string `json:"scopes"`
-	CreatedAt    string   `json:"created_at"`
-	CreatedBy    string   `json:"created_by"`
-	RevokedAt    *string  `json:"revoked_at,omitempty"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	RedirectURIs   []string `json:"redirect_uris"`
+	Scopes         []string `json:"scopes"`
+	ToolPolicyMode string   `json:"tool_policy_mode"`
+	RateLimitRPM   *int     `json:"rate_limit_rpm,omitempty"`
+	RateLimitBurst *int     `json:"rate_limit_burst,omitempty"`
+	CreatedAt      string   `json:"created_at"`
+	CreatedBy      string   `json:"created_by"`
+	RevokedAt      *string  `json:"revoked_at,omitempty"`
 }
 
 // List returns all MCP OAuth clients for the tenant.
@@ -143,12 +185,9 @@ func (h *Handler) Revoke(ctx context.Context, auth *session.AuthCtx, req *Revoke
 		return nil, ptrext.Of(ValidationError{Field: "id", Message: "invalid client ID"})
 	}
 
-	client, err := h.clients.GetByID(ctx, id)
+	client, err := h.loadClientForTenant(ctx, auth.TenantID, id)
 	if err != nil {
 		return nil, err
-	}
-	if client.TenantID != auth.TenantID {
-		return nil, mcprepo.ErrClientNotFound
 	}
 
 	if err := h.clients.Revoke(ctx, id); err != nil {
@@ -180,18 +219,39 @@ func (h *Handler) Revoke(ctx context.Context, auth *session.AuthCtx, req *Revoke
 
 func toDTO(c mcprepo.Client) ClientDTO {
 	dto := ClientDTO{
-		ID:           c.ID.String(),
-		Name:         c.Name,
-		RedirectURIs: c.RedirectURIs,
-		Scopes:       c.Scopes,
-		CreatedAt:    c.CreatedAt.UTC().Format(time.RFC3339),
-		CreatedBy:    c.CreatedBy,
+		ID:             c.ID.String(),
+		Name:           c.Name,
+		RedirectURIs:   c.RedirectURIs,
+		Scopes:         c.Scopes,
+		ToolPolicyMode: c.ToolPolicyMode,
+		RateLimitRPM:   c.RateLimitRPM,
+		RateLimitBurst: c.RateLimitBurst,
+		CreatedAt:      c.CreatedAt.UTC().Format(time.RFC3339),
+		CreatedBy:      c.CreatedBy,
 	}
 	if c.RevokedAt != nil {
 		s := c.RevokedAt.UTC().Format(time.RFC3339)
 		dto.RevokedAt = ptrext.Of(s)
 	}
 	return dto
+}
+
+func (h *Handler) loadClientForTenant(ctx context.Context, tenantID string, id uuid.UUID) (*mcprepo.Client, error) {
+	client, err := h.clients.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if client.TenantID != tenantID {
+		return nil, mcprepo.ErrClientNotFound
+	}
+	return client, nil
+}
+
+func ensureClientMutable(client *mcprepo.Client) error {
+	if client != nil && client.RevokedAt != nil {
+		return ptrext.Of(ValidationError{Field: "id", Message: "client is revoked"})
+	}
+	return nil
 }
 
 func validateScopes(scopes []string) error {
@@ -295,24 +355,30 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func writeError(w http.ResponseWriter, err error) {
 	var ve *ValidationError
 	if errors.As(err, &ve) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
-			"error": ve.Error(),
-		})
+		writeErrorJSON(w, http.StatusBadRequest, "validation_error", ve.Error())
 		return
 	}
 	if errors.Is(err, mcprepo.ErrClientNotFound) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
-			"error": "client not found",
-		})
+		writeErrorJSON(w, http.StatusNotFound, "not_found", "client not found")
 		return
 	}
+	if errors.Is(err, mcprepo.ErrSessionNotFound) {
+		writeErrorJSON(w, http.StatusNotFound, "not_found", "session not found")
+		return
+	}
+	if errors.Is(err, mcprepo.ErrRefreshTokenNotFound) {
+		writeErrorJSON(w, http.StatusNotFound, "not_found", "refresh grant not found")
+		return
+	}
+	writeErrorJSON(w, http.StatusInternalServerError, "internal_error", "internal error")
+}
+
+func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusInternalServerError)
+	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
-		"error": "internal error",
+		"code":    code,
+		"message": message,
+		"error":   message,
 	})
 }

@@ -215,7 +215,32 @@ func TestAuthServer_Authorize(t *testing.T) {
 	ts := newTestServer(t, []string{"mcp:read", "mcp:write"})
 	resp := ts.authorize(t, "mcp:read", testCodeVerifier)
 	assert.NotEmpty(t, resp.Code)
+	assert.Equal(t, "test-issuer", resp.Issuer)
 	assert.Equal(t, "https://example.com/callback", resp.RedirectURI)
+}
+
+func TestServeAuthorize_RedirectIncludesIssuer(t *testing.T) {
+	ts := newTestServer(t, []string{"mcp:read"})
+	challenge := oauth.GenerateCodeChallenge(testCodeVerifier)
+	req := httptest.NewRequest(http.MethodGet, "/authorize?"+url.Values{
+		"client_id":             {ts.clientID.String()},
+		"redirect_uri":          {"https://example.com/callback"},
+		"response_type":         {"code"},
+		"scope":                 {"mcp:read"},
+		"state":                 {"test-state"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	rec := httptest.NewRecorder()
+
+	ts.server.ServeAuthorize(rec, req)
+
+	require.Equal(t, http.StatusFound, rec.Code)
+	location, err := rec.Result().Location()
+	require.NoError(t, err)
+	assert.Equal(t, "test-issuer", location.Query().Get("iss"))
+	assert.Equal(t, "test-state", location.Query().Get("state"))
+	assert.NotEmpty(t, location.Query().Get("code"))
 }
 
 func TestAuthServer_Authorize_PKCERequired(t *testing.T) {
@@ -226,6 +251,20 @@ func TestAuthServer_Authorize_PKCERequired(t *testing.T) {
 		ResponseType: "code",
 	})
 	assert.ErrorIs(t, err, oauth.ErrPKCERequired)
+}
+
+func TestAuthServer_Authorize_InvalidTarget(t *testing.T) {
+	ts := newTestServer(t, []string{"mcp:read"})
+	_, err := ts.server.Authorize(context.Background(), oauth.AuthorizeRequest{
+		ClientID:            ts.clientID.String(),
+		RedirectURI:         "https://example.com/callback",
+		ResponseType:        "code",
+		Scope:               "mcp:read",
+		Resource:            "https://evil.example/mcp",
+		CodeChallenge:       oauth.GenerateCodeChallenge(testCodeVerifier),
+		CodeChallengeMethod: "S256",
+	})
+	assert.ErrorIs(t, err, oauth.ErrInvalidTarget)
 }
 
 func TestAuthServer_Token_AuthorizationCode(t *testing.T) {
@@ -254,6 +293,21 @@ func TestAuthServer_Token_RefreshToken(t *testing.T) {
 		GrantType: "refresh_token", RefreshToken: tokenResp.RefreshToken, ClientID: ts.clientID.String(),
 	})
 	assert.ErrorIs(t, err, oauth.ErrInvalidRefreshToken)
+}
+
+func TestAuthServer_Token_InvalidTarget(t *testing.T) {
+	ts := newTestServer(t, []string{"mcp:read"})
+	authResp := ts.authorize(t, "mcp:read", testCodeVerifier)
+
+	_, err := ts.server.Token(context.Background(), oauth.TokenRequest{
+		GrantType:    "authorization_code",
+		Code:         authResp.Code,
+		RedirectURI:  "https://example.com/callback",
+		ClientID:     ts.clientID.String(),
+		CodeVerifier: testCodeVerifier,
+		Resource:     "https://evil.example/mcp",
+	})
+	assert.ErrorIs(t, err, oauth.ErrInvalidTarget)
 }
 
 func TestAuthServer_Token_InvalidGrant(t *testing.T) {

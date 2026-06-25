@@ -135,8 +135,14 @@ func (r *TokensRepo) GetByHash(ctx context.Context, tokenHash string) (*RefreshT
 // Revoke marks a refresh token as revoked.
 func (r *TokensRepo) Revoke(ctx context.Context, id uuid.UUID) error {
 	const q = `UPDATE mcp_oauth_refresh_tokens SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL`
-	_, err := r.pool.Exec(ctx, q, id)
-	return err
+	tag, err := r.pool.Exec(ctx, q, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRefreshTokenNotFound
+	}
+	return nil
 }
 
 // Consume atomically retrieves and revokes a refresh token (for rotation).
@@ -224,6 +230,43 @@ func (r *TokensRepo) RevokeByClient(ctx context.Context, clientID uuid.UUID) (in
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// RevokeBySession revokes all active refresh tokens for one session.
+func (r *TokensRepo) RevokeBySession(ctx context.Context, sessionID uuid.UUID) (int64, error) {
+	const q = `UPDATE mcp_oauth_refresh_tokens SET revoked_at = NOW() WHERE session_id = $1 AND revoked_at IS NULL`
+	tag, err := r.pool.Exec(ctx, q, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// ListByClient returns active refresh grants for one client.
+func (r *TokensRepo) ListByClient(ctx context.Context, clientID uuid.UUID) ([]RefreshToken, error) {
+	const q = `
+		SELECT id, client_id, session_id, token_hash, scopes, user_id, expires_at, created_at, revoked_at
+		FROM mcp_oauth_refresh_tokens
+		WHERE client_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+		ORDER BY expires_at ASC, created_at DESC
+	`
+	rows, err := r.pool.Query(ctx, q, clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RefreshToken
+	for rows.Next() {
+		var t RefreshToken
+		if err := rows.Scan(
+			&t.ID, &t.ClientID, &t.SessionID, &t.TokenHash, &t.Scopes, &t.UserID, &t.ExpiresAt, &t.CreatedAt, &t.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // Cleanup deletes expired refresh tokens.
