@@ -176,12 +176,12 @@ func runServer() error {
 	// on every Prometheus scrape — avoids hammering the DB.
 	safego(ctx, "outbox_lag_refresher", func() { runOutboxLagRefresher(ctx, runtimeDeps.outboxRepo) })
 	safego(ctx, "audit_pruner", func() {
-		runAuditPruner(ctx, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
+		runAuditPruner(ctx, pool, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
 	})
 	// Release stale ingest idempotency keys so the partial unique index stays
 	// bounded to the recent retry window (#37).
 	safego(ctx, "idempotency_key_pruner", func() {
-		runIdempotencyKeyPruner(ctx, runtimeDeps.feedbackRepo, idempotencyKeyRetention, idempotencyKeyPruneInterval)
+		runIdempotencyKeyPruner(ctx, pool, runtimeDeps.feedbackRepo, idempotencyKeyRetention, idempotencyKeyPruneInterval)
 	})
 	// MCP OAuth cleanup: expired codes, revoked tokens, idle sessions (#93).
 	safego(ctx, "mcp_pruner", func() {
@@ -367,10 +367,32 @@ func sleepBeforeShutdown(delay time.Duration) {
 	<-timer.C
 }
 
-func runAuditPruner(ctx context.Context, svc *auditlogsvc.Service, retention, interval time.Duration) {
+func runAuditPruner(ctx context.Context, pool *pgxpool.Pool, svc *auditlogsvc.Service, retention, interval time.Duration) {
+	const where = "main.runAuditPruner"
 	if svc == nil || retention <= 0 || interval <= 0 {
 		return
 	}
+
+	// Acquire advisory lock so only one replica runs the pruner.
+	// The lock is held on a dedicated connection for the pruner's lifetime.
+	lock, acquired, err := database.TryAdvisoryLock(ctx, pool, database.LockAuditPruner)
+	if err != nil {
+		metrics.AdvisoryLockTotal.WithLabelValues("audit_pruner", "error").Inc()
+		logext.Warnf(ctx, "[%s] advisory lock failed,err:%+v", where, err.Error())
+		return
+	}
+	if !acquired {
+		metrics.AdvisoryLockTotal.WithLabelValues("audit_pruner", "busy").Inc()
+		logext.Infof(ctx, "[%s] another replica holds the lock,skipping", where)
+		return
+	}
+	metrics.AdvisoryLockTotal.WithLabelValues("audit_pruner", "acquired").Inc()
+	defer func() {
+		if err := lock.Release(context.Background()); err != nil {
+			logext.Warnf(ctx, "[%s] release lock failed,err:%+v", where, err.Error())
+		}
+	}()
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	pruneAuditOnce(ctx, svc, retention)
@@ -402,10 +424,32 @@ const (
 	idempotencyKeyPruneInterval = 6 * time.Hour
 )
 
-func runIdempotencyKeyPruner(ctx context.Context, repo *feedback.FeedbackRepo, retention, interval time.Duration) {
+func runIdempotencyKeyPruner(ctx context.Context, pool *pgxpool.Pool, repo *feedback.FeedbackRepo, retention, interval time.Duration) {
+	const where = "main.runIdempotencyKeyPruner"
 	if repo == nil || retention <= 0 || interval <= 0 {
 		return
 	}
+
+	// Acquire advisory lock so only one replica runs the pruner.
+	// The lock is held on a dedicated connection for the pruner's lifetime.
+	lock, acquired, err := database.TryAdvisoryLock(ctx, pool, database.LockIdempotencyPruner)
+	if err != nil {
+		metrics.AdvisoryLockTotal.WithLabelValues("idempotency_pruner", "error").Inc()
+		logext.Warnf(ctx, "[%s] advisory lock failed,err:%+v", where, err.Error())
+		return
+	}
+	if !acquired {
+		metrics.AdvisoryLockTotal.WithLabelValues("idempotency_pruner", "busy").Inc()
+		logext.Infof(ctx, "[%s] another replica holds the lock,skipping", where)
+		return
+	}
+	metrics.AdvisoryLockTotal.WithLabelValues("idempotency_pruner", "acquired").Inc()
+	defer func() {
+		if err := lock.Release(context.Background()); err != nil {
+			logext.Warnf(ctx, "[%s] release lock failed,err:%+v", where, err.Error())
+		}
+	}()
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	pruneIdempotencyKeysOnce(ctx, repo, retention)
@@ -435,9 +479,31 @@ const (
 )
 
 func runMCPPruner(ctx context.Context, pool *pgxpool.Pool, interval, sessionIdleLimit time.Duration) {
+	const where = "main.runMCPPruner"
 	if pool == nil || interval <= 0 {
 		return
 	}
+
+	// Acquire advisory lock so only one replica runs the pruner.
+	// The lock is held on a dedicated connection for the pruner's lifetime.
+	lock, acquired, err := database.TryAdvisoryLock(ctx, pool, database.LockMCPPruner)
+	if err != nil {
+		metrics.AdvisoryLockTotal.WithLabelValues("mcp_pruner", "error").Inc()
+		logext.Warnf(ctx, "[%s] advisory lock failed,err:%+v", where, err.Error())
+		return
+	}
+	if !acquired {
+		metrics.AdvisoryLockTotal.WithLabelValues("mcp_pruner", "busy").Inc()
+		logext.Infof(ctx, "[%s] another replica holds the lock,skipping", where)
+		return
+	}
+	metrics.AdvisoryLockTotal.WithLabelValues("mcp_pruner", "acquired").Inc()
+	defer func() {
+		if err := lock.Release(context.Background()); err != nil {
+			logext.Warnf(ctx, "[%s] release lock failed,err:%+v", where, err.Error())
+		}
+	}()
+
 	codes := mcprepo.NewCodes(pool)
 	tokens := mcprepo.NewTokens(pool)
 	sessions := mcprepo.NewSessions(pool)

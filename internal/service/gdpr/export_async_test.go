@@ -94,9 +94,18 @@ func (s *exportJobStoreStub) ClaimNextExportJob(context.Context) (*gdprrepo.Expo
 	return s.claimJob, s.claimErr
 }
 
+func (s *exportJobStoreStub) ClaimNextExportJobWithOwner(context.Context, string) (*gdprrepo.ExportJob, error) {
+	return s.claimJob, s.claimErr
+}
+
 func (s *exportJobStoreStub) HeartbeatExportJob(_ context.Context, jobID string) error {
 	s.heartbeatJobID = jobID
 	return nil
+}
+
+func (s *exportJobStoreStub) HeartbeatExportJobWithOwner(_ context.Context, jobID, _ string) (int64, error) {
+	s.heartbeatJobID = jobID
+	return 1, nil
 }
 
 func (s *exportJobStoreStub) CompleteExportJob(_ context.Context, jobID, _ string, archiveFilename string, archive []byte, counts gdprrepo.Counts, _ time.Time) error {
@@ -107,10 +116,24 @@ func (s *exportJobStoreStub) CompleteExportJob(_ context.Context, jobID, _ strin
 	return nil
 }
 
+func (s *exportJobStoreStub) CompleteExportJobWithOwner(_ context.Context, jobID, _, _ string, archiveFilename string, archive []byte, counts gdprrepo.Counts, _ time.Time) (int64, error) {
+	s.completeJobID = jobID
+	s.completeCounts = counts
+	s.completeFilename = archiveFilename
+	s.completeArchiveLen = len(archive)
+	return 1, nil
+}
+
 func (s *exportJobStoreStub) FailExportJob(_ context.Context, jobID, errMsg string) error {
 	s.failJobID = jobID
 	s.failErrMsg = errMsg
 	return nil
+}
+
+func (s *exportJobStoreStub) FailExportJobWithOwner(_ context.Context, jobID, _, errMsg string) (int64, error) {
+	s.failJobID = jobID
+	s.failErrMsg = errMsg
+	return 1, nil
 }
 
 func (s *exportJobStoreStub) ExpireReadyExportJobs(context.Context, time.Time) (int64, error) {

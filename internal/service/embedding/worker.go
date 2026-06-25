@@ -17,10 +17,18 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/pkg/workerdrain"
 	"github.com/Phixsura/attune/internal/repo/embedding"
 	"github.com/Phixsura/attune/internal/repo/llmaudit"
 	"github.com/Phixsura/attune/internal/service/llmrouter"
 )
+
+// heartbeatInterval is how often we refresh the claim while processing a task.
+// Rule of thumb: staleDuration / 3 to staleDuration / 2.
+const heartbeatInterval = 90 * time.Second
+
+// drainTimeout is how long to wait for in-flight work during graceful shutdown.
+const drainTimeout = 30 * time.Second
 
 // Worker processes embedding tasks from the outbox.
 type Worker struct {
@@ -28,6 +36,13 @@ type Worker struct {
 	router    *llmrouter.Router
 	llmClient llmclient.LLMClient
 	auditRepo *llmaudit.Repo
+
+	// owner uniquely identifies this worker instance so heartbeat refresh
+	// only touches rows this instance still holds.
+	owner string
+
+	// drain tracks in-flight work for graceful shutdown.
+	drain *workerdrain.Drainer
 
 	pollInterval  time.Duration
 	staleDuration time.Duration
@@ -44,11 +59,15 @@ func NewWorker(
 	llmClient llmclient.LLMClient,
 	auditRepo *llmaudit.Repo,
 ) *Worker {
+	d := workerdrain.New("embedding")
+	d.SetTimeout(drainTimeout)
 	return ptrext.Of(Worker{
 		taskRepo:      taskRepo,
 		router:        router,
 		llmClient:     llmClient,
 		auditRepo:     auditRepo,
+		owner:         "embedding-" + uuid.NewString(),
+		drain:         d,
 		pollInterval:  5 * time.Second,
 		staleDuration: 5 * time.Minute,
 		maxAttempts:   5,
@@ -74,23 +93,26 @@ func (w *Worker) Configure(pollInterval time.Duration, dimensions, maxAttempts i
 	}
 }
 
-// Run loops on ctx until cancellation.
+// Run loops on ctx until cancellation. On context cancellation it drains
+// in-flight work before returning.
 func (w *Worker) Run(ctx context.Context) {
 	const where = "embedding.Worker.Run"
 	if reset, err := w.taskRepo.ResetStaleClaims(ctx, w.staleDuration); err != nil {
 		logext.Warnf(ctx, "[%s] reset stale claims failed,err:%+v", where, err.Error())
 	} else if reset > 0 {
 		logext.Infof(ctx, "[%s] reset stale claims,count:%d", where, reset)
+		metrics.WorkerStaleClaimsRecovered.WithLabelValues("embedding").Add(float64(reset))
 	}
-	logext.Infof(ctx, "[%s] embedding worker started,poll_interval:%s,dims:%d,threshold:%.2f",
-		where, w.pollInterval, w.dimensions, w.threshold)
+	logext.Infof(ctx, "[%s] embedding worker started,owner:%s,poll_interval:%s,dims:%d,threshold:%.2f",
+		where, w.owner, w.pollInterval, w.dimensions, w.threshold)
 
 	tick := time.NewTicker(w.pollInterval)
 	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			logext.Infof(ctx, "[%s] embedding worker stopping", where)
+			logext.Infof(ctx, "[%s] embedding worker stopping,waiting for in-flight work", where)
+			w.drain.Drain(ctx)
 			return
 		case <-tick.C:
 			w.ProcessOnce(ctx)
@@ -101,58 +123,99 @@ func (w *Worker) Run(ctx context.Context) {
 // ProcessOnce processes one task. Exposed for testing.
 func (w *Worker) ProcessOnce(ctx context.Context) {
 	const where = "embedding.Worker.ProcessOnce"
-	task, err := w.taskRepo.TryClaim(ctx, w.staleDuration)
+	task, err := w.taskRepo.TryClaimWithOwner(ctx, w.staleDuration, w.owner)
 	if err != nil {
 		if !errors.Is(err, embedding.ErrNoTask) {
 			logext.Errorf(ctx, "[%s] try claim failed,err:%+v", where, err.Error())
 		}
 		return
 	}
+
+	// Track in-flight work for graceful shutdown drain.
+	w.drain.Enter()
+	defer w.drain.Leave()
+
 	w.processTask(ctx, task)
 }
 
 func (w *Worker) processTask(ctx context.Context, task *embedding.Task) {
-	const where = "embedding.Worker.processTask"
 	start := time.Now()
 
-	content, err := w.taskRepo.GetFeedbackContent(ctx, task.FeedbackID)
-	if err != nil {
-		logext.Errorf(ctx, "[%s] get content failed,task_id:%d,err:%+v", where, task.ID, err.Error())
-		_ = w.taskRepo.MarkFailed(ctx, task.ID, err, w.maxAttempts)
+	// Create a cancellable context for the task processing.
+	// If heartbeat detects lease lost, it cancels this context to abort early.
+	taskCtx, cancelTask := context.WithCancel(ctx)
+	defer cancelTask()
+
+	// Start heartbeat goroutine — pass cancelTask so it can abort processing on lease lost.
+	go w.heartbeat(ctx, task.ID, cancelTask)
+
+	emb, model, resp, ok := w.fetchEmbedding(ctx, taskCtx, task)
+	if !ok {
 		return
 	}
 
-	resp, err := w.router.Embed(ctx, llmrouter.EmbeddingRequest{
+	clusterID, isNewCluster, ok := w.assignCluster(ctx, task, emb, model)
+	if !ok {
+		return
+	}
+
+	w.completeTask(ctx, task, resp, clusterID, isNewCluster, start)
+}
+
+func (w *Worker) fetchEmbedding(ctx, taskCtx context.Context, task *embedding.Task) ([]float32, string, llmrouter.EmbeddingResponse, bool) {
+	const where = "embedding.Worker.fetchEmbedding"
+
+	content, err := w.taskRepo.GetFeedbackContent(taskCtx, task.FeedbackID)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			logext.Warnf(ctx, "[%s] task aborted (lease lost),task_id:%d", where, task.ID)
+			metrics.EmbedErrors.WithLabelValues(task.TenantID, "lease_lost").Inc()
+		} else {
+			logext.Errorf(ctx, "[%s] get content failed,task_id:%d,err:%+v", where, task.ID, err.Error())
+			_, _ = w.taskRepo.MarkFailed(ctx, task.ID, w.owner, err, w.maxAttempts)
+		}
+		return nil, "", llmrouter.EmbeddingResponse{}, false
+	}
+
+	resp, err := w.router.Embed(taskCtx, llmrouter.EmbeddingRequest{
 		TenantID:   task.TenantID,
 		Input:      []string{content},
 		Dimensions: w.dimensions,
 		UserID:     fmt.Sprintf("feedback:%d", task.FeedbackID),
 	})
 	if err != nil {
-		logext.Errorf(ctx, "[%s] embed failed,task_id:%d,err:%+v", where, task.ID, err.Error())
-		_ = w.taskRepo.MarkFailed(ctx, task.ID, err, w.maxAttempts)
-		metrics.EmbedErrors.WithLabelValues(task.TenantID, "embed_api").Inc()
-		return
+		if errors.Is(err, context.Canceled) {
+			logext.Warnf(ctx, "[%s] task aborted (lease lost),task_id:%d", where, task.ID)
+			metrics.EmbedErrors.WithLabelValues(task.TenantID, "lease_lost").Inc()
+		} else {
+			logext.Errorf(ctx, "[%s] embed failed,task_id:%d,err:%+v", where, task.ID, err.Error())
+			_, _ = w.taskRepo.MarkFailed(ctx, task.ID, w.owner, err, w.maxAttempts)
+			metrics.EmbedErrors.WithLabelValues(task.TenantID, "embed_api").Inc()
+		}
+		return nil, "", llmrouter.EmbeddingResponse{}, false
 	}
 	if len(resp.Embeddings) == 0 || len(resp.Embeddings[0]) == 0 {
 		err := fmt.Errorf("empty embedding response")
 		logext.Errorf(ctx, "[%s] %s,task_id:%d", where, err.Error(), task.ID)
-		_ = w.taskRepo.MarkFailed(ctx, task.ID, err, w.maxAttempts)
-		return
+		_, _ = w.taskRepo.MarkFailed(ctx, task.ID, w.owner, err, w.maxAttempts)
+		return nil, "", llmrouter.EmbeddingResponse{}, false
 	}
 
-	emb := resp.Embeddings[0]
-	model := resp.Route.ProviderModel
+	return resp.Embeddings[0], resp.Route.ProviderModel, resp, true
+}
+
+func (w *Worker) assignCluster(ctx context.Context, task *embedding.Task, emb []float32, model string) (uuid.UUID, bool, bool) {
+	const where = "embedding.Worker.assignCluster"
 
 	cfg, err := w.taskRepo.GetClusteringConfig(ctx, task.TenantID)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] get clustering config failed,task_id:%d,err:%+v", where, task.ID, err.Error())
-		_ = w.taskRepo.MarkFailed(ctx, task.ID, err, w.maxAttempts)
-		return
+		_, _ = w.taskRepo.MarkFailed(ctx, task.ID, w.owner, err, w.maxAttempts)
+		return uuid.Nil, false, false
 	}
 	threshold := cfg.Threshold
 	if threshold <= 0 {
-		threshold = w.threshold // fallback to worker default
+		threshold = w.threshold
 	}
 
 	similar, err := w.taskRepo.FindSimilar(ctx, embedding.FindSimilarOpts{
@@ -165,8 +228,8 @@ func (w *Worker) processTask(ctx context.Context, task *embedding.Task) {
 	})
 	if err != nil {
 		logext.Errorf(ctx, "[%s] find similar failed,task_id:%d,err:%+v", where, task.ID, err.Error())
-		_ = w.taskRepo.MarkFailed(ctx, task.ID, err, w.maxAttempts)
-		return
+		_, _ = w.taskRepo.MarkFailed(ctx, task.ID, w.owner, err, w.maxAttempts)
+		return uuid.Nil, false, false
 	}
 
 	var clusterID uuid.UUID
@@ -185,16 +248,24 @@ func (w *Worker) processTask(ctx context.Context, task *embedding.Task) {
 		ClusterID:      clusterID,
 	}); err != nil {
 		logext.Errorf(ctx, "[%s] update embedding failed,task_id:%d,err:%+v", where, task.ID, err.Error())
-		_ = w.taskRepo.MarkFailed(ctx, task.ID, err, w.maxAttempts)
-		return
+		_, _ = w.taskRepo.MarkFailed(ctx, task.ID, w.owner, err, w.maxAttempts)
+		return uuid.Nil, false, false
 	}
+
+	return clusterID, isNewCluster, true
+}
+
+func (w *Worker) completeTask(ctx context.Context, task *embedding.Task, resp llmrouter.EmbeddingResponse, clusterID uuid.UUID, isNewCluster bool, start time.Time) {
+	const where = "embedding.Worker.completeTask"
 
 	if !isNewCluster {
 		w.maybeGenerateClusterLabel(ctx, task.TenantID, clusterID)
 	}
 
-	if err := w.taskRepo.MarkDone(ctx, task.ID); err != nil {
+	if n, err := w.taskRepo.MarkDone(ctx, task.ID, w.owner); err != nil {
 		logext.Errorf(ctx, "[%s] mark done failed,task_id:%d,err:%+v", where, task.ID, err.Error())
+	} else if n == 0 {
+		logext.Warnf(ctx, "[%s] task re-claimed by another worker,task_id:%d", where, task.ID)
 	}
 
 	w.writeAudit(ctx, task, resp, start)
@@ -279,4 +350,32 @@ func (w *Worker) writeAudit(ctx context.Context, task *embedding.Task, resp llmr
 		LatencyMS:       int(time.Since(start).Milliseconds()),
 		Status:          "ok",
 	})
+}
+
+// heartbeat periodically refreshes the claim on the task until ctx is cancelled.
+// If lease is lost (another worker re-claimed), it calls cancelTask to abort processing early.
+func (w *Worker) heartbeat(ctx context.Context, taskID int64, cancelTask context.CancelFunc) {
+	const where = "embedding.Worker.heartbeat"
+	tick := time.NewTicker(heartbeatInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			// Use background context to avoid racing with parent cancellation.
+			n, err := w.taskRepo.RefreshClaim(context.Background(), taskID, w.owner)
+			if err != nil {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("embedding", "error").Inc()
+				logext.Warnf(ctx, "[%s] refresh claim failed,task_id:%d,err:%+v", where, taskID, err.Error())
+			} else if n == 0 {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("embedding", "lost").Inc()
+				logext.Warnf(ctx, "[%s] task re-claimed by another worker,task_id:%d — aborting", where, taskID)
+				cancelTask() // Abort processing early to avoid wasting API tokens
+				return
+			} else {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("embedding", "ok").Inc()
+			}
+		}
+	}
 }

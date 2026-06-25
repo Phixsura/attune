@@ -13,9 +13,13 @@ import (
 	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/pkg/workerdrain"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
+
+// drainTimeout is how long to wait for in-flight work during graceful shutdown.
+const drainTimeout = 30 * time.Second
 
 // OutboxWorker drains the notify_outbox queue. Today's scope: only
 // raw-webhook destinations go through outbox (external customers need
@@ -34,6 +38,9 @@ type OutboxWorker struct {
 	// different replica that re-claimed a stale row keeps it.
 	owner string
 
+	// drain tracks in-flight work for graceful shutdown.
+	drain *workerdrain.Drainer
+
 	pollInterval time.Duration
 	batchSize    int
 	maxAttempts  int
@@ -46,11 +53,14 @@ func NewOutboxWorker(
 	targets *notifytarget.NotifyTargetRepo,
 	transport *notify.Transport,
 ) *OutboxWorker {
+	d := workerdrain.New("outbox")
+	d.SetTimeout(drainTimeout)
 	return ptrext.Of(OutboxWorker{
 		outbox:       outbox,
 		targets:      targets,
 		transport:    transport,
 		owner:        "outbox-" + uuid.NewString(),
+		drain:        d,
 		pollInterval: 5 * time.Second,
 		batchSize:    10,
 		maxAttempts:  5,
@@ -73,23 +83,26 @@ func (w *OutboxWorker) Configure(pollInterval time.Duration, batchSize, maxAttem
 
 // Run loops on ctx until cancellation. At startup it clears stale
 // claims (from prior crashes), then ticks every pollInterval to claim
-// + send a batch.
+// + send a batch. On context cancellation it drains in-flight work
+// before returning.
 func (w *OutboxWorker) Run(ctx context.Context) {
 	const where = "service.OutboxWorker.Run"
 	if reset, err := w.outbox.ResetStaleClaims(ctx); err != nil {
 		logext.Warnf(ctx, "[%s] reset stale claims failed,err:%+v", where, err.Error())
 	} else if reset > 0 {
 		logext.Infof(ctx, "[%s] reset stale claims,count:%d", where, reset)
+		metrics.WorkerStaleClaimsRecovered.WithLabelValues("outbox").Add(float64(reset))
 	}
-	logext.Infof(ctx, "[%s] outbox worker started,poll_interval:%s,batch:%d,max_attempts:%d",
-		where, w.pollInterval, w.batchSize, w.maxAttempts)
+	logext.Infof(ctx, "[%s] outbox worker started,owner:%s,poll_interval:%s,batch:%d,max_attempts:%d",
+		where, w.owner, w.pollInterval, w.batchSize, w.maxAttempts)
 
 	tick := time.NewTicker(w.pollInterval)
 	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			logext.Infof(ctx, "[%s] outbox worker stopping", where)
+			logext.Infof(ctx, "[%s] outbox worker stopping,waiting for in-flight work", where)
+			w.drain.Drain(ctx)
 			return
 		case <-tick.C:
 			w.ProcessOnce(ctx)
@@ -123,6 +136,11 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 		return
 	}
 
+	// Track in-flight work for graceful shutdown drain.
+	for range rows {
+		w.drain.Enter()
+	}
+
 	ids := make([]int64, len(rows))
 	for i, row := range rows {
 		ids[i] = row.ID
@@ -133,12 +151,15 @@ func (w *OutboxWorker) processBatch(ctx context.Context) {
 
 	for _, row := range rows {
 		w.processRow(ctx, row)
+		w.drain.Leave()
 	}
 }
 
 // heartbeatClaims periodically renews the claims for the rows still in-flight
 // in the current batch until the batch finishes (ctx cancelled). Already
 // delivered/dead rows are skipped by RefreshClaims's status filter.
+// Note: For batch processing, individual row lease loss is handled at MarkDelivered
+// time via fencing, so we don't cancel the whole batch on partial lease loss.
 func (w *OutboxWorker) heartbeatClaims(ctx context.Context, ids []int64) {
 	const where = "service.OutboxWorker.heartbeatClaims"
 	tick := time.NewTicker(claimHeartbeatInterval)
@@ -148,8 +169,17 @@ func (w *OutboxWorker) heartbeatClaims(ctx context.Context, ids []int64) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			if _, err := w.outbox.RefreshClaims(ctx, ids, w.owner); err != nil {
+			// Use background context to avoid racing with parent cancellation.
+			n, err := w.outbox.RefreshClaims(context.Background(), ids, w.owner)
+			if err != nil {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("outbox", "error").Inc()
 				logext.Warnf(ctx, "[%s] refresh claims failed,err:%+v", where, err.Error())
+			} else if n == 0 && len(ids) > 0 {
+				// All rows in this batch were re-claimed by another worker.
+				metrics.WorkerHeartbeatTotal.WithLabelValues("outbox", "lost").Inc()
+				logext.Warnf(ctx, "[%s] all rows re-claimed by another worker,count:%d", where, len(ids))
+			} else {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("outbox", "ok").Add(float64(n))
 			}
 		}
 	}
@@ -206,9 +236,11 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 	}
 	logext.Infof(ctx, "[%s] OK,id:%d,tenant:%s,dest_type:%s",
 		where, row.ID, row.TenantID, row.DestinationType)
-	if err := w.outbox.MarkDelivered(ctx, row.ID); err != nil {
+	if n, err := w.outbox.MarkDelivered(ctx, row.ID, w.owner); err != nil {
 		logext.Warnf(ctx, "[%s] mark delivered failed,id:%d,inbound_trace_id:%s,err:%+v",
 			where, row.ID, row.TraceID, err.Error())
+	} else if n == 0 {
+		logext.Warnf(ctx, "[%s] row re-claimed by another worker,id:%d", where, row.ID)
 	}
 	// Clear the alert state on first success after a failing streak.
 	// ClearFailure is no-op when last_failure_at IS NULL,
@@ -242,7 +274,7 @@ func (w *OutboxWorker) failOrDead(
 		return
 	}
 	delay := outboxBackoff(next)
-	if err := w.outbox.MarkFailed(ctx, row.ID, msg, string(kind), httpStatus, delay); err != nil {
+	if _, err := w.outbox.MarkFailed(ctx, row.ID, w.owner, msg, string(kind), httpStatus, delay); err != nil {
 		logext.Warnf(ctx, "[%s] mark failed errored,id:%d,inbound_trace_id:%s,err:%+v",
 			where, row.ID, row.TraceID, err.Error())
 	}
@@ -267,9 +299,14 @@ func (w *OutboxWorker) markDead(
 	httpStatus int,
 ) {
 	const where = "service.OutboxWorker.markDead"
-	if err := w.outbox.MarkDead(ctx, row.ID, reason, string(kind), httpStatus); err != nil {
+	n, err := w.outbox.MarkDead(ctx, row.ID, w.owner, reason, string(kind), httpStatus)
+	if err != nil {
 		logext.Warnf(ctx, "[%s] mark dead errored,id:%d,inbound_trace_id:%s,err:%+v",
 			where, row.ID, row.TraceID, err.Error())
+		return
+	}
+	if n == 0 {
+		logext.Warnf(ctx, "[%s] row re-claimed by another worker,id:%d", where, row.ID)
 		return
 	}
 	logext.Warnf(ctx, "[%s] row marked dead,id:%d,tenant:%s,inbound_trace_id:%s,reason:%s",

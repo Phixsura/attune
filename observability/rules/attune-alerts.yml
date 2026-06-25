@@ -146,6 +146,45 @@ groups:
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneworkerpanics"
           action: "Find the panicking worker in logs (grep the worker label for the recovered-panic stack), fix the underlying bug; a tight loop means a poison input or a persistent nil-deref."
 
+      - alert: AttuneWorkerHeartbeatLost
+        expr: sum by (worker) (increase(attune_worker_heartbeat_total{outcome="lost"}[10m])) > 5
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune worker losing task leases"
+          description: "Worker {{ $labels.worker }} lost {{ $value | humanize }} task leases over 10m. This indicates tasks are being re-claimed by other workers before completion."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneworkerheartbeatlost"
+          action: "Check if task processing time exceeds the stale claim threshold (5m). Consider increasing heartbeat frequency or reducing task complexity."
+
+      - alert: AttuneWorkerDrainTimeout
+        expr: sum by (worker) (increase(attune_worker_drain_total{outcome="timeout"}[30m])) > 0
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune worker shutdown drain timeout"
+          description: "Worker {{ $labels.worker }} timed out during graceful shutdown drain. In-flight tasks may have been abandoned mid-processing."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneworkerdraintimeout"
+          action: "Check for stuck tasks in the queue tables. Consider increasing drain timeout or investigating why tasks are taking too long."
+
+      - alert: AttuneWorkerStaleClaimsHigh
+        expr: sum by (worker) (increase(attune_worker_stale_claims_recovered_total[1h])) > 10
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "High stale claim recovery rate"
+          description: "Worker {{ $labels.worker }} recovered {{ $value | humanize }} stale claims in 1h. This indicates workers are crashing or not completing heartbeats."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneworkerstaleclaimshigh"
+          action: "Check worker logs for crashes or OOM kills. Verify heartbeat goroutines are running and database connectivity is stable."
+
   - name: attune.alerts.operations
     rules:
       - alert: AttuneOutboxLagHigh
@@ -269,3 +308,60 @@ groups:
           dashboard_url: "/d/attune-security-compliance/attune-security-compliance"
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneauditrowsmissing"
           action: "Treat as compliance-sensitive: verify audit writer health, database writes, and recent authorization-denial paths before suppressing."
+
+  - name: attune.alerts.performance
+    rules:
+      - alert: AttuneEnrichmentLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(attune_enrich_duration_seconds_bucket[5m]))) > 30
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune enrichment p95 latency exceeds 30s"
+          description: "Enrichment p95 latency is {{ $value | humanizeDuration }}. Check AI pipeline health and LLM provider latency."
+          dashboard: "Attune AI Pipeline"
+          dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneenrichmentlatencyhigh"
+          action: "Split by tenant and model. Check LLM provider status and queue depth. Consider scaling workers if queue is backing up."
+
+      - alert: AttuneSearchLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le, type) (rate(attune_search_query_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Attune search p95 latency exceeds 1s"
+          description: "Search p95 latency for {{ $labels.type }} is {{ $value | humanizeDuration }}. Check database indexes and query plans."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunesearchlatencyhigh"
+          action: "Check pg_stat_statements for slow queries. Verify embedding indexes are current. Consider VACUUM ANALYZE on large tables."
+
+      - alert: AttuneCircuitBreakerOpen
+        expr: sum by (name) (increase(attune_circuit_breaker_transitions_total{to="open"}[10m])) > 0
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Circuit breaker opened for {{ $labels.name }}"
+          description: "The circuit breaker for {{ $labels.name }} opened in the last 10 minutes due to repeated failures."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunecircuitbreakeropen"
+          action: "Check upstream provider health. The circuit will automatically recover after the open duration. If persistent, investigate root cause."
+
+      - alert: AttuneEmbeddingQueueDepthHigh
+        expr: max(attune_embed_queue_depth) > 100
+        for: 10m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Embedding queue depth exceeds 100"
+          description: "Embedding task queue depth is {{ $value }}. Workers may be saturated or failing."
+          dashboard: "Attune AI Pipeline"
+          dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneembeddingqueuedepthhigh"
+          action: "Check embedding worker health and provider latency. Scale workers if queue is growing. Check for poison tasks."

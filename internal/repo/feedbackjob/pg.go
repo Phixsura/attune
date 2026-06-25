@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/pgxutil"
@@ -179,8 +180,9 @@ func (r *Repo) List(ctx context.Context, tenantID string, status *Status, limit 
 
 // Claim attempts to claim the next queued job for processing.
 // Uses SELECT FOR UPDATE SKIP LOCKED to handle concurrent workers.
+// Sets claimed_by to owner for fencing token validation.
 // Returns nil if no jobs available.
-func (r *Repo) Claim(ctx context.Context) (*Job, error) {
+func (r *Repo) Claim(ctx context.Context, owner string) (*Job, error) {
 	const where = "repo.feedbackjob.Claim"
 
 	tx, err := r.pool.Begin(ctx)
@@ -209,13 +211,14 @@ func (r *Repo) Claim(ctx context.Context) (*Job, error) {
 		return nil, fmt.Errorf("claim batch job select: %w", err)
 	}
 
-	// Update to running status
+	// Update to running status with claimed_by for fencing
 	_, err = tx.Exec(
 		ctx, `
 		UPDATE batch_jobs
-		SET status = 'running', started_at = NOW(), claimed_at = NOW(), last_heartbeat = NOW()
+		SET status = 'running', started_at = NOW(), claimed_at = NOW(),
+		    claimed_by = $2, last_heartbeat = NOW()
 		WHERE id = $1`,
-		job.ID,
+		job.ID, owner,
 	)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] update failed,job_id:%s,err:%+v", where, job.ID, err.Error())
@@ -237,14 +240,15 @@ func (r *Repo) Claim(ctx context.Context) (*Job, error) {
 }
 
 // UpdateProgress updates the progress counter and heartbeat.
-func (r *Repo) UpdateProgress(ctx context.Context, jobID string, progress int) error {
+// Only updates if claimed_by matches owner (fencing token).
+func (r *Repo) UpdateProgress(ctx context.Context, jobID, owner string, progress int) error {
 	const where = "repo.feedbackjob.UpdateProgress"
 	tag, err := r.pool.Exec(
 		ctx, `
 		UPDATE batch_jobs
 		SET progress = $2, last_heartbeat = NOW()
-		WHERE id = $1 AND status = 'running'`,
-		jobID, progress,
+		WHERE id = $1 AND status = 'running' AND claimed_by = $3`,
+		jobID, progress, owner,
 	)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] update failed,job_id:%s,err:%+v", where, jobID, err.Error())
@@ -257,45 +261,49 @@ func (r *Repo) UpdateProgress(ctx context.Context, jobID string, progress int) e
 }
 
 // Complete marks a job as completed with the result.
-func (r *Repo) Complete(ctx context.Context, jobID string, result []byte) error {
+// Only updates if claimed_by matches owner (fencing token).
+// Returns rows affected (0 if job was re-claimed).
+func (r *Repo) Complete(ctx context.Context, jobID, owner string, result []byte) (int64, error) {
 	const where = "repo.feedbackjob.Complete"
 	tag, err := r.pool.Exec(
 		ctx, `
 		UPDATE batch_jobs
-		SET status = 'completed', result = $2, completed_at = NOW(), claimed_at = NULL
-		WHERE id = $1 AND status = 'running'`,
-		jobID, result,
+		SET status = 'completed', result = $2, completed_at = NOW(),
+		    claimed_at = NULL, claimed_by = NULL
+		WHERE id = $1 AND status = 'running' AND claimed_by = $3`,
+		jobID, result, owner,
 	)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] update failed,job_id:%s,err:%+v", where, jobID, err.Error())
-		return fmt.Errorf("complete batch job: %w", err)
+		return 0, fmt.Errorf("complete batch job: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+	if tag.RowsAffected() > 0 {
+		logext.Infof(ctx, "[%s] OK,job_id:%s", where, jobID)
 	}
-	logext.Infof(ctx, "[%s] OK,job_id:%s", where, jobID)
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 // Fail marks a job as failed with an error message.
-func (r *Repo) Fail(ctx context.Context, jobID string, errMsg string) error {
+// Only updates if claimed_by matches owner (fencing token).
+// Returns rows affected (0 if job was re-claimed).
+func (r *Repo) Fail(ctx context.Context, jobID, owner string, errMsg string) (int64, error) {
 	const where = "repo.feedbackjob.Fail"
 	tag, err := r.pool.Exec(
 		ctx, `
 		UPDATE batch_jobs
-		SET status = 'failed', error = $2, completed_at = NOW(), claimed_at = NULL
-		WHERE id = $1 AND status = 'running'`,
-		jobID, pgxutil.Truncate(errMsg, 1000),
+		SET status = 'failed', error = $2, completed_at = NOW(),
+		    claimed_at = NULL, claimed_by = NULL
+		WHERE id = $1 AND status = 'running' AND claimed_by = $3`,
+		jobID, pgxutil.Truncate(errMsg, 1000), owner,
 	)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] update failed,job_id:%s,err:%+v", where, jobID, err.Error())
-		return fmt.Errorf("fail batch job: %w", err)
+		return 0, fmt.Errorf("fail batch job: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+	if tag.RowsAffected() > 0 {
+		logext.Infof(ctx, "[%s] OK,job_id:%s,error:%s", where, jobID, pgxutil.Truncate(errMsg, 200))
 	}
-	logext.Infof(ctx, "[%s] OK,job_id:%s,error:%s", where, jobID, pgxutil.Truncate(errMsg, 200))
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 // Cancel attempts to cancel a job.
@@ -334,33 +342,32 @@ func (r *Repo) Cancel(ctx context.Context, tenantID, jobID string) error {
 }
 
 // Heartbeat updates the heartbeat timestamp for a running job.
-func (r *Repo) Heartbeat(ctx context.Context, jobID string) error {
-	const where = "repo.feedbackjob.Heartbeat"
+// Only updates if claimed_by matches owner (fencing token).
+// Returns rows affected (0 if job was re-claimed).
+func (r *Repo) Heartbeat(ctx context.Context, jobID, owner string) (int64, error) {
 	tag, err := r.pool.Exec(
 		ctx, `
 		UPDATE batch_jobs
 		SET last_heartbeat = NOW()
-		WHERE id = $1 AND status = 'running'`,
-		jobID,
+		WHERE id = $1 AND status = 'running' AND claimed_by = $2`,
+		jobID, owner,
 	)
 	if err != nil {
-		logext.Errorf(ctx, "[%s] update failed,job_id:%s,err:%+v", where, jobID, err.Error())
-		return fmt.Errorf("heartbeat batch job: %w", err)
+		return 0, fmt.Errorf("heartbeat batch job: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 // RecoverStuck finds and requeues jobs with stale heartbeats.
+// Clears claimed_by so another worker can claim.
 // Returns count of recovered jobs.
 func (r *Repo) RecoverStuck(ctx context.Context, staleThreshold time.Duration) (int64, error) {
 	const where = "repo.feedbackjob.RecoverStuck"
 	tag, err := r.pool.Exec(
 		ctx, `
 		UPDATE batch_jobs
-		SET status = 'queued', started_at = NULL, claimed_at = NULL, last_heartbeat = NULL
+		SET status = 'queued', started_at = NULL, claimed_at = NULL,
+		    claimed_by = NULL, last_heartbeat = NULL
 		WHERE status = 'running'
 		  AND last_heartbeat < NOW() - make_interval(secs => $1)`,
 		int(staleThreshold.Seconds()),
@@ -372,6 +379,7 @@ func (r *Repo) RecoverStuck(ctx context.Context, staleThreshold time.Duration) (
 	count := tag.RowsAffected()
 	if count > 0 {
 		logext.Infof(ctx, "[%s] recovered %d stuck jobs", where, count)
+		metrics.WorkerStaleClaimsRecovered.WithLabelValues("batch_job").Add(float64(count))
 	}
 	return count, nil
 }

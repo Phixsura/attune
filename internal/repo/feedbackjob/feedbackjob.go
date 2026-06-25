@@ -56,24 +56,32 @@ type Store interface {
 
 	// Claim attempts to claim the next queued job for processing.
 	// Uses SELECT FOR UPDATE SKIP LOCKED to handle concurrent workers.
+	// Sets claimed_by to owner for fencing token validation.
 	// Returns nil if no jobs available.
-	Claim(ctx context.Context) (*Job, error)
+	Claim(ctx context.Context, owner string) (*Job, error)
 
 	// UpdateProgress updates the progress counter and heartbeat.
-	UpdateProgress(ctx context.Context, jobID string, progress int) error
+	// Only updates if claimed_by matches owner (fencing token).
+	UpdateProgress(ctx context.Context, jobID, owner string, progress int) error
 
 	// Complete marks a job as completed with the result.
-	Complete(ctx context.Context, jobID string, result []byte) error
+	// Only updates if claimed_by matches owner (fencing token).
+	// Returns rows affected (0 if job was re-claimed).
+	Complete(ctx context.Context, jobID, owner string, result []byte) (int64, error)
 
 	// Fail marks a job as failed with an error message.
-	Fail(ctx context.Context, jobID string, errMsg string) error
+	// Only updates if claimed_by matches owner (fencing token).
+	// Returns rows affected (0 if job was re-claimed).
+	Fail(ctx context.Context, jobID, owner string, errMsg string) (int64, error)
 
 	// Cancel attempts to cancel a job.
 	// Only queued or running jobs can be cancelled.
 	Cancel(ctx context.Context, tenantID, jobID string) error
 
 	// Heartbeat updates the heartbeat timestamp for a running job.
-	Heartbeat(ctx context.Context, jobID string) error
+	// Only updates if claimed_by matches owner (fencing token).
+	// Returns rows affected (0 if job was re-claimed).
+	Heartbeat(ctx context.Context, jobID, owner string) (int64, error)
 
 	// RecoverStuck finds and requeues jobs with stale heartbeats.
 	// Returns count of recovered jobs.

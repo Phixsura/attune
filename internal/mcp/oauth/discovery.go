@@ -16,6 +16,10 @@ const (
 	protectedResourceWellKnownSuffix   = "/.well-known/oauth-protected-resource"
 	authorizationServerWellKnownSuffix = "/.well-known/oauth-authorization-server"
 	openIDConfigurationWellKnownSuffix = "/.well-known/openid-configuration"
+
+	// discoveryCacheMaxAge is the Cache-Control max-age for discovery endpoints.
+	// 1 hour is reasonable since discovery metadata rarely changes.
+	discoveryCacheMaxAge = 3600
 )
 
 // DiscoveryResponse is the OAuth protected resource metadata.
@@ -195,6 +199,6 @@ func mustWellKnownPath(identifier, wellKnownSuffix string) string {
 
 func writeDiscoveryJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", discoveryCacheMaxAge))
 	json.NewEncoder(w).Encode(v) //nolint:errcheck
 }

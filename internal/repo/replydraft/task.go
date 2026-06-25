@@ -89,14 +89,26 @@ func (r *DraftTaskRepo) TryClaim(ctx context.Context, staleDuration time.Duratio
 	return r.q.TryClaim(ctx, staleDuration)
 }
 
-// MarkDone marks a task completed.
-func (r *DraftTaskRepo) MarkDone(ctx context.Context, taskID int64) error {
-	return r.q.MarkDone(ctx, taskID)
+// TryClaimWithOwner claims one eligible draft task and sets claimed_by to owner.
+// This enables heartbeat refresh to only touch rows this worker instance holds.
+func (r *DraftTaskRepo) TryClaimWithOwner(ctx context.Context, staleDuration time.Duration, owner string) (*Task, error) {
+	return r.q.TryClaimWithOwner(ctx, staleDuration, owner)
 }
 
-// MarkFailed records a failure with retry backoff.
-func (r *DraftTaskRepo) MarkFailed(ctx context.Context, taskID int64, lastErr error, maxAttempts int) error {
-	return r.q.MarkFailed(ctx, taskID, lastErr, maxAttempts)
+// RefreshClaim extends the lease on a task by updating claimed_at.
+// Returns 1 if refreshed, 0 if the task was re-claimed by another worker.
+func (r *DraftTaskRepo) RefreshClaim(ctx context.Context, taskID int64, owner string) (int64, error) {
+	return r.q.RefreshClaim(ctx, taskID, owner)
+}
+
+// MarkDone marks a task completed. Returns 0 rows if another worker re-claimed.
+func (r *DraftTaskRepo) MarkDone(ctx context.Context, taskID int64, owner string) (int64, error) {
+	return r.q.MarkDone(ctx, taskID, owner)
+}
+
+// MarkFailed records a failure with retry backoff. Returns 0 rows if another worker re-claimed.
+func (r *DraftTaskRepo) MarkFailed(ctx context.Context, taskID int64, owner string, lastErr error, maxAttempts int) (int64, error) {
+	return r.q.MarkFailed(ctx, taskID, owner, lastErr, maxAttempts)
 }
 
 // ResetStaleClaims recovers tasks stuck in processing.

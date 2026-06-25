@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/pkg/workerdrain"
 	"github.com/Phixsura/attune/internal/repo/digestrun"
 	"github.com/Phixsura/attune/internal/repo/digestsubscription"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
@@ -32,6 +33,13 @@ type targetReader interface {
 	ListActiveByTenantAudience(ctx context.Context, tenantID, audience string) ([]notifytarget.NotifyTarget, error)
 }
 
+// heartbeatInterval is how often we refresh the claim while processing a run.
+// Rule of thumb: staleDuration / 3 to staleDuration / 2.
+const heartbeatInterval = 90 * time.Second
+
+// drainTimeout is how long to wait for in-flight work during graceful shutdown.
+const drainTimeout = 30 * time.Second
+
 // Worker schedules and delivers daily digests. Each tick it (1) claims any due
 // subscriptions into digest_runs and advances their cursor, then (2) drains
 // pending/stale runs — aggregate, render, deliver, mark.
@@ -42,6 +50,13 @@ type Worker struct {
 	targets targetReader
 	embed   embedQueueReader
 	sender  *sender
+
+	// owner uniquely identifies this worker instance so heartbeat refresh
+	// only touches rows this instance still holds.
+	owner string
+
+	// drain tracks in-flight work for graceful shutdown.
+	drain *workerdrain.Drainer
 
 	pollInterval  time.Duration
 	staleDuration time.Duration
@@ -64,6 +79,8 @@ func NewWorker(
 	transport *notify.Transport,
 	deepLinkBase string,
 ) *Worker {
+	d := workerdrain.New("digest")
+	d.SetTimeout(drainTimeout)
 	return ptrext.Of(Worker{
 		subs:          subs,
 		runs:          runs,
@@ -71,6 +88,8 @@ func NewWorker(
 		targets:       targets,
 		embed:         embed,
 		sender:        newSender(transport),
+		owner:         "digest-" + uuid.NewString(),
+		drain:         d,
 		pollInterval:  60 * time.Second,
 		staleDuration: 5 * time.Minute,
 		graceWindow:   2 * time.Hour,
@@ -91,21 +110,24 @@ func (w *Worker) Configure(pollInterval time.Duration, maxAttempts int) {
 }
 
 // Run loops until ctx cancellation, recovering stale claims on boot.
+// On context cancellation it drains in-flight work before returning.
 func (w *Worker) Run(ctx context.Context) {
 	const where = "service.digest.Worker.Run"
 	if reset, err := w.runs.ResetStaleClaims(ctx, w.staleDuration); err != nil {
 		logext.Warnf(ctx, "[%s] reset stale claims failed,err:%+v", where, err.Error())
 	} else if reset > 0 {
 		logext.Infof(ctx, "[%s] reset stale claims,count:%d", where, reset)
+		metrics.WorkerStaleClaimsRecovered.WithLabelValues("digest").Add(float64(reset))
 	}
-	logext.Infof(ctx, "[%s] digest worker started,poll_interval:%s", where, w.pollInterval)
+	logext.Infof(ctx, "[%s] digest worker started,owner:%s,poll_interval:%s", where, w.owner, w.pollInterval)
 
 	tick := time.NewTicker(w.pollInterval)
 	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			logext.Infof(ctx, "[%s] digest worker stopping", where)
+			logext.Infof(ctx, "[%s] digest worker stopping,waiting for in-flight work", where)
+			w.drain.Drain(ctx)
 			return
 		case <-tick.C:
 			w.ProcessOnce(ctx, time.Now())
@@ -211,7 +233,7 @@ func (w *Worker) advanceOnly(ctx context.Context, id uuid.UUID, next time.Time) 
 func (w *Worker) drainRuns(ctx context.Context) {
 	const where = "service.digest.Worker.drainRuns"
 	for i := 0; i < w.drainBatch; i++ {
-		run, err := w.runs.TryClaim(ctx, w.staleDuration)
+		run, err := w.runs.TryClaimWithOwner(ctx, w.staleDuration, w.owner)
 		if errors.Is(err, digestrun.ErrNoRun) {
 			return
 		}
@@ -219,33 +241,56 @@ func (w *Worker) drainRuns(ctx context.Context) {
 			logext.Errorf(ctx, "[%s] claim run failed,err:%+v", where, err.Error())
 			return
 		}
+
+		// Track in-flight work for graceful shutdown drain.
+		w.drain.Enter()
 		w.processRun(ctx, run)
+		w.drain.Leave()
 	}
 }
 
 func (w *Worker) processRun(ctx context.Context, run *digestrun.Run) {
 	const where = "service.digest.Worker.processRun"
 	start := time.Now()
-	res, sub, err := w.aggregateRun(ctx, run)
+
+	// Create a cancellable context for the run processing.
+	// If heartbeat detects lease lost, it cancels this context to abort early.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
+	// Start heartbeat goroutine — pass cancelRun so it can abort processing on lease lost.
+	go w.heartbeat(ctx, run.ID, cancelRun)
+
+	res, sub, err := w.aggregateRun(runCtx, run)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			logext.Warnf(ctx, "[%s] run aborted (lease lost),run_id:%d", where, run.ID)
+			metrics.DigestRunsTotal.WithLabelValues(run.TenantID, "lease_lost").Inc()
+			return
+		}
 		logext.Errorf(ctx, "[%s] aggregate failed,run_id:%d,err:%+v", where, run.ID, err.Error())
-		_ = w.runs.MarkFailed(ctx, run.ID, err, w.maxAttempts)
+		_, _ = w.runs.MarkFailed(ctx, run.ID, w.owner, err, w.maxAttempts)
 		metrics.DigestRunsTotal.WithLabelValues(run.TenantID, "failed").Inc()
 		return
 	}
 	if res.Tier == TierSkip {
-		_ = w.runs.MarkSkippedEmpty(ctx, run.ID, res.Stats.Total)
+		_, _ = w.runs.MarkSkippedEmpty(ctx, run.ID, w.owner, res.Stats.Total)
 		metrics.DigestRunsTotal.WithLabelValues(run.TenantID, "skipped_empty").Inc()
 		logext.Infof(ctx, "[%s] skipped empty,run_id:%d,tenant_id:%s", where, run.ID, run.TenantID)
 		return
 	}
-	if err := w.deliver(ctx, run, sub, res); err != nil {
+	if err := w.deliver(runCtx, run, sub, res); err != nil {
+		if errors.Is(err, context.Canceled) {
+			logext.Warnf(ctx, "[%s] run aborted (lease lost),run_id:%d", where, run.ID)
+			metrics.DigestRunsTotal.WithLabelValues(run.TenantID, "lease_lost").Inc()
+			return
+		}
 		logext.Errorf(ctx, "[%s] deliver failed,run_id:%d,err:%+v", where, run.ID, err.Error())
-		_ = w.runs.MarkFailed(ctx, run.ID, err, w.maxAttempts)
+		_, _ = w.runs.MarkFailed(ctx, run.ID, w.owner, err, w.maxAttempts)
 		metrics.DigestRunsTotal.WithLabelValues(run.TenantID, "failed").Inc()
 		return
 	}
-	_ = w.runs.MarkSent(ctx, run.ID, res.Stats.Total, len(res.Themes))
+	_, _ = w.runs.MarkSent(ctx, run.ID, w.owner, res.Stats.Total, len(res.Themes))
 	metrics.DigestRunsTotal.WithLabelValues(run.TenantID, "sent").Inc()
 	metrics.DigestDuration.WithLabelValues(run.TenantID).Observe(time.Since(start).Seconds())
 	logext.Infof(ctx, "[%s] sent,run_id:%d,tenant_id:%s,themes:%d,feedback:%d",
@@ -333,4 +378,32 @@ func (w *Worker) deliver(
 		return fmt.Errorf("all %d digest deliveries failed", len(errs))
 	}
 	return nil
+}
+
+// heartbeat periodically refreshes the claim on the run until ctx is cancelled.
+// If lease is lost (another worker re-claimed), it calls cancelRun to abort processing early.
+func (w *Worker) heartbeat(ctx context.Context, runID int64, cancelRun context.CancelFunc) {
+	const where = "service.digest.Worker.heartbeat"
+	tick := time.NewTicker(heartbeatInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			// Use background context to avoid racing with parent cancellation.
+			n, err := w.runs.RefreshClaim(context.Background(), runID, w.owner)
+			if err != nil {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("digest", "error").Inc()
+				logext.Warnf(ctx, "[%s] refresh claim failed,run_id:%d,err:%+v", where, runID, err.Error())
+			} else if n == 0 {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("digest", "lost").Inc()
+				logext.Warnf(ctx, "[%s] run re-claimed by another worker,run_id:%d — aborting", where, runID)
+				cancelRun() // Abort processing early
+				return
+			} else {
+				metrics.WorkerHeartbeatTotal.WithLabelValues("digest", "ok").Inc()
+			}
+		}
+	}
 }
