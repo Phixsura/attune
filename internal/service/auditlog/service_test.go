@@ -275,6 +275,11 @@ func TestActorFromRequest(t *testing.T) {
 	if actor.Type != "admin" || actor.ID != "user-1" || actor.IP != "10.0.0.8" || actor.UserAgent != "browser" {
 		t.Fatalf("ActorFromRequest() = %#v", actor)
 	}
+
+	actor = ActorFromRequest(" ", " user-1 ", req)
+	if actor.Type != "admin" || actor.ID != "user-1" {
+		t.Fatalf("ActorFromRequest() legacy admin = %#v", actor)
+	}
 }
 
 func TestMarshalJSONAndRemoteAddrIP(t *testing.T) {

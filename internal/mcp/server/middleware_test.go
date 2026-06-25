@@ -25,7 +25,7 @@ const (
 func newTestSigner() *oauth.JWTSigner { return oauth.NewJWTSigner([]byte(testJWTSecret), testIssuer) }
 
 func newTestMiddleware() *server.AuthMiddleware {
-	return server.NewAuthMiddleware(newTestSigner(), nil, nil)
+	return server.NewAuthMiddleware(newTestSigner(), nil, nil, "https://attune.example.com/.well-known/oauth-protected-resource/mcp/v1")
 }
 
 func testFailingHandler(t *testing.T) http.Handler {
@@ -34,7 +34,7 @@ func testFailingHandler(t *testing.T) http.Handler {
 
 func TestAuthMiddleware_ValidToken(t *testing.T) {
 	signer := newTestSigner()
-	middleware := server.NewAuthMiddleware(signer, nil, nil)
+	middleware := server.NewAuthMiddleware(signer, nil, nil, "https://attune.example.com/.well-known/oauth-protected-resource/mcp/v1")
 	claims := oauth.AccessTokenClaims{TenantID: "tenant-123", ClientID: uuid.New(), SessionID: uuid.New(), Scopes: []string{"mcp:read"}}
 	token, err := signer.Sign(claims, time.Hour)
 	assert.NoError(t, err)
@@ -60,8 +60,8 @@ func TestAuthMiddleware_Unauthorized(t *testing.T) {
 	tests := []struct {
 		name, auth, wwwAuth string
 	}{
-		{"missing_header", "", "Bearer"},
-		{"invalid_header", "Basic dXNlcjpwYXNz", ""},
+		{"missing_header", "", "resource_metadata"},
+		{"invalid_header", "Basic dXNlcjpwYXNz", "resource_metadata"},
 		{"invalid_token", "Bearer invalid-token", "invalid_token"},
 	}
 	for _, tt := range tests {
@@ -101,6 +101,10 @@ func TestRequireScope(t *testing.T) {
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			assert.Equal(t, tt.expect, rec.Code)
+			if tt.expect == http.StatusForbidden {
+				assert.Contains(t, rec.Header().Get("WWW-Authenticate"), `error="insufficient_scope"`)
+				assert.Contains(t, rec.Header().Get("WWW-Authenticate"), `scope="`+tt.scope+`"`)
+			}
 		})
 	}
 }
@@ -136,8 +140,8 @@ func TestAuthMiddleware_RevokedOrClosed(t *testing.T) {
 		name       string
 		middleware *server.AuthMiddleware
 	}{
-		{"revoked_client", server.NewAuthMiddleware(signer, ptrext.Of(mockClientValidator{revoked: true}), nil)},
-		{"closed_session", server.NewAuthMiddleware(signer, nil, ptrext.Of(mockSessionValidator{active: false}))},
+		{"revoked_client", server.NewAuthMiddleware(signer, ptrext.Of(mockClientValidator{revoked: true}), nil, "https://attune.example.com/.well-known/oauth-protected-resource/mcp/v1")},
+		{"closed_session", server.NewAuthMiddleware(signer, nil, ptrext.Of(mockSessionValidator{active: false}), "https://attune.example.com/.well-known/oauth-protected-resource/mcp/v1")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -2916,6 +2916,219 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/mcp/clients:
+        get:
+            tags:
+                - MCPClientService
+            description: GET /fb/v1/console/mcp/clients
+            operationId: MCPClientService_ListMCPClients
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListMCPClientsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        post:
+            tags:
+                - MCPClientService
+            description: POST /fb/v1/console/mcp/clients
+            operationId: MCPClientService_CreateMCPClient
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateMCPClientRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateMCPClientResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/mcp/clients/{id}:
+        get:
+            tags:
+                - MCPClientService
+            description: GET /fb/v1/console/mcp/clients/{id}
+            operationId: MCPClientService_GetMCPClient
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetMCPClientResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        delete:
+            tags:
+                - MCPClientService
+            description: DELETE /fb/v1/console/mcp/clients/{id}
+            operationId: MCPClientService_RevokeMCPClient
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RevokeMCPClientResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+        patch:
+            tags:
+                - MCPClientService
+            description: PATCH /fb/v1/console/mcp/clients/{id}
+            operationId: MCPClientService_UpdateMCPClient
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateMCPClientRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateMCPClientResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/mcp/clients/{id}/grants/{grantId}:
+        delete:
+            tags:
+                - MCPClientService
+            description: DELETE /fb/v1/console/mcp/clients/{id}/grants/{grant_id}
+            operationId: MCPClientService_RevokeMCPRefreshGrant
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: grantId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RevokeMCPRefreshGrantResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/mcp/clients/{id}/sessions/{sessionId}:
+        delete:
+            tags:
+                - MCPClientService
+            description: DELETE /fb/v1/console/mcp/clients/{id}/sessions/{session_id}
+            operationId: MCPClientService_RevokeMCPSession
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: sessionId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RevokeMCPSessionResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/mcp/clients/{id}/tool-policies:
+        put:
+            tags:
+                - MCPClientService
+            description: PUT /fb/v1/console/mcp/clients/{id}/tool-policies
+            operationId: MCPClientService_ReplaceMCPClientToolPolicies
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ReplaceMCPClientToolPoliciesRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplaceMCPClientToolPoliciesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/me:
         get:
             tags:
@@ -4615,6 +4828,26 @@ components:
                 timeoutSeconds:
                     type: integer
                     format: int32
+        CreateMCPClientRequest:
+            required:
+                - name
+            type: object
+            properties:
+                name:
+                    type: string
+                redirectUris:
+                    type: array
+                    items:
+                        type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+        CreateMCPClientResponse:
+            type: object
+            properties:
+                client:
+                    $ref: '#/components/schemas/MCPClient'
         CreateManagedIdentityRequest:
             required:
                 - name
@@ -5907,6 +6140,25 @@ components:
                     type: string
                 errors:
                     type: string
+        GetMCPClientResponse:
+            type: object
+            properties:
+                client:
+                    $ref: '#/components/schemas/MCPClient'
+                sessions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/MCPSession'
+                refreshGrants:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/MCPRefreshGrant'
+                tools:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/MCPClientToolPolicy'
+                connection:
+                    $ref: '#/components/schemas/MCPConnectionProfile'
         GetMeResponse:
             type: object
             properties:
@@ -6500,6 +6752,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/LeakDetection'
+        ListMCPClientsResponse:
+            type: object
+            properties:
+                clients:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/MCPClient'
         ListManagedIdentitiesResponse:
             type: object
             properties:
@@ -6621,6 +6880,153 @@ components:
         LogoutResponse:
             type: object
             properties: {}
+        MCPClient:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                redirectUris:
+                    type: array
+                    items:
+                        type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+                toolPolicyMode:
+                    type: string
+                rateLimitRpm:
+                    type: integer
+                    format: int32
+                rateLimitBurst:
+                    type: integer
+                    format: int32
+                createdAt:
+                    type: string
+                createdBy:
+                    type: string
+                revokedAt:
+                    type: string
+        MCPClientToolPolicy:
+            type: object
+            properties:
+                name:
+                    type: string
+                requiredScope:
+                    type: string
+                risk:
+                    type: string
+                dataClass:
+                    type: string
+                readOnlyHint:
+                    type: boolean
+                destructiveHint:
+                    type: boolean
+                openWorldHint:
+                    type: boolean
+                defaultRpm:
+                    type: integer
+                    format: int32
+                defaultBurst:
+                    type: integer
+                    format: int32
+                scopeGranted:
+                    type: boolean
+                effectiveAllowed:
+                    type: boolean
+                effect:
+                    type: string
+                rateLimitRpm:
+                    type: integer
+                    format: int32
+                rateLimitBurst:
+                    type: integer
+                    format: int32
+        MCPConnectionProfile:
+            type: object
+            properties:
+                serverUrl:
+                    type: string
+                resourceUrl:
+                    type: string
+                oauthIssuer:
+                    type: string
+                authorizationEndpoint:
+                    type: string
+                tokenEndpoint:
+                    type: string
+                protectedResourceMetadataUrl:
+                    type: string
+                authorizationServerMetadataUrl:
+                    type: string
+                openidConfigurationUrl:
+                    type: string
+                legacyProtectedResourceMetadataUrl:
+                    type: string
+                legacyAuthorizationServerMetadataUrl:
+                    type: string
+                legacyOpenidConfigurationUrl:
+                    type: string
+        MCPRefreshGrant:
+            type: object
+            properties:
+                id:
+                    type: string
+                sessionId:
+                    type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+                expiresAt:
+                    type: string
+                createdAt:
+                    type: string
+        MCPSession:
+            type: object
+            properties:
+                id:
+                    type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+                lastToolName:
+                    type: string
+                lastDecision:
+                    type: string
+                lastIp:
+                    type: string
+                lastUserAgent:
+                    type: string
+                lastActiveAt:
+                    type: string
+                createdAt:
+                    type: string
+                closedReason:
+                    type: string
+                closedBy:
+                    type: string
+                closedAt:
+                    type: string
+        MCPToolPolicyInput:
+            required:
+                - toolName
+                - effect
+            type: object
+            properties:
+                toolName:
+                    type: string
+                effect:
+                    type: string
+                rateLimitRpm:
+                    type: integer
+                    format: int32
+                rateLimitBurst:
+                    type: integer
+                    format: int32
         ManagedIdentity:
             type: object
             properties:
@@ -6921,6 +7327,22 @@ components:
                     type: string
                     description: Generic visual tone key, e.g. "success" / "warning" / "danger".
             description: RendererValue configures one taxonomy value under a RendererSpec.
+        ReplaceMCPClientToolPoliciesRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                policies:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/MCPToolPolicyInput'
+        ReplaceMCPClientToolPoliciesResponse:
+            type: object
+            properties:
+                tools:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/MCPClientToolPolicy'
         ReplaceTransitionsRequest:
             type: object
             properties:
@@ -7058,6 +7480,15 @@ components:
                         - GDPR_REQUEST_STATUS_REVOKED
                     type: string
                     format: enum
+        RevokeMCPClientResponse:
+            type: object
+            properties: {}
+        RevokeMCPRefreshGrantResponse:
+            type: object
+            properties: {}
+        RevokeMCPSessionResponse:
+            type: object
+            properties: {}
         RollbackEnrichmentRuntimeRequest:
             type: object
             properties:
@@ -7631,6 +8062,24 @@ components:
                 timeoutSeconds:
                     type: integer
                     format: int32
+        UpdateMCPClientRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                toolPolicyMode:
+                    type: string
+                rateLimitRpm:
+                    type: integer
+                    format: int32
+                rateLimitBurst:
+                    type: integer
+                    format: int32
+        UpdateMCPClientResponse:
+            type: object
+            properties:
+                client:
+                    $ref: '#/components/schemas/MCPClient'
         UpdateMemberRoleRequest:
             required:
                 - id
@@ -7931,6 +8380,8 @@ tags:
       description: JobService provides status tracking for async batch operations (#30).
     - name: LLMConfigService
       description: LLMConfigService manages DB-backed provider channels and routes.
+    - name: MCPClientService
+      description: MCPClientService manages MCP OAuth clients and their governance surface.
     - name: MemberService
       description: MemberService manages tenant membership for RBAC (#38).
     - name: NotifyOutboxService

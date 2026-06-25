@@ -9,6 +9,63 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **MCP governance controls and admin surface (#153).** Expands the MCP server
+  from scope-only access into a governed access plane. Includes:
+  - Centralized MCP tool metadata catalog with runtime risk/data classification
+  - Per-client governance defaults: tool-policy mode (`legacy_allow_all` /
+    `allow_list`) and client-level rate-limit settings
+  - Per-tool override records with explicit allow/deny and override RPM/burst
+  - Token-bucket enforcement for client/tool RPM + burst limits, so configured
+    burst ceilings take effect at runtime instead of remaining display-only
+  - Request-accurate MCP session activity tracking (`last_tool_name`,
+    `last_decision`, IP, user agent, close reason/by)
+  - Audit events for MCP authorization denials, MCP rate-limit denials, client
+    governance changes, tool-policy changes, single-session revocation, and
+    single refresh-grant revocation
+  - Console MCP access page expansion: client detail, active sessions, refresh
+    grants, governance editor, tool-policy editor, single-session revoke, and
+    single refresh-grant revoke
+  - MCP client admin proto/OpenAPI contract for the Console control plane
+
+### Fixed
+
+- **MCP protocol compatibility and governance hardening (#153).** Improves the
+  MCP server's real-world interoperability and operator safety by:
+  - adding a dedicated MCP public base URL path so discovery no longer has to
+    piggyback on `console.base_url`, with fallback to the configured MCP issuer
+    before falling back to the Console URL
+  - publishing RFC-compliant OAuth protected-resource and authorization-server
+    metadata routes, while keeping the older `/mcp/**/.well-known/*` paths for
+    backwards compatibility with existing manual setups
+  - codifying a 10-scenario MCP compatibility regression matrix covering root
+    discovery, legacy discovery, OpenID compatibility metadata, Bearer
+    challenges, resource indicators, and authorization redirect issuer hints
+  - adding a Console MCP connection workspace with deployment-derived endpoint
+    URLs plus fixed-client templates for Claude Code, Cursor, VS Code, and curl
+    diagnostics so operators can wire real MCP hosts without hand-deriving
+    OAuth/discovery settings
+  - explicitly labeling the connection workspace as interactive-OAuth oriented,
+    so operators do not mistake the current fixed-client templates for support
+    of headless `client_credentials` hosts or CI-style remote MCP consumers
+  - allowing the Console client-registration flow to submit multiple redirect
+    URIs, so multi-callback hosts such as VS Code can be registered directly
+    instead of remaining permanently stuck in a "missing redirect URI" state
+  - fixing MCP Console card/table layout containment on narrow viewports so the
+    admin surface keeps horizontal scrolling inside dense tables instead of
+    forcing whole-page overflow on mobile-sized screens
+  - advertising PKCE / public-client metadata and returning explicit
+    `WWW-Authenticate` insufficient-scope challenges so MCP hosts can react to
+    scope failures more reliably
+  - including the authorization server issuer on OAuth authorization-code
+    redirects for stronger client-side mix-up protection
+  - preventing revoked MCP clients from being mutated through the governance
+    API and normalizing legacy admin sessions into auditable admin actors for
+    MCP control-plane audit logs
+  - aligning the Console detail workspace with revoked-client reality by
+    marking revoked clients read-only, removing “ready to connect” guidance,
+    and stopping the UI from offering copyable host snippets that can no
+    longer complete OAuth
+
 - **Backup and restore drill with decryptability verification (#151).** A
   repeatable, backup-tool-agnostic drill that verifies an already-restored
   PostgreSQL database is actually recoverable — without production traffic.

@@ -18,7 +18,7 @@ import (
 )
 
 func TestHandler_Create_ValidatesScopes(t *testing.T) {
-	h := mcpclient.NewHandler(nil, nil, nil) // nil repos - we're testing validation
+	h := mcpclient.NewHandler(nil, nil, nil, nil) // nil repos - we're testing validation
 
 	auth := ptrext.Of(session.AuthCtx{
 		TenantID: "tenant-1",
@@ -38,7 +38,7 @@ func TestHandler_Create_ValidatesScopes(t *testing.T) {
 }
 
 func TestHandler_Create_RequiresRedirectURI(t *testing.T) {
-	h := mcpclient.NewHandler(nil, nil, nil)
+	h := mcpclient.NewHandler(nil, nil, nil, nil)
 
 	auth := ptrext.Of(session.AuthCtx{
 		TenantID: "tenant-1",
@@ -58,7 +58,7 @@ func TestHandler_Create_RequiresRedirectURI(t *testing.T) {
 }
 
 func TestHandler_Create_ValidatesRedirectURIs(t *testing.T) {
-	h := mcpclient.NewHandler(nil, nil, nil)
+	h := mcpclient.NewHandler(nil, nil, nil, nil)
 
 	auth := ptrext.Of(session.AuthCtx{
 		TenantID: "tenant-1",

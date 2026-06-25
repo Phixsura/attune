@@ -13,7 +13,11 @@ export const useCreateMCPClient = () => {
       })
       return resp.client
     },
-    onSuccess: () => {
+    onSuccess: (client) => {
+      queryClient.setQueryData<MCPClient[]>(['console', 'mcp-clients'], (current) => {
+        const withoutCreated = (current ?? []).filter((item) => item.id !== client.id)
+        return [client, ...withoutCreated]
+      })
       queryClient.invalidateQueries({ queryKey: ['console', 'mcp-clients'] })
     },
   })

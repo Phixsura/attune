@@ -1,0 +1,199 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+// MCPClientService manages MCP OAuth clients and their governance surface.
+service MCPClientService {
+  // GET /fb/v1/console/mcp/clients
+  rpc ListMCPClients(ListMCPClientsRequest) returns (ListMCPClientsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/mcp/clients"};
+  }
+
+  // POST /fb/v1/console/mcp/clients
+  rpc CreateMCPClient(CreateMCPClientRequest) returns (CreateMCPClientResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/mcp/clients"
+      body: "*"
+    };
+  }
+
+  // GET /fb/v1/console/mcp/clients/{id}
+  rpc GetMCPClient(GetMCPClientRequest) returns (GetMCPClientResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/mcp/clients/{id}"};
+  }
+
+  // DELETE /fb/v1/console/mcp/clients/{id}
+  rpc RevokeMCPClient(RevokeMCPClientRequest) returns (RevokeMCPClientResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/mcp/clients/{id}"};
+  }
+
+  // PATCH /fb/v1/console/mcp/clients/{id}
+  rpc UpdateMCPClient(UpdateMCPClientRequest) returns (UpdateMCPClientResponse) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/mcp/clients/{id}"
+      body: "*"
+    };
+  }
+
+  // PUT /fb/v1/console/mcp/clients/{id}/tool-policies
+  rpc ReplaceMCPClientToolPolicies(ReplaceMCPClientToolPoliciesRequest) returns (ReplaceMCPClientToolPoliciesResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/mcp/clients/{id}/tool-policies"
+      body: "*"
+    };
+  }
+
+  // DELETE /fb/v1/console/mcp/clients/{id}/sessions/{session_id}
+  rpc RevokeMCPSession(RevokeMCPSessionRequest) returns (RevokeMCPSessionResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/mcp/clients/{id}/sessions/{session_id}"};
+  }
+
+  // DELETE /fb/v1/console/mcp/clients/{id}/grants/{grant_id}
+  rpc RevokeMCPRefreshGrant(RevokeMCPRefreshGrantRequest) returns (RevokeMCPRefreshGrantResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/mcp/clients/{id}/grants/{grant_id}"};
+  }
+}
+
+message MCPClient {
+  string id = 1;
+  string name = 2;
+  repeated string redirect_uris = 3;
+  repeated string scopes = 4;
+  string tool_policy_mode = 5;
+  optional int32 rate_limit_rpm = 6;
+  optional int32 rate_limit_burst = 7;
+  string created_at = 8;                // RFC3339
+  string created_by = 9;
+  optional string revoked_at = 10;      // RFC3339
+}
+
+message MCPSession {
+  string id = 1;
+  repeated string scopes = 2;
+  string last_tool_name = 3;
+  string last_decision = 4;
+  string last_ip = 5;
+  string last_user_agent = 6;
+  string last_active_at = 7;            // RFC3339
+  string created_at = 8;                // RFC3339
+  string closed_reason = 9;
+  string closed_by = 10;
+  optional string closed_at = 11;       // RFC3339
+}
+
+message MCPRefreshGrant {
+  string id = 1;
+  string session_id = 2;
+  repeated string scopes = 3;
+  string expires_at = 4;                // RFC3339
+  string created_at = 5;                // RFC3339
+}
+
+message MCPClientToolPolicy {
+  string name = 1;
+  string required_scope = 2;
+  string risk = 3;
+  string data_class = 4;
+  bool read_only_hint = 5;
+  bool destructive_hint = 6;
+  bool open_world_hint = 7;
+  int32 default_rpm = 8;
+  int32 default_burst = 9;
+  bool scope_granted = 10;
+  bool effective_allowed = 11;
+  string effect = 12;
+  optional int32 rate_limit_rpm = 13;
+  optional int32 rate_limit_burst = 14;
+}
+
+message MCPConnectionProfile {
+  string server_url = 1;
+  string resource_url = 2;
+  string oauth_issuer = 3;
+  string authorization_endpoint = 4;
+  string token_endpoint = 5;
+  string protected_resource_metadata_url = 6;
+  string authorization_server_metadata_url = 7;
+  string openid_configuration_url = 8;
+  string legacy_protected_resource_metadata_url = 9;
+  string legacy_authorization_server_metadata_url = 10;
+  string legacy_openid_configuration_url = 11;
+}
+
+message MCPToolPolicyInput {
+  string tool_name = 1 [(google.api.field_behavior) = REQUIRED];
+  string effect = 2 [(google.api.field_behavior) = REQUIRED];
+  optional int32 rate_limit_rpm = 3;
+  optional int32 rate_limit_burst = 4;
+}
+
+message ListMCPClientsRequest {}
+
+message ListMCPClientsResponse {
+  repeated MCPClient clients = 1;
+}
+
+message CreateMCPClientRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  repeated string redirect_uris = 2;
+  repeated string scopes = 3;
+}
+
+message CreateMCPClientResponse {
+  MCPClient client = 1;
+}
+
+message GetMCPClientRequest {
+  string id = 1;                        // path param (UUID)
+}
+
+message GetMCPClientResponse {
+  MCPClient client = 1;
+  repeated MCPSession sessions = 2;
+  repeated MCPRefreshGrant refresh_grants = 3;
+  repeated MCPClientToolPolicy tools = 4;
+  MCPConnectionProfile connection = 5;
+}
+
+message RevokeMCPClientRequest {
+  string id = 1;                        // path param (UUID)
+}
+
+message RevokeMCPClientResponse {}
+
+message UpdateMCPClientRequest {
+  string id = 1;                        // path param (UUID)
+  optional string tool_policy_mode = 2;
+  optional int32 rate_limit_rpm = 3;
+  optional int32 rate_limit_burst = 4;
+}
+
+message UpdateMCPClientResponse {
+  MCPClient client = 1;
+}
+
+message ReplaceMCPClientToolPoliciesRequest {
+  string id = 1;                        // path param (UUID)
+  repeated MCPToolPolicyInput policies = 2;
+}
+
+message ReplaceMCPClientToolPoliciesResponse {
+  repeated MCPClientToolPolicy tools = 1;
+}
+
+message RevokeMCPSessionRequest {
+  string id = 1;                        // path param (UUID)
+  string session_id = 2;                // path param (UUID)
+}
+
+message RevokeMCPSessionResponse {}
+
+message RevokeMCPRefreshGrantRequest {
+  string id = 1;                        // path param (UUID)
+  string grant_id = 2;                  // path param (UUID)
+}
+
+message RevokeMCPRefreshGrantResponse {}

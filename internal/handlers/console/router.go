@@ -1984,7 +1984,12 @@ func (r *Router) mountMCPClients(m chi.Router) {
 		c.Use(r.requireAdmin)
 		c.Get("/", r.mcpClients.ServeList)
 		c.Post("/", r.mcpClients.ServeCreate)
+		c.Get("/{id}", r.mcpClients.ServeGet)
 		c.Delete("/{id}", r.mcpClients.ServeRevoke)
+		c.Patch("/{id}", r.mcpClients.ServeUpdate)
+		c.Put("/{id}/tool-policies", r.mcpClients.ServeReplaceToolPolicies)
+		c.Delete("/{id}/grants/{grant_id}", r.mcpClients.ServeRevokeRefreshGrant)
+		c.Delete("/{id}/sessions/{session_id}", r.mcpClients.ServeRevokeSession)
 	})
 }
 

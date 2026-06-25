@@ -90,7 +90,7 @@ func TestE2E_AllMCPTools(t *testing.T) {
 	}
 
 	cfg := mcp.Config{
-		BaseURL:            "https://test.attune.io",
+		PublicBaseURL:      "https://test.attune.io",
 		JWTSecret:          []byte("test-secret-key-for-jwt-signing-32bytes!"),
 		JWTIssuer:          "https://test.attune.io/mcp/oauth",
 		RateLimitPerMinute: 100,
@@ -268,7 +268,7 @@ func TestE2E_ScopeEnforcement(t *testing.T) {
 	feedbackRepo := feedback.NewFeedback(pool)
 
 	cfg := mcp.Config{
-		BaseURL:            "https://test.attune.io",
+		PublicBaseURL:      "https://test.attune.io",
 		JWTSecret:          []byte("test-secret-key-for-jwt-signing-32bytes!"),
 		JWTIssuer:          "https://test.attune.io/mcp/oauth",
 		RateLimitPerMinute: 100,

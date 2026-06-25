@@ -23,6 +23,7 @@ import (
 	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	consolellmconfig "github.com/Phixsura/attune/internal/handlers/console/llmconfig"
+	consolemcpclient "github.com/Phixsura/attune/internal/handlers/console/mcpclient"
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/member"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
@@ -64,6 +65,7 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 		tagAssignments:     &consoletagassignment.Handler{},
 		workflow:           &consoleworkflow.Handler{},
 		members:            &member.Handler{},
+		mcpClients:         &consolemcpclient.Handler{},
 	}).Mount()
 
 	got := map[string]bool{}
@@ -104,6 +106,12 @@ var auditEmittedActions = []string{
 	"api_key.rotate",
 	"api_key.create",
 	"api_key.revoke",
+	"mcp_client.create",
+	"mcp_client.revoke",
+	"mcp_client.update",
+	"mcp_client.tool_policy_update",
+	"mcp_refresh_grant.revoke",
+	"mcp_session.revoke",
 	"retry_enrichment",
 }
 
@@ -208,5 +216,11 @@ func expectedMutatingRouteCoverage() map[string]string {
 		"POST /members/":                                     "audited: member.invite",
 		"PATCH /members/{id}":                                "audited: member.update_role",
 		"DELETE /members/{id}":                               "audited: member.remove",
+		"POST /mcp/clients/":                                 "audited: mcp_client.create",
+		"DELETE /mcp/clients/{id}":                           "audited: mcp_client.revoke",
+		"PATCH /mcp/clients/{id}":                            "audited: mcp_client.update",
+		"PUT /mcp/clients/{id}/tool-policies":                "audited: mcp_client.tool_policy_update",
+		"DELETE /mcp/clients/{id}/grants/{grant_id}":         "audited: mcp_refresh_grant.revoke",
+		"DELETE /mcp/clients/{id}/sessions/{session_id}":     "audited: mcp_session.revoke",
 	}
 }

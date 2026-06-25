@@ -43,6 +43,11 @@ func NewJWTSigner(secret []byte, issuer string) *JWTSigner {
 	return ptrext.Of(JWTSigner{secret: secret, issuer: issuer, audience: "attune-mcp"})
 }
 
+// Issuer returns the configured token issuer.
+func (s *JWTSigner) Issuer() string {
+	return s.issuer
+}
+
 // Sign creates a signed JWT access token.
 func (s *JWTSigner) Sign(claims AccessTokenClaims, ttl time.Duration) (string, error) {
 	now := time.Now()

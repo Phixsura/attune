@@ -24,10 +24,11 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/mcp"
 	"github.com/Phixsura/attune/internal/mcp/jsonrpc"
 	"github.com/Phixsura/attune/internal/mcp/oauth"
+	mcppolicy "github.com/Phixsura/attune/internal/mcp/policy"
 	"github.com/Phixsura/attune/internal/mcp/tools"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
-	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/testdb"
 )
@@ -41,6 +42,7 @@ type testEnv struct {
 	codesRepo    *mcprepo.CodesRepo
 	tokensRepo   *mcprepo.TokensRepo
 	sessionsRepo *mcprepo.SessionsRepo
+	toolPolicies *mcprepo.ToolPoliciesRepo
 	feedbackRepo *feedback.FeedbackRepo
 	jwtSecret    []byte
 	jwtIssuer    string
@@ -64,13 +66,14 @@ func newTestEnv(t *testing.T, tenantSlug, tenantName string) *testEnv {
 		codesRepo:    mcprepo.NewCodes(pool),
 		tokensRepo:   mcprepo.NewTokens(pool),
 		sessionsRepo: mcprepo.NewSessions(pool),
+		toolPolicies: mcprepo.NewToolPolicies(pool),
 		feedbackRepo: feedback.NewFeedback(pool),
 		jwtSecret:    []byte("test-secret-key-for-jwt-signing-32bytes!"),
 		jwtIssuer:    "https://test.attune.io/mcp/oauth",
 	}
 
 	cfg := mcp.Config{
-		BaseURL:            "https://test.attune.io",
+		PublicBaseURL:      "https://test.attune.io",
 		JWTSecret:          env.jwtSecret,
 		JWTIssuer:          env.jwtIssuer,
 		RateLimitPerMinute: 100,
@@ -83,8 +86,10 @@ func newTestEnv(t *testing.T, tenantSlug, tenantName string) *testEnv {
 		Codes:            &codeStoreAdapter{repo: env.codesRepo},
 		Tokens:           &tokenStoreAdapter{repo: env.tokensRepo},
 		Sessions:         &sessionStoreAdapter{repo: env.sessionsRepo},
+		ToolPolicies:     &toolPolicyStoreAdapter{repo: env.toolPolicies},
 		ClientValidator:  &clientValidatorAdapter{repo: env.clientsRepo},
 		SessionValidator: &sessionValidatorAdapter{repo: env.sessionsRepo},
+		SessionActivity:  env.sessionsRepo,
 	}
 
 	deps := ptrext.Of(tools.Deps{
@@ -533,10 +538,15 @@ func (a *clientStoreAdapter) GetByID(ctx context.Context, id uuid.UUID) (*oauth.
 		return nil, oauth.ErrInvalidClient
 	}
 	return &oauth.Client{
-		ID:           c.ID,
-		TenantID:     c.TenantID,
-		RedirectURIs: c.RedirectURIs,
-		Scopes:       c.Scopes,
+		ID:             c.ID,
+		TenantID:       c.TenantID,
+		Name:           c.Name,
+		RedirectURIs:   c.RedirectURIs,
+		Scopes:         c.Scopes,
+		ToolPolicyMode: c.ToolPolicyMode,
+		RateLimitRPM:   c.RateLimitRPM,
+		RateLimitBurst: c.RateLimitBurst,
+		CreatedAt:      c.CreatedAt,
 	}, nil
 }
 
@@ -659,6 +669,25 @@ func (a *sessionStoreAdapter) Touch(ctx context.Context, id uuid.UUID) error {
 
 func (a *sessionStoreAdapter) IsActive(ctx context.Context, id uuid.UUID) (bool, error) {
 	return a.repo.IsActive(ctx, id)
+}
+
+type toolPolicyStoreAdapter struct {
+	repo *mcprepo.ToolPoliciesRepo
+}
+
+func (a *toolPolicyStoreAdapter) GetByClientAndTool(ctx context.Context, clientID uuid.UUID, toolName string) (*mcppolicy.ToolPolicy, error) {
+	p, err := a.repo.GetByClientAndTool(ctx, clientID, toolName)
+	if err != nil {
+		if err == mcprepo.ErrToolPolicyNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &mcppolicy.ToolPolicy{
+		Effect:         p.Effect,
+		RateLimitRPM:   p.RateLimitRPM,
+		RateLimitBurst: p.RateLimitBurst,
+	}, nil
 }
 
 type clientValidatorAdapter struct {

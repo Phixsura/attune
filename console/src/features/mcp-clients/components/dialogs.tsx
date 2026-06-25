@@ -34,18 +34,19 @@ export function CreateMCPClientDialog({
 }) {
   const { t } = useTranslation()
   const [name, setName] = useState('')
-  const [redirectUri, setRedirectUri] = useState('')
+  const [redirectUrisText, setRedirectUrisText] = useState('')
   const [scopes, setScopes] = useState<string[]>(['mcp:read'])
+  const parsedRedirectURIs = parseRedirectURIs(redirectUrisText)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     await onSubmit({
       name: name.trim(),
-      redirect_uris: [redirectUri.trim()],
+      redirect_uris: parsedRedirectURIs,
       scopes,
     })
     setName('')
-    setRedirectUri('')
+    setRedirectUrisText('')
     setScopes(['mcp:read'])
   }
 
@@ -75,14 +76,19 @@ export function CreateMCPClientDialog({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="redirect_uri">
+              <Label htmlFor="redirect_uris">
                 {t('mcp_clients.create_dialog.redirect_uri_label')}
               </Label>
-              <Input
-                id="redirect_uri"
-                value={redirectUri}
-                onChange={(e) => setRedirectUri(e.target.value)}
-                placeholder="http://localhost:8080/callback"
+              <p className="text-xs leading-5 text-muted-foreground">
+                {t('mcp_clients.create_dialog.redirect_uri_hint')}
+              </p>
+              <textarea
+                id="redirect_uris"
+                value={redirectUrisText}
+                onChange={(e) => setRedirectUrisText(e.target.value)}
+                placeholder={t('mcp_clients.create_dialog.redirect_uri_placeholder')}
+                rows={4}
+                className="min-h-24 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40"
                 required
               />
             </div>
@@ -118,7 +124,9 @@ export function CreateMCPClientDialog({
             </Button>
             <Button
               type="submit"
-              disabled={pending || !name.trim() || !redirectUri.trim() || scopes.length === 0}
+              disabled={
+                pending || !name.trim() || parsedRedirectURIs.length === 0 || scopes.length === 0
+              }
             >
               {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t('mcp_clients.create_button')}
@@ -128,6 +136,22 @@ export function CreateMCPClientDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+function parseRedirectURIs(value: string): string[] {
+  const seen = new Set<string>()
+  const redirects: string[] = []
+
+  for (const item of value.split(/[\n,]+/)) {
+    const normalized = item.trim()
+    if (!normalized || seen.has(normalized)) {
+      continue
+    }
+    seen.add(normalized)
+    redirects.push(normalized)
+  }
+
+  return redirects
 }
 
 export function RevokeMCPClientDialog({
