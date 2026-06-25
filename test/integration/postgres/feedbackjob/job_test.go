@@ -173,7 +173,7 @@ func TestPG_JobListByStatus(t *testing.T) {
 
 	// Claim and complete one. (Complete only works on running jobs.)
 	_, _ = e.jobs.Claim(e.ctx, "test-worker") // Claims job1 (FIFO order).
-	_ = e.jobs.Complete(e.ctx, job1.ID, []byte(`{"succeeded":10}`))
+	_, _ = e.jobs.Complete(e.ctx, job1.ID, "test-worker", []byte(`{"succeeded":10}`))
 
 	// List only completed.
 	status := feedbackjob.StatusCompleted
@@ -321,7 +321,7 @@ func TestPG_JobComplete(t *testing.T) {
 	result := map[string]int{"succeeded": 8, "failed": 2}
 	resultJSON, _ := json.Marshal(result)
 
-	err := e.jobs.Complete(e.ctx, job.ID, resultJSON)
+	_, err := e.jobs.Complete(e.ctx, job.ID, "test-worker", resultJSON)
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestPG_JobFail(t *testing.T) {
 	job, _ := e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 10)
 	_, _ = e.jobs.Claim(e.ctx, "test-worker")
 
-	err := e.jobs.Fail(e.ctx, job.ID, "something went wrong")
+	_, err := e.jobs.Fail(e.ctx, job.ID, "test-worker", "something went wrong")
 	if err != nil {
 		t.Fatalf("Fail: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestPG_JobCancelCompleted(t *testing.T) {
 
 	job, _ := e.jobs.Create(e.ctx, e.tenantID, "user-1", []byte("{}"), 10)
 	_, _ = e.jobs.Claim(e.ctx, "test-worker")
-	_ = e.jobs.Complete(e.ctx, job.ID, []byte("{}"))
+	_, _ = e.jobs.Complete(e.ctx, job.ID, "test-worker", []byte("{}"))
 
 	err := e.jobs.Cancel(e.ctx, e.tenantID, job.ID)
 	if !errors.Is(err, feedbackjob.ErrJobNotCancellable) {
@@ -434,7 +434,7 @@ func TestPG_JobHeartbeat(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Update heartbeat.
-	err := e.jobs.Heartbeat(e.ctx, job.ID)
+	_, err := e.jobs.Heartbeat(e.ctx, job.ID, "test-worker")
 	if err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
@@ -537,7 +537,7 @@ func TestPG_JobLifecycle(t *testing.T) {
 
 	// 4. Complete job.
 	result := []byte(`{"succeeded":95,"failed":5}`)
-	if err := e.jobs.Complete(e.ctx, job.ID, result); err != nil {
+	if _, err := e.jobs.Complete(e.ctx, job.ID, "test-worker", result); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 

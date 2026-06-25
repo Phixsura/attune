@@ -120,8 +120,8 @@ func TestTryClaim(t *testing.T) {
 				break
 			}
 			require.NoError(t, err)
-			// Mark done so we don't claim it again
-			_ = repo.MarkDone(ctx, task.ID)
+			// Mark done so we don't claim it again (empty owner matches TryClaim)
+			_, _ = repo.MarkDone(ctx, task.ID, "")
 		}
 
 		// Now try to claim - should get ErrNoTask since disabled tenant's task shouldn't be claimed
@@ -481,12 +481,12 @@ func TestMarkDoneAndFailed(t *testing.T) {
 
 		var taskID int64
 		err := pool.QueryRow(ctx, `
-			INSERT INTO embedding_task (feedback_id, tenant_id, status)
-			VALUES ($1, $2, 'processing')
+			INSERT INTO embedding_task (feedback_id, tenant_id, status, claimed_by)
+			VALUES ($1, $2, 'processing', 'test-worker')
 			RETURNING id`, feedbackID, tenantID).Scan(&taskID)
 		require.NoError(t, err)
 
-		err = repo.MarkDone(ctx, taskID)
+		_, err = repo.MarkDone(ctx, taskID, "test-worker")
 		require.NoError(t, err)
 
 		var status string
@@ -501,15 +501,15 @@ func TestMarkDoneAndFailed(t *testing.T) {
 
 		var taskID int64
 		err := pool.QueryRow(ctx, `
-			INSERT INTO embedding_task (feedback_id, tenant_id, status, attempts)
-			VALUES ($1, $2, 'processing', 1)
+			INSERT INTO embedding_task (feedback_id, tenant_id, status, attempts, claimed_by)
+			VALUES ($1, $2, 'processing', 1, 'test-worker')
 			RETURNING id`, feedbackID, tenantID).Scan(&taskID)
 		require.NoError(t, err)
 
 		// attempts(1) < maxAttempts(3): stays 'failed' with a future next_retry_at
 		// so the backoff window is actually enforced. (Returning to 'pending' would
 		// be re-claimed on the next poll, defeating the backoff — see queue.go.)
-		err = repo.MarkFailed(ctx, taskID, errors.New("transient error"), 3)
+		_, err = repo.MarkFailed(ctx, taskID, "test-worker", errors.New("transient error"), 3)
 		require.NoError(t, err)
 
 		var status, lastErr string
@@ -529,13 +529,13 @@ func TestMarkDoneAndFailed(t *testing.T) {
 
 		var taskID int64
 		err := pool.QueryRow(ctx, `
-			INSERT INTO embedding_task (feedback_id, tenant_id, status, attempts)
-			VALUES ($1, $2, 'processing', 3)
+			INSERT INTO embedding_task (feedback_id, tenant_id, status, attempts, claimed_by)
+			VALUES ($1, $2, 'processing', 3, 'test-worker')
 			RETURNING id`, feedbackID, tenantID).Scan(&taskID)
 		require.NoError(t, err)
 
 		// attempts(3) >= maxAttempts(3), should set to 'failed' permanently
-		err = repo.MarkFailed(ctx, taskID, errors.New("permanent error"), 3)
+		_, err = repo.MarkFailed(ctx, taskID, "test-worker", errors.New("permanent error"), 3)
 		require.NoError(t, err)
 
 		var status, lastErr string
