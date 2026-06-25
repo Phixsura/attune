@@ -20,7 +20,8 @@ import (
 )
 
 type fakeClientStore struct {
-	client mcprepo.Client
+	client    mcprepo.Client
+	revokedID uuid.UUID
 }
 
 func (f *fakeClientStore) ListByTenant(context.Context, string) ([]mcprepo.Client, error) {
@@ -38,7 +39,10 @@ func (f *fakeClientStore) GetByID(_ context.Context, id uuid.UUID) (*mcprepo.Cli
 	return ptrext.Of(f.client), nil
 }
 
-func (f *fakeClientStore) Revoke(context.Context, uuid.UUID) error { return nil }
+func (f *fakeClientStore) Revoke(_ context.Context, id uuid.UUID) error {
+	f.revokedID = id
+	return nil
+}
 
 func (f *fakeClientStore) UpdateGovernance(_ context.Context, p mcprepo.UpdateClientGovernanceParams) (*mcprepo.Client, error) {
 	f.client.ToolPolicyMode = p.ToolPolicyMode
@@ -49,6 +53,7 @@ func (f *fakeClientStore) UpdateGovernance(_ context.Context, p mcprepo.UpdateCl
 
 type fakeTokenStore struct {
 	grants         []mcprepo.RefreshToken
+	revokedClient  uuid.UUID
 	revokedGrant   uuid.UUID
 	revokedSession uuid.UUID
 }
@@ -58,7 +63,10 @@ func (f *fakeTokenStore) Revoke(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (f *fakeTokenStore) RevokeByClient(context.Context, uuid.UUID) (int64, error) { return 0, nil }
+func (f *fakeTokenStore) RevokeByClient(_ context.Context, clientID uuid.UUID) (int64, error) {
+	f.revokedClient = clientID
+	return 1, nil
+}
 
 func (f *fakeTokenStore) RevokeBySession(_ context.Context, sessionID uuid.UUID) (int64, error) {
 	f.revokedSession = sessionID
@@ -71,12 +79,16 @@ func (f *fakeTokenStore) ListByClient(context.Context, uuid.UUID) ([]mcprepo.Ref
 
 type fakeSessionStore struct {
 	sessions     []mcprepo.Session
+	closedClient uuid.UUID
 	closedID     uuid.UUID
 	closedReason string
 	closedBy     string
 }
 
-func (f *fakeSessionStore) CloseByClient(context.Context, uuid.UUID) (int64, error) { return 0, nil }
+func (f *fakeSessionStore) CloseByClient(_ context.Context, clientID uuid.UUID) (int64, error) {
+	f.closedClient = clientID
+	return 1, nil
+}
 
 func (f *fakeSessionStore) CloseWithReason(_ context.Context, id uuid.UUID, reason, closedBy string) error {
 	f.closedID = id
