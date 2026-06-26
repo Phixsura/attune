@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func TestCheckIP(t *testing.T) {
@@ -171,5 +173,97 @@ func TestRedactURLIn(t *testing.T) {
 	}
 	if RedactURLIn("anything", "") != "anything" {
 		t.Errorf("empty rawURL should be a no-op")
+	}
+}
+
+func TestBlockedError_Error(t *testing.T) {
+	t.Parallel()
+
+	e := ptrext.Of(BlockedError{Host: "example.internal", Reason: "internal / DNS-rebinding domain"})
+	if !strings.Contains(e.Error(), "example.internal") {
+		t.Fatalf("Error() should contain host: %s", e.Error())
+	}
+
+	e = ptrext.Of(BlockedError{IP: net.ParseIP("10.0.0.1"), Reason: "private"})
+	if !strings.Contains(e.Error(), "10.0.0.1") {
+		t.Fatalf("Error() should contain IP when set: %s", e.Error())
+	}
+}
+
+func TestCheckIP_NilIP(t *testing.T) {
+	t.Parallel()
+	err := Policy{}.CheckIP(nil)
+	if err == nil {
+		t.Fatal("nil IP should be blocked")
+	}
+	var blocked *BlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("expected *BlockedError, got %T", err)
+	}
+	if !strings.Contains(blocked.Reason, "unparseable") {
+		t.Fatalf("reason should mention unparseable: %s", blocked.Reason)
+	}
+}
+
+func TestValidateURL_BadURL(t *testing.T) {
+	t.Parallel()
+	err := Policy{}.ValidateURL("://bad")
+	if err == nil {
+		t.Fatal("expected error for bad URL")
+	}
+}
+
+func TestValidateURL_EmptyHost(t *testing.T) {
+	t.Parallel()
+	err := Policy{}.ValidateURL("file:///etc/passwd")
+	if err == nil {
+		t.Fatal("expected error for empty host")
+	}
+	var blocked *BlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("expected *BlockedError, got %T", err)
+	}
+}
+
+func TestRedactURL_BadURL(t *testing.T) {
+	t.Parallel()
+	got := RedactURL("://bad")
+	if got != "<redacted-url>" {
+		t.Fatalf("bad URL should return <redacted-url>, got %q", got)
+	}
+}
+
+func TestRedactURL_EmptyHost(t *testing.T) {
+	t.Parallel()
+	got := RedactURL("not-a-url")
+	if got != "<redacted-url>" {
+		t.Fatalf("non-URL should return <redacted-url>, got %q", got)
+	}
+}
+
+func TestSetTrustedProxyHops(t *testing.T) {
+	SetTrustedProxyHops(2)
+	defer SetTrustedProxyHops(0)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8, 9.0.1.2")
+
+	ip := ClientIPDefault(req)
+	if ip != "5.6.7.8" {
+		t.Fatalf("expected 5.6.7.8 (2 hops from right), got %s", ip)
+	}
+}
+
+func TestClientIPDefault_NoHops(t *testing.T) {
+	SetTrustedProxyHops(0)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+
+	ip := ClientIPDefault(req)
+	if ip != "10.0.0.1" {
+		t.Fatalf("expected peer address 10.0.0.1, got %s", ip)
 	}
 }

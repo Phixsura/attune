@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -27,25 +29,62 @@ type mockFeedbackStore struct {
 	keywordCallCount  int
 }
 
-func (m *mockFeedbackStore) SemanticSearch(ctx context.Context, params *feedback.SemanticSearchParams) ([]feedback.SemanticSearchHit, error) {
+func (m *mockFeedbackStore) SemanticSearch(_ context.Context, _ *feedback.SemanticSearchParams) ([]feedback.SemanticSearchHit, error) {
 	m.semanticCallCount++
 	return m.semanticHits, m.semanticErr
 }
 
-func (m *mockFeedbackStore) KeywordSearch(ctx context.Context, params *feedback.KeywordSearchParams) ([]*feedback.SearchFeedback, error) {
+func (m *mockFeedbackStore) KeywordSearch(_ context.Context, _ *feedback.KeywordSearchParams) ([]*feedback.SearchFeedback, error) {
 	m.keywordCallCount++
 	return m.keywordResults, m.keywordErr
 }
 
-func (m *mockFeedbackStore) HasEmbedding(ctx context.Context, tenantID string) (bool, error) {
+func (m *mockFeedbackStore) HasEmbedding(_ context.Context, _ string) (bool, error) {
 	return m.hasEmbedding, m.hasEmbeddingErr
 }
 
-func (m *mockFeedbackStore) GetEmbeddingStats(ctx context.Context, tenantID string) (*feedback.EmbeddingStats, error) {
+func (m *mockFeedbackStore) GetEmbeddingStats(_ context.Context, _ string) (*feedback.EmbeddingStats, error) {
 	return m.stats, m.statsErr
 }
 
+// mockCache implements EmbeddingCache for testing with controllable behavior.
+type mockCache struct {
+	getEmbedding []float32
+	getModel     string
+	getFound     bool
+	getErr       error
+	setErr       error
+	getCalls     int
+	setCalls     int
+}
+
+func (m *mockCache) Get(_ context.Context, _, _ string) ([]float32, string, bool, error) {
+	m.getCalls++
+	return m.getEmbedding, m.getModel, m.getFound, m.getErr
+}
+
+func (m *mockCache) Set(_ context.Context, _, _ string, _ []float32, _ string, _ time.Duration) error {
+	m.setCalls++
+	return m.setErr
+}
+
+// mockRateLimiter implements ratelimit.SlidingLimiter for testing.
+type mockRateLimiter struct {
+	allowed    bool
+	retryAfter time.Duration
+	err        error
+}
+
+func (m *mockRateLimiter) Allow(_ context.Context, _ string, _ int, _ time.Duration) (bool, time.Duration, error) {
+	return m.allowed, m.retryAfter, m.err
+}
+
+func (m *mockRateLimiter) AllowWithInfo(_ context.Context, _ string, _ int, _ time.Duration) (bool, ratelimit.RateLimitInfo, error) {
+	return m.allowed, ratelimit.RateLimitInfo{}, m.err
+}
+
 func TestSearch_EmptyQuery(t *testing.T) {
+	t.Parallel()
 	svc := New(nil, nil, nil, nil)
 
 	_, err := svc.Search(context.Background(), ptrext.Of(SearchRequest{
@@ -53,22 +92,20 @@ func TestSearch_EmptyQuery(t *testing.T) {
 		Query:    "",
 	}))
 
-	if !errors.Is(err, ErrEmptyQuery) {
-		t.Errorf("expected ErrEmptyQuery, got %v", err)
-	}
+	require.ErrorIs(t, err, ErrEmptyQuery)
 }
 
 func TestSearch_NilRequest(t *testing.T) {
+	t.Parallel()
 	svc := New(nil, nil, nil, nil)
 
 	_, err := svc.Search(context.Background(), nil)
 
-	if !errors.Is(err, ErrEmptyQuery) {
-		t.Errorf("expected ErrEmptyQuery, got %v", err)
-	}
+	require.ErrorIs(t, err, ErrEmptyQuery)
 }
 
 func TestSearch_RateLimited(t *testing.T) {
+	t.Parallel()
 	limiter := ratelimit.NewMemorySlidingLimiter()
 	store := ptrext.Of(mockFeedbackStore{})
 	svc := New(store, nil, limiter, nil)
@@ -88,12 +125,33 @@ func TestSearch_RateLimited(t *testing.T) {
 		Query:    "test",
 	}))
 
-	if !errors.Is(err, ErrRateLimited) {
-		t.Errorf("expected ErrRateLimited, got %v", err)
-	}
+	require.ErrorIs(t, err, ErrRateLimited)
+}
+
+func TestSearch_RateLimiterError_FailsOpen(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		hasEmbedding: false,
+		keywordResults: []*feedback.SearchFeedback{
+			{ID: 1, Content: "result"},
+		},
+	})
+	limiter := ptrext.Of(mockRateLimiter{
+		err: errors.New("redis connection refused"),
+	})
+	svc := New(store, nil, limiter, nil)
+
+	resp, err := svc.Search(context.Background(), ptrext.Of(SearchRequest{
+		TenantID: "tenant1",
+		Query:    "test",
+	}))
+
+	require.NoError(t, err)
+	require.Len(t, resp.Hits, 1)
 }
 
 func TestSearch_NoEmbeddings_FallsBackToKeyword(t *testing.T) {
+	t.Parallel()
 	store := ptrext.Of(mockFeedbackStore{
 		hasEmbedding: false,
 		keywordResults: []*feedback.SearchFeedback{
@@ -107,24 +165,15 @@ func TestSearch_NoEmbeddings_FallsBackToKeyword(t *testing.T) {
 		TenantID: "tenant1",
 		Query:    "test",
 	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !resp.UsedKeywordFallback {
-		t.Error("expected UsedKeywordFallback=true")
-	}
-	if len(resp.Hits) != 2 {
-		t.Errorf("expected 2 hits, got %d", len(resp.Hits))
-	}
-	if resp.Hits[0].MatchType != "keyword" {
-		t.Errorf("expected match_type='keyword', got %q", resp.Hits[0].MatchType)
-	}
-	if store.keywordCallCount != 1 {
-		t.Errorf("expected 1 keyword search call, got %d", store.keywordCallCount)
-	}
+	require.NoError(t, err)
+	require.True(t, resp.UsedKeywordFallback)
+	require.Len(t, resp.Hits, 2)
+	require.Equal(t, "keyword", resp.Hits[0].MatchType)
+	require.Equal(t, 1, store.keywordCallCount)
 }
 
 func TestSearch_HasEmbeddingError_FallsBackToKeyword(t *testing.T) {
+	t.Parallel()
 	store := ptrext.Of(mockFeedbackStore{
 		hasEmbeddingErr: errors.New("db error"),
 		keywordResults: []*feedback.SearchFeedback{
@@ -137,15 +186,77 @@ func TestSearch_HasEmbeddingError_FallsBackToKeyword(t *testing.T) {
 		TenantID: "tenant1",
 		Query:    "test",
 	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !resp.UsedKeywordFallback {
-		t.Error("expected UsedKeywordFallback=true")
-	}
+	require.NoError(t, err)
+	require.True(t, resp.UsedKeywordFallback)
+}
+
+func TestSearch_StatsError_UsesEmptyStats(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		hasEmbedding: true,
+		statsErr:     errors.New("stats query failed"),
+		keywordResults: []*feedback.SearchFeedback{
+			{ID: 1, Content: "test"},
+		},
+	})
+	// stats error -> stats.EmbeddingModel == "" -> keyword fallback.
+	svc := New(store, nil, nil, nil)
+
+	resp, err := svc.Search(context.Background(), ptrext.Of(SearchRequest{
+		TenantID: "tenant1",
+		Query:    "test",
+	}))
+	require.NoError(t, err)
+	require.True(t, resp.UsedKeywordFallback)
+}
+
+func TestSearch_EmptyEmbeddingModel_FallsBackToKeyword(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		hasEmbedding: true,
+		stats: ptrext.Of(feedback.EmbeddingStats{
+			EmbeddedCount:  10,
+			EmbeddingModel: "", // no model set
+		}),
+		keywordResults: []*feedback.SearchFeedback{
+			{ID: 1, Content: "test"},
+		},
+	})
+	svc := New(store, nil, nil, nil)
+
+	resp, err := svc.Search(context.Background(), ptrext.Of(SearchRequest{
+		TenantID: "tenant1",
+		Query:    "test",
+	}))
+	require.NoError(t, err)
+	require.True(t, resp.UsedKeywordFallback)
+}
+
+func TestSearch_EmbeddingGenerationFails_FallsBackToKeyword(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		hasEmbedding: true,
+		stats: ptrext.Of(feedback.EmbeddingStats{
+			EmbeddedCount:  10,
+			EmbeddingModel: "text-embedding-3-small",
+		}),
+		keywordResults: []*feedback.SearchFeedback{
+			{ID: 1, Content: "test"},
+		},
+	})
+	// nil router -> getOrGenerateEmbedding returns error -> keyword fallback.
+	svc := New(store, nil, nil, nil)
+
+	resp, err := svc.Search(context.Background(), ptrext.Of(SearchRequest{
+		TenantID: "tenant1",
+		Query:    "test",
+	}))
+	require.NoError(t, err)
+	require.True(t, resp.UsedKeywordFallback)
 }
 
 func TestSearch_KeywordScoreDescending(t *testing.T) {
+	t.Parallel()
 	store := ptrext.Of(mockFeedbackStore{
 		hasEmbedding: false,
 		keywordResults: []*feedback.SearchFeedback{
@@ -160,22 +271,60 @@ func TestSearch_KeywordScoreDescending(t *testing.T) {
 		TenantID: "tenant1",
 		Query:    "test",
 	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// First result should have highest keyword score.
-	if resp.Hits[0].KeywordScore <= resp.Hits[1].KeywordScore {
-		t.Errorf("first hit score (%f) should be > second (%f)",
-			resp.Hits[0].KeywordScore, resp.Hits[1].KeywordScore)
-	}
-	if resp.Hits[1].KeywordScore <= resp.Hits[2].KeywordScore {
-		t.Errorf("second hit score (%f) should be > third (%f)",
-			resp.Hits[1].KeywordScore, resp.Hits[2].KeywordScore)
-	}
+	require.Greater(t, resp.Hits[0].KeywordScore, resp.Hits[1].KeywordScore)
+	require.Greater(t, resp.Hits[1].KeywordScore, resp.Hits[2].KeywordScore)
+}
+
+func TestSearch_NilRateLimiter_Proceeds(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		hasEmbedding: false,
+		keywordResults: []*feedback.SearchFeedback{
+			{ID: 1, Content: "test"},
+		},
+	})
+	svc := New(store, nil, nil, nil)
+
+	resp, err := svc.Search(context.Background(), ptrext.Of(SearchRequest{
+		TenantID: "tenant1",
+		Query:    "test",
+	}))
+
+	require.NoError(t, err)
+	require.Len(t, resp.Hits, 1)
+}
+
+func TestSearch_ModelMismatch_FallsBackToKeyword(t *testing.T) {
+	t.Parallel()
+	// Embedding generation fails because router is nil, which triggers keyword
+	// fallback via the same code path as a model mismatch.
+	store := ptrext.Of(mockFeedbackStore{
+		hasEmbedding: true,
+		stats: ptrext.Of(feedback.EmbeddingStats{
+			EmbeddedCount:  50,
+			EmbeddingModel: "text-embedding-3-large",
+		}),
+		keywordResults: []*feedback.SearchFeedback{
+			{ID: 1, Content: "keyword result"},
+		},
+	})
+	svc := New(store, nil, nil, nil)
+
+	resp, err := svc.Search(context.Background(), ptrext.Of(SearchRequest{
+		TenantID: "tenant1",
+		Query:    "test",
+	}))
+
+	require.NoError(t, err)
+	require.True(t, resp.UsedKeywordFallback)
+	require.Len(t, resp.Hits, 1)
 }
 
 func TestNormalizeRequest_Defaults(t *testing.T) {
+	t.Parallel()
 	req := ptrext.Of(SearchRequest{
 		TenantID: "tenant1",
 		Query:    "test",
@@ -183,21 +332,14 @@ func TestNormalizeRequest_Defaults(t *testing.T) {
 
 	normalized := normalizeRequest(req)
 
-	if normalized.Limit != DefaultLimit {
-		t.Errorf("expected Limit=%d, got %d", DefaultLimit, normalized.Limit)
-	}
-	if normalized.MinSimilarity != DefaultMinSimilarity {
-		t.Errorf("expected MinSimilarity=%f, got %f", DefaultMinSimilarity, normalized.MinSimilarity)
-	}
-	if normalized.SemanticWeight != DefaultSemanticWeight {
-		t.Errorf("expected SemanticWeight=%f, got %f", DefaultSemanticWeight, normalized.SemanticWeight)
-	}
-	if normalized.KeywordWeight != DefaultKeywordWeight {
-		t.Errorf("expected KeywordWeight=%f, got %f", DefaultKeywordWeight, normalized.KeywordWeight)
-	}
+	require.Equal(t, DefaultLimit, normalized.Limit)
+	require.InDelta(t, DefaultMinSimilarity, normalized.MinSimilarity, 0.001)
+	require.InDelta(t, DefaultSemanticWeight, normalized.SemanticWeight, 0.001)
+	require.InDelta(t, DefaultKeywordWeight, normalized.KeywordWeight, 0.001)
 }
 
 func TestNormalizeRequest_LimitCap(t *testing.T) {
+	t.Parallel()
 	req := ptrext.Of(SearchRequest{
 		TenantID: "tenant1",
 		Query:    "test",
@@ -206,12 +348,399 @@ func TestNormalizeRequest_LimitCap(t *testing.T) {
 
 	normalized := normalizeRequest(req)
 
-	if normalized.Limit != MaxLimit {
-		t.Errorf("expected Limit=%d, got %d", MaxLimit, normalized.Limit)
+	require.Equal(t, MaxLimit, normalized.Limit)
+}
+
+func TestNormalizeRequest_PreservesCustomValues(t *testing.T) {
+	t.Parallel()
+	filter := ptrext.Of(feedback.FeedbackFilter{Q: "bug"})
+	req := ptrext.Of(SearchRequest{
+		TenantID:       "tenant1",
+		Query:          "test",
+		Limit:          15,
+		MinSimilarity:  0.8,
+		Filter:         filter,
+		SemanticWeight: 0.5,
+		KeywordWeight:  0.5,
+	})
+
+	normalized := normalizeRequest(req)
+
+	require.Equal(t, 15, normalized.Limit)
+	require.InDelta(t, 0.8, normalized.MinSimilarity, 0.001)
+	require.InDelta(t, 0.5, normalized.SemanticWeight, 0.001)
+	require.InDelta(t, 0.5, normalized.KeywordWeight, 0.001)
+	require.Equal(t, filter, normalized.Filter)
+	require.Equal(t, "tenant1", normalized.TenantID)
+	require.Equal(t, "test", normalized.Query)
+}
+
+func TestNormalizeRequest_NegativeLimit(t *testing.T) {
+	t.Parallel()
+	req := ptrext.Of(SearchRequest{
+		TenantID: "tenant1",
+		Query:    "test",
+		Limit:    -5,
+	})
+
+	normalized := normalizeRequest(req)
+	require.Equal(t, DefaultLimit, normalized.Limit)
+}
+
+func TestKeywordOnlySearch_Error(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		keywordErr: errors.New("keyword search db error"),
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.keywordOnlySearch(context.Background(), ptrext.Of(SearchRequest{
+		TenantID: "tenant1",
+		Query:    "test",
+		Limit:    10,
+	}))
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+	require.Contains(t, err.Error(), "keyword search")
+}
+
+func TestKeywordOnlySearch_EmptyResults(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		keywordResults: []*feedback.SearchFeedback{},
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.keywordOnlySearch(context.Background(), ptrext.Of(SearchRequest{
+		TenantID: "tenant1",
+		Query:    "test",
+		Limit:    10,
+	}))
+
+	require.NoError(t, err)
+	require.Empty(t, resp.Hits)
+	require.True(t, resp.UsedKeywordFallback)
+	require.Equal(t, "", resp.EmbeddingModel)
+	require.Equal(t, 0, resp.TotalWithEmbeddings)
+}
+
+func TestKeywordOnlySearch_ScoreFloorAt01(t *testing.T) {
+	t.Parallel()
+	// Build enough results so that position-based scoring would go below 0.1
+	// if not clamped. Position 19: 1.0 - 19*0.05 = 0.05 -> clamped to 0.1.
+	results := make([]*feedback.SearchFeedback, 25)
+	for i := range results {
+		results[i] = ptrext.Of(feedback.SearchFeedback{ID: int64(i + 1), Content: "item"})
+	}
+	store := ptrext.Of(mockFeedbackStore{keywordResults: results})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.keywordOnlySearch(context.Background(), ptrext.Of(SearchRequest{
+		TenantID: "tenant1",
+		Query:    "test",
+		Limit:    30,
+	}))
+
+	require.NoError(t, err)
+	require.Len(t, resp.Hits, 25)
+	// Last hit (position 24) would be 1.0 - 24*0.05 = -0.2, clamped to 0.1.
+	require.InDelta(t, 0.1, resp.Hits[24].KeywordScore, 0.001)
+	// Position 18: 1.0 - 18*0.05 = 0.1.
+	require.InDelta(t, 0.1, resp.Hits[18].KeywordScore, 0.001)
+}
+
+func TestKeywordOnlySearchWithMetrics_Error(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		keywordErr: errors.New("db error"),
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.keywordOnlySearchWithMetrics(
+		context.Background(),
+		ptrext.Of(SearchRequest{TenantID: "t1", Query: "q", Limit: 10}),
+		time.Now(),
+	)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+}
+
+func TestHybridSearch_Success(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		semanticHits: []feedback.SemanticSearchHit{
+			{Feedback: ptrext.Of(feedback.SearchFeedback{ID: 1, Content: "semantic hit"}), Similarity: 0.9},
+		},
+		keywordResults: []*feedback.SearchFeedback{
+			{ID: 2, Content: "keyword hit"},
+		},
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.hybridSearch(
+		context.Background(),
+		ptrext.Of(SearchRequest{
+			TenantID:       "tenant1",
+			Query:          "test",
+			Limit:          10,
+			MinSimilarity:  0.5,
+			SemanticWeight: 0.7,
+			KeywordWeight:  0.3,
+		}),
+		[]float32{0.1, 0.2},
+		"text-embedding-3-small",
+		100,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Hits, 2)
+	require.Equal(t, "text-embedding-3-small", resp.EmbeddingModel)
+	require.Equal(t, 100, resp.TotalWithEmbeddings)
+	require.False(t, resp.UsedKeywordFallback)
+	require.Equal(t, 1, store.semanticCallCount)
+	require.Equal(t, 1, store.keywordCallCount)
+}
+
+func TestHybridSearch_SemanticError_FallsBackToKeyword(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		semanticErr: errors.New("vector search failed"),
+		keywordResults: []*feedback.SearchFeedback{
+			{ID: 1, Content: "keyword fallback"},
+		},
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.hybridSearch(
+		context.Background(),
+		ptrext.Of(SearchRequest{
+			TenantID:       "tenant1",
+			Query:          "test",
+			Limit:          10,
+			SemanticWeight: 0.7,
+			KeywordWeight:  0.3,
+		}),
+		[]float32{0.1, 0.2},
+		"text-embedding-3-small",
+		50,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Hits, 1)
+	require.True(t, resp.UsedKeywordFallback)
+	require.Equal(t, "keyword", resp.Hits[0].MatchType)
+	require.Equal(t, 1, store.semanticCallCount)
+}
+
+func TestHybridSearch_KeywordError_ContinuesWithSemanticOnly(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		semanticHits: []feedback.SemanticSearchHit{
+			{Feedback: ptrext.Of(feedback.SearchFeedback{ID: 1, Content: "semantic"}), Similarity: 0.9},
+		},
+		keywordErr: errors.New("keyword search failed"),
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.hybridSearch(
+		context.Background(),
+		ptrext.Of(SearchRequest{
+			TenantID:       "tenant1",
+			Query:          "test",
+			Limit:          10,
+			SemanticWeight: 0.7,
+			KeywordWeight:  0.3,
+		}),
+		[]float32{0.1, 0.2},
+		"text-embedding-3-small",
+		50,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Hits, 1)
+	require.Equal(t, "semantic", resp.Hits[0].MatchType)
+	require.False(t, resp.UsedKeywordFallback)
+}
+
+func TestHybridSearch_NoSemanticResults_MarksAsFallback(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		semanticHits: []feedback.SemanticSearchHit{}, // empty
+		keywordResults: []*feedback.SearchFeedback{
+			{ID: 1, Content: "keyword only"},
+		},
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.hybridSearch(
+		context.Background(),
+		ptrext.Of(SearchRequest{
+			TenantID:       "tenant1",
+			Query:          "test",
+			Limit:          10,
+			SemanticWeight: 0.7,
+			KeywordWeight:  0.3,
+		}),
+		[]float32{0.1},
+		"model",
+		10,
+	)
+
+	require.NoError(t, err)
+	require.True(t, resp.UsedKeywordFallback)
+}
+
+func TestHybridSearch_BothErrors_ReturnsKeywordError(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		semanticErr: errors.New("vector fail"),
+		keywordErr:  errors.New("keyword fail"),
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.hybridSearch(
+		context.Background(),
+		ptrext.Of(SearchRequest{
+			TenantID:       "tenant1",
+			Query:          "test",
+			Limit:          10,
+			SemanticWeight: 0.7,
+			KeywordWeight:  0.3,
+		}),
+		[]float32{0.1},
+		"model",
+		5,
+	)
+
+	// Semantic error triggers keyword fallback, which also fails.
+	require.Error(t, err)
+	require.Nil(t, resp)
+	require.Contains(t, err.Error(), "keyword search")
+}
+
+func TestHybridSearchWithMetrics_SemanticType(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		semanticHits: []feedback.SemanticSearchHit{
+			{Feedback: ptrext.Of(feedback.SearchFeedback{ID: 1}), Similarity: 0.9},
+		},
+		keywordResults: []*feedback.SearchFeedback{},
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.hybridSearchWithMetrics(
+		context.Background(),
+		ptrext.Of(SearchRequest{
+			TenantID:       "tenant1",
+			Query:          "test",
+			Limit:          10,
+			SemanticWeight: 0.7,
+			KeywordWeight:  0.3,
+		}),
+		[]float32{0.1},
+		"model",
+		5,
+		time.Now(),
+	)
+
+	require.NoError(t, err)
+	require.False(t, resp.UsedKeywordFallback)
+	// All hits are "semantic" type.
+	for _, hit := range resp.Hits {
+		require.Equal(t, "semantic", hit.MatchType)
 	}
 }
 
+func TestHybridSearchWithMetrics_HybridType(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		semanticHits: []feedback.SemanticSearchHit{
+			{Feedback: ptrext.Of(feedback.SearchFeedback{ID: 1}), Similarity: 0.9},
+		},
+		keywordResults: []*feedback.SearchFeedback{
+			{ID: 1}, // same ID -> hybrid
+		},
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.hybridSearchWithMetrics(
+		context.Background(),
+		ptrext.Of(SearchRequest{
+			TenantID:       "tenant1",
+			Query:          "test",
+			Limit:          10,
+			SemanticWeight: 0.7,
+			KeywordWeight:  0.3,
+		}),
+		[]float32{0.1},
+		"model",
+		5,
+		time.Now(),
+	)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Hits, 1)
+	require.Equal(t, "hybrid", resp.Hits[0].MatchType)
+}
+
+func TestHybridSearchWithMetrics_FallbackType(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		semanticHits:   []feedback.SemanticSearchHit{},
+		keywordResults: []*feedback.SearchFeedback{{ID: 1}},
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.hybridSearchWithMetrics(
+		context.Background(),
+		ptrext.Of(SearchRequest{
+			TenantID:       "tenant1",
+			Query:          "test",
+			Limit:          10,
+			SemanticWeight: 0.7,
+			KeywordWeight:  0.3,
+		}),
+		[]float32{0.1},
+		"model",
+		5,
+		time.Now(),
+	)
+
+	require.NoError(t, err)
+	require.True(t, resp.UsedKeywordFallback)
+}
+
+func TestHybridSearchWithMetrics_Error(t *testing.T) {
+	t.Parallel()
+	store := ptrext.Of(mockFeedbackStore{
+		semanticErr: errors.New("vector fail"),
+		keywordErr:  errors.New("keyword fail"),
+	})
+	svc := ptrext.Of(service{feedbackStore: store})
+
+	resp, err := svc.hybridSearchWithMetrics(
+		context.Background(),
+		ptrext.Of(SearchRequest{
+			TenantID:       "tenant1",
+			Query:          "test",
+			Limit:          10,
+			SemanticWeight: 0.7,
+			KeywordWeight:  0.3,
+		}),
+		[]float32{0.1},
+		"model",
+		5,
+		time.Now(),
+	)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+}
+
 func TestMergeResults_Deduplication(t *testing.T) {
+	t.Parallel()
 	svc := ptrext.Of(service{})
 
 	semanticHits := []feedback.SemanticSearchHit{
@@ -225,33 +754,56 @@ func TestMergeResults_Deduplication(t *testing.T) {
 
 	merged := svc.mergeResults(semanticHits, keywordResults, 0.7, 0.3, 10)
 
-	// Should have 3 unique items.
-	if len(merged) != 3 {
-		t.Errorf("expected 3 merged results, got %d", len(merged))
-	}
+	require.Len(t, merged, 3)
 
 	// Check that ID=2 is marked as hybrid.
 	var found bool
 	for _, hit := range merged {
 		if hit.Feedback.ID == 2 {
 			found = true
-			if hit.MatchType != "hybrid" {
-				t.Errorf("expected ID=2 match_type='hybrid', got %q", hit.MatchType)
-			}
-			if hit.Similarity == 0 {
-				t.Error("expected ID=2 to have semantic similarity")
-			}
-			if hit.KeywordScore == 0 {
-				t.Error("expected ID=2 to have keyword score")
-			}
+			require.Equal(t, "hybrid", hit.MatchType)
+			require.NotZero(t, hit.Similarity)
+			require.NotZero(t, hit.KeywordScore)
 		}
 	}
-	if !found {
-		t.Error("ID=2 not found in merged results")
+	require.True(t, found, "ID=2 not found in merged results")
+}
+
+func TestMergeResults_NilSemanticFeedback_Skipped(t *testing.T) {
+	t.Parallel()
+	svc := ptrext.Of(service{})
+
+	semanticHits := []feedback.SemanticSearchHit{
+		{Feedback: nil, Similarity: 0.9},
+		{Feedback: ptrext.Of(feedback.SearchFeedback{ID: 1, Content: "real"}), Similarity: 0.8},
 	}
+	var keywordResults []*feedback.SearchFeedback
+
+	merged := svc.mergeResults(semanticHits, keywordResults, 0.7, 0.3, 10)
+
+	require.Len(t, merged, 1)
+	require.Equal(t, int64(1), merged[0].Feedback.ID)
+}
+
+func TestMergeResults_NilKeywordFeedback_Skipped(t *testing.T) {
+	t.Parallel()
+	svc := ptrext.Of(service{})
+
+	var semanticHits []feedback.SemanticSearchHit
+	keywordResults := []*feedback.SearchFeedback{
+		nil,
+		{ID: 1, Content: "real"},
+		nil,
+	}
+
+	merged := svc.mergeResults(semanticHits, keywordResults, 0.7, 0.3, 10)
+
+	require.Len(t, merged, 1)
+	require.Equal(t, int64(1), merged[0].Feedback.ID)
 }
 
 func TestMergeResults_SortedByWeightedScore(t *testing.T) {
+	t.Parallel()
 	svc := ptrext.Of(service{})
 
 	// High semantic, low keyword.
@@ -268,12 +820,11 @@ func TestMergeResults_SortedByWeightedScore(t *testing.T) {
 	// ID=2: 0*0.7 + 1.0*0.3 = 0.30
 	merged := svc.mergeResults(semanticHits, keywordResults, 0.7, 0.3, 10)
 
-	if merged[0].Feedback.ID != 1 {
-		t.Errorf("expected ID=1 first (higher weighted score), got ID=%d", merged[0].Feedback.ID)
-	}
+	require.Equal(t, int64(1), merged[0].Feedback.ID)
 }
 
 func TestMergeResults_Limit(t *testing.T) {
+	t.Parallel()
 	svc := ptrext.Of(service{})
 
 	semanticHits := []feedback.SemanticSearchHit{
@@ -285,86 +836,216 @@ func TestMergeResults_Limit(t *testing.T) {
 
 	merged := svc.mergeResults(semanticHits, keywordResults, 0.7, 0.3, 2)
 
-	if len(merged) != 2 {
-		t.Errorf("expected 2 results after limit, got %d", len(merged))
+	require.Len(t, merged, 2)
+}
+
+func TestMergeResults_EmptyInputs(t *testing.T) {
+	t.Parallel()
+	svc := ptrext.Of(service{})
+
+	merged := svc.mergeResults(nil, nil, 0.7, 0.3, 10)
+
+	require.Empty(t, merged)
+}
+
+func TestMergeResults_KeywordScoreFloor(t *testing.T) {
+	t.Parallel()
+	svc := ptrext.Of(service{})
+
+	var semanticHits []feedback.SemanticSearchHit
+	// 25 keyword results: position 24 -> 1.0 - 24*0.05 = -0.2 -> clamped to 0.1.
+	keywordResults := make([]*feedback.SearchFeedback, 25)
+	for i := range keywordResults {
+		keywordResults[i] = ptrext.Of(feedback.SearchFeedback{ID: int64(i + 1)})
+	}
+
+	merged := svc.mergeResults(semanticHits, keywordResults, 0.7, 0.3, 30)
+
+	require.Len(t, merged, 25)
+	// All scores should be >= 0.1.
+	for _, hit := range merged {
+		require.GreaterOrEqual(t, hit.KeywordScore, 0.1)
 	}
 }
 
+func TestGetOrGenerateEmbedding_NilRouter(t *testing.T) {
+	t.Parallel()
+	svc := ptrext.Of(service{router: nil})
+
+	_, _, err := svc.getOrGenerateEmbedding(context.Background(), "tenant1", "test query")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm router not configured")
+}
+
+func TestGetOrGenerateEmbedding_CacheHit(t *testing.T) {
+	t.Parallel()
+	cachedEmb := make([]float32, EmbeddingDims)
+	for i := range cachedEmb {
+		cachedEmb[i] = float32(i) * 0.01
+	}
+	cache := ptrext.Of(mockCache{
+		getEmbedding: cachedEmb,
+		getModel:     "text-embedding-3-small",
+		getFound:     true,
+	})
+	svc := ptrext.Of(service{cache: cache, router: nil})
+
+	emb, model, err := svc.getOrGenerateEmbedding(context.Background(), "tenant1", "test query")
+
+	require.NoError(t, err)
+	require.Len(t, emb, EmbeddingDims)
+	require.Equal(t, "text-embedding-3-small", model)
+	require.Equal(t, 1, cache.getCalls)
+	require.Equal(t, 0, cache.setCalls) // no set needed on hit
+}
+
+func TestGetOrGenerateEmbedding_CacheHit_WrongDims(t *testing.T) {
+	t.Parallel()
+	// Cache returns embedding with wrong dimensions -- should be treated as miss.
+	cache := ptrext.Of(mockCache{
+		getEmbedding: []float32{0.1, 0.2, 0.3}, // only 3 dims, not EmbeddingDims
+		getModel:     "text-embedding-3-small",
+		getFound:     true,
+	})
+	svc := ptrext.Of(service{cache: cache, router: nil})
+
+	// Falls through to router which is nil -> error.
+	_, _, err := svc.getOrGenerateEmbedding(context.Background(), "tenant1", "test query")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm router not configured")
+}
+
+func TestGetOrGenerateEmbedding_CacheHit_EmptyModel(t *testing.T) {
+	t.Parallel()
+	cachedEmb := make([]float32, EmbeddingDims)
+	cache := ptrext.Of(mockCache{
+		getEmbedding: cachedEmb,
+		getModel:     "", // empty model
+		getFound:     true,
+	})
+	svc := ptrext.Of(service{cache: cache, router: nil})
+
+	// Falls through to router which is nil -> error.
+	_, _, err := svc.getOrGenerateEmbedding(context.Background(), "tenant1", "test query")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm router not configured")
+}
+
+func TestGetOrGenerateEmbedding_CacheGetError_ContinuesWithoutCache(t *testing.T) {
+	t.Parallel()
+	cache := ptrext.Of(mockCache{
+		getErr: errors.New("redis timeout"),
+	})
+	// Router is nil, so it fails at the "generate" step, proving we got past the cache error.
+	svc := ptrext.Of(service{cache: cache, router: nil})
+
+	_, _, err := svc.getOrGenerateEmbedding(context.Background(), "tenant1", "test query")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm router not configured")
+	require.Equal(t, 1, cache.getCalls)
+}
+
+func TestGetOrGenerateEmbedding_NilCache_NilRouter(t *testing.T) {
+	t.Parallel()
+	svc := ptrext.Of(service{cache: nil, router: nil})
+
+	_, _, err := svc.getOrGenerateEmbedding(context.Background(), "tenant1", "test query")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm router not configured")
+}
+
+func TestGetEmbedding_DelegatesToGetOrGenerate(t *testing.T) {
+	t.Parallel()
+	cachedEmb := make([]float32, EmbeddingDims)
+	cache := ptrext.Of(mockCache{
+		getEmbedding: cachedEmb,
+		getModel:     "text-embedding-3-small",
+		getFound:     true,
+	})
+	svc := New(nil, nil, nil, cache)
+
+	emb, model, err := svc.GetEmbedding(context.Background(), "tenant1", "test query")
+
+	require.NoError(t, err)
+	require.Len(t, emb, EmbeddingDims)
+	require.Equal(t, "text-embedding-3-small", model)
+}
+
+func TestGetEmbedding_Error(t *testing.T) {
+	t.Parallel()
+	svc := New(nil, nil, nil, nil)
+
+	_, _, err := svc.GetEmbedding(context.Background(), "tenant1", "test query")
+
+	require.Error(t, err)
+}
+
 func TestHashQuery_Consistent(t *testing.T) {
+	t.Parallel()
 	hash1 := hashQuery("tenant1", "test query")
 	hash2 := hashQuery("tenant1", "test query")
 	hash3 := hashQuery("tenant2", "test query")
 
-	if hash1 != hash2 {
-		t.Error("same input should produce same hash")
-	}
-	if hash1 == hash3 {
-		t.Error("different tenant should produce different hash")
-	}
-	if len(hash1) != 32 {
-		t.Errorf("expected hash length 32, got %d", len(hash1))
-	}
+	require.Equal(t, hash1, hash2, "same input should produce same hash")
+	require.NotEqual(t, hash1, hash3, "different tenant should produce different hash")
+	require.Len(t, hash1, 32)
+}
+
+func TestHashQuery_DifferentQueries(t *testing.T) {
+	t.Parallel()
+	hash1 := hashQuery("tenant1", "query A")
+	hash2 := hashQuery("tenant1", "query B")
+
+	require.NotEqual(t, hash1, hash2, "different queries should produce different hashes")
 }
 
 func TestMemoryCache_Basic(t *testing.T) {
+	t.Parallel()
 	cache := NewMemoryCache()
 	ctx := context.Background()
 
 	// Initially empty.
 	_, _, found, err := cache.Get(ctx, "tenant1", "hash1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if found {
-		t.Error("expected not found")
-	}
+	require.NoError(t, err)
+	require.False(t, found)
 
 	// Set a value.
 	testEmb := []float32{0.1, 0.2, 0.3}
 	testModel := "text-embedding-3-small"
 	err = cache.Set(ctx, "tenant1", "hash1", testEmb, testModel, time.Hour)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Should find it now.
 	emb, model, found, err := cache.Get(ctx, "tenant1", "hash1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !found {
-		t.Error("expected found")
-	}
-	if len(emb) != 3 {
-		t.Errorf("expected 3 elements, got %d", len(emb))
-	}
-	if model != testModel {
-		t.Errorf("expected model %q, got %q", testModel, model)
-	}
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, emb, 3)
+	require.Equal(t, testModel, model)
 }
 
 func TestMemoryCache_Expiration(t *testing.T) {
+	t.Parallel()
 	cache := ptrext.Of(memoryCache{entries: make(map[string]memoryCacheEntry)})
 	ctx := context.Background()
 
-	// Set with very short TTL.
+	// Set with negative TTL (already expired).
 	testEmb := []float32{0.1, 0.2, 0.3}
-	err := cache.Set(ctx, "tenant1", "hash1", testEmb, "text-embedding-3-small", -time.Second) // Already expired
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := cache.Set(ctx, "tenant1", "hash1", testEmb, "text-embedding-3-small", -time.Second)
+	require.NoError(t, err)
 
 	// Should not find expired entry.
 	_, _, found, err := cache.Get(ctx, "tenant1", "hash1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if found {
-		t.Error("expected expired entry not found")
-	}
+	require.NoError(t, err)
+	require.False(t, found)
 }
 
 func TestVecToString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    []float32
@@ -377,15 +1058,15 @@ func TestVecToString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := vecToString(tt.input)
-			if result != tt.expected {
-				t.Errorf("expected %q, got %q", tt.expected, result)
-			}
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
 
 func TestParseVecString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		input       string
@@ -402,20 +1083,14 @@ func TestParseVecString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := parseVecString(tt.input)
 			if tt.expectErr {
-				if err == nil {
-					t.Error("expected error")
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-				return
-			}
-			if len(result) != tt.expectedLen {
-				t.Errorf("expected length %d, got %d", tt.expectedLen, len(result))
-			}
+			require.NoError(t, err)
+			require.Len(t, result, tt.expectedLen)
 		})
 	}
 }

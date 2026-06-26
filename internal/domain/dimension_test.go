@@ -377,3 +377,124 @@ func TestCustomerFeedbackPackV1(t *testing.T) {
 		t.Fatalf("sentiment display: %v", sentiment.DisplayName)
 	}
 }
+
+func TestRendererValidation(t *testing.T) {
+	t.Parallel()
+
+	base := Dimension{
+		Name:        "kind",
+		DisplayName: I18nString{"default": "Kind"},
+		Kind:        DimSingle,
+		Taxonomy:    []Taxonomy{{Value: "bug", DisplayName: I18nString{"default": "Bug"}}},
+		Renderer:    RendererSpec{Kind: RendererEnumBadge},
+	}
+
+	t.Run("valid with renderer tones", func(t *testing.T) {
+		t.Parallel()
+		d := base
+		d.Renderer.Values = map[string]RendererValue{"bug": {Tone: RendererToneSuccess}}
+		if err := d.Validate(); err != nil {
+			t.Fatalf("valid renderer tone rejected: %v", err)
+		}
+	})
+
+	t.Run("invalid renderer tone value", func(t *testing.T) {
+		t.Parallel()
+		d := base
+		d.Renderer.Values = map[string]RendererValue{"bug": {Tone: "sparkle"}}
+		err := d.Validate()
+		if err == nil {
+			t.Fatal("invalid tone should fail validation")
+		}
+	})
+}
+
+func TestComputeIsUrgent_EmptyUrgentSet(t *testing.T) {
+	t.Parallel()
+
+	dims := DimensionSet{
+		{Name: "severity", Kind: DimSingle, Taxonomy: []Taxonomy{{Value: "critical"}}},
+	}
+	attrs := map[string]any{"severity": "critical"}
+
+	if ComputeIsUrgent(attrs, dims) {
+		t.Fatal("no UrgentSet means no urgent")
+	}
+}
+
+func TestComputeIsUrgent_MultipleValues(t *testing.T) {
+	t.Parallel()
+
+	dims := DimensionSet{
+		{Name: "tags", Kind: DimMulti, Taxonomy: []Taxonomy{{Value: "a"}, {Value: "b"}, {Value: "c"}}, UrgentSet: []string{"b"}},
+	}
+	attrs := map[string]any{"tags": []any{"a", "b"}}
+
+	if !ComputeIsUrgent(attrs, dims) {
+		t.Fatal("multi-dim with matching urgent value should be urgent")
+	}
+}
+
+func TestAppendDiagnosticValue_Overflow(t *testing.T) {
+	t.Parallel()
+
+	values := make([]string, maxDiagnosticValues)
+	for i := range values {
+		values[i] = "x"
+	}
+	result := appendDiagnosticValue(values, "new")
+	if len(result) != maxDiagnosticValues {
+		t.Fatalf("expected max %d, got %d", maxDiagnosticValues, len(result))
+	}
+}
+
+func TestTruncateDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("short string passes through", func(t *testing.T) {
+		t.Parallel()
+		if got := truncateDiagnostic("short"); got != "short" {
+			t.Fatalf("expected 'short', got %q", got)
+		}
+	})
+
+	t.Run("trims whitespace", func(t *testing.T) {
+		t.Parallel()
+		if got := truncateDiagnostic("  hello  "); got != "hello" {
+			t.Fatalf("expected 'hello', got %q", got)
+		}
+	})
+}
+
+func TestToStringSlice_NonStringInSlice(t *testing.T) {
+	t.Parallel()
+
+	_, ok := toStringSlice([]any{"a", 42})
+	if ok {
+		t.Fatal("non-string element should fail")
+	}
+}
+
+func TestToStringSlice_NonSlice(t *testing.T) {
+	t.Parallel()
+
+	_, ok := toStringSlice(42)
+	if ok {
+		t.Fatal("non-slice should fail")
+	}
+}
+
+func TestDedupeStrings_WithEmpties(t *testing.T) {
+	t.Parallel()
+
+	result := dedupeStrings([]string{"a", "", "b", "a", "", "c"})
+	expected := []string{"a", "b", "c"}
+	if len(result) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, result)
+	}
+	for i, v := range expected {
+		if result[i] != v {
+			t.Fatalf("at %d: expected %q, got %q", i, v, result[i])
+		}
+	}
+}

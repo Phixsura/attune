@@ -185,3 +185,110 @@ func TestDefaultProgressConfig(t *testing.T) {
 	require.Equal(t, []int32{5, 10, 25, 50, 75, 100}, cfg.Steps)
 	require.Equal(t, 5*time.Minute, cfg.Interval)
 }
+
+func TestController_Get_NotFound(t *testing.T) {
+	t.Parallel()
+	c := NewController()
+	_, ok := c.Get("nonexistent")
+	require.False(t, ok)
+}
+
+func TestController_Evaluate_NoReleases(t *testing.T) {
+	t.Parallel()
+	c := NewController()
+	actions := c.Evaluate(t.Context())
+	require.Empty(t, actions)
+}
+
+func TestController_Evaluate_TriggersRollback(t *testing.T) {
+	t.Parallel()
+	c := NewController()
+	r := NewRelease(ReleaseConfig{
+		Name:           "bad-deploy",
+		InitialPercent: 50,
+		ErrorThreshold: 0.1,
+		MinRequests:    5,
+	})
+	for i := 0; i < 10; i++ {
+		r.RecordRequest(TargetCanary, errors.New("fail"), time.Millisecond)
+	}
+	for i := 0; i < 10; i++ {
+		r.RecordRequest(TargetStable, nil, time.Millisecond)
+	}
+	c.Register(r)
+
+	actions := c.Evaluate(t.Context())
+	require.Contains(t, actions["bad-deploy"], "rolled back")
+	require.Equal(t, StateRolledBack, r.Stats().State)
+}
+
+func TestController_Evaluate_NoRollbackWhenHealthy(t *testing.T) {
+	t.Parallel()
+	c := NewController()
+	r := NewRelease(ReleaseConfig{
+		Name:             "good-deploy",
+		InitialPercent:   50,
+		ErrorThreshold:   0.5,
+		LatencyThreshold: time.Second,
+		MinRequests:      5,
+	})
+	for i := 0; i < 10; i++ {
+		r.RecordRequest(TargetCanary, nil, time.Millisecond)
+	}
+	c.Register(r)
+
+	actions := c.Evaluate(t.Context())
+	require.Empty(t, actions)
+}
+
+func TestRelease_SetTrafficPercent_States(t *testing.T) {
+	t.Parallel()
+	r := NewRelease(ReleaseConfig{Name: "state-test"})
+
+	r.SetTrafficPercent(100)
+	require.Equal(t, StateCompleted, r.Stats().State)
+
+	r.SetTrafficPercent(0)
+	require.Equal(t, StatePaused, r.Stats().State)
+
+	r.SetTrafficPercent(50)
+	require.Equal(t, StateProgressing, r.Stats().State)
+}
+
+func TestRelease_Stats_ZeroRequests(t *testing.T) {
+	t.Parallel()
+	r := NewRelease(ReleaseConfig{Name: "empty", InitialPercent: 25})
+	stats := r.Stats()
+	require.Equal(t, "empty", stats.Name)
+	require.Equal(t, int32(25), stats.TrafficPercent)
+	require.Equal(t, int64(0), stats.CanaryRequests)
+	require.Equal(t, int64(0), stats.StableRequests)
+	require.Equal(t, float64(0), stats.CanaryErrorRate)
+	require.Equal(t, float64(0), stats.StableErrorRate)
+}
+
+func TestRelease_RecordRequest_Stable(t *testing.T) {
+	t.Parallel()
+	r := NewRelease(ReleaseConfig{Name: "stable-track"})
+	r.RecordRequest(TargetStable, errors.New("oops"), 50*time.Millisecond)
+	stats := r.Stats()
+	require.Equal(t, int64(1), stats.StableRequests)
+	require.InDelta(t, 1.0, stats.StableErrorRate, 0.01)
+	require.Equal(t, 50*time.Millisecond, stats.StableAvgLatency)
+}
+
+func TestRelease_ShouldRollback_NoRollbackLowError(t *testing.T) {
+	t.Parallel()
+	r := NewRelease(ReleaseConfig{
+		Name:             "healthy",
+		ErrorThreshold:   0.5,
+		LatencyThreshold: time.Second,
+		MinRequests:      5,
+	})
+	for i := 0; i < 10; i++ {
+		r.RecordRequest(TargetCanary, nil, 10*time.Millisecond)
+	}
+	shouldRollback, reason := r.ShouldRollback()
+	require.False(t, shouldRollback)
+	require.Empty(t, reason)
+}

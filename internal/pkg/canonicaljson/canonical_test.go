@@ -153,6 +153,149 @@ func TestMarshalEntry_RawJSON(t *testing.T) {
 	}
 }
 
+func TestMarshalEntry_InvalidJSON(t *testing.T) {
+	t.Parallel()
+	_, err := MarshalEntry(json.RawMessage(`not json`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestMarshal_CustomStruct(t *testing.T) {
+	t.Parallel()
+	type point struct {
+		X int `json:"x"`
+		Y int `json:"y"`
+	}
+	got, err := Marshal(point{X: 1, Y: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"x":1,"y":2}`
+	if string(got) != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestMarshal_StringBackspace(t *testing.T) {
+	t.Parallel()
+	got, err := Marshal("a\bb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `"a\bb"` {
+		t.Errorf("got %s, want %q", got, `a\bb`)
+	}
+}
+
+func TestMarshal_StringFormFeed(t *testing.T) {
+	t.Parallel()
+	got, err := Marshal("a\fb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `"a\fb"` {
+		t.Errorf("got %s, want %q", got, `a\fb`)
+	}
+}
+
+func TestMarshal_StringCarriageReturn(t *testing.T) {
+	t.Parallel()
+	got, err := Marshal("a\rb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `"a\rb"` {
+		t.Errorf("got %s, want %q", got, `a\rb`)
+	}
+}
+
+func TestMarshal_EmptyArray(t *testing.T) {
+	t.Parallel()
+	got, err := Marshal([]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "[]" {
+		t.Errorf("got %s, want []", got)
+	}
+}
+
+func TestMarshal_EmptyObject(t *testing.T) {
+	t.Parallel()
+	got, err := Marshal(map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "{}" {
+		t.Errorf("got %s, want {}", got)
+	}
+}
+
+func TestMarshal_NestedArrays(t *testing.T) {
+	t.Parallel()
+	got, err := Marshal([]any{[]any{1.0, 2.0}, []any{3.0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "[[1,2],[3]]" {
+		t.Errorf("got %s, want [[1,2],[3]]", got)
+	}
+}
+
+func TestMarshal_JSONNumber(t *testing.T) {
+	t.Parallel()
+	got, err := Marshal(json.Number("3.14"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "3.14" {
+		t.Errorf("got %s, want 3.14", got)
+	}
+}
+
+func TestMarshal_JSONNumberInvalid(t *testing.T) {
+	t.Parallel()
+	got, err := Marshal(json.Number("not-a-number"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "not-a-number" {
+		t.Errorf("got %s, want not-a-number", got)
+	}
+}
+
+func TestMarshal_UnsupportedChannelType(t *testing.T) {
+	t.Parallel()
+	_, err := Marshal(make(chan int))
+	if err == nil {
+		t.Fatal("channel should fail")
+	}
+}
+
+func TestMarshal_MixedArray(t *testing.T) {
+	t.Parallel()
+	got, err := Marshal([]any{"hello", float64(42), true, nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `["hello",42,true,null]`
+	if string(got) != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestMarshal_NegativeExponential(t *testing.T) {
+	t.Parallel()
+	got, err := Marshal(-1.5e-8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "-1.5e-8" {
+		t.Errorf("got %s, want -1.5e-8", got)
+	}
+}
+
 func TestMarshal_Deterministic(t *testing.T) {
 	input := map[string]any{
 		"id":     float64(42),

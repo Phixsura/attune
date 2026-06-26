@@ -127,6 +127,44 @@ func TestFormatText_SkippedCount(t *testing.T) {
 	}
 }
 
+func TestStatusIcon_Unknown(t *testing.T) {
+	t.Parallel()
+	if got := StatusIcon(Status("x")); got != "?" {
+		t.Errorf("StatusIcon unknown = %q, want ?", got)
+	}
+}
+
+func TestStatusLabel_Skipped(t *testing.T) {
+	t.Parallel()
+	got := StatusLabel(StatusSkipped)
+	if !strings.Contains(got, "SKIPPED") {
+		t.Errorf("StatusLabel(skipped) = %q, want to contain SKIPPED", got)
+	}
+}
+
+func TestCategoryTitle_AllCategories(t *testing.T) {
+	t.Parallel()
+	cats := []struct {
+		cat  Category
+		want string
+	}{
+		{CategoryConfig, "Config"},
+		{CategoryDatabase, "Database"},
+		{CategoryMigration, "Migration"},
+		{CategoryBackup, "Backup"},
+		{CategoryEncryption, "Encryption"},
+		{CategoryAuth, "Auth"},
+		{CategoryMetrics, "Metrics"},
+		{CategoryWorker, "Worker"},
+		{Category("custom"), "custom"},
+	}
+	for _, c := range cats {
+		if got := categoryTitle(c.cat); got != c.want {
+			t.Errorf("categoryTitle(%q) = %q, want %q", c.cat, got, c.want)
+		}
+	}
+}
+
 func TestFormatText_GroupsByCategory(t *testing.T) {
 	report := Report{
 		Status: StatusPass,

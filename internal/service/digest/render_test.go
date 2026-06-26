@@ -3,7 +3,12 @@
 package digest
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/Phixsura/attune/internal/repo/feedback"
 )
 
 func TestRenderSparkline(t *testing.T) {
@@ -113,4 +118,125 @@ func TestTruncate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRenderMarkdownItems(t *testing.T) {
+	t.Parallel()
+
+	items := []feedback.DigestFeedbackRow{
+		{ID: 1, Title: "Login fails"},
+		{ID: 2, Title: "Slow page load"},
+	}
+
+	t.Run("without deep link", func(t *testing.T) {
+		t.Parallel()
+		out := renderMarkdownItems(items, "")
+		require.Contains(t, out, "#1 Login fails")
+		require.Contains(t, out, "#2 Slow page load")
+		require.NotContains(t, out, "[→]")
+	})
+
+	t.Run("with deep link", func(t *testing.T) {
+		t.Parallel()
+		out := renderMarkdownItems(items, "https://app.example.com")
+		require.Contains(t, out, "[→](https://app.example.com/feedback/1)")
+		require.Contains(t, out, "[→](https://app.example.com/feedback/2)")
+	})
+}
+
+func TestRenderMarkdownHeader_WithDeltas(t *testing.T) {
+	t.Parallel()
+
+	view := DigestView{
+		RunDate:   "2024-01-15",
+		Sparkline: []int{1, 2, 3, 4, 5, 6, 7},
+		Result: Result{
+			Stats: feedback.DigestWindowStats{Total: 42, Enriched: 38, Urgent: 3},
+		},
+		Deltas: Deltas{
+			Feedback: DeltaValue{Direction: "up", Change: 5},
+			Enriched: DeltaValue{Direction: "down", Change: -2},
+			Urgent:   DeltaValue{Direction: "up", Change: 1},
+		},
+	}
+
+	out := renderMarkdownHeader(view)
+	require.Contains(t, out, "2024-01-15")
+	require.Contains(t, out, "↑5")
+	require.Contains(t, out, "↓2")
+	require.Contains(t, out, "3 urgent")
+}
+
+func TestRenderMarkdownHeader_NoSparkline(t *testing.T) {
+	t.Parallel()
+
+	view := DigestView{
+		RunDate: "2024-01-15",
+		Result:  Result{Stats: feedback.DigestWindowStats{Total: 10, Enriched: 8}},
+	}
+
+	out := renderMarkdownHeader(view)
+	require.NotContains(t, out, "7-day trend")
+}
+
+func TestRenderMarkdown_WithItems(t *testing.T) {
+	t.Parallel()
+
+	view := DigestView{
+		RunDate: "2024-01-15",
+		Result: Result{
+			Stats: feedback.DigestWindowStats{Total: 2, Enriched: 1},
+			Items: []feedback.DigestFeedbackRow{
+				{ID: 1, Title: "Bug report"},
+			},
+		},
+	}
+
+	out := renderMarkdown(view)
+	require.Contains(t, out, "Recent Feedback")
+	require.Contains(t, out, "#1 Bug report")
+}
+
+func TestRenderPayload_WithItems(t *testing.T) {
+	t.Parallel()
+
+	view := DigestView{
+		TenantID: "t1",
+		RunDate:  "2024-01-15",
+		Result: Result{
+			Stats: feedback.DigestWindowStats{Total: 1, Enriched: 1},
+			Items: []feedback.DigestFeedbackRow{
+				{ID: 42, Title: "Item title"},
+			},
+		},
+	}
+
+	data, err := RenderPayload(view)
+	require.NoError(t, err)
+	s := string(data)
+	require.True(t, strings.Contains(s, "t1"))
+	require.True(t, strings.Contains(s, "Item title"))
+}
+
+func TestRenderMarkdownThemes_SingleCount(t *testing.T) {
+	t.Parallel()
+
+	themes := []Theme{
+		{Title: "Auth", Count: 1, ExampleTitles: []string{"Login issue"}},
+	}
+
+	out := renderMarkdownThemes(themes, "")
+	require.Contains(t, out, "1 report\n")
+	require.NotContains(t, out, "reports")
+}
+
+func TestRenderMarkdownThemes_WithDeepLink(t *testing.T) {
+	t.Parallel()
+
+	themes := []Theme{
+		{Title: "Auth", Count: 3, ExampleIDs: []int64{1, 2, 3}},
+	}
+
+	out := renderMarkdownThemes(themes, "https://app.example.com")
+	require.Contains(t, out, "[View →](https://app.example.com/feedback?theme=Auth)")
 }

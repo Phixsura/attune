@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/repo/embedding"
@@ -335,4 +336,517 @@ func TestBuildClusterThemePlaceholderTitle(t *testing.T) {
 	if th.Count != 4 {
 		t.Fatalf("count = %d, want 4", th.Count)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Callback-based fakes for error injection in enrichment tests.
+// ---------------------------------------------------------------------------
+
+type fakeFeedbackFn struct {
+	windowStatsFn func(context.Context, string, time.Time, time.Time) (feedback.DigestWindowStats, error)
+	enrichedFn    func(context.Context, string, time.Time, time.Time, int) ([]feedback.DigestFeedbackRow, error)
+	dailyCountsFn func(context.Context, string, time.Time, int) ([]feedback.DailyCount, error)
+}
+
+func (f fakeFeedbackFn) WindowStats(ctx context.Context, tid string, from, to time.Time) (feedback.DigestWindowStats, error) {
+	return f.windowStatsFn(ctx, tid, from, to)
+}
+
+func (f fakeFeedbackFn) EnrichedInWindow(ctx context.Context, tid string, from, to time.Time, limit int) ([]feedback.DigestFeedbackRow, error) {
+	return f.enrichedFn(ctx, tid, from, to, limit)
+}
+
+func (f fakeFeedbackFn) DailyCounts(ctx context.Context, tid string, to time.Time, days int) ([]feedback.DailyCount, error) {
+	return f.dailyCountsFn(ctx, tid, to, days)
+}
+
+type fakeClustersFn struct {
+	getCfgFn      func(context.Context, string) (embedding.ClusteringConfig, error)
+	topClustersFn func(context.Context, string, time.Time, time.Time, int) ([]embedding.DigestCluster, error)
+	examplesFn    func(context.Context, string, uuid.UUID, time.Time, time.Time, int) ([]embedding.DigestExample, error)
+}
+
+func (f fakeClustersFn) GetClusteringConfig(ctx context.Context, tid string) (embedding.ClusteringConfig, error) {
+	return f.getCfgFn(ctx, tid)
+}
+
+func (f fakeClustersFn) TopClustersInWindow(ctx context.Context, tid string, from, to time.Time, limit int) ([]embedding.DigestCluster, error) {
+	return f.topClustersFn(ctx, tid, from, to, limit)
+}
+
+func (f fakeClustersFn) ClusterExamplesInWindow(ctx context.Context, tid string, id uuid.UUID, from, to time.Time, limit int) ([]embedding.DigestExample, error) {
+	return f.examplesFn(ctx, tid, id, from, to, limit)
+}
+
+// ---------------------------------------------------------------------------
+// computeDelta — flat (change == 0)
+// ---------------------------------------------------------------------------
+
+func TestComputeDelta(t *testing.T) {
+	t.Parallel()
+
+	t.Run("up", func(t *testing.T) {
+		t.Parallel()
+		d := computeDelta(10, 5)
+		require.Equal(t, 5, d.Change)
+		require.Equal(t, "up", d.Direction)
+	})
+
+	t.Run("down", func(t *testing.T) {
+		t.Parallel()
+		d := computeDelta(3, 7)
+		require.Equal(t, -4, d.Change)
+		require.Equal(t, "down", d.Direction)
+	})
+
+	t.Run("flat when equal", func(t *testing.T) {
+		t.Parallel()
+		d := computeDelta(5, 5)
+		require.Equal(t, 0, d.Change)
+		require.Equal(t, "flat", d.Direction)
+		require.Equal(t, 5, d.Current)
+		require.Equal(t, 5, d.Prior)
+	})
+
+	t.Run("flat when both zero", func(t *testing.T) {
+		t.Parallel()
+		d := computeDelta(0, 0)
+		require.Equal(t, 0, d.Change)
+		require.Equal(t, "flat", d.Direction)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// buildSparkline — edge cases
+// ---------------------------------------------------------------------------
+
+func TestBuildSparkline(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty counts returns zero-filled slice", func(t *testing.T) {
+		t.Parallel()
+		to := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
+		got := buildSparkline(nil, to, 7)
+		require.Len(t, got, 7)
+		for i, v := range got {
+			require.Equal(t, 0, v, "index %d should be zero", i)
+		}
+	})
+
+	t.Run("counts that do not match any date are ignored", func(t *testing.T) {
+		t.Parallel()
+		to := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
+		outOfRange := []feedback.DailyCount{
+			{Date: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Count: 99},
+		}
+		got := buildSparkline(outOfRange, to, 7)
+		require.Len(t, got, 7)
+		for i, v := range got {
+			require.Equal(t, 0, v, "index %d should be zero (out-of-range date)", i)
+		}
+	})
+
+	t.Run("multiple entries fill correct indices", func(t *testing.T) {
+		t.Parallel()
+		to := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
+		counts := []feedback.DailyCount{
+			{Date: time.Date(2026, 6, 14, 0, 0, 0, 0, time.UTC), Count: 3},  // index 0
+			{Date: time.Date(2026, 6, 17, 0, 0, 0, 0, time.UTC), Count: 7},  // index 3
+			{Date: time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC), Count: 12}, // index 5
+		}
+		got := buildSparkline(counts, to, 7)
+		require.Len(t, got, 7)
+		require.Equal(t, 3, got[0])
+		require.Equal(t, 0, got[1])
+		require.Equal(t, 0, got[2])
+		require.Equal(t, 7, got[3])
+		require.Equal(t, 0, got[4])
+		require.Equal(t, 12, got[5])
+		require.Equal(t, 0, got[6])
+	})
+
+	t.Run("single day window", func(t *testing.T) {
+		t.Parallel()
+		to := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
+		counts := []feedback.DailyCount{
+			{Date: time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC), Count: 5},
+		}
+		got := buildSparkline(counts, to, 1)
+		require.Equal(t, []int{5}, got)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// priorThemeKeys
+// ---------------------------------------------------------------------------
+
+func TestPriorThemeKeys(t *testing.T) {
+	t.Parallel()
+
+	t.Run("builds lowercase key map from cluster labels", func(t *testing.T) {
+		t.Parallel()
+		clusters := fakeClustersFn{
+			getCfgFn: func(context.Context, string) (embedding.ClusteringConfig, error) {
+				return embedding.ClusteringConfig{}, nil
+			},
+			topClustersFn: func(context.Context, string, time.Time, time.Time, int) ([]embedding.DigestCluster, error) {
+				return []embedding.DigestCluster{
+					{Label: "Checkout Bug"},
+					{Label: "Performance"},
+					{Label: ""},
+				}, nil
+			},
+			examplesFn: func(context.Context, string, uuid.UUID, time.Time, time.Time, int) ([]embedding.DigestExample, error) {
+				return nil, nil
+			},
+		}
+		agg := NewAggregator(clusters, fakeFeedback{}, fakeNamer{})
+		from := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+		to := time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)
+
+		keys, err := agg.priorThemeKeys(context.Background(), "t", from, to)
+		require.NoError(t, err)
+		require.Len(t, keys, 2)
+		require.True(t, keys["checkout bug"])
+		require.True(t, keys["performance"])
+		require.False(t, keys[""])
+	})
+
+	t.Run("propagates error from TopClustersInWindow", func(t *testing.T) {
+		t.Parallel()
+		clusters := fakeClustersFn{
+			getCfgFn: func(context.Context, string) (embedding.ClusteringConfig, error) {
+				return embedding.ClusteringConfig{}, nil
+			},
+			topClustersFn: func(context.Context, string, time.Time, time.Time, int) ([]embedding.DigestCluster, error) {
+				return nil, errors.New("db down")
+			},
+			examplesFn: func(context.Context, string, uuid.UUID, time.Time, time.Time, int) ([]embedding.DigestExample, error) {
+				return nil, nil
+			},
+		}
+		agg := NewAggregator(clusters, fakeFeedback{}, fakeNamer{})
+		_, err := agg.priorThemeKeys(context.Background(), "t", time.Time{}, time.Time{})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "db down")
+	})
+
+	t.Run("empty clusters returns empty map", func(t *testing.T) {
+		t.Parallel()
+		clusters := fakeClustersFn{
+			getCfgFn: func(context.Context, string) (embedding.ClusteringConfig, error) {
+				return embedding.ClusteringConfig{}, nil
+			},
+			topClustersFn: func(context.Context, string, time.Time, time.Time, int) ([]embedding.DigestCluster, error) {
+				return nil, nil
+			},
+			examplesFn: func(context.Context, string, uuid.UUID, time.Time, time.Time, int) ([]embedding.DigestExample, error) {
+				return nil, nil
+			},
+		}
+		agg := NewAggregator(clusters, fakeFeedback{}, fakeNamer{})
+		keys, err := agg.priorThemeKeys(context.Background(), "t", time.Time{}, time.Time{})
+		require.NoError(t, err)
+		require.Empty(t, keys)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// applyLifecycle
+// ---------------------------------------------------------------------------
+
+func TestApplyLifecycle(t *testing.T) {
+	t.Parallel()
+
+	t.Run("marks ongoing when key exists", func(t *testing.T) {
+		t.Parallel()
+		themes := []Theme{
+			{Title: "Checkout Bug"},
+			{Title: "New Feature"},
+			{Title: "Performance"},
+		}
+		priorKeys := map[string]bool{
+			"checkout bug": true,
+			"performance":  true,
+		}
+		applyLifecycle(themes, priorKeys)
+
+		require.Equal(t, LifecycleOngoing, themes[0].Lifecycle)
+		require.Equal(t, LifecycleNew, themes[1].Lifecycle)
+		require.Equal(t, LifecycleOngoing, themes[2].Lifecycle)
+	})
+
+	t.Run("all new when prior keys empty", func(t *testing.T) {
+		t.Parallel()
+		themes := []Theme{{Title: "Alpha"}, {Title: "Beta"}}
+		applyLifecycle(themes, map[string]bool{})
+
+		require.Equal(t, LifecycleNew, themes[0].Lifecycle)
+		require.Equal(t, LifecycleNew, themes[1].Lifecycle)
+	})
+
+	t.Run("case-insensitive matching", func(t *testing.T) {
+		t.Parallel()
+		themes := []Theme{{Title: "CHECKOUT BUG"}}
+		priorKeys := map[string]bool{"checkout bug": true}
+		applyLifecycle(themes, priorKeys)
+		require.Equal(t, LifecycleOngoing, themes[0].Lifecycle)
+	})
+
+	t.Run("empty themes slice is a no-op", func(t *testing.T) {
+		t.Parallel()
+		applyLifecycle(nil, map[string]bool{"x": true})
+	})
+}
+
+// ---------------------------------------------------------------------------
+// ComputeEnrichment
+// ---------------------------------------------------------------------------
+
+func TestComputeEnrichment(t *testing.T) {
+	t.Parallel()
+
+	from := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 6, 13, 0, 0, 0, 0, time.UTC)
+	priorFrom := time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)
+	priorTo := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
+
+	t.Run("prior stats failure returns partial enrichment without deltas", func(t *testing.T) {
+		t.Parallel()
+		fb := fakeFeedbackFn{
+			windowStatsFn: func(context.Context, string, time.Time, time.Time) (feedback.DigestWindowStats, error) {
+				// ComputeEnrichment calls WindowStats once for the prior window.
+				return feedback.DigestWindowStats{}, errors.New("prior stats unavailable")
+			},
+			enrichedFn: func(context.Context, string, time.Time, time.Time, int) ([]feedback.DigestFeedbackRow, error) {
+				return nil, nil
+			},
+			dailyCountsFn: func(_ context.Context, _ string, _ time.Time, _ int) ([]feedback.DailyCount, error) {
+				return []feedback.DailyCount{
+					{Date: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), Count: 10},
+				}, nil
+			},
+		}
+		clusters := fakeClusters{cfg: embedding.ClusteringConfig{Enabled: false}}
+		agg := NewAggregator(clusters, fb, fakeNamer{themes: nil})
+
+		res := Result{Stats: feedback.DigestWindowStats{Total: 10, Enriched: 10}}
+		e, err := agg.ComputeEnrichment(context.Background(), "t", &res, from, to, priorFrom, priorTo)
+
+		require.NoError(t, err)
+		// Deltas should be zero-valued (not computed because prior stats failed)
+		require.Equal(t, Deltas{}, e.Deltas)
+		// Sparkline should still be populated
+		require.NotNil(t, e.Sparkline)
+	})
+
+	t.Run("daily counts failure returns partial enrichment without sparkline", func(t *testing.T) {
+		t.Parallel()
+		fb := fakeFeedbackFn{
+			windowStatsFn: func(context.Context, string, time.Time, time.Time) (feedback.DigestWindowStats, error) {
+				return feedback.DigestWindowStats{Total: 8, Enriched: 6, Urgent: 1}, nil
+			},
+			enrichedFn: func(context.Context, string, time.Time, time.Time, int) ([]feedback.DigestFeedbackRow, error) {
+				return nil, nil
+			},
+			dailyCountsFn: func(context.Context, string, time.Time, int) ([]feedback.DailyCount, error) {
+				return nil, errors.New("daily counts unavailable")
+			},
+		}
+		clusters := fakeClusters{cfg: embedding.ClusteringConfig{Enabled: false}}
+		agg := NewAggregator(clusters, fb, fakeNamer{themes: nil})
+
+		res := Result{Stats: feedback.DigestWindowStats{Total: 8, Enriched: 6, Urgent: 1}}
+		e, err := agg.ComputeEnrichment(context.Background(), "t", &res, from, to, priorFrom, priorTo)
+
+		require.NoError(t, err)
+		// Deltas should be computed (prior stats succeed, current == prior here)
+		require.Equal(t, "flat", e.Deltas.Feedback.Direction)
+		// Sparkline should be nil (daily counts failed)
+		require.Nil(t, e.Sparkline)
+	})
+
+	t.Run("themes trigger lifecycle computation", func(t *testing.T) {
+		t.Parallel()
+		fb := fakeFeedbackFn{
+			windowStatsFn: func(context.Context, string, time.Time, time.Time) (feedback.DigestWindowStats, error) {
+				return feedback.DigestWindowStats{Total: 20, Enriched: 15, Urgent: 2}, nil
+			},
+			enrichedFn: func(context.Context, string, time.Time, time.Time, int) ([]feedback.DigestFeedbackRow, error) {
+				return nil, nil
+			},
+			dailyCountsFn: func(context.Context, string, time.Time, int) ([]feedback.DailyCount, error) {
+				return nil, nil
+			},
+		}
+		clusters := fakeClustersFn{
+			getCfgFn: func(context.Context, string) (embedding.ClusteringConfig, error) {
+				return embedding.ClusteringConfig{Enabled: true}, nil
+			},
+			topClustersFn: func(context.Context, string, time.Time, time.Time, int) ([]embedding.DigestCluster, error) {
+				return []embedding.DigestCluster{
+					{Label: "checkout bug"},
+				}, nil
+			},
+			examplesFn: func(context.Context, string, uuid.UUID, time.Time, time.Time, int) ([]embedding.DigestExample, error) {
+				return nil, nil
+			},
+		}
+		agg := NewAggregator(clusters, fb, fakeNamer{})
+
+		res := Result{
+			Stats:  feedback.DigestWindowStats{Total: 20, Enriched: 15},
+			Themes: []Theme{{Title: "Checkout Bug", Count: 5}, {Title: "New Feature", Count: 3}},
+		}
+		e, err := agg.ComputeEnrichment(context.Background(), "t", &res, from, to, priorFrom, priorTo)
+
+		require.NoError(t, err)
+		require.NotEqual(t, Deltas{}, e.Deltas)
+		require.Equal(t, LifecycleOngoing, res.Themes[0].Lifecycle)
+		require.Equal(t, LifecycleNew, res.Themes[1].Lifecycle)
+	})
+
+	t.Run("prior themes failure skips lifecycle but keeps other enrichment", func(t *testing.T) {
+		t.Parallel()
+		fb := fakeFeedbackFn{
+			windowStatsFn: func(context.Context, string, time.Time, time.Time) (feedback.DigestWindowStats, error) {
+				return feedback.DigestWindowStats{Total: 10, Enriched: 10}, nil
+			},
+			enrichedFn: func(context.Context, string, time.Time, time.Time, int) ([]feedback.DigestFeedbackRow, error) {
+				return nil, nil
+			},
+			dailyCountsFn: func(context.Context, string, time.Time, int) ([]feedback.DailyCount, error) {
+				return []feedback.DailyCount{
+					{Date: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), Count: 10},
+				}, nil
+			},
+		}
+		clusters := fakeClustersFn{
+			getCfgFn: func(context.Context, string) (embedding.ClusteringConfig, error) {
+				return embedding.ClusteringConfig{Enabled: true}, nil
+			},
+			topClustersFn: func(context.Context, string, time.Time, time.Time, int) ([]embedding.DigestCluster, error) {
+				return nil, errors.New("cluster db unavailable")
+			},
+			examplesFn: func(context.Context, string, uuid.UUID, time.Time, time.Time, int) ([]embedding.DigestExample, error) {
+				return nil, nil
+			},
+		}
+		agg := NewAggregator(clusters, fb, fakeNamer{})
+
+		res := Result{
+			Stats:  feedback.DigestWindowStats{Total: 10, Enriched: 10},
+			Themes: []Theme{{Title: "Bug"}, {Title: "Feature"}},
+		}
+		e, err := agg.ComputeEnrichment(context.Background(), "t", &res, from, to, priorFrom, priorTo)
+
+		require.NoError(t, err)
+		require.Equal(t, "flat", e.Deltas.Feedback.Direction)
+		require.NotNil(t, e.Sparkline)
+		// Lifecycle should not have been set (prior themes failed)
+		require.Equal(t, ThemeLifecycle(""), res.Themes[0].Lifecycle)
+		require.Equal(t, ThemeLifecycle(""), res.Themes[1].Lifecycle)
+	})
+
+	t.Run("full happy path with all three enrichments", func(t *testing.T) {
+		t.Parallel()
+		// ComputeEnrichment calls WindowStats once with (priorFrom, priorTo).
+		// It uses res.Stats as the current stats (passed in), so the WindowStats
+		// call returns the *prior* window stats for delta computation.
+		fb := fakeFeedbackFn{
+			windowStatsFn: func(context.Context, string, time.Time, time.Time) (feedback.DigestWindowStats, error) {
+				// Prior window stats
+				return feedback.DigestWindowStats{Total: 20, Enriched: 15, Urgent: 2}, nil
+			},
+			enrichedFn: func(context.Context, string, time.Time, time.Time, int) ([]feedback.DigestFeedbackRow, error) {
+				return nil, nil
+			},
+			dailyCountsFn: func(_ context.Context, _ string, _ time.Time, _ int) ([]feedback.DailyCount, error) {
+				return []feedback.DailyCount{
+					{Date: time.Date(2026, 6, 7, 0, 0, 0, 0, time.UTC), Count: 3},
+					{Date: time.Date(2026, 6, 8, 0, 0, 0, 0, time.UTC), Count: 5},
+					{Date: time.Date(2026, 6, 9, 0, 0, 0, 0, time.UTC), Count: 2},
+					{Date: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), Count: 6},
+					{Date: time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC), Count: 4},
+					{Date: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), Count: 8},
+				}, nil
+			},
+		}
+		clusters := fakeClustersFn{
+			getCfgFn: func(context.Context, string) (embedding.ClusteringConfig, error) {
+				return embedding.ClusteringConfig{Enabled: true}, nil
+			},
+			topClustersFn: func(context.Context, string, time.Time, time.Time, int) ([]embedding.DigestCluster, error) {
+				return []embedding.DigestCluster{
+					{Label: "ongoing bug"},
+				}, nil
+			},
+			examplesFn: func(context.Context, string, uuid.UUID, time.Time, time.Time, int) ([]embedding.DigestExample, error) {
+				return nil, nil
+			},
+		}
+		agg := NewAggregator(clusters, fb, fakeNamer{})
+
+		res := Result{
+			Stats:  feedback.DigestWindowStats{Total: 30, Enriched: 25, Urgent: 5},
+			Themes: []Theme{{Title: "Ongoing Bug", Count: 10}, {Title: "Brand New", Count: 5}},
+		}
+		e, err := agg.ComputeEnrichment(context.Background(), "t", &res, from, to, priorFrom, priorTo)
+
+		require.NoError(t, err)
+
+		// Deltas: current(30) - prior(20) = 10, up
+		require.Equal(t, "up", e.Deltas.Feedback.Direction)
+		require.Equal(t, 10, e.Deltas.Feedback.Change)
+		require.Equal(t, 30, e.Deltas.Feedback.Current)
+		require.Equal(t, 20, e.Deltas.Feedback.Prior)
+
+		require.Equal(t, "up", e.Deltas.Enriched.Direction)
+		require.Equal(t, 10, e.Deltas.Enriched.Change)
+
+		require.Equal(t, "up", e.Deltas.Urgent.Direction)
+		require.Equal(t, 3, e.Deltas.Urgent.Change)
+
+		// Sparkline
+		require.Len(t, e.Sparkline, 7)
+
+		// Lifecycle
+		require.Equal(t, LifecycleOngoing, res.Themes[0].Lifecycle)
+		require.Equal(t, LifecycleNew, res.Themes[1].Lifecycle)
+	})
+
+	t.Run("no themes skips lifecycle computation", func(t *testing.T) {
+		t.Parallel()
+		fb := fakeFeedbackFn{
+			windowStatsFn: func(context.Context, string, time.Time, time.Time) (feedback.DigestWindowStats, error) {
+				return feedback.DigestWindowStats{Total: 5, Enriched: 5}, nil
+			},
+			enrichedFn: func(context.Context, string, time.Time, time.Time, int) ([]feedback.DigestFeedbackRow, error) {
+				return nil, nil
+			},
+			dailyCountsFn: func(context.Context, string, time.Time, int) ([]feedback.DailyCount, error) {
+				return nil, nil
+			},
+		}
+		topClustersCalled := false
+		clusters := fakeClustersFn{
+			getCfgFn: func(context.Context, string) (embedding.ClusteringConfig, error) {
+				return embedding.ClusteringConfig{}, nil
+			},
+			topClustersFn: func(context.Context, string, time.Time, time.Time, int) ([]embedding.DigestCluster, error) {
+				topClustersCalled = true
+				return nil, nil
+			},
+			examplesFn: func(context.Context, string, uuid.UUID, time.Time, time.Time, int) ([]embedding.DigestExample, error) {
+				return nil, nil
+			},
+		}
+		agg := NewAggregator(clusters, fb, fakeNamer{})
+
+		res := Result{Stats: feedback.DigestWindowStats{Total: 5, Enriched: 5}}
+		_, err := agg.ComputeEnrichment(context.Background(), "t", &res, from, to, priorFrom, priorTo)
+
+		require.NoError(t, err)
+		require.False(t, topClustersCalled, "TopClustersInWindow must not be called when there are no themes")
+	})
 }

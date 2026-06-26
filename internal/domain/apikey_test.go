@@ -132,6 +132,50 @@ func TestIPAllowedStrings(t *testing.T) {
 	}
 }
 
+func TestValidEventTypes(t *testing.T) {
+	t.Parallel()
+	types := ValidEventTypes()
+	if len(types) != 8 {
+		t.Fatalf("ValidEventTypes() returned %d items, want 8", len(types))
+	}
+	seen := map[APIKeyEventType]bool{}
+	for _, et := range types {
+		if seen[et] {
+			t.Errorf("duplicate event type: %s", et)
+		}
+		seen[et] = true
+	}
+}
+
+func TestValidSecretManagerTypes(t *testing.T) {
+	t.Parallel()
+	types := ValidSecretManagerTypes()
+	if len(types) != 4 {
+		t.Fatalf("ValidSecretManagerTypes() returned %d items, want 4", len(types))
+	}
+	for _, sm := range types {
+		if sm == "" {
+			t.Error("empty secret manager type")
+		}
+	}
+}
+
+func TestValidIdentityProviders(t *testing.T) {
+	t.Parallel()
+	providers := ValidIdentityProviders()
+	if len(providers) != 6 {
+		t.Fatalf("ValidIdentityProviders() returned %d items, want 6", len(providers))
+	}
+}
+
+func TestValidSIEMProviders(t *testing.T) {
+	t.Parallel()
+	providers := ValidSIEMProviders()
+	if len(providers) != 7 {
+		t.Fatalf("ValidSIEMProviders() returned %d items, want 7", len(providers))
+	}
+}
+
 func TestValidEnvironments(t *testing.T) {
 	t.Parallel()
 	envs := ValidEnvironments()

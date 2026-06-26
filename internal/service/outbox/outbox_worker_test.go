@@ -33,6 +33,7 @@ func TestOutboxWorker_Configure(t *testing.T) {
 	t.Parallel()
 
 	t.Run("updates all values", func(t *testing.T) {
+		t.Parallel()
 		w := NewOutboxWorker(nil, nil, nil)
 		w.Configure(10*time.Second, 20, 3)
 		if w.pollInterval != 10*time.Second {
@@ -47,6 +48,7 @@ func TestOutboxWorker_Configure(t *testing.T) {
 	})
 
 	t.Run("zero values keep defaults", func(t *testing.T) {
+		t.Parallel()
 		w := NewOutboxWorker(nil, nil, nil)
 		origPoll := w.pollInterval
 		origBatch := w.batchSize
@@ -66,6 +68,7 @@ func TestOutboxWorker_Configure(t *testing.T) {
 	})
 
 	t.Run("negative values keep defaults", func(t *testing.T) {
+		t.Parallel()
 		w := NewOutboxWorker(nil, nil, nil)
 		origPoll := w.pollInterval
 		origBatch := w.batchSize
@@ -85,6 +88,7 @@ func TestOutboxWorker_Configure(t *testing.T) {
 	})
 
 	t.Run("partial updates", func(t *testing.T) {
+		t.Parallel()
 		w := NewOutboxWorker(nil, nil, nil)
 		origBatch := w.batchSize
 
@@ -132,6 +136,7 @@ func TestOutboxBackoff(t *testing.T) {
 	for _, tt := range tests {
 		name := time.Duration(tt.attempt).String()
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			got := outboxBackoff(tt.attempt)
 			if got != tt.want {
 				t.Errorf("outboxBackoff(%d) = %v, want %v", tt.attempt, got, tt.want)
@@ -159,6 +164,7 @@ func TestTruncateStr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := truncateStr(tt.s, tt.n)
 			if got != tt.want {
 				t.Errorf("truncateStr(%q, %d) = %q, want %q", tt.s, tt.n, got, tt.want)

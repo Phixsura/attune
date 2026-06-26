@@ -210,6 +210,80 @@ func TestBindBeforeHandlerCanReject(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"code":"FORBIDDEN"`)
 }
 
+func TestBindBadJSONBody(t *testing.T) {
+	t.Parallel()
+
+	h := Bind(
+		"dispatcher.BindBadJSON",
+		JSON(func() *attunev1.CreateApiKeyRequest { return &attunev1.CreateApiKeyRequest{} }),
+		func(*RequestContext[testAuth], *attunev1.CreateApiKeyRequest) (Result[*attunev1.CreateApiKeyResponse], error) {
+			t.Fatal("handler should not run on decode failure")
+			return Result[*attunev1.CreateApiKeyResponse]{}, nil
+		},
+		contextAuth[testAuth, *attunev1.CreateApiKeyRequest](func(context.Context) testAuth {
+			return testAuth{TenantID: "tenant-1"}
+		}),
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{bad json`))
+	rec := httptest.NewRecorder()
+
+	h(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), `"code":"BAD_REQUEST"`)
+}
+
+func TestBindAuthError(t *testing.T) {
+	t.Parallel()
+
+	h := Bind(
+		"dispatcher.BindAuthError",
+		Empty(func() *attunev1.GetUsageRequest { return &attunev1.GetUsageRequest{} }),
+		func(*RequestContext[testAuth], *attunev1.GetUsageRequest) (Result[*attunev1.GetUsageResponse], error) {
+			t.Fatal("handler should not run on auth failure")
+			return Result[*attunev1.GetUsageResponse]{}, nil
+		},
+		WithAuth(func(*http.Request, *attunev1.GetUsageRequest) (testAuth, error) {
+			return testAuth{}, NewError(http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "bad creds")
+		}),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	rec := httptest.NewRecorder()
+
+	h(rec, req)
+
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Contains(t, rec.Body.String(), `"code":"UNAUTHORIZED"`)
+}
+
+func TestBindExtraBinderError(t *testing.T) {
+	t.Parallel()
+
+	h := Bind(
+		"dispatcher.BindExtraError",
+		Empty(func() *attunev1.DeleteApiKeyRequest { return &attunev1.DeleteApiKeyRequest{} }),
+		func(*RequestContext[testAuth], *attunev1.DeleteApiKeyRequest) (Result[*attunev1.DeleteApiKeyResponse], error) {
+			t.Fatal("handler should not run on binder failure")
+			return Result[*attunev1.DeleteApiKeyResponse]{}, nil
+		},
+		contextAuth[testAuth, *attunev1.DeleteApiKeyRequest](func(context.Context) testAuth {
+			return testAuth{TenantID: "tenant-1"}
+		}),
+		WithBinders(
+			func(_ *http.Request, _ *attunev1.DeleteApiKeyRequest) error {
+				return NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "binder failed")
+			},
+		),
+	)
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	rec := httptest.NewRecorder()
+
+	h(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestBindPanicsWithoutWithAuth(t *testing.T) {
 	t.Parallel()
 

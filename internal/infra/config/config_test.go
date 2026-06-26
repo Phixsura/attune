@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 )
 
@@ -614,4 +616,470 @@ func TestLoadPathMCPRequiresPublicBaseURLWhenConsoleDisabled(t *testing.T) {
 	if !strings.Contains(err.Error(), "mcp.public_base_url or console.base_url is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// GDPR validation edge cases
+// ---------------------------------------------------------------------------
+
+func TestLoadPathRejectsInvalidGDPRExportTTL(t *testing.T) {
+	t.Parallel()
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\ngdpr:\n  export_ttl: \"bad\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "gdpr.export_ttl")
+}
+
+func TestLoadPathRejectsInvalidGDPRStepUpTTL(t *testing.T) {
+	t.Parallel()
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\ngdpr:\n  step_up_ttl: \"bad\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "gdpr.step_up_ttl")
+}
+
+func TestLoadPathRejectsNonPositiveGDPRExportTTL(t *testing.T) {
+	t.Parallel()
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\ngdpr:\n  export_ttl: \"0s\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "gdpr.export_ttl")
+}
+
+func TestLoadPathRejectsNonPositiveGDPRStepUpTTL(t *testing.T) {
+	t.Parallel()
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\ngdpr:\n  step_up_ttl: \"0s\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "gdpr.step_up_ttl")
+}
+
+// ---------------------------------------------------------------------------
+// Worker config validation
+// ---------------------------------------------------------------------------
+
+// TestValidateWorkerConfig exercises validateWorkerConfig directly because
+// yamlConfig does not expose a workers: key (worker tuning is set via
+// applyWorkerDefaults and not yet surfaced in YAML). The internal method is
+// accessible because this test file is in the same package.
+func TestValidateWorkerConfig(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		mutate  func(c *Config)
+		errPart string
+	}{
+		{
+			name:    "zero heartbeat_interval",
+			mutate:  func(c *Config) { c.WorkerHeartbeatInterval = 0 },
+			errPart: "workers.heartbeat_interval must be positive",
+		},
+		{
+			name:    "zero stale_duration",
+			mutate:  func(c *Config) { c.WorkerStaleDuration = 0 },
+			errPart: "workers.stale_duration must be positive",
+		},
+		{
+			name:    "zero drain_timeout",
+			mutate:  func(c *Config) { c.WorkerDrainTimeout = 0 },
+			errPart: "workers.drain_timeout must be positive",
+		},
+		{
+			name:    "zero poll_interval",
+			mutate:  func(c *Config) { c.WorkerPollInterval = 0 },
+			errPart: "workers.poll_interval must be positive",
+		},
+		{
+			name:    "zero max_attempts",
+			mutate:  func(c *Config) { c.WorkerMaxAttempts = 0 },
+			errPart: "workers.max_attempts must be positive",
+		},
+		{
+			name:    "negative max_attempts",
+			mutate:  func(c *Config) { c.WorkerMaxAttempts = -1 },
+			errPart: "workers.max_attempts must be positive",
+		},
+		{
+			name: "heartbeat_interval equals stale_duration",
+			mutate: func(c *Config) {
+				c.WorkerHeartbeatInterval = 5 * time.Minute
+				c.WorkerStaleDuration = 5 * time.Minute
+			},
+			errPart: "workers.heartbeat_interval",
+		},
+		{
+			name: "heartbeat_interval exceeds stale_duration",
+			mutate: func(c *Config) {
+				c.WorkerHeartbeatInterval = 10 * time.Minute
+				c.WorkerStaleDuration = 5 * time.Minute
+			},
+			errPart: "workers.heartbeat_interval",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := validWorkerConfig()
+			tc.mutate(c)
+			err := c.validateWorkerConfig()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.errPart)
+		})
+	}
+}
+
+func TestValidateWorkerConfigAcceptsValid(t *testing.T) {
+	t.Parallel()
+	c := validWorkerConfig()
+	require.NoError(t, c.validateWorkerConfig())
+}
+
+// validWorkerConfig returns a Config with valid worker fields for direct
+// validation testing.
+func validWorkerConfig() *Config {
+	return &Config{ // ptrext:allow test-fixture
+		WorkerHeartbeatInterval: 90 * time.Second,
+		WorkerStaleDuration:     5 * time.Minute,
+		WorkerDrainTimeout:      30 * time.Second,
+		WorkerPollInterval:      5 * time.Second,
+		WorkerMaxAttempts:       5,
+	}
+}
+
+// TestParseWorkerFields exercises parseWorkerFields directly to cover parse
+// error branches (workers YAML key is not exposed in yamlConfig).
+func TestParseWorkerFields(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		mutate  func(c *Config)
+		errPart string
+	}{
+		{
+			name:    "bad heartbeat_interval",
+			mutate:  func(c *Config) { c.Workers.HeartbeatInterval = "bad" },
+			errPart: "workers.heartbeat_interval",
+		},
+		{
+			name:    "bad stale_duration",
+			mutate:  func(c *Config) { c.Workers.StaleDuration = "bad" },
+			errPart: "workers.stale_duration",
+		},
+		{
+			name:    "bad drain_timeout",
+			mutate:  func(c *Config) { c.Workers.DrainTimeout = "bad" },
+			errPart: "workers.drain_timeout",
+		},
+		{
+			name:    "bad poll_interval",
+			mutate:  func(c *Config) { c.Workers.PollInterval = "bad" },
+			errPart: "workers.poll_interval",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := &Config{} // ptrext:allow test-fixture
+			c.applyWorkerDefaults()
+			tc.mutate(c)
+			err := c.parseWorkerFields()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.errPart)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Enricher config validation edge cases
+// ---------------------------------------------------------------------------
+
+func TestLoadPathRejectsInvalidEnricherEdgeCases(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		replace string
+		errPart string
+	}{
+		{
+			name:    "negative batch",
+			replace: "enricher:\n  interval: \"30s\"\n  batch: -1\n",
+			errPart: "enricher.batch",
+		},
+		{
+			name:    "negative workers",
+			replace: "enricher:\n  interval: \"30s\"\n  workers: -1\n",
+			errPart: "enricher.workers",
+		},
+		{
+			name:    "bad batch_window",
+			replace: "enricher:\n  interval: \"30s\"\n  batch_window: \"bad\"\n",
+			errPart: "enricher.batch_window",
+		},
+		{
+			name:    "zero batch_window",
+			replace: "enricher:\n  interval: \"30s\"\n  batch_window: \"0s\"\n",
+			errPart: "enricher.batch_window",
+		},
+		{
+			name:    "negative llm_max_qps",
+			replace: "enricher:\n  interval: \"30s\"\n  llm_max_qps: -1\n",
+			errPart: "enricher.llm_max_qps",
+		},
+		{
+			name:    "negative llm_burst",
+			replace: "enricher:\n  interval: \"30s\"\n  llm_burst: -1\n",
+			errPart: "enricher.llm_burst",
+		},
+		{
+			name:    "bad interval",
+			replace: "enricher:\n  interval: \"bad\"\n",
+			errPart: "enricher.interval",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			raw := strings.Replace(
+				validConfigYAML(t, validTinkKeyset(t)),
+				"enricher:\n  interval: \"30s\"\n",
+				tc.replace,
+				1,
+			)
+			_, err := LoadPath(writeConfig(t, raw))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.errPart)
+		})
+	}
+}
+
+func TestLoadPathEnricherLLMBurstDefaultFromQPS(t *testing.T) {
+	t.Parallel()
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"enricher:\n  interval: \"30s\"\n",
+		"enricher:\n  interval: \"30s\"\n  llm_max_qps: 5\n",
+		1,
+	)
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Equal(t, 5, cfg.EnricherLLMBurst, "llm_burst should default to int(llm_max_qps)")
+}
+
+func TestLoadPathEnricherLLMBurstDefaultMinOne(t *testing.T) {
+	t.Parallel()
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"enricher:\n  interval: \"30s\"\n",
+		"enricher:\n  interval: \"30s\"\n  llm_max_qps: 0.5\n",
+		1,
+	)
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.EnricherLLMBurst, "llm_burst should be at least 1 when qps > 0")
+}
+
+// ---------------------------------------------------------------------------
+// Console validation edge cases
+// ---------------------------------------------------------------------------
+
+func TestLoadPathRejectsConsoleEdgeCases(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		consoleYAML string
+		errPart     string
+	}{
+		{
+			name:        "base_url without session_key",
+			consoleYAML: "console:\n  base_url: \"https://attune.example.com\"\n",
+			errPart:     "console.base_url and console.session_key must be set together",
+		},
+		{
+			name:        "session_key without base_url",
+			consoleYAML: "console:\n  session_key: \"01234567890123456789012345678901\"\n",
+			errPart:     "console.base_url and console.session_key must be set together",
+		},
+		{
+			name: "session_key too short",
+			consoleYAML: "console:\n  base_url: \"https://attune.example.com\"\n  session_key: \"short\"\n" +
+				"  bootstrap_admin:\n    email: \"a@b.com\"\n    password: \"correct horse battery staple\"\n",
+			errPart: "console.session_key must be at least 32 bytes",
+		},
+		{
+			name: "bootstrap email without password",
+			consoleYAML: "console:\n  base_url: \"https://attune.example.com\"\n  session_key: \"01234567890123456789012345678901\"\n" +
+				"  bootstrap_admin:\n    email: \"admin@example.com\"\n",
+			errPart: "console.bootstrap_admin.password is required",
+		},
+		{
+			name: "bootstrap password without email",
+			consoleYAML: "console:\n  base_url: \"https://attune.example.com\"\n  session_key: \"01234567890123456789012345678901\"\n" +
+				"  bootstrap_admin:\n    password: \"correct horse battery staple\"\n",
+			errPart: "console.bootstrap_admin.email is required",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			raw := strings.Replace(
+				validConfigYAML(t, validTinkKeyset(t)),
+				"console:\n  base_url: \"https://attune.example.com\"\n  session_key: \"01234567890123456789012345678901\"\n  bootstrap_admin:\n    email: \"admin@example.com\"\n    password: \"correct horse battery staple\"\n",
+				tc.consoleYAML,
+				1,
+			)
+			_, err := LoadPath(writeConfig(t, raw))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.errPart)
+		})
+	}
+}
+
+func TestLoadPathAcceptsConsoleWithoutBootstrapAdmin(t *testing.T) {
+	t.Parallel()
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"console:\n  base_url: \"https://attune.example.com\"\n  session_key: \"01234567890123456789012345678901\"\n  bootstrap_admin:\n    email: \"admin@example.com\"\n    password: \"correct horse battery staple\"\n",
+		"console:\n  base_url: \"https://attune.example.com\"\n  session_key: \"01234567890123456789012345678901\"\n",
+		1,
+	)
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Empty(t, cfg.Console.BootstrapAdmin.Email)
+	require.Empty(t, cfg.Console.BootstrapAdmin.Password)
+}
+
+func TestLoadPathAcceptsNoConsoleBlock(t *testing.T) {
+	t.Parallel()
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"console:\n  base_url: \"https://attune.example.com\"\n  session_key: \"01234567890123456789012345678901\"\n  bootstrap_admin:\n    email: \"admin@example.com\"\n    password: \"correct horse battery staple\"\n",
+		"",
+		1,
+	)
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Empty(t, cfg.ConsoleBaseURL)
+	require.Empty(t, cfg.ConsoleSessionKey)
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown parse edge cases
+// ---------------------------------------------------------------------------
+
+func TestLoadPathRejectsUnparseableShutdownTimeout(t *testing.T) {
+	t.Parallel()
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"observability:\n",
+		"shutdown:\n  timeout: \"bad\"\nobservability:\n",
+		1,
+	)
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shutdown.timeout")
+}
+
+func TestLoadPathRejectsUnparseableShutdownDrainDelay(t *testing.T) {
+	t.Parallel()
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"observability:\n",
+		"shutdown:\n  drain_delay: \"bad\"\nobservability:\n",
+		1,
+	)
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shutdown.drain_delay")
+}
+
+// ---------------------------------------------------------------------------
+// Audit parse/validate edge cases
+// ---------------------------------------------------------------------------
+
+func TestLoadPathRejectsUnparseableAuditPruneInterval(t *testing.T) {
+	t.Parallel()
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\naudit:\n  prune_interval: \"not-a-duration\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "audit.prune_interval")
+}
+
+func TestLoadPathRejectsZeroAuditPruneInterval(t *testing.T) {
+	t.Parallel()
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\naudit:\n  prune_interval: \"0s\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "audit.prune_interval")
+}
+
+// ---------------------------------------------------------------------------
+// Missing database URL
+// ---------------------------------------------------------------------------
+
+func TestLoadPathRejectsMissingDatabaseURL(t *testing.T) {
+	t.Parallel()
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"database:\n  url: \"postgres://attune:test@localhost:5432/attune?sslmode=disable\"\n",
+		"database:\n  url: \"\"\n",
+		1,
+	)
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "database.url")
+}
+
+// ---------------------------------------------------------------------------
+// Missing / empty tink keyset
+// ---------------------------------------------------------------------------
+
+func TestLoadPathRejectsMissingTinkKeyset(t *testing.T) {
+	t.Parallel()
+	raw := validConfigYAML(t, "   ")
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "secrets.tink_keyset")
+}
+
+// ---------------------------------------------------------------------------
+// Default port
+// ---------------------------------------------------------------------------
+
+func TestLoadPathUsesDefaultPort(t *testing.T) {
+	t.Parallel()
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"port: 8090\n",
+		"",
+		1,
+	)
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Equal(t, DefaultPort, cfg.Port)
+}
+
+// ---------------------------------------------------------------------------
+// Empty path fallback
+// ---------------------------------------------------------------------------
+
+func TestLoadPathEmptyStringFallsBackToDefault(t *testing.T) {
+	t.Parallel()
+	_, err := LoadPath("   ")
+	require.Error(t, err, "empty path should try default file which does not exist")
+}
+
+// ---------------------------------------------------------------------------
+// Worker defaults verification
+// ---------------------------------------------------------------------------
+
+func TestLoadPathWorkerDefaults(t *testing.T) {
+	t.Parallel()
+	raw := validConfigYAML(t, validTinkKeyset(t))
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Equal(t, DefaultWorkerHeartbeatInterval, cfg.WorkerHeartbeatInterval)
+	require.Equal(t, DefaultWorkerStaleDuration, cfg.WorkerStaleDuration)
+	require.Equal(t, DefaultWorkerDrainTimeout, cfg.WorkerDrainTimeout)
+	require.Equal(t, DefaultWorkerPollInterval, cfg.WorkerPollInterval)
+	require.Equal(t, DefaultWorkerMaxAttempts, cfg.WorkerMaxAttempts)
 }
