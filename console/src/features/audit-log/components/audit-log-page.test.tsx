@@ -623,6 +623,91 @@ describe('AuditLogPage', () => {
     expect(localSearch).toHaveValue('')
   })
 
+  it('shows active filter count chip in collapsed view after applying filters', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('/fb/v1/console/audit-log', ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        })
+      }),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(urls).toHaveLength(1)
+    })
+
+    await expandFiltersIfCollapsed(user)
+    await user.type(screen.getByLabelText('目标 ID'), 'member-1')
+    await user.click(screen.getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() => {
+      expect(urls).toHaveLength(2)
+    })
+
+    await user.click(screen.getByRole('button', { name: '收起筛选' }))
+
+    expect(screen.getByText('已应用 1 条筛选')).toBeInTheDocument()
+  })
+
+  it('hides filter count chip when no filters are active in collapsed view', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '展开筛选' })).toBeInTheDocument()
+    })
+
+    expect(screen.queryByText(/已应用.*条筛选/)).not.toBeInTheDocument()
+    expect(screen.queryByText('未应用服务器筛选')).not.toBeInTheDocument()
+  })
+
+  it('renders compact page header with title and action buttons', async () => {
+    server.use(http.get('/fb/v1/console/audit-log', () => HttpResponse.json({ items: [] })))
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: '审计日志' })).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: /导出 CSV/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /导出证据包/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /复制当前视角/ })).toBeInTheDocument()
+  })
+
   it('shows a local-search empty state without losing the loaded results', async () => {
     server.use(
       http.get('/fb/v1/console/audit-log', () =>
