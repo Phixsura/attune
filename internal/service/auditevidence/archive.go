@@ -227,10 +227,10 @@ func buildChain(entries []auditlogrepo.Entry) ([]chainedEvent, string, error) {
 		}
 		eventHash := sha256Hex(canonical)
 
-		chainInput := make([]byte, 0, len(canonical)+len(prevHash))
-		chainInput = append(chainInput, canonical...)
-		chainInput = append(chainInput, []byte(prevHash)...)
-		chainHash := sha256Hex(chainInput)
+		h := sha256.New()
+		h.Write(canonical)
+		h.Write([]byte(prevHash))
+		chainHash := hex.EncodeToString(h.Sum(nil))
 
 		result = append(result, chainedEvent{
 			Event:     eventJSON,

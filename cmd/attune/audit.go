@@ -179,10 +179,10 @@ func verifyChain(eventsData []byte, m verifyManifest) error {
 		if ce.EventHash != eventHash {
 			return fmt.Errorf("FAIL  event %d: event_hash mismatch (tampered?)", i+1)
 		}
-		chainInput := make([]byte, 0, len(canonical)+len(ce.PrevHash))
-		chainInput = append(chainInput, canonical...)
-		chainInput = append(chainInput, []byte(ce.PrevHash)...)
-		chainHash := sha256Hex(chainInput)
+		h := sha256.New()
+		h.Write(canonical)
+		h.Write([]byte(ce.PrevHash))
+		chainHash := hex.EncodeToString(h.Sum(nil))
 		if ce.ChainHash != chainHash {
 			return fmt.Errorf("FAIL  event %d: chain_hash mismatch (tampered?)", i+1)
 		}
