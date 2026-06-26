@@ -301,3 +301,24 @@ func TestMarshalJSONAndRemoteAddrIP(t *testing.T) {
 		t.Fatal("marshalJSON(badJSON) err = nil")
 	}
 }
+
+func TestIsKnownAction_Valid(t *testing.T) {
+	t.Parallel()
+	if !IsKnownAction("api_key.create") {
+		t.Fatal("expected 'api_key.create' to be a known action")
+	}
+}
+
+func TestIsKnownAction_Invalid(t *testing.T) {
+	t.Parallel()
+	if IsKnownAction("nonexistent-action") {
+		t.Fatal("expected 'nonexistent-action' to be unknown")
+	}
+}
+
+func TestIsKnownAction_WithWhitespace(t *testing.T) {
+	t.Parallel()
+	if !IsKnownAction(" api_key.create ") {
+		t.Fatal("expected trimmed 'api_key.create' to be known")
+	}
+}

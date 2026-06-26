@@ -267,3 +267,90 @@ func TestClientIPDefault_NoHops(t *testing.T) {
 		t.Fatalf("expected peer address 10.0.0.1, got %s", ip)
 	}
 }
+
+func TestDialControl_UnparseableAddress(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: false}
+	err := p.dialControl("tcp", "not-an-ip", nil)
+	if err == nil {
+		t.Fatal("expected error for unparseable address")
+	}
+	var blocked *BlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("expected BlockedError, got %T", err)
+	}
+}
+
+func TestDialControl_PrivateIP(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: false}
+	err := p.dialControl("tcp", "10.0.0.1:80", nil)
+	if err == nil {
+		t.Fatal("expected error for private IP")
+	}
+}
+
+func TestDialControl_AllowedPublicIP(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: false}
+	err := p.dialControl("tcp", "8.8.8.8:443", nil)
+	if err != nil {
+		t.Fatalf("expected nil for public IP, got %v", err)
+	}
+}
+
+func TestDialControl_AllowLoopback(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: true}
+	err := p.dialControl("tcp", "127.0.0.1:8080", nil)
+	if err != nil {
+		t.Fatalf("expected nil for loopback when allowed, got %v", err)
+	}
+}
+
+func TestCheckIP_MetadataIP(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: false}
+	ip := net.ParseIP("100.100.100.200")
+	err := p.CheckIP(ip)
+	if err == nil {
+		t.Fatal("expected error for cloud metadata IP")
+	}
+}
+
+func TestCheckIP_6to4Embedded(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: false}
+	ip := net.ParseIP("2002:0a00:0001::1")
+	err := p.CheckIP(ip)
+	if err == nil {
+		t.Fatal("expected error for 6to4-embedded private IP")
+	}
+}
+
+func TestRemoteHost_NoPort(t *testing.T) {
+	t.Parallel()
+	got := remoteHost("192.168.1.1")
+	if got != "192.168.1.1" {
+		t.Fatalf("expected '192.168.1.1', got %q", got)
+	}
+}
+
+func TestRemoteHost_WithPort(t *testing.T) {
+	t.Parallel()
+	got := remoteHost("192.168.1.1:8080")
+	if got != "192.168.1.1" {
+		t.Fatalf("expected '192.168.1.1', got %q", got)
+	}
+}
+
+func TestMustCIDR_Panic(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic from mustCIDR with invalid CIDR")
+		}
+	}()
+	mustCIDR("not-a-cidr")
+}

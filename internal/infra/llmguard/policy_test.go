@@ -235,6 +235,174 @@ func TestResolvePolicies_TagMismatchSkipped(t *testing.T) {
 	}
 }
 
+func TestRuleStageMatches(t *testing.T) {
+	t.Parallel()
+	if !ruleStageMatches(Target{}, StageLLMInput) {
+		t.Fatal("empty stages should match any stage")
+	}
+	if !ruleStageMatches(Target{Stages: []Stage{StageLLMInput}}, StageLLMInput) {
+		t.Fatal("matching stage should pass")
+	}
+	if ruleStageMatches(Target{Stages: []Stage{StageLLMInput}}, StageLLMOutput) {
+		t.Fatal("non-matching stage should fail")
+	}
+}
+
+func TestRuleEntities_Empty(t *testing.T) {
+	t.Parallel()
+	got := ruleEntities(Rule{})
+	if len(got) != 1 || got[0] != "" {
+		t.Fatalf("empty entities should return [\"\"], got %v", got)
+	}
+}
+
+func TestRuleEntities_NonEmpty(t *testing.T) {
+	t.Parallel()
+	got := ruleEntities(Rule{Entities: []string{"email", "phone"}})
+	if len(got) != 2 {
+		t.Fatalf("should preserve, got %v", got)
+	}
+}
+
+func TestEffectiveRule_NoRules(t *testing.T) {
+	t.Parallel()
+	_, ok := effectiveRule(ruleBucket{})
+	if ok {
+		t.Fatal("empty bucket should return false")
+	}
+}
+
+func TestEffectiveRule_OverrideTakesPrecedence(t *testing.T) {
+	t.Parallel()
+	def := ptrext.Of(weightedRule{rule: Rule{Action: ActionRedact}})
+	override := ptrext.Of(weightedRule{rule: Rule{Action: ActionOff}})
+	r, ok := effectiveRule(ruleBucket{def: def, override: override})
+	if !ok {
+		t.Fatal("should find rule")
+	}
+	if r.Action != ActionOff {
+		t.Fatalf("override should win, got %s", r.Action)
+	}
+}
+
+func TestStrongerFloor_Nil(t *testing.T) {
+	t.Parallel()
+	next := weightedRule{rule: Rule{Action: ActionBlock}}
+	got := strongerFloor(nil, next)
+	if got.rule.Action != ActionBlock {
+		t.Fatal("nil current should accept next")
+	}
+}
+
+func TestNarrowerRule_Nil(t *testing.T) {
+	t.Parallel()
+	next := weightedRule{rule: Rule{Action: ActionRedact}}
+	got := narrowerRule(nil, next)
+	if got.rule.Action != ActionRedact {
+		t.Fatal("nil current should accept next")
+	}
+}
+
+func TestPolicySpecificity(t *testing.T) {
+	t.Parallel()
+	p := Policy{TenantID: "t1", Target: Target{Channels: []string{"email"}, SourceIDs: []string{"s1"}, SourceTags: []string{"x"}}}
+	score := policySpecificity(p)
+	if score != 100 {
+		t.Fatalf("expected 10+20+30+40=100, got %d", score)
+	}
+	if policySpecificity(Policy{}) != 0 {
+		t.Fatal("empty policy should have 0 specificity")
+	}
+}
+
+func TestStrongerFloor_SameRankHigherSpecificity(t *testing.T) {
+	t.Parallel()
+	current := ptrext.Of(weightedRule{rule: Rule{Action: ActionBlock}, specificity: 10, priority: 1})
+	next := weightedRule{rule: Rule{Action: ActionBlock}, specificity: 20, priority: 1}
+	got := strongerFloor(current, next)
+	if got.specificity != 20 {
+		t.Fatalf("same action rank but higher specificity should win: got %d", got.specificity)
+	}
+}
+
+func TestStrongerFloor_WeakerRank(t *testing.T) {
+	t.Parallel()
+	current := ptrext.Of(weightedRule{rule: Rule{Action: ActionBlock}, specificity: 10})
+	next := weightedRule{rule: Rule{Action: ActionRedact}, specificity: 20}
+	got := strongerFloor(current, next)
+	if got.rule.Action != ActionBlock {
+		t.Fatal("weaker action rank should not replace stronger")
+	}
+}
+
+func TestNarrowerRule_SameSpecificityStrongerAction(t *testing.T) {
+	t.Parallel()
+	current := ptrext.Of(weightedRule{rule: Rule{Action: ActionRedact}, specificity: 10, priority: 1})
+	next := weightedRule{rule: Rule{Action: ActionBlock}, specificity: 10, priority: 1}
+	got := narrowerRule(current, next)
+	if got.rule.Action != ActionBlock {
+		t.Fatal("same specificity/priority but stronger action should win")
+	}
+}
+
+func TestNarrowerRule_WeakerSpecificity(t *testing.T) {
+	t.Parallel()
+	current := ptrext.Of(weightedRule{rule: Rule{Action: ActionBlock}, specificity: 20, priority: 1})
+	next := weightedRule{rule: Rule{Action: ActionRedact}, specificity: 10, priority: 1}
+	got := narrowerRule(current, next)
+	if got.specificity != 20 {
+		t.Fatal("lower specificity should not replace higher")
+	}
+}
+
+func TestEffectiveRule_NoBaseline_NoOverride_NoDefault(t *testing.T) {
+	t.Parallel()
+	_, ok := effectiveRule(ruleBucket{})
+	if ok {
+		t.Fatal("empty bucket should produce no rule")
+	}
+}
+
+func TestEffectiveRule_BaselineStrongerThanOverride(t *testing.T) {
+	t.Parallel()
+	r, ok := effectiveRule(ruleBucket{
+		baseline: ptrext.Of(weightedRule{rule: Rule{Action: ActionBlock}}),
+		override: ptrext.Of(weightedRule{rule: Rule{Action: ActionRedact}}),
+	})
+	if !ok {
+		t.Fatal("expected rule")
+	}
+	if r.Action != ActionBlock {
+		t.Fatalf("baseline should win when stronger: got %s", r.Action)
+	}
+}
+
+func TestEffectiveRule_OverrideWhenNoBaseline(t *testing.T) {
+	t.Parallel()
+	r, ok := effectiveRule(ruleBucket{
+		override: ptrext.Of(weightedRule{rule: Rule{Action: ActionRedact}}),
+	})
+	if !ok {
+		t.Fatal("expected rule")
+	}
+	if r.Action != ActionRedact {
+		t.Fatalf("override should be used when no baseline: got %s", r.Action)
+	}
+}
+
+func TestEffectiveRule_DefaultWhenNoBaselineNoOverride(t *testing.T) {
+	t.Parallel()
+	r, ok := effectiveRule(ruleBucket{
+		def: ptrext.Of(weightedRule{rule: Rule{Action: ActionRedact}}),
+	})
+	if !ok {
+		t.Fatal("expected rule")
+	}
+	if r.Action != ActionRedact {
+		t.Fatalf("default should be used: got %s", r.Action)
+	}
+}
+
 func assertRuleAction(t *testing.T, plan Plan, entity string, want Action) {
 	t.Helper()
 	for _, r := range plan.Rules {

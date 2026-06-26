@@ -108,3 +108,67 @@ func (r *recordingLLM) Complete(_ context.Context, req llmclient.CompletionReque
 }
 
 func (r *recordingLLM) Close() error { return nil }
+
+func TestClient_CloseNil(t *testing.T) {
+	t.Parallel()
+	var c *Client
+	if err := c.Close(); err != nil {
+		t.Fatalf("nil client Close: %v", err)
+	}
+}
+
+func TestClient_CloseNilNext(t *testing.T) {
+	t.Parallel()
+	c := ptrext.Of(Client{})
+	if err := c.Close(); err != nil {
+		t.Fatalf("nil next Close: %v", err)
+	}
+}
+
+func TestClient_CloseForwards(t *testing.T) {
+	t.Parallel()
+	backend := ptrext.Of(recordingLLM{})
+	c := NewClient(backend, nil)
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestClient_ResolveNilResolver(t *testing.T) {
+	t.Parallel()
+	c := ptrext.Of(Client{})
+	plan, err := c.resolve(context.Background(), llmclient.GuardMetadata{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(plan.Rules) != 0 {
+		t.Fatal("nil resolver should return empty plan")
+	}
+}
+
+func TestClient_ApplyStage_NoRules(t *testing.T) {
+	t.Parallel()
+	backend := ptrext.Of(recordingLLM{resp: `{"ok":true}`})
+	c := NewClient(backend, nil)
+	out, err := c.applyStage(context.Background(), StageLLMInput, "hello", Plan{}, llmclient.GuardMetadata{})
+	if err != nil {
+		t.Fatalf("applyStage: %v", err)
+	}
+	if out != "hello" {
+		t.Fatalf("no rules should pass through, got %q", out)
+	}
+}
+
+func TestClient_ApplyStage_UnknownGuard(t *testing.T) {
+	t.Parallel()
+	backend := ptrext.Of(recordingLLM{resp: `{"ok":true}`})
+	c := NewClient(backend, nil)
+	plan := Plan{Rules: []Rule{{Guard: "nonexistent", Stage: StageLLMInput, Action: ActionBlock}}}
+	out, err := c.applyStage(context.Background(), StageLLMInput, "text", plan, llmclient.GuardMetadata{})
+	if err != nil {
+		t.Fatalf("unknown guard should be skipped: %v", err)
+	}
+	if out != "text" {
+		t.Fatalf("unknown guard should pass through, got %q", out)
+	}
+}

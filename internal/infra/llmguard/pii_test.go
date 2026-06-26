@@ -179,6 +179,65 @@ func TestMergePIIMatches_Overlapping(t *testing.T) {
 	}
 }
 
+func TestAllSameDigit(t *testing.T) {
+	t.Parallel()
+	if !allSameDigit("0000") {
+		t.Fatal("all zeros should be true")
+	}
+	if !allSameDigit("5555555") {
+		t.Fatal("all fives should be true")
+	}
+	if allSameDigit("0001") {
+		t.Fatal("mixed should be false")
+	}
+	if !allSameDigit("") {
+		t.Fatal("empty should be true")
+	}
+	if !allSameDigit("7") {
+		t.Fatal("single digit should be true")
+	}
+}
+
+func TestDetectEntity_UnknownEntity(t *testing.T) {
+	t.Parallel()
+	matches := detectEntity("hello world", "nonexistent_entity", Rule{Action: ActionRedact})
+	if len(matches) != 0 {
+		t.Fatalf("unknown entity should return 0 matches, got %d", len(matches))
+	}
+}
+
+func TestCapturedPIISpan_ShortLoc(t *testing.T) {
+	t.Parallel()
+	start, end := capturedPIISpan([]int{0})
+	if start != -1 || end != -1 {
+		t.Fatalf("short loc should return -1,-1, got %d,%d", start, end)
+	}
+}
+
+func TestCapturedPIISpan_Group1(t *testing.T) {
+	t.Parallel()
+	start, end := capturedPIISpan([]int{0, 20, 5, 10})
+	if start != 5 || end != 10 {
+		t.Fatalf("expected group1 5,10 got %d,%d", start, end)
+	}
+}
+
+func TestCapturedPIISpan_Group2(t *testing.T) {
+	t.Parallel()
+	start, end := capturedPIISpan([]int{0, 20, -1, -1, 5, 10})
+	if start != 5 || end != 10 {
+		t.Fatalf("expected group2 5,10 got %d,%d", start, end)
+	}
+}
+
+func TestCapturedPIISpan_NilLoc(t *testing.T) {
+	t.Parallel()
+	start, end := capturedPIISpan(nil)
+	if start != -1 || end != -1 {
+		t.Fatalf("nil loc should return -1,-1, got %d,%d", start, end)
+	}
+}
+
 func BenchmarkPIIGuardRedact(b *testing.B) {
 	text := strings.Repeat("hello alice@example.com phone +1 4155552671 card 4111111111111111\n", 1024)
 	g := NewPIIGuard()

@@ -206,3 +206,107 @@ func TestExportCSVQuotesJSONColumns(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "curl/8.0")
 	require.True(t, strings.Contains(rec.Body.String(), `"{""url"":""https://example.com/hook""}"`))
 }
+
+func TestToProto_MapsAllFields(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 6, 15, 10, 30, 0, 0, time.UTC)
+	entry := auditlogrepo.Entry{
+		ID:             1,
+		ActorType:      "admin",
+		ActorID:        "user-42",
+		ActorEmail:     "admin@example.com",
+		ActorIP:        "10.0.0.1",
+		ActorUserAgent: "curl/8.0",
+		Action:         "created",
+		TargetType:     "notify_target",
+		TargetID:       "target-1",
+		Summary:        "created webhook",
+		BeforeJSON:     []byte(`{"url":"old"}`),
+		AfterJSON:      []byte(`{"url":"new"}`),
+		CreatedAt:      now,
+	}
+	out := toProto(entry)
+	require.Equal(t, int64(1), out.GetId())
+	require.Equal(t, "admin", out.GetActorType())
+	require.Equal(t, "user-42", out.GetActorId())
+	require.Equal(t, "admin@example.com", out.GetActorEmail())
+	require.Equal(t, "10.0.0.1", out.GetActorIp())
+	require.Equal(t, "curl/8.0", out.GetActorUserAgent())
+	require.Equal(t, "created", out.GetAction())
+	require.Equal(t, "notify_target", out.GetTargetType())
+	require.Equal(t, "target-1", out.GetTargetId())
+	require.Equal(t, "created webhook", out.GetSummary())
+	require.Equal(t, `{"url":"old"}`, out.GetBeforeJson())
+	require.Equal(t, `{"url":"new"}`, out.GetAfterJson())
+	require.Contains(t, out.GetCreatedAt(), "2026-06-15")
+}
+
+func TestCollectQueryValues_MultipleCommaValues(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest(http.MethodGet, "/?action=a,b&action=c", nil)
+	got := collectQueryValues(req.URL.Query(), "action")
+	require.ElementsMatch(t, []string{"a", "b", "c"}, got)
+}
+
+func TestCollectQueryValues_EmptyKey(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	got := collectQueryValues(req.URL.Query(), "action")
+	require.Empty(t, got)
+}
+
+func TestBuildFilter_ValidDates(t *testing.T) {
+	t.Parallel()
+	req := ptrext.Of(attunev1.ListAuditLogRequest{
+		From: "2026-01-01T00:00:00Z",
+		To:   "2026-12-31T23:59:59Z",
+	})
+	f, err := buildFilter("t1", req)
+	require.NoError(t, err)
+	require.NotNil(t, f.From)
+	require.NotNil(t, f.To)
+}
+
+func TestBuildFilter_InvalidFrom(t *testing.T) {
+	t.Parallel()
+	req := ptrext.Of(attunev1.ListAuditLogRequest{
+		From: "not-a-date",
+	})
+	_, err := buildFilter("t1", req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "from must be RFC3339")
+}
+
+func TestBuildFilter_InvalidTo(t *testing.T) {
+	t.Parallel()
+	req := ptrext.Of(attunev1.ListAuditLogRequest{
+		To: "not-a-date",
+	})
+	_, err := buildFilter("t1", req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "to must be RFC3339")
+}
+
+func TestBuildFilter_InvalidCursor(t *testing.T) {
+	t.Parallel()
+	req := ptrext.Of(attunev1.ListAuditLogRequest{
+		Cursor: ptrext.Of("bad-cursor"),
+	})
+	_, err := buildFilter("t1", req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cursor must be audit pagination token")
+}
+
+func TestFirstQueryValue_ReturnsFirst(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest(http.MethodGet, "/?foo=bar&baz=qux", nil)
+	got := firstQueryValue(req.URL.Query(), "missing", "foo")
+	require.Equal(t, "bar", got)
+}
+
+func TestFirstQueryValue_AllEmpty(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	got := firstQueryValue(req.URL.Query(), "a", "b")
+	require.Equal(t, "", got)
+}

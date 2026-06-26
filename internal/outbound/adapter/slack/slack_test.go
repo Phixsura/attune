@@ -867,3 +867,46 @@ func readAll(r interface{ Read([]byte) (int, error) }) ([]byte, error) {
 	}
 	return buf, nil
 }
+
+func TestDeltaArrow(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		d    deltaValue
+		want string
+	}{
+		{"up with change", deltaValue{Change: 5, Direction: "up"}, "↑5"},
+		{"up no change", deltaValue{Change: 0, Direction: "up"}, "↑"},
+		{"down with change", deltaValue{Change: -3, Direction: "down"}, "↓3"},
+		{"down no change", deltaValue{Change: 0, Direction: "down"}, "↓"},
+		{"empty direction", deltaValue{Change: 1, Direction: ""}, ""},
+		{"unknown direction", deltaValue{Change: 1, Direction: "flat"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := deltaArrow(c.d); got != c.want {
+				t.Fatalf("deltaArrow(%+v) = %q, want %q", c.d, got, c.want)
+			}
+		})
+	}
+}
+
+func TestLifecycleBadge(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		lc   string
+		want string
+	}{
+		{"new", ":new: "},
+		{"regressed", ":back: "},
+		{"resolved", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.lc, func(t *testing.T) {
+			if got := lifecycleBadge(c.lc); got != c.want {
+				t.Fatalf("lifecycleBadge(%q) = %q, want %q", c.lc, got, c.want)
+			}
+		})
+	}
+}
