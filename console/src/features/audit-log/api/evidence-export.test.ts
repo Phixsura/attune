@@ -53,5 +53,23 @@ describe('evidence-export', () => {
       )
       await expect(downloadEvidenceExport('job-2')).rejects.toThrow('HTTP 404')
     })
+
+    it('throws with HTTP status fallback when body is not JSON', async () => {
+      server.use(
+        http.get('/fb/v1/console/audit-log/evidence/:id/download', () =>
+          HttpResponse.text('not json', { status: 500 }),
+        ),
+      )
+      await expect(downloadEvidenceExport('job-3')).rejects.toThrow('HTTP 500')
+    })
+
+    it('throws with HTTP status fallback when JSON lacks message field', async () => {
+      server.use(
+        http.get('/fb/v1/console/audit-log/evidence/:id/download', () =>
+          HttpResponse.json({ error: 'something' }, { status: 502 }),
+        ),
+      )
+      await expect(downloadEvidenceExport('job-4')).rejects.toThrow('HTTP 502')
+    })
   })
 })

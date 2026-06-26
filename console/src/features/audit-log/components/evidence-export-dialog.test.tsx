@@ -52,6 +52,62 @@ describe('EvidenceExportDialog', () => {
     })
   })
 
+  it('shows processing view with queued status', async () => {
+    server.use(
+      http.post('/fb/v1/console/audit-log/evidence', () =>
+        HttpResponse.json({ jobId: 'job-q', status: 'queued', retryAfterSeconds: 1 }),
+      ),
+      http.get('/fb/v1/console/audit-log/evidence/job-q', () =>
+        HttpResponse.json({
+          jobId: 'job-q',
+          status: 'queued',
+          totalEvents: 0,
+          createdAt: '2026-06-26T00:00:00Z',
+          retryAfterSeconds: 2,
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('排队中')).toBeInTheDocument()
+    })
+  })
+
+  it('shows completed view without expiry when expiresAt is absent', async () => {
+    server.use(
+      http.post('/fb/v1/console/audit-log/evidence', () =>
+        HttpResponse.json({ jobId: 'job-ne', status: 'queued', retryAfterSeconds: 1 }),
+      ),
+      http.get('/fb/v1/console/audit-log/evidence/job-ne', () =>
+        HttpResponse.json({
+          jobId: 'job-ne',
+          status: 'completed',
+          totalEvents: 3,
+          createdAt: '2026-06-26T00:00:00Z',
+          completedAt: '2026-06-26T00:00:01Z',
+          retryAfterSeconds: 2,
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('下载证据包')).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/过期/)).not.toBeInTheDocument()
+  })
+
   it('shows retry button for failed exports', async () => {
     server.use(
       http.post('/fb/v1/console/audit-log/evidence', () =>
