@@ -7,3 +7,7 @@ cmd/attune/cli_extra_coverage_test.go
 cmd/attune/drill_coverage_test.go
 internal/infra/config/config_test.go
 internal/infra/database/pool_coverage_test.go
+internal/restoredrill/orchestrate_test.go
+
+# Documentation with example localhost postgres URIs
+docs/private-deploy.md

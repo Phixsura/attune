@@ -13,8 +13,6 @@ import (
 // --- Status and Category constants ---
 
 func TestStatusConstants(t *testing.T) {
-	t.Parallel()
-
 	require.Equal(t, Status("pass"), StatusPass)
 	require.Equal(t, Status("warn"), StatusWarn)
 	require.Equal(t, Status("fail"), StatusFail)
@@ -22,8 +20,6 @@ func TestStatusConstants(t *testing.T) {
 }
 
 func TestCategoryConstants(t *testing.T) {
-	t.Parallel()
-
 	require.Equal(t, Category("config"), CategoryConfig)
 	require.Equal(t, Category("database"), CategoryDatabase)
 	require.Equal(t, Category("migration"), CategoryMigration)
@@ -35,14 +31,10 @@ func TestCategoryConstants(t *testing.T) {
 }
 
 func TestAllCategories_Length(t *testing.T) {
-	t.Parallel()
-
 	require.Len(t, AllCategories, 8, "expected 8 categories in display order")
 }
 
 func TestAllCategories_Order(t *testing.T) {
-	t.Parallel()
-
 	expected := []Category{
 		CategoryConfig, CategoryDatabase, CategoryMigration, CategoryBackup,
 		CategoryEncryption, CategoryAuth, CategoryMetrics, CategoryWorker,
@@ -53,8 +45,6 @@ func TestAllCategories_Order(t *testing.T) {
 // --- WorstStatus edge cases ---
 
 func TestWorstStatus_OnlySkipped(t *testing.T) {
-	t.Parallel()
-
 	results := []Result{
 		{Status: StatusSkipped},
 		{Status: StatusSkipped},
@@ -63,8 +53,6 @@ func TestWorstStatus_OnlySkipped(t *testing.T) {
 }
 
 func TestWorstStatus_FailShortCircuits(t *testing.T) {
-	t.Parallel()
-
 	results := []Result{
 		{Status: StatusFail},
 		{Status: StatusPass},
@@ -74,28 +62,20 @@ func TestWorstStatus_FailShortCircuits(t *testing.T) {
 }
 
 func TestWorstStatus_SinglePass(t *testing.T) {
-	t.Parallel()
-
 	require.Equal(t, StatusPass, WorstStatus([]Result{{Status: StatusPass}}))
 }
 
 func TestWorstStatus_SingleWarn(t *testing.T) {
-	t.Parallel()
-
 	require.Equal(t, StatusWarn, WorstStatus([]Result{{Status: StatusWarn}}))
 }
 
 func TestWorstStatus_SingleFail(t *testing.T) {
-	t.Parallel()
-
 	require.Equal(t, StatusFail, WorstStatus([]Result{{Status: StatusFail}}))
 }
 
 // --- StatusIcon ---
 
 func TestStatusIcon_AllStatuses(t *testing.T) {
-	t.Parallel()
-
 	cases := []struct {
 		status Status
 		want   string
@@ -107,7 +87,6 @@ func TestStatusIcon_AllStatuses(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.status), func(t *testing.T) {
-			t.Parallel()
 			icon := StatusIcon(tc.status)
 			require.Contains(t, icon, tc.want, "icon should contain ANSI color code")
 		})
@@ -117,8 +96,6 @@ func TestStatusIcon_AllStatuses(t *testing.T) {
 // --- StatusLabel ---
 
 func TestStatusLabel_AllStatuses(t *testing.T) {
-	t.Parallel()
-
 	cases := []struct {
 		status Status
 		substr string
@@ -129,7 +106,6 @@ func TestStatusLabel_AllStatuses(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.status), func(t *testing.T) {
-			t.Parallel()
 			label := StatusLabel(tc.status)
 			require.Contains(t, label, tc.substr)
 		})
@@ -137,8 +113,6 @@ func TestStatusLabel_AllStatuses(t *testing.T) {
 }
 
 func TestStatusLabel_Unknown(t *testing.T) {
-	t.Parallel()
-
 	label := StatusLabel(Status("custom"))
 	require.Equal(t, "CUSTOM", label)
 }
@@ -146,16 +120,12 @@ func TestStatusLabel_Unknown(t *testing.T) {
 // --- categoryTitle ---
 
 func TestCategoryTitle_Unknown(t *testing.T) {
-	t.Parallel()
-
 	require.Equal(t, "custom", categoryTitle(Category("custom")))
 }
 
 // --- countByStatus ---
 
 func TestCountByStatus_Empty(t *testing.T) {
-	t.Parallel()
-
 	pass, warn, fail, skipped := countByStatus(nil)
 	require.Equal(t, 0, pass)
 	require.Equal(t, 0, warn)
@@ -164,8 +134,6 @@ func TestCountByStatus_Empty(t *testing.T) {
 }
 
 func TestCountByStatus_Mixed(t *testing.T) {
-	t.Parallel()
-
 	results := []Result{
 		{Status: StatusPass},
 		{Status: StatusPass},
@@ -182,8 +150,6 @@ func TestCountByStatus_Mixed(t *testing.T) {
 }
 
 func TestCountByStatus_AllPass(t *testing.T) {
-	t.Parallel()
-
 	results := []Result{{Status: StatusPass}, {Status: StatusPass}, {Status: StatusPass}}
 	pass, warn, fail, skipped := countByStatus(results)
 	require.Equal(t, 3, pass)
@@ -195,8 +161,6 @@ func TestCountByStatus_AllPass(t *testing.T) {
 // --- FormatText coverage ---
 
 func TestFormatText_HeaderLine(t *testing.T) {
-	t.Parallel()
-
 	report := Report{
 		Status:  StatusPass,
 		Checks:  []Result{},
@@ -210,8 +174,6 @@ func TestFormatText_HeaderLine(t *testing.T) {
 }
 
 func TestFormatText_EmptyChecks(t *testing.T) {
-	t.Parallel()
-
 	report := Report{
 		Status:  StatusPass,
 		Checks:  []Result{},
@@ -225,8 +187,6 @@ func TestFormatText_EmptyChecks(t *testing.T) {
 }
 
 func TestFormatText_WarnRemediationShown(t *testing.T) {
-	t.Parallel()
-
 	report := Report{
 		Status: StatusWarn,
 		Checks: []Result{
@@ -246,8 +206,6 @@ func TestFormatText_WarnRemediationShown(t *testing.T) {
 }
 
 func TestFormatText_PassRemediationHidden(t *testing.T) {
-	t.Parallel()
-
 	report := Report{
 		Status: StatusPass,
 		Checks: []Result{
@@ -267,8 +225,6 @@ func TestFormatText_PassRemediationHidden(t *testing.T) {
 }
 
 func TestFormatText_MultipleCategoryHeaders(t *testing.T) {
-	t.Parallel()
-
 	report := Report{
 		Status: StatusPass,
 		Checks: []Result{
@@ -290,8 +246,6 @@ func TestFormatText_MultipleCategoryHeaders(t *testing.T) {
 }
 
 func TestFormatText_FailureCount(t *testing.T) {
-	t.Parallel()
-
 	report := Report{
 		Status: StatusFail,
 		Checks: []Result{
@@ -309,8 +263,6 @@ func TestFormatText_FailureCount(t *testing.T) {
 // --- RunAll ---
 
 func TestRunAll_NormalExecution(t *testing.T) {
-	t.Parallel()
-
 	origRegistry := make([]Check, len(registry))
 	copy(origRegistry, registry)
 	registry = nil
@@ -331,8 +283,6 @@ func TestRunAll_NormalExecution(t *testing.T) {
 }
 
 func TestRunAll_EmptyRegistry(t *testing.T) {
-	t.Parallel()
-
 	origRegistry := make([]Check, len(registry))
 	copy(origRegistry, registry)
 	registry = nil
@@ -346,8 +296,6 @@ func TestRunAll_EmptyRegistry(t *testing.T) {
 // --- Report/Result JSON ---
 
 func TestResult_Fields(t *testing.T) {
-	t.Parallel()
-
 	r := Result{
 		Name:        "test:check",
 		Category:    CategoryDatabase,
@@ -363,8 +311,6 @@ func TestResult_Fields(t *testing.T) {
 }
 
 func TestReport_Fields(t *testing.T) {
-	t.Parallel()
-
 	report := Report{
 		Status: StatusWarn,
 		Checks: []Result{
@@ -381,8 +327,6 @@ func TestReport_Fields(t *testing.T) {
 // --- Registry ---
 
 func TestRegistered_EmptyAfterClear(t *testing.T) {
-	t.Parallel()
-
 	orig := registry
 	defer func() { registry = orig }()
 
@@ -391,8 +335,6 @@ func TestRegistered_EmptyAfterClear(t *testing.T) {
 }
 
 func TestRegister_PreservesOrder(t *testing.T) {
-	t.Parallel()
-
 	orig := registry
 	defer func() { registry = orig }()
 
@@ -409,8 +351,6 @@ func TestRegister_PreservesOrder(t *testing.T) {
 }
 
 func TestRegistered_MutationSafe(t *testing.T) {
-	t.Parallel()
-
 	orig := registry
 	defer func() { registry = orig }()
 
