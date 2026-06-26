@@ -708,6 +708,175 @@ describe('AuditLogPage', () => {
     expect(screen.getByRole('button', { name: /复制当前视角/ })).toBeInTheDocument()
   })
 
+  it('shows empty state when no audit records exist', async () => {
+    server.use(http.get('/fb/v1/console/audit-log', () => HttpResponse.json({ items: [] })))
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('暂无审计记录')).toBeInTheDocument()
+    })
+  })
+
+  it('navigates with keyboard shortcuts', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+            {
+              id: '2',
+              actorType: 'admin',
+              actorId: 'user-2',
+              action: 'member.remove',
+              targetType: 'member',
+              targetId: 'member-2',
+              summary: 'Removed member',
+              createdAt: '2026-06-16T09:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('1/2')).toBeInTheDocument()
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))
+
+    await waitFor(() => {
+      expect(screen.getByText('2/2')).toBeInTheDocument()
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }))
+
+    await waitFor(() => {
+      expect(screen.getByText('1/2')).toBeInTheDocument()
+    })
+  })
+
+  it('focuses search input with / shortcut', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }))
+
+    const searchInput = screen.getByPlaceholderText(
+      '在已加载记录里继续搜索动作、摘要、操作者、目标或快照内容',
+    )
+    expect(searchInput).toHaveFocus()
+  })
+
+  it('opens details drawer with enter key', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    await waitFor(() => {
+      expect(window.location.search).toContain('entry=1')
+    })
+  })
+
+  it('closes details drawer with escape key', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
+    })
+
+    await user.click(screen.getAllByRole('button', { name: '查看详情' })[0] as HTMLElement)
+
+    await waitFor(() => {
+      expect(window.location.search).toContain('entry=1')
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
+    await waitFor(() => {
+      expect(window.location.search).not.toContain('entry=1')
+    })
+  })
+
   it('shows a local-search empty state without losing the loaded results', async () => {
     server.use(
       http.get('/fb/v1/console/audit-log', () =>

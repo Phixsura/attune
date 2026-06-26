@@ -4,6 +4,14 @@ import { EvidenceExportDialog } from '@/features/audit-log/components/evidence-e
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 
+vi.mock('@/features/audit-log/api/evidence-export', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return {
+    ...actual,
+    downloadEvidenceExport: vi.fn().mockResolvedValue(undefined),
+  }
+})
+
 const emptyFilters = {}
 
 describe('EvidenceExportDialog', () => {
@@ -135,5 +143,182 @@ describe('EvidenceExportDialog', () => {
       expect(screen.getByText(/internal error/)).toBeInTheDocument()
     })
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+  })
+
+  it('triggers download when clicking the download button', async () => {
+    const { downloadEvidenceExport } = await import('@/features/audit-log/api/evidence-export')
+
+    server.use(
+      http.post('/fb/v1/console/audit-log/evidence', () =>
+        HttpResponse.json({ jobId: 'job-dl', status: 'queued', retryAfterSeconds: 1 }),
+      ),
+      http.get('/fb/v1/console/audit-log/evidence/job-dl', () =>
+        HttpResponse.json({
+          jobId: 'job-dl',
+          status: 'completed',
+          totalEvents: 2,
+          createdAt: '2026-06-26T00:00:00Z',
+          completedAt: '2026-06-26T00:00:01Z',
+          archiveFilename: 'evidence.zip',
+          retryAfterSeconds: 2,
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('下载证据包')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '下载证据包' }))
+
+    await waitFor(() => {
+      expect(downloadEvidenceExport).toHaveBeenCalledWith('job-dl', 'evidence.zip')
+    })
+  })
+
+  it('retries export after failure', async () => {
+    let postCount = 0
+    server.use(
+      http.post('/fb/v1/console/audit-log/evidence', () => {
+        postCount++
+        return HttpResponse.json({
+          jobId: `job-retry-${postCount}`,
+          status: 'queued',
+          retryAfterSeconds: 1,
+        })
+      }),
+      http.get('/fb/v1/console/audit-log/evidence/job-retry-1', () =>
+        HttpResponse.json({
+          jobId: 'job-retry-1',
+          status: 'failed',
+          totalEvents: 0,
+          createdAt: '2026-06-26T00:00:00Z',
+          error: 'timeout',
+          retryAfterSeconds: 2,
+        }),
+      ),
+      http.get('/fb/v1/console/audit-log/evidence/job-retry-2', () =>
+        HttpResponse.json({
+          jobId: 'job-retry-2',
+          status: 'completed',
+          totalEvents: 1,
+          createdAt: '2026-06-26T00:00:00Z',
+          completedAt: '2026-06-26T00:00:01Z',
+          retryAfterSeconds: 2,
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('下载证据包')).toBeInTheDocument()
+    })
+    expect(postCount).toBe(2)
+  })
+
+  it('shows failed view without error message', async () => {
+    server.use(
+      http.post('/fb/v1/console/audit-log/evidence', () =>
+        HttpResponse.json({ jobId: 'job-ne', status: 'queued', retryAfterSeconds: 1 }),
+      ),
+      http.get('/fb/v1/console/audit-log/evidence/job-ne', () =>
+        HttpResponse.json({
+          jobId: 'job-ne',
+          status: 'failed',
+          totalEvents: 0,
+          createdAt: '2026-06-26T00:00:00Z',
+          retryAfterSeconds: 2,
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    })
+  })
+
+  it('shows processing view with running status', async () => {
+    server.use(
+      http.post('/fb/v1/console/audit-log/evidence', () =>
+        HttpResponse.json({ jobId: 'job-run', status: 'queued', retryAfterSeconds: 1 }),
+      ),
+      http.get('/fb/v1/console/audit-log/evidence/job-run', () =>
+        HttpResponse.json({
+          jobId: 'job-run',
+          status: 'running',
+          totalEvents: 0,
+          createdAt: '2026-06-26T00:00:00Z',
+          retryAfterSeconds: 2,
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('生成中')).toBeInTheDocument()
+    })
+    expect(screen.getByText('正在打包审计日志，完成后可直接下载。')).toBeInTheDocument()
+  })
+
+  it('passes filters to the export request', async () => {
+    const capturedBodies: unknown[] = []
+    server.use(
+      http.post('/fb/v1/console/audit-log/evidence', async ({ request }) => {
+        capturedBodies.push(await request.json())
+        return HttpResponse.json({ jobId: 'job-f', status: 'queued', retryAfterSeconds: 1 })
+      }),
+      http.get('/fb/v1/console/audit-log/evidence/job-f', () =>
+        HttpResponse.json({
+          jobId: 'job-f',
+          status: 'queued',
+          totalEvents: 0,
+          createdAt: '2026-06-26T00:00:00Z',
+          retryAfterSeconds: 60,
+        }),
+      ),
+    )
+
+    const filters = { actions: ['member.invite'], targetId: 'member-1' }
+    const { user } = renderWithProviders(
+      <EvidenceExportDialog filters={filters} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+
+    await waitFor(() => {
+      expect(capturedBodies).toHaveLength(1)
+    })
+    expect(capturedBodies[0]).toMatchObject({
+      actions: ['member.invite'],
+      targetId: 'member-1',
+    })
   })
 })
