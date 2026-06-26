@@ -317,7 +317,12 @@ func securityDashboard() dashboard {
 			targetExpr("B", `rate(attune_audit_rows_pruned_total[$__rate_interval])`, "pruned"),
 			targetExpr("C", `histogram_quantile(0.95, sum by (le) (rate(attune_audit_prune_duration_seconds_bucket[$__rate_interval])))`, "prune p95"),
 		}, "short", gp(0, 35, 12, 8)),
-		seriesDesc(20, "Guard policy activity", "Guard actions and blocks by stage, guard, entity, action, and reason. Use this as compliance evidence for policy behavior.", []target{
+		seriesDesc(20, "Evidence export", "Audit evidence export throughput, duration, and archive size. Tracks compliance pack generation for auditor handoff.", []target{
+			targetExpr("A", `sum by (status) (rate(attune_audit_evidence_exports_total[$__rate_interval]))`, "{{status}}"),
+			targetExpr("B", `histogram_quantile(0.95, sum by (le) (rate(attune_audit_evidence_export_duration_seconds_bucket[$__rate_interval])))`, "duration p95"),
+			targetExpr("C", `histogram_quantile(0.95, sum by (le) (rate(attune_audit_evidence_export_size_bytes_bucket[$__rate_interval])))`, "size p95"),
+		}, "short", gp(0, 43, 12, 8)),
+		seriesDesc(21, "Guard policy activity", "Guard actions and blocks by stage, guard, entity, action, and reason. Use this as compliance evidence for policy behavior.", []target{
 			targetExpr("A", `sum by (stage, guard, entity, action) (rate(attune_guard_actions_total[$__rate_interval]))`, "{{stage}} / {{guard}} / {{entity}} / {{action}}"),
 			targetExpr("B", `sum by (stage, guard, reason) (rate(attune_guard_blocked_total[$__rate_interval]))`, "blocked / {{stage}} / {{guard}} / {{reason}}"),
 		}, "reqps", gp(12, 35, 12, 8)),

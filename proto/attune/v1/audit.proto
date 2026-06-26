@@ -12,6 +12,21 @@ service AuditLogService {
   rpc ExportAuditLogCSV(ExportAuditLogCSVRequest) returns (google.api.HttpBody) {
     option (google.api.http) = {get: "/fb/v1/console/audit-log/export.csv"};
   }
+  rpc CreateAuditEvidenceExport(CreateAuditEvidenceExportRequest)
+      returns (CreateAuditEvidenceExportResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/audit-log/evidence"
+      body: "*"
+    };
+  }
+  rpc GetAuditEvidenceExport(GetAuditEvidenceExportRequest)
+      returns (GetAuditEvidenceExportResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/audit-log/evidence/{job_id}"};
+  }
+  rpc DownloadAuditEvidenceExport(DownloadAuditEvidenceExportRequest)
+      returns (google.api.HttpBody) {
+    option (google.api.http) = {get: "/fb/v1/console/audit-log/evidence/{job_id}/download"};
+  }
 }
 
 message AuditLogEntry {
@@ -57,4 +72,43 @@ message ExportAuditLogCSVRequest {
   string from = 6;
   string to = 7;
   repeated string actions = 8;
+}
+
+message CreateAuditEvidenceExportRequest {
+  string from = 1;
+  string to = 2;
+  repeated string actions = 3;
+  string actor_type = 4;
+  string actor_id = 5;
+  string target_type = 6;
+  string target_id = 7;
+}
+
+message CreateAuditEvidenceExportResponse {
+  string job_id = 1;
+  string status = 2;
+  int32 retry_after_seconds = 3;
+}
+
+message GetAuditEvidenceExportRequest {
+  string job_id = 1;
+}
+
+message GetAuditEvidenceExportResponse {
+  string job_id = 1;
+  string status = 2;
+  int32 total_events = 3;
+  string created_at = 4;
+  optional string started_at = 5;
+  optional string completed_at = 6;
+  optional string expires_at = 7;
+  optional string downloaded_at = 8;
+  optional string download_path = 9;
+  optional string archive_filename = 10;
+  optional string error = 11;
+  int32 retry_after_seconds = 12;
+}
+
+message DownloadAuditEvidenceExportRequest {
+  string job_id = 1;
 }

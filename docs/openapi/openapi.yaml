@@ -917,6 +917,76 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /fb/v1/console/audit-log/evidence:
+        post:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_CreateAuditEvidenceExport
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateAuditEvidenceExportRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateAuditEvidenceExportResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/audit-log/evidence/{jobId}:
+        get:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_GetAuditEvidenceExport
+            parameters:
+                - name: jobId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetAuditEvidenceExportResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /fb/v1/console/audit-log/evidence/{jobId}/download:
+        get:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_DownloadAuditEvidenceExport
+            parameters:
+                - name: jobId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        '*/*': {}
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/audit-log/export.csv:
         get:
             tags:
@@ -4747,6 +4817,35 @@ components:
             properties:
                 request:
                     $ref: '#/components/schemas/ApprovalRequest'
+        CreateAuditEvidenceExportRequest:
+            type: object
+            properties:
+                from:
+                    type: string
+                to:
+                    type: string
+                actions:
+                    type: array
+                    items:
+                        type: string
+                actorType:
+                    type: string
+                actorId:
+                    type: string
+                targetType:
+                    type: string
+                targetId:
+                    type: string
+        CreateAuditEvidenceExportResponse:
+            type: object
+            properties:
+                jobId:
+                    type: string
+                status:
+                    type: string
+                retryAfterSeconds:
+                    type: integer
+                    format: int32
         CreateEventSubscriptionRequest:
             required:
                 - eventTypes
@@ -6033,6 +6132,35 @@ components:
                     type: string
                 expiresAt:
                     type: string
+        GetAuditEvidenceExportResponse:
+            type: object
+            properties:
+                jobId:
+                    type: string
+                status:
+                    type: string
+                totalEvents:
+                    type: integer
+                    format: int32
+                createdAt:
+                    type: string
+                startedAt:
+                    type: string
+                completedAt:
+                    type: string
+                expiresAt:
+                    type: string
+                downloadedAt:
+                    type: string
+                downloadPath:
+                    type: string
+                archiveFilename:
+                    type: string
+                error:
+                    type: string
+                retryAfterSeconds:
+                    type: integer
+                    format: int32
         GetClusterMembersResponse:
             type: object
             properties:

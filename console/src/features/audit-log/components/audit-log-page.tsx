@@ -1,20 +1,18 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { format, formatDistanceToNow, isToday, isYesterday, type Locale } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import type { LucideIcon } from 'lucide-react'
+import type { TFunction } from 'i18next'
 import {
+  Archive,
   CalendarClock,
-  CheckCircle2,
   ChevronDown,
-  Clock3,
   Copy,
   Download,
   FileSearch,
   Filter,
   Loader2,
+  MoreHorizontal,
   Search,
-  ShieldCheck,
-  Sparkles,
   TimerReset,
   X,
 } from 'lucide-react'
@@ -23,8 +21,14 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -36,13 +40,24 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
-import { auditActionOptions } from '@/features/audit-log/actions'
+import {
+  auditActionOptions,
+  buildEventDescription,
+  formatIdDisplay,
+  getActionDotColor,
+  getActionLabel,
+  getActorAvatar,
+  getActorTypeLabel,
+  getFieldLabel,
+  getTargetTypeLabel,
+} from '@/features/audit-log/actions'
 import {
   type AuditLogEntry,
   type AuditLogFilters,
   auditLogInfiniteQuery,
   downloadAuditLogCsv,
 } from '@/features/audit-log/api/list-audit-log'
+import { EvidenceExportDialog } from '@/features/audit-log/components/evidence-export-dialog'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { cn } from '@/lib/utils'
 
@@ -73,18 +88,6 @@ type AuditUrlState = {
 type AppliedFilterDescriptor = {
   key: 'actions' | 'actorId' | 'from' | 'localQuery' | 'targetId' | 'targetType' | 'to'
   label: string
-}
-
-type InvestigationSignal = {
-  count: number
-  value: string
-}
-
-type CompactSignalDescriptor = {
-  key: string
-  label: string
-  onSelect: (value: string) => void
-  signal?: InvestigationSignal
 }
 
 type AuditActivityBurst = {
@@ -162,8 +165,8 @@ export function AuditLogPage() {
     initialUrlState.inspectedEntryId,
   )
   const [isExporting, setIsExporting] = useState(false)
+  const [evidenceDialogOpen, setEvidenceDialogOpen] = useState(false)
   const [isFilterConsoleExpanded, setIsFilterConsoleExpanded] = useState(false)
-  const [isSliceSignalsExpanded, setIsSliceSignalsExpanded] = useState(false)
   const [expandedBurstKeys, setExpandedBurstKeys] = useState<Set<string>>(() => new Set())
   const localQueryInputRef = useRef<HTMLInputElement | null>(null)
   const entryFocusButtonRefs = useRef(new Map<string, HTMLButtonElement>())
@@ -174,16 +177,12 @@ export function AuditLogPage() {
   const query = useInfiniteQuery(auditLogInfiniteQuery(filters))
   const items = query.data?.pages.flatMap((page) => page.items ?? []) ?? []
   const visibleItems = deferredLocalQuery
-    ? items.filter((item) => matchesLocalAuditQuery(item, deferredLocalQuery))
+    ? items.filter((item) => matchesLocalAuditQuery(item, deferredLocalQuery, t))
     : items
-  const latestEntry = items[0]
-  const uniqueActions = new Set(items.map((item) => item.action)).size
   const activeFilterCount = countActiveFilters(filters)
   const hasPendingChanges = !areFiltersEqual(draftFilters, filters)
   const filterSummary = describeAppliedFilters(filters, localQuery, t)
   const presets = buildPresets(t)
-  const insightItems = deferredLocalQuery ? visibleItems : items
-  const insightSignals = buildInvestigationSignals(insightItems)
   const selectedVisibleIndex = selectedEntryId
     ? visibleItems.findIndex((item) => item.id === selectedEntryId)
     : -1
@@ -203,10 +202,6 @@ export function AuditLogPage() {
     ? detailItems.findIndex((item) => item.id === inspectedEntryId)
     : -1
   const streamGroups = buildStreamGroups(visibleItems, locale)
-  const burstCount = streamGroups.reduce(
-    (count, group) => count + group.blocks.filter((block) => block.kind === 'burst').length,
-    0,
-  )
   const selectedBurstContext = selectedEntryId
     ? findBurstContextForEntry(streamGroups, selectedEntryId)
     : null
@@ -216,38 +211,6 @@ export function AuditLogPage() {
     selectedBurstContext.burstItemIndex >= 3
       ? selectedBurstContext.burstKey
       : null
-  const selectedBurst = selectedBurstContext?.burst ?? null
-  const selectedBurstTargetId = selectedBurst?.targetId ?? null
-  const selectedBurstPosition =
-    typeof selectedBurstContext?.burstItemIndex === 'number'
-      ? selectedBurstContext.burstItemIndex + 1
-      : null
-  const selectedBurstCanExpand = (selectedBurst?.count ?? 0) > 3
-  const selectedBurstExpanded =
-    Boolean(selectedBurst && expandedBurstKeys.has(selectedBurst.key)) ||
-    selectedBurstKeyToExpand === selectedBurst?.key
-  const oldestVisibleEntry = visibleItems[visibleItems.length - 1] ?? null
-  const selectedChangeSummary = selectedEntry ? describeAuditChanges(selectedEntry) : null
-  const selectedLocalMatchReasons =
-    selectedEntry && deferredLocalQuery
-      ? describeLocalAuditMatch(selectedEntry, deferredLocalQuery)
-      : []
-  const selectedHasActionScope = selectedEntry
-    ? hasSingleActionFilter(filters, selectedEntry.action)
-    : false
-  const selectedHasTargetScope = selectedEntry
-    ? hasTargetFilter(filters, selectedEntry.targetId)
-    : false
-  const selectedHasActorScope = selectedEntry
-    ? hasActorFilter(filters, selectedEntry.actorId)
-    : false
-  const selectedBurstHasActionScope = selectedBurst
-    ? hasSingleActionFilter(filters, selectedBurst.action)
-    : false
-  const selectedBurstHasTargetScope = selectedBurstTargetId
-    ? hasTargetFilter(filters, selectedBurstTargetId)
-    : false
-  const hasInvestigationScope = activeFilterCount > 0 || Boolean(deferredLocalQuery)
 
   useEffect(() => {
     if (visibleItems.length === 0) {
@@ -686,33 +649,6 @@ export function AuditLogPage() {
     })
   }
 
-  const compactSignals: CompactSignalDescriptor[] = [
-    {
-      key: 'action',
-      label: t('audit_log.slice_actions'),
-      onSelect: (value) => handleInvestigate('action', value),
-      signal: insightSignals.actions[0],
-    },
-    {
-      key: 'actor',
-      label: t('audit_log.slice_actors'),
-      onSelect: (value) => handleInvestigate('actorId', value),
-      signal: insightSignals.actors[0],
-    },
-    {
-      key: 'target',
-      label: t('audit_log.slice_targets'),
-      onSelect: (value) => handleInvestigate('targetId', value),
-      signal: insightSignals.targets[0],
-    },
-    {
-      key: 'path',
-      label: t('audit_log.slice_paths'),
-      onSelect: handleSpotlightSignal,
-      signal: insightSignals.paths[0],
-    },
-  ]
-
   if (!canView) {
     return (
       <EmptyState
@@ -725,100 +661,44 @@ export function AuditLogPage() {
 
   return (
     <section className="space-y-5">
-      <header className="overflow-hidden rounded-[1.5rem] border border-primary/15 bg-[linear-gradient(135deg,rgba(255,255,255,0.98),rgba(255,248,240,0.96)_46%,rgba(255,238,219,0.88))] shadow-[0_1px_0_rgba(15,23,42,0.03),0_18px_50px_-28px_rgba(234,88,12,0.35)]">
-        <div className="space-y-4 px-6 py-5 lg:px-7 lg:py-6">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-white/80 px-3 py-1 text-[11px] font-semibold tracking-[0.18em] text-primary uppercase shadow-sm backdrop-blur">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                {t('audit_log.hero_eyebrow')}
-              </div>
-              <div className="space-y-2">
-                <h1 className="max-w-3xl text-[2rem] font-semibold tracking-[-0.045em] text-foreground [text-wrap:balance] md:text-[2.3rem]">
-                  {t('audit_log.title')}
-                </h1>
-                <p className="max-w-[56ch] text-sm leading-6 text-muted-foreground [text-wrap:pretty]">
-                  {t('audit_log.subtitle')}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Button type="button" disabled={isExporting} onClick={() => void handleExport()}>
-                  <Download className="mr-2 h-4 w-4" />
-                  {isExporting ? t('audit_log.exporting') : t('audit_log.export')}
-                </Button>
-                <Button type="button" variant="outline" onClick={handleCopyCurrentView}>
-                  <Copy className="mr-2 h-4 w-4" />
-                  {t('audit_log.copy_view')}
-                </Button>
-              </div>
-            </div>
-
-            <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-white/72 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
-              {t('audit_log.table_help')}
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard
-              icon={FileSearch}
-              label={t('audit_log.stats.loaded')}
-              value={String(items.length)}
-              hint={t('audit_log.stats.loaded_hint')}
-            />
-            <StatCard
-              icon={Filter}
-              label={t('audit_log.stats.filters')}
-              value={String(activeFilterCount)}
-              hint={
-                activeFilterCount > 0
-                  ? t('audit_log.stats.filters_active')
-                  : t('audit_log.stats.filters_idle')
-              }
-            />
-            <StatCard
-              icon={CalendarClock}
-              label={t('audit_log.stats.latest')}
-              value={
-                latestEntry
-                  ? formatDistanceToNow(new Date(latestEntry.createdAt), {
-                      addSuffix: true,
-                      locale,
-                    })
-                  : t('audit_log.stats.latest_empty')
-              }
-              hint={
-                latestEntry
-                  ? formatAbsoluteTimestamp(latestEntry.createdAt, locale)
-                  : t('audit_log.stats.latest_hint')
-              }
-            />
-            <StatCard
-              icon={ShieldCheck}
-              label={t('audit_log.stats.actions')}
-              value={String(uniqueActions)}
-              hint={t('audit_log.stats.actions_hint')}
-            />
-          </div>
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          {t('audit_log.title')}
+        </h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            disabled={isExporting}
+            onClick={() => void handleExport()}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            {isExporting ? t('audit_log.exporting') : t('audit_log.export')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setEvidenceDialogOpen(true)}
+          >
+            <Archive className="mr-2 h-4 w-4" />
+            {t('audit_log.evidence_export')}
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={handleCopyCurrentView}>
+            <Copy className="mr-2 h-4 w-4" />
+            {t('audit_log.copy_view')}
+          </Button>
         </div>
       </header>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(19rem,22rem)_minmax(0,1fr)]">
         <Card className="overflow-hidden border-border/70 shadow-[0_1px_0_rgba(15,23,42,0.02),0_16px_40px_-30px_rgba(15,23,42,0.24)] xl:sticky xl:top-6 xl:self-start">
-          <CardHeader className="border-b border-border/70 bg-[linear-gradient(180deg,rgba(248,250,252,0.9),rgba(255,255,255,0.95))]">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-3">
-                <div className="inline-flex items-center gap-2 text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-                  <Filter className="h-3.5 w-3.5 text-primary" />
-                  {t('audit_log.filters_title')}
-                </div>
-                <CardTitle className="text-xl tracking-[-0.03em]">
-                  {t('audit_log.filters_panel_title')}
-                </CardTitle>
-                <CardDescription className="max-w-md leading-6">
-                  {t('audit_log.filters_panel_body')}
-                </CardDescription>
-              </div>
+          <CardHeader className="border-b border-border/70 px-5 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                {t('audit_log.filters_title')}
+              </CardTitle>
               <Button
                 type="button"
                 variant="ghost"
@@ -953,19 +833,6 @@ export function AuditLogPage() {
                       {draft.toValue || t('audit_log.filters_to')}
                     </FilterChip>
                   </div>
-                  <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground">
-                    {hasPendingChanges ? (
-                      <>
-                        <Clock3 className="h-3.5 w-3.5 text-primary" />
-                        {t('audit_log.pending_changes')}
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-                        {t('audit_log.pending_changes_synced')}
-                      </>
-                    )}
-                  </div>
                 </div>
 
                 <div className="flex flex-wrap gap-3 pt-1">
@@ -985,93 +852,37 @@ export function AuditLogPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="rounded-2xl border border-border/60 bg-muted/18 px-4 py-3 text-sm leading-6 text-muted-foreground">
-                  {activeFilterCount > 0
-                    ? t('audit_log.compact_filter_active', { count: activeFilterCount })
-                    : t('audit_log.compact_filter_idle')}
-                </div>
-                <div className="space-y-2">
-                  <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                    {t('audit_log.presets_title')}
+                {activeFilterCount > 0 ? (
+                  <div className="rounded-xl border border-primary/20 bg-primary/[0.04] px-4 py-2.5 text-sm text-foreground">
+                    {t('audit_log.compact_filter_active', { count: activeFilterCount })}
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {presets.map((preset) => (
-                      <Button
-                        key={preset.id}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="rounded-full"
-                        onClick={() => handlePreset(preset)}
-                      >
-                        {preset.label}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-muted/18 px-4 py-3">
-                  <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                    {hasPendingChanges ? (
-                      <>
-                        <Clock3 className="h-3.5 w-3.5 text-primary" />
-                        {t('audit_log.pending_changes')}
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-                        {t('audit_log.pending_changes_synced')}
-                      </>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {hasPendingChanges ? (
-                      <Button type="button" size="sm" onClick={handleApply}>
-                        {t('audit_log.apply')}
-                      </Button>
-                    ) : null}
-                    <Button type="button" variant="ghost" size="sm" onClick={handleReset}>
-                      {t('audit_log.reset')}
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  {presets.map((preset) => (
+                    <Button
+                      key={preset.id}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="rounded-full"
+                      onClick={() => handlePreset(preset)}
+                    >
+                      {preset.label}
                     </Button>
-                  </div>
+                  ))}
                 </div>
+                <Button type="button" variant="ghost" size="sm" onClick={handleReset}>
+                  <TimerReset className="mr-2 h-4 w-4" />
+                  {t('audit_log.reset')}
+                </Button>
               </div>
             )}
           </CardContent>
         </Card>
 
         <Card className="overflow-hidden border-border/70 shadow-[0_1px_0_rgba(15,23,42,0.02),0_16px_40px_-32px_rgba(15,23,42,0.22)]">
-          <CardHeader className="border-b border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.86))]">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="space-y-2">
-                <div className="inline-flex items-center gap-2 text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-                  <Sparkles className="h-3.5 w-3.5 text-primary" />
-                  {t('audit_log.table_title')}
-                </div>
-                <CardTitle className="text-xl tracking-[-0.03em]">
-                  {t('audit_log.stream_title')}
-                </CardTitle>
-                <CardDescription className="max-w-2xl leading-6">
-                  {t('audit_log.stream_help')}
-                </CardDescription>
-              </div>
-              <div className="rounded-2xl border border-border/70 bg-white/80 px-4 py-3 shadow-sm">
-                <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                  {deferredLocalQuery
-                    ? t('audit_log.stream_visible_label')
-                    : t('audit_log.stream_count_label')}
-                </div>
-                <div className="mt-1 text-2xl font-semibold tracking-[-0.04em] text-foreground tabular-nums">
-                  {visibleItems.length}
-                </div>
-                <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                  {deferredLocalQuery
-                    ? t('audit_log.stream_visible_hint', { total: items.length })
-                    : t('audit_log.stream_count_hint')}
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-3 pt-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <CardHeader className="border-b border-border/70 px-6 py-4">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
               <div className="relative">
                 <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -1093,63 +904,17 @@ export function AuditLogPage() {
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
-                {filterSummary.length > 0 ? (
-                  filterSummary.map((summary) => (
-                    <RemovableFilterChip
-                      key={summary.key}
-                      label={summary.label}
-                      onRemove={() => handleRemoveAppliedFilter(summary.key)}
-                    />
-                  ))
-                ) : (
-                  <FilterChip active={false}>{t('audit_log.all_filters_idle')}</FilterChip>
-                )}
+                {filterSummary.length > 0
+                  ? filterSummary.map((summary) => (
+                      <RemovableFilterChip
+                        key={summary.key}
+                        label={summary.label}
+                        onRemove={() => handleRemoveAppliedFilter(summary.key)}
+                      />
+                    ))
+                  : null}
               </div>
             </div>
-
-            {visibleItems.length > 0 ? (
-              <div className="pt-4">
-                <div className="rounded-2xl border border-border/70 bg-muted/[0.08] px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.78)]">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-2">
-                      <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                        {t('audit_log.scope_title')}
-                      </div>
-                      <div className="text-sm leading-6 text-foreground">
-                        {activeFilterCount > 0 || deferredLocalQuery
-                          ? t('audit_log.scope_body_active')
-                          : t('audit_log.scope_body_idle')}
-                      </div>
-                    </div>
-                    {oldestVisibleEntry && latestEntry ? (
-                      <div className="rounded-full border border-border/70 bg-background/88 px-3 py-1.5 text-xs text-muted-foreground tabular-nums">
-                        {t('audit_log.scope_range', {
-                          from: formatAbsoluteTimestamp(oldestVisibleEntry.createdAt, locale),
-                          to: formatAbsoluteTimestamp(latestEntry.createdAt, locale),
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <FilterChip active>
-                      {t('audit_log.scope_events', { count: visibleItems.length })}
-                    </FilterChip>
-                    {burstCount > 0 ? (
-                      <FilterChip active={false}>
-                        {t('audit_log.scope_bursts', { count: burstCount })}
-                      </FilterChip>
-                    ) : null}
-                    <FilterChip active={Boolean(deferredLocalQuery)}>
-                      {deferredLocalQuery
-                        ? t('audit_log.scope_local_query', {
-                            query: localQuery.trim(),
-                          })
-                        : t('audit_log.scope_local_idle')}
-                    </FilterChip>
-                  </div>
-                </div>
-              </div>
-            ) : null}
           </CardHeader>
           <CardContent className="px-0 py-0">
             {query.isPending ? (
@@ -1195,441 +960,74 @@ export function AuditLogPage() {
               />
             ) : (
               <div className="space-y-0">
-                <div className="border-b border-border/70 bg-[linear-gradient(180deg,rgba(255,251,247,0.72),rgba(255,255,255,0.94))] px-6 py-4">
-                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(19rem,0.95fr)]">
-                    <div className="space-y-4">
-                      <div className="rounded-[1.35rem] border border-border/70 bg-white/88 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                              {t('audit_log.slice_signals_title')}
-                            </div>
-                            <div className="max-w-[52ch] text-sm leading-6 text-muted-foreground">
-                              {deferredLocalQuery
-                                ? t('audit_log.slice_signals_body_visible', {
-                                    count: insightItems.length,
-                                  })
-                                : t('audit_log.slice_signals_body_loaded', {
-                                    count: insightItems.length,
-                                  })}
-                            </div>
+                {selectedEntry ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-6 py-2.5">
+                    <div className="flex items-center gap-2 text-sm">
+                      {(() => {
+                        const av = getActorAvatar(selectedEntry.actorId, selectedEntry.actorEmail)
+                        return (
+                          <div
+                            className={cn(
+                              'flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-medium',
+                              av.bg,
+                              av.text,
+                            )}
+                          >
+                            {av.initials}
                           </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <FilterChip active={Boolean(deferredLocalQuery)}>
-                              {deferredLocalQuery
-                                ? t('audit_log.slice_basis_visible')
-                                : t('audit_log.slice_basis_loaded')}
-                            </FilterChip>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setIsSliceSignalsExpanded((value) => !value)}
-                              aria-expanded={isSliceSignalsExpanded}
-                            >
-                              {isSliceSignalsExpanded
-                                ? t('audit_log.collapse_signals')
-                                : t('audit_log.expand_signals')}
-                              <ChevronDown
-                                className={cn(
-                                  'h-4 w-4 transition-transform',
-                                  isSliceSignalsExpanded && 'rotate-180',
-                                )}
-                              />
-                            </Button>
-                          </div>
-                        </div>
-                        {isSliceSignalsExpanded ? (
-                          <div className="mt-4 grid gap-3 2xl:grid-cols-2">
-                            <InvestigationSignalGroup
-                              title={t('audit_log.slice_actions')}
-                              items={insightSignals.actions}
-                              emptyLabel={t('audit_log.slice_none')}
-                              onSelect={(value) => handleInvestigate('action', value)}
-                            />
-                            <InvestigationSignalGroup
-                              title={t('audit_log.slice_actors')}
-                              items={insightSignals.actors}
-                              emptyLabel={t('audit_log.slice_none')}
-                              onSelect={(value) => handleInvestigate('actorId', value)}
-                            />
-                            <InvestigationSignalGroup
-                              title={t('audit_log.slice_targets')}
-                              items={insightSignals.targets}
-                              emptyLabel={t('audit_log.slice_none')}
-                              onSelect={(value) => handleInvestigate('targetId', value)}
-                            />
-                            <InvestigationSignalGroup
-                              title={t('audit_log.slice_paths')}
-                              items={insightSignals.paths}
-                              emptyLabel={t('audit_log.slice_none')}
-                              onSelect={handleSpotlightSignal}
-                            />
-                          </div>
-                        ) : (
-                          <div className="mt-4 grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-                            {compactSignals.map((item) => (
-                              <CompactInvestigationSignalCard
-                                key={item.key}
-                                title={item.label}
-                                signal={item.signal}
-                                emptyLabel={t('audit_log.slice_none')}
-                                onSelect={item.onSelect}
-                              />
-                            ))}
-                          </div>
+                        )
+                      })()}
+                      <div
+                        className={cn(
+                          'h-1.5 w-1.5 rounded-full',
+                          getActionDotColor(selectedEntry.action),
                         )}
-                      </div>
-
-                      {selectedBurst ? (
-                        <div className="rounded-[1.35rem] border border-border/70 bg-background/92 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.76)]">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="space-y-1">
-                              <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                                {t('audit_log.workspace_burst_title')}
-                              </div>
-                              <div className="max-w-[50ch] text-sm leading-6 text-muted-foreground">
-                                {t('audit_log.workspace_burst_body', {
-                                  current: selectedBurstPosition ?? 1,
-                                  total: selectedBurst.count,
-                                })}
-                              </div>
-                            </div>
-                            <div className="rounded-full border border-border/70 bg-muted/[0.12] px-3 py-1.5 text-xs text-muted-foreground tabular-nums">
-                              {t('audit_log.scope_range', {
-                                from: formatAbsoluteTimestamp(
-                                  selectedBurst.oldestCreatedAt,
-                                  locale,
-                                ),
-                                to: formatAbsoluteTimestamp(selectedBurst.latestCreatedAt, locale),
-                              })}
-                            </div>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <AuditToken className="border-primary/15 bg-primary/8 text-primary">
-                              {selectedBurst.action}
-                            </AuditToken>
-                            {selectedBurst.targetType ? (
-                              <AuditToken>{selectedBurst.targetType}</AuditToken>
-                            ) : null}
-                            {selectedBurst.targetId ? (
-                              <AuditToken>{selectedBurst.targetId}</AuditToken>
-                            ) : null}
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => setSelectedEntryId(selectedBurst.latestId)}
-                              disabled={selectedEntry?.id === selectedBurst.latestId}
-                            >
-                              {t('audit_log.burst_focus_latest')}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={() => setSelectedEntryId(selectedBurst.oldestId)}
-                              disabled={selectedEntry?.id === selectedBurst.oldestId}
-                            >
-                              {t('audit_log.workspace_burst_focus_oldest')}
-                            </Button>
-                            {selectedBurstCanExpand ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={() => toggleBurstExpansion(selectedBurst.key)}
-                              >
-                                {selectedBurstExpanded
-                                  ? t('audit_log.workspace_burst_collapse_rows')
-                                  : t('audit_log.workspace_burst_expand_rows', {
-                                      count: selectedBurst.count,
-                                    })}
-                              </Button>
-                            ) : null}
-                            {!selectedBurstHasActionScope ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={() =>
-                                  handleInvestigate(
-                                    'action',
-                                    selectedBurst.action,
-                                    selectedEntry?.id,
-                                  )
-                                }
-                              >
-                                {t('audit_log.workspace_burst_filter_action')}
-                              </Button>
-                            ) : null}
-                            {selectedBurstTargetId && !selectedBurstHasTargetScope ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={() =>
-                                  handleInvestigate(
-                                    'targetId',
-                                    selectedBurstTargetId,
-                                    selectedEntry?.id,
-                                  )
-                                }
-                              >
-                                {t('audit_log.workspace_burst_filter_target')}
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
+                      />
+                      <span className="font-medium text-foreground">
+                        {getActionLabel(selectedEntry.action, t)}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {buildEventDescription(selectedEntry, t)}
+                      </span>
+                      {selectedVisibleIndex >= 0 ? (
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {selectedVisibleIndex + 1}/{visibleItems.length}
+                        </span>
                       ) : null}
                     </div>
-
-                    <div className="rounded-[1.35rem] border border-border/70 bg-muted/[0.05] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.78)]">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                            {selectedEntry
-                              ? t('audit_log.investigation_workspace_title')
-                              : t('audit_log.selection_hint_title')}
-                          </div>
-                          <div className="text-base font-semibold text-foreground">
-                            {selectedEntry
-                              ? selectedEntry.summary || t('audit_log.summary_fallback')
-                              : t('audit_log.selection_hint_title')}
-                          </div>
-                          <div className="max-w-[54ch] text-sm leading-6 text-muted-foreground">
-                            {selectedEntry
-                              ? t('audit_log.selection_hint_body', {
-                                  action: selectedEntry.action,
-                                  actorId: selectedEntry.actorId || t('audit_log.actor_unknown'),
-                                })
-                              : t('audit_log.selection_idle_body')}
-                          </div>
-                        </div>
-                        {selectedEntry && selectedVisibleIndex >= 0 ? (
-                          <FilterChip active>
-                            {t('audit_log.focus_position', {
-                              current: selectedVisibleIndex + 1,
-                              total: visibleItems.length,
-                            })}
-                          </FilterChip>
-                        ) : null}
-                      </div>
-
-                      {selectedEntry ? (
-                        <>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {selectedBurst && selectedBurstPosition ? (
-                              <FilterChip active={false}>
-                                {t('audit_log.workspace_burst_position', {
-                                  current: selectedBurstPosition,
-                                  total: selectedBurst.count,
-                                })}
-                              </FilterChip>
-                            ) : null}
-                            <FilterChip active={hasInvestigationScope}>
-                              {hasInvestigationScope
-                                ? t('audit_log.workspace_scope_active')
-                                : t('audit_log.workspace_scope_idle')}
-                            </FilterChip>
-                          </div>
-
-                          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
-                            <InvestigationFactCard
-                              label={t('audit_log.fields.action')}
-                              value={selectedEntry.action}
-                              mono
-                            />
-                            <InvestigationFactCard
-                              label={t('audit_log.fields.actor')}
-                              value={selectedEntry.actorId || t('audit_log.actor_unknown')}
-                              hint={selectedEntry.actorType || undefined}
-                              mono
-                            />
-                            <InvestigationFactCard
-                              label={t('audit_log.fields.target')}
-                              value={selectedEntry.targetId || t('audit_log.target_unknown')}
-                              hint={selectedEntry.targetType || undefined}
-                              mono
-                            />
-                            <InvestigationFactCard
-                              label={t('audit_log.fields.created_at')}
-                              value={formatAbsoluteTimestamp(selectedEntry.createdAt, locale)}
-                              hint={formatDistanceToNow(new Date(selectedEntry.createdAt), {
-                                addSuffix: true,
-                                locale,
-                              })}
-                              mono
-                            />
-                          </div>
-
-                          {selectedLocalMatchReasons.length > 0 ? (
-                            <div className="mt-4 space-y-2">
-                              <div className="text-[11px] font-semibold tracking-[0.16em] text-amber-700 uppercase">
-                                {t('audit_log.focus_reasons_title')}
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {selectedLocalMatchReasons.map((reason) => (
-                                  <FilterChip key={`${selectedEntry.id}:${reason}`} active={false}>
-                                    {t(`audit_log.local_match_${reason}`)}
-                                  </FilterChip>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-
-                          {selectedChangeSummary ? (
-                            <div className="mt-4 space-y-2">
-                              <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                                {t('audit_log.focus_paths_title')}
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {selectedChangeSummary.paths.slice(0, 4).map((path) => (
-                                  <SpotlightPathChip
-                                    key={`focus:${selectedEntry.id}:${path}`}
-                                    path={path}
-                                    onSpotlight={handleSpotlightSignal}
-                                  />
-                                ))}
-                                {selectedChangeSummary.count > 4 ? (
-                                  <FilterChip active>
-                                    {t('audit_log.change_more', {
-                                      count: selectedChangeSummary.count - 4,
-                                    })}
-                                  </FilterChip>
-                                ) : null}
-                              </div>
-                            </div>
-                          ) : null}
-
-                          <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                            <div className="space-y-2 rounded-2xl border border-border/70 bg-background/92 px-4 py-3">
-                              <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                                {t('audit_log.workspace_browse_title')}
-                              </div>
-                              <div className="text-xs leading-5 text-muted-foreground">
-                                {t('audit_log.shortcuts_inline')}
-                              </div>
-                              <div className="flex flex-wrap gap-2 pt-1">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  onClick={() => handleMoveSelection(-1)}
-                                  disabled={selectedVisibleIndex <= 0}
-                                >
-                                  {t('audit_log.previous_entry')}
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  onClick={() => handleMoveSelection(1)}
-                                  disabled={
-                                    selectedVisibleIndex < 0 ||
-                                    selectedVisibleIndex >= visibleItems.length - 1
-                                  }
-                                >
-                                  {t('audit_log.next_entry')}
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => handleOpenDetails(selectedEntry.id)}
-                                >
-                                  {t('audit_log.open_details')}
-                                </Button>
-                              </div>
-                            </div>
-
-                            <div className="space-y-2 rounded-2xl border border-border/70 bg-background/92 px-4 py-3">
-                              <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                                {t('audit_log.workspace_narrow_title')}
-                              </div>
-                              <div className="flex flex-wrap gap-2 pt-1">
-                                {!selectedHasActionScope ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    onClick={() =>
-                                      handleInvestigate(
-                                        'action',
-                                        selectedEntry.action,
-                                        selectedEntry.id,
-                                      )
-                                    }
-                                  >
-                                    {t('audit_log.same_action')}
-                                  </Button>
-                                ) : null}
-                                {selectedEntry.targetId && !selectedHasTargetScope ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    onClick={() =>
-                                      handleInvestigate(
-                                        'targetId',
-                                        selectedEntry.targetId,
-                                        selectedEntry.id,
-                                      )
-                                    }
-                                  >
-                                    {t('audit_log.same_target')}
-                                  </Button>
-                                ) : null}
-                                {selectedEntry.actorId && !selectedHasActorScope ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    onClick={() =>
-                                      handleInvestigate(
-                                        'actorId',
-                                        selectedEntry.actorId,
-                                        selectedEntry.id,
-                                      )
-                                    }
-                                  >
-                                    {t('audit_log.same_actor')}
-                                  </Button>
-                                ) : null}
-                                {selectedHasActionScope &&
-                                selectedHasTargetScope &&
-                                selectedHasActorScope ? (
-                                  <div className="text-xs leading-5 text-muted-foreground">
-                                    {t('audit_log.workspace_narrow_done')}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                          </div>
-
-                          {hasInvestigationScope ? (
-                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/92 px-4 py-3">
-                              <div className="space-y-1">
-                                <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                                  {t('audit_log.workspace_scope_title')}
-                                </div>
-                                <div className="text-xs leading-5 text-muted-foreground">
-                                  {t('audit_log.workspace_scope_body')}
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {deferredLocalQuery ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    onClick={handleClearLocalQuery}
-                                  >
-                                    {t('audit_log.local_empty_action')}
-                                  </Button>
-                                ) : null}
-                                <Button type="button" variant="outline" onClick={handleReset}>
-                                  <TimerReset className="mr-2 h-4 w-4" />
-                                  {t('audit_log.workspace_scope_reset')}
-                                </Button>
-                              </div>
-                            </div>
-                          ) : null}
-                        </>
-                      ) : null}
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleMoveSelection(-1)}
+                        disabled={selectedVisibleIndex <= 0}
+                      >
+                        {t('audit_log.previous_entry')}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleMoveSelection(1)}
+                        disabled={
+                          selectedVisibleIndex < 0 ||
+                          selectedVisibleIndex >= visibleItems.length - 1
+                        }
+                      >
+                        {t('audit_log.next_entry')}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenDetails(selectedEntry.id)}
+                      >
+                        {t('audit_log.open_details')}
+                      </Button>
                     </div>
                   </div>
-                </div>
+                ) : null}
 
                 <AuditLogStream
                   activeFilters={filters}
@@ -1701,6 +1099,12 @@ export function AuditLogPage() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <EvidenceExportDialog
+        open={evidenceDialogOpen}
+        onOpenChange={setEvidenceDialogOpen}
+        filters={filters}
+      />
     </section>
   )
 }
@@ -1751,7 +1155,7 @@ function AuditLogStream({
               </span>
             </div>
           </div>
-          <div className="divide-y divide-border/70">
+          <div>
             {group.blocks.map((block) => {
               if (block.kind === 'burst') {
                 const hasSingleActionFilter =
@@ -1815,128 +1219,147 @@ function AuditLogStream({
                 <article
                   key={item.id}
                   className={cn(
-                    'px-6 py-5 transition-colors md:px-7',
-                    isSelected ? 'bg-primary/[0.045]' : 'hover:bg-muted/[0.14]',
+                    'pb-0 pt-4 transition-colors',
+                    isSelected
+                      ? 'border-l-2 border-l-primary bg-primary/[0.045] pl-[22px] pr-6 md:pl-[26px] md:pr-7'
+                      : 'px-6 hover:bg-muted/[0.14] md:px-7',
                   )}
                 >
-                  <div className="space-y-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <AuditToken className="border-primary/15 bg-primary/8 text-primary">
-                          {item.action}
-                        </AuditToken>
-                        <AuditToken>{item.targetType || t('audit_log.target_unknown')}</AuditToken>
-                        <AuditToken>{item.actorType || t('audit_log.actor_unknown')}</AuditToken>
-                        {isSelected ? (
-                          <AuditToken className="border-amber-200 bg-amber-50 text-amber-700">
-                            {t('audit_log.current_focus')}
-                          </AuditToken>
-                        ) : null}
-                        {changeSummary ? (
-                          <AuditToken className="border-emerald-200 bg-emerald-50 text-emerald-700">
-                            {t('audit_log.change_count', { count: changeSummary.count })}
-                          </AuditToken>
-                        ) : null}
-                      </div>
-                      <div className="rounded-full border border-border/70 bg-background/80 px-3 py-1 text-xs text-muted-foreground tabular-nums">
-                        {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true, locale })}
-                      </div>
+                  <div className="group/card flex gap-3">
+                    <div className="flex shrink-0 flex-col items-center gap-1.5 pt-1">
+                      {(() => {
+                        const av = getActorAvatar(item.actorId, item.actorEmail)
+                        return (
+                          <div
+                            className={cn(
+                              'flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium',
+                              av.bg,
+                              av.text,
+                            )}
+                          >
+                            {av.initials}
+                          </div>
+                        )
+                      })()}
+                      <div
+                        className={cn('h-2 w-2 rounded-full', getActionDotColor(item.action))}
+                        title={getActionLabel(item.action, t)}
+                      />
+                      <div className="w-px flex-1 bg-border" />
                     </div>
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <button
+                        type="button"
+                        ref={(node) => onRegisterFocusButton(item.id, node)}
+                        onClick={() => onFocus(item.id)}
+                        aria-label={t('audit_log.focus_entry_aria', {
+                          summary: getActionLabel(item.action, t),
+                        })}
+                        className={cn(
+                          'w-full rounded-xl text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                          isSelected ? 'bg-primary/[0.035]' : 'hover:bg-muted/[0.08]',
+                        )}
+                      >
+                        <div className="space-y-0.5 p-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm font-medium text-foreground">
+                              {getActionLabel(item.action, t)}
+                            </span>
+                            <span
+                              className="shrink-0 text-xs text-muted-foreground tabular-nums"
+                              title={formatAbsoluteTimestamp(item.createdAt, locale)}
+                            >
+                              {formatDistanceToNow(new Date(item.createdAt), {
+                                addSuffix: true,
+                                locale,
+                              })}
+                            </span>
+                          </div>
+                          <p className="text-[13px] leading-relaxed text-muted-foreground">
+                            {buildEventDescription(item, t)}
+                          </p>
+                        </div>
+                      </button>
 
-                    <button
-                      type="button"
-                      ref={(node) => onRegisterFocusButton(item.id, node)}
-                      onClick={() => onFocus(item.id)}
-                      aria-label={t('audit_log.focus_entry_aria', {
-                        summary: item.summary || t('audit_log.summary_fallback'),
-                      })}
-                      className={cn(
-                        'w-full rounded-2xl text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-                        isSelected ? 'bg-primary/[0.035]' : 'hover:bg-muted/[0.08]',
-                      )}
-                    >
-                      <div className="space-y-2 rounded-2xl p-2">
-                        <div className="text-lg font-semibold tracking-[-0.03em] text-foreground [text-wrap:balance]">
-                          {item.summary || t('audit_log.summary_fallback')}
+                      {localMatchReasons.length > 0 ? (
+                        <div className="rounded-xl border border-amber-200/80 bg-amber-50/78 px-3 py-2">
+                          <div className="text-[11px] font-semibold tracking-[0.16em] text-amber-700 uppercase">
+                            {t('audit_log.local_match_title')}
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {localMatchReasons.map((reason) => (
+                              <FilterChip key={`${item.id}:${reason}`} active={false}>
+                                {t(`audit_log.local_match_${reason}`)}
+                              </FilterChip>
+                            ))}
+                          </div>
                         </div>
-                        <p className="text-sm leading-6 text-muted-foreground">
-                          <span className="font-medium text-foreground">
-                            {t('audit_log.fields.created_at')}
-                          </span>{' '}
-                          <span className="font-mono text-[13px]">
-                            {formatAbsoluteTimestamp(item.createdAt, locale)}
-                          </span>
-                          {' · '}
-                          <span className="font-medium text-foreground">
-                            {t('audit_log.actor_line')}
-                          </span>{' '}
-                          <span className="font-mono text-[13px]">
-                            {item.actorId || t('audit_log.actor_unknown')}
-                          </span>
-                          {' · '}
-                          <span className="font-medium text-foreground">
-                            {t('audit_log.target_line')}
-                          </span>{' '}
-                          <span className="font-mono text-[13px]">
-                            {item.targetId || t('audit_log.target_unknown')}
-                          </span>
-                        </p>
-                      </div>
-                    </button>
+                      ) : null}
 
-                    {localMatchReasons.length > 0 ? (
-                      <div className="rounded-2xl border border-amber-200/80 bg-amber-50/78 px-4 py-3">
-                        <div className="text-[11px] font-semibold tracking-[0.16em] text-amber-700 uppercase">
-                          {t('audit_log.local_match_title')}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <AuditToken>
+                            {item.actorType
+                              ? getActorTypeLabel(item.actorType, t)
+                              : t('audit_log.actor_unknown')}
+                          </AuditToken>
+                          {changeSummary ? (
+                            <span className="hidden items-center gap-1.5 group-hover/card:inline-flex">
+                              {changeSummary.paths.slice(0, 3).map((path) => (
+                                <SpotlightPathChip
+                                  key={path}
+                                  path={path}
+                                  onSpotlight={onSpotlightSignal}
+                                />
+                              ))}
+                              {changeSummary.count > 3 ? (
+                                <AuditToken className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                                  +{changeSummary.count - 3}
+                                </AuditToken>
+                              ) : null}
+                            </span>
+                          ) : null}
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {localMatchReasons.map((reason) => (
-                            <FilterChip key={`${item.id}:${reason}`} active={false}>
-                              {t(`audit_log.local_match_${reason}`)}
-                            </FilterChip>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {changeSummary ? (
-                      <div className="rounded-2xl border border-border/70 bg-muted/[0.14] px-4 py-3">
-                        <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                          {t('audit_log.change_summary_title')}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {changeSummary.paths.slice(0, 5).map((path) => (
-                            <SpotlightPathChip
-                              key={path}
-                              path={path}
-                              onSpotlight={onSpotlightSignal}
-                            />
-                          ))}
-                          {changeSummary.count > 5 ? (
-                            <FilterChip active>
-                              {t('audit_log.change_more', { count: changeSummary.count - 5 })}
-                            </FilterChip>
+                        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover/card:opacity-100">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onInspect(item.id)}
+                          >
+                            {t('audit_log.open_details')}
+                          </Button>
+                          {item.targetId || item.actorId ? (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  aria-label={t('audit_log.more_actions')}
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {item.targetId ? (
+                                  <DropdownMenuItem onClick={() => onCopy(item.targetId)}>
+                                    <Copy className="mr-2 h-3.5 w-3.5" />
+                                    {t('audit_log.copy_target_id')}
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {item.actorId ? (
+                                  <DropdownMenuItem onClick={() => onCopy(item.actorId)}>
+                                    <Copy className="mr-2 h-3.5 w-3.5" />
+                                    {t('audit_log.copy_actor_id')}
+                                  </DropdownMenuItem>
+                                ) : null}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           ) : null}
                         </div>
                       </div>
-                    ) : null}
-
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="button" variant="outline" onClick={() => onInspect(item.id)}>
-                        {t('audit_log.open_details')}
-                      </Button>
-                      {item.targetId ? (
-                        <Button type="button" variant="ghost" onClick={() => onCopy(item.targetId)}>
-                          <Copy className="h-4 w-4" />
-                          {t('audit_log.copy_target_id')}
-                        </Button>
-                      ) : null}
-                      {item.actorId ? (
-                        <Button type="button" variant="ghost" onClick={() => onCopy(item.actorId)}>
-                          <Copy className="h-4 w-4" />
-                          {t('audit_log.copy_actor_id')}
-                        </Button>
-                      ) : null}
                     </div>
                   </div>
                 </article>
@@ -1985,21 +1408,49 @@ function AuditDetailsSheet({
   return (
     <>
       <SheetHeader className="border-b border-border/70 bg-background/95">
-        <div className="flex flex-wrap items-center gap-2">
-          <AuditToken className="border-primary/15 bg-primary/8 text-primary">
-            {item.action}
-          </AuditToken>
-          <AuditToken>{item.targetType || t('audit_log.target_unknown')}</AuditToken>
-          <AuditToken>{item.actorType || t('audit_log.actor_unknown')}</AuditToken>
+        <div className="flex items-start gap-3">
+          {(() => {
+            const av = getActorAvatar(item.actorId, item.actorEmail)
+            return (
+              <div
+                className={cn(
+                  'flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium',
+                  av.bg,
+                  av.text,
+                )}
+              >
+                {av.initials}
+              </div>
+            )
+          })()}
+          <div className="min-w-0 flex-1">
+            <SheetTitle className="text-xl tracking-[-0.03em]">
+              {getActionLabel(item.action, t)}
+            </SheetTitle>
+            <SheetDescription className="leading-6">
+              {buildEventDescription(item, t)}
+              {' · '}
+              {formatAbsoluteTimestamp(item.createdAt, locale)}
+            </SheetDescription>
+          </div>
+          <div
+            className={cn(
+              'mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full',
+              getActionDotColor(item.action),
+            )}
+            title={getActionLabel(item.action, t)}
+          />
         </div>
-        <SheetTitle className="text-xl tracking-[-0.03em]">
-          {item.summary || t('audit_log.summary_fallback')}
-        </SheetTitle>
-        <SheetDescription className="leading-6">
-          {t('audit_log.details_intro', {
-            time: formatAbsoluteTimestamp(item.createdAt, locale),
-          })}
-        </SheetDescription>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <AuditToken>
+            {item.targetType
+              ? getTargetTypeLabel(item.targetType, t)
+              : t('audit_log.target_unknown')}
+          </AuditToken>
+          <AuditToken>
+            {item.actorType ? getActorTypeLabel(item.actorType, t) : t('audit_log.actor_unknown')}
+          </AuditToken>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
           <div className="rounded-full border border-border/70 bg-background/88 px-3 py-1 text-xs text-muted-foreground tabular-nums">
             {t('audit_log.entry_position', {
@@ -2084,14 +1535,20 @@ function AuditDetailsSheet({
         <div className="grid gap-4 pt-4 sm:grid-cols-2">
           <EntityPanel
             title={t('audit_log.fields.actor')}
-            primary={item.actorType || t('audit_log.actor_unknown')}
+            primary={
+              item.actorType ? getActorTypeLabel(item.actorType, t) : t('audit_log.actor_unknown')
+            }
             secondary={item.actorId || t('audit_log.actor_unknown')}
             auxiliary={item.actorEmail}
             onCopy={item.actorId ? () => onCopy(item.actorId) : undefined}
           />
           <EntityPanel
             title={t('audit_log.fields.target')}
-            primary={item.targetType || t('audit_log.target_unknown')}
+            primary={
+              item.targetType
+                ? getTargetTypeLabel(item.targetType, t)
+                : t('audit_log.target_unknown')
+            }
             secondary={item.targetId || t('audit_log.target_unknown')}
             onCopy={item.targetId ? () => onCopy(item.targetId) : undefined}
           />
@@ -2186,71 +1643,6 @@ function FilterField({
   )
 }
 
-function StatCard({
-  className,
-  hint,
-  icon: Icon,
-  label,
-  value,
-}: {
-  className?: string
-  hint: string
-  icon: LucideIcon
-  label: string
-  value: string
-}) {
-  return (
-    <div
-      className={cn(
-        'rounded-[1.05rem] border border-white/70 bg-white/84 p-3.5 shadow-[0_8px_24px_-24px_rgba(15,23,42,0.4)] backdrop-blur',
-        className,
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-          {label}
-        </div>
-        <div className="rounded-full bg-primary/10 p-1.5 text-primary">
-          <Icon className="h-3.5 w-3.5" />
-        </div>
-      </div>
-      <div className="mt-3 text-[1.65rem] font-semibold tracking-[-0.045em] text-foreground [text-wrap:balance]">
-        {value}
-      </div>
-      <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{hint}</div>
-    </div>
-  )
-}
-
-function InvestigationFactCard({
-  hint,
-  label,
-  mono = false,
-  value,
-}: {
-  hint?: string
-  label: string
-  mono?: boolean
-  value: string
-}) {
-  return (
-    <div className="rounded-2xl border border-border/70 bg-background/92 px-3.5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.76)]">
-      <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-        {label}
-      </div>
-      <div
-        className={cn(
-          'mt-1.5 break-all text-sm font-medium text-foreground',
-          mono && 'font-mono text-[12px]',
-        )}
-      >
-        {value}
-      </div>
-      {hint ? <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div> : null}
-    </div>
-  )
-}
-
 function AuditActionMultiSelect({
   onChange,
   selected,
@@ -2268,7 +1660,11 @@ function AuditActionMultiSelect({
       ? t('audit_log.filters_actions_placeholder')
       : t('audit_log.filters_actions_selected', { count: selected.length })
   const visibleActions = deferredQuery
-    ? auditActionOptions.filter((action) => action.toLowerCase().includes(deferredQuery))
+    ? auditActionOptions.filter(
+        (action) =>
+          action.toLowerCase().includes(deferredQuery) ||
+          getActionLabel(action, t).toLowerCase().includes(deferredQuery),
+      )
     : auditActionOptions
 
   const toggle = (action: string) => {
@@ -2332,7 +1728,7 @@ function AuditActionMultiSelect({
                   checked={selected.includes(action)}
                   onCheckedChange={() => toggle(action)}
                 />
-                <span className="font-mono text-xs">{action}</span>
+                <span className="text-xs">{getActionLabel(action, t)}</span>
               </label>
             )
           })}
@@ -2440,41 +1836,6 @@ function FilterChip({ active, children }: { active: boolean; children: React.Rea
   )
 }
 
-function CompactInvestigationSignalCard({
-  emptyLabel,
-  onSelect,
-  signal,
-  title,
-}: {
-  emptyLabel: string
-  onSelect: (value: string) => void
-  signal?: InvestigationSignal
-  title: string
-}) {
-  return (
-    <div className="rounded-2xl border border-border/70 bg-white/88 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
-      <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-        {title}
-      </div>
-      {signal ? (
-        <button
-          type="button"
-          onClick={() => onSelect(signal.value)}
-          aria-label={`${signal.value} ${signal.count}`}
-          className="mt-2 inline-flex max-w-full items-center gap-2 rounded-full border border-border/70 bg-background/92 px-2.5 py-1.5 text-left text-xs text-foreground transition hover:border-primary/30 hover:bg-primary/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        >
-          <span className="max-w-[11rem] truncate font-mono text-[11px]">{signal.value}</span>
-          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary tabular-nums">
-            {signal.count}
-          </span>
-        </button>
-      ) : (
-        <div className="mt-2 text-xs leading-5 text-muted-foreground">{emptyLabel}</div>
-      )}
-    </div>
-  )
-}
-
 function ActivityBurstCard({
   burst,
   canInvestigateAction,
@@ -2512,23 +1873,27 @@ function ActivityBurstCard({
           <div className="text-sm leading-6 text-muted-foreground">
             {burst.targetId
               ? t('audit_log.burst_body_targeted', {
-                  action: burst.action,
+                  action: getActionLabel(burst.action, t),
                   from: formatAbsoluteTimestamp(burst.oldestCreatedAt, locale),
-                  target: burst.targetId,
+                  target: formatIdDisplay(burst.targetId),
                   to: formatAbsoluteTimestamp(burst.latestCreatedAt, locale),
                 })
               : t('audit_log.burst_body_generic', {
-                  action: burst.action,
+                  action: getActionLabel(burst.action, t),
                   from: formatAbsoluteTimestamp(burst.oldestCreatedAt, locale),
                   to: formatAbsoluteTimestamp(burst.latestCreatedAt, locale),
                 })}
           </div>
           <div className="flex flex-wrap gap-2">
             <AuditToken className="border-primary/15 bg-primary/8 text-primary">
-              {burst.action}
+              {getActionLabel(burst.action, t)}
             </AuditToken>
-            {burst.targetType ? <AuditToken>{burst.targetType}</AuditToken> : null}
-            {burst.targetId ? <AuditToken>{burst.targetId}</AuditToken> : null}
+            {burst.targetType ? (
+              <AuditToken>{getTargetTypeLabel(burst.targetType, t)}</AuditToken>
+            ) : null}
+            {burst.targetId ? (
+              <AuditToken title={burst.targetId}>{formatIdDisplay(burst.targetId)}</AuditToken>
+            ) : null}
           </div>
           {burst.paths.length > 0 ? (
             <div className="space-y-2">
@@ -2610,49 +1975,71 @@ function CompactBurstEntryRow({
   const { t } = useTranslation()
 
   return (
-    <article className="px-6 py-3 md:px-7">
-      <div className="rounded-2xl border border-border/60 bg-background/88 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] transition hover:border-primary/20 hover:bg-primary/[0.02]">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+    <article className="group/burst px-6 py-3 md:px-7">
+      <div className="flex gap-2.5 rounded-2xl border border-border/60 bg-background/88 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] transition hover:border-primary/20 hover:bg-primary/[0.02]">
+        <div className="flex shrink-0 flex-col items-center gap-1 pt-0.5">
+          {(() => {
+            const av = getActorAvatar(item.actorId, item.actorEmail)
+            return (
+              <div
+                className={cn(
+                  'flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-medium',
+                  av.bg,
+                  av.text,
+                )}
+              >
+                {av.initials}
+              </div>
+            )
+          })()}
+          <div
+            className={cn('h-1.5 w-1.5 rounded-full', getActionDotColor(item.action))}
+            title={getActionLabel(item.action, t)}
+          />
+          <div className="w-px flex-1 bg-border/50" />
+        </div>
+        <div className="min-w-0 flex-1">
           <button
             type="button"
             ref={(node) => onRegisterFocusButton(item.id, node)}
             onClick={() => onFocus(item.id)}
             aria-label={t('audit_log.focus_entry_aria', {
-              summary: item.summary || t('audit_log.summary_fallback'),
+              summary: getActionLabel(item.action, t),
             })}
-            className="min-w-0 flex-1 rounded-xl p-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="w-full rounded-xl p-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span className="font-mono tabular-nums">
-                {formatAbsoluteTimestamp(item.createdAt, locale)}
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-foreground">
+                {getActionLabel(item.action, t)}
               </span>
-              <span>
+              <span
+                className="shrink-0 text-xs text-muted-foreground tabular-nums"
+                title={formatAbsoluteTimestamp(item.createdAt, locale)}
+              >
                 {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true, locale })}
               </span>
-              {changeSummary ? (
-                <FilterChip active={false}>
-                  {t('audit_log.compact_change_count', { count: changeSummary.count })}
-                </FilterChip>
-              ) : null}
             </div>
-            <div className="mt-2 text-sm font-medium text-foreground">
-              {item.summary || t('audit_log.summary_fallback')}
-            </div>
-            <div className="mt-1 text-xs leading-5 text-muted-foreground">
-              {t('audit_log.actor_line')} {item.actorId || t('audit_log.actor_unknown')}
-              {' · '}
-              {t('audit_log.target_line')} {item.targetId || t('audit_log.target_unknown')}
-            </div>
+            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+              {buildEventDescription(item, t)}
+            </p>
           </button>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {changeSummary?.paths.slice(0, 2).map((path) => (
-              <SpotlightPathChip
-                key={`${item.id}:${path}`}
-                path={path}
-                onSpotlight={onSpotlightSignal}
-              />
-            ))}
-            <Button type="button" size="sm" variant="ghost" onClick={() => onInspect(item.id)}>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {changeSummary?.paths.slice(0, 2).map((path) => (
+                <SpotlightPathChip
+                  key={`${item.id}:${path}`}
+                  path={path}
+                  onSpotlight={onSpotlightSignal}
+                />
+              ))}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => onInspect(item.id)}
+              className="opacity-0 transition-opacity group-hover/burst:opacity-100"
+            >
               {t('audit_log.open_details')}
             </Button>
           </div>
@@ -2678,48 +2065,8 @@ function SpotlightPathChip({
       aria-label={t('audit_log.spotlight_path', { path })}
       className="inline-flex items-center rounded-full border border-primary/18 bg-primary/9 px-3 py-1 text-xs text-primary transition hover:border-primary/30 hover:bg-primary/[0.14] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
-      {path}
+      {getFieldLabel(path, t)}
     </button>
-  )
-}
-
-function InvestigationSignalGroup({
-  emptyLabel,
-  items,
-  onSelect,
-  title,
-}: {
-  emptyLabel: string
-  items: InvestigationSignal[]
-  onSelect: (value: string) => void
-  title: string
-}) {
-  return (
-    <div className="rounded-2xl border border-border/70 bg-white/88 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
-      <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-        {title}
-      </div>
-      {items.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {items.map((item) => (
-            <button
-              key={`${title}:${item.value}`}
-              type="button"
-              onClick={() => onSelect(item.value)}
-              aria-label={`${item.value} ${item.count}`}
-              className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/92 px-3 py-1.5 text-left text-xs text-foreground transition hover:border-primary/30 hover:bg-primary/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            >
-              <span className="max-w-[16rem] truncate font-mono text-[11px]">{item.value}</span>
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary tabular-nums">
-                {item.count}
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="mt-3 text-xs leading-5 text-muted-foreground">{emptyLabel}</div>
-      )}
-    </div>
   )
 }
 
@@ -2741,9 +2088,18 @@ function RemovableFilterChip({ label, onRemove }: { label: string; onRemove: () 
   )
 }
 
-function AuditToken({ children, className }: { children: React.ReactNode; className?: string }) {
+function AuditToken({
+  children,
+  className,
+  title,
+}: {
+  children: React.ReactNode
+  className?: string
+  title?: string
+}) {
   return (
     <span
+      title={title}
       className={cn(
         'inline-flex items-center rounded-full border border-border/70 bg-muted/22 px-3 py-1 font-mono text-[11px] tracking-[0.02em] text-muted-foreground',
         className,
@@ -2917,35 +2273,6 @@ function describeAppliedFilters(
       label: `${t('audit_log.local_query_label')}: ${localQuery.trim()}`,
     })
   return summary
-}
-
-function buildInvestigationSignals(items: AuditLogEntry[]) {
-  return {
-    actions: countTopSignals(items.map((item) => item.action)),
-    actors: countTopSignals(items.map((item) => item.actorId)),
-    paths: countTopSignals(
-      items.flatMap((item) => {
-        const changeSummary = describeAuditChanges(item)
-        return changeSummary?.paths ?? []
-      }),
-      4,
-    ),
-    targets: countTopSignals(items.map((item) => item.targetId)),
-  }
-}
-
-function countTopSignals(values: Array<string | undefined>, limit = 3): InvestigationSignal[] {
-  const counts = new Map<string, number>()
-  for (const rawValue of values) {
-    const value = rawValue?.trim()
-    if (!value) continue
-    counts.set(value, (counts.get(value) ?? 0) + 1)
-  }
-
-  return [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .slice(0, limit)
-    .map(([value, count]) => ({ value, count }))
 }
 
 function readAuditLogStateFromUrl(): AuditUrlState {
@@ -3147,7 +2474,7 @@ function formatDayLabel(value: Date, locale?: Locale) {
   return format(value, 'yyyy-MM-dd EEEE', { locale })
 }
 
-function matchesLocalAuditQuery(item: AuditLogEntry, query: string) {
+function matchesLocalAuditQuery(item: AuditLogEntry, query: string, t?: TFunction) {
   const changeSummary = describeAuditChanges(item)
   const haystack = [
     item.action,
@@ -3162,6 +2489,9 @@ function matchesLocalAuditQuery(item: AuditLogEntry, query: string) {
     item.beforeJson,
     item.afterJson,
     changeSummary?.paths.join(' '),
+    t ? getActionLabel(item.action, t) : '',
+    t && item.targetType ? getTargetTypeLabel(item.targetType, t) : '',
+    t && item.actorType ? getActorTypeLabel(item.actorType, t) : '',
   ]
     .join(' ')
     .toLowerCase()

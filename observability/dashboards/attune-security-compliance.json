@@ -771,6 +771,61 @@
     {
       "id": 20,
       "type": "timeseries",
+      "title": "Evidence export",
+      "description": "Audit evidence export throughput, duration, and archive size. Tracks compliance pack generation for auditor handoff.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "targets": [
+        {
+          "expr": "(sum by (status) (rate(attune_audit_evidence_exports_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        },
+        {
+          "expr": "(histogram_quantile(0.95, sum by (le) (rate(attune_audit_evidence_export_duration_seconds_bucket[$__rate_interval])))) or vector(0)",
+          "legendFormat": "duration p95",
+          "refId": "B"
+        },
+        {
+          "expr": "(histogram_quantile(0.95, sum by (le) (rate(attune_audit_evidence_export_size_bytes_bucket[$__rate_interval])))) or vector(0)",
+          "legendFormat": "size p95",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
       "title": "Guard policy activity",
       "description": "Guard actions and blocks by stage, guard, entity, action, and reason. Use this as compliance evidence for policy behavior.",
       "gridPos": {

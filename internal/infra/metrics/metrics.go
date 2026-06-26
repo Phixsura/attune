@@ -811,6 +811,36 @@ var DependencyHealthCheckDuration = prometheus.NewHistogramVec(
 	[]string{"dependency"},
 )
 
+// AuditEvidenceExportsTotal counts evidence export jobs by outcome.
+// status ∈ {completed, failed, expired}.
+var AuditEvidenceExportsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_audit_evidence_exports_total",
+		Help: "Audit evidence export jobs by outcome.",
+	},
+	[]string{"tenant", "status"},
+)
+
+// AuditEvidenceExportDuration tracks evidence export processing time.
+var AuditEvidenceExportDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_audit_evidence_export_duration_seconds",
+		Help:    "Audit evidence export processing latency.",
+		Buckets: prometheus.ExponentialBuckets(1, 2, 10), // 1s..512s
+	},
+	[]string{"tenant"},
+)
+
+// AuditEvidenceExportSizeBytes tracks evidence archive size.
+var AuditEvidenceExportSizeBytes = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_audit_evidence_export_size_bytes",
+		Help:    "Audit evidence archive size in bytes.",
+		Buckets: prometheus.ExponentialBuckets(1024, 4, 8), // 1KB..16MB
+	},
+	[]string{"tenant"},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -904,6 +934,9 @@ var allMetrics = []prometheus.Collector{
 	MigrationChecksumDriftTotal,
 	DependencyHealthCheckTotal,
 	DependencyHealthCheckDuration,
+	AuditEvidenceExportsTotal,
+	AuditEvidenceExportDuration,
+	AuditEvidenceExportSizeBytes,
 }
 
 // RegisteredMetricNames returns the attune metric families registered by this
@@ -988,6 +1021,9 @@ func RegisteredMetricNames() []string {
 		"attune_migration_checksum_drift_total",
 		"attune_dependency_health_check_total",
 		"attune_dependency_health_check_duration_seconds",
+		"attune_audit_evidence_exports_total",
+		"attune_audit_evidence_export_duration_seconds",
+		"attune_audit_evidence_export_size_bytes",
 	}
 }
 

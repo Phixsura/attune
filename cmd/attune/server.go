@@ -38,6 +38,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	auditevidencerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	enrichmentruntimerepo "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -52,6 +53,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/restoredrill"
 	"github.com/Phixsura/attune/internal/service/apikey"
+	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	digestsvc "github.com/Phixsura/attune/internal/service/digest"
 	embeddingsvc "github.com/Phixsura/attune/internal/service/embedding"
@@ -188,7 +190,7 @@ func runServer() error {
 		runMCPPruner(ctx, pool, mcpPruneInterval, mcpSessionIdleLimit)
 	})
 
-	batchJobWorker := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, cfg.ConsoleBaseURL, cfg.GDPRExportTTL)
+	batchJobWorker := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, cfg.ConsoleBaseURL, cfg.GDPRExportTTL, cfg.AuditEvidenceExportTTL, cfg.AuditEvidenceSigningKey)
 	defer batchJobWorker.Stop()
 
 	ingestHandler := handlers.NewIngestHandler(runtimeDeps.ingestor, runtimeDeps.sources)
@@ -613,11 +615,14 @@ func startBackgroundWorkers(
 	feedbackRepo *feedback.FeedbackRepo,
 	consoleBaseURL string,
 	gdprExportTTL time.Duration,
+	auditEvidenceExportTTL time.Duration,
+	auditEvidenceSigningKey []byte,
 ) *batchjob.Worker {
 	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
 	startReplyDraftWorker(ctx, pool, enricher, llm)
 	startDigestWorker(ctx, pool, llm, consoleBaseURL)
 	startGDPRExportWorker(ctx, pool, gdprExportTTL)
+	startAuditEvidenceWorker(ctx, pool, auditEvidenceExportTTL, auditEvidenceSigningKey)
 
 	worker := batchjob.New(
 		feedbackjobrepo.New(pool),
@@ -632,6 +637,17 @@ func startGDPRExportWorker(ctx context.Context, pool *pgxpool.Pool, exportTTL ti
 	repo := gdprrepo.New(pool)
 	worker := gdprsvc.NewWorker(repo, repo, auditlogsvc.New(auditlogrepo.New(pool)), gdprsvc.WithWorkerExportTTL(exportTTL))
 	safego(ctx, "gdpr_export", func() { worker.Run(ctx) })
+}
+
+func startAuditEvidenceWorker(ctx context.Context, pool *pgxpool.Pool, exportTTL time.Duration, signingKey []byte) {
+	jobs := auditevidencerepo.New(pool)
+	audit := auditlogsvc.New(auditlogrepo.New(pool))
+	opts := []auditevidencesvc.WorkerOption{auditevidencesvc.WithWorkerExportTTL(exportTTL)}
+	if len(signingKey) > 0 {
+		opts = append(opts, auditevidencesvc.WithWorkerSigningKey(signingKey))
+	}
+	worker := auditevidencesvc.NewWorker(jobs, audit, audit, opts...)
+	safego(ctx, "audit_evidence", func() { worker.Run(ctx) })
 }
 
 // startDigestWorker wires the daily digest scheduler + worker (#27). llm is the

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
+	consoleauditevidence "github.com/Phixsura/attune/internal/handlers/console/auditevidence"
 	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/clusters"
@@ -66,6 +67,7 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 		workflow:           &consoleworkflow.Handler{},
 		members:            &member.Handler{},
 		mcpClients:         &consolemcpclient.Handler{},
+		auditEvidence:      &consoleauditevidence.Handler{},
 	}).Mount()
 
 	got := map[string]bool{}
@@ -100,6 +102,7 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 // the route is mounted but no handler code emits that action yet. Those are
 // tracked separately; this test guards only the actions proven to be emitted.
 var auditEmittedActions = []string{
+	"audit_evidence.create",
 	"enrich_config.update",
 	"enrich_config.activate_version",
 	"enrich_config.promote_suggested",
@@ -156,6 +159,7 @@ func expectedMutatingRouteCoverage() map[string]string {
 		"POST /api-keys/{id}/rotation-schedule":              "audited: api_key.rotation_schedule.create",
 		"POST /api-keys/{id}/signing-keys":                   "audited: api_key.signing_key.create",
 		"POST /gdpr/step-up/verify":                          "exempt: recent-auth refreshes the session but does not mutate tenant data directly",
+		"POST /audit-log/evidence/":                          "audited: audit_evidence.create",
 		"POST /gdpr/export":                                  "audited: gdpr.export",
 		"POST /gdpr/exports/{job_id}/revoke":                 "audited: gdpr.export.revoked",
 		"POST /gdpr/delete":                                  "audited: gdpr.delete",

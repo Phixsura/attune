@@ -28,6 +28,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	auditevidencerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
@@ -52,6 +53,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
 	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/service/apikey"
+	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
@@ -282,10 +284,15 @@ func buildConsoleRouter(
 		usage, enrichConfig, enrichmentRuntimeHandler, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
 		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
+	attachOptionalHandlers(router, pool, cfg, auditLogSvc)
+	return router.Mount(), nil
+}
+
+func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, auditLogSvc *auditlogsvc.Service) {
 	attachOutboxHandler(router, pool, auditLogSvc)
+	attachAuditEvidenceHandler(router, pool, cfg, auditLogSvc)
 	attachMCPClientHandler(router, cfg, pool, auditLogSvc)
 	attachPreflightHandler(router, cfg, pool)
-	return router.Mount(), nil
 }
 
 // attachOutboxHandler wires the notify dead-queue console handler (#33). Kept
@@ -295,6 +302,16 @@ func attachOutboxHandler(router *console.Router, pool *pgxpool.Pool, audit *audi
 	h := console.NewOutboxHandler(outboxrepo.NewOutbox(pool))
 	h.SetAuditLogger(audit)
 	router.SetOutboxHandler(h)
+}
+
+func attachAuditEvidenceHandler(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, audit *auditlogsvc.Service) {
+	svc := auditevidencesvc.New(
+		auditevidencerepo.New(pool),
+		audit,
+		audit,
+		auditevidencesvc.WithExportTTL(cfg.AuditEvidenceExportTTL),
+	)
+	router.SetAuditEvidenceHandler(console.NewAuditEvidenceHandler(svc))
 }
 
 // attachPreflightHandler wires the production readiness preflight handler (#149).
