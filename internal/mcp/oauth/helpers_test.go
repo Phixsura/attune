@@ -3,6 +3,9 @@
 package oauth
 
 import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -130,5 +133,86 @@ func TestAudienceContains(t *testing.T) {
 				t.Errorf("audienceContains(%v, %q) = %v, want %v", tt.aud, tt.target, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGenerateRandomString(t *testing.T) {
+	t.Parallel()
+	a := generateRandomString()
+	b := generateRandomString()
+	if a == b {
+		t.Fatal("two calls should produce different strings")
+	}
+	if len(a) < 40 {
+		t.Fatalf("expected base64 of 32 bytes (~43 chars), got %d", len(a))
+	}
+}
+
+func TestErrorRedirect_InvalidClient(t *testing.T) {
+	t.Parallel()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/authorize", nil)
+	errorRedirect(w, r, "https://example.com/callback", "state1", ErrInvalidClient)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid client, got %d", w.Code)
+	}
+}
+
+func TestErrorRedirect_InvalidRedirectURI(t *testing.T) {
+	t.Parallel()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/authorize", nil)
+	errorRedirect(w, r, "https://example.com/callback", "", ErrInvalidRedirectURI)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid redirect, got %d", w.Code)
+	}
+}
+
+func TestErrorRedirect_EmptyRedirectURI(t *testing.T) {
+	t.Parallel()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/authorize", nil)
+	errorRedirect(w, r, "", "s", ErrPKCERequired)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty redirect, got %d", w.Code)
+	}
+}
+
+func TestErrorRedirect_Redirect(t *testing.T) {
+	t.Parallel()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/authorize", nil)
+	errorRedirect(w, r, "https://example.com/callback", "mystate", ErrInvalidScope)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d", w.Code)
+	}
+	loc := w.Header().Get("Location")
+	if loc == "" {
+		t.Fatal("missing Location header")
+	}
+}
+
+func TestMapAuthError(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		err      error
+		wantCode string
+	}{
+		{ErrInvalidRequest, "invalid_request"},
+		{ErrInvalidClient, "invalid_request"},
+		{ErrInvalidRedirectURI, "invalid_request"},
+		{ErrPKCERequired, "invalid_request"},
+		{ErrInvalidScope, "invalid_scope"},
+		{ErrInvalidTarget, "invalid_target"},
+		{errors.New("unknown"), "access_denied"},
+	}
+	for _, c := range cases {
+		code, desc := mapAuthError(c.err)
+		if code != c.wantCode {
+			t.Errorf("mapAuthError(%v) code = %q, want %q", c.err, code, c.wantCode)
+		}
+		if desc == "" {
+			t.Errorf("mapAuthError(%v) desc is empty", c.err)
+		}
 	}
 }

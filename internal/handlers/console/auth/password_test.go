@@ -10,6 +10,7 @@ import (
 )
 
 func TestVerifyOrDummy_RealHashWrongPassword(t *testing.T) {
+	t.Parallel()
 	h, err := auth.HashPassword("correct-password")
 	if err != nil {
 		t.Fatal(err)
@@ -20,6 +21,7 @@ func TestVerifyOrDummy_RealHashWrongPassword(t *testing.T) {
 }
 
 func TestVerifyOrDummy_RealHashRightPassword(t *testing.T) {
+	t.Parallel()
 	h, err := auth.HashPassword("correct-password")
 	if err != nil {
 		t.Fatal(err)
@@ -30,8 +32,23 @@ func TestVerifyOrDummy_RealHashRightPassword(t *testing.T) {
 }
 
 func TestVerifyOrDummy_EmptyHashRunsDummy(t *testing.T) {
+	t.Parallel()
 	if auth.VerifyOrDummy("", "anything") {
 		t.Error("empty hash should always return false")
+	}
+}
+
+func TestHashPassword_Success(t *testing.T) {
+	t.Parallel()
+	h, err := auth.HashPassword("test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h == "" {
+		t.Error("hash should not be empty")
+	}
+	if !auth.VerifyOrDummy(h, "test-password") {
+		t.Error("hash should verify against original password")
 	}
 }
 

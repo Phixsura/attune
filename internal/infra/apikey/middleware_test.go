@@ -376,3 +376,62 @@ func TestRequireScope_MissingScope(t *testing.T) {
 		t.Errorf("code = %v, want FORBIDDEN; body=%s", m["code"], body)
 	}
 }
+
+func TestMiddleware_ExpiredKey_401(t *testing.T) {
+	t.Parallel()
+	mw := Middleware(stubVerifier{err: domain.ErrAPIKeyExpired})
+	srv := httptest.NewServer(wrap(mw(next(t))))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/feedback/ingest", nil)
+	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"deadbeef")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+	body, _ := readAll(resp)
+	m := decode(t, body)
+	if m["message"] != "api key expired" {
+		t.Errorf("message = %v, want 'api key expired'; body=%s", m["message"], body)
+	}
+}
+
+func TestMiddleware_IPNotAllowed_403(t *testing.T) {
+	t.Parallel()
+	mw := Middleware(stubVerifier{err: domain.ErrIPNotAllowed})
+	srv := httptest.NewServer(wrap(mw(next(t))))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/feedback/ingest", nil)
+	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"deadbeef")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+	body, _ := readAll(resp)
+	m := decode(t, body)
+	if m["code"] != "FORBIDDEN" || m["message"] != "ip not in allowlist" {
+		t.Errorf("envelope wrong: %s", body)
+	}
+}
+
+func TestFromContext_Panics(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic from FromContext with empty context")
+		}
+	}()
+	FromContext(context.Background())
+}

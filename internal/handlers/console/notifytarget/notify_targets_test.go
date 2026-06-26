@@ -254,3 +254,36 @@ func TestAuditNotifyTargetSnapshot_WithoutSecret(t *testing.T) {
 	require.True(t, len(hashStr) > 10, "url_hash should be a sha256 string")
 	require.Contains(t, hashStr, "sha256:")
 }
+
+func TestNotifyTargetSummary_EmptyType(t *testing.T) {
+	t.Parallel()
+	got := notifyTargetSummary("created", notifytarget.NotifyTarget{})
+	require.Equal(t, "created", got)
+}
+
+func TestNotifyTargetSummary_WithType(t *testing.T) {
+	t.Parallel()
+	got := notifyTargetSummary("deleted", notifytarget.NotifyTarget{DestinationType: "slack"})
+	require.Equal(t, "deleted (slack)", got)
+}
+
+func TestErrMessage_Nil(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "", errMessage(nil))
+}
+
+func TestErrMessage_WithError(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "something broke", errMessage(errors.New("something broke")))
+}
+
+func TestSanitizeNotifyTargetURL_Empty(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "", sanitizeNotifyTargetURL(""))
+}
+
+func TestSanitizeNotifyTargetURL_InvalidURL(t *testing.T) {
+	t.Parallel()
+	got := sanitizeNotifyTargetURL("://broken")
+	require.Equal(t, "://broken", got)
+}

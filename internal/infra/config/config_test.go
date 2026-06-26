@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+// ptrext:file-allow test-fixtures
 
 package config
 
@@ -1082,4 +1083,336 @@ func TestLoadPathWorkerDefaults(t *testing.T) {
 	require.Equal(t, DefaultWorkerDrainTimeout, cfg.WorkerDrainTimeout)
 	require.Equal(t, DefaultWorkerPollInterval, cfg.WorkerPollInterval)
 	require.Equal(t, DefaultWorkerMaxAttempts, cfg.WorkerMaxAttempts)
+}
+
+func TestIsAllowedWebhookURL(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		url  string
+		want bool
+	}{
+		{"https://example.com/hook", true},
+		{"http://example.com/hook", false},
+		{"http://127.0.0.1:8080/hook", true},
+		{"http://localhost:9090/hook", true},
+		{"http://[::1]:8080/hook", true},
+		{"ftp://example.com", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := isAllowedWebhookURL(c.url); got != c.want {
+			t.Errorf("isAllowedWebhookURL(%q) = %v, want %v", c.url, got, c.want)
+		}
+	}
+}
+
+func TestHasPrivateIPPrefix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		host string
+		want bool
+	}{
+		{"10.0.0.1", true},
+		{"192.168.1.1", true},
+		{"172.16.0.1", true},
+		{"172.31.255.255", true},
+		{"172.15.0.1", false},
+		{"172.32.0.1", false},
+		{"8.8.8.8", false},
+		{"example.com", false},
+	}
+	for _, c := range cases {
+		if got := hasPrivateIPPrefix(c.host); got != c.want {
+			t.Errorf("hasPrivateIPPrefix(%q) = %v, want %v", c.host, got, c.want)
+		}
+	}
+}
+
+func TestParseAuditEvidenceFields_ValidTTL(t *testing.T) {
+	t.Parallel()
+	c := &Config{}
+	c.AuditEvidence.ExportTTL = "24h"
+	err := c.parseAuditEvidenceFields()
+	require.NoError(t, err)
+	require.Equal(t, 24*time.Hour, c.AuditEvidenceExportTTL)
+}
+
+func TestParseAuditEvidenceFields_InvalidTTL(t *testing.T) {
+	t.Parallel()
+	c := &Config{}
+	c.AuditEvidence.ExportTTL = "bad"
+	err := c.parseAuditEvidenceFields()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "audit_evidence.export_ttl")
+}
+
+func TestParseAuditEvidenceFields_ValidSigningKey(t *testing.T) {
+	t.Parallel()
+	seed := strings.Repeat("ab", 32) // 64 hex chars = 32 bytes
+	c := &Config{}
+	c.AuditEvidence.ExportTTL = "1h"
+	c.AuditEvidence.SigningKey = seed
+	err := c.parseAuditEvidenceFields()
+	require.NoError(t, err)
+	require.Len(t, c.AuditEvidenceSigningKey, 32)
+}
+
+func TestParseAuditEvidenceFields_InvalidHex(t *testing.T) {
+	t.Parallel()
+	c := &Config{}
+	c.AuditEvidence.ExportTTL = "1h"
+	c.AuditEvidence.SigningKey = "not-hex"
+	err := c.parseAuditEvidenceFields()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "hex-encoded")
+}
+
+func TestParseAuditEvidenceFields_ShortKey(t *testing.T) {
+	t.Parallel()
+	shortKey := hex.EncodeToString([]byte("short"))
+	c := &Config{}
+	c.AuditEvidence.ExportTTL = "1h"
+	c.AuditEvidence.SigningKey = shortKey
+	err := c.parseAuditEvidenceFields()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at least 32 bytes")
+}
+
+func TestParseAuditEvidenceFields_EmptyKeyOK(t *testing.T) {
+	t.Parallel()
+	c := &Config{}
+	c.AuditEvidence.ExportTTL = "1h"
+	err := c.parseAuditEvidenceFields()
+	require.NoError(t, err)
+	require.Nil(t, c.AuditEvidenceSigningKey)
+}
+
+func TestValidateMCPConfig_Disabled(t *testing.T) {
+	t.Parallel()
+	c := &Config{}
+	require.NoError(t, c.validateMCPConfig())
+}
+
+func TestValidateMCPConfig_EmptyJWTSecret(t *testing.T) {
+	t.Parallel()
+	c := &Config{MCPEnabled: true}
+	c.MCP.Enabled = true
+	err := c.validateMCPConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "jwt_secret is required")
+}
+
+func TestValidateMCPConfig_ShortJWTSecret(t *testing.T) {
+	t.Parallel()
+	c := &Config{MCPEnabled: true}
+	c.MCP.Enabled = true
+	c.MCP.OAuth.JWTSecret = "too-short"
+	err := c.validateMCPConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at least 32 bytes")
+}
+
+func TestValidateMCPConfig_PlaceholderJWTSecret(t *testing.T) {
+	t.Parallel()
+	c := &Config{MCPEnabled: true}
+	c.MCP.Enabled = true
+	c.MCP.OAuth.JWTSecret = "replace-with-32-or-more-random-characters"
+	err := c.validateMCPConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "replaced with a random value")
+}
+
+func TestValidateMCPConfig_NegativeAccessTokenTTL(t *testing.T) {
+	t.Parallel()
+	c := &Config{MCPEnabled: true}
+	c.MCP.Enabled = true
+	c.MCP.OAuth.JWTSecret = strings.Repeat("x", 32)
+	c.MCPAccessTokenTTL = -1
+	err := c.validateMCPConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "access_token_ttl must be positive")
+}
+
+func TestValidateMCPConfig_NegativeRefreshTokenTTL(t *testing.T) {
+	t.Parallel()
+	c := &Config{MCPEnabled: true}
+	c.MCP.Enabled = true
+	c.MCP.OAuth.JWTSecret = strings.Repeat("x", 32)
+	c.MCPAccessTokenTTL = time.Hour
+	c.MCPRefreshTokenTTL = -1
+	err := c.validateMCPConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "refresh_token_ttl must be positive")
+}
+
+func TestValidateMCPConfig_NegativeRateLimit(t *testing.T) {
+	t.Parallel()
+	c := &Config{MCPEnabled: true}
+	c.MCP.Enabled = true
+	c.MCP.OAuth.JWTSecret = strings.Repeat("x", 32)
+	c.MCPAccessTokenTTL = time.Hour
+	c.MCPRefreshTokenTTL = time.Hour
+	c.MCPRateLimitPerMinute = -1
+	err := c.validateMCPConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requests_per_minute must be positive")
+}
+
+func TestValidateMCPConfig_NegativeBurst(t *testing.T) {
+	t.Parallel()
+	c := &Config{MCPEnabled: true}
+	c.MCP.Enabled = true
+	c.MCP.OAuth.JWTSecret = strings.Repeat("x", 32)
+	c.MCPAccessTokenTTL = time.Hour
+	c.MCPRefreshTokenTTL = time.Hour
+	c.MCPRateLimitPerMinute = 100
+	c.MCPRateLimitBurst = -1
+	err := c.validateMCPConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "burst must be positive")
+}
+
+func TestValidateMCPConfig_MissingPublicBaseURL(t *testing.T) {
+	t.Parallel()
+	c := &Config{MCPEnabled: true}
+	c.MCP.Enabled = true
+	c.MCP.OAuth.JWTSecret = strings.Repeat("x", 32)
+	c.MCPAccessTokenTTL = time.Hour
+	c.MCPRefreshTokenTTL = time.Hour
+	c.MCPRateLimitPerMinute = 100
+	c.MCPRateLimitBurst = 10
+	err := c.validateMCPConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "public_base_url")
+}
+
+func TestValidateMCPConfig_InvalidPublicBaseURL(t *testing.T) {
+	t.Parallel()
+	c := &Config{MCPEnabled: true}
+	c.MCP.Enabled = true
+	c.MCP.OAuth.JWTSecret = strings.Repeat("x", 32)
+	c.MCPAccessTokenTTL = time.Hour
+	c.MCPRefreshTokenTTL = time.Hour
+	c.MCPRateLimitPerMinute = 100
+	c.MCPRateLimitBurst = 10
+	c.MCPPublicBaseURL = "not a valid url"
+	err := c.validateMCPConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "valid URL")
+}
+
+func TestValidateConsole_MismatchedBaseAndSession(t *testing.T) {
+	t.Parallel()
+	c := &Config{ConsoleBaseURL: "https://example.com"}
+	err := c.validateConsole()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "set together")
+}
+
+func TestValidateConsole_ShortSessionKey(t *testing.T) {
+	t.Parallel()
+	c := &Config{
+		ConsoleBaseURL:    "https://example.com",
+		ConsoleSessionKey: "short",
+	}
+	err := c.validateConsole()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at least 32 bytes")
+}
+
+func TestValidateConsole_PlaceholderSessionKey(t *testing.T) {
+	t.Parallel()
+	c := &Config{
+		ConsoleBaseURL:    "https://example.com",
+		ConsoleSessionKey: "replace-with-32-or-more-random-characters",
+	}
+	err := c.validateConsole()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "replaced with a random value")
+}
+
+func TestValidateConsole_PasswordWithoutEmail(t *testing.T) {
+	t.Parallel()
+	c := &Config{
+		ConsoleBaseURL:    "https://example.com",
+		ConsoleSessionKey: strings.Repeat("x", 32),
+	}
+	c.Console.BootstrapAdmin.Password = "secret123"
+	err := c.validateConsole()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "email is required")
+}
+
+func TestValidateConsole_EmailWithoutPassword(t *testing.T) {
+	t.Parallel()
+	c := &Config{
+		ConsoleBaseURL:    "https://example.com",
+		ConsoleSessionKey: strings.Repeat("x", 32),
+	}
+	c.Console.BootstrapAdmin.Email = "admin@example.com"
+	err := c.validateConsole()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "password is required")
+}
+
+func TestValidateConsole_PlaceholderPassword(t *testing.T) {
+	t.Parallel()
+	c := &Config{
+		ConsoleBaseURL:    "https://example.com",
+		ConsoleSessionKey: strings.Repeat("x", 32),
+	}
+	c.Console.BootstrapAdmin.Email = "admin@example.com"
+	c.Console.BootstrapAdmin.Password = "replace-this-after-first-login"
+	err := c.validateConsole()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "replaced before startup")
+}
+
+func TestValidateGDPRConfig_AllZero(t *testing.T) {
+	t.Parallel()
+	c := &Config{}
+	err := c.validateGDPRConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "export_ttl must be positive")
+}
+
+func TestValidateGDPRConfig_ZeroStepUpTTL(t *testing.T) {
+	t.Parallel()
+	c := &Config{GDPRExportTTL: time.Hour}
+	err := c.validateGDPRConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "step_up_ttl must be positive")
+}
+
+func TestValidateGDPRConfig_ZeroDeleteGrace(t *testing.T) {
+	t.Parallel()
+	c := &Config{GDPRExportTTL: time.Hour, GDPRStepUpTTL: time.Hour}
+	err := c.validateGDPRConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "delete_grace_window must be positive")
+}
+
+func TestValidateGDPRConfig_AllValid(t *testing.T) {
+	t.Parallel()
+	c := &Config{
+		GDPRExportTTL:         time.Hour,
+		GDPRStepUpTTL:         time.Minute,
+		GDPRDeleteGraceWindow: 24 * time.Hour,
+	}
+	require.NoError(t, c.validateGDPRConfig())
+}
+
+func TestValidateAuditEvidenceConfig_PositiveTTL(t *testing.T) {
+	t.Parallel()
+	c := &Config{}
+	c.AuditEvidenceExportTTL = time.Hour
+	require.NoError(t, c.validateAuditEvidenceConfig())
+}
+
+func TestValidateAuditEvidenceConfig_ZeroTTL(t *testing.T) {
+	t.Parallel()
+	c := &Config{}
+	err := c.validateAuditEvidenceConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must be positive")
 }
