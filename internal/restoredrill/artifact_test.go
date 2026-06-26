@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,5 +35,22 @@ func TestVerifyBackupArtifact_NotADir(t *testing.T) {
 	}
 	if err := VerifyBackupArtifact(context.Background(), f); err == nil {
 		t.Fatal("expected error for a non-directory path")
+	}
+}
+
+// TestVerifyBackupArtifact_EmptyManifest: a directory with an empty
+// backup_manifest file is rejected (incomplete backup).
+func TestVerifyBackupArtifact_EmptyManifest(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "backup_manifest"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := VerifyBackupArtifact(context.Background(), dir)
+	if err == nil {
+		t.Fatal("expected error for an empty backup_manifest")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("error %q should mention 'empty'", err)
 	}
 }

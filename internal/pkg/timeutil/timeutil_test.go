@@ -78,3 +78,25 @@ func TestDaysFromNow(t *testing.T) {
 	diff := future.Sub(now)
 	require.InDelta(t, 7*24*float64(time.Hour), float64(diff), float64(time.Minute))
 }
+
+func TestSince(t *testing.T) {
+	t.Parallel()
+	past := Now().Add(-2 * time.Second)
+	d := Since(past)
+	require.True(t, d >= time.Second)
+}
+
+func TestUntil(t *testing.T) {
+	t.Parallel()
+	future := Now().Add(2 * time.Second)
+	d := Until(future)
+	require.True(t, d > 0)
+}
+
+func TestTruncate(t *testing.T) {
+	t.Parallel()
+	ts := time.Date(2021, 1, 15, 14, 37, 45, 0, time.UTC)
+	truncated := Truncate(ts, time.Hour)
+	require.Equal(t, 14, truncated.Hour())
+	require.Equal(t, 0, truncated.Minute())
+}

@@ -177,3 +177,17 @@ func TestRetryPolicy_BackoffClampsAtMaxDelay(t *testing.T) {
 		t.Errorf("clamp: want 30s, got %v", got)
 	}
 }
+
+func TestDefaultRetry(t *testing.T) {
+	t.Parallel()
+	p := DefaultRetry()
+	if p.MaxAttempts != 5 {
+		t.Errorf("MaxAttempts = %d, want 5", p.MaxAttempts)
+	}
+	if p.BaseDelay != 1*time.Second {
+		t.Errorf("BaseDelay = %v, want 1s", p.BaseDelay)
+	}
+	if p.MaxDelay != 10*time.Minute {
+		t.Errorf("MaxDelay = %v, want 10m", p.MaxDelay)
+	}
+}

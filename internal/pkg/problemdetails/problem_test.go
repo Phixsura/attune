@@ -127,3 +127,9 @@ func TestServiceUnavailable(t *testing.T) {
 	p := ServiceUnavailable("Service is down")
 	require.Equal(t, http.StatusServiceUnavailable, p.Status)
 }
+
+func TestWithInstance(t *testing.T) {
+	t.Parallel()
+	p := New(400, "Bad Request").WithInstance("/feedback/42")
+	require.Equal(t, "/feedback/42", p.Instance)
+}

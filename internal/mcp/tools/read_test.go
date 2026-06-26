@@ -40,6 +40,7 @@ func (m *mockFeedbackReader) GetForConsole(_ context.Context, _ string, _ int64)
 type mockWorkflowStateReader struct {
 	listRows []workflowstate.WorkflowState
 	getRow   *workflowstate.WorkflowState
+	getErr   error
 }
 
 func (m *mockWorkflowStateReader) List(_ context.Context, _ string, _ bool) ([]workflowstate.WorkflowState, error) {
@@ -47,7 +48,7 @@ func (m *mockWorkflowStateReader) List(_ context.Context, _ string, _ bool) ([]w
 }
 
 func (m *mockWorkflowStateReader) GetByTenantAndID(_ context.Context, _, _ string) (*workflowstate.WorkflowState, error) {
-	return m.getRow, nil
+	return m.getRow, m.getErr
 }
 
 type mockTagReader struct {
@@ -221,6 +222,182 @@ func TestListWorkflowStates(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, items, 1)
 	assert.Equal(t, "open", items[0].Name)
+}
+
+func TestGetFeedback_InvalidParams(t *testing.T) {
+	t.Parallel()
+	deps := ptrext.Of(tools.Deps{Feedback: ptrext.Of(mockFeedbackReader{})})
+	d := jsonrpc.NewDispatcher()
+	tools.RegisterReadTools(d, deps)
+	ctx := contextWithClaims("tenant-123", []string{"mcp:read"})
+
+	resp := d.Dispatch(ctx, ptrext.Of(jsonrpc.Request{
+		JSONRPC: jsonrpc.Version,
+		Method:  "get_feedback",
+		Params:  json.RawMessage(`not valid json`),
+		ID:      "1",
+	}))
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, jsonrpc.CodeInvalidParams, resp.Error.Code)
+}
+
+func TestGetFeedback_ZeroID(t *testing.T) {
+	t.Parallel()
+	deps := ptrext.Of(tools.Deps{Feedback: ptrext.Of(mockFeedbackReader{})})
+	d := jsonrpc.NewDispatcher()
+	tools.RegisterReadTools(d, deps)
+	ctx := contextWithClaims("tenant-123", []string{"mcp:read"})
+
+	resp := d.Dispatch(ctx, ptrext.Of(jsonrpc.Request{
+		JSONRPC: jsonrpc.Version,
+		Method:  "get_feedback",
+		Params:  json.RawMessage(`{"id": 0}`),
+		ID:      "1",
+	}))
+	require.NotNil(t, resp.Error)
+	assert.Contains(t, resp.Error.Message, "required")
+}
+
+func TestGetFeedback_WithDetailFields(t *testing.T) {
+	t.Parallel()
+	deps := ptrext.Of(tools.Deps{
+		Feedback: ptrext.Of(mockFeedbackReader{
+			getRow: ptrext.Of(feedback.ConsoleDetailRow{
+				ConsoleListRow: feedback.ConsoleListRow{
+					ID:               1,
+					Content:          "c",
+					Source:           "api",
+					Type:             "bug",
+					UserID:           "u",
+					EnrichmentStatus: "complete",
+					CreatedAt:        time.Now(),
+					EnrichedAttrs:    json.RawMessage(`{"kind":"bug"}`),
+				},
+				SourceMeta:  json.RawMessage(`{"browser":"chrome"}`),
+				Attachments: json.RawMessage(`[{"url":"x"}]`),
+			}),
+		}),
+	})
+	d := jsonrpc.NewDispatcher()
+	tools.RegisterReadTools(d, deps)
+	ctx := contextWithClaims("t", []string{"mcp:read"})
+
+	resp := d.Dispatch(ctx, ptrext.Of(jsonrpc.Request{
+		JSONRPC: jsonrpc.Version,
+		Method:  "get_feedback",
+		Params:  json.RawMessage(`{"id": 1}`),
+		ID:      "1",
+	}))
+	require.Nil(t, resp.Error)
+	detail, ok := resp.Result.(tools.FeedbackDetail)
+	require.True(t, ok)
+	assert.NotNil(t, detail.EnrichedAttrs)
+	assert.NotNil(t, detail.SourceMeta)
+	assert.NotNil(t, detail.Attachments)
+}
+
+func TestGetWorkflowState(t *testing.T) {
+	t.Parallel()
+	deps := ptrext.Of(tools.Deps{
+		WorkflowState: ptrext.Of(mockWorkflowStateReader{
+			getRow: ptrext.Of(workflowstate.WorkflowState{
+				ID:          "ws-1",
+				Name:        "open",
+				DisplayName: domain.I18nString{"en": "Open"},
+				Color:       "#00ff00",
+				Category:    "open",
+				Position:    1,
+				IsDefault:   true,
+			}),
+		}),
+	})
+	d := jsonrpc.NewDispatcher()
+	tools.RegisterReadTools(d, deps)
+	ctx := contextWithClaims("t", []string{"mcp:read"})
+
+	resp := d.Dispatch(ctx, ptrext.Of(jsonrpc.Request{
+		JSONRPC: jsonrpc.Version,
+		Method:  "get_workflow_state",
+		Params:  json.RawMessage(`{"id":"ws-1"}`),
+		ID:      "1",
+	}))
+	require.Nil(t, resp.Error)
+	item, ok := resp.Result.(tools.WorkflowStateItem)
+	require.True(t, ok)
+	assert.Equal(t, "open", item.Name)
+}
+
+func TestGetWorkflowState_MissingID(t *testing.T) {
+	t.Parallel()
+	deps := ptrext.Of(tools.Deps{WorkflowState: ptrext.Of(mockWorkflowStateReader{})})
+	d := jsonrpc.NewDispatcher()
+	tools.RegisterReadTools(d, deps)
+	ctx := contextWithClaims("t", []string{"mcp:read"})
+
+	resp := d.Dispatch(ctx, ptrext.Of(jsonrpc.Request{
+		JSONRPC: jsonrpc.Version,
+		Method:  "get_workflow_state",
+		Params:  json.RawMessage(`{}`),
+		ID:      "1",
+	}))
+	require.NotNil(t, resp.Error)
+	assert.Contains(t, resp.Error.Message, "required")
+}
+
+func TestGetWorkflowState_InsufficientScope(t *testing.T) {
+	t.Parallel()
+	deps := ptrext.Of(tools.Deps{WorkflowState: ptrext.Of(mockWorkflowStateReader{})})
+	d := jsonrpc.NewDispatcher()
+	tools.RegisterReadTools(d, deps)
+	ctx := contextWithClaims("t", []string{"mcp:ingest"})
+
+	resp := d.Dispatch(ctx, ptrext.Of(jsonrpc.Request{
+		JSONRPC: jsonrpc.Version,
+		Method:  "get_workflow_state",
+		Params:  json.RawMessage(`{"id":"ws-1"}`),
+		ID:      "1",
+	}))
+	require.NotNil(t, resp.Error)
+	assert.Contains(t, resp.Error.Message, "scope")
+}
+
+func TestListFeedback_InvalidParams(t *testing.T) {
+	t.Parallel()
+	deps := ptrext.Of(tools.Deps{Feedback: ptrext.Of(mockFeedbackReader{})})
+	d := jsonrpc.NewDispatcher()
+	tools.RegisterReadTools(d, deps)
+	ctx := contextWithClaims("t", []string{"mcp:read"})
+
+	resp := d.Dispatch(ctx, ptrext.Of(jsonrpc.Request{
+		JSONRPC: jsonrpc.Version,
+		Method:  "list_feedback",
+		Params:  json.RawMessage(`not json`),
+		ID:      "1",
+	}))
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, jsonrpc.CodeInvalidParams, resp.Error.Code)
+}
+
+func TestListFeedback_WithFilters(t *testing.T) {
+	t.Parallel()
+	deps := ptrext.Of(tools.Deps{
+		Feedback: ptrext.Of(mockFeedbackReader{
+			listRows: []feedback.ConsoleListRow{
+				{ID: 1, Content: "c", Source: "web", Type: "bug", UserID: "u", EnrichmentStatus: "complete", CreatedAt: time.Now()},
+			},
+		}),
+	})
+	d := jsonrpc.NewDispatcher()
+	tools.RegisterReadTools(d, deps)
+	ctx := contextWithClaims("t", []string{"mcp:read"})
+
+	resp := d.Dispatch(ctx, ptrext.Of(jsonrpc.Request{
+		JSONRPC: jsonrpc.Version,
+		Method:  "list_feedback",
+		Params:  json.RawMessage(`{"cursor":5,"limit":200,"q":"search","urgent":true,"workflow_state_id":"ws-1","tag_id":"tag-1"}`),
+		ID:      "1",
+	}))
+	require.Nil(t, resp.Error)
 }
 
 func TestListTags(t *testing.T) {

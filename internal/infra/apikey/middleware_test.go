@@ -299,6 +299,53 @@ func TestRequireScope_HasScope(t *testing.T) {
 	}
 }
 
+func TestIsBrowserUserAgent(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		ua   string
+		want bool
+	}{
+		{"Mozilla/5.0 (Windows NT 10.0; Win64; x64)", true},
+		{"chrome/120.0.0.0", true},
+		{"attune-sdk/1.0", false},
+		{"curl/7.88.1", false},
+		{"", false},
+		{"Safari/605.1.15", true},
+		{"Firefox/120.0", true},
+		{"Edge/120", true},
+		{"Go-http-client/1.1", false},
+	}
+	for _, c := range cases {
+		if got := IsBrowserUserAgent(c.ua); got != c.want {
+			t.Errorf("IsBrowserUserAgent(%q) = %v, want %v", c.ua, got, c.want)
+		}
+	}
+}
+
+func TestFromContextSafe_MissingCtx(t *testing.T) {
+	t.Parallel()
+	auth, ok := FromContextSafe(context.Background())
+	if ok || auth != nil {
+		t.Errorf("expected nil/false from empty context, got %v %v", auth, ok)
+	}
+}
+
+func TestWithAuthForTest(t *testing.T) {
+	t.Parallel()
+	scopes := []domain.Scope{domain.ScopeIngestWrite, domain.ScopeFeedbackRead}
+	ctx := WithAuthForTest(context.Background(), "tenant-1", uuid.Nil.String(), scopes)
+	auth, ok := FromContextSafe(ctx)
+	if !ok || auth == nil {
+		t.Fatal("auth should be present")
+	}
+	if auth.TenantID != "tenant-1" {
+		t.Errorf("tenant = %s, want tenant-1", auth.TenantID)
+	}
+	if len(auth.Scopes) != 2 {
+		t.Errorf("scopes = %d, want 2", len(auth.Scopes))
+	}
+}
+
 // TestRequireScope_MissingScope verifies that a request without the required scope is rejected.
 func TestRequireScope_MissingScope(t *testing.T) {
 	kid := uuid.New()

@@ -126,3 +126,78 @@ func TestSafeErrorRedactsProviderBody(t *testing.T) {
 	require.Equal(t, "provider_status_403", safeError(err))
 	require.Equal(t, "provider_error", safeError(errors.New(`provider failed: {"prompt":"secret"}`)))
 }
+
+func TestSafeError_DeadlineExceeded(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "deadline_exceeded", safeError(context.DeadlineExceeded))
+}
+
+func TestSafeError_ContextCanceled(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "context_canceled", safeError(context.Canceled))
+}
+
+func TestSafeError_GuardBlocked(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "guard_blocked", safeError(errors.New("llm guard blocked request: pii detected")))
+}
+
+func TestSafeError_Nil(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "", safeError(nil))
+}
+
+func TestSafeError_PlainError(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "something broke", safeError(errors.New("something broke")))
+}
+
+func TestTruncateError_Short(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "short", truncateError("short"))
+}
+
+func TestTruncateError_Long(t *testing.T) {
+	t.Parallel()
+	long := ""
+	for i := 0; i < 600; i++ {
+		long += "x"
+	}
+	result := truncateError(long)
+	require.Contains(t, result, "...(truncated)")
+	require.LessOrEqual(t, len([]rune(result)), 530)
+}
+
+func TestNonNegativeI32(t *testing.T) {
+	t.Parallel()
+	require.EqualValues(t, 0, nonNegativeI32(-5))
+	require.EqualValues(t, 0, nonNegativeI32(0))
+	require.EqualValues(t, 10, nonNegativeI32(10))
+}
+
+func TestMetricModelLabel(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "unknown", metricModelLabel(""))
+	require.Equal(t, "unknown", metricModelLabel("  "))
+	require.Equal(t, "gpt-4o-mini", metricModelLabel("gpt-4o-mini"))
+	require.Equal(t, "custom", metricModelLabel("some-random-model"))
+}
+
+func TestClient_Close_Nil(t *testing.T) {
+	t.Parallel()
+	var c *Client
+	require.NoError(t, c.Close())
+}
+
+func TestClient_Close_NilNext(t *testing.T) {
+	t.Parallel()
+	c := ptrext.Of(Client{})
+	require.NoError(t, c.Close())
+}
+
+func TestClient_Close_WithNext(t *testing.T) {
+	t.Parallel()
+	rec := ptrext.Of(fakeRecorder{})
+	c := NewClient(fakeLLM{}, rec)
+	require.NoError(t, c.Close())
+}

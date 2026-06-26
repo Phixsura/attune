@@ -114,3 +114,155 @@ func TestDecryptInboundEmail_OK(t *testing.T) {
 		t.Fatalf("expected email decrypt to succeed, got %v", err)
 	}
 }
+
+func TestDecryptInboundEmail_WrongKeyset(t *testing.T) {
+	t.Parallel()
+	writer := newTestStore(t)
+	reader := newTestStore(t)
+	pw, err := writer.Encrypt([]byte("imap-password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := json.Marshal(inboundEmailSecrets{PasswordEncrypted: pw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, err := writer.Encrypt(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := decryptInboundEmail(reader, outer); err == nil {
+		t.Fatal("expected email decrypt to fail with mismatched keyset")
+	}
+}
+
+func TestDecryptInboundWebhook_NoCurrentSecret(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	// Create an envelope with empty current secret
+	env := inboundWebhookSecrets{SecretCurrentEncrypted: nil}
+	plain, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, err := store.Encrypt(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = decryptInboundWebhook(store, outer)
+	if err == nil {
+		t.Fatal("expected error for empty current secret")
+	}
+}
+
+func TestDecryptInboundEmail_NoPassword(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	// Create an envelope with empty password
+	env := inboundEmailSecrets{PasswordEncrypted: nil}
+	plain, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, err := store.Encrypt(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = decryptInboundEmail(store, outer)
+	if err == nil {
+		t.Fatal("expected error for empty password")
+	}
+}
+
+func TestDecryptInboundWebhook_BadInnerJSON(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	// Encrypt something that is NOT valid JSON for the inner envelope
+	outer, err := store.Encrypt([]byte("not-valid-json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = decryptInboundWebhook(store, outer)
+	if err == nil {
+		t.Fatal("expected error for bad inner JSON")
+	}
+}
+
+func TestDecryptInboundEmail_BadInnerJSON(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	outer, err := store.Encrypt([]byte("not-valid-json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = decryptInboundEmail(store, outer)
+	if err == nil {
+		t.Fatal("expected error for bad inner JSON")
+	}
+}
+
+func TestDecryptInboundWebhook_BadCurrentSecret(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	// Create envelope with a current_secret that is not valid ciphertext
+	env := inboundWebhookSecrets{
+		SecretCurrentEncrypted: []byte("not-valid-ciphertext"),
+	}
+	plain, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, err := store.Encrypt(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = decryptInboundWebhook(store, outer)
+	if err == nil {
+		t.Fatal("expected error for bad current secret ciphertext")
+	}
+}
+
+func TestDecryptInboundWebhook_BadPreviousSecret(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	cur, err := store.Encrypt([]byte("current-webhook-signing-secret-32b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := inboundWebhookSecrets{
+		SecretCurrentEncrypted:  cur,
+		SecretPreviousEncrypted: []byte("not-valid-ciphertext"),
+	}
+	plain, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, err := store.Encrypt(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = decryptInboundWebhook(store, outer)
+	if err == nil {
+		t.Fatal("expected error for bad previous secret ciphertext")
+	}
+}
+
+func TestDecryptInboundEmail_BadPasswordCiphertext(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	env := inboundEmailSecrets{
+		PasswordEncrypted: []byte("not-valid-ciphertext"),
+	}
+	plain, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, err := store.Encrypt(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = decryptInboundEmail(store, outer)
+	if err == nil {
+		t.Fatal("expected error for bad password ciphertext")
+	}
+}

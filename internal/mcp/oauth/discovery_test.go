@@ -62,6 +62,88 @@ func TestDiscoveryHandlerAuthorizationServerMetadata(t *testing.T) {
 	assert.Contains(t, resp.ProtectedResources, "https://attune.example.com/mcp/v1")
 }
 
+func TestDiscoveryHandler_Paths(t *testing.T) {
+	t.Parallel()
+	h := oauth.NewDiscoveryHandler("https://attune.example.com", "https://attune.example.com/mcp/oauth")
+
+	assert.Contains(t, h.ProtectedResourceMetadataPath(), "oauth-protected-resource")
+	assert.Contains(t, h.AuthorizationServerMetadataPath(), "oauth-authorization-server")
+	assert.Contains(t, h.OpenIDConfigurationPath(), "openid-configuration")
+}
+
+func TestDiscoveryHandler_URLs(t *testing.T) {
+	t.Parallel()
+	h := oauth.NewDiscoveryHandler("https://attune.example.com", "https://attune.example.com/mcp/oauth")
+
+	assert.Contains(t, h.ProtectedResourceMetadataURL(), "https://attune.example.com")
+	assert.Contains(t, h.AuthorizationServerMetadataURL(), "https://attune.example.com")
+	assert.Contains(t, h.OpenIDConfigurationURL(), "https://attune.example.com")
+}
+
+func TestDiscoveryHandler_ServeHTTP(t *testing.T) {
+	t.Parallel()
+	h := oauth.NewDiscoveryHandler("https://attune.example.com", "https://attune.example.com/mcp/oauth")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp oauth.DiscoveryResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.NotEmpty(t, resp.Resource)
+}
+
+func TestDiscoveryHandler_OpenIDConfiguration(t *testing.T) {
+	t.Parallel()
+	h := oauth.NewDiscoveryHandler("https://attune.example.com", "https://attune.example.com/mcp/oauth")
+	rec := httptest.NewRecorder()
+	h.ServeOpenIDConfiguration(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp oauth.AuthorizationServerMetadataResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "https://attune.example.com/mcp/oauth", resp.Issuer)
+}
+
+func TestWellKnownURL(t *testing.T) {
+	t.Parallel()
+
+	t.Run("root issuer", func(t *testing.T) {
+		t.Parallel()
+		u, err := oauth.WellKnownURL("https://example.com", "/.well-known/oauth-authorization-server")
+		require.NoError(t, err)
+		assert.Equal(t, "https://example.com/.well-known/oauth-authorization-server", u)
+	})
+
+	t.Run("path issuer", func(t *testing.T) {
+		t.Parallel()
+		u, err := oauth.WellKnownURL("https://example.com/mcp/oauth", "/.well-known/oauth-authorization-server")
+		require.NoError(t, err)
+		assert.Equal(t, "https://example.com/.well-known/oauth-authorization-server/mcp/oauth", u)
+	})
+
+	t.Run("relative URL fails", func(t *testing.T) {
+		t.Parallel()
+		_, err := oauth.WellKnownURL("/relative", "/.well-known/x")
+		require.Error(t, err)
+	})
+}
+
+func TestWellKnownPath_Errors(t *testing.T) {
+	t.Parallel()
+
+	t.Run("relative URL", func(t *testing.T) {
+		t.Parallel()
+		_, err := oauth.WellKnownPath("/relative", "/.well-known/x")
+		require.Error(t, err)
+	})
+
+	t.Run("no scheme", func(t *testing.T) {
+		t.Parallel()
+		_, err := oauth.WellKnownPath("example.com", "/.well-known/x")
+		require.Error(t, err)
+	})
+}
+
 func TestWellKnownPath(t *testing.T) {
 	tests := []struct {
 		name       string

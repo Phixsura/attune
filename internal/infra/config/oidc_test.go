@@ -177,6 +177,124 @@ func TestParseNonStandardIP(t *testing.T) {
 	}
 }
 
+func TestOIDCConfig_Validate(t *testing.T) {
+	t.Parallel()
+
+	valid := OIDCConfig{
+		Enabled:     true,
+		IssuerURL:   "https://accounts.google.com",
+		ClientID:    "my-client",
+		RedirectURI: "https://app.example.com/callback",
+		Scopes:      []string{"openid", "email"},
+	}
+
+	t.Run("disabled skips validation", func(t *testing.T) {
+		t.Parallel()
+		cfg := OIDCConfig{Enabled: false}
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("valid config", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("missing issuer", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.IssuerURL = ""
+		assert.ErrorIs(t, cfg.Validate(), ErrOIDCIssuerRequired)
+	})
+
+	t.Run("missing client id", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.ClientID = ""
+		assert.ErrorIs(t, cfg.Validate(), ErrOIDCClientIDRequired)
+	})
+
+	t.Run("missing redirect uri", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.RedirectURI = ""
+		assert.ErrorIs(t, cfg.Validate(), ErrOIDCRedirectRequired)
+	})
+
+	t.Run("http issuer rejected", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.IssuerURL = "http://idp.example.com"
+		assert.ErrorIs(t, cfg.Validate(), ErrOIDCIssuerNotHTTPS)
+	})
+
+	t.Run("http issuer allowed with insecure skip verify", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.IssuerURL = "http://idp.example.com"
+		cfg.InsecureSkipVerify = true
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("http issuer allowed for localhost", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.IssuerURL = "http://localhost:8080"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("cloud metadata issuer rejected", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.IssuerURL = "https://169.254.169.254"
+		assert.ErrorIs(t, cfg.Validate(), ErrOIDCIssuerMetadata)
+	})
+
+	t.Run("private ip issuer rejected", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.IssuerURL = "https://192.168.1.1"
+		assert.ErrorIs(t, cfg.Validate(), ErrOIDCIssuerPrivate)
+	})
+
+	t.Run("private ip issuer allowed with insecure skip verify", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.IssuerURL = "https://192.168.1.1"
+		cfg.InsecureSkipVerify = true
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("http redirect rejected", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.RedirectURI = "http://app.example.com/callback"
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("http redirect allowed for localhost", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.RedirectURI = "http://localhost:3000/callback"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("scopes without openid rejected", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.Scopes = []string{"email", "profile"}
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("security warnings logged", func(t *testing.T) {
+		t.Parallel()
+		cfg := valid
+		cfg.InsecureSkipVerify = true
+		cfg.SkipIssuerCheck = true
+		assert.NoError(t, cfg.Validate())
+	})
+}
+
 func TestOIDCConfig_ApplyDefaults(t *testing.T) {
 	t.Parallel()
 

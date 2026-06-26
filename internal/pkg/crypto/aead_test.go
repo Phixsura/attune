@@ -90,3 +90,23 @@ func TestAEAD_EmptyKey(t *testing.T) {
 		t.Error("expected error for empty key")
 	}
 }
+
+func TestAEAD_CiphertextTooShort(t *testing.T) {
+	t.Parallel()
+	aead, err := NewAEAD([]byte("key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = aead.Decrypt("YQ") // "a" in base64url, way too short
+	if err == nil {
+		t.Fatal("expected error for short ciphertext")
+	}
+}
+
+func TestAEAD_NilKey(t *testing.T) {
+	t.Parallel()
+	_, err := NewAEAD(nil)
+	if err == nil {
+		t.Fatal("expected error for nil key")
+	}
+}

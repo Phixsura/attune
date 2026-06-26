@@ -852,3 +852,660 @@ func TestItemFailureToProto_NoUpdatedAt(t *testing.T) {
 		t.Error("CurrentUpdatedAt should be nil")
 	}
 }
+
+func TestWorker_ProcessNextJob_CancelledContext(t *testing.T) {
+	t.Parallel()
+
+	// A job that should detect cancelled context during chunk processing.
+	ids := make([]int64, 100)
+	for i := range ids {
+		ids[i] = int64(i + 1)
+	}
+
+	op := ptrext.Of(attunev1.BatchOperation{
+		Op: &attunev1.BatchOperation_Tag{
+			Tag: ptrext.Of(attunev1.BatchTagOp{
+				AddTagIds: []string{"tag-1"},
+			}),
+		},
+	})
+	reqBytes := makeJobRequestBytes(t, op, ids, nil)
+
+	// The mock will cancel the context on the first batch call
+	ctx, cancel := context.WithCancel(context.Background())
+	fbRepo := &mockFeedbackRepo{}
+
+	completeFn := func(ctx context.Context, jobID, owner string, result []byte) (int64, error) {
+		return 1, nil
+	}
+	failFn := func(ctx context.Context, jobID, owner string, errMsg string) (int64, error) {
+		return 1, nil
+	}
+
+	jobRepo := &cancellingMockJobRepo{
+		jobs: []*feedbackjob.Job{{
+			ID:       "job-cancel",
+			TenantID: "tenant-1",
+			Status:   feedbackjob.StatusQueued,
+			Request:  reqBytes,
+			Total:    100,
+		}},
+		completeFn: completeFn,
+		failFn:     failFn,
+		cancelFn:   cancel,
+	}
+	w := New(jobRepo, fbRepo, Config{BatchSize: 10})
+
+	err := w.processNextJob(ctx)
+	// Should not return an error (the job is handled internally).
+	if err != nil {
+		t.Fatalf("processNextJob should handle cancellation internally, got: %v", err)
+	}
+}
+
+// cancellingMockJobRepo is a mock that cancels context on first UpdateProgress call.
+type cancellingMockJobRepo struct {
+	mu         sync.Mutex
+	jobs       []*feedbackjob.Job
+	claimIndex int
+	cancelFn   context.CancelFunc
+	cancelled  bool
+	completeFn func(ctx context.Context, jobID, owner string, result []byte) (int64, error)
+	failFn     func(ctx context.Context, jobID, owner string, errMsg string) (int64, error)
+}
+
+func (m *cancellingMockJobRepo) Create(ctx context.Context, tenantID, createdBy string, request []byte, total int) (*feedbackjob.Job, error) {
+	return nil, nil
+}
+
+func (m *cancellingMockJobRepo) Get(ctx context.Context, tenantID, jobID string) (*feedbackjob.Job, error) {
+	return nil, feedbackjob.ErrNotFound
+}
+
+func (m *cancellingMockJobRepo) List(ctx context.Context, tenantID string, status *feedbackjob.Status, limit int, cursor string) ([]*feedbackjob.Job, string, error) {
+	return nil, "", nil
+}
+
+func (m *cancellingMockJobRepo) Claim(ctx context.Context, owner string) (*feedbackjob.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.claimIndex >= len(m.jobs) {
+		return nil, nil
+	}
+	job := m.jobs[m.claimIndex]
+	m.claimIndex++
+	now := time.Now()
+	job.Status = feedbackjob.StatusRunning
+	job.StartedAt = ptrext.Of(now)
+	job.ClaimedAt = ptrext.Of(now)
+	return job, nil
+}
+
+func (m *cancellingMockJobRepo) UpdateProgress(ctx context.Context, jobID, owner string, progress int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.cancelled {
+		m.cancelled = true
+		m.cancelFn()
+	}
+	return nil
+}
+
+func (m *cancellingMockJobRepo) Complete(ctx context.Context, jobID, owner string, result []byte) (int64, error) {
+	if m.completeFn != nil {
+		return m.completeFn(ctx, jobID, owner, result)
+	}
+	return 1, nil
+}
+
+func (m *cancellingMockJobRepo) Fail(ctx context.Context, jobID, owner string, errMsg string) (int64, error) {
+	if m.failFn != nil {
+		return m.failFn(ctx, jobID, owner, errMsg)
+	}
+	return 1, nil
+}
+
+func (m *cancellingMockJobRepo) Cancel(ctx context.Context, tenantID, jobID string) error {
+	return nil
+}
+
+func (m *cancellingMockJobRepo) Heartbeat(ctx context.Context, jobID, owner string) (int64, error) {
+	return 1, nil
+}
+
+func (m *cancellingMockJobRepo) RecoverStuck(ctx context.Context, staleThreshold time.Duration) (int64, error) {
+	return 0, nil
+}
+
+var _ feedbackjob.Store = (*cancellingMockJobRepo)(nil)
+
+func TestWorker_ProcessNextJob_CompleteReturnsZero(t *testing.T) {
+	t.Parallel()
+
+	op := ptrext.Of(attunev1.BatchOperation{
+		Op: &attunev1.BatchOperation_Tag{
+			Tag: ptrext.Of(attunev1.BatchTagOp{
+				AddTagIds: []string{"tag-1"},
+			}),
+		},
+	})
+	reqBytes := makeJobRequestBytes(t, op, []int64{1, 2}, nil)
+
+	// A job repo where Complete returns 0 (job re-claimed by another worker)
+	jobRepo := &completeZeroMockJobRepo{
+		mockJobRepo: mockJobRepo{
+			jobs: []*feedbackjob.Job{{
+				ID:       "job-reclaimed",
+				TenantID: "tenant-1",
+				Status:   feedbackjob.StatusQueued,
+				Request:  reqBytes,
+				Total:    2,
+			}},
+		},
+	}
+	fbRepo := &mockFeedbackRepo{}
+	w := New(jobRepo, fbRepo, Config{BatchSize: 10})
+
+	ctx := context.Background()
+	err := w.processNextJob(ctx)
+	// Should not return an error (handled internally with warning log)
+	if err != nil {
+		t.Fatalf("processNextJob should not return error when Complete returns 0: %v", err)
+	}
+}
+
+type completeZeroMockJobRepo struct {
+	mockJobRepo
+}
+
+func (m *completeZeroMockJobRepo) Complete(ctx context.Context, jobID, owner string, result []byte) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.completeCalls = append(m.completeCalls, struct {
+		JobID  string
+		Result []byte
+	}{jobID, result})
+	return 0, nil // Simulate re-claimed by another worker
+}
+
+var _ feedbackjob.Store = (*completeZeroMockJobRepo)(nil)
+
+func TestWorker_ProcessNextJob_FailReturnsZero(t *testing.T) {
+	t.Parallel()
+
+	op := ptrext.Of(attunev1.BatchOperation{
+		Op: &attunev1.BatchOperation_Tag{
+			Tag: ptrext.Of(attunev1.BatchTagOp{
+				AddTagIds: []string{"tag-1"},
+			}),
+		},
+	})
+	reqBytes := makeJobRequestBytes(t, op, []int64{1}, nil)
+
+	jobRepo := &failZeroMockJobRepo{
+		mockJobRepo: mockJobRepo{
+			jobs: []*feedbackjob.Job{{
+				ID:       "job-fail-zero",
+				TenantID: "tenant-1",
+				Status:   feedbackjob.StatusQueued,
+				Request:  reqBytes,
+				Total:    1,
+			}},
+		},
+	}
+	fbRepo := &mockFeedbackRepo{
+		batchTagErr: errors.New("execution error"),
+	}
+	w := New(jobRepo, fbRepo, Config{BatchSize: 10})
+
+	ctx := context.Background()
+	err := w.processNextJob(ctx)
+	// Should not return an error (handled internally)
+	if err != nil {
+		t.Fatalf("processNextJob should not return error: %v", err)
+	}
+}
+
+type failZeroMockJobRepo struct {
+	mockJobRepo
+}
+
+func (m *failZeroMockJobRepo) Fail(ctx context.Context, jobID, owner string, errMsg string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failCalls = append(m.failCalls, struct {
+		JobID  string
+		ErrMsg string
+	}{jobID, errMsg})
+	return 0, nil // Simulate re-claimed by another worker
+}
+
+var _ feedbackjob.Store = (*failZeroMockJobRepo)(nil)
+
+func TestWorker_ProcessNextJob_FailRepoError(t *testing.T) {
+	t.Parallel()
+
+	op := ptrext.Of(attunev1.BatchOperation{
+		Op: &attunev1.BatchOperation_Tag{
+			Tag: ptrext.Of(attunev1.BatchTagOp{
+				AddTagIds: []string{"tag-1"},
+			}),
+		},
+	})
+	reqBytes := makeJobRequestBytes(t, op, []int64{1}, nil)
+
+	jobRepo := &failErrorMockJobRepo{
+		mockJobRepo: mockJobRepo{
+			jobs: []*feedbackjob.Job{{
+				ID:       "job-fail-err",
+				TenantID: "tenant-1",
+				Status:   feedbackjob.StatusQueued,
+				Request:  reqBytes,
+				Total:    1,
+			}},
+		},
+	}
+	fbRepo := &mockFeedbackRepo{
+		batchTagErr: errors.New("execution error"),
+	}
+	w := New(jobRepo, fbRepo, Config{BatchSize: 10})
+
+	ctx := context.Background()
+	err := w.processNextJob(ctx)
+	// Should not return an error (error during Fail is logged, not propagated)
+	if err != nil {
+		t.Fatalf("processNextJob should not return error: %v", err)
+	}
+}
+
+type failErrorMockJobRepo struct {
+	mockJobRepo
+}
+
+func (m *failErrorMockJobRepo) Fail(ctx context.Context, jobID, owner string, errMsg string) (int64, error) {
+	return 0, errors.New("fail repo error")
+}
+
+var _ feedbackjob.Store = (*failErrorMockJobRepo)(nil)
+
+func TestWorker_ProcessNextJob_CompleteError(t *testing.T) {
+	t.Parallel()
+
+	op := ptrext.Of(attunev1.BatchOperation{
+		Op: &attunev1.BatchOperation_Tag{
+			Tag: ptrext.Of(attunev1.BatchTagOp{
+				AddTagIds: []string{"tag-1"},
+			}),
+		},
+	})
+	reqBytes := makeJobRequestBytes(t, op, []int64{1}, nil)
+
+	jobRepo := &completeErrorMockJobRepo{
+		mockJobRepo: mockJobRepo{
+			jobs: []*feedbackjob.Job{{
+				ID:       "job-complete-err",
+				TenantID: "tenant-1",
+				Status:   feedbackjob.StatusQueued,
+				Request:  reqBytes,
+				Total:    1,
+			}},
+		},
+	}
+	fbRepo := &mockFeedbackRepo{}
+	w := New(jobRepo, fbRepo, Config{BatchSize: 10})
+
+	ctx := context.Background()
+	err := w.processNextJob(ctx)
+	// Should not return an error (error during Complete is logged, not propagated)
+	if err != nil {
+		t.Fatalf("processNextJob should not return error: %v", err)
+	}
+}
+
+type completeErrorMockJobRepo struct {
+	mockJobRepo
+}
+
+func (m *completeErrorMockJobRepo) Complete(ctx context.Context, jobID, owner string, result []byte) (int64, error) {
+	return 0, errors.New("complete repo error")
+}
+
+var _ feedbackjob.Store = (*completeErrorMockJobRepo)(nil)
+
+func TestWorker_ExecuteOperation_UnknownOp(t *testing.T) {
+	t.Parallel()
+
+	// A BatchOperation with no op set (nil operation interface)
+	op := ptrext.Of(attunev1.BatchOperation{})
+	reqBytes := makeJobRequestBytes(t, op, []int64{1}, nil)
+
+	jobRepo := &mockJobRepo{
+		jobs: []*feedbackjob.Job{{
+			ID:       "job-unknown-op",
+			TenantID: "tenant-1",
+			Status:   feedbackjob.StatusQueued,
+			Request:  reqBytes,
+			Total:    1,
+		}},
+	}
+	fbRepo := &mockFeedbackRepo{}
+	w := New(jobRepo, fbRepo, Config{BatchSize: 10})
+
+	ctx := context.Background()
+	err := w.processNextJob(ctx)
+	if err != nil {
+		t.Fatalf("processNextJob should not return error: %v", err)
+	}
+
+	// Job should be failed
+	if len(jobRepo.failCalls) != 1 {
+		t.Fatalf("expected 1 fail call, got %d", len(jobRepo.failCalls))
+	}
+}
+
+func TestWorker_WithIfUnmodifiedSince(t *testing.T) {
+	t.Parallel()
+
+	cutoff := time.Now().Add(-1 * time.Hour)
+	op := ptrext.Of(attunev1.BatchOperation{
+		Op: &attunev1.BatchOperation_Tag{
+			Tag: ptrext.Of(attunev1.BatchTagOp{
+				AddTagIds: []string{"tag-1"},
+			}),
+		},
+	})
+	reqBytes := makeJobRequestBytes(t, op, []int64{1, 2}, ptrext.Of(cutoff))
+
+	jobRepo := &mockJobRepo{
+		jobs: []*feedbackjob.Job{{
+			ID:       "job-with-cutoff",
+			TenantID: "tenant-1",
+			Status:   feedbackjob.StatusQueued,
+			Request:  reqBytes,
+			Total:    2,
+		}},
+	}
+	fbRepo := &mockFeedbackRepo{
+		batchTagResult: ptrext.Of(feedback.BatchResult{
+			Succeeded: 1,
+			Skipped:   1,
+		}),
+	}
+	w := New(jobRepo, fbRepo, Config{BatchSize: 10})
+
+	ctx := context.Background()
+	err := w.processNextJob(ctx)
+	if err != nil {
+		t.Fatalf("processNextJob error: %v", err)
+	}
+
+	if len(jobRepo.completeCalls) != 1 {
+		t.Fatalf("expected 1 complete call, got %d", len(jobRepo.completeCalls))
+	}
+
+	var result jobResult
+	if err := json.Unmarshal(jobRepo.completeCalls[0].Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if result.Succeeded != 1 {
+		t.Errorf("Succeeded = %d, want 1", result.Succeeded)
+	}
+	if result.Skipped != 1 {
+		t.Errorf("Skipped = %d, want 1", result.Skipped)
+	}
+}
+
+func TestWorker_StopSignalDuringWork(t *testing.T) {
+	t.Parallel()
+
+	jobRepo := &mockJobRepo{}
+	w := New(jobRepo, nil, Config{
+		NumWorkers:       1,
+		PollInterval:     50 * time.Millisecond,
+		RecoveryInterval: 50 * time.Millisecond,
+	})
+
+	ctx := context.Background()
+	w.Start(ctx)
+
+	// Stop should signal workers to exit
+	done := make(chan struct{})
+	go func() {
+		w.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Workers exited cleanly
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop did not complete within 3 seconds")
+	}
+}
+
+func TestWorker_HeartbeatError(t *testing.T) {
+	t.Parallel()
+
+	op := ptrext.Of(attunev1.BatchOperation{
+		Op: &attunev1.BatchOperation_Tag{
+			Tag: ptrext.Of(attunev1.BatchTagOp{
+				AddTagIds: []string{"tag-1"},
+			}),
+		},
+	})
+	reqBytes := makeJobRequestBytes(t, op, []int64{1}, nil)
+
+	jobRepo := &heartbeatErrorMockJobRepo{
+		mockJobRepo: mockJobRepo{
+			jobs: []*feedbackjob.Job{{
+				ID:       "job-hb-err",
+				TenantID: "tenant-1",
+				Status:   feedbackjob.StatusQueued,
+				Request:  reqBytes,
+				Total:    1,
+			}},
+		},
+	}
+
+	fbRepo := &mockFeedbackRepo{}
+	w := New(jobRepo, fbRepo, Config{
+		BatchSize:         10,
+		HeartbeatInterval: 10 * time.Millisecond,
+	})
+
+	ctx := context.Background()
+	err := w.processNextJob(ctx)
+	if err != nil {
+		t.Fatalf("processNextJob should not return error: %v", err)
+	}
+
+	if len(jobRepo.completeCalls) != 1 {
+		t.Fatalf("expected 1 complete call, got %d", len(jobRepo.completeCalls))
+	}
+}
+
+type heartbeatErrorMockJobRepo struct {
+	mockJobRepo
+}
+
+func (m *heartbeatErrorMockJobRepo) Heartbeat(ctx context.Context, jobID, owner string) (int64, error) {
+	return 0, errors.New("heartbeat error")
+}
+
+var _ feedbackjob.Store = (*heartbeatErrorMockJobRepo)(nil)
+
+func TestWorker_HeartbeatLeaseLost(t *testing.T) {
+	t.Parallel()
+
+	// Create a slow-executing job (many chunks) so heartbeat has time to fire
+	ids := make([]int64, 200)
+	for i := range ids {
+		ids[i] = int64(i + 1)
+	}
+
+	op := ptrext.Of(attunev1.BatchOperation{
+		Op: &attunev1.BatchOperation_Tag{
+			Tag: ptrext.Of(attunev1.BatchTagOp{
+				AddTagIds: []string{"tag-1"},
+			}),
+		},
+	})
+	reqBytes := makeJobRequestBytes(t, op, ids, nil)
+
+	jobRepo := &heartbeatLostMockJobRepo{
+		mockJobRepo: mockJobRepo{
+			jobs: []*feedbackjob.Job{{
+				ID:       "job-hb-lost",
+				TenantID: "tenant-1",
+				Status:   feedbackjob.StatusQueued,
+				Request:  reqBytes,
+				Total:    200,
+			}},
+		},
+	}
+
+	fbRepo := &slowMockFeedbackRepo{}
+	w := New(jobRepo, fbRepo, Config{
+		BatchSize:         5,
+		HeartbeatInterval: 10 * time.Millisecond,
+	})
+
+	ctx := context.Background()
+	err := w.processNextJob(ctx)
+	// Should not return an error (lease lost is handled internally)
+	if err != nil {
+		t.Fatalf("processNextJob should not return error on lease lost: %v", err)
+	}
+}
+
+type heartbeatLostMockJobRepo struct {
+	mockJobRepo
+}
+
+func (m *heartbeatLostMockJobRepo) Heartbeat(ctx context.Context, jobID, owner string) (int64, error) {
+	return 0, nil // n=0 means lease lost
+}
+
+var _ feedbackjob.Store = (*heartbeatLostMockJobRepo)(nil)
+
+// slowMockFeedbackRepo adds a small delay to simulate slow processing.
+type slowMockFeedbackRepo struct {
+	mockFeedbackRepo
+}
+
+func (m *slowMockFeedbackRepo) BatchUpdateTags(
+	ctx context.Context,
+	tenantID string,
+	updates []feedback.BatchTagUpdate,
+	ifUnmodifiedSince *time.Time,
+) (*feedback.BatchResult, error) {
+	// Small delay so heartbeat has time to fire
+	time.Sleep(5 * time.Millisecond)
+	return ptrext.Of(feedback.BatchResult{Succeeded: len(updates)}), nil
+}
+
+var _ FeedbackBatchStore = (*slowMockFeedbackRepo)(nil)
+
+func TestWorker_RecoverStuckJobs(t *testing.T) {
+	t.Parallel()
+
+	jobRepo := &mockJobRepo{
+		recoverStuckCount: 3,
+	}
+	w := New(jobRepo, nil, Config{
+		NumWorkers:       0, // No workers, just test recovery
+		RecoveryInterval: 20 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Manually start the recovery goroutine
+	w.wg.Add(1)
+	go w.recoverStuckJobs(ctx)
+
+	// Wait for at least one recovery cycle
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	w.wg.Wait()
+	// No assertion needed beyond not panicking; the metric increment is the evidence
+}
+
+func TestWorker_RecoverStuckJobs_Error(t *testing.T) {
+	t.Parallel()
+
+	jobRepo := &recoverErrorMockJobRepo{}
+	w := New(jobRepo, nil, Config{
+		RecoveryInterval: 20 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	w.wg.Add(1)
+	go w.recoverStuckJobs(ctx)
+
+	// Let a few cycles run with error
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	w.wg.Wait()
+	// Should not panic or hang
+}
+
+type recoverErrorMockJobRepo struct {
+	mockJobRepo
+}
+
+func (m *recoverErrorMockJobRepo) RecoverStuck(ctx context.Context, staleThreshold time.Duration) (int64, error) {
+	return 0, errors.New("recovery error")
+}
+
+var _ feedbackjob.Store = (*recoverErrorMockJobRepo)(nil)
+
+func TestWorker_ContextCancelledDuringWork(t *testing.T) {
+	t.Parallel()
+
+	jobRepo := &mockJobRepo{}
+	w := New(jobRepo, nil, Config{
+		NumWorkers:       1,
+		PollInterval:     50 * time.Millisecond,
+		RecoveryInterval: 50 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Start(ctx)
+
+	// Cancel context to stop workers
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		w.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Workers exited cleanly on context cancel
+	case <-time.After(3 * time.Second):
+		t.Fatal("workers did not exit within 3 seconds after context cancel")
+	}
+}
+
+func TestWorker_RecoverStuckJobs_StopSignal(t *testing.T) {
+	t.Parallel()
+
+	jobRepo := &mockJobRepo{}
+	w := New(jobRepo, nil, Config{
+		RecoveryInterval: 20 * time.Millisecond,
+	})
+
+	ctx := context.Background()
+
+	w.wg.Add(1)
+	go w.recoverStuckJobs(ctx)
+
+	// Stop signal should cause recovery goroutine to exit
+	time.Sleep(50 * time.Millisecond)
+	close(w.stopCh)
+	w.wg.Wait()
+	// Should not hang
+}

@@ -126,6 +126,13 @@ func TestCircuitBreakerClient_Reset(t *testing.T) {
 	require.Equal(t, circuitbreaker.StateClosed, client.State())
 }
 
+func TestCircuitBreakerClient_Close(t *testing.T) {
+	t.Parallel()
+	mock := newMockLLMClient(nil, nil)
+	client := NewCircuitBreakerClient(mock, "test")
+	require.NoError(t, client.Close())
+}
+
 func TestIsCircuitBreakerError(t *testing.T) {
 	t.Parallel()
 
