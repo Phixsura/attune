@@ -136,3 +136,78 @@ func TestSSOCutoverAlert(t *testing.T) {
 		t.Errorf("Details[new_mode] = %s, want sso_only", alert.Details["new_mode"])
 	}
 }
+
+func TestService_Send_WebhookErrorStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	defer server.Close()
+
+	svc := NewService(server.URL)
+
+	// Should not panic on 5xx response
+	svc.Send(context.Background(), Alert{
+		Type:    AlertBreakGlassUsed,
+		Summary: "test",
+	})
+
+	// Wait for async send
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestService_Send_SetsTimestamp(t *testing.T) {
+	var mu sync.Mutex
+	var receivedAlert Alert
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		_ = json.Unmarshal(body, &receivedAlert)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	svc := NewService(server.URL)
+
+	// Send with zero timestamp
+	svc.Send(context.Background(), Alert{
+		Type:    AlertBreakGlassUsed,
+		Summary: "test",
+	})
+
+	// Wait for async send
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if receivedAlert.Timestamp.IsZero() {
+		t.Error("Timestamp should be set automatically")
+	}
+}
+
+func TestService_Send_InvalidURL(t *testing.T) {
+	svc := NewService("http://invalid.local.test:99999")
+
+	// Should not panic on connection error
+	svc.Send(context.Background(), Alert{
+		Type:    AlertBreakGlassUsed,
+		Summary: "test",
+	})
+
+	// Wait for async send attempt
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestAlertType_Constants(t *testing.T) {
+	if AlertBreakGlassUsed != "breakglass.used" {
+		t.Errorf("AlertBreakGlassUsed = %s, want breakglass.used", AlertBreakGlassUsed)
+	}
+	if AlertBreakGlassIssued != "breakglass.issued" {
+		t.Errorf("AlertBreakGlassIssued = %s, want breakglass.issued", AlertBreakGlassIssued)
+	}
+	if AlertSSOCutover != "sso.cutover" {
+		t.Errorf("AlertSSOCutover = %s, want sso.cutover", AlertSSOCutover)
+	}
+}
