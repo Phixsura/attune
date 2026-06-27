@@ -239,7 +239,7 @@ func TestPG_ListValidForAdmin_ExcludesUsedAndRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue used: %v", err)
 	}
-	if err := repo.MarkUsed(ctx, tenantID, used.ID); err != nil {
+	if err := repo.MarkUsed(ctx, tenantID, used.ID, "192.168.1.100"); err != nil {
 		t.Fatalf("MarkUsed: %v", err)
 	}
 
@@ -378,7 +378,7 @@ func TestPG_MarkUsed(t *testing.T) {
 		t.Fatalf("Issue: %v", err)
 	}
 
-	if err := repo.MarkUsed(ctx, tenantID, token.ID); err != nil {
+	if err := repo.MarkUsed(ctx, tenantID, token.ID, "192.168.1.100"); err != nil {
 		t.Fatalf("MarkUsed: %v", err)
 	}
 
@@ -410,11 +410,11 @@ func TestPG_MarkUsed_AlreadyUsed(t *testing.T) {
 		t.Fatalf("Issue: %v", err)
 	}
 
-	if err := repo.MarkUsed(ctx, tenantID, token.ID); err != nil {
+	if err := repo.MarkUsed(ctx, tenantID, token.ID, "192.168.1.100"); err != nil {
 		t.Fatalf("MarkUsed first: %v", err)
 	}
 
-	err = repo.MarkUsed(ctx, tenantID, token.ID)
+	err = repo.MarkUsed(ctx, tenantID, token.ID, "192.168.1.100")
 	if !errors.Is(err, breakglass.ErrAlreadyUsed) {
 		t.Errorf("MarkUsed second: got %v, want %v", err, breakglass.ErrAlreadyUsed)
 	}
@@ -427,7 +427,7 @@ func TestPG_MarkUsed_NotFound(t *testing.T) {
 
 	tenantID := insertTenant(ctx, t, pool, "bg-mark-not-found")
 
-	err := repo.MarkUsed(ctx, tenantID, uuid.NewString())
+	err := repo.MarkUsed(ctx, tenantID, uuid.NewString(), "192.168.1.100")
 	if !errors.Is(err, breakglass.ErrNotFound) {
 		t.Errorf("MarkUsed non-existent: got %v, want %v", err, breakglass.ErrNotFound)
 	}
@@ -455,7 +455,7 @@ func TestPG_MarkUsed_Revoked(t *testing.T) {
 		t.Fatalf("Revoke: %v", err)
 	}
 
-	err = repo.MarkUsed(ctx, tenantID, token.ID)
+	err = repo.MarkUsed(ctx, tenantID, token.ID, "192.168.1.100")
 	if !errors.Is(err, breakglass.ErrAlreadyRevoked) {
 		t.Errorf("MarkUsed revoked token: got %v, want %v", err, breakglass.ErrAlreadyRevoked)
 	}
@@ -479,7 +479,7 @@ func TestPG_MarkUsed_Expired(t *testing.T) {
 		t.Fatalf("Issue: %v", err)
 	}
 
-	err = repo.MarkUsed(ctx, tenantID, token.ID)
+	err = repo.MarkUsed(ctx, tenantID, token.ID, "192.168.1.100")
 	if !errors.Is(err, breakglass.ErrExpired) {
 		t.Errorf("MarkUsed expired token: got %v, want %v", err, breakglass.ErrExpired)
 	}
@@ -511,7 +511,7 @@ func TestPG_MarkUsed_ConcurrentRace(t *testing.T) {
 	for i := 0; i < concurrency; i++ {
 		go func() {
 			defer wg.Done()
-			results <- repo.MarkUsed(ctx, tenantID, token.ID)
+			results <- repo.MarkUsed(ctx, tenantID, token.ID, "192.168.1.100")
 		}()
 	}
 	wg.Wait()
@@ -556,7 +556,7 @@ func TestPG_MarkUsed_TenantIsolation(t *testing.T) {
 	}
 
 	// MarkUsed with wrong tenant should return NotFound
-	err = repo.MarkUsed(ctx, tenant2, token.ID)
+	err = repo.MarkUsed(ctx, tenant2, token.ID, "192.168.1.100")
 	if !errors.Is(err, breakglass.ErrNotFound) {
 		t.Errorf("MarkUsed wrong tenant: got %v, want %v", err, breakglass.ErrNotFound)
 	}
@@ -652,7 +652,7 @@ func TestPG_Revoke_AlreadyUsed(t *testing.T) {
 		t.Fatalf("Issue: %v", err)
 	}
 
-	if err := repo.MarkUsed(ctx, tenantID, token.ID); err != nil {
+	if err := repo.MarkUsed(ctx, tenantID, token.ID, "192.168.1.100"); err != nil {
 		t.Fatalf("MarkUsed: %v", err)
 	}
 
