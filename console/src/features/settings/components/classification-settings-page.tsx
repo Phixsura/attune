@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionsEditor } from '@/components/dim/dimensions-editor'
+import { DraftBanner } from '@/components/draft-banner'
 import { EmptyState } from '@/components/empty-state'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
+import { SaveStatus } from '@/components/save-status'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -24,7 +26,8 @@ import { type EnrichConfig, enrichConfigQuery } from '@/features/settings/api/ge
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
 import { SuggestedValuesPanel } from '@/features/settings/components/suggested-values-panel'
-import { readDraft, useDraftGuard } from '@/hooks/use-draft-guard'
+import { clearStoredDraft, readDraft, useDraftGuard } from '@/hooks/use-draft-guard'
+import { useKeyboardSave } from '@/hooks/use-keyboard-save'
 import {
   type EditableDimension,
   markPersisted,
@@ -32,14 +35,10 @@ import {
   seedDimensions,
   toWireDimensions,
 } from '@/lib/editable-rows'
+import { cn } from '@/lib/utils'
 
 export function ClassificationSettingsPage() {
   const { t } = useTranslation()
-  // The draft is an operator-edited form, not a live feed: don't let a
-  // background tab-refocus refetch fire while editing (the in-progress draft
-  // lives in <ClassificationSettingsForm> state and the form is seeded once,
-  // so a refetch can't silently clobber it either way — this just avoids the
-  // pointless request).
   const cfg = useQuery({ ...enrichConfigQuery(), refetchOnWindowFocus: false })
 
   if (cfg.isPending) {
@@ -52,8 +51,6 @@ export function ClassificationSettingsPage() {
   }
 
   if (!cfg.data) {
-    // Settled with no data (fetch error) — surface it with a retry instead of
-    // an indefinite spinner.
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-16 text-sm text-muted-foreground">
         <p>{t('common.error')}</p>
@@ -64,23 +61,26 @@ export function ClassificationSettingsPage() {
     )
   }
 
-  // Gated child: only mounted once `cfg.data` is defined, so the form seeds its
-  // edit model exactly once (in a useState initializer) from a non-null
-  // snapshot — never via a `useEffect([cfg.data])` that re-fires on refetch.
-  return <ClassificationSettingsForm initial={cfg.data} />
+  return <ClassificationSettingsForm initial={cfg.data} refetch={cfg.refetch} />
 }
 
-function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
+function ClassificationSettingsForm({
+  initial,
+  refetch,
+}: {
+  initial: EnrichConfig
+  refetch: () => void
+}) {
   const { t } = useTranslation()
   const { can } = usePermissions()
   const canEdit = can('settings:enrich_config:edit')
   const save = useUpdateEnrichConfig()
   const preview = usePreviewEnrichPrompt()
 
-  const storedDraft = readDraft<{ prompt: string; rows: EditableDimension[] }>(
-    'classification-settings',
-  )
-  const [restoredFromStorage] = useState(() => storedDraft !== null)
+  const storedDraft = useRef(
+    readDraft<{ prompt: string; rows: EditableDimension[] }>('classification-settings'),
+  ).current
+  const restoredFromStorage = storedDraft !== null
   const [prompt, setPrompt] = useState(
     () => storedDraft?.prompt ?? initial.promptTemplate ?? initial.defaultPromptTemplate,
   )
@@ -89,15 +89,34 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
   )
   const [sample, setSample] = useState('')
   const [previewText, setPreviewText] = useState('')
-  const [touched, setTouched] = useState(() => restoredFromStorage)
+  const [touched, setTouched] = useState(() => {
+    if (!restoredFromStorage) return false
+    const serverPrompt = initial.promptTemplate ?? initial.defaultPromptTemplate
+    return (
+      prompt !== serverPrompt ||
+      JSON.stringify(toWireDimensions(rows)) !== JSON.stringify(initial.dimensions ?? [])
+    )
+  })
   const [discardOpen, setDiscardOpen] = useState(false)
+  const [recoveryDismissed, setRecoveryDismissed] = useState(false)
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
 
   const guard = useDraftGuard({
     storageKey: 'classification-settings',
     draft: { prompt, rows },
     dirty: touched,
     disabled: !canEdit,
+    onExternalSave: refetch,
   })
+
+  useEffect(() => {
+    if (restoredFromStorage && !touched) {
+      clearStoredDraft('classification-settings')
+    }
+  }, [restoredFromStorage, touched])
+
+  const promptDirty =
+    prompt !== (initial.promptTemplate ?? initial.defaultPromptTemplate) && touched
 
   const updatePrompt = (value: string) => {
     setPrompt(value)
@@ -111,41 +130,42 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
     setTouched(true)
   }
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fire once on mount
-  useEffect(() => {
-    if (!restoredFromStorage) return
-    toast.info(t('draft.recovered'), {
-      duration: 8000,
-      action: {
-        label: t('draft.recovered_discard'),
-        onClick: () => {
-          setPrompt(initial.promptTemplate ?? initial.defaultPromptTemplate)
-          setRows(seedDimensions(initial.dimensions ?? []))
-          setTouched(false)
-          guard.clearDraft()
-        },
-      },
-    })
-  }, [])
-
   const handleRestoreDefault = () => {
     if (initial.defaultPromptTemplate) updatePrompt(initial.defaultPromptTemplate)
   }
 
   const handleDiscard = () => {
+    const snapshot = { prompt, rows }
     setPrompt(initial.promptTemplate ?? initial.defaultPromptTemplate)
     setRows(seedDimensions(initial.dimensions ?? []))
     setTouched(false)
     guard.clearDraft()
     setDiscardOpen(false)
+    toast.info(t('draft.discarded_undo'), {
+      id: 'classification-discard-undo',
+      duration: 5000,
+      action: {
+        label: t('draft.undo'),
+        onClick: () => {
+          setPrompt(snapshot.prompt)
+          setRows(snapshot.rows)
+          setTouched(true)
+        },
+      },
+    })
   }
 
-  const handleSave = () => {
+  const handleDismissRecovery = () => {
+    setPrompt(initial.promptTemplate ?? initial.defaultPromptTemplate)
+    setRows(seedDimensions(initial.dimensions ?? []))
+    setTouched(false)
+    guard.clearDraft()
+    setRecoveryDismissed(true)
+  }
+
+  const submitSave = (afterSuccess?: () => void) => {
     const defaultTmpl = initial.defaultPromptTemplate ?? ''
     const isDefaultPrompt = prompt.trim() === defaultTmpl.trim()
-    // Snapshot the identities being submitted, so on success we lock exactly
-    // those rows (and taxonomy rows) — and leave anything the operator adds
-    // during the in-flight save still editable.
     const sentDimKeys = new Set(rows.map((r) => r._key))
     const sentTaxKeys = new Set(rows.flatMap((r) => r.taxonomy.map((tx) => tx._key)))
     save.mutate(
@@ -158,11 +178,26 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
           setRows((prev) => markPersisted(prev, sentDimKeys, sentTaxKeys))
           guard.clearDraft()
           setTouched(false)
-          toast.success(t('settings.saved'))
+          setRecoveryDismissed(true)
+          afterSuccess?.()
         },
-        onError: (err) => toast.error(err instanceof Error ? err.message : 'failed'),
+        onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
       },
     )
+  }
+
+  const handleSave = () => {
+    submitSave(() => {
+      setLastSavedAt(new Date())
+      toast.success(t('settings.saved'))
+    })
+  }
+
+  const handleSaveAndLeave = () => {
+    submitSave(() => {
+      toast.success(t('settings.saved'))
+      guard.proceed()
+    })
   }
 
   const handlePreview = () => {
@@ -178,18 +213,24 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
       },
       {
         onSuccess: (resp) => setPreviewText(resp.renderedPrompt),
-        onError: (err) => toast.error(err instanceof Error ? err.message : 'failed'),
+        onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
       },
     )
   }
+
+  useKeyboardSave({
+    onSave: handleSave,
+    enabled: canEdit && touched && !save.isPending,
+  })
 
   const constrained = rows.some((d) => d.taxonomy.length > 0)
   const modeLabel = constrained ? t('settings.mode_constrained') : t('settings.mode_freeform')
   const constrainedCount = rows.filter((d) => d.taxonomy.length > 0).length
   const urgentEnabledCount = rows.filter((d) => d.urgentSet?.length > 0).length
+  const showRecovery = restoredFromStorage && touched && !recoveryDismissed
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-6" aria-label={touched ? t('draft.aria_unsaved') : undefined}>
       <PageHero
         eyebrow={t('shell.groups.configuration')}
         title={t('settings.classification_title')}
@@ -220,6 +261,15 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
         }
       />
 
+      {showRecovery && (
+        <DraftBanner
+          variant="recovery"
+          draftAgeMs={guard.draftAge}
+          onDiscard={handleDismissRecovery}
+          onKeep={() => setRecoveryDismissed(true)}
+        />
+      )}
+
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
         <Card className="border-border/70 shadow-none">
           <CardHeader className="border-b border-border/60 bg-muted/15">
@@ -233,10 +283,13 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
               <Label htmlFor="prompt">{t('settings.prompt_label')}</Label>
               <textarea
                 id="prompt"
-                className="min-h-[320px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm leading-7 outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                className={cn(
+                  'min-h-[320px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm leading-7 outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+                  promptDirty && 'border-l-2 border-l-amber-500',
+                )}
                 value={prompt}
                 onChange={(e) => updatePrompt(e.target.value)}
-                disabled={!canEdit}
+                disabled={!canEdit || save.isPending}
               />
               <p className="text-xs text-muted-foreground">{t('settings.prompt_tokens')}</p>
             </div>
@@ -245,18 +298,31 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
                 type="button"
                 variant="secondary"
                 onClick={handleRestoreDefault}
-                disabled={!canEdit}
+                disabled={!canEdit || save.isPending}
               >
                 {t('settings.restore_default')}
               </Button>
               <Button type="button" onClick={handleSave} disabled={!canEdit || save.isPending}>
-                {save.isPending ? t('app.loading') : t('common.save')}
+                {save.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    {t('draft.status_saving')}
+                  </>
+                ) : (
+                  t('common.save')
+                )}
               </Button>
               {touched && (
-                <Button type="button" variant="ghost" onClick={() => setDiscardOpen(true)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setDiscardOpen(true)}
+                  disabled={save.isPending}
+                >
                   {t('draft.discard_changes')}
                 </Button>
               )}
+              <SaveStatus dirty={touched} saving={save.isPending} lastSavedAt={lastSavedAt} />
             </div>
           </CardContent>
         </Card>
@@ -307,9 +373,6 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
           <CardDescription>{t('settings.dimensions_help')}</CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
-          {/* Lock the editor while a save is in flight: editing a just-submitted
-              row's identifier mid-save would, on success, lock it to a value the
-              server never received. */}
           <DimensionsEditor
             value={rows}
             onChange={updateRows}
@@ -333,7 +396,7 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
           </DialogHeader>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setDiscardOpen(false)}>
-              {t('common.cancel')}
+              {t('draft.discard_continue_editing')}
             </Button>
             <Button type="button" variant="destructive" onClick={handleDiscard}>
               {t('draft.discard_changes')}
@@ -346,6 +409,8 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
         open={guard.dialogOpen}
         onConfirmLeave={guard.confirmLeave}
         onCancelLeave={guard.cancelLeave}
+        onSaveAndLeave={canEdit ? handleSaveAndLeave : undefined}
+        saving={save.isPending}
       />
     </section>
   )

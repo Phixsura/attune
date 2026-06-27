@@ -2,13 +2,39 @@ import { HttpResponse, http } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ClassificationSettingsPage } from '@/features/settings/components/classification-settings-page'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
+
+let blockerState: {
+  status: 'idle' | 'blocked'
+  proceed: ReturnType<typeof vi.fn>
+  reset: ReturnType<typeof vi.fn>
+  shouldBlockFn?: (args: unknown) => boolean
+} = {
+  status: 'idle',
+  proceed: vi.fn(),
+  reset: vi.fn(),
+}
+
+function resetBlocker() {
+  blockerState = {
+    status: 'idle',
+    proceed: vi.fn(),
+    reset: vi.fn(),
+  }
+}
 
 vi.mock('@tanstack/react-router', () => ({
-  useBlocker: () => ({ status: 'idle', proceed: undefined, reset: undefined }),
+  useBlocker: (opts?: { shouldBlockFn?: (args: unknown) => boolean }) => {
+    if (opts?.shouldBlockFn) blockerState.shouldBlockFn = opts.shouldBlockFn
+    return blockerState
+  },
 }))
 
-afterEach(() => sessionStorage.clear())
+afterEach(() => {
+  localStorage.clear()
+  sessionStorage.clear()
+  resetBlocker()
+})
 
 describe('ClassificationSettingsPage', () => {
   it('renders hero metrics and preview empty state from the enrich config query', async () => {
@@ -296,7 +322,7 @@ describe('ClassificationSettingsPage', () => {
   })
 
   describe('draft durability (#172)', () => {
-    it('persists draft to sessionStorage after editing the prompt', async () => {
+    it('persists draft to localStorage after editing the prompt', async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true })
       seedConfig()
       const { user } = renderWithProviders(<ClassificationSettingsPage />)
@@ -304,16 +330,18 @@ describe('ClassificationSettingsPage', () => {
       await user.clear(textarea)
       await user.type(textarea, 'New prompt')
       vi.advanceTimersByTime(600)
-      const stored = sessionStorage.getItem('attune:draft:classification-settings')
+      const stored = localStorage.getItem('attune:draft:classification-settings')
       expect(stored).not.toBeNull()
-      expect(JSON.parse(stored!).prompt).toBe('New prompt')
+      const envelope = JSON.parse(stored as string)
+      expect(envelope._v).toBe(1)
+      expect(envelope.data.prompt).toBe('New prompt')
       vi.useRealTimers()
     })
 
-    it('restores draft from sessionStorage on mount', async () => {
-      sessionStorage.setItem(
+    it('restores draft from localStorage on mount', async () => {
+      localStorage.setItem(
         'attune:draft:classification-settings',
-        JSON.stringify({ prompt: 'Stored prompt', rows: [] }),
+        JSON.stringify({ _v: 1, _ts: Date.now(), data: { prompt: 'Stored prompt', rows: [] } }),
       )
       seedConfig()
       renderWithProviders(<ClassificationSettingsPage />)
@@ -321,17 +349,17 @@ describe('ClassificationSettingsPage', () => {
       expect(textarea).toHaveValue('Stored prompt')
     })
 
-    it('clears sessionStorage on successful save', async () => {
-      sessionStorage.setItem(
+    it('clears localStorage on successful save', async () => {
+      localStorage.setItem(
         'attune:draft:classification-settings',
-        JSON.stringify({ prompt: 'Draft', rows: [] }),
+        JSON.stringify({ _v: 1, _ts: Date.now(), data: { prompt: 'Draft', rows: [] } }),
       )
       seedConfig()
       const { user } = renderWithProviders(<ClassificationSettingsPage />)
       await screen.findByLabelText('提示词模板')
       await user.click(screen.getByRole('button', { name: '保存' }))
       await waitFor(() => {
-        expect(sessionStorage.getItem('attune:draft:classification-settings')).toBeNull()
+        expect(localStorage.getItem('attune:draft:classification-settings')).toBeNull()
       })
     })
 
@@ -344,6 +372,338 @@ describe('ClassificationSettingsPage', () => {
       await user.clear(textarea)
       await user.type(textarea, 'edit')
       expect(screen.getByRole('button', { name: '放弃更改' })).toBeInTheDocument()
+    })
+
+    it('disables prompt textarea while save is in flight', async () => {
+      let releasePut: () => void = () => {}
+      const gate = new Promise<void>((r) => {
+        releasePut = r
+      })
+      server.use(
+        http.get('/fb/v1/console/enrich-config', () =>
+          HttpResponse.json({
+            config: { promptTemplate: 'Prompt', defaultPromptTemplate: 'Prompt', dimensions: [] },
+          }),
+        ),
+        http.get('/fb/v1/console/eval/suggestions', () =>
+          HttpResponse.json({ suggestions: [], coverage: [] }),
+        ),
+        http.put('/fb/v1/console/enrich-config', async ({ request }) => {
+          const body = (await request.json()) as { dimensions?: unknown[] }
+          await gate
+          return HttpResponse.json({
+            config: {
+              promptTemplate: 'Prompt',
+              defaultPromptTemplate: 'Prompt',
+              dimensions: body.dimensions ?? [],
+            },
+          })
+        }),
+      )
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'edit')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => expect(textarea).toBeDisabled())
+      releasePut()
+      await waitFor(() => expect(textarea).toBeEnabled())
+    })
+
+    it('keeps draft in localStorage after a failed save', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      server.use(
+        http.get('/fb/v1/console/enrich-config', () =>
+          HttpResponse.json({
+            config: { promptTemplate: 'Prompt', defaultPromptTemplate: 'Prompt', dimensions: [] },
+          }),
+        ),
+        http.get('/fb/v1/console/eval/suggestions', () =>
+          HttpResponse.json({ suggestions: [], coverage: [] }),
+        ),
+        http.put('/fb/v1/console/enrich-config', () =>
+          HttpResponse.json({ error: { code: 'INTERNAL', message: 'boom' } }, { status: 500 }),
+        ),
+      )
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await user.clear(textarea)
+      await user.type(textarea, 'Unsaved edit')
+      vi.advanceTimersByTime(600)
+      expect(localStorage.getItem('attune:draft:classification-settings')).not.toBeNull()
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => {
+        expect(localStorage.getItem('attune:draft:classification-settings')).not.toBeNull()
+      })
+      expect(screen.getByRole('button', { name: '放弃更改' })).toBeInTheDocument()
+      vi.useRealTimers()
+    })
+
+    it('gracefully ignores corrupted localStorage', async () => {
+      localStorage.setItem('attune:draft:classification-settings', '{bad json!!!')
+      seedConfig()
+      renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      expect(textarea).toHaveValue('Prompt')
+    })
+
+    it('discard resets form to server state and re-enables editing', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'dirty edit')
+      vi.advanceTimersByTime(600)
+      expect(localStorage.getItem('attune:draft:classification-settings')).not.toBeNull()
+      await user.click(screen.getByRole('button', { name: '放弃更改' }))
+      const dialog = await screen.findByRole('alertdialog')
+      const confirmBtn = within(dialog).getByRole('button', { name: '放弃更改' })
+      await user.click(confirmBtn)
+      await waitFor(() => {
+        expect(textarea).toHaveValue('Prompt')
+        expect(localStorage.getItem('attune:draft:classification-settings')).toBeNull()
+        expect(screen.queryByRole('button', { name: '放弃更改' })).not.toBeInTheDocument()
+      })
+      await user.clear(textarea)
+      await user.type(textarea, 'new edit after discard')
+      vi.advanceTimersByTime(600)
+      expect(localStorage.getItem('attune:draft:classification-settings')).not.toBeNull()
+      expect(screen.getByRole('button', { name: '放弃更改' })).toBeInTheDocument()
+      vi.useRealTimers()
+    })
+
+    it('restore default marks form dirty and persists draft', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      server.use(
+        http.get('/fb/v1/console/enrich-config', () =>
+          HttpResponse.json({
+            config: {
+              promptTemplate: 'Custom prompt',
+              defaultPromptTemplate: 'Default prompt',
+              dimensions: [],
+            },
+          }),
+        ),
+        http.get('/fb/v1/console/eval/suggestions', () =>
+          HttpResponse.json({ suggestions: [], coverage: [] }),
+        ),
+      )
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      expect(textarea).toHaveValue('Custom prompt')
+      expect(screen.queryByRole('button', { name: '放弃更改' })).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: '恢复默认模板' }))
+      expect(textarea).toHaveValue('Default prompt')
+      expect(screen.getByRole('button', { name: '放弃更改' })).toBeInTheDocument()
+      vi.advanceTimersByTime(600)
+      const stored = localStorage.getItem('attune:draft:classification-settings')
+      expect(stored).not.toBeNull()
+      const envelope = JSON.parse(stored as string)
+      expect(envelope.data.prompt).toBe('Default prompt')
+      vi.useRealTimers()
+    })
+
+    it('restore default button is disabled during save', async () => {
+      let releasePut: () => void = () => {}
+      const gate = new Promise<void>((r) => {
+        releasePut = r
+      })
+      server.use(
+        http.get('/fb/v1/console/enrich-config', () =>
+          HttpResponse.json({
+            config: { promptTemplate: 'Prompt', defaultPromptTemplate: 'Default', dimensions: [] },
+          }),
+        ),
+        http.get('/fb/v1/console/eval/suggestions', () =>
+          HttpResponse.json({ suggestions: [], coverage: [] }),
+        ),
+        http.put('/fb/v1/console/enrich-config', async ({ request }) => {
+          const body = (await request.json()) as { dimensions?: unknown[] }
+          await gate
+          return HttpResponse.json({
+            config: {
+              promptTemplate: 'Prompt',
+              defaultPromptTemplate: 'Default',
+              dimensions: body.dimensions ?? [],
+            },
+          })
+        }),
+      )
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'edit')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: '恢复默认模板' })).toBeDisabled()
+      })
+      releasePut()
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: '恢复默认模板' })).toBeEnabled()
+      })
+    })
+
+    it('shows recovery banner when draft exists on mount', async () => {
+      localStorage.setItem(
+        'attune:draft:classification-settings',
+        JSON.stringify({
+          _v: 1,
+          _ts: Date.now() - 60_000,
+          data: { prompt: 'Recovered', rows: [] },
+        }),
+      )
+      seedConfig()
+      renderWithProviders(<ClassificationSettingsPage />)
+      await waitFor(() => {
+        expect(screen.getByText('检测到未保存的草稿')).toBeInTheDocument()
+      })
+    })
+
+    it('recovery banner dismiss resets form to server state', async () => {
+      localStorage.setItem(
+        'attune:draft:classification-settings',
+        JSON.stringify({
+          _v: 1,
+          _ts: Date.now() - 60_000,
+          data: { prompt: 'Recovered', rows: [] },
+        }),
+      )
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      await waitFor(() => {
+        expect(screen.getByText('检测到未保存的草稿')).toBeInTheDocument()
+      })
+      await user.click(screen.getByRole('button', { name: '丢弃' }))
+      await waitFor(() => {
+        expect(screen.queryByText('检测到未保存的草稿')).not.toBeInTheDocument()
+      })
+      const textarea = await screen.findByLabelText('提示词模板')
+      expect(textarea).toHaveValue('Prompt')
+    })
+
+    it('shows SaveStatus unsaved indicator when dirty', async () => {
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      expect(screen.queryByText(/未保存/)).not.toBeInTheDocument()
+      await user.clear(textarea)
+      await user.type(textarea, 'dirty')
+      expect(screen.getByText(/未保存/)).toBeInTheDocument()
+    })
+
+    it('shows SaveStatus saving indicator during save', async () => {
+      let releasePut: () => void = () => {}
+      const gate = new Promise<void>((r) => {
+        releasePut = r
+      })
+      server.use(
+        http.get('/fb/v1/console/enrich-config', () =>
+          HttpResponse.json({
+            config: { promptTemplate: 'Prompt', defaultPromptTemplate: 'Prompt', dimensions: [] },
+          }),
+        ),
+        http.get('/fb/v1/console/eval/suggestions', () =>
+          HttpResponse.json({ suggestions: [], coverage: [] }),
+        ),
+        http.put('/fb/v1/console/enrich-config', async ({ request }) => {
+          const body = (await request.json()) as { dimensions?: unknown[] }
+          await gate
+          return HttpResponse.json({
+            config: {
+              promptTemplate: 'Prompt',
+              defaultPromptTemplate: 'Prompt',
+              dimensions: body.dimensions ?? [],
+            },
+          })
+        }),
+      )
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'edit')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => {
+        expect(screen.getAllByText('保存中…').length).toBeGreaterThanOrEqual(1)
+      })
+      releasePut()
+      await waitFor(() => expect(textarea).toBeEnabled())
+    })
+
+    it('highlights prompt textarea border when prompt is dirty', async () => {
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      expect(textarea.className).not.toContain('border-l-amber-500')
+      await user.clear(textarea)
+      await user.type(textarea, 'changed')
+      expect(textarea.className).toContain('border-l-amber-500')
+    })
+
+    it('registers shouldBlockFn when form is dirty', async () => {
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'dirty edit')
+      expect(blockerState.shouldBlockFn).toBeDefined()
+    })
+
+    it('shows UnsavedChangesDialog when blocker status is blocked', async () => {
+      seedConfig()
+      blockerState.status = 'blocked'
+      renderWithProviders(<ClassificationSettingsPage />)
+      await waitFor(() => {
+        expect(screen.getByText('未保存的更改')).toBeInTheDocument()
+      })
+    })
+
+    it('save-and-leave calls proceed after successful save', async () => {
+      localStorage.setItem(
+        'attune:draft:classification-settings',
+        JSON.stringify({
+          _v: 1,
+          _ts: Date.now(),
+          data: { prompt: 'Dirty edit', rows: [] },
+        }),
+      )
+      seedConfig()
+      blockerState.status = 'blocked'
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      await screen.findByLabelText('提示词模板')
+      const dialog = await screen.findByRole('alertdialog')
+      await user.click(within(dialog).getByRole('button', { name: '保存并离开' }))
+      await waitFor(() => {
+        expect(blockerState.proceed).toHaveBeenCalledOnce()
+      })
+    })
+
+    it('discard fires undo toast with action that restores the draft', async () => {
+      const infoSpy = vi.spyOn(await import('sonner').then((m) => m.toast), 'info')
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'will undo')
+      await user.click(screen.getByRole('button', { name: '放弃更改' }))
+      const dialog = await screen.findByRole('alertdialog')
+      await user.click(within(dialog).getByRole('button', { name: '放弃更改' }))
+      await waitFor(() => expect(textarea).toHaveValue('Prompt'))
+      expect(infoSpy).toHaveBeenCalledOnce()
+      const toastOpts = infoSpy.mock.calls[0][1] as unknown as {
+        action: { onClick: () => void }
+      }
+      toastOpts.action.onClick()
+      await waitFor(() => expect(textarea).toHaveValue('will undo'))
+      infoSpy.mockRestore()
     })
   })
 })

@@ -16,10 +16,12 @@ import {
   SlidersHorizontal,
   TimerReset,
 } from 'lucide-react'
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { DraftBanner } from '@/components/draft-banner'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
+import { SaveStatus } from '@/components/save-status'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -58,6 +60,7 @@ import {
   useVerifyRuntimeStepUp,
 } from '@/features/settings/api/enrichment-runtime'
 import { readDraft, useDraftGuard } from '@/hooks/use-draft-guard'
+import { useKeyboardSave } from '@/hooks/use-keyboard-save'
 
 const RESET_FIELDS: Array<{ field: RuntimeResetField; labelKey: string }> = [
   {
@@ -115,15 +118,20 @@ type RuntimeValidationErrorKey =
   | 'settings.enrichment_runtime.errors.llm_max_qps_required'
   | 'settings.enrichment_runtime.errors.llm_burst_required'
 
+export type HydrateDecision = 'hydrate' | 'skip' | 'conflict'
+
 export function shouldHydrateRuntimeDraft(args: {
   desiredVersion?: string
   lastHydratedVersion?: string
   dirty: boolean
-}) {
+}): HydrateDecision {
   const { desiredVersion, lastHydratedVersion, dirty } = args
-  if (!desiredVersion) return false
-  if (desiredVersion !== lastHydratedVersion) return true
-  return !dirty
+  if (!desiredVersion) return 'skip'
+  if (desiredVersion !== lastHydratedVersion) {
+    if (!lastHydratedVersion) return 'hydrate'
+    return dirty ? 'conflict' : 'hydrate'
+  }
+  return dirty ? 'skip' : 'hydrate'
 }
 
 export function validateRuntimeSpec(
@@ -394,11 +402,12 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
   const stepUp = operationsQuery.data?.stepUp
   const stepUpSatisfied = stepUp?.satisfied ?? false
 
-  const [restoredFromStorage, setRestoredFromStorage] = useState(
-    () => readDraft<DraftState>('enrichment-runtime') !== null,
-  )
-  const [draft, setDraft] = useState<DraftState>(
-    () => readDraft<DraftState>('enrichment-runtime') ?? emptyDraft(),
+  const awaitingServerHydrate = useRef(false)
+
+  const storedDraft = useRef(readDraft<Partial<DraftState>>('enrichment-runtime')).current
+  const restoredFromStorageRef = useRef(storedDraft !== null)
+  const [draft, setDraft] = useState<DraftState>(() =>
+    storedDraft ? { ...emptyDraft(), ...storedDraft } : emptyDraft(),
   )
   const [lastHydratedVersion, setLastHydratedVersion] = useState<string>()
   const [updateReason, setUpdateReason] = useState('')
@@ -413,6 +422,10 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
   )
   const [rollbackReason, setRollbackReason] = useState('')
   const [historicalExpanded, setHistoricalExpanded] = useState(false)
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
+  const [bannerState, setBannerState] = useState<'recovery' | 'conflict' | null>(
+    storedDraft !== null ? 'recovery' : null,
+  )
 
   const parsedSpec = useMemo(() => draftToSpec(draft), [draft])
   const validationError = useMemo(
@@ -422,16 +435,21 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
         : t('settings.enrichment_runtime.errors.invalid_number'),
     [parsedSpec, t],
   )
+  const desiredDraft = useMemo(() => (desiredSpec ? specToDraft(desiredSpec) : null), [desiredSpec])
   const dirty = useMemo(() => {
-    if (!desiredSpec || !parsedSpec.ok) return false
-    return JSON.stringify(parsedSpec.value) !== JSON.stringify(desiredSpec)
-  }, [desiredSpec, parsedSpec])
+    if (!desiredDraft) return false
+    return JSON.stringify(draft) !== JSON.stringify(desiredDraft)
+  }, [draft, desiredDraft])
+
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
 
   const guard = useDraftGuard({
     storageKey: 'enrichment-runtime',
     draft,
     dirty,
     disabled: !canEdit,
+    onExternalSave: () => runtimeQuery.refetch(),
   })
 
   const lastKnownGoodEntry = useMemo(() => findLastKnownGoodEntry(runtime), [runtime])
@@ -462,43 +480,34 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
     return buildRuntimePosture(runtime.desiredSpec, runtime.summary.liveInstances)
   }, [runtime])
 
+  const latestDesiredSpec = useRef(desiredSpec)
+  latestDesiredSpec.current = desiredSpec
+
   useEffect(() => {
     if (!desiredSpec) return
-    if (restoredFromStorage) {
+    if (restoredFromStorageRef.current) {
+      restoredFromStorageRef.current = false
       setLastHydratedVersion(desiredVersion)
-      setRestoredFromStorage(false)
       return
     }
-    if (
-      !shouldHydrateRuntimeDraft({
-        desiredVersion,
-        lastHydratedVersion,
-        dirty,
-      })
-    ) {
-      return
+    const decision = shouldHydrateRuntimeDraft({
+      desiredVersion,
+      lastHydratedVersion,
+      dirty: dirtyRef.current,
+    })
+    if (decision === 'skip') return
+    if (decision === 'conflict') {
+      if (awaitingServerHydrate.current) {
+        awaitingServerHydrate.current = false
+      } else {
+        setBannerState('conflict')
+        setLastHydratedVersion(desiredVersion)
+        return
+      }
     }
     setDraft(specToDraft(desiredSpec))
     setLastHydratedVersion(desiredVersion)
-  }, [desiredSpec, desiredVersion, dirty, lastHydratedVersion, restoredFromStorage])
-
-  const [hadStoredDraft] = useState(() => readDraft<DraftState>('enrichment-runtime') !== null)
-  const [recoveryToastFired, setRecoveryToastFired] = useState(false)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fire once when server data arrives after storage restore
-  useEffect(() => {
-    if (recoveryToastFired || !hadStoredDraft || !desiredSpec) return
-    setRecoveryToastFired(true)
-    toast.info(t('draft.recovered'), {
-      duration: 8000,
-      action: {
-        label: t('draft.recovered_discard'),
-        onClick: () => {
-          setDraft(specToDraft(desiredSpec))
-          guard.clearDraft()
-        },
-      },
-    })
-  }, [desiredSpec, hadStoredDraft, recoveryToastFired])
+  }, [desiredSpec, desiredVersion, lastHydratedVersion])
 
   const handleVerifyStepUp = () => {
     verifyStepUpMutation.mutate(stepUpPassword, {
@@ -522,14 +531,8 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
     return false
   }
 
-  const handleSave = () => {
-    if (!canEdit || !runtime || !parsedSpec.ok) return
-    const errText = translateRuntimeValidationError(validateRuntimeSpec(parsedSpec.value), t)
-    if (errText) {
-      toast.error(errText)
-      return
-    }
-    if (!ensureStepUp()) return
+  const submitUpdate = (afterSuccess?: () => void) => {
+    if (!parsedSpec.ok) return
     updateMutation.mutate(
       {
         expectedVersion: desiredVersion,
@@ -539,12 +542,27 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
       {
         onSuccess: () => {
           setUpdateReason('')
+          awaitingServerHydrate.current = true
           guard.clearDraft()
-          toast.success(t('settings.enrichment_runtime.toasts.updated'))
+          afterSuccess?.()
         },
         onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
       },
     )
+  }
+
+  const handleSave = () => {
+    if (!canEdit || !runtime || !parsedSpec.ok) return
+    const errText = translateRuntimeValidationError(validateRuntimeSpec(parsedSpec.value), t)
+    if (errText) {
+      toast.error(errText)
+      return
+    }
+    if (!ensureStepUp()) return
+    submitUpdate(() => {
+      setLastSavedAt(new Date())
+      toast.success(t('settings.enrichment_runtime.toasts.updated'))
+    })
   }
 
   const handleReset = () => {
@@ -567,6 +585,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
           setResetAll(false)
           setResetFields([])
           setResetReason('')
+          awaitingServerHydrate.current = true
           guard.clearDraft()
           toast.success(t('settings.enrichment_runtime.toasts.reset'))
         },
@@ -588,6 +607,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
         onSuccess: () => {
           setRollbackTarget(null)
           setRollbackReason('')
+          awaitingServerHydrate.current = true
           guard.clearDraft()
           toast.success(t('settings.enrichment_runtime.toasts.rollback'))
         },
@@ -606,6 +626,31 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
     )
   }
 
+  const handleSaveAndLeave = () => {
+    if (!canEdit || !runtime || !parsedSpec.ok) return
+    const errText = translateRuntimeValidationError(validateRuntimeSpec(parsedSpec.value), t)
+    if (errText) {
+      toast.error(errText)
+      return
+    }
+    if (!ensureStepUp()) return
+    submitUpdate(() => guard.proceed())
+  }
+
+  const handleDismissBanner = () => {
+    if (bannerState && latestDesiredSpec.current) {
+      setDraft(specToDraft(latestDesiredSpec.current))
+      setLastHydratedVersion(desiredVersion)
+    }
+    guard.clearDraft()
+    setBannerState(null)
+  }
+
+  useKeyboardSave({
+    onSave: handleSave,
+    enabled: canEdit && dirty && !updateMutation.isPending && stepUpSatisfied,
+  })
+
   if (runtimeQuery.isPending) {
     return (
       <div className="flex items-center justify-center py-16 text-muted-foreground">
@@ -620,7 +665,10 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
   return (
     <>
       <TooltipProvider>
-        <section className="min-w-0 space-y-6">
+        <section
+          className="min-w-0 space-y-6"
+          aria-label={dirty ? t('draft.aria_unsaved') : undefined}
+        >
           <PageHero
             eyebrow={t('shell.groups.configuration')}
             title={t('settings.enrichment_runtime.title')}
@@ -687,6 +735,15 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
               </>
             }
           />
+
+          {bannerState && (
+            <DraftBanner
+              variant={bannerState}
+              draftAgeMs={bannerState === 'recovery' ? guard.draftAge : undefined}
+              onDiscard={handleDismissBanner}
+              onKeep={() => setBannerState(null)}
+            />
+          )}
 
           <div className="grid gap-4 xl:grid-cols-[1.12fr,0.88fr]">
             <Card className="overflow-hidden border-border/70 bg-[linear-gradient(180deg,rgba(255,247,237,0.62),rgba(255,255,255,0.98)_34%)] shadow-none">
@@ -859,7 +916,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                         label={t('settings.enrichment_runtime.fields.queue_len')}
                         hint={t('settings.enrichment_runtime.field_hints.queue_len')}
                         value={draft.queueLen}
-                        disabled={!canEdit}
+                        disabled={!canEdit || updateMutation.isPending}
                         onChange={(value) => setDraft((prev) => ({ ...prev, queueLen: value }))}
                       />
                       <NumberField
@@ -867,7 +924,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                         label={t('settings.enrichment_runtime.fields.workers')}
                         hint={t('settings.enrichment_runtime.field_hints.workers')}
                         value={draft.workers}
-                        disabled={!canEdit}
+                        disabled={!canEdit || updateMutation.isPending}
                         onChange={(value) => setDraft((prev) => ({ ...prev, workers: value }))}
                       />
                     </div>
@@ -884,7 +941,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                         label={t('settings.enrichment_runtime.fields.batch_size')}
                         hint={t('settings.enrichment_runtime.field_hints.batch_size')}
                         value={draft.batchSize}
-                        disabled={!canEdit}
+                        disabled={!canEdit || updateMutation.isPending}
                         onChange={(value) => setDraft((prev) => ({ ...prev, batchSize: value }))}
                       />
                       <NumberField
@@ -893,7 +950,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                         hint={t('settings.enrichment_runtime.field_hints.batch_window')}
                         suffix={t('settings.enrichment_runtime.seconds_suffix')}
                         value={draft.batchWindowSeconds}
-                        disabled={!canEdit}
+                        disabled={!canEdit || updateMutation.isPending}
                         onChange={(value) =>
                           setDraft((prev) => ({ ...prev, batchWindowSeconds: value }))
                         }
@@ -904,7 +961,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                         hint={t('settings.enrichment_runtime.field_hints.sweep_interval')}
                         suffix={t('settings.enrichment_runtime.seconds_suffix')}
                         value={draft.sweepIntervalSeconds}
-                        disabled={!canEdit}
+                        disabled={!canEdit || updateMutation.isPending}
                         onChange={(value) =>
                           setDraft((prev) => ({
                             ...prev,
@@ -931,7 +988,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                               'settings.enrichment_runtime.fields.llm_rate_limit_enabled',
                             )}
                             checked={draft.llmRateLimitEnabled}
-                            disabled={!canEdit}
+                            disabled={!canEdit || updateMutation.isPending}
                             onCheckedChange={(checked) =>
                               setDraft((prev) => ({
                                 ...prev,
@@ -950,7 +1007,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                         label={t('settings.enrichment_runtime.fields.llm_max_qps')}
                         hint={t('settings.enrichment_runtime.field_hints.llm_max_qps')}
                         value={draft.llmMaxQps}
-                        disabled={!canEdit}
+                        disabled={!canEdit || updateMutation.isPending}
                         onChange={(value) => setDraft((prev) => ({ ...prev, llmMaxQps: value }))}
                       />
                       <NumberField
@@ -958,7 +1015,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                         label={t('settings.enrichment_runtime.fields.llm_burst')}
                         hint={t('settings.enrichment_runtime.field_hints.llm_burst')}
                         value={draft.llmBurst}
-                        disabled={!canEdit}
+                        disabled={!canEdit || updateMutation.isPending}
                         onChange={(value) => setDraft((prev) => ({ ...prev, llmBurst: value }))}
                       />
                     </div>
@@ -974,7 +1031,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                     placeholder={t('settings.enrichment_runtime.reason_placeholder')}
                     value={updateReason}
                     onChange={(e) => setUpdateReason(e.target.value)}
-                    disabled={!canEdit}
+                    disabled={!canEdit || updateMutation.isPending}
                   />
                 </div>
 
@@ -1032,7 +1089,12 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
                 ) : null}
 
                 {canEdit ? (
-                  <div className="flex flex-wrap justify-end gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <SaveStatus
+                      dirty={dirty}
+                      saving={updateMutation.isPending}
+                      lastSavedAt={lastSavedAt}
+                    />
                     <Button
                       variant="outline"
                       onClick={() => {
@@ -1716,6 +1778,9 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
         open={guard.dialogOpen}
         onConfirmLeave={guard.confirmLeave}
         onCancelLeave={guard.cancelLeave}
+        onSaveAndLeave={canEdit && stepUpSatisfied ? handleSaveAndLeave : undefined}
+        saving={updateMutation.isPending}
+        changeCount={draftVsDesiredDiff.length}
       />
     </>
   )

@@ -10,15 +10,30 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 ### Added
 
 - **Draft durability and navigation guards for settings editors (#172).**
-  sessionStorage-backed draft persistence and unsaved-change protection for the
-  classification settings and enrichment runtime editor pages.
-  - Drafts auto-save to sessionStorage (debounced 500ms, tab-scoped).
+  localStorage-backed draft persistence with versioned envelope format and
+  unsaved-change protection for classification settings and enrichment runtime
+  editor pages.
+  - Drafts auto-save to localStorage with `StoredEnvelope` wrapper (schema
+    version + timestamp), debounced 500ms, with 24h TTL auto-expiry.
+    Transparent migration from legacy sessionStorage on first read.
   - `useBlocker` + `beforeunload` prevent accidental navigation with a shared
-    `UnsavedChangesDialog` confirmation modal.
-  - Recovery toast on page mount when a stored draft is detected, with one-click
-    discard option.
+    `UnsavedChangesDialog` modal supporting save-and-leave as a third option.
+  - Persistent inline `DraftBanner` (recovery/conflict variants) replaces
+    transient toasts for draft recovery and conflict notification.
+  - `BroadcastChannel` cross-tab notification on draft clear.
+  - `beforeunload` immediate flush via refs for stale-closure safety.
+  - Keyboard shortcuts: Cmd/Ctrl+S to save, Cmd/Ctrl+Enter to submit.
+  - `SaveStatus` indicator: saving spinner, unsaved dot, or "saved at HH:MM".
+  - Undo-discard pattern: snapshot state before discard, 5-second undo toast.
+  - `document.title` dirty indicator (`●` prefix when form is dirty).
+  - Field-level dirty highlighting on prompt textarea.
   - Discard button + confirmation dialog to revert to last-saved server state.
   - Drafts cleared automatically on successful save/reset/rollback.
+  - Background refresh conflict detection: when the runtime page's 5-second
+    polling returns a new server version while the user has dirty edits, a
+    conflict banner offers to load the latest version without silently
+    overwriting the in-progress draft.
+  - Form inputs disabled during in-flight save to prevent mid-mutation edits.
 - **SSO cutover and break-glass recovery controls (#158).** Enterprise-grade
   SSO enforcement with emergency access path for admin recovery.
   - Runtime-switchable auth mode (`hybrid` ↔ `sso_only`) stored in DB, no
