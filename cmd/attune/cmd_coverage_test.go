@@ -446,7 +446,7 @@ func TestSubcommands_NoExtraKeys(t *testing.T) {
 	expected := map[string]struct{}{
 		"server": {}, "doctor": {}, "keys": {}, "tenant": {}, "eval": {},
 		"outbox": {}, "secrets": {}, "llm": {}, "embed": {},
-		"migrations": {}, "restore-drill": {}, "audit": {},
+		"migrations": {}, "restore-drill": {}, "audit": {}, "auth": {},
 	}
 	for key := range subcommands {
 		_, ok := expected[key]

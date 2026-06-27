@@ -122,3 +122,37 @@ func RunAll(ctx context.Context, env *Environment) Report {
 		Elapsed: time.Since(start).Truncate(time.Millisecond).String(),
 	}
 }
+
+// RunChecks executes a subset of checks by name and returns the report.
+// If a name doesn't match any registered check, it's silently skipped.
+func RunChecks(ctx context.Context, env *Environment, names []string) Report {
+	start := time.Now()
+	checks := Registered()
+
+	nameSet := make(map[string]bool, len(names))
+	for _, name := range names {
+		nameSet[name] = true
+	}
+
+	results := make([]Result, 0, len(names))
+	for _, c := range checks {
+		if !nameSet[c.Name] {
+			continue
+		}
+		if ctx.Err() != nil {
+			results = append(results, Result{
+				Name:     c.Name,
+				Category: c.Category,
+				Status:   StatusFail,
+				Message:  "Skipped — preflight timeout exceeded",
+			})
+			continue
+		}
+		results = append(results, c.Run(ctx, env))
+	}
+	return Report{
+		Status:  WorstStatus(results),
+		Checks:  results,
+		Elapsed: time.Since(start).Truncate(time.Millisecond).String(),
+	}
+}

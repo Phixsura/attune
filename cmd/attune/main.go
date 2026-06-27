@@ -58,6 +58,7 @@ var subcommands = map[string]func([]string) error{
 	"llm":     runLLM,
 	"embed":   runEmbed,
 	"audit":   runAudit,
+	"auth":    runAuth,
 }
 
 func main() {
@@ -114,6 +115,7 @@ Usage:
  attune audit verify-export [--public-key <hex>] <archive.zip> Verify evidence pack integrity
  attune audit generate-signing-key              Generate Ed25519 signing keypair
  attune audit export-public-key --signing-key <hex> Derive public key from signing key
+ attune auth breakglass issue|list|revoke       Manage break-glass tokens (#158)
 `)
 }
 
