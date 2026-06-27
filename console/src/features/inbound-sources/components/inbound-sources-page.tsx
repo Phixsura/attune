@@ -153,9 +153,9 @@ export function InboundSourcesPage() {
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
-        <Card className="border-border/70 shadow-none">
-          <CardHeader className="border-b border-border/60 bg-muted/15">
-            <CardTitle>{t('inbound_sources.registry_title')}</CardTitle>
+        <Card className="border-border/60 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">{t('inbound_sources.registry_title')}</CardTitle>
             <CardDescription>
               {t('inbound_sources.registry_description', { count: sources.length })}
             </CardDescription>
@@ -186,9 +186,9 @@ export function InboundSourcesPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/70 shadow-none">
-          <CardHeader className="border-b border-border/60 bg-muted/15">
-            <CardTitle>{t('inbound_sources.playbook_title')}</CardTitle>
+        <Card className="border-border/60 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">{t('inbound_sources.playbook_title')}</CardTitle>
             <CardDescription>{t('inbound_sources.playbook_description')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-6">
@@ -239,7 +239,7 @@ export function InboundSourcesPage() {
 
 function PlaybookRow({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-[1rem] border border-border/70 bg-background/85 px-4 py-3.5">
+    <div className="rounded-[1rem] border border-border/60 bg-background/85 px-4 py-3.5">
       <div className="text-sm font-semibold text-foreground">{title}</div>
       <div className="mt-1 text-sm leading-6 text-muted-foreground">{body}</div>
     </div>

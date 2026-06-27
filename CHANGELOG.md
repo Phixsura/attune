@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Draft durability and navigation guards for settings editors (#172).**
+  localStorage-backed draft persistence with versioned envelope format and
+  unsaved-change protection for classification settings and enrichment runtime
+  editor pages.
+  - Drafts auto-save to localStorage with `StoredEnvelope` wrapper (schema
+    version + timestamp), debounced 500ms, with 24h TTL auto-expiry.
+    Transparent migration from legacy sessionStorage on first read.
+  - `useBlocker` + `beforeunload` prevent accidental navigation with a shared
+    `UnsavedChangesDialog` two-button modal (stay / discard-and-leave).
+  - Persistent inline `DraftBanner` (recovery/conflict variants) replaces
+    transient toasts for draft recovery and conflict notification.
+  - `BroadcastChannel` cross-tab notification on draft clear.
+  - `beforeunload` immediate flush via refs for stale-closure safety.
+  - Keyboard shortcut: Cmd/Ctrl+S to save (hook also supports Cmd/Ctrl+Enter
+    when `onSubmit` is wired).
+  - `SaveStatus` indicator: saving spinner or unsaved dot; returns null when
+    saved (no persistent timestamp).
+  - `document.title` dirty indicator (`●` prefix when form is dirty).
+  - Discard button to revert to last-saved server state.
+  - Drafts cleared automatically on successful save/reset/rollback.
+  - Background refresh conflict detection on both classification and runtime
+    editors: when a refetch (polling, BroadcastChannel, or window focus)
+    returns changed server data while the user has dirty edits, a conflict
+    banner offers to load the latest version or keep local edits, without
+    silently overwriting the in-progress draft.
+  - Form inputs disabled during in-flight save to prevent mid-mutation edits.
 - **SSO cutover and break-glass recovery controls (#158).** Enterprise-grade
   SSO enforcement with emergency access path for admin recovery.
   - Runtime-switchable auth mode (`hybrid` ↔ `sso_only`) stored in DB, no
@@ -248,6 +274,31 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     grants, governance editor, tool-policy editor, single-session revoke, and
     single refresh-grant revoke
   - MCP client admin proto/OpenAPI contract for the Console control plane
+
+### Changed
+
+- **Console UI minimalism overhaul (#172).** Converge card styling, page
+  layout, and shared components toward a restrained, industry-standard
+  aesthetic across all Console pages.
+  - `PageHero`: plain text layout with inline metrics (tooltip hints via
+    `title`); removed gradient backgrounds, shadows, and card wrappers.
+  - `DraftBanner`: border-l-2 inline bar with text buttons; removed
+    rounded card wrapper and heavy Button components.
+  - `SaveStatus`: text-xs only (saving spinner or unsaved dot); returns
+    null when clean — no persistent saved-at timestamp.
+  - `UnsavedChangesDialog`: two equal-weight outline buttons (stay /
+    leave); removed save-and-leave third option and destructive styling.
+  - Card headers: removed `bg-muted/15` backgrounds and `border-b`
+    separators across notify-targets, guard-policies, api-keys,
+    digest-subscription, workflow-settings, tags, GDPR, outbox-dead,
+    inbound-sources, and LLM config pages. Unified `CardTitle` to
+    `text-base`.
+  - Card borders: unified to `border-border/60 shadow-none` across all
+    settings and configuration pages.
+  - Enrichment runtime page: removed Value Cards, Playbook steps,
+    Convergence Alert, RuntimePosture cards, Operator Guidance, and
+    GuidanceBlock sections (~250 lines). `RuntimeFormSection` uses
+    `border-t` separators with inline icons instead of rounded containers.
 
 ### Fixed
 

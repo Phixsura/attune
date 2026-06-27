@@ -130,9 +130,9 @@ export function DigestSubscriptionPage() {
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
-        <Card className="border-border/70 shadow-none">
-          <CardHeader className="border-b border-border/60 bg-muted/15">
-            <CardTitle>{t('digest.editor_title')}</CardTitle>
+        <Card className="border-border/60 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">{t('digest.editor_title')}</CardTitle>
             <CardDescription>{t('digest.editor_description')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5 pt-6">
@@ -235,7 +235,7 @@ export function DigestSubscriptionPage() {
               {t('digest.clustering_enabled_field')}
             </label>
             <p className="text-xs text-muted-foreground">{t('digest.clustering_enabled_help')}</p>
-            <div className="rounded-[1rem] border border-border/70 bg-muted/10 px-4 py-3.5">
+            <div className="rounded-[1rem] border border-border/60 bg-muted/10 px-4 py-3.5">
               <div className="text-sm font-semibold text-foreground">
                 {t('digest.clustering_surface_title')}
               </div>
@@ -278,9 +278,9 @@ export function DigestSubscriptionPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/70 shadow-none">
-          <CardHeader className="border-b border-border/60 bg-muted/15">
-            <CardTitle>{t('digest.playbook_title')}</CardTitle>
+        <Card className="border-border/60 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">{t('digest.playbook_title')}</CardTitle>
             <CardDescription>{t('digest.playbook_description')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-6">
@@ -305,7 +305,7 @@ export function DigestSubscriptionPage() {
 
 function PlaybookRow({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-[1rem] border border-border/70 bg-background/85 px-4 py-3.5">
+    <div className="rounded-[1rem] border border-border/60 bg-background/85 px-4 py-3.5">
       <div className="text-sm font-semibold text-foreground">{title}</div>
       <div className="mt-1 text-sm leading-6 text-muted-foreground">{body}</div>
     </div>

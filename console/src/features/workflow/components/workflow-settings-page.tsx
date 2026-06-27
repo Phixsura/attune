@@ -170,9 +170,9 @@ export function WorkflowSettingsPage() {
       ) : (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
           <div className="space-y-6">
-            <Card className="gap-0 overflow-hidden border-border/70 py-0 shadow-none">
-              <CardHeader className="border-b border-border/60 bg-muted/15 py-4">
-                <CardTitle>{t('workflow.states_title')}</CardTitle>
+            <Card className="gap-0 overflow-hidden border-border/60 py-0 shadow-none">
+              <CardHeader>
+                <CardTitle className="text-base">{t('workflow.states_title')}</CardTitle>
                 <CardDescription>{t('workflow.states_subtitle')}</CardDescription>
               </CardHeader>
               <CardContent className="px-0 pb-0">
@@ -229,9 +229,9 @@ export function WorkflowSettingsPage() {
             </Card>
 
             {active.length >= 2 && (
-              <Card className="border-border/70 shadow-none">
-                <CardHeader className="border-b border-border/60 bg-muted/15">
-                  <CardTitle>{t('workflow.transitions_title')}</CardTitle>
+              <Card className="border-border/60 shadow-none">
+                <CardHeader>
+                  <CardTitle className="text-base">{t('workflow.transitions_title')}</CardTitle>
                   <CardDescription>{t('workflow.transitions_subtitle')}</CardDescription>
                 </CardHeader>
                 <CardContent className="pt-6">
@@ -246,9 +246,9 @@ export function WorkflowSettingsPage() {
             )}
           </div>
 
-          <Card className="border-border/70 shadow-none">
-            <CardHeader className="border-b border-border/60 bg-muted/15">
-              <CardTitle>{t('workflow.playbook_title')}</CardTitle>
+          <Card className="border-border/60 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-base">{t('workflow.playbook_title')}</CardTitle>
               <CardDescription>{t('workflow.playbook_description')}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 pt-6">
@@ -330,7 +330,7 @@ function WorkflowPlaybookRow({
   body: string
 }) {
   return (
-    <div className="rounded-[1rem] border border-border/70 bg-background/85 px-4 py-3.5">
+    <div className="rounded-[1rem] border border-border/60 bg-background/85 px-4 py-3.5">
       <div className="flex items-start gap-3">
         <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
           {index}

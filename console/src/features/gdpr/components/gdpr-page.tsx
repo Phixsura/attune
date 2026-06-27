@@ -325,9 +325,9 @@ export function GDPRPage() {
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
           <div className="space-y-6">
-            <Card className="border-border/70 shadow-none">
-              <CardHeader className="border-b border-border/60 bg-muted/15">
-                <CardTitle>{t('gdpr.subject_title')}</CardTitle>
+            <Card className="border-border/60 shadow-none">
+              <CardHeader>
+                <CardTitle className="text-base">{t('gdpr.subject_title')}</CardTitle>
                 <CardDescription>{t('gdpr.subject_help')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 pt-6">
@@ -346,9 +346,9 @@ export function GDPRPage() {
             </Card>
 
             <div className="grid gap-6 xl:grid-cols-2">
-              <Card className="border-border/70 shadow-none">
-                <CardHeader className="border-b border-border/60 bg-muted/15">
-                  <CardTitle>{t('gdpr.export_title')}</CardTitle>
+              <Card className="border-border/60 shadow-none">
+                <CardHeader>
+                  <CardTitle className="text-base">{t('gdpr.export_title')}</CardTitle>
                   <CardDescription>{t('gdpr.export_help')}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-6">
@@ -416,7 +416,7 @@ export function GDPRPage() {
 
               <Card className="border-destructive/25 shadow-none">
                 <CardHeader className="border-b border-destructive/15 bg-destructive/[0.03]">
-                  <CardTitle>{t('gdpr.delete_title')}</CardTitle>
+                  <CardTitle className="text-base">{t('gdpr.delete_title')}</CardTitle>
                   <CardDescription>{t('gdpr.delete_help')}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-6">
@@ -448,9 +448,9 @@ export function GDPRPage() {
               </Card>
             </div>
 
-            <Card className="border-border/70 shadow-none">
-              <CardHeader className="border-b border-border/60 bg-muted/15">
-                <CardTitle>{t('gdpr.request_center_title')}</CardTitle>
+            <Card className="border-border/60 shadow-none">
+              <CardHeader>
+                <CardTitle className="text-base">{t('gdpr.request_center_title')}</CardTitle>
                 <CardDescription>{t('gdpr.request_center_help')}</CardDescription>
               </CardHeader>
               <CardContent>
@@ -604,9 +604,9 @@ export function GDPRPage() {
           </div>
 
           <div className="space-y-6">
-            <Card className="border-border/70 shadow-none">
-              <CardHeader className="border-b border-border/60 bg-muted/15">
-                <CardTitle>{t('gdpr.ops_title')}</CardTitle>
+            <Card className="border-border/60 shadow-none">
+              <CardHeader>
+                <CardTitle className="text-base">{t('gdpr.ops_title')}</CardTitle>
                 <CardDescription>{t('gdpr.ops_help')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 pt-6">
@@ -674,7 +674,7 @@ export function GDPRPage() {
 
             <Card className="border-amber-500/20 shadow-none">
               <CardHeader className="border-b border-amber-500/15 bg-amber-50/40">
-                <CardTitle>{t('gdpr.guardrail_title')}</CardTitle>
+                <CardTitle className="text-base">{t('gdpr.guardrail_title')}</CardTitle>
                 <CardDescription>{t('gdpr.guardrail_help')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 pt-6">
@@ -704,10 +704,10 @@ export function GDPRPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-border/70 shadow-none">
-              <CardHeader className="border-b border-border/60 bg-muted/15">
+            <Card className="border-border/60 shadow-none">
+              <CardHeader>
                 <div>
-                  <CardTitle>{t('gdpr.filter_all')}</CardTitle>
+                  <CardTitle className="text-base">{t('gdpr.filter_all')}</CardTitle>
                   <CardDescription>{t('gdpr.request_center_help')}</CardDescription>
                 </div>
               </CardHeader>
@@ -734,7 +734,7 @@ export function GDPRPage() {
                     {t('gdpr.refresh')}
                   </Button>
                 </div>
-                <div className="rounded-md border border-border/70 bg-background/85 px-4 py-3 text-sm text-muted-foreground">
+                <div className="rounded-md border border-border/60 bg-background/85 px-4 py-3 text-sm text-muted-foreground">
                   {t('gdpr.guardrail_help')}
                 </div>
               </CardContent>

@@ -1,6 +1,6 @@
 import { HttpResponse, http } from 'msw'
 import { createElement } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EnrichmentRuntimePage } from '@/features/settings/components/enrichment-runtime-page'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
@@ -18,8 +18,40 @@ import {
 } from './enrichment-runtime-page'
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
+
+let blockerState: {
+  status: 'idle' | 'blocked'
+  proceed: ReturnType<typeof vi.fn>
+  reset: ReturnType<typeof vi.fn>
+  shouldBlockFn?: (args: unknown) => boolean
+} = {
+  status: 'idle',
+  proceed: vi.fn(),
+  reset: vi.fn(),
+}
+
+function resetBlocker() {
+  blockerState = {
+    status: 'idle',
+    proceed: vi.fn(),
+    reset: vi.fn(),
+  }
+}
+
+vi.mock('@tanstack/react-router', () => ({
+  useBlocker: (opts?: { shouldBlockFn?: (args: unknown) => boolean }) => {
+    if (opts?.shouldBlockFn) blockerState.shouldBlockFn = opts.shouldBlockFn
+    return blockerState
+  },
+}))
+
+afterEach(() => {
+  localStorage.clear()
+  sessionStorage.clear()
+  resetBlocker()
+})
 
 const baseRuntimeResponse = {
   runtime: {
@@ -237,34 +269,64 @@ function mockRuntimePage(options?: {
 }
 
 describe('shouldHydrateRuntimeDraft', () => {
-  it('hydrates when the desired version changes even if the local draft is dirty', () => {
+  it('returns conflict when server version changes and local draft is dirty', () => {
     expect(
       shouldHydrateRuntimeDraft({
         desiredVersion: '8',
         lastHydratedVersion: '7',
         dirty: true,
       }),
-    ).toBe(true)
+    ).toBe('conflict')
   })
 
-  it('does not overwrite a dirty draft while polling the same desired version', () => {
+  it('hydrates when server version changes and local draft is clean', () => {
+    expect(
+      shouldHydrateRuntimeDraft({
+        desiredVersion: '8',
+        lastHydratedVersion: '7',
+        dirty: false,
+      }),
+    ).toBe('hydrate')
+  })
+
+  it('skips when polling the same version and draft is dirty', () => {
     expect(
       shouldHydrateRuntimeDraft({
         desiredVersion: '8',
         lastHydratedVersion: '8',
         dirty: true,
       }),
-    ).toBe(false)
+    ).toBe('skip')
   })
 
-  it('refreshes a clean draft while polling the same desired version', () => {
+  it('hydrates when polling the same version and draft is clean', () => {
     expect(
       shouldHydrateRuntimeDraft({
         desiredVersion: '8',
         lastHydratedVersion: '8',
         dirty: false,
       }),
-    ).toBe(true)
+    ).toBe('hydrate')
+  })
+
+  it('always hydrates on initial load even when dirty (lastHydratedVersion undefined)', () => {
+    expect(
+      shouldHydrateRuntimeDraft({
+        desiredVersion: '8',
+        lastHydratedVersion: undefined,
+        dirty: true,
+      }),
+    ).toBe('hydrate')
+  })
+
+  it('skips when desiredVersion is undefined', () => {
+    expect(
+      shouldHydrateRuntimeDraft({
+        desiredVersion: undefined,
+        lastHydratedVersion: '7',
+        dirty: false,
+      }),
+    ).toBe('skip')
   })
 })
 
@@ -676,7 +738,6 @@ describe('EnrichmentRuntimePage', () => {
     const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
 
     expect(await screen.findByText('富化运行时控制面')).toBeInTheDocument()
-    expect(screen.getByText('这不是参数页，而是富化运行时的在线控制台')).toBeInTheDocument()
     expect(screen.getByText('phjdeMacBook-Pro')).toBeInTheDocument()
     expect(
       screen.queryByText('attune-c43e0420-6bcf-4ef1-9584-5759bdb271aa'),
@@ -818,4 +879,318 @@ describe('EnrichmentRuntimePage', () => {
       })
     })
   }, 20_000) // Full-page runtime smoke covers multiple guarded action dialogs.
+
+  describe('draft durability (#172)', () => {
+    it('restores draft from localStorage on mount', async () => {
+      const storedDraft = {
+        queueLen: '200',
+        workers: '8',
+        batchSize: '20',
+        batchWindowSeconds: '10',
+        sweepIntervalSeconds: '60',
+        llmRateLimitEnabled: false,
+        llmMaxQps: '0',
+        llmBurst: '0',
+      }
+      localStorage.setItem(
+        'attune:draft:enrichment-runtime',
+        JSON.stringify({ _v: 1, _ts: Date.now(), data: storedDraft }),
+      )
+      mockRuntimePage()
+      renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('200')).toBeInTheDocument()
+      })
+    })
+
+    it('shows recovery banner when draft is restored from localStorage', async () => {
+      const storedDraft = {
+        queueLen: '200',
+        workers: '8',
+        batchSize: '20',
+        batchWindowSeconds: '10',
+        sweepIntervalSeconds: '60',
+        llmRateLimitEnabled: false,
+        llmMaxQps: '0',
+        llmBurst: '0',
+      }
+      localStorage.setItem(
+        'attune:draft:enrichment-runtime',
+        JSON.stringify({ _v: 1, _ts: Date.now(), data: storedDraft }),
+      )
+      mockRuntimePage()
+      renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await waitFor(() => {
+        expect(screen.getByText('检测到未保存的草稿')).toBeInTheDocument()
+      })
+    })
+
+    it('clears localStorage on successful save', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      mockRuntimePage()
+      const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await screen.findByText('目标策略')
+      const queueInput = screen.getByLabelText('队列容量')
+      await user.clear(queueInput)
+      await user.type(queueInput, '1008')
+      vi.advanceTimersByTime(600)
+      expect(localStorage.getItem('attune:draft:enrichment-runtime')).not.toBeNull()
+      await user.type(screen.getByLabelText('变更说明'), 'test')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => {
+        expect(localStorage.getItem('attune:draft:enrichment-runtime')).toBeNull()
+      })
+      vi.useRealTimers()
+    })
+
+    it('gracefully ignores corrupted localStorage', async () => {
+      localStorage.setItem('attune:draft:enrichment-runtime', '{corrupted!!!')
+      mockRuntimePage()
+      renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      const queueInput = await screen.findByLabelText('队列容量')
+      expect(queueInput).toHaveValue(1007)
+    })
+
+    it('fills missing fields with defaults when restoring a partial draft', async () => {
+      localStorage.setItem(
+        'attune:draft:enrichment-runtime',
+        JSON.stringify({ _v: 1, _ts: Date.now(), data: { queueLen: '5000', workers: '8' } }),
+      )
+      mockRuntimePage()
+      renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      const queueInput = await screen.findByLabelText('队列容量')
+      expect(queueInput).toHaveValue(5000)
+      expect(screen.getByLabelText('工作协程数')).toHaveValue(8)
+    })
+
+    it('does not persist drafts when canEdit is false', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      mockRuntimePage()
+      renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: false }))
+      await screen.findByText('目标策略')
+      vi.advanceTimersByTime(600)
+      expect(localStorage.getItem('attune:draft:enrichment-runtime')).toBeNull()
+      vi.useRealTimers()
+    })
+
+    it('keeps draft in localStorage after a failed save', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      server.use(
+        http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
+        http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(verifiedOperations)),
+        http.put('/fb/v1/console/enrichment-runtime', () =>
+          HttpResponse.json({ error: { code: 'INTERNAL', message: 'boom' } }, { status: 500 }),
+        ),
+      )
+      const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await screen.findByText('目标策略')
+      const queueInput = screen.getByLabelText('队列容量')
+      await user.clear(queueInput)
+      await user.type(queueInput, '2000')
+      vi.advanceTimersByTime(600)
+      expect(localStorage.getItem('attune:draft:enrichment-runtime')).not.toBeNull()
+      await user.type(screen.getByLabelText('变更说明'), 'test')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => {
+        expect(localStorage.getItem('attune:draft:enrichment-runtime')).not.toBeNull()
+      })
+      vi.useRealTimers()
+    })
+
+    it('disables form inputs while save is in flight', async () => {
+      let releasePut: () => void = () => {}
+      const gate = new Promise<void>((r) => {
+        releasePut = r
+      })
+      server.use(
+        http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
+        http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(verifiedOperations)),
+        http.put('/fb/v1/console/enrichment-runtime', async () => {
+          await gate
+          return HttpResponse.json(baseRuntimeResponse)
+        }),
+      )
+      const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await screen.findByText('目标策略')
+      const queueInput = screen.getByLabelText('队列容量')
+      await user.clear(queueInput)
+      await user.type(queueInput, '2000')
+      await user.type(screen.getByLabelText('变更说明'), 'test')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => expect(queueInput).toBeDisabled())
+      releasePut()
+      await waitFor(() => expect(queueInput).toBeEnabled())
+    })
+
+    it('persists updated draft value when editing a restored draft', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      const storedDraft = {
+        queueLen: '200',
+        workers: '3',
+        batchSize: '10',
+        batchWindowSeconds: '5',
+        sweepIntervalSeconds: '30',
+        llmRateLimitEnabled: false,
+        llmMaxQps: '0',
+        llmBurst: '0',
+      }
+      localStorage.setItem(
+        'attune:draft:enrichment-runtime',
+        JSON.stringify({ _v: 1, _ts: Date.now(), data: storedDraft }),
+      )
+      mockRuntimePage()
+      const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('200')).toBeInTheDocument()
+      })
+      const queueInput = screen.getByLabelText('队列容量')
+      await user.clear(queueInput)
+      await user.type(queueInput, '4000')
+      vi.advanceTimersByTime(600)
+      const stored = localStorage.getItem('attune:draft:enrichment-runtime')
+      expect(stored).not.toBeNull()
+      const envelope = JSON.parse(stored as string)
+      expect(envelope.data.queueLen).toBe('4000')
+      vi.useRealTimers()
+    })
+
+    it('shows conflict banner when server version changes while user has dirty edits', async () => {
+      let runtimeVersion = '14'
+      server.use(
+        http.get('/fb/v1/console/enrichment-runtime', () => {
+          const resp = {
+            runtime: {
+              ...baseRuntimeResponse.runtime,
+              desiredRevision: {
+                ...baseRuntimeResponse.runtime.desiredRevision,
+                version: runtimeVersion,
+              },
+              summary: {
+                ...baseRuntimeResponse.runtime.summary,
+                desiredVersion: runtimeVersion,
+              },
+            },
+          }
+          return HttpResponse.json(resp)
+        }),
+        http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(verifiedOperations)),
+      )
+      const { user, queryClient } = renderWithProviders(
+        createElement(EnrichmentRuntimePage, { canEdit: true }),
+      )
+      await screen.findByText('目标策略')
+
+      const queueInput = screen.getByLabelText('队列容量')
+      await user.clear(queueInput)
+      await user.type(queueInput, '2000')
+
+      runtimeVersion = '15'
+      void queryClient.invalidateQueries({ queryKey: ['console', 'enrichment-runtime'] })
+
+      await waitFor(() => {
+        expect(screen.getByText('服务器配置已更新')).toBeInTheDocument()
+      })
+
+      expect(screen.getByLabelText('队列容量')).toHaveValue(2000)
+    })
+
+    it('conflict banner discard resets draft to server spec', async () => {
+      let runtimeVersion = '14'
+      server.use(
+        http.get('/fb/v1/console/enrichment-runtime', () => {
+          const resp = {
+            ...baseRuntimeResponse,
+            runtime: {
+              ...baseRuntimeResponse.runtime,
+              desiredRevision: {
+                ...baseRuntimeResponse.runtime.desiredRevision,
+                version: runtimeVersion,
+              },
+              summary: {
+                ...baseRuntimeResponse.runtime.summary,
+                desiredVersion: runtimeVersion,
+              },
+            },
+          }
+          return HttpResponse.json(resp)
+        }),
+        http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(verifiedOperations)),
+      )
+      const { user, queryClient } = renderWithProviders(
+        createElement(EnrichmentRuntimePage, { canEdit: true }),
+      )
+      await screen.findByText('目标策略')
+      const queueInput = screen.getByLabelText('队列容量')
+      await user.clear(queueInput)
+      await user.type(queueInput, '2000')
+
+      runtimeVersion = '15'
+      void queryClient.invalidateQueries({ queryKey: ['console', 'enrichment-runtime'] })
+
+      await waitFor(() => {
+        expect(screen.getByText('服务器配置已更新')).toBeInTheDocument()
+      })
+
+      await user.click(screen.getByRole('button', { name: '加载最新版本' }))
+      await waitFor(() => {
+        expect(screen.queryByText('服务器配置已更新')).not.toBeInTheDocument()
+      })
+      expect(screen.getByLabelText('队列容量')).toHaveValue(
+        baseRuntimeResponse.runtime.desiredSpec.queueLen,
+      )
+    })
+
+    it('marks dirty even when input is invalid (non-numeric)', async () => {
+      server.use(
+        http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
+        http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(verifiedOperations)),
+      )
+      const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await screen.findByText('目标策略')
+      const queueInput = screen.getByLabelText('队列容量')
+      await user.clear(queueInput)
+      await user.type(queueInput, 'abc')
+      expect(screen.getByText(/未保存/)).toBeInTheDocument()
+      expect(blockerState.shouldBlockFn?.({} as never)).toBe(true)
+    })
+
+    it('shows SaveStatus unsaved indicator when form is dirty', async () => {
+      server.use(
+        http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
+        http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(verifiedOperations)),
+      )
+      const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await screen.findByText('目标策略')
+      expect(screen.queryByText(/未保存/)).not.toBeInTheDocument()
+      const queueInput = screen.getByLabelText('队列容量')
+      await user.clear(queueInput)
+      await user.type(queueInput, '999')
+      expect(screen.getByText(/未保存/)).toBeInTheDocument()
+    })
+
+    it('registers shouldBlockFn when form is dirty', async () => {
+      server.use(
+        http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
+        http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(verifiedOperations)),
+      )
+      const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await screen.findByText('目标策略')
+      const queueInput = screen.getByLabelText('队列容量')
+      await user.clear(queueInput)
+      await user.type(queueInput, '999')
+      expect(blockerState.shouldBlockFn).toBeDefined()
+    })
+
+    it('shows UnsavedChangesDialog when blocker status is blocked', async () => {
+      server.use(
+        http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
+        http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(verifiedOperations)),
+      )
+      blockerState.status = 'blocked'
+      renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await waitFor(() => {
+        expect(screen.getByText('未保存的更改')).toBeInTheDocument()
+      })
+    })
+  })
 })

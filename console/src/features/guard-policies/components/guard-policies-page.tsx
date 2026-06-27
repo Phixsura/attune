@@ -177,9 +177,9 @@ export function GuardPoliciesPage() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
         <div className="space-y-6">
-          <Card className="border-border/70 shadow-none">
-            <CardHeader className="border-b border-border/60 bg-muted/15">
-              <CardTitle>{t('guard_policies.effective_title')}</CardTitle>
+          <Card className="border-border/60 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-base">{t('guard_policies.effective_title')}</CardTitle>
               <CardDescription>{t('guard_policies.effective_help')}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-6">
@@ -241,9 +241,9 @@ export function GuardPoliciesPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/70 shadow-none">
-            <CardHeader className="border-b border-border/60 bg-muted/15">
-              <CardTitle>{t('guard_policies.policies_title')}</CardTitle>
+          <Card className="border-border/60 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-base">{t('guard_policies.policies_title')}</CardTitle>
               <CardDescription>{t('guard_policies.policies_help')}</CardDescription>
             </CardHeader>
             <CardContent className="pt-6">
@@ -264,9 +264,9 @@ export function GuardPoliciesPage() {
           </Card>
         </div>
 
-        <Card className="border-border/70 shadow-none">
-          <CardHeader className="border-b border-border/60 bg-muted/15">
-            <CardTitle>{t('guard_policies.playbook_title')}</CardTitle>
+        <Card className="border-border/60 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">{t('guard_policies.playbook_title')}</CardTitle>
             <CardDescription>{t('guard_policies.playbook_description')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-6">
@@ -314,7 +314,7 @@ export function GuardPoliciesPage() {
 
 function PlaybookRow({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-[1rem] border border-border/70 bg-background/85 px-4 py-3.5">
+    <div className="rounded-[1rem] border border-border/60 bg-background/85 px-4 py-3.5">
       <div className="text-sm font-semibold text-foreground">{title}</div>
       <div className="mt-1 text-sm leading-6 text-muted-foreground">{body}</div>
     </div>
