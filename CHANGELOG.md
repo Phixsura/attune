@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Signed compliance evidence packs for audit logs (#152).** Export
+  tamper-evident ZIP archives of audit log entries with SHA-256 hash chains
+  (RFC 8785 canonical JSON) and optional Ed25519 digital signatures.
+  - Backend: `audit_evidence_export` migration, `repo/auditevidence`,
+    `service/auditevidence` (archive builder + async claim/heartbeat/drain
+    worker), `canonicaljson` package, `audit_evidence` config section.
+  - Proto API: `CreateAuditEvidenceExport`, `GetAuditEvidenceExport`,
+    `DownloadAuditEvidenceExport` RPCs on `AuditLogService`.
+  - Console handler: `POST /audit-log/evidence`, `GET .../evidence/{job_id}`,
+    `GET .../evidence/{job_id}/download` (admin-only, binary ZIP download).
+  - CLI: `attune audit verify-export` (offline chain + signature verification),
+    `generate-signing-key`, `export-public-key`.
+  - Enriched manifest format: `export_id`, `created_by`, `filter`, `stats`
+    (total_events, first/last event timestamps, action_counts), per-file
+    SHA-256 hashes, `signing.public_key_fingerprint` for key rotation, and
+    `external_anchors` reservation for future RFC 3161 timestamping.
+  - Per-file SHA-256 verification in CLI verifier and Python reference
+    verifier (`scripts/verify-evidence.py`).
 - **HA worker leases and queue-drain safety (#155).** Standardizes background
   worker safety for multi-replica deploys:
   - `claimed_by` column across all worker task tables (reply_draft_task,
@@ -421,6 +439,31 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   truncated to Slack's hard limits (150/3000 chars, rune-safe).
 
 ### Changed
+
+- **Console audit log page UX overhaul (#152).** Brings the audit log page to
+  industry-leading quality (Datadog / WorkOS / Clerk level):
+  - Replaced hero header (gradient, badge, 2.3rem title, subtitle) with a
+    compact single-line title bar + action buttons (~300px → ~48px)
+  - Simplified filter panel header: removed eyebrow label, description text,
+    gradient background; title now inline with toggle
+  - Removed sync status bars ("当前输入已经和结果列表同步") from both expanded
+    and collapsed filter states — no longer exposes internal draft/commit
+    architecture
+  - Collapsed filter empty state now conditionally rendered: hidden when no
+    filters active, shows count chip only when filters are set
+  - Replaced investigation workspace (~460 lines) with compact toolbar (~50
+    lines): inline avatar + action dot + description + position counter
+  - Removed stat cards (loaded count, filters, latest event, actions) and
+    floating help pill from header area
+  - Removed stream section header (eyebrow, title, description, count badge,
+    scope area with date range/events/bursts chips)
+  - Event card selection: "当前聚焦" chip → left border accent with subtle
+    background tint
+  - Change-path chips on event cards now hover-only (hidden → visible on
+    group hover)
+  - Cleaned up ~790 lines of unused code (components, state, helpers)
+  - Updated tests: removed 6 workspace-specific tests, updated 3 tests for
+    new compact UI format (664 tests passing)
 
 - **Source vocabulary is now registry-driven (#95).** Adding an inbound channel
   no longer requires editing a hardcoded map in the core `domain` package — the

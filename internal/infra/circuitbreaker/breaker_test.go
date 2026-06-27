@@ -11,6 +11,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNew_DefaultsApplied(t *testing.T) {
+	t.Parallel()
+	b := New(Config{Name: "test"})
+	require.Equal(t, StateClosed, b.State())
+	require.Equal(t, 5, b.cfg.FailureThreshold)
+	require.Equal(t, 2, b.cfg.SuccessThreshold)
+	require.Equal(t, 30*time.Second, b.cfg.OpenDuration)
+	require.Equal(t, 1, b.cfg.HalfOpenMaxConcurrent)
+}
+
+func TestNew_NegativeThresholds(t *testing.T) {
+	t.Parallel()
+	b := New(Config{Name: "test", FailureThreshold: -1, SuccessThreshold: -1, OpenDuration: -1, HalfOpenMaxConcurrent: -1})
+	require.Equal(t, 5, b.cfg.FailureThreshold)
+	require.Equal(t, 2, b.cfg.SuccessThreshold)
+	require.Equal(t, 30*time.Second, b.cfg.OpenDuration)
+	require.Equal(t, 1, b.cfg.HalfOpenMaxConcurrent)
+}
+
 func TestBreaker_ClosedState(t *testing.T) {
 	t.Parallel()
 	b := New(DefaultConfig("test"))

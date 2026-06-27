@@ -55,6 +55,12 @@ func TestParseScopes(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidScope)
 }
 
+func TestScope_String(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "feedback:read", ScopeFeedbackRead.String())
+	assert.Equal(t, "ingest:write", ScopeIngestWrite.String())
+}
+
 func TestAllScopes_Count(t *testing.T) {
 	assert.Equal(t, 27, len(AllScopes), "should have 27 scopes")
 }

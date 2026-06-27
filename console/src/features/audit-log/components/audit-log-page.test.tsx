@@ -69,7 +69,7 @@ describe('AuditLogPage', () => {
 
     await expandFiltersIfCollapsed(user)
     await user.click(screen.getByRole('button', { name: '动作' }))
-    const actionChoices = screen.getAllByText('member.remove')
+    const actionChoices = screen.getAllByText('移除成员')
     await user.click(actionChoices[actionChoices.length - 1] as HTMLElement)
     await user.type(screen.getByLabelText('目标 ID'), 'member-42')
     await user.type(screen.getByLabelText('开始时间'), '2026-06-16T10:00')
@@ -123,13 +123,13 @@ describe('AuditLogPage', () => {
     const { user } = renderWithProviders(<AuditLogPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('Invited member')).toBeInTheDocument()
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
     })
 
     await user.click(screen.getByRole('button', { name: '加载更多' }))
 
     await waitFor(() => {
-      expect(screen.getByText('Removed member')).toBeInTheDocument()
+      expect(screen.getAllByText('移除成员').length).toBeGreaterThan(0)
     })
     expect(cursor).toBe('1718539200000000000:42')
   })
@@ -175,7 +175,7 @@ describe('AuditLogPage', () => {
 
     await expandFiltersIfCollapsed(user)
     await user.click(screen.getByRole('button', { name: '动作' }))
-    await user.click(screen.getByText('member.remove'))
+    await user.click(screen.getByText('移除成员'))
     expect(screen.getByRole('button', { name: '动作' })).toHaveTextContent('已选择 1 个动作')
 
     await user.click(screen.getByRole('button', { name: '重置' }))
@@ -211,7 +211,7 @@ describe('AuditLogPage', () => {
     const { user } = renderWithProviders(<AuditLogPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('Invited member')).toBeInTheDocument()
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
     })
 
     await user.click(screen.getAllByRole('button', { name: '查看详情' })[0])
@@ -221,7 +221,7 @@ describe('AuditLogPage', () => {
     expect(screen.getByText('127.0.0.1')).toBeInTheDocument()
     expect(screen.getByText('playwright')).toBeInTheDocument()
     expect(screen.getAllByText('变更摘要')).not.toHaveLength(0)
-    expect(screen.getAllByText('role')).not.toHaveLength(0)
+    expect(screen.getAllByText('角色')).not.toHaveLength(0)
   })
 
   it('preserves the current scope when opening the details drawer', async () => {
@@ -250,7 +250,7 @@ describe('AuditLogPage', () => {
     const { user } = renderWithProviders(<AuditLogPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('Invited member')).toBeInTheDocument()
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
     })
 
     await user.click(screen.getAllByRole('button', { name: '查看详情' })[0] as HTMLElement)
@@ -295,78 +295,12 @@ describe('AuditLogPage', () => {
     const { user } = renderWithProviders(<AuditLogPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('Invited member')).toBeInTheDocument()
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
     })
 
-    await user.click(screen.getByRole('button', { name: '聚焦事件：Removed member' }))
+    await user.click(screen.getByRole('button', { name: '聚焦事件：移除成员' }))
 
-    expect(
-      screen.getByText(
-        (_, element) =>
-          element?.textContent ===
-          '当前聚焦：member.remove，操作者 user-2。打开详情后可复制关键 ID、查看请求元数据和变更快照。',
-      ),
-    ).toBeInTheDocument()
-    expect(screen.getByText('聚焦第 2 / 2 条')).toBeInTheDocument()
-  })
-
-  it('surfaces slice signals and lets the operator narrow from repeated actions', async () => {
-    const urls: string[] = []
-    server.use(
-      http.get('/fb/v1/console/audit-log', ({ request }) => {
-        urls.push(request.url)
-        return HttpResponse.json({
-          items: [
-            {
-              id: '1',
-              actorType: 'admin',
-              actorId: 'user-1',
-              action: 'member.invite',
-              targetType: 'member',
-              targetId: 'member-1',
-              summary: 'Invited member A',
-              createdAt: '2026-06-16T10:00:00Z',
-            },
-            {
-              id: '2',
-              actorType: 'admin',
-              actorId: 'user-2',
-              action: 'member.invite',
-              targetType: 'member',
-              targetId: 'member-2',
-              summary: 'Invited member B',
-              createdAt: '2026-06-16T09:00:00Z',
-            },
-            {
-              id: '3',
-              actorType: 'admin',
-              actorId: 'user-1',
-              action: 'member.remove',
-              targetType: 'member',
-              targetId: 'member-3',
-              summary: 'Removed member',
-              createdAt: '2026-06-16T08:00:00Z',
-            },
-          ],
-        })
-      }),
-    )
-
-    const { user } = renderWithProviders(<AuditLogPage />)
-
-    await waitFor(() => {
-      expect(screen.getByText('当前切片信号')).toBeInTheDocument()
-    })
-
-    expect(screen.getByText('高频动作')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'member.invite 2' })).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'member.invite 2' }))
-
-    await waitFor(() => {
-      expect(urls).toHaveLength(2)
-    })
-    expect(urls[1]).toContain('action=member.invite')
+    expect(screen.getByText('2/2')).toBeInTheDocument()
   })
 
   it('keeps the advanced filter console collapsed until the operator expands it', async () => {
@@ -386,96 +320,6 @@ describe('AuditLogPage', () => {
 
     expect(screen.getByRole('button', { name: '收起筛选' })).toBeInTheDocument()
     expect(screen.getByPlaceholderText('例如：member / api_key / workflow')).toBeInTheDocument()
-  })
-
-  it('lets the operator spotlight repeated changed fields from the current slice', async () => {
-    server.use(
-      http.get('/fb/v1/console/audit-log', () =>
-        HttpResponse.json({
-          items: [
-            {
-              id: '1',
-              actorType: 'admin',
-              actorId: 'user-1',
-              action: 'member.update_role',
-              targetType: 'member',
-              targetId: 'member-1',
-              summary: 'Updated member role',
-              beforeJson: '{"profile":{"role":"member"}}',
-              afterJson: '{"profile":{"role":"admin"}}',
-              createdAt: '2026-06-16T10:00:00Z',
-            },
-            {
-              id: '2',
-              actorType: 'admin',
-              actorId: 'user-2',
-              action: 'member.update_role',
-              targetType: 'member',
-              targetId: 'member-2',
-              summary: 'Updated another role',
-              beforeJson: '{"profile":{"role":"member"}}',
-              afterJson: '{"profile":{"role":"owner"}}',
-              createdAt: '2026-06-16T09:00:00Z',
-            },
-          ],
-        }),
-      ),
-    )
-
-    const { user } = renderWithProviders(<AuditLogPage />)
-
-    await waitFor(() => {
-      expect(screen.getByText('高频变更字段')).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByRole('button', { name: 'profile.role 2' }))
-
-    expect(
-      screen.getByPlaceholderText('在已加载记录里继续搜索动作、摘要、操作者、目标或快照内容'),
-    ).toHaveFocus()
-    expect(
-      screen.getByRole('button', { name: '移除筛选：本地检索: profile.role' }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByPlaceholderText('在已加载记录里继续搜索动作、摘要、操作者、目标或快照内容'),
-    ).toHaveValue('profile.role')
-    expect(screen.getAllByText('命中本地检索')).toHaveLength(2)
-    expect(screen.getAllByText('变更字段')).not.toHaveLength(0)
-    expect(
-      screen.getByRole('button', { name: '聚焦事件：Updated member role' }),
-    ).toBeInTheDocument()
-  })
-
-  it('surfaces selected change fields inline in the investigation workspace', async () => {
-    server.use(
-      http.get('/fb/v1/console/audit-log', () =>
-        HttpResponse.json({
-          items: [
-            {
-              id: '1',
-              actorType: 'admin',
-              actorId: 'user-1',
-              action: 'member.update_role',
-              targetType: 'member',
-              targetId: 'member-1',
-              summary: 'Updated member role',
-              beforeJson: '{"profile":{"role":"member"}}',
-              afterJson: '{"profile":{"role":"admin"}}',
-              createdAt: '2026-06-16T10:00:00Z',
-            },
-          ],
-        }),
-      ),
-    )
-
-    renderWithProviders(<AuditLogPage />)
-
-    await waitFor(() => {
-      expect(screen.getByText('当前调查工作台')).toBeInTheDocument()
-    })
-
-    expect(screen.getByText('先关注这些变更字段')).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: '聚焦字段：profile.role' })).not.toHaveLength(0)
   })
 
   it('groups adjacent repeated activity into a burst summary', async () => {
@@ -542,12 +386,9 @@ describe('AuditLogPage', () => {
       expect(screen.getByText('连续 3 条相近事件')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('当前调查范围')).toBeInTheDocument()
-    expect(screen.getByText('重复段落 1 组')).toBeInTheDocument()
-    expect(screen.getByText('本地检索未启用')).toBeInTheDocument()
     expect(screen.getByText('这一段里反复变化的字段')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '聚焦字段：prompt_template' })).not.toHaveLength(0)
-    expect(screen.getAllByRole('button', { name: '复制目标 ID' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: '更多操作' })).toHaveLength(2)
 
     await user.click(screen.getAllByRole('button', { name: '沿这段动作继续' })[0] as HTMLElement)
 
@@ -625,146 +466,17 @@ describe('AuditLogPage', () => {
     })
 
     expect(screen.getByText(/默认收起后续 2 条记录/)).toBeInTheDocument()
-    expect(screen.queryByText('Updated config 4')).not.toBeInTheDocument()
+    const collapsedCount = screen.getAllByText('更新富化配置').length
 
     await user.click(screen.getAllByRole('button', { name: '展开这段 5 条事件' })[0] as HTMLElement)
 
     expect(screen.getByText(/这一段的 5 条事件已经全部展开/)).toBeInTheDocument()
-    expect(screen.getAllByText('Updated config 4')).not.toHaveLength(0)
-    expect(screen.getByText('Updated config 5')).toBeInTheDocument()
+    const expandedCount = screen.getAllByText('更新富化配置').length
+    expect(expandedCount).toBeGreaterThan(collapsedCount)
 
     await user.click(screen.getByRole('button', { name: '收起这段事件' }))
 
-    expect(screen.queryByText('Updated config 4')).not.toBeInTheDocument()
-  })
-
-  it('surfaces burst context directly inside the investigation workspace', async () => {
-    server.use(
-      http.get('/fb/v1/console/audit-log', () =>
-        HttpResponse.json({
-          items: [
-            {
-              id: '1',
-              actorType: 'admin',
-              actorId: 'user-1',
-              action: 'enrich_config.update',
-              targetType: 'tenant',
-              targetId: 'test-tenant',
-              summary: 'Updated config 1',
-              createdAt: '2026-06-16T10:00:00Z',
-            },
-            {
-              id: '2',
-              actorType: 'admin',
-              actorId: 'user-1',
-              action: 'enrich_config.update',
-              targetType: 'tenant',
-              targetId: 'test-tenant',
-              summary: 'Updated config 2',
-              createdAt: '2026-06-16T09:50:00Z',
-            },
-            {
-              id: '3',
-              actorType: 'admin',
-              actorId: 'user-1',
-              action: 'enrich_config.update',
-              targetType: 'tenant',
-              targetId: 'test-tenant',
-              summary: 'Updated config 3',
-              createdAt: '2026-06-16T09:40:00Z',
-            },
-            {
-              id: '4',
-              actorType: 'admin',
-              actorId: 'user-1',
-              action: 'enrich_config.update',
-              targetType: 'tenant',
-              targetId: 'test-tenant',
-              summary: 'Updated config 4',
-              createdAt: '2026-06-16T09:30:00Z',
-            },
-          ],
-        }),
-      ),
-    )
-
-    const { user } = renderWithProviders(<AuditLogPage />)
-
-    await waitFor(() => {
-      expect(screen.getByText('这条事件属于连续动作段')).toBeInTheDocument()
-    })
-
-    expect(screen.getByText('位于连续段第 1 / 4 条')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: '聚焦这段最早事件' }))
-
-    expect(screen.getAllByText('Updated config 4')).not.toHaveLength(0)
-    expect(screen.getByText('位于连续段第 4 / 4 条')).toBeInTheDocument()
-  })
-
-  it('lets the operator reset a narrowed investigation from the workspace', async () => {
-    const urls: string[] = []
-    server.use(
-      http.get('/fb/v1/console/audit-log', ({ request }) => {
-        urls.push(request.url)
-        return HttpResponse.json({
-          items: [
-            {
-              id: '1',
-              actorType: 'admin',
-              actorId: 'user-1',
-              action: 'member.invite',
-              targetType: 'member',
-              targetId: 'member-1',
-              summary: 'Invited member A',
-              createdAt: '2026-06-16T10:00:00Z',
-            },
-            {
-              id: '2',
-              actorType: 'admin',
-              actorId: 'user-2',
-              action: 'member.invite',
-              targetType: 'member',
-              targetId: 'member-2',
-              summary: 'Invited member B',
-              createdAt: '2026-06-16T09:00:00Z',
-            },
-            {
-              id: '3',
-              actorType: 'admin',
-              actorId: 'user-3',
-              action: 'member.remove',
-              targetType: 'member',
-              targetId: 'member-3',
-              summary: 'Removed member',
-              createdAt: '2026-06-16T08:00:00Z',
-            },
-          ],
-        })
-      }),
-    )
-
-    const { user } = renderWithProviders(<AuditLogPage />)
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'member.invite 2' })).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByRole('button', { name: 'member.invite 2' }))
-
-    await waitFor(() => {
-      expect(urls).toHaveLength(2)
-    })
-
-    expect(screen.getByText('放宽当前范围')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: '重置调查范围' }))
-
-    await waitFor(() => {
-      expect(window.location.search).toBe('')
-    })
-
-    expect(screen.getByText('当前范围覆盖全部已加载事件')).toBeInTheDocument()
+    expect(screen.getAllByText('更新富化配置').length).toBeLessThan(expandedCount)
   })
 
   it('lets the operator move through adjacent events inside the details drawer', async () => {
@@ -800,7 +512,7 @@ describe('AuditLogPage', () => {
     const { user } = renderWithProviders(<AuditLogPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('Invited member')).toBeInTheDocument()
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
     })
 
     await user.click(screen.getAllByRole('button', { name: '查看详情' })[0] as HTMLElement)
@@ -858,56 +570,18 @@ describe('AuditLogPage', () => {
     const { user } = renderWithProviders(<AuditLogPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('Invited member')).toBeInTheDocument()
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
     })
 
     await user.click(screen.getByRole('button', { name: '下一条' }))
 
     await waitFor(() => {
-      expect(screen.getByText('聚焦第 2 / 3 条')).toBeInTheDocument()
+      expect(screen.getByText('2/3')).toBeInTheDocument()
     })
 
     await user.click(screen.getByRole('button', { name: '上一条' }))
 
-    expect(screen.getByText('聚焦第 1 / 3 条')).toBeInTheDocument()
-  })
-
-  it('lets the operator narrow to the same target directly from the focused event', async () => {
-    const urls: string[] = []
-    server.use(
-      http.get('/fb/v1/console/audit-log', ({ request }) => {
-        urls.push(request.url)
-        return HttpResponse.json({
-          items: [
-            {
-              id: '1',
-              actorType: 'admin',
-              actorId: 'user-1',
-              action: 'member.invite',
-              targetType: 'member',
-              targetId: 'member-1',
-              summary: 'Invited member',
-              createdAt: '2026-06-16T10:00:00Z',
-            },
-          ],
-        })
-      }),
-    )
-
-    const { user } = renderWithProviders(<AuditLogPage />)
-
-    await waitFor(() => {
-      expect(screen.getByText('Invited member')).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByRole('button', { name: '只看这个目标' }))
-
-    await waitFor(() => {
-      expect(urls).toHaveLength(2)
-    })
-    expect(urls[1]).toContain('targetId=member-1')
-    await expandFiltersIfCollapsed(user)
-    expect(screen.getByLabelText('目标 ID')).toHaveValue('member-1')
+    expect(screen.getByText('1/3')).toBeInTheDocument()
   })
 
   it('lets the operator clear the local query from the active scope chips', async () => {
@@ -934,7 +608,7 @@ describe('AuditLogPage', () => {
     const { user } = renderWithProviders(<AuditLogPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('Invited member')).toBeInTheDocument()
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
     })
 
     const localSearch = screen.getByPlaceholderText(
@@ -947,6 +621,260 @@ describe('AuditLogPage', () => {
     await user.click(screen.getByRole('button', { name: '移除筛选：本地检索: playwright' }))
 
     expect(localSearch).toHaveValue('')
+  })
+
+  it('shows active filter count chip in collapsed view after applying filters', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('/fb/v1/console/audit-log', ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        })
+      }),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(urls).toHaveLength(1)
+    })
+
+    await expandFiltersIfCollapsed(user)
+    await user.type(screen.getByLabelText('目标 ID'), 'member-1')
+    await user.click(screen.getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() => {
+      expect(urls).toHaveLength(2)
+    })
+
+    await user.click(screen.getByRole('button', { name: '收起筛选' }))
+
+    expect(screen.getByText('已应用 1 条筛选')).toBeInTheDocument()
+  })
+
+  it('hides filter count chip when no filters are active in collapsed view', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '展开筛选' })).toBeInTheDocument()
+    })
+
+    expect(screen.queryByText(/已应用.*条筛选/)).not.toBeInTheDocument()
+    expect(screen.queryByText('未应用服务器筛选')).not.toBeInTheDocument()
+  })
+
+  it('renders compact page header with title and action buttons', async () => {
+    server.use(http.get('/fb/v1/console/audit-log', () => HttpResponse.json({ items: [] })))
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: '审计日志' })).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: /导出 CSV/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /导出证据包/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /复制当前视角/ })).toBeInTheDocument()
+  })
+
+  it('shows empty state when no audit records exist', async () => {
+    server.use(http.get('/fb/v1/console/audit-log', () => HttpResponse.json({ items: [] })))
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('暂无审计记录')).toBeInTheDocument()
+    })
+  })
+
+  it('navigates with keyboard shortcuts', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+            {
+              id: '2',
+              actorType: 'admin',
+              actorId: 'user-2',
+              action: 'member.remove',
+              targetType: 'member',
+              targetId: 'member-2',
+              summary: 'Removed member',
+              createdAt: '2026-06-16T09:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('1/2')).toBeInTheDocument()
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }))
+
+    await waitFor(() => {
+      expect(screen.getByText('2/2')).toBeInTheDocument()
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }))
+
+    await waitFor(() => {
+      expect(screen.getByText('1/2')).toBeInTheDocument()
+    })
+  })
+
+  it('focuses search input with / shortcut', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }))
+
+    const searchInput = screen.getByPlaceholderText(
+      '在已加载记录里继续搜索动作、摘要、操作者、目标或快照内容',
+    )
+    expect(searchInput).toHaveFocus()
+  })
+
+  it('opens details drawer with enter key', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    await waitFor(() => {
+      expect(window.location.search).toContain('entry=1')
+    })
+  })
+
+  it('closes details drawer with escape key', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
+    })
+
+    await user.click(screen.getAllByRole('button', { name: '查看详情' })[0] as HTMLElement)
+
+    await waitFor(() => {
+      expect(window.location.search).toContain('entry=1')
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
+    await waitFor(() => {
+      expect(window.location.search).not.toContain('entry=1')
+    })
   })
 
   it('shows a local-search empty state without losing the loaded results', async () => {
@@ -972,7 +900,7 @@ describe('AuditLogPage', () => {
     const { user } = renderWithProviders(<AuditLogPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('Invited member')).toBeInTheDocument()
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
     })
 
     await user.type(

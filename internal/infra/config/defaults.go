@@ -46,6 +46,8 @@ var (
 	DefaultGDPRDeleteGraceWindow = 15 * time.Minute
 )
 
+var DefaultAuditEvidenceExportTTL = 72 * time.Hour
+
 // Worker defaults
 const (
 	DefaultWorkerHeartbeatInterval = 90 * time.Second

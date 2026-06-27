@@ -38,3 +38,36 @@ func TestIngestPortInterface_Compiles(t *testing.T) {
 		return 0, nil
 	})
 }
+
+func TestIngestFunc_DelegatesCorrectly(t *testing.T) {
+	t.Parallel()
+	var calledTenant string
+	var calledKeyID uuid.UUID
+	var calledInput domain.IngestInput
+
+	f := inbound.IngestFunc(func(_ context.Context, tenant string, keyID uuid.UUID, in domain.IngestInput) (int64, error) {
+		calledTenant = tenant
+		calledKeyID = keyID
+		calledInput = in
+		return 42, nil
+	})
+
+	in := domain.IngestInput{Source: "test", Content: "body"}
+	testKeyID := uuid.New()
+	id, err := f.Ingest(context.Background(), "demo", testKeyID, in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != 42 {
+		t.Errorf("got id %d, want 42", id)
+	}
+	if calledTenant != "demo" {
+		t.Errorf("tenant = %q, want %q", calledTenant, "demo")
+	}
+	if calledKeyID != testKeyID {
+		t.Errorf("keyID = %v, want %v", calledKeyID, testKeyID)
+	}
+	if calledInput.Source != "test" {
+		t.Errorf("input.Source = %q, want %q", calledInput.Source, "test")
+	}
+}

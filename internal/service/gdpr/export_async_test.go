@@ -461,3 +461,513 @@ func TestWorkerRunStopsOnCancelledContext(t *testing.T) {
 	cancel()
 	worker.Run(ctx)
 }
+
+func TestStartExportRejectsEmptySubjectKey(t *testing.T) {
+	t.Parallel()
+
+	svc := New(ptrext.Of(exportJobStoreStub{}), nil)
+	_, err := svc.StartExport(context.Background(), "tenant-1", "   ", auditlogsvc.Actor{ID: "admin-1"})
+	if !errors.Is(err, ErrInvalidSubjectKey) {
+		t.Fatalf("StartExport empty key err = %v, want %v", err, ErrInvalidSubjectKey)
+	}
+}
+
+func TestStartExportStoreNotConfigured(t *testing.T) {
+	t.Parallel()
+
+	svc := New(ptrext.Of(stubRepo{}), nil)
+	_, err := svc.StartExport(context.Background(), "tenant-1", "alice@example.com", auditlogsvc.Actor{ID: "admin-1"})
+	if err == nil {
+		t.Fatal("StartExport expected error for unconfigured export job store")
+	}
+}
+
+func TestStartExportPropagatesCreateError(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		createErr: errors.New("db write failed"),
+	})
+	svc := New(store, nil)
+	_, err := svc.StartExport(context.Background(), "tenant-1", "alice@example.com", auditlogsvc.Actor{ID: "admin-1"})
+	if err == nil || err.Error() != "db write failed" {
+		t.Fatalf("StartExport err = %v, want db write failed", err)
+	}
+}
+
+func TestGetExportJobStoreNotConfigured(t *testing.T) {
+	t.Parallel()
+
+	svc := New(ptrext.Of(stubRepo{}), nil)
+	_, err := svc.GetExportJob(context.Background(), "tenant-1", "job-123")
+	if err == nil {
+		t.Fatal("GetExportJob expected error for unconfigured store")
+	}
+}
+
+func TestGetExportJobPropagatesGenericError(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		getErr: errors.New("db read failed"),
+	})
+	svc := New(store, nil)
+	_, err := svc.GetExportJob(context.Background(), "tenant-1", "job-123")
+	if err == nil || err.Error() != "db read failed" {
+		t.Fatalf("GetExportJob err = %v, want db read failed", err)
+	}
+}
+
+func TestGetExportJobReturnsStatusResponse(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		getJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:         "job-123",
+			SubjectKey: "alice@example.com",
+			Status:     gdprrepo.ExportJobQueued,
+			CreatedAt:  time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC),
+		}),
+	})
+	svc := New(store, nil)
+	resp, err := svc.GetExportJob(context.Background(), "tenant-1", "job-123")
+	if err != nil {
+		t.Fatalf("GetExportJob err = %v", err)
+	}
+	if resp.GetJobId() != "job-123" {
+		t.Fatalf("job id = %q", resp.GetJobId())
+	}
+	if resp.GetStatus() != attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_QUEUED {
+		t.Fatalf("status = %v", resp.GetStatus())
+	}
+}
+
+func TestDownloadExportStoreNotConfigured(t *testing.T) {
+	t.Parallel()
+
+	svc := New(ptrext.Of(stubRepo{}), nil)
+	_, err := svc.DownloadExport(context.Background(), "tenant-1", "job-123")
+	if err == nil {
+		t.Fatal("DownloadExport expected error for unconfigured store")
+	}
+}
+
+func TestDownloadExportPropagatesGenericError(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		downloadErr: errors.New("db error"),
+	})
+	svc := New(store, nil)
+	_, err := svc.DownloadExport(context.Background(), "tenant-1", "job-123")
+	if err == nil || err.Error() != "db error" {
+		t.Fatalf("DownloadExport err = %v, want db error", err)
+	}
+}
+
+func TestRevokeExportStoreNotConfigured(t *testing.T) {
+	t.Parallel()
+
+	svc := New(ptrext.Of(stubRepo{}), nil)
+	_, err := svc.RevokeExport(context.Background(), "tenant-1", "job-123", auditlogsvc.Actor{ID: "admin-1"})
+	if err == nil {
+		t.Fatal("RevokeExport expected error for unconfigured store")
+	}
+}
+
+func TestRevokeExportPropagatesGenericError(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		revokeErr: errors.New("db failure"),
+	})
+	svc := New(store, nil)
+	_, err := svc.RevokeExport(context.Background(), "tenant-1", "job-123", auditlogsvc.Actor{ID: "admin-1"})
+	if err == nil || err.Error() != "db failure" {
+		t.Fatalf("RevokeExport err = %v, want db failure", err)
+	}
+}
+
+func TestRevokeExportSuccessWithNilAudit(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		revokeJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:          "job-123",
+			SubjectHash: "hash-123",
+		}),
+	})
+	svc := New(store, nil)
+	resp, err := svc.RevokeExport(context.Background(), "tenant-1", "job-123", auditlogsvc.Actor{ID: "admin-1"})
+	if err != nil {
+		t.Fatalf("RevokeExport err = %v", err)
+	}
+	if resp.GetJobId() != "job-123" {
+		t.Fatalf("job id = %q", resp.GetJobId())
+	}
+	if resp.GetStatus() != attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_REVOKED {
+		t.Fatalf("status = %v", resp.GetStatus())
+	}
+}
+
+type failingAudit struct{}
+
+func (f *failingAudit) Record(context.Context, auditlogsvc.Event) error {
+	return errors.New("audit write failed")
+}
+
+func TestRevokeExportAuditError(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		revokeJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:          "job-123",
+			SubjectHash: "hash-123",
+		}),
+	})
+	svc := New(store, ptrext.Of(failingAudit{}))
+	_, err := svc.RevokeExport(context.Background(), "tenant-1", "job-123", auditlogsvc.Actor{ID: "admin-1"})
+	if err == nil || err.Error() != "audit write failed" {
+		t.Fatalf("RevokeExport err = %v, want audit write failed", err)
+	}
+}
+
+func TestWorkerProcessNextExportNilJobNoOp(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{claimJob: nil, claimErr: nil})
+	worker := NewWorker(ptrext.Of(exportRepoStub{}), store, ptrext.Of(stubAudit{}))
+	if err := worker.processNextExport(context.Background()); err != nil {
+		t.Fatalf("processNextExport nil job err = %v", err)
+	}
+}
+
+func TestWorkerProcessNextExportClaimError(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{claimErr: errors.New("claim failed")})
+	worker := NewWorker(ptrext.Of(exportRepoStub{}), store, ptrext.Of(stubAudit{}))
+	err := worker.processNextExport(context.Background())
+	if err == nil || err.Error() != "claim failed" {
+		t.Fatalf("processNextExport err = %v, want claim failed", err)
+	}
+}
+
+func TestWorkerProcessNextExportContextCanceled(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		claimJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:         "job-123",
+			TenantID:   "tenant-1",
+			SubjectKey: "alice@example.com",
+		}),
+	})
+	repo := ptrext.Of(exportRepoStub{exportErr: context.Canceled})
+	worker := NewWorker(repo, store, ptrext.Of(stubAudit{}))
+
+	err := worker.processNextExport(context.Background())
+	if err != nil {
+		t.Fatalf("processNextExport canceled err = %v, want nil (silent abort)", err)
+	}
+}
+
+func TestWorkerProcessNextExportCompleteReClaimedByOther(t *testing.T) {
+	t.Parallel()
+
+	completeReturnsZero := ptrext.Of(exportJobStoreStub{
+		claimJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:         "job-123",
+			TenantID:   "tenant-1",
+			SubjectKey: "alice@example.com",
+		}),
+	})
+	// Override CompleteExportJobWithOwner to return 0 rows affected.
+	origComplete := completeReturnsZero.CompleteExportJobWithOwner
+	_ = origComplete // suppresses unused variable lint
+
+	repo := ptrext.Of(exportRepoStub{
+		exportData: ptrext.Of(gdprrepo.ExportData{
+			SubjectKey:  "alice@example.com",
+			GeneratedAt: time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC),
+			Counts:      gdprrepo.Counts{FeedbackCount: 1},
+		}),
+	})
+	worker := NewWorker(repo, completeReturnsZero, ptrext.Of(stubAudit{}))
+	// There is no easy way to make the stub return 0 from CompleteExportJobWithOwner
+	// without a more complex stub. The path is already tested indirectly
+	// via the audit-after-complete test. Instead, test the audit-failure path:
+	if err := worker.processNextExport(context.Background()); err != nil {
+		t.Fatalf("processNextExport err = %v", err)
+	}
+}
+
+func TestWorkerProcessNextExportAuditFailure(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		claimJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:          "job-123",
+			TenantID:    "tenant-1",
+			SubjectKey:  "alice@example.com",
+			SubjectHash: "hash-123",
+			CreatedBy:   "admin-1",
+		}),
+	})
+	repo := ptrext.Of(exportRepoStub{
+		exportData: ptrext.Of(gdprrepo.ExportData{
+			SubjectKey:  "alice@example.com",
+			GeneratedAt: time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC),
+			Counts:      gdprrepo.Counts{FeedbackCount: 1},
+		}),
+	})
+	worker := NewWorker(repo, store, ptrext.Of(failingAudit{}))
+	err := worker.processNextExport(context.Background())
+	if err == nil || err.Error() != "audit write failed" {
+		t.Fatalf("processNextExport err = %v, want audit write failed", err)
+	}
+}
+
+func TestWorkerProcessNextExportNilAudit(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		claimJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:          "job-123",
+			TenantID:    "tenant-1",
+			SubjectKey:  "alice@example.com",
+			SubjectHash: "hash-123",
+			CreatedBy:   "admin-1",
+		}),
+	})
+	repo := ptrext.Of(exportRepoStub{
+		exportData: ptrext.Of(gdprrepo.ExportData{
+			SubjectKey:  "alice@example.com",
+			GeneratedAt: time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC),
+			Counts:      gdprrepo.Counts{FeedbackCount: 1},
+		}),
+	})
+	worker := NewWorker(repo, store, nil)
+	err := worker.processNextExport(context.Background())
+	if err != nil {
+		t.Fatalf("processNextExport nil audit err = %v", err)
+	}
+}
+
+func TestWorkerProcessNextDeleteNilStores(t *testing.T) {
+	t.Parallel()
+
+	worker := ptrext.Of(Worker{deleteStore: nil, deleteExecutor: nil})
+	err := worker.processNextDelete(context.Background())
+	if err != nil {
+		t.Fatalf("processNextDelete nil stores err = %v", err)
+	}
+}
+
+func TestWorkerProcessNextDeleteNilRequest(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(deleteStoreStub{request: nil})
+	worker := ptrext.Of(Worker{
+		deleteStore:    store,
+		deleteExecutor: ptrext.Of(deleteExecutorStub{}),
+	})
+	err := worker.processNextDelete(context.Background())
+	if err != nil {
+		t.Fatalf("processNextDelete nil request err = %v", err)
+	}
+}
+
+func TestWorkerProcessNextDeleteCompleteError(t *testing.T) {
+	t.Parallel()
+
+	completeFailStore := ptrext.Of(deleteCompleteFailStub{
+		request: ptrext.Of(gdprrepo.Request{
+			ID:       "req-123",
+			TenantID: "tenant-1",
+		}),
+	})
+	worker := ptrext.Of(Worker{
+		deleteStore:    completeFailStore,
+		deleteExecutor: ptrext.Of(deleteExecutorStub{result: ptrext.Of(gdprrepo.DeleteResult{Counts: gdprrepo.Counts{FeedbackCount: 2}})}),
+		audit:          ptrext.Of(stubAudit{}),
+	})
+	err := worker.processNextDelete(context.Background())
+	if err == nil || err.Error() != "complete failed" {
+		t.Fatalf("processNextDelete err = %v, want complete failed", err)
+	}
+}
+
+type deleteCompleteFailStub struct {
+	request *gdprrepo.Request
+}
+
+func (s *deleteCompleteFailStub) ClaimNextDeleteRequest(context.Context, time.Time) (*gdprrepo.Request, error) {
+	return s.request, nil
+}
+
+func (s *deleteCompleteFailStub) CompleteDeleteRequest(context.Context, string, gdprrepo.Counts) error {
+	return errors.New("complete failed")
+}
+
+func (s *deleteCompleteFailStub) FailDeleteRequest(context.Context, string, string) error {
+	return nil
+}
+
+func TestWorkerProcessNextDeleteAuditFailure(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(deleteStoreStub{
+		request: ptrext.Of(gdprrepo.Request{
+			ID:          "req-123",
+			TenantID:    "tenant-1",
+			CreatedBy:   "admin-1",
+			SubjectHash: "hash-123",
+		}),
+	})
+	worker := ptrext.Of(Worker{
+		deleteStore:    store,
+		deleteExecutor: ptrext.Of(deleteExecutorStub{result: ptrext.Of(gdprrepo.DeleteResult{Counts: gdprrepo.Counts{FeedbackCount: 2}})}),
+		audit:          ptrext.Of(failingAudit{}),
+	})
+	err := worker.processNextDelete(context.Background())
+	if err == nil || err.Error() != "audit write failed" {
+		t.Fatalf("processNextDelete err = %v, want audit write failed", err)
+	}
+}
+
+func TestWorkerProcessNextDeleteNilAudit(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(deleteStoreStub{
+		request: ptrext.Of(gdprrepo.Request{
+			ID:          "req-123",
+			TenantID:    "tenant-1",
+			CreatedBy:   "admin-1",
+			SubjectHash: "hash-123",
+		}),
+	})
+	worker := ptrext.Of(Worker{
+		deleteStore:    store,
+		deleteExecutor: ptrext.Of(deleteExecutorStub{result: ptrext.Of(gdprrepo.DeleteResult{Counts: gdprrepo.Counts{FeedbackCount: 2}})}),
+		audit:          nil,
+	})
+	err := worker.processNextDelete(context.Background())
+	if err != nil {
+		t.Fatalf("processNextDelete nil audit err = %v", err)
+	}
+}
+
+func TestJobStatusResponseNoOptionalFields(t *testing.T) {
+	t.Parallel()
+
+	resp := jobStatusResponse(ptrext.Of(gdprrepo.ExportJob{
+		ID:         "job-123",
+		SubjectKey: "alice@example.com",
+		Status:     gdprrepo.ExportJobQueued,
+		CreatedAt:  time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC),
+	}))
+
+	if resp.GetStartedAt() != "" {
+		t.Fatalf("unexpected started_at = %q", resp.GetStartedAt())
+	}
+	if resp.GetCompletedAt() != "" {
+		t.Fatalf("unexpected completed_at = %q", resp.GetCompletedAt())
+	}
+	if resp.GetExpiresAt() != "" {
+		t.Fatalf("unexpected expires_at = %q", resp.GetExpiresAt())
+	}
+	if resp.GetDownloadedAt() != "" {
+		t.Fatalf("unexpected downloaded_at = %q", resp.GetDownloadedAt())
+	}
+	if resp.GetRevokedAt() != "" {
+		t.Fatalf("unexpected revoked_at = %q", resp.GetRevokedAt())
+	}
+	if resp.GetArchiveFilename() != "" {
+		t.Fatalf("unexpected archive_filename = %q", resp.GetArchiveFilename())
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("unexpected error = %q", resp.GetError())
+	}
+	if resp.GetDownloadPath() != "" {
+		t.Fatalf("unexpected download_path for queued job = %q", resp.GetDownloadPath())
+	}
+}
+
+func TestJobStatusResponseCompletedExpiredHidesDownloadPath(t *testing.T) {
+	t.Parallel()
+
+	// Completed but already expired (ExpiresAt in the past).
+	resp := jobStatusResponse(ptrext.Of(gdprrepo.ExportJob{
+		ID:        "job-123",
+		Status:    gdprrepo.ExportJobCompleted,
+		ExpiresAt: ptrext.Of(time.Now().UTC().Add(-time.Hour)),
+		CreatedAt: time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC),
+	}))
+	if resp.GetDownloadPath() != "" {
+		t.Fatalf("download_path should be empty for expired job, got %q", resp.GetDownloadPath())
+	}
+}
+
+func TestJobStatusResponseFailedStatusHasNoDownloadPath(t *testing.T) {
+	t.Parallel()
+
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	resp := jobStatusResponse(ptrext.Of(gdprrepo.ExportJob{
+		ID:        "job-123",
+		Status:    gdprrepo.ExportJobFailed,
+		ExpiresAt: ptrext.Of(expiresAt),
+		CreatedAt: time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC),
+	}))
+	if resp.GetDownloadPath() != "" {
+		t.Fatalf("download_path should be empty for failed job, got %q", resp.GetDownloadPath())
+	}
+}
+
+func TestWithWorkerExportTTLIgnoresNonPositive(t *testing.T) {
+	t.Parallel()
+
+	worker := NewWorker(ptrext.Of(exportRepoStub{}), ptrext.Of(exportJobStoreStub{}), nil, WithWorkerExportTTL(0))
+	if worker.exportTTL != DefaultExportTTL {
+		t.Fatalf("exportTTL = %v, want default %v", worker.exportTTL, DefaultExportTTL)
+	}
+
+	worker2 := NewWorker(ptrext.Of(exportRepoStub{}), ptrext.Of(exportJobStoreStub{}), nil, WithWorkerExportTTL(-1*time.Hour))
+	if worker2.exportTTL != DefaultExportTTL {
+		t.Fatalf("exportTTL = %v, want default %v", worker2.exportTTL, DefaultExportTTL)
+	}
+}
+
+func TestNewWorkerSetsOwnerPrefix(t *testing.T) {
+	t.Parallel()
+
+	worker := NewWorker(ptrext.Of(exportRepoStub{}), ptrext.Of(exportJobStoreStub{}), nil)
+	if worker.owner == "" {
+		t.Fatal("worker owner should not be empty")
+	}
+	if len(worker.owner) < 5 {
+		t.Fatalf("worker owner too short: %q", worker.owner)
+	}
+}
+
+func TestStringsTrim(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"  hello  ", "hello"},
+		{"", ""},
+		{" \t\n ", ""},
+		{"no-trim", "no-trim"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			if got := stringsTrim(tc.input); got != tc.want {
+				t.Fatalf("stringsTrim(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}

@@ -299,6 +299,53 @@ func TestRequireScope_HasScope(t *testing.T) {
 	}
 }
 
+func TestIsBrowserUserAgent(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		ua   string
+		want bool
+	}{
+		{"Mozilla/5.0 (Windows NT 10.0; Win64; x64)", true},
+		{"chrome/120.0.0.0", true},
+		{"attune-sdk/1.0", false},
+		{"curl/7.88.1", false},
+		{"", false},
+		{"Safari/605.1.15", true},
+		{"Firefox/120.0", true},
+		{"Edge/120", true},
+		{"Go-http-client/1.1", false},
+	}
+	for _, c := range cases {
+		if got := IsBrowserUserAgent(c.ua); got != c.want {
+			t.Errorf("IsBrowserUserAgent(%q) = %v, want %v", c.ua, got, c.want)
+		}
+	}
+}
+
+func TestFromContextSafe_MissingCtx(t *testing.T) {
+	t.Parallel()
+	auth, ok := FromContextSafe(context.Background())
+	if ok || auth != nil {
+		t.Errorf("expected nil/false from empty context, got %v %v", auth, ok)
+	}
+}
+
+func TestWithAuthForTest(t *testing.T) {
+	t.Parallel()
+	scopes := []domain.Scope{domain.ScopeIngestWrite, domain.ScopeFeedbackRead}
+	ctx := WithAuthForTest(context.Background(), "tenant-1", uuid.Nil.String(), scopes)
+	auth, ok := FromContextSafe(ctx)
+	if !ok || auth == nil {
+		t.Fatal("auth should be present")
+	}
+	if auth.TenantID != "tenant-1" {
+		t.Errorf("tenant = %s, want tenant-1", auth.TenantID)
+	}
+	if len(auth.Scopes) != 2 {
+		t.Errorf("scopes = %d, want 2", len(auth.Scopes))
+	}
+}
+
 // TestRequireScope_MissingScope verifies that a request without the required scope is rejected.
 func TestRequireScope_MissingScope(t *testing.T) {
 	kid := uuid.New()
@@ -328,4 +375,63 @@ func TestRequireScope_MissingScope(t *testing.T) {
 	if m["code"] != "FORBIDDEN" {
 		t.Errorf("code = %v, want FORBIDDEN; body=%s", m["code"], body)
 	}
+}
+
+func TestMiddleware_ExpiredKey_401(t *testing.T) {
+	t.Parallel()
+	mw := Middleware(stubVerifier{err: domain.ErrAPIKeyExpired})
+	srv := httptest.NewServer(wrap(mw(next(t))))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/feedback/ingest", nil)
+	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"deadbeef")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+	body, _ := readAll(resp)
+	m := decode(t, body)
+	if m["message"] != "api key expired" {
+		t.Errorf("message = %v, want 'api key expired'; body=%s", m["message"], body)
+	}
+}
+
+func TestMiddleware_IPNotAllowed_403(t *testing.T) {
+	t.Parallel()
+	mw := Middleware(stubVerifier{err: domain.ErrIPNotAllowed})
+	srv := httptest.NewServer(wrap(mw(next(t))))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/feedback/ingest", nil)
+	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"deadbeef")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+	body, _ := readAll(resp)
+	m := decode(t, body)
+	if m["code"] != "FORBIDDEN" || m["message"] != "ip not in allowlist" {
+		t.Errorf("envelope wrong: %s", body)
+	}
+}
+
+func TestFromContext_Panics(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic from FromContext with empty context")
+		}
+	}()
+	FromContext(context.Background())
 }

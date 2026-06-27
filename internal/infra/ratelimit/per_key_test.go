@@ -34,6 +34,47 @@ func (v rpmVerifier) LookupWithScopesAndIP(context.Context, string, string) (str
 	return v.tenantID, v.keyID, domain.AllScopes, v.rpm, nil
 }
 
+func TestPerKeyBurst_NegativeRPM(t *testing.T) {
+	t.Parallel()
+	if perKeyBurst(-1) != 1 {
+		t.Fatal("negative rpm should clamp to 1")
+	}
+	if perKeyBurst(0) != 1 {
+		t.Fatal("zero rpm should clamp to 1")
+	}
+	if perKeyBurst(5) != 5 {
+		t.Fatal("positive rpm should be returned as-is")
+	}
+}
+
+func TestPerKey_RetryAfterSeconds(t *testing.T) {
+	t.Parallel()
+	l := NewPerKey(false, nil)
+	k := uuid.New()
+
+	if l.retryAfterSeconds(k, 0) != 0 {
+		t.Fatal("rpm=0 should return 0")
+	}
+	if l.retryAfterSeconds(uuid.Nil, 5) != 0 {
+		t.Fatal("nil key should return 0")
+	}
+
+	l.Allow(k, 1, "t")
+	l.Allow(k, 1, "t")
+	got := l.retryAfterSeconds(k, 1)
+	if got < 1 {
+		t.Fatalf("should have positive retry-after, got %d", got)
+	}
+}
+
+func TestPerKey_RetryAfterSeconds_Disabled(t *testing.T) {
+	t.Parallel()
+	l := NewPerKey(true, nil)
+	if l.retryAfterSeconds(uuid.New(), 5) != 0 {
+		t.Fatal("disabled limiter should return 0")
+	}
+}
+
 func TestPerKey_Allow(t *testing.T) {
 	l := NewPerKey(false, nil)
 	k := uuid.New()

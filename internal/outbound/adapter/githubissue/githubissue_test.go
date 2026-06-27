@@ -3,6 +3,8 @@
 package githubissue
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -195,5 +197,93 @@ func TestChannelID(t *testing.T) {
 	c := ptrext.Of(channel{})
 	if got := c.ID(); got != channelID {
 		t.Errorf("ID() = %q, want %q", got, channelID)
+	}
+}
+
+func TestRenderEvent_Success(t *testing.T) {
+	t.Parallel()
+	c := ptrext.Of(channel{})
+	env := ptrext.Of(outbound.Envelope{
+		Feedback: map[string]any{
+			"id":    float64(1),
+			"title": "Test Issue",
+		},
+	})
+	dst := outbound.Target{
+		URL:    "https://github.com/owner/repo",
+		Secret: "ghp_test_token",
+	}
+	rendered, err := c.RenderEvent(env, dst)
+	if err != nil {
+		t.Fatalf("RenderEvent: %v", err)
+	}
+	if rendered.Build == nil {
+		t.Fatal("Build must not be nil")
+	}
+	if rendered.Check == nil {
+		t.Fatal("Check must not be nil")
+	}
+}
+
+func TestRenderEvent_BadURL(t *testing.T) {
+	t.Parallel()
+	c := ptrext.Of(channel{})
+	env := ptrext.Of(outbound.Envelope{
+		Feedback: map[string]any{"id": float64(1), "title": "t"},
+	})
+	_, err := c.RenderEvent(env, outbound.Target{URL: "ftp://bad.example.com/x/y"})
+	if err == nil {
+		t.Fatal("expected error for non-github URL")
+	}
+}
+
+func TestRenderEvent_BuildSetsHeaders(t *testing.T) {
+	t.Parallel()
+	c := ptrext.Of(channel{})
+	env := ptrext.Of(outbound.Envelope{
+		Feedback: map[string]any{
+			"id":    float64(42),
+			"title": "Header check",
+		},
+	})
+	dst := outbound.Target{
+		URL:    "https://github.com/myorg/myrepo",
+		Secret: "ghp_token123",
+	}
+	rendered, err := c.RenderEvent(env, dst)
+	if err != nil {
+		t.Fatalf("RenderEvent: %v", err)
+	}
+	ctx := context.Background()
+	req, err := rendered.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer ghp_token123" {
+		t.Fatalf("Authorization = %q", got)
+	}
+	if got := req.Header.Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := req.Header.Get("Accept"); !strings.Contains(got, "github") {
+		t.Fatalf("Accept = %q", got)
+	}
+	if !strings.Contains(req.URL.Path, "myorg/myrepo") {
+		t.Fatalf("URL path = %q, expected myorg/myrepo", req.URL.Path)
+	}
+}
+
+func TestRenderEvent_TerminalOnInvalidURL(t *testing.T) {
+	t.Parallel()
+	c := ptrext.Of(channel{})
+	env := ptrext.Of(outbound.Envelope{
+		Feedback: map[string]any{"id": float64(1), "title": "t"},
+	})
+	_, err := c.RenderEvent(env, outbound.Target{URL: "https://not-github.com/a/b"})
+	if err == nil {
+		t.Fatal("expected error for non-github host")
+	}
+	if !errors.Is(err, outbound.ErrTerminal) {
+		t.Fatalf("expected terminal error, got %v", err)
 	}
 }

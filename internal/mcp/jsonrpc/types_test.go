@@ -78,3 +78,26 @@ func TestError_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "-32600")
 	assert.Contains(t, err.Error(), "test error")
 }
+
+func TestInvalidParams(t *testing.T) {
+	t.Parallel()
+	resp := jsonrpc.InvalidParams("req-1", "missing field")
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, jsonrpc.CodeInvalidParams, resp.Error.Code)
+	assert.Equal(t, "missing field", resp.Error.Message)
+}
+
+func TestInternalError(t *testing.T) {
+	t.Parallel()
+	resp := jsonrpc.InternalError("req-2", "oops")
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, jsonrpc.CodeInternalError, resp.Error.Code)
+	assert.Equal(t, "oops", resp.Error.Message)
+}
+
+func TestInvalidRequest(t *testing.T) {
+	t.Parallel()
+	resp := jsonrpc.InvalidRequest("req-3", "bad version")
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, jsonrpc.CodeInvalidRequest, resp.Error.Code)
+}

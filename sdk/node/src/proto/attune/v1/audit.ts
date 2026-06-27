@@ -54,7 +54,49 @@ export interface ExportAuditLogCSVRequest {
   actions: string[];
 }
 
+export interface CreateAuditEvidenceExportRequest {
+  from: string;
+  to: string;
+  actions: string[];
+  actorType: string;
+  actorId: string;
+  targetType: string;
+  targetId: string;
+}
+
+export interface CreateAuditEvidenceExportResponse {
+  jobId: string;
+  status: string;
+  retryAfterSeconds: number;
+}
+
+export interface GetAuditEvidenceExportRequest {
+  jobId: string;
+}
+
+export interface GetAuditEvidenceExportResponse {
+  jobId: string;
+  status: string;
+  totalEvents: number;
+  createdAt: string;
+  startedAt?: string | undefined;
+  completedAt?: string | undefined;
+  expiresAt?: string | undefined;
+  downloadedAt?: string | undefined;
+  downloadPath?: string | undefined;
+  archiveFilename?: string | undefined;
+  error?: string | undefined;
+  retryAfterSeconds: number;
+}
+
+export interface DownloadAuditEvidenceExportRequest {
+  jobId: string;
+}
+
 export interface AuditLogService {
   ListAuditLog(request: ListAuditLogRequest): Promise<ListAuditLogResponse>;
   ExportAuditLogCSV(request: ExportAuditLogCSVRequest): Promise<HttpBody>;
+  CreateAuditEvidenceExport(request: CreateAuditEvidenceExportRequest): Promise<CreateAuditEvidenceExportResponse>;
+  GetAuditEvidenceExport(request: GetAuditEvidenceExportRequest): Promise<GetAuditEvidenceExportResponse>;
+  DownloadAuditEvidenceExport(request: DownloadAuditEvidenceExportRequest): Promise<HttpBody>;
 }

@@ -100,6 +100,44 @@ func TestEnum(t *testing.T) {
 	}
 }
 
+func TestInt64(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		query         string
+		key           string
+		def, min, max int64
+		expected      int64
+	}{
+		{"", "n", 10, 1, 100, 10},
+		{"n=42", "n", 10, 1, 100, 42},
+		{"n=0", "n", 10, 1, 100, 1},
+		{"n=200", "n", 10, 1, 100, 100},
+		{"n=abc", "n", 10, 1, 100, 10},
+		{"n=-5", "n", 10, -10, 100, -5},
+	}
+	for _, tt := range tests {
+		result := Int64(request(tt.query), tt.key, tt.def, tt.min, tt.max)
+		require.Equal(t, tt.expected, result, "query=%q", tt.query)
+	}
+}
+
+func TestTime(t *testing.T) {
+	t.Parallel()
+	def := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		query    string
+		expected time.Time
+	}{
+		{"", def},
+		{"t=2026-06-15T10:30:00Z", time.Date(2026, 6, 15, 10, 30, 0, 0, time.UTC)},
+		{"t=not-a-date", def},
+	}
+	for _, tt := range tests {
+		result := Time(request(tt.query), "t", def)
+		require.Equal(t, tt.expected, result, "query=%q", tt.query)
+	}
+}
+
 func TestDuration(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func TestCheckIP(t *testing.T) {
@@ -172,4 +174,183 @@ func TestRedactURLIn(t *testing.T) {
 	if RedactURLIn("anything", "") != "anything" {
 		t.Errorf("empty rawURL should be a no-op")
 	}
+}
+
+func TestBlockedError_Error(t *testing.T) {
+	t.Parallel()
+
+	e := ptrext.Of(BlockedError{Host: "example.internal", Reason: "internal / DNS-rebinding domain"})
+	if !strings.Contains(e.Error(), "example.internal") {
+		t.Fatalf("Error() should contain host: %s", e.Error())
+	}
+
+	e = ptrext.Of(BlockedError{IP: net.ParseIP("10.0.0.1"), Reason: "private"})
+	if !strings.Contains(e.Error(), "10.0.0.1") {
+		t.Fatalf("Error() should contain IP when set: %s", e.Error())
+	}
+}
+
+func TestCheckIP_NilIP(t *testing.T) {
+	t.Parallel()
+	err := Policy{}.CheckIP(nil)
+	if err == nil {
+		t.Fatal("nil IP should be blocked")
+	}
+	var blocked *BlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("expected *BlockedError, got %T", err)
+	}
+	if !strings.Contains(blocked.Reason, "unparseable") {
+		t.Fatalf("reason should mention unparseable: %s", blocked.Reason)
+	}
+}
+
+func TestValidateURL_BadURL(t *testing.T) {
+	t.Parallel()
+	err := Policy{}.ValidateURL("://bad")
+	if err == nil {
+		t.Fatal("expected error for bad URL")
+	}
+}
+
+func TestValidateURL_EmptyHost(t *testing.T) {
+	t.Parallel()
+	err := Policy{}.ValidateURL("file:///etc/passwd")
+	if err == nil {
+		t.Fatal("expected error for empty host")
+	}
+	var blocked *BlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("expected *BlockedError, got %T", err)
+	}
+}
+
+func TestRedactURL_BadURL(t *testing.T) {
+	t.Parallel()
+	got := RedactURL("://bad")
+	if got != "<redacted-url>" {
+		t.Fatalf("bad URL should return <redacted-url>, got %q", got)
+	}
+}
+
+func TestRedactURL_EmptyHost(t *testing.T) {
+	t.Parallel()
+	got := RedactURL("not-a-url")
+	if got != "<redacted-url>" {
+		t.Fatalf("non-URL should return <redacted-url>, got %q", got)
+	}
+}
+
+func TestSetTrustedProxyHops(t *testing.T) {
+	SetTrustedProxyHops(2)
+	defer SetTrustedProxyHops(0)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8, 9.0.1.2")
+
+	ip := ClientIPDefault(req)
+	if ip != "5.6.7.8" {
+		t.Fatalf("expected 5.6.7.8 (2 hops from right), got %s", ip)
+	}
+}
+
+func TestClientIPDefault_NoHops(t *testing.T) {
+	SetTrustedProxyHops(0)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+
+	ip := ClientIPDefault(req)
+	if ip != "10.0.0.1" {
+		t.Fatalf("expected peer address 10.0.0.1, got %s", ip)
+	}
+}
+
+func TestDialControl_UnparseableAddress(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: false}
+	err := p.dialControl("tcp", "not-an-ip", nil)
+	if err == nil {
+		t.Fatal("expected error for unparseable address")
+	}
+	var blocked *BlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("expected BlockedError, got %T", err)
+	}
+}
+
+func TestDialControl_PrivateIP(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: false}
+	err := p.dialControl("tcp", "10.0.0.1:80", nil)
+	if err == nil {
+		t.Fatal("expected error for private IP")
+	}
+}
+
+func TestDialControl_AllowedPublicIP(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: false}
+	err := p.dialControl("tcp", "8.8.8.8:443", nil)
+	if err != nil {
+		t.Fatalf("expected nil for public IP, got %v", err)
+	}
+}
+
+func TestDialControl_AllowLoopback(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: true}
+	err := p.dialControl("tcp", "127.0.0.1:8080", nil)
+	if err != nil {
+		t.Fatalf("expected nil for loopback when allowed, got %v", err)
+	}
+}
+
+func TestCheckIP_MetadataIP(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: false}
+	ip := net.ParseIP("100.100.100.200")
+	err := p.CheckIP(ip)
+	if err == nil {
+		t.Fatal("expected error for cloud metadata IP")
+	}
+}
+
+func TestCheckIP_6to4Embedded(t *testing.T) {
+	t.Parallel()
+	p := Policy{AllowPrivate: false, AllowLoopback: false}
+	ip := net.ParseIP("2002:0a00:0001::1")
+	err := p.CheckIP(ip)
+	if err == nil {
+		t.Fatal("expected error for 6to4-embedded private IP")
+	}
+}
+
+func TestRemoteHost_NoPort(t *testing.T) {
+	t.Parallel()
+	got := remoteHost("192.168.1.1")
+	if got != "192.168.1.1" {
+		t.Fatalf("expected '192.168.1.1', got %q", got)
+	}
+}
+
+func TestRemoteHost_WithPort(t *testing.T) {
+	t.Parallel()
+	got := remoteHost("192.168.1.1:8080")
+	if got != "192.168.1.1" {
+		t.Fatalf("expected '192.168.1.1', got %q", got)
+	}
+}
+
+func TestMustCIDR_Panic(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic from mustCIDR with invalid CIDR")
+		}
+	}()
+	mustCIDR("not-a-cidr")
 }

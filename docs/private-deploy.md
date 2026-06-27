@@ -139,6 +139,40 @@ audit:
 - `audit.prune_interval` controls how often the background pruner removes expired rows.
 - CSV audit exports contain actor metadata and sanitized before/after payloads; treat them like internal security records and avoid sharing them through public channels.
 
+To sign audit evidence exports with Ed25519, generate a keypair:
+
+```bash
+docker compose run --rm attune audit generate-signing-key
+```
+
+This prints a hex-encoded Ed25519 seed (`signing_key`) and the corresponding
+`public_key`. Add the seed to `config.yaml`:
+
+```yaml
+audit:
+  evidence:
+    export_ttl: 72h
+    signing_key: "<hex from generate-signing-key>"
+```
+
+- `audit.evidence.export_ttl` controls how long exported archives remain downloadable (default `72h`).
+- `audit.evidence.signing_key` is a hex-encoded Ed25519 seed (32 bytes). When set, every export archive includes a `manifest.sig` detached signature.
+
+Distribute the public key to auditors. They verify an export with:
+
+```bash
+attune audit verify-export --public-key <hex-public-key> archive.zip
+```
+
+To re-derive the public key from an existing signing key:
+
+```bash
+docker compose run --rm attune audit export-public-key --signing-key <hex>
+```
+
+> **Treat the signing key like a credential.** Store it in the same secret
+> manager as your Tink keyset. The public key is safe to distribute.
+
 If this deployment already has inbound sources encrypted by the old
 `ATTUNE_INBOUND_MASTER_KEY`, paste that old 32-byte key as hex/base64 into
 `secrets.legacy_inbound_master_key` before the first rollout. After startup,

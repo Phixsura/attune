@@ -57,6 +57,7 @@ var subcommands = map[string]func([]string) error{
 	"secrets": runSecrets,
 	"llm":     runLLM,
 	"embed":   runEmbed,
+	"audit":   runAudit,
 }
 
 func main() {
@@ -110,6 +111,9 @@ Usage:
  attune secrets generate-keyset|keyset-info|add-key|set-primary|delete-key|reencrypt|retire-key Manage Tink runtime secrets
  attune llm channels|abilities|routes ... Manage DB-backed LLM config
  attune embed backfill|reset|status --tenant <slug> Manage feedback embeddings (#25)
+ attune audit verify-export [--public-key <hex>] <archive.zip> Verify evidence pack integrity
+ attune audit generate-signing-key              Generate Ed25519 signing keypair
+ attune audit export-public-key --signing-key <hex> Derive public key from signing key
 `)
 }
 

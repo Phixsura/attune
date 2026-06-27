@@ -113,6 +113,9 @@ exposition plus the portable assets in this directory.
 | `attune_restore_drill_last_success_timestamp_seconds` | gauge | — | unix timestamp of the most recent non-failing restore drill, derived from `restore_drill_runs` at scrape time (#151) |
 | `attune_restore_drill_runs_total` | counter | `status` | restore drills recorded, by status (#151) |
 | `attune_restore_drill_last_rto_seconds` | gauge | — | measured restore duration (RTO) of the most recent drill that recorded one (#151) |
+| `attune_audit_evidence_exports_total` | counter | `tenant`, `status` | audit evidence export jobs by outcome (#152) |
+| `attune_audit_evidence_export_duration_seconds` | histogram | `tenant` | audit evidence export processing latency (#152) |
+| `attune_audit_evidence_export_size_bytes` | histogram | `tenant` | audit evidence archive size in bytes (#152) |
 
 Label values:
 

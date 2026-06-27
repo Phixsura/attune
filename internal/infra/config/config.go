@@ -6,6 +6,7 @@ package config
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
@@ -47,6 +48,7 @@ type Config struct {
 	Enricher      EnricherConfig
 	Workers       WorkersConfig
 	Audit         AuditConfig
+	AuditEvidence AuditEvidenceConfig
 	GDPR          GDPRConfig
 	Console       ConsoleConfig
 	Shutdown      ShutdownConfig
@@ -61,26 +63,28 @@ type Config struct {
 
 	// Convenience fields used by legacy wiring while the runtime contract is
 	// config-first/nested.
-	DatabaseURL           string
-	EnricherInterval      time.Duration
-	EnricherBatch         int
-	EnricherQueueLen      int
-	EnricherWorkers       int
-	EnricherBatchWindow   time.Duration
-	EnricherLLMMaxQPS     float64
-	EnricherLLMBurst      int
-	ConsoleSessionKey     string
-	ConsoleBaseURL        string
-	RateLimitPerMinute    int
-	RateLimitBurst        int
-	RateLimitDisabled     bool
-	AuditRetention        time.Duration
-	AuditPruneInterval    time.Duration
-	GDPRExportTTL         time.Duration
-	GDPRStepUpTTL         time.Duration
-	GDPRDeleteGraceWindow time.Duration
-	ShutdownDrainDelay    time.Duration
-	ShutdownTimeout       time.Duration
+	DatabaseURL             string
+	EnricherInterval        time.Duration
+	EnricherBatch           int
+	EnricherQueueLen        int
+	EnricherWorkers         int
+	EnricherBatchWindow     time.Duration
+	EnricherLLMMaxQPS       float64
+	EnricherLLMBurst        int
+	ConsoleSessionKey       string
+	ConsoleBaseURL          string
+	RateLimitPerMinute      int
+	RateLimitBurst          int
+	RateLimitDisabled       bool
+	AuditRetention          time.Duration
+	AuditPruneInterval      time.Duration
+	AuditEvidenceExportTTL  time.Duration
+	AuditEvidenceSigningKey []byte
+	GDPRExportTTL           time.Duration
+	GDPRStepUpTTL           time.Duration
+	GDPRDeleteGraceWindow   time.Duration
+	ShutdownDrainDelay      time.Duration
+	ShutdownTimeout         time.Duration
 
 	// MCP convenience fields
 	MCPEnabled            bool
@@ -134,6 +138,11 @@ type GDPRConfig struct {
 	ExportTTL         string `yaml:"export_ttl"`
 	StepUpTTL         string `yaml:"step_up_ttl"`
 	DeleteGraceWindow string `yaml:"delete_grace_window"`
+}
+
+type AuditEvidenceConfig struct {
+	ExportTTL  string `yaml:"export_ttl"`
+	SigningKey string `yaml:"signing_key"`
 }
 
 type ConsoleConfig struct {
@@ -229,6 +238,7 @@ type yamlConfig struct {
 	Migrations     MigrationsConfig    `yaml:"migrations"`
 	Enricher       EnricherConfig      `yaml:"enricher"`
 	Audit          AuditConfig         `yaml:"audit"`
+	AuditEvidence  AuditEvidenceConfig `yaml:"audit_evidence"`
 	GDPR           GDPRConfig          `yaml:"gdpr"`
 	Console        ConsoleConfig       `yaml:"console"`
 	Shutdown       ShutdownConfig      `yaml:"shutdown"`
@@ -298,6 +308,7 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 		Migrations:     yc.Migrations,
 		Enricher:       yc.Enricher,
 		Audit:          yc.Audit,
+		AuditEvidence:  yc.AuditEvidence,
 		GDPR:           yc.GDPR,
 		Console:        yc.Console,
 		Shutdown:       yc.Shutdown,
@@ -324,6 +335,9 @@ func (c *Config) parseDerivedFields() error {
 		return err
 	}
 	if err := c.parseAuditFields(); err != nil {
+		return err
+	}
+	if err := c.parseAuditEvidenceFields(); err != nil {
 		return err
 	}
 	if err := c.parseGDPRFields(); err != nil {
@@ -368,6 +382,26 @@ func (c *Config) parseAuditFields() error {
 	}
 	c.AuditRetention = time.Duration(c.Audit.RetentionDays) * 24 * time.Hour
 	c.AuditPruneInterval = pruneInterval
+	return nil
+}
+
+func (c *Config) parseAuditEvidenceFields() error {
+	ttl, err := time.ParseDuration(c.AuditEvidence.ExportTTL)
+	if err != nil {
+		return fmt.Errorf("audit_evidence.export_ttl: %w", err)
+	}
+	c.AuditEvidenceExportTTL = ttl
+	if raw := strings.TrimSpace(c.AuditEvidence.SigningKey); raw != "" {
+		key, err := hex.DecodeString(raw)
+		if err != nil {
+			return fmt.Errorf("audit_evidence.signing_key: must be hex-encoded: %w", err)
+		}
+		const ed25519SeedSize = 32
+		if len(key) < ed25519SeedSize {
+			return fmt.Errorf("audit_evidence.signing_key: must be at least %d bytes (got %d)", ed25519SeedSize, len(key))
+		}
+		c.AuditEvidenceSigningKey = key
+	}
 	return nil
 }
 
@@ -484,6 +518,7 @@ func (c *Config) applyDefaults() {
 	if c.Audit.PruneInterval == "" {
 		c.Audit.PruneInterval = DefaultAuditPruneInterval.String()
 	}
+	c.applyAuditEvidenceDefaults()
 	c.applyGDPRDefaults()
 	if c.Shutdown.DrainDelay == "" {
 		c.Shutdown.DrainDelay = DefaultShutdownDrainDelay.String()
@@ -501,6 +536,12 @@ func (c *Config) applyDefaults() {
 	c.OIDC.ApplyDefaults()
 	c.applyWorkerDefaults()
 	c.applyMCPDefaults()
+}
+
+func (c *Config) applyAuditEvidenceDefaults() {
+	if c.AuditEvidence.ExportTTL == "" {
+		c.AuditEvidence.ExportTTL = DefaultAuditEvidenceExportTTL.String()
+	}
 }
 
 func (c *Config) applyWorkerDefaults() {
@@ -590,6 +631,9 @@ func (c *Config) validate() error {
 	if err := c.validateAuditConfig(); err != nil {
 		return err
 	}
+	if err := c.validateAuditEvidenceConfig(); err != nil {
+		return err
+	}
 	if err := c.validateGDPRConfig(); err != nil {
 		return err
 	}
@@ -614,6 +658,13 @@ func (c *Config) validateAuditConfig() error {
 	}
 	if c.AuditPruneInterval <= 0 {
 		return fmt.Errorf("config: audit.prune_interval must be positive")
+	}
+	return nil
+}
+
+func (c *Config) validateAuditEvidenceConfig() error {
+	if c.AuditEvidenceExportTTL <= 0 {
+		return fmt.Errorf("config: audit_evidence.export_ttl must be positive")
 	}
 	return nil
 }

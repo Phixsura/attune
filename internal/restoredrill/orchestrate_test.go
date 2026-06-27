@@ -89,3 +89,112 @@ func TestEphemeralDBName(t *testing.T) {
 		t.Fatalf("ephemeralDBName = %q", n)
 	}
 }
+
+func TestEphemeralDBName_Unique(t *testing.T) {
+	t.Parallel()
+	n1, err := ephemeralDBName()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n2, err := ephemeralDBName()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n1 == n2 {
+		t.Fatalf("two ephemeralDBName calls returned the same name: %q", n1)
+	}
+}
+
+func TestWithDatabase_NonPostgresScheme(t *testing.T) {
+	t.Parallel()
+	_, err := withDatabase("http://user:pass@host:5432/db", "newdb")
+	if err == nil {
+		t.Fatal("expected error for http scheme")
+	}
+	if !strings.Contains(err.Error(), "postgres://") {
+		t.Fatalf("error %q should mention postgres:// requirement", err)
+	}
+}
+
+func TestWithDatabase_PostgresqlScheme(t *testing.T) {
+	t.Parallel()
+	got, err := withDatabase("postgresql://u:p@h:5432/olddb?sslmode=disable", "newdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "/newdb") {
+		t.Fatalf("withDatabase = %q, expected /newdb", got)
+	}
+	if !strings.Contains(got, "sslmode=disable") {
+		t.Fatalf("withDatabase = %q, expected sslmode to be preserved", got)
+	}
+}
+
+func TestRestoreConn_NonPostgresScheme(t *testing.T) {
+	t.Parallel()
+	_, _, err := restoreConn("http://user:pass@host:5432/db")
+	if err == nil {
+		t.Fatal("expected error for http scheme")
+	}
+	if !strings.Contains(err.Error(), "postgres://") {
+		t.Fatalf("error %q should mention postgres:// requirement", err)
+	}
+}
+
+func TestRestoreConn_PostgresqlScheme(t *testing.T) {
+	t.Parallel()
+	uri, env, err := restoreConn("postgresql://user:secret@host:5432/db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := envVal(env, "PGPASSWORD"); got != "secret" {
+		t.Fatalf("PGPASSWORD = %q, want secret", got)
+	}
+	if strings.Contains(uri, "secret") {
+		t.Fatalf("password leaked into URI: %q", uri)
+	}
+}
+
+func TestRestoreConn_ParseError(t *testing.T) {
+	t.Parallel()
+	_, _, err := restoreConn("://bad url")
+	if err == nil {
+		t.Fatal("expected parse error for malformed URL")
+	}
+}
+
+func TestRestoreConn_NoUser(t *testing.T) {
+	t.Parallel()
+	// A URL with no user info at all
+	uri, _, err := restoreConn("postgres://host:5432/db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(uri, "host:5432/db") {
+		t.Fatalf("URI = %q, expected host:5432/db", uri)
+	}
+}
+
+func TestLastLines_EmptyString(t *testing.T) {
+	t.Parallel()
+	got := lastLines("", 3)
+	if got != "" {
+		t.Fatalf("lastLines empty = %q, want empty", got)
+	}
+}
+
+func TestLastLines_ExactN(t *testing.T) {
+	t.Parallel()
+	got := lastLines("a\nb\nc", 3)
+	if got != "a | b | c" {
+		t.Fatalf("lastLines exact = %q", got)
+	}
+}
+
+func TestLastLines_SingleLine(t *testing.T) {
+	t.Parallel()
+	got := lastLines("single line", 5)
+	if got != "single line" {
+		t.Fatalf("lastLines single = %q", got)
+	}
+}

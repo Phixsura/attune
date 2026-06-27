@@ -23,6 +23,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
+	consoleauditevidence "github.com/Phixsura/attune/internal/handlers/console/auditevidence"
 	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/clusters"
@@ -68,6 +69,7 @@ var (
 	NewSigner                    = session.NewSigner
 	NewAuthHandler               = auth.NewHandler
 	NewAuditLogHandler           = consoleauditlog.NewHandler
+	NewAuditEvidenceHandler      = consoleauditevidence.NewHandler
 	NewChangePasswordHandler     = auth.NewChangePasswordHandler
 	NewMeHandler                 = me.NewMeHandler
 	NewAPIKeysHandler            = apikey.NewAPIKeysHandler
@@ -169,6 +171,7 @@ type Router struct {
 	oidc               *consoleoidc.Handler
 	members            *member.Handler
 	mcpClients         *consolemcpclient.Handler
+	auditEvidence      *consoleauditevidence.Handler
 	preflight          http.Handler
 	admins             adminReader
 	rbac               *rbac.Middleware
@@ -1145,6 +1148,59 @@ func (r *Router) mountAuditLog(m chi.Router) {
 			}),
 		))
 		a.Get("/export.csv", r.auditLog.ExportCSV)
+		r.mountAuditEvidence(a)
+	})
+}
+
+func (r *Router) SetAuditEvidenceHandler(h *consoleauditevidence.Handler) {
+	r.auditEvidence = h
+}
+
+func (r *Router) mountAuditEvidence(a chi.Router) {
+	if r.auditEvidence == nil {
+		return
+	}
+	a.Route("/evidence", func(e chi.Router) {
+		e.Post("/", dispatcher.Bind(
+			"console.auditevidence.Create",
+			dispatcher.JSON(func() *attunev1.CreateAuditEvidenceExportRequest {
+				return ptrext.Of(attunev1.CreateAuditEvidenceExportRequest{})
+			}),
+			r.auditEvidence.Create,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateAuditEvidenceExportRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		e.Get("/{job_id}", dispatcher.Bind(
+			"console.auditevidence.Get",
+			dispatcher.Empty(func() *attunev1.GetAuditEvidenceExportRequest {
+				return ptrext.Of(attunev1.GetAuditEvidenceExportRequest{})
+			}),
+			r.auditEvidence.Get,
+			dispatcher.WithBinders(
+				dispatcher.Param("job_id", func(req *attunev1.GetAuditEvidenceExportRequest, id string) {
+					req.JobId = id
+				}),
+			),
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetAuditEvidenceExportRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		e.Get("/{job_id}/download", dispatcher.Bind(
+			"console.auditevidence.Download",
+			dispatcher.Empty(func() *attunev1.DownloadAuditEvidenceExportRequest {
+				return ptrext.Of(attunev1.DownloadAuditEvidenceExportRequest{})
+			}),
+			r.auditEvidence.Download,
+			dispatcher.WithBinders(
+				dispatcher.Param("job_id", func(req *attunev1.DownloadAuditEvidenceExportRequest, id string) {
+					req.JobId = id
+				}),
+			),
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DownloadAuditEvidenceExportRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 	})
 }
 

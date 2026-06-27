@@ -579,3 +579,81 @@ func readBody(r *http.Request) []byte {
 	body, _ := io.ReadAll(r.Body)
 	return body
 }
+
+func TestValidTimestamp(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{"2025-01-15T10:00:00Z", "2025-01-15T10:00:00Z"},
+		{"not-a-date", ""},
+		{"2025-13-01", ""},
+	}
+	for _, c := range cases {
+		if got := validTimestamp(c.in); got != c.want {
+			t.Errorf("validTimestamp(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestToDigestView_DirectType(t *testing.T) {
+	t.Parallel()
+	dv := digestView{TenantID: "t1", RunDate: "2025-01-01"}
+	got, ok := toDigestView(dv)
+	if !ok {
+		t.Fatal("direct type assertion should succeed")
+	}
+	if got.TenantID != "t1" {
+		t.Fatalf("tenant_id = %q, want t1", got.TenantID)
+	}
+}
+
+func TestToDigestView_MapViaJSON(t *testing.T) {
+	t.Parallel()
+	m := map[string]any{
+		"tenant_id": "t2",
+		"run_date":  "2025-06-01",
+	}
+	got, ok := toDigestView(m)
+	if !ok {
+		t.Fatal("map should marshal/unmarshal to digestView")
+	}
+	if got.TenantID != "t2" {
+		t.Fatalf("tenant_id = %q, want t2", got.TenantID)
+	}
+}
+
+func TestToDigestView_EmptyMap(t *testing.T) {
+	t.Parallel()
+	_, ok := toDigestView(map[string]any{})
+	if ok {
+		t.Fatal("empty map should return false (no tenant_id or run_date)")
+	}
+}
+
+func TestToDigestView_Unmarshalable(t *testing.T) {
+	t.Parallel()
+	_, ok := toDigestView(make(chan int))
+	if ok {
+		t.Fatal("channel should not marshal")
+	}
+}
+
+func TestDescriptionBudget_LongTitle(t *testing.T) {
+	t.Parallel()
+	longTitle := string(make([]rune, 7000))
+	got := descriptionBudget(discordEmbed{Title: longTitle})
+	if got != 0 {
+		t.Fatalf("expected 0 budget for oversized title, got %d", got)
+	}
+}
+
+func TestDescriptionBudget_EmptyEmbed(t *testing.T) {
+	t.Parallel()
+	got := descriptionBudget(discordEmbed{})
+	if got <= 0 {
+		t.Fatalf("empty embed should have positive budget, got %d", got)
+	}
+}

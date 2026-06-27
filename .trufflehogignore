@@ -1,3 +1,13 @@
 # Exclude test config files with intentional test-only credentials
 deploy/config.oidc-test.yaml
 deploy/docker-compose.oidc-test.yml
+
+# Test files with localhost-only postgres URIs (no real credentials)
+cmd/attune/cli_extra_coverage_test.go
+cmd/attune/drill_coverage_test.go
+internal/infra/config/config_test.go
+internal/infra/database/pool_coverage_test.go
+internal/restoredrill/orchestrate_test.go
+
+# Documentation with example localhost postgres URIs
+docs/private-deploy.md

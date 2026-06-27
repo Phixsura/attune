@@ -49,6 +49,72 @@ func TestPriceUsage_ProviderPrefixedModel(t *testing.T) {
 	}
 }
 
+func TestNonNegativeI32(t *testing.T) {
+	t.Parallel()
+	if nonNegativeI32(-5) != 0 {
+		t.Fatal("negative should clamp to 0")
+	}
+	if nonNegativeI32(0) != 0 {
+		t.Fatal("zero should stay 0")
+	}
+	if nonNegativeI32(42) != 42 {
+		t.Fatal("positive should be unchanged")
+	}
+}
+
+func TestModelHasPrefix_ExactMatch(t *testing.T) {
+	t.Parallel()
+	if !modelHasPrefix("gpt-4o", "gpt-4o") {
+		t.Fatal("exact match should be true")
+	}
+}
+
+func TestModelHasPrefix_Separators(t *testing.T) {
+	t.Parallel()
+	for _, sep := range []string{"-", "_", ":", "@"} {
+		if !modelHasPrefix("gpt-4o"+sep+"mini", "gpt-4o") {
+			t.Fatalf("separator %q should match", sep)
+		}
+	}
+}
+
+func TestModelHasPrefix_NoSeparator(t *testing.T) {
+	t.Parallel()
+	if modelHasPrefix("gpt-4omini", "gpt-4o") {
+		t.Fatal("no separator should not match")
+	}
+}
+
+func TestModelHasPrefix_NotPrefix(t *testing.T) {
+	t.Parallel()
+	if modelHasPrefix("llama-3", "gpt-4o") {
+		t.Fatal("non-prefix should not match")
+	}
+}
+
+func TestNormalizeModelName(t *testing.T) {
+	t.Parallel()
+	if normalizeModelName("  GPT-4O  ") != "gpt-4o" {
+		t.Fatal("should trim and lowercase")
+	}
+}
+
+func TestLookupModelPrice_EmptyModel(t *testing.T) {
+	t.Parallel()
+	_, ok := LookupModelPrice("")
+	if ok {
+		t.Fatal("empty model should not be found")
+	}
+}
+
+func TestPriceUsage_NegativeTokens(t *testing.T) {
+	t.Parallel()
+	got := PriceUsage("gpt-4o-mini", Usage{InputTokens: -100, OutputTokens: -50})
+	if got.CostUSD != 0 {
+		t.Fatalf("negative tokens should result in 0 cost, got %f", got.CostUSD)
+	}
+}
+
 func TestPriceUsage_UnknownModelRecordsZeroCost(t *testing.T) {
 	got := PriceUsage("private-gateway-model", Usage{InputTokens: 42, OutputTokens: 11})
 	if got.Known {

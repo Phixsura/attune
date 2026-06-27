@@ -173,6 +173,12 @@ func TestDispatcher_Dispatch_PanicRecovery(t *testing.T) {
 	assert.Equal(t, "internal server error", resp.Error.Message)
 }
 
+func TestToolError_Error(t *testing.T) {
+	t.Parallel()
+	e := jsonrpc.NewToolError(jsonrpc.CodeInvalidParams, "bad field")
+	assert.Equal(t, "bad field", e.Error())
+}
+
 func TestDispatcher_Dispatch_InternalErrorMasked(t *testing.T) {
 	d := jsonrpc.NewDispatcher()
 
