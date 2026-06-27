@@ -182,6 +182,9 @@ type SecurityConfig struct {
 	// that many hops from the right of XFF. 0 (default) ignores XFF entirely and
 	// uses the direct peer, so a direct client cannot spoof an allowlisted IP.
 	TrustedProxyHops int `yaml:"trusted_proxy_hops"`
+	// AlertWebhookURL is the URL to POST security alerts to (break-glass use,
+	// suspicious activity, etc.). Empty disables alerting.
+	AlertWebhookURL string `yaml:"alert_webhook_url"`
 }
 
 // EgressPolicy builds the nethardening policy from the security config.

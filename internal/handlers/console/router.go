@@ -71,6 +71,9 @@ var (
 	NewAuditLogHandler           = consoleauditlog.NewHandler
 	NewAuditEvidenceHandler      = consoleauditevidence.NewHandler
 	NewChangePasswordHandler     = auth.NewChangePasswordHandler
+	NewBreakGlassHandler         = auth.NewBreakGlassHandler
+	NewBreakGlassAPIHandler      = auth.NewBreakGlassAPIHandler
+	NewSSOCutoverHandler         = auth.NewSSOCutoverHandler
 	NewMeHandler                 = me.NewMeHandler
 	NewAPIKeysHandler            = apikey.NewAPIKeysHandler
 	NewNotifyTargetsHandler      = notifytarget.NewNotifyTargetsHandler
@@ -147,6 +150,9 @@ type Router struct {
 	signer             *session.Signer
 	login              *auth.Handler
 	changePassword     *auth.ChangePasswordHandler
+	breakglass         *auth.BreakGlassHandler
+	breakglassAPI      *auth.BreakGlassAPIHandler
+	ssoCutover         *auth.SSOCutoverHandler
 	me                 *me.MeHandler
 	auditLog           *consoleauditlog.Handler
 	apiKeys            *apikey.APIKeysHandler
@@ -265,6 +271,9 @@ func (r *Router) Mount() chi.Router {
 	// OIDC SSO endpoints (public, no session required)
 	r.mountOIDC(mux)
 
+	// Break-glass login (public, no session required)
+	r.mountBreakGlass(mux)
+
 	// /auth/providers returns available auth methods (public)
 	mux.Get("/auth/providers", r.authProviders)
 
@@ -317,6 +326,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountOutbox(m)
 	r.mountMCPClients(m)
 	r.mountPreflight(m)
+	r.mountSSOCutover(m)
 	r.mountDigestSubscription(m)
 	r.mountFeedback(m)
 	m.Group(func(u chi.Router) {
@@ -2351,6 +2361,21 @@ func (r *Router) SetPreflightHandler(h http.Handler) {
 	r.preflight = h
 }
 
+// SetBreakGlassHandler sets the break-glass login handler (#158).
+func (r *Router) SetBreakGlassHandler(h *auth.BreakGlassHandler) {
+	r.breakglass = h
+}
+
+// SetBreakGlassAPIHandler sets the break-glass API handler (#158).
+func (r *Router) SetBreakGlassAPIHandler(h *auth.BreakGlassAPIHandler) {
+	r.breakglassAPI = h
+}
+
+// SetSSOCutoverHandler sets the SSO cutover handler (#158).
+func (r *Router) SetSSOCutoverHandler(h *auth.SSOCutoverHandler) {
+	r.ssoCutover = h
+}
+
 func (r *Router) mountPreflight(m chi.Router) {
 	if r.preflight == nil {
 		return
@@ -2358,5 +2383,34 @@ func (r *Router) mountPreflight(m chi.Router) {
 	m.Route("/system", func(s chi.Router) {
 		s.Use(r.requireAdmin)
 		s.Get("/preflight", r.preflight.ServeHTTP)
+	})
+}
+
+// mountBreakGlass mounts the break-glass login endpoint (public, no session).
+func (r *Router) mountBreakGlass(mux chi.Router) {
+	if r.breakglass == nil {
+		return
+	}
+	mux.Get("/auth/breakglass", r.breakglass.Login)
+}
+
+// mountSSOCutover mounts the SSO cutover and break-glass API endpoints (admin-only).
+func (r *Router) mountSSOCutover(m chi.Router) {
+	m.Route("/auth", func(a chi.Router) {
+		a.Use(r.requireAdmin)
+		if r.ssoCutover != nil {
+			a.Route("/sso", func(s chi.Router) {
+				s.Get("/mode", r.ssoCutover.GetAuthMode)
+				s.Post("/cutover", r.ssoCutover.Cutover)
+				s.Post("/fallback", r.ssoCutover.Fallback)
+			})
+		}
+		if r.breakglassAPI != nil {
+			a.Route("/breakglass", func(b chi.Router) {
+				b.Get("/tokens", r.breakglassAPI.List)
+				b.Post("/issue", r.breakglassAPI.Issue)
+				b.Post("/tokens/{id}/revoke", r.breakglassAPI.Revoke)
+			})
+		}
 	})
 }

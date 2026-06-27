@@ -30,6 +30,7 @@ import (
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditevidencerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
+	breakglassrepo "github.com/Phixsura/attune/internal/repo/breakglass"
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	enrichruntime "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
@@ -49,12 +50,15 @@ import (
 	oidcuserrepo "github.com/Phixsura/attune/internal/repo/oidcuser"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
+	systemsettingsrepo "github.com/Phixsura/attune/internal/repo/systemsettings"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
 	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	authmodesvc "github.com/Phixsura/attune/internal/service/authmode"
+	breakglasssvc "github.com/Phixsura/attune/internal/service/breakglass"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	evalsvc "github.com/Phixsura/attune/internal/service/eval"
@@ -65,6 +69,7 @@ import (
 	"github.com/Phixsura/attune/internal/service/llmrouter"
 	"github.com/Phixsura/attune/internal/service/oidcauth"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
+	"github.com/Phixsura/attune/internal/service/securityalert"
 	"github.com/Phixsura/attune/internal/service/semanticsearch"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
 
@@ -284,15 +289,16 @@ func buildConsoleRouter(
 		usage, enrichConfig, enrichmentRuntimeHandler, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
 		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
-	attachOptionalHandlers(router, pool, cfg, auditLogSvc)
+	attachOptionalHandlers(router, pool, cfg, auditLogSvc, signer, tenantRepo, adminRepo)
 	return router.Mount(), nil
 }
 
-func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, auditLogSvc *auditlogsvc.Service) {
+func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo) {
 	attachOutboxHandler(router, pool, auditLogSvc)
 	attachAuditEvidenceHandler(router, pool, cfg, auditLogSvc)
 	attachMCPClientHandler(router, cfg, pool, auditLogSvc)
 	attachPreflightHandler(router, cfg, pool)
+	attachSSOCutoverHandler(router, pool, cfg, auditLogSvc, signer, tenantRepo, adminRepo)
 }
 
 // attachOutboxHandler wires the notify dead-queue console handler (#33). Kept
@@ -332,6 +338,48 @@ func attachMCPClientHandler(router *console.Router, cfg *config.Config, pool *pg
 	h.SetAuditLogger(audit)
 	h.SetConnectionProfile(cfg.MCPPublicBaseURL, cfg.MCP.OAuth.Issuer)
 	router.SetMCPClientHandler(h)
+}
+
+// attachSSOCutoverHandler wires the SSO cutover and break-glass handlers (#158).
+func attachSSOCutoverHandler(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, audit *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo) {
+	bgRepo := breakglassrepo.NewRepo(pool)
+	settingsRepo := systemsettingsrepo.NewRepo(pool)
+	bgSvc := breakglasssvc.NewService(bgRepo, breakglasssvc.DefaultConfig())
+
+	preflightEnv := ptrext.Of(preflight.Environment{Cfg: cfg, Pool: pool})
+	authModeSvc := authmodesvc.NewService(
+		settingsRepo,
+		preflightRunnerFunc(preflight.RunChecks),
+		preflightEnv,
+		bgSvc.CountValid,
+	)
+
+	alertSvc := securityalert.NewService(cfg.Security.AlertWebhookURL)
+	lockoutTracker := breakglasssvc.NewLockoutTracker(breakglasssvc.DefaultLockoutConfig())
+
+	router.SetSSOCutoverHandler(console.NewSSOCutoverHandler(authModeSvc))
+	router.SetBreakGlassAPIHandler(console.NewBreakGlassAPIHandler(bgSvc, audit, alertSvc))
+	router.SetBreakGlassHandler(console.NewBreakGlassHandler(bgSvc, signer, tenantRepo, adminIDByEmailAdapter{adminRepo}, audit, alertSvc, lockoutTracker, cfg.ConsoleBaseURL))
+}
+
+// adminIDByEmailAdapter adapts admin.Repo to the adminIDByEmailResolver interface.
+type adminIDByEmailAdapter struct {
+	repo *admin.Repo
+}
+
+func (a adminIDByEmailAdapter) GetIDByEmail(ctx context.Context, email string) (string, error) {
+	admin, err := a.repo.GetByEmail(ctx, email)
+	if err != nil {
+		return "", err
+	}
+	return admin.ID, nil
+}
+
+// preflightRunnerFunc adapts a function to the authmode.PreflightRunner interface.
+type preflightRunnerFunc func(ctx context.Context, env *preflight.Environment, names []string) preflight.Report
+
+func (f preflightRunnerFunc) RunChecks(ctx context.Context, env *preflight.Environment, names []string) preflight.Report {
+	return f(ctx, env, names)
 }
 
 func buildGDPRHandler(
