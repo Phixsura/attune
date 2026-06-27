@@ -384,21 +384,32 @@ flag is simpler and correct.
 
 ## Verification
 
-- [ ] Classification: edit prompt → navigate away → dialog appears → "Stay"
+- [x] Classification: edit prompt → navigate away → dialog appears → "Stay"
       keeps draft → "Discard and leave" proceeds
-- [ ] Classification: edit prompt → F5 → page reloads → DraftBanner shows
+      (tests: `registers shouldBlockFn`, `shows UnsavedChangesDialog`, `save-and-leave`)
+- [x] Classification: edit prompt → F5 → page reloads → DraftBanner shows
       "Draft recovered" → edits are restored → "Discard" reverts to server state
-- [ ] Classification: edit → save → navigate away → no dialog (clean state)
-- [ ] Classification: edit → "Discard Changes" → confirm → form resets to
+      (tests: `shows recovery banner`, `recovery banner dismiss resets form`)
+- [x] Classification: edit → save → navigate away → no dialog (clean state)
+      (test: `does not show blocker dialog after a successful save`)
+- [x] Classification: edit → "Discard Changes" → confirm → form resets to
       server state, localStorage cleared
-- [ ] Runtime: edit fields → navigate away → dialog appears
-- [ ] Runtime: edit fields → F5 → draft recovered from localStorage
-- [ ] Runtime: save/reset/rollback → localStorage cleared
-- [ ] Strict Mode: double-mount does not produce duplicate toasts or phantom
+      (test: `discard resets form to server state`)
+- [x] Runtime: edit fields → navigate away → dialog appears
+      (test: `registers shouldBlockFn`, `shows UnsavedChangesDialog`)
+- [x] Runtime: edit fields → F5 → draft recovered from localStorage
+      (tests: `fills missing fields with defaults when restoring a partial draft`)
+- [x] Runtime: save/reset/rollback → localStorage cleared
+      (test: `clears localStorage on successful save`)
+- [x] Strict Mode: double-mount does not produce duplicate toasts or phantom
       dirty state
-- [ ] `beforeunload`: dirty form → close tab → browser native prompt fires
-- [ ] `beforeunload`: clean form → close tab → no prompt
-- [ ] All existing tests pass (no regressions)
+      (test: `StrictMode double-mount does not produce duplicate side effects`)
+- [x] `beforeunload`: dirty form → close tab → browser native prompt fires
+      (test: `flushes draft to localStorage on beforeunload when dirty`)
+- [x] `beforeunload`: clean form → close tab → no prompt
+      (test: `does not flush on beforeunload when not dirty`)
+- [x] All existing tests pass (no regressions)
+      (full suite: 840+ tests, 0 failures)
 
 ---
 

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionsEditor } from '@/components/dim/dimensions-editor'
@@ -36,6 +36,13 @@ import {
   toWireDimensions,
 } from '@/lib/editable-rows'
 import { cn } from '@/lib/utils'
+
+function configFingerprint(cfg: EnrichConfig): string {
+  return JSON.stringify({
+    p: cfg.promptTemplate ?? cfg.defaultPromptTemplate,
+    d: cfg.dimensions,
+  })
+}
 
 export function ClassificationSettingsPage() {
   const { t } = useTranslation()
@@ -100,6 +107,28 @@ function ClassificationSettingsForm({
   const [discardOpen, setDiscardOpen] = useState(false)
   const [recoveryDismissed, setRecoveryDismissed] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
+  const [conflictDetected, setConflictDetected] = useState(false)
+
+  const serverFp = useMemo(() => configFingerprint(initial), [initial])
+  const lastHydratedFp = useRef(serverFp)
+  const touchedRef = useRef(touched)
+  touchedRef.current = touched
+  const awaitingServerHydrate = useRef(false)
+
+  useEffect(() => {
+    if (serverFp === lastHydratedFp.current) return
+    lastHydratedFp.current = serverFp
+    if (awaitingServerHydrate.current) {
+      awaitingServerHydrate.current = false
+      return
+    }
+    if (touchedRef.current) {
+      setConflictDetected(true)
+      return
+    }
+    setPrompt(initial.promptTemplate ?? initial.defaultPromptTemplate)
+    setRows(seedDimensions(initial.dimensions ?? []))
+  }, [serverFp, initial])
 
   const guard = useDraftGuard({
     storageKey: 'classification-settings',
@@ -163,11 +192,24 @@ function ClassificationSettingsForm({
     setRecoveryDismissed(true)
   }
 
+  const handleConflictLoadServer = () => {
+    setPrompt(initial.promptTemplate ?? initial.defaultPromptTemplate)
+    setRows(seedDimensions(initial.dimensions ?? []))
+    setTouched(false)
+    guard.clearDraft()
+    setConflictDetected(false)
+  }
+
+  const handleConflictKeepDraft = () => {
+    setConflictDetected(false)
+  }
+
   const submitSave = (afterSuccess?: () => void) => {
     const defaultTmpl = initial.defaultPromptTemplate ?? ''
     const isDefaultPrompt = prompt.trim() === defaultTmpl.trim()
     const sentDimKeys = new Set(rows.map((r) => r._key))
     const sentTaxKeys = new Set(rows.flatMap((r) => r.taxonomy.map((tx) => tx._key)))
+    awaitingServerHydrate.current = true
     save.mutate(
       {
         dimensions: toWireDimensions(rows),
@@ -179,9 +221,13 @@ function ClassificationSettingsForm({
           guard.clearDraft()
           setTouched(false)
           setRecoveryDismissed(true)
+          setConflictDetected(false)
           afterSuccess?.()
         },
-        onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+        onError: (err) => {
+          awaitingServerHydrate.current = false
+          toast.error(err instanceof Error ? err.message : t('common.error'))
+        },
       },
     )
   }
@@ -267,6 +313,14 @@ function ClassificationSettingsForm({
           draftAgeMs={guard.draftAge}
           onDiscard={handleDismissRecovery}
           onKeep={() => setRecoveryDismissed(true)}
+        />
+      )}
+
+      {conflictDetected && (
+        <DraftBanner
+          variant="conflict"
+          onDiscard={handleConflictLoadServer}
+          onKeep={handleConflictKeepDraft}
         />
       )}
 

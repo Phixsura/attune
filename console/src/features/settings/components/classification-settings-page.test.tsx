@@ -685,6 +685,150 @@ describe('ClassificationSettingsPage', () => {
       })
     })
 
+    it('shows conflict banner when server data changes while user has dirty edits', async () => {
+      let callCount = 0
+      server.use(
+        http.get('/fb/v1/console/enrich-config', () => {
+          callCount++
+          return HttpResponse.json({
+            config: {
+              promptTemplate: callCount === 1 ? 'Original' : 'Updated by someone else',
+              defaultPromptTemplate: 'Default',
+              dimensions: [],
+            },
+          })
+        }),
+        http.get('/fb/v1/console/eval/suggestions', () =>
+          HttpResponse.json({ suggestions: [], coverage: [] }),
+        ),
+      )
+      const { user, queryClient: qc } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'My local edit')
+
+      await qc.refetchQueries({ queryKey: ['console', 'enrich-config'] })
+
+      await waitFor(() => {
+        expect(screen.getByText('服务器配置已更新')).toBeInTheDocument()
+      })
+      expect(textarea).toHaveValue('My local edit')
+    })
+
+    it('conflict banner discard loads server version', async () => {
+      let callCount = 0
+      server.use(
+        http.get('/fb/v1/console/enrich-config', () => {
+          callCount++
+          return HttpResponse.json({
+            config: {
+              promptTemplate: callCount === 1 ? 'Original' : 'Server updated',
+              defaultPromptTemplate: 'Default',
+              dimensions: [],
+            },
+          })
+        }),
+        http.get('/fb/v1/console/eval/suggestions', () =>
+          HttpResponse.json({ suggestions: [], coverage: [] }),
+        ),
+      )
+      const { user, queryClient: qc } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'My local edit')
+
+      await qc.refetchQueries({ queryKey: ['console', 'enrich-config'] })
+
+      await waitFor(() => {
+        expect(screen.getByText('服务器配置已更新')).toBeInTheDocument()
+      })
+      await user.click(screen.getByRole('button', { name: '加载最新版本' }))
+      await waitFor(() => {
+        expect(textarea).toHaveValue('Server updated')
+        expect(screen.queryByText('服务器配置已更新')).not.toBeInTheDocument()
+      })
+    })
+
+    it('conflict banner keep-draft dismisses banner and preserves edits', async () => {
+      let callCount = 0
+      server.use(
+        http.get('/fb/v1/console/enrich-config', () => {
+          callCount++
+          return HttpResponse.json({
+            config: {
+              promptTemplate: callCount === 1 ? 'Original' : 'Server updated',
+              defaultPromptTemplate: 'Default',
+              dimensions: [],
+            },
+          })
+        }),
+        http.get('/fb/v1/console/eval/suggestions', () =>
+          HttpResponse.json({ suggestions: [], coverage: [] }),
+        ),
+      )
+      const { user, queryClient: qc } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'My local edit')
+
+      await qc.refetchQueries({ queryKey: ['console', 'enrich-config'] })
+
+      await waitFor(() => {
+        expect(screen.getByText('服务器配置已更新')).toBeInTheDocument()
+      })
+      await user.click(screen.getByRole('button', { name: '保留我的修改' }))
+      await waitFor(() => {
+        expect(screen.queryByText('服务器配置已更新')).not.toBeInTheDocument()
+      })
+      expect(textarea).toHaveValue('My local edit')
+    })
+
+    it('auto-hydrates server data when not dirty and initial changes', async () => {
+      let callCount = 0
+      server.use(
+        http.get('/fb/v1/console/enrich-config', () => {
+          callCount++
+          return HttpResponse.json({
+            config: {
+              promptTemplate: callCount === 1 ? 'Original' : 'Server updated',
+              defaultPromptTemplate: 'Default',
+              dimensions: [],
+            },
+          })
+        }),
+        http.get('/fb/v1/console/eval/suggestions', () =>
+          HttpResponse.json({ suggestions: [], coverage: [] }),
+        ),
+      )
+      const { queryClient: qc } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      expect(textarea).toHaveValue('Original')
+
+      await qc.refetchQueries({ queryKey: ['console', 'enrich-config'] })
+
+      await waitFor(() => {
+        expect(textarea).toHaveValue('Server updated')
+      })
+      expect(screen.queryByText('服务器配置已更新')).not.toBeInTheDocument()
+    })
+
+    it('does not show blocker dialog after a successful save', async () => {
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'dirty edit')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => {
+        expect(localStorage.getItem('attune:draft:classification-settings')).toBeNull()
+      })
+      expect(blockerState.shouldBlockFn?.({ location: {} })).toBeFalsy()
+    })
+
     it('discard fires undo toast with action that restores the draft', async () => {
       const infoSpy = vi.spyOn(await import('sonner').then((m) => m.toast), 'info')
       seedConfig()

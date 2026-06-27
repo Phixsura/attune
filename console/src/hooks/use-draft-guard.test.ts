@@ -410,4 +410,48 @@ describe('useDraftGuard', () => {
     )
     expect(document.title).toBe('Settings')
   })
+
+  it('draft survives unmount and remount (remount resilience)', () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { unmount } = renderHook(() =>
+      useDraftGuard({ storageKey: 'remount-key', draft: { value: 'persisted' }, dirty: true }),
+    )
+    vi.advanceTimersByTime(600)
+    unmount()
+
+    const recovered = readDraft<{ value: string }>('remount-key')
+    expect(recovered).toEqual({ value: 'persisted' })
+
+    const draft = recovered ?? { value: '' }
+    renderHook(() => useDraftGuard({ storageKey: 'remount-key', draft, dirty: true }))
+    expect(readDraft<{ value: string }>('remount-key')).toEqual({ value: 'persisted' })
+    vi.useRealTimers()
+  })
+
+  it('StrictMode double-mount does not produce duplicate side effects', () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    document.title = 'Page'
+
+    const { unmount: firstUnmount } = renderHook(() =>
+      useDraftGuard({ storageKey: 'strict-key', draft: { v: 1 }, dirty: true }),
+    )
+    firstUnmount()
+
+    const { unmount: secondUnmount } = renderHook(() =>
+      useDraftGuard({ storageKey: 'strict-key', draft: { v: 1 }, dirty: true }),
+    )
+
+    expect(document.title).toBe('● Page')
+    expect(document.title.match(/●/g)?.length).toBe(1)
+
+    vi.advanceTimersByTime(600)
+    const stored = localStorage.getItem('attune:draft:strict-key')
+    expect(stored).not.toBeNull()
+    const envelope = JSON.parse(stored as string)
+    expect(envelope.data).toEqual({ v: 1 })
+
+    secondUnmount()
+    expect(document.title).toBe('Page')
+    vi.useRealTimers()
+  })
 })

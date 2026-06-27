@@ -30,10 +30,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - Field-level dirty highlighting on prompt textarea.
   - Discard button + confirmation dialog to revert to last-saved server state.
   - Drafts cleared automatically on successful save/reset/rollback.
-  - Background refresh conflict detection: when the runtime page's 5-second
-    polling returns a new server version while the user has dirty edits, a
-    conflict banner offers to load the latest version without silently
-    overwriting the in-progress draft.
+  - Background refresh conflict detection on both classification and runtime
+    editors: when a refetch (polling, BroadcastChannel, or window focus)
+    returns changed server data while the user has dirty edits, a conflict
+    banner offers to load the latest version or keep local edits, without
+    silently overwriting the in-progress draft.
   - Form inputs disabled during in-flight save to prevent mid-mutation edits.
 - **SSO cutover and break-glass recovery controls (#158).** Enterprise-grade
   SSO enforcement with emergency access path for admin recovery.
