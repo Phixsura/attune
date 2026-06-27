@@ -1,6 +1,6 @@
 import { HttpResponse, http } from 'msw'
 import { createElement } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EnrichmentRuntimePage } from '@/features/settings/components/enrichment-runtime-page'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
@@ -20,6 +20,12 @@ import {
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
+
+vi.mock('@tanstack/react-router', () => ({
+  useBlocker: () => ({ status: 'idle', proceed: undefined, reset: undefined }),
+}))
+
+afterEach(() => sessionStorage.clear())
 
 const baseRuntimeResponse = {
   runtime: {

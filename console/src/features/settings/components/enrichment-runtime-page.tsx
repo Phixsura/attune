@@ -43,6 +43,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { UnsavedChangesDialog } from '@/components/unsaved-changes-dialog'
 import {
   type EnrichmentRuntimeHistoryEntryView,
   type EnrichmentRuntimeInstanceView,
@@ -56,6 +57,7 @@ import {
   useUpdateEnrichmentRuntime,
   useVerifyRuntimeStepUp,
 } from '@/features/settings/api/enrichment-runtime'
+import { readDraft, useDraftGuard } from '@/hooks/use-draft-guard'
 
 const RESET_FIELDS: Array<{ field: RuntimeResetField; labelKey: string }> = [
   {
@@ -392,7 +394,9 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
   const stepUp = operationsQuery.data?.stepUp
   const stepUpSatisfied = stepUp?.satisfied ?? false
 
-  const [draft, setDraft] = useState<DraftState>(emptyDraft())
+  const [draft, setDraft] = useState<DraftState>(
+    () => readDraft<DraftState>('enrichment-runtime') ?? emptyDraft(),
+  )
   const [lastHydratedVersion, setLastHydratedVersion] = useState<string>()
   const [updateReason, setUpdateReason] = useState('')
   const [stepUpOpen, setStepUpOpen] = useState(false)
@@ -419,6 +423,14 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
     if (!desiredSpec || !parsedSpec.ok) return false
     return JSON.stringify(parsedSpec.value) !== JSON.stringify(desiredSpec)
   }, [desiredSpec, parsedSpec])
+
+  const guard = useDraftGuard({
+    storageKey: 'enrichment-runtime',
+    draft,
+    dirty,
+    disabled: !canEdit,
+  })
+
   const lastKnownGoodEntry = useMemo(() => findLastKnownGoodEntry(runtime), [runtime])
   const runtimeConditions = useMemo(
     () => (runtime ? buildRuntimeConditions(runtime) : []),
@@ -501,6 +513,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
       {
         onSuccess: () => {
           setUpdateReason('')
+          guard.clearDraft()
           toast.success(t('settings.enrichment_runtime.toasts.updated'))
         },
         onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
@@ -528,6 +541,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
           setResetAll(false)
           setResetFields([])
           setResetReason('')
+          guard.clearDraft()
           toast.success(t('settings.enrichment_runtime.toasts.reset'))
         },
         onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
@@ -548,6 +562,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
         onSuccess: () => {
           setRollbackTarget(null)
           setRollbackReason('')
+          guard.clearDraft()
           toast.success(t('settings.enrichment_runtime.toasts.rollback'))
         },
         onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
@@ -1670,6 +1685,12 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <UnsavedChangesDialog
+        open={guard.dialogOpen}
+        onConfirmLeave={guard.confirmLeave}
+        onCancelLeave={guard.cancelLeave}
+      />
     </>
   )
 }
