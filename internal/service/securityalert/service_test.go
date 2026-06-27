@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,11 +29,10 @@ func TestNewService_EmptyURL(t *testing.T) {
 
 func TestService_Send_WebhookCalled(t *testing.T) {
 	var called atomic.Bool
+	var mu sync.Mutex
 	var receivedAlert Alert
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called.Store(true)
-
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
@@ -44,10 +44,13 @@ func TestService_Send_WebhookCalled(t *testing.T) {
 		}
 
 		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
 		if err := json.Unmarshal(body, &receivedAlert); err != nil {
 			t.Errorf("failed to unmarshal alert: %v", err)
 		}
+		mu.Unlock()
 
+		called.Store(true)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -70,6 +73,8 @@ func TestService_Send_WebhookCalled(t *testing.T) {
 	if !called.Load() {
 		t.Error("webhook was not called")
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if receivedAlert.Type != AlertBreakGlassUsed {
 		t.Errorf("Type = %s, want %s", receivedAlert.Type, AlertBreakGlassUsed)
 	}

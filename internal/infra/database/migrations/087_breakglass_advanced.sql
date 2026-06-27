@@ -20,8 +20,8 @@ ADD COLUMN IF NOT EXISTS scoped_permissions TEXT[] DEFAULT NULL;
 
 -- 3. Recovery codes table: multiple one-time codes per tenant
 CREATE TABLE IF NOT EXISTS break_glass_recovery_codes (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     code_hash TEXT NOT NULL,
     label TEXT NOT NULL,  -- e.g., "Code 1", "Code 2", etc.
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -41,8 +41,8 @@ WHERE used_at IS NULL AND revoked_at IS NULL;
 
 -- 4. Expiry warning tracking
 CREATE TABLE IF NOT EXISTS break_glass_expiry_warnings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    token_id UUID NOT NULL REFERENCES break_glass_tokens(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    token_id TEXT NOT NULL REFERENCES break_glass_tokens(id) ON DELETE CASCADE,
     warning_type TEXT NOT NULL CHECK (warning_type IN ('24h', '1h', 'expired')),
     sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(token_id, warning_type)
