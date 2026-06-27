@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Draft durability and navigation guards for settings editors (#172).**
+  sessionStorage-backed draft persistence and unsaved-change protection for the
+  classification settings and enrichment runtime editor pages.
+  - Drafts auto-save to sessionStorage (debounced 500ms, tab-scoped).
+  - `useBlocker` + `beforeunload` prevent accidental navigation with a shared
+    `UnsavedChangesDialog` confirmation modal.
+  - Recovery toast on page mount when a stored draft is detected, with one-click
+    discard option.
+  - Discard button + confirmation dialog to revert to last-saved server state.
+  - Drafts cleared automatically on successful save/reset/rollback.
 - **SSO cutover and break-glass recovery controls (#158).** Enterprise-grade
   SSO enforcement with emergency access path for admin recovery.
   - Runtime-switchable auth mode (`hybrid` ↔ `sso_only`) stored in DB, no

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #172 |
-| **Status** | Accepted |
+| **Status** | Implemented |
 | **Started** | 2026-06-27 |
 | **Related** | #90 (dimensions editor identity — established the seed-once pattern and `editable-rows.ts`) |
 
