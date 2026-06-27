@@ -194,7 +194,7 @@ export function LLMConfigPage() {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-[1.6rem] border border-border/70 bg-[linear-gradient(135deg,rgba(255,247,237,0.92),rgba(255,255,255,0.96))] px-6 py-6 shadow-[0_24px_70px_-52px_rgba(15,23,42,0.25)] sm:px-7">
+      <section className="rounded-[1.6rem] border border-border/60 bg-[linear-gradient(135deg,rgba(255,247,237,0.92),rgba(255,255,255,0.96))] px-6 py-6 shadow-[0_24px_70px_-52px_rgba(15,23,42,0.25)] sm:px-7">
         <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
             <div className="text-[11px] font-semibold tracking-[0.22em] text-muted-foreground uppercase">
@@ -252,10 +252,10 @@ export function LLMConfigPage() {
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.85fr)]">
         <div className="space-y-6">
-          <Card className="border-border/70 shadow-none">
+          <Card className="border-border/60 shadow-none">
             <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
               <div>
-                <CardTitle>{t('llm_config.channels.title')}</CardTitle>
+                <CardTitle className="text-base">{t('llm_config.channels.title')}</CardTitle>
                 <CardDescription>
                   {t('llm_config.channels.deck', { count: channelCount })}
                 </CardDescription>
@@ -315,10 +315,10 @@ export function LLMConfigPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/70 shadow-none">
+          <Card className="border-border/60 shadow-none">
             <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
               <div>
-                <CardTitle>{t('llm_config.routes.title')}</CardTitle>
+                <CardTitle className="text-base">{t('llm_config.routes.title')}</CardTitle>
                 <CardDescription>
                   {t('llm_config.routes.deck', { count: routeCount, enabled: enabledRouteCount })}
                 </CardDescription>
@@ -371,9 +371,9 @@ export function LLMConfigPage() {
         </div>
 
         <div className="space-y-6 xl:sticky xl:top-24 xl:self-start">
-          <Card className="border-border/70 shadow-none">
+          <Card className="border-border/60 shadow-none">
             <CardHeader className="space-y-1">
-              <CardTitle>{t('llm_config.focus.title')}</CardTitle>
+              <CardTitle className="text-base">{t('llm_config.focus.title')}</CardTitle>
               <CardDescription>
                 {selected?.name ?? t('llm_config.focus.no_channel')}
               </CardDescription>
@@ -394,7 +394,7 @@ export function LLMConfigPage() {
                     />
                   </div>
 
-                  <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+                  <div className="rounded-2xl border border-border/60 bg-muted/20 p-4">
                     <div className="text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">
                       {t('llm_config.focus.endpoint')}
                     </div>
@@ -426,10 +426,10 @@ export function LLMConfigPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/70 shadow-none">
+          <Card className="border-border/60 shadow-none">
             <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
               <div>
-                <CardTitle>{t('llm_config.abilities.title')}</CardTitle>
+                <CardTitle className="text-base">{t('llm_config.abilities.title')}</CardTitle>
                 <CardDescription>
                   {selected?.name ?? t('llm_config.abilities.no_channel')}
                 </CardDescription>
@@ -489,9 +489,9 @@ export function LLMConfigPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/70 bg-muted/10 shadow-none">
+          <Card className="border-border/60 bg-muted/10 shadow-none">
             <CardHeader className="space-y-1">
-              <CardTitle>{t('llm_config.playbook.title')}</CardTitle>
+              <CardTitle className="text-base">{t('llm_config.playbook.title')}</CardTitle>
               <CardDescription>{t('llm_config.playbook.description')}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -502,7 +502,7 @@ export function LLMConfigPage() {
               ].map((step) => (
                 <div
                   key={step}
-                  className="rounded-xl border border-border/70 bg-background/80 px-3 py-3 text-sm text-muted-foreground"
+                  className="rounded-xl border border-border/60 bg-background/80 px-3 py-3 text-sm text-muted-foreground"
                 >
                   {step}
                 </div>
@@ -627,7 +627,7 @@ function deleteBody(
 
 function SummaryPanel({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
-    <div className="rounded-[1.25rem] border border-border/70 bg-background/86 px-4 py-4 shadow-[0_18px_50px_-42px_rgba(15,23,42,0.25)]">
+    <div className="rounded-[1.25rem] border border-border/60 bg-background/86 px-4 py-4 shadow-[0_18px_50px_-42px_rgba(15,23,42,0.25)]">
       <div className="text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">
         {label}
       </div>
@@ -639,7 +639,7 @@ function SummaryPanel({ label, value, hint }: { label: string; value: string; hi
 
 function InspectorMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-muted/15 px-3 py-3">
+    <div className="rounded-xl border border-border/60 bg-muted/15 px-3 py-3">
       <div className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
         {label}
       </div>

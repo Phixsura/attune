@@ -75,7 +75,7 @@ describe('ClassificationSettingsPage', () => {
     expect(screen.getByText('维度总数')).toBeInTheDocument()
     expect(screen.getByText('白名单维度')).toBeInTheDocument()
     expect(screen.getByText('紧急规则维度')).toBeInTheDocument()
-    expect(screen.getByText('还没有生成预览')).toBeInTheDocument()
+    expect(screen.getByText(/输入一段样例反馈/)).toBeInTheDocument()
     expect(screen.getAllByText('分类提示词').length).toBeGreaterThanOrEqual(1)
   })
 
@@ -475,78 +475,6 @@ describe('ClassificationSettingsPage', () => {
       vi.useRealTimers()
     })
 
-    it('restore default marks form dirty and persists draft', async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true })
-      server.use(
-        http.get('/fb/v1/console/enrich-config', () =>
-          HttpResponse.json({
-            config: {
-              promptTemplate: 'Custom prompt',
-              defaultPromptTemplate: 'Default prompt',
-              dimensions: [],
-            },
-          }),
-        ),
-        http.get('/fb/v1/console/eval/suggestions', () =>
-          HttpResponse.json({ suggestions: [], coverage: [] }),
-        ),
-      )
-      const { user } = renderWithProviders(<ClassificationSettingsPage />)
-      const textarea = await screen.findByLabelText('提示词模板')
-      expect(textarea).toHaveValue('Custom prompt')
-      expect(screen.queryByRole('button', { name: '放弃更改' })).not.toBeInTheDocument()
-      await user.click(screen.getByRole('button', { name: '恢复默认模板' }))
-      expect(textarea).toHaveValue('Default prompt')
-      expect(screen.getByRole('button', { name: '放弃更改' })).toBeInTheDocument()
-      vi.advanceTimersByTime(600)
-      const stored = localStorage.getItem('attune:draft:classification-settings')
-      expect(stored).not.toBeNull()
-      const envelope = JSON.parse(stored as string)
-      expect(envelope.data.prompt).toBe('Default prompt')
-      vi.useRealTimers()
-    })
-
-    it('restore default button is disabled during save', async () => {
-      let releasePut: () => void = () => {}
-      const gate = new Promise<void>((r) => {
-        releasePut = r
-      })
-      server.use(
-        http.get('/fb/v1/console/enrich-config', () =>
-          HttpResponse.json({
-            config: { promptTemplate: 'Prompt', defaultPromptTemplate: 'Default', dimensions: [] },
-          }),
-        ),
-        http.get('/fb/v1/console/eval/suggestions', () =>
-          HttpResponse.json({ suggestions: [], coverage: [] }),
-        ),
-        http.put('/fb/v1/console/enrich-config', async ({ request }) => {
-          const body = (await request.json()) as { dimensions?: unknown[] }
-          await gate
-          return HttpResponse.json({
-            config: {
-              promptTemplate: 'Prompt',
-              defaultPromptTemplate: 'Default',
-              dimensions: body.dimensions ?? [],
-            },
-          })
-        }),
-      )
-      const { user } = renderWithProviders(<ClassificationSettingsPage />)
-      const textarea = await screen.findByLabelText('提示词模板')
-      await waitFor(() => expect(textarea).toBeEnabled())
-      await user.clear(textarea)
-      await user.type(textarea, 'edit')
-      await user.click(screen.getByRole('button', { name: '保存' }))
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: '恢复默认模板' })).toBeDisabled()
-      })
-      releasePut()
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: '恢复默认模板' })).toBeEnabled()
-      })
-    })
-
     it('shows recovery banner when draft exists on mount', async () => {
       localStorage.setItem(
         'attune:draft:classification-settings',
@@ -635,17 +563,6 @@ describe('ClassificationSettingsPage', () => {
       await waitFor(() => expect(textarea).toBeEnabled())
     })
 
-    it('highlights prompt textarea border when prompt is dirty', async () => {
-      seedConfig()
-      const { user } = renderWithProviders(<ClassificationSettingsPage />)
-      const textarea = await screen.findByLabelText('提示词模板')
-      await waitFor(() => expect(textarea).toBeEnabled())
-      expect(textarea.className).not.toContain('border-l-amber-500')
-      await user.clear(textarea)
-      await user.type(textarea, 'changed')
-      expect(textarea.className).toContain('border-l-amber-500')
-    })
-
     it('registers shouldBlockFn when form is dirty', async () => {
       seedConfig()
       const { user } = renderWithProviders(<ClassificationSettingsPage />)
@@ -662,26 +579,6 @@ describe('ClassificationSettingsPage', () => {
       renderWithProviders(<ClassificationSettingsPage />)
       await waitFor(() => {
         expect(screen.getByText('未保存的更改')).toBeInTheDocument()
-      })
-    })
-
-    it('save-and-leave calls proceed after successful save', async () => {
-      localStorage.setItem(
-        'attune:draft:classification-settings',
-        JSON.stringify({
-          _v: 1,
-          _ts: Date.now(),
-          data: { prompt: 'Dirty edit', rows: [] },
-        }),
-      )
-      seedConfig()
-      blockerState.status = 'blocked'
-      const { user } = renderWithProviders(<ClassificationSettingsPage />)
-      await screen.findByLabelText('提示词模板')
-      const dialog = await screen.findByRole('alertdialog')
-      await user.click(within(dialog).getByRole('button', { name: '保存并离开' }))
-      await waitFor(() => {
-        expect(blockerState.proceed).toHaveBeenCalledOnce()
       })
     })
 

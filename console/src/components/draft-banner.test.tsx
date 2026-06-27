@@ -3,22 +3,14 @@ import { renderWithProviders, screen } from '@/testing/test-utils'
 import { DraftBanner } from './draft-banner'
 
 describe('DraftBanner', () => {
-  it('renders recovery variant with age', () => {
-    renderWithProviders(
-      <DraftBanner variant="recovery" draftAgeMs={120_000} onDiscard={vi.fn()} onKeep={vi.fn()} />,
-    )
+  it('renders recovery variant with title and action buttons', () => {
+    renderWithProviders(<DraftBanner variant="recovery" onDiscard={vi.fn()} onKeep={vi.fn()} />)
     expect(screen.getByText('检测到未保存的草稿')).toBeInTheDocument()
-    expect(screen.getByText(/2 分钟/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '丢弃' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保留草稿' })).toBeInTheDocument()
   })
 
-  it('renders recovery variant without age', () => {
-    renderWithProviders(<DraftBanner variant="recovery" onDiscard={vi.fn()} onKeep={vi.fn()} />)
-    expect(screen.getByText('存在未保存的草稿，与当前服务器配置不同。')).toBeInTheDocument()
-  })
-
-  it('renders conflict variant', () => {
+  it('renders conflict variant with different title and actions', () => {
     renderWithProviders(<DraftBanner variant="conflict" onDiscard={vi.fn()} onKeep={vi.fn()} />)
     expect(screen.getByText('服务器配置已更新')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '加载最新版本' })).toBeInTheDocument()
@@ -45,26 +37,16 @@ describe('DraftBanner', () => {
 
   it('has role=alert for accessibility', () => {
     renderWithProviders(<DraftBanner variant="recovery" onDiscard={vi.fn()} onKeep={vi.fn()} />)
-    const alerts = screen.getAllByRole('alert')
-    expect(alerts.length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByRole('alert').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('formats age in seconds', () => {
-    renderWithProviders(
-      <DraftBanner variant="recovery" draftAgeMs={30_000} onDiscard={vi.fn()} onKeep={vi.fn()} />,
+  it('uses amber accent for recovery and destructive for conflict', () => {
+    const { unmount } = renderWithProviders(
+      <DraftBanner variant="recovery" onDiscard={vi.fn()} onKeep={vi.fn()} />,
     )
-    expect(screen.getByText(/几秒/)).toBeInTheDocument()
-  })
-
-  it('formats age in hours', () => {
-    renderWithProviders(
-      <DraftBanner
-        variant="recovery"
-        draftAgeMs={7_200_000}
-        onDiscard={vi.fn()}
-        onKeep={vi.fn()}
-      />,
-    )
-    expect(screen.getByText(/2 小时/)).toBeInTheDocument()
+    expect(screen.getByRole('alert').className).toContain('border-l-amber')
+    unmount()
+    renderWithProviders(<DraftBanner variant="conflict" onDiscard={vi.fn()} onKeep={vi.fn()} />)
+    expect(screen.getByRole('alert').className).toContain('border-l-destructive')
   })
 })

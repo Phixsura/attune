@@ -3,15 +3,11 @@ import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import type { TFunction } from 'i18next'
 import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
   CircleHelp,
   DatabaseBackup,
   Gauge,
   Loader2,
   RefreshCcw,
-  ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
   TimerReset,
@@ -22,7 +18,6 @@ import { toast } from 'sonner'
 import { DraftBanner } from '@/components/draft-banner'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { SaveStatus } from '@/components/save-status'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -475,11 +470,6 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
     }
     return partitionRuntimeInstances(runtime.instances, runtime.summary.liveInstances)
   }, [runtime])
-  const runtimePosture = useMemo(() => {
-    if (!runtime) return []
-    return buildRuntimePosture(runtime.desiredSpec, runtime.summary.liveInstances)
-  }, [runtime])
-
   const latestDesiredSpec = useRef(desiredSpec)
   latestDesiredSpec.current = desiredSpec
 
@@ -626,17 +616,6 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
     )
   }
 
-  const handleSaveAndLeave = () => {
-    if (!canEdit || !runtime || !parsedSpec.ok) return
-    const errText = translateRuntimeValidationError(validateRuntimeSpec(parsedSpec.value), t)
-    if (errText) {
-      toast.error(errText)
-      return
-    }
-    if (!ensureStepUp()) return
-    submitUpdate(() => guard.proceed())
-  }
-
   const handleDismissBanner = () => {
     if (bannerState && latestDesiredSpec.current) {
       setDraft(specToDraft(latestDesiredSpec.current))
@@ -739,168 +718,34 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
           {bannerState && (
             <DraftBanner
               variant={bannerState}
-              draftAgeMs={bannerState === 'recovery' ? guard.draftAge : undefined}
               onDiscard={handleDismissBanner}
               onKeep={() => setBannerState(null)}
             />
           )}
 
-          <div className="grid gap-4 xl:grid-cols-[1.12fr,0.88fr]">
-            <Card className="overflow-hidden border-border/70 bg-[linear-gradient(180deg,rgba(255,247,237,0.62),rgba(255,255,255,0.98)_34%)] shadow-none">
-              <CardHeader className="pb-4">
-                <CardTitle>{t('settings.enrichment_runtime.value_title')}</CardTitle>
-                <CardDescription className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                  {t('settings.enrichment_runtime.value_body')}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-3 md:grid-cols-3">
-                {(['capacity', 'stability', 'rollback'] as const).map((key) => (
-                  <div
-                    key={key}
-                    className="rounded-[1rem] border border-border/80 bg-background/95 p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
-                  >
-                    <div className="text-sm font-medium tracking-tight">
-                      {t(`settings.enrichment_runtime.value_cards.${key}.title`)}
-                    </div>
-                    <div className="mt-2 text-sm leading-6 text-muted-foreground">
-                      {t(`settings.enrichment_runtime.value_cards.${key}.body`)}
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            <Card className="border-border/70 bg-zinc-50/60 shadow-none">
-              <CardHeader className="pb-4">
-                <CardTitle>{t('settings.enrichment_runtime.playbook_title')}</CardTitle>
-                <CardDescription className="text-sm leading-6 text-muted-foreground">
-                  {t('settings.enrichment_runtime.playbook_body')}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {(['review', 'change', 'observe', 'rollback'] as const).map((key, index) => (
-                  <div
-                    key={key}
-                    className="flex gap-3 rounded-[1rem] border border-border/80 bg-background/90 px-3 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
-                  >
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-950 text-xs font-semibold text-white">
-                      {index + 1}
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium">
-                        {t(`settings.enrichment_runtime.playbook_steps.${key}.title`)}
-                      </div>
-                      <div className="mt-1 text-sm leading-6 text-muted-foreground">
-                        {t(`settings.enrichment_runtime.playbook_steps.${key}.body`)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          </div>
-
-          {!runtime.summary.fullyConverged || runtime.summary.degradedInstances > 0 ? (
-            <Alert variant="destructive">
-              <AlertTriangle />
-              <AlertTitle>{t('settings.enrichment_runtime.convergence_warning_title')}</AlertTitle>
-              <AlertDescription>
-                <p>{t('settings.enrichment_runtime.convergence_warning_body')}</p>
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <Alert>
-              <CheckCircle2 />
-              <AlertTitle>{t('settings.enrichment_runtime.convergence_ok_title')}</AlertTitle>
-              <AlertDescription>
-                <p>{t('settings.enrichment_runtime.convergence_ok_body')}</p>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <div className="grid gap-4 xl:grid-cols-3">
-            {runtimePosture.map((item) => (
-              <Card
-                key={item.title}
-                className="border-border/70 bg-zinc-50/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
-              >
-                <CardContent className="space-y-2 p-4">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <item.icon className="h-4 w-4 text-muted-foreground" />
-                    {item.title}
-                  </div>
-                  <div className="text-sm leading-6 text-muted-foreground">{item.body}</div>
-                </CardContent>
-              </Card>
+          <div className="flex flex-wrap items-center gap-2">
+            {runtimeConditions.map((condition) => (
+              <ConditionChip
+                key={condition.label}
+                tone={condition.tone}
+                label={localizeConditionLabel(condition.label, t)}
+              />
             ))}
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
-            <Card className="border-border/70 bg-zinc-50/40 shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle>{t('settings.enrichment_runtime.conditions_title')}</CardTitle>
-                <CardDescription>
-                  {t('settings.enrichment_runtime.conditions_help')}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap gap-2">
-                  {runtimeConditions.map((condition) => (
-                    <ConditionChip
-                      key={condition.label}
-                      tone={condition.tone}
-                      label={localizeConditionLabel(condition.label, t)}
-                    />
-                  ))}
-                </div>
-                {runtime.desiredSpec.llmRateLimitEnabled && runtime.summary.liveInstances > 1 ? (
-                  <Alert>
-                    <AlertTriangle />
-                    <AlertTitle>{t('settings.enrichment_runtime.local_limiter_title')}</AlertTitle>
-                    <AlertDescription>
-                      <p>
-                        {t('settings.enrichment_runtime.local_limiter_body', {
-                          count: runtime.summary.liveInstances,
-                        })}
-                      </p>
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <Card className="border-border/70 bg-zinc-50/60 shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle>{t('settings.enrichment_runtime.operator_guidance_title')}</CardTitle>
-                <CardDescription>
-                  {t('settings.enrichment_runtime.operator_guidance_body')}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <GuidanceBlock
-                  title={t('settings.enrichment_runtime.when_change_title')}
-                  items={[
-                    t('settings.enrichment_runtime.when_change_items.backlog'),
-                    t('settings.enrichment_runtime.when_change_items.latency'),
-                    t('settings.enrichment_runtime.when_change_items.provider'),
-                  ]}
-                />
-                <GuidanceBlock
-                  title={t('settings.enrichment_runtime.after_change_title')}
-                  items={[
-                    t('settings.enrichment_runtime.after_change_items.instances'),
-                    t('settings.enrichment_runtime.after_change_items.degraded'),
-                    t('settings.enrichment_runtime.after_change_items.history'),
-                  ]}
-                />
-              </CardContent>
-            </Card>
+            {runtime.desiredSpec.llmRateLimitEnabled && runtime.summary.liveInstances > 1 && (
+              <span className="text-xs text-muted-foreground">
+                {t('settings.enrichment_runtime.local_limiter_body', {
+                  count: runtime.summary.liveInstances,
+                })}
+              </span>
+            )}
           </div>
 
           <div className="grid gap-6 xl:grid-cols-[1.3fr,0.9fr]">
-            <Card className="border-border/70 shadow-sm">
-              <CardHeader className="border-b border-border/70 bg-zinc-50/50 pb-4">
-                <CardTitle>{t('settings.enrichment_runtime.policy_title')}</CardTitle>
+            <Card className="border-border/60 shadow-none">
+              <CardHeader>
+                <CardTitle className="text-base">
+                  {t('settings.enrichment_runtime.policy_title')}
+                </CardTitle>
                 <CardDescription>{t('settings.enrichment_runtime.policy_help')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
@@ -1124,9 +969,11 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
               </CardContent>
             </Card>
 
-            <Card className="border-border/70 bg-zinc-50/30 shadow-sm">
+            <Card className="border-border/60 shadow-none">
               <CardHeader>
-                <CardTitle>{t('settings.enrichment_runtime.guardrail_title')}</CardTitle>
+                <CardTitle className="text-base">
+                  {t('settings.enrichment_runtime.guardrail_title')}
+                </CardTitle>
                 <CardDescription>{t('settings.enrichment_runtime.guardrail_help')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -1778,9 +1625,6 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
         open={guard.dialogOpen}
         onConfirmLeave={guard.confirmLeave}
         onCancelLeave={guard.cancelLeave}
-        onSaveAndLeave={canEdit && stepUpSatisfied ? handleSaveAndLeave : undefined}
-        saving={updateMutation.isPending}
-        changeCount={draftVsDesiredDiff.length}
       />
     </>
   )
@@ -1866,43 +1710,21 @@ function ConditionChip({ tone, label }: { tone: 'good' | 'warn' | 'bad'; label: 
   return <span className={`rounded-md border px-2 py-1 text-xs font-medium ${cls}`}>{label}</span>
 }
 
-function GuidanceBlock({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="space-y-2 rounded-lg border border-border/80 bg-background/90 p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <div className="text-sm font-medium">{title}</div>
-      <div className="space-y-2">
-        {items.map((item) => (
-          <div key={item} className="flex gap-2 text-sm text-muted-foreground">
-            <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/60" />
-            <span>{item}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function RuntimeFormSection({
   icon: Icon,
   title,
-  body,
   children,
 }: {
   icon: typeof Gauge
   title: string
-  body: string
+  body?: string
   children: ReactNode
 }) {
   return (
-    <section className="rounded-xl border border-border/80 bg-zinc-50/40 p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <div className="mb-4 flex items-start gap-3">
-        <div className="rounded-full border border-background/80 bg-background p-2">
-          <Icon className="h-4 w-4 text-muted-foreground" />
-        </div>
-        <div className="min-w-0">
-          <div className="text-sm font-medium">{title}</div>
-          <div className="mt-1 text-sm leading-6 text-muted-foreground">{body}</div>
-        </div>
+    <section className="space-y-3 border-t border-border/50 pt-4">
+      <div className="flex items-center gap-2">
+        <Icon className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-medium">{title}</span>
       </div>
       {children}
     </section>
@@ -2114,36 +1936,6 @@ function localizeSpecLabel(key: string, fallback: string, t: TFunction): string 
     default:
       return fallback
   }
-}
-
-function buildRuntimePosture(spec: EnrichmentRuntimeSpecView, liveInstances: number) {
-  return [
-    {
-      icon: Activity,
-      title: '当前吞吐姿态',
-      body:
-        spec.workers >= Math.max(4, Math.ceil(spec.queueLen / 300))
-          ? '当前更偏向积极吞吐，适合快速吃掉积压，但也会更快放大下游压力。'
-          : '当前更偏向保守吞吐，适合稳定运行，但面对突发积压时恢复会更慢。',
-    },
-    {
-      icon: TimerReset,
-      title: '当前批处理姿态',
-      body:
-        spec.batchWindowSeconds >= 10 || spec.batchSize >= 20
-          ? '当前更偏向效率优先，会增加聚合等待来换取更好的批处理收益。'
-          : '当前更偏向响应优先，更快开始处理单条任务，但批处理效率更保守。',
-    },
-    {
-      icon: spec.llmRateLimitEnabled ? ShieldAlert : SlidersHorizontal,
-      title: '当前模型调用姿态',
-      body: spec.llmRateLimitEnabled
-        ? liveInstances > 1
-          ? '已开启本地限流，能约束单节点压力，但多个节点不会共享同一份全局额度。'
-          : '已开启本地限流，当前节点会主动约束模型调用速率，适合供应商波动或成本敏感场景。'
-        : '当前未开启运行时 LLM 限流，更适合追求吞吐，但需要依赖上游服务自身的承载能力。',
-    },
-  ]
 }
 
 function looksOpaqueId(value: string): boolean {

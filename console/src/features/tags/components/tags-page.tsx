@@ -145,9 +145,9 @@ export function TagsPage() {
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
-        <Card className="border-border/70 shadow-none">
-          <CardHeader className="border-b border-border/60 bg-muted/15">
-            <CardTitle>{t('tags.registry_title')}</CardTitle>
+        <Card className="border-border/60 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">{t('tags.registry_title')}</CardTitle>
             <CardDescription>
               {t('tags.registry_description', { count: totalTags })}
             </CardDescription>
@@ -220,9 +220,9 @@ export function TagsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/70 shadow-none">
-          <CardHeader className="border-b border-border/60 bg-muted/15">
-            <CardTitle>{t('tags.playbook_title')}</CardTitle>
+        <Card className="border-border/60 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">{t('tags.playbook_title')}</CardTitle>
             <CardDescription>{t('tags.playbook_description')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-6">
@@ -291,7 +291,7 @@ export function TagsPage() {
 
 function PlaybookRow({ index, title, body }: { index: string; title: string; body: string }) {
   return (
-    <div className="rounded-[1rem] border border-border/70 bg-background/85 px-4 py-3.5">
+    <div className="rounded-[1rem] border border-border/60 bg-background/85 px-4 py-3.5">
       <div className="flex items-start gap-3">
         <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
           {index}
