@@ -9,6 +9,7 @@ import {
   KeyRound,
   Layers,
   LayoutDashboard,
+  Lock,
   Radio,
   Scale,
   Settings2,
@@ -201,6 +202,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     icon: Stethoscope,
     labelKey: 'nav.system_readiness',
     path: '/administration/system-readiness',
+    adminOnly: true,
+  },
+  {
+    group: 'administration',
+    icon: Lock,
+    labelKey: 'nav.security',
+    path: '/administration/security',
     adminOnly: true,
   },
 ]

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **SSO cutover and break-glass recovery controls (#158).** Enterprise-grade
+  SSO enforcement with emergency access path for admin recovery.
+  - Runtime-switchable auth mode (`hybrid` ↔ `sso_only`) stored in DB, no
+    restart required. `system_settings` table for per-tenant config.
+  - Break-glass tokens: one-time, time-limited (default 30m, configurable
+    5m–24h), bcrypt-hashed, `bg_` prefix for log grep. Full lifecycle:
+    issue via CLI/Console, validate on login, auto-expire.
+  - Preflight checks block SSO cutover unless: OIDC enabled + issuer
+    reachable + redirect_uri matches console.base_url + ≥1 break-glass
+    token exists (or explicit skip).
+  - Audit actions: `auth.mode_change`, `breakglass.issue`, `breakglass.use`,
+    `breakglass.revoke`, `breakglass.expire`.
+  - CLI: `attune auth breakglass {issue,list,revoke}`.
+  - Console: Settings → Security → Auth Mode + Break-Glass Tokens.
+  - Session `UserType` field distinguishes `local`, `oidc`, `breakglass`.
+  - Design based on NIST SP 800-63C-4 replay protection requirements and
+    patterns from Authentik, Ory Kratos, Okta, Microsoft Entra ID.
 - **Signed compliance evidence packs for audit logs (#152).** Export
   tamper-evident ZIP archives of audit log entries with SHA-256 hash chains
   (RFC 8785 canonical JSON) and optional Ed25519 digital signatures.
