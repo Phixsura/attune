@@ -152,3 +152,117 @@ func TestBreakGlassToken_IsIPAllowed_IPv6(t *testing.T) {
 		})
 	}
 }
+
+func TestBreakGlassToken_IsPendingApproval(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name  string
+		token domain.BreakGlassToken
+		want  bool
+	}{
+		{
+			name:  "no approval required",
+			token: domain.BreakGlassToken{RequiresApproval: false},
+			want:  false,
+		},
+		{
+			name:  "requires approval and not approved",
+			token: domain.BreakGlassToken{RequiresApproval: true, ApprovedAt: nil},
+			want:  true,
+		},
+		{
+			name:  "requires approval but already approved",
+			token: domain.BreakGlassToken{RequiresApproval: true, ApprovedAt: ptrext.Of(now)},
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.token.IsPendingApproval(); got != tt.want {
+				t.Errorf("IsPendingApproval() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBreakGlassToken_IsApprovalExpired(t *testing.T) {
+	now := time.Now()
+	future := now.Add(1 * time.Hour)
+	past := now.Add(-1 * time.Hour)
+
+	tests := []struct {
+		name  string
+		token domain.BreakGlassToken
+		want  bool
+	}{
+		{
+			name:  "no approval expiry set",
+			token: domain.BreakGlassToken{RequiresApproval: true, ApprovalExpiresAt: nil},
+			want:  false,
+		},
+		{
+			name:  "approval expires in future",
+			token: domain.BreakGlassToken{RequiresApproval: true, ApprovalExpiresAt: ptrext.Of(future)},
+			want:  false,
+		},
+		{
+			name:  "approval expired in past",
+			token: domain.BreakGlassToken{RequiresApproval: true, ApprovalExpiresAt: ptrext.Of(past)},
+			want:  true,
+		},
+		{
+			name:  "requires approval false ignores expiry",
+			token: domain.BreakGlassToken{RequiresApproval: false, ApprovalExpiresAt: ptrext.Of(past)},
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.token.IsApprovalExpired(now); got != tt.want {
+				t.Errorf("IsApprovalExpired() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBreakGlassRecoveryCode_IsValid(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name string
+		code domain.BreakGlassRecoveryCode
+		want bool
+	}{
+		{
+			name: "valid code",
+			code: domain.BreakGlassRecoveryCode{UsedAt: nil, RevokedAt: nil},
+			want: true,
+		},
+		{
+			name: "used code",
+			code: domain.BreakGlassRecoveryCode{UsedAt: ptrext.Of(now)},
+			want: false,
+		},
+		{
+			name: "revoked code",
+			code: domain.BreakGlassRecoveryCode{RevokedAt: ptrext.Of(now)},
+			want: false,
+		},
+		{
+			name: "used and revoked code",
+			code: domain.BreakGlassRecoveryCode{UsedAt: ptrext.Of(now), RevokedAt: ptrext.Of(now)},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.code.IsValid(); got != tt.want {
+				t.Errorf("IsValid() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
