@@ -22,7 +22,11 @@ export function SaveStatus({ dirty, saving, lastSavedAt }: SaveStatusProps) {
     )
   } else if (dirty) {
     className = 'text-sm text-amber-600 dark:text-amber-400'
-    content = `● ${t('draft.status_unsaved')}`
+    content = (
+      <>
+        <span aria-hidden="true">●</span> {t('draft.status_unsaved')}
+      </>
+    )
   } else if (lastSavedAt) {
     const time = lastSavedAt.toLocaleTimeString(undefined, {
       hour: '2-digit',

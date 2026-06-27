@@ -147,7 +147,7 @@ export function useDraftGuard<T>(opts: UseDraftGuardOpts<T>): UseDraftGuardRetur
   }, [dirty, disabled])
 
   useEffect(() => {
-    if (typeof BroadcastChannel === 'undefined') return
+    if (disabled || typeof BroadcastChannel === 'undefined') return
     const ch = new BroadcastChannel('attune-draft')
     channelRef.current = ch
     ch.onmessage = (e) => {
@@ -159,7 +159,7 @@ export function useDraftGuard<T>(opts: UseDraftGuardOpts<T>): UseDraftGuardRetur
       channelRef.current = null
       ch.close()
     }
-  }, [storageKey])
+  }, [storageKey, disabled])
 
   const isBlocked = !disabled && dirty
   const isBlockedRef = useRef(isBlocked)

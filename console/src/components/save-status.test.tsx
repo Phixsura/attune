@@ -39,6 +39,13 @@ describe('SaveStatus', () => {
     expect(screen.queryByText(/已保存于/)).not.toBeInTheDocument()
   })
 
+  it('hides bullet character from screen readers', () => {
+    renderWithProviders(<SaveStatus dirty={true} saving={false} lastSavedAt={null} />)
+    const bullet = document.querySelector('[aria-hidden="true"]')
+    expect(bullet).not.toBeNull()
+    expect(bullet?.textContent).toBe('●')
+  })
+
   it('has aria-live on all states', () => {
     const { rerender } = renderWithProviders(
       <SaveStatus dirty={true} saving={false} lastSavedAt={null} />,

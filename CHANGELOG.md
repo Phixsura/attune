@@ -22,7 +22,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     transient toasts for draft recovery and conflict notification.
   - `BroadcastChannel` cross-tab notification on draft clear.
   - `beforeunload` immediate flush via refs for stale-closure safety.
-  - Keyboard shortcuts: Cmd/Ctrl+S to save, Cmd/Ctrl+Enter to submit.
+  - Keyboard shortcut: Cmd/Ctrl+S to save (hook also supports Cmd/Ctrl+Enter
+    when `onSubmit` is wired).
   - `SaveStatus` indicator: saving spinner, unsaved dot, or "saved at HH:MM".
   - Undo-discard pattern: snapshot state before discard, 5-second undo toast.
   - `document.title` dirty indicator (`●` prefix when form is dirty).

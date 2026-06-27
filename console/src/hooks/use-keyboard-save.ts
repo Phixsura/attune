@@ -16,13 +16,13 @@ export function useKeyboardSave(opts: UseKeyboardSaveOpts): void {
     if (opts.enabled === false) return
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
-      if (mod && e.key === 's') {
+      if (mod && e.key === 's' && onSaveRef.current) {
         e.preventDefault()
-        onSaveRef.current?.()
+        onSaveRef.current()
       }
-      if (mod && e.key === 'Enter') {
+      if (mod && e.key === 'Enter' && onSubmitRef.current) {
         e.preventDefault()
-        onSubmitRef.current?.()
+        onSubmitRef.current()
       }
     }
     document.addEventListener('keydown', handler)

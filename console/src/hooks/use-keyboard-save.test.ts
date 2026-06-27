@@ -87,4 +87,28 @@ describe('useKeyboardSave', () => {
     document.dispatchEvent(event)
     expect(event.defaultPrevented).toBe(true)
   })
+
+  it('does not preventDefault for Cmd+S when onSave is not provided', () => {
+    renderHook(() => useKeyboardSave({ onSubmit: vi.fn() }))
+    const event = new KeyboardEvent('keydown', {
+      key: 's',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    document.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('does not preventDefault for Cmd+Enter when onSubmit is not provided', () => {
+    renderHook(() => useKeyboardSave({ onSave: vi.fn() }))
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    document.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+  })
 })

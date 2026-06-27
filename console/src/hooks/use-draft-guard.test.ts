@@ -63,6 +63,15 @@ describe('readDraft', () => {
     expect(readDraft<{ x: number }>('test-key')).toBeNull()
     expect(localStorage.getItem('attune:draft:test-key')).toBeNull()
   })
+
+  it('discards drafts from a future schema version', () => {
+    localStorage.setItem(
+      'attune:draft:test-key',
+      JSON.stringify({ _v: 999, _ts: Date.now(), data: { x: 1 } }),
+    )
+    expect(readDraft<{ x: number }>('test-key')).toBeNull()
+    expect(localStorage.getItem('attune:draft:test-key')).toBeNull()
+  })
 })
 
 describe('readDraftAge', () => {
@@ -346,5 +355,59 @@ describe('useDraftGuard', () => {
     sender.close()
     await new Promise((r) => setTimeout(r, 50))
     expect(onExternalSave).not.toHaveBeenCalled()
+  })
+
+  it('does not create BroadcastChannel when disabled', async () => {
+    const onExternalSave = vi.fn()
+    renderHook(() =>
+      useDraftGuard({
+        storageKey: 'test',
+        draft: { v: 1 },
+        dirty: false,
+        disabled: true,
+        onExternalSave,
+      }),
+    )
+    const sender = new BroadcastChannel('attune-draft')
+    sender.postMessage({ type: 'draft-cleared', key: 'test' })
+    sender.close()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(onExternalSave).not.toHaveBeenCalled()
+  })
+
+  it('adds dirty indicator to document.title when dirty', () => {
+    document.title = 'Settings'
+    renderHook(() => useDraftGuard({ storageKey: 'test', draft: { v: 1 }, dirty: true }))
+    expect(document.title).toBe('● Settings')
+  })
+
+  it('removes dirty indicator from document.title when dirty becomes false', () => {
+    document.title = 'Settings'
+    const { rerender } = renderHook(
+      ({ dirty }: { dirty: boolean }) =>
+        useDraftGuard({ storageKey: 'test', draft: { v: 1 }, dirty }),
+      { initialProps: { dirty: true } },
+    )
+    expect(document.title).toBe('● Settings')
+    rerender({ dirty: false })
+    expect(document.title).toBe('Settings')
+  })
+
+  it('cleans up document.title on unmount while dirty', () => {
+    document.title = 'Settings'
+    const { unmount } = renderHook(() =>
+      useDraftGuard({ storageKey: 'test', draft: { v: 1 }, dirty: true }),
+    )
+    expect(document.title).toBe('● Settings')
+    unmount()
+    expect(document.title).toBe('Settings')
+  })
+
+  it('does not add title indicator when disabled', () => {
+    document.title = 'Settings'
+    renderHook(() =>
+      useDraftGuard({ storageKey: 'test', draft: { v: 1 }, dirty: true, disabled: true }),
+    )
+    expect(document.title).toBe('Settings')
   })
 })
