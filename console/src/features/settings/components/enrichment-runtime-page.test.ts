@@ -18,7 +18,7 @@ import {
 } from './enrichment-runtime-page'
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -842,6 +842,29 @@ describe('EnrichmentRuntimePage', () => {
       renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
       await waitFor(() => {
         expect(screen.getByDisplayValue('200')).toBeInTheDocument()
+      })
+    })
+
+    it('shows recovery toast when draft is restored from sessionStorage', async () => {
+      const { toast } = await import('sonner')
+      const storedDraft = {
+        queueLen: '200',
+        workers: '8',
+        batchSize: '20',
+        batchWindowSeconds: '10',
+        sweepIntervalSeconds: '60',
+        llmRateLimitEnabled: false,
+        llmMaxQps: '0',
+        llmBurst: '0',
+      }
+      sessionStorage.setItem('attune:draft:enrichment-runtime', JSON.stringify(storedDraft))
+      mockRuntimePage()
+      renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await waitFor(() => {
+        expect(toast.info).toHaveBeenCalledWith(
+          '已恢复上次未保存的草稿',
+          expect.objectContaining({ duration: 8000 }),
+        )
       })
     })
 

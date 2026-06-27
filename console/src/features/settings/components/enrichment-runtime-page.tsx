@@ -482,6 +482,24 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
     setLastHydratedVersion(desiredVersion)
   }, [desiredSpec, desiredVersion, dirty, lastHydratedVersion, restoredFromStorage])
 
+  const [hadStoredDraft] = useState(() => readDraft<DraftState>('enrichment-runtime') !== null)
+  const [recoveryToastFired, setRecoveryToastFired] = useState(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fire once when server data arrives after storage restore
+  useEffect(() => {
+    if (recoveryToastFired || !hadStoredDraft || !desiredSpec) return
+    setRecoveryToastFired(true)
+    toast.info(t('draft.recovered'), {
+      duration: 8000,
+      action: {
+        label: t('draft.recovered_discard'),
+        onClick: () => {
+          setDraft(specToDraft(desiredSpec))
+          guard.clearDraft()
+        },
+      },
+    })
+  }, [desiredSpec, hadStoredDraft, recoveryToastFired])
+
   const handleVerifyStepUp = () => {
     verifyStepUpMutation.mutate(stepUpPassword, {
       onSuccess: async () => {
