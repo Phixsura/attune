@@ -824,4 +824,43 @@ describe('EnrichmentRuntimePage', () => {
       })
     })
   }, 20_000) // Full-page runtime smoke covers multiple guarded action dialogs.
+
+  describe('draft durability (#172)', () => {
+    it('restores draft from sessionStorage on mount', async () => {
+      const storedDraft = {
+        queueLen: '200',
+        workers: '8',
+        batchSize: '20',
+        batchWindowSeconds: '10',
+        sweepIntervalSeconds: '60',
+        llmRateLimitEnabled: false,
+        llmMaxQps: '0',
+        llmBurst: '0',
+      }
+      sessionStorage.setItem('attune:draft:enrichment-runtime', JSON.stringify(storedDraft))
+      mockRuntimePage()
+      renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('200')).toBeInTheDocument()
+      })
+    })
+
+    it('clears sessionStorage on successful save', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      mockRuntimePage()
+      const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      await screen.findByText('目标策略')
+      const queueInput = screen.getByLabelText('队列容量')
+      await user.clear(queueInput)
+      await user.type(queueInput, '1008')
+      vi.advanceTimersByTime(600)
+      expect(sessionStorage.getItem('attune:draft:enrichment-runtime')).not.toBeNull()
+      await user.type(screen.getByLabelText('变更说明'), 'test')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => {
+        expect(sessionStorage.getItem('attune:draft:enrichment-runtime')).toBeNull()
+      })
+      vi.useRealTimers()
+    })
+  })
 })

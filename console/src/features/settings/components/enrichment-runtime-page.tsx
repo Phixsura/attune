@@ -394,6 +394,9 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
   const stepUp = operationsQuery.data?.stepUp
   const stepUpSatisfied = stepUp?.satisfied ?? false
 
+  const [restoredFromStorage, setRestoredFromStorage] = useState(
+    () => readDraft<DraftState>('enrichment-runtime') !== null,
+  )
   const [draft, setDraft] = useState<DraftState>(
     () => readDraft<DraftState>('enrichment-runtime') ?? emptyDraft(),
   )
@@ -461,6 +464,11 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
 
   useEffect(() => {
     if (!desiredSpec) return
+    if (restoredFromStorage) {
+      setLastHydratedVersion(desiredVersion)
+      setRestoredFromStorage(false)
+      return
+    }
     if (
       !shouldHydrateRuntimeDraft({
         desiredVersion,
@@ -472,7 +480,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
     }
     setDraft(specToDraft(desiredSpec))
     setLastHydratedVersion(desiredVersion)
-  }, [desiredSpec, desiredVersion, dirty, lastHydratedVersion])
+  }, [desiredSpec, desiredVersion, dirty, lastHydratedVersion, restoredFromStorage])
 
   const handleVerifyStepUp = () => {
     verifyStepUpMutation.mutate(stepUpPassword, {
