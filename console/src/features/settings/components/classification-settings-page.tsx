@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionsEditor } from '@/components/dim/dimensions-editor'
@@ -8,13 +8,23 @@ import { EmptyState } from '@/components/empty-state'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { UnsavedChangesDialog } from '@/components/unsaved-changes-dialog'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { type EnrichConfig, enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usePreviewEnrichPrompt } from '@/features/settings/api/preview-enrich-prompt'
 import { useUpdateEnrichConfig } from '@/features/settings/api/update-enrich-config'
 import { SuggestedValuesPanel } from '@/features/settings/components/suggested-values-panel'
+import { readDraft, useDraftGuard } from '@/hooks/use-draft-guard'
 import {
   type EditableDimension,
   markPersisted,
@@ -67,20 +77,67 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
   const save = useUpdateEnrichConfig()
   const preview = usePreviewEnrichPrompt()
 
-  // Seeded ONCE from the server snapshot. Subsequent `initial` changes (e.g. our
-  // own post-save cache write) do not re-seed — the form owns its draft and
-  // reconciles `_isNew` imperatively on save (below).
-  const [prompt, setPrompt] = useState(
-    () => initial.promptTemplate ?? initial.defaultPromptTemplate,
+  const storedDraft = readDraft<{ prompt: string; rows: EditableDimension[] }>(
+    'classification-settings',
   )
-  const [rows, setRows] = useState<EditableDimension[]>(() =>
-    seedDimensions(initial.dimensions ?? []),
+  const [restoredFromStorage] = useState(() => storedDraft !== null)
+  const [prompt, setPrompt] = useState(
+    () => storedDraft?.prompt ?? initial.promptTemplate ?? initial.defaultPromptTemplate,
+  )
+  const [rows, setRows] = useState<EditableDimension[]>(
+    () => storedDraft?.rows ?? seedDimensions(initial.dimensions ?? []),
   )
   const [sample, setSample] = useState('')
   const [previewText, setPreviewText] = useState('')
+  const [touched, setTouched] = useState(() => restoredFromStorage)
+  const [discardOpen, setDiscardOpen] = useState(false)
+
+  const guard = useDraftGuard({
+    storageKey: 'classification-settings',
+    draft: { prompt, rows },
+    dirty: touched,
+    disabled: !canEdit,
+  })
+
+  const updatePrompt = (value: string) => {
+    setPrompt(value)
+    setTouched(true)
+  }
+
+  const updateRows = (
+    value: EditableDimension[] | ((prev: EditableDimension[]) => EditableDimension[]),
+  ) => {
+    setRows(value)
+    setTouched(true)
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fire once on mount
+  useEffect(() => {
+    if (!restoredFromStorage) return
+    toast.info(t('draft.recovered'), {
+      duration: 8000,
+      action: {
+        label: t('draft.recovered_discard'),
+        onClick: () => {
+          setPrompt(initial.promptTemplate ?? initial.defaultPromptTemplate)
+          setRows(seedDimensions(initial.dimensions ?? []))
+          setTouched(false)
+          guard.clearDraft()
+        },
+      },
+    })
+  }, [])
 
   const handleRestoreDefault = () => {
-    if (initial.defaultPromptTemplate) setPrompt(initial.defaultPromptTemplate)
+    if (initial.defaultPromptTemplate) updatePrompt(initial.defaultPromptTemplate)
+  }
+
+  const handleDiscard = () => {
+    setPrompt(initial.promptTemplate ?? initial.defaultPromptTemplate)
+    setRows(seedDimensions(initial.dimensions ?? []))
+    setTouched(false)
+    guard.clearDraft()
+    setDiscardOpen(false)
   }
 
   const handleSave = () => {
@@ -99,6 +156,8 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
       {
         onSuccess: () => {
           setRows((prev) => markPersisted(prev, sentDimKeys, sentTaxKeys))
+          guard.clearDraft()
+          setTouched(false)
           toast.success(t('settings.saved'))
         },
         onError: (err) => toast.error(err instanceof Error ? err.message : 'failed'),
@@ -176,7 +235,7 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
                 id="prompt"
                 className="min-h-[320px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm leading-7 outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={(e) => updatePrompt(e.target.value)}
                 disabled={!canEdit}
               />
               <p className="text-xs text-muted-foreground">{t('settings.prompt_tokens')}</p>
@@ -193,6 +252,11 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
               <Button type="button" onClick={handleSave} disabled={!canEdit || save.isPending}>
                 {save.isPending ? t('app.loading') : t('common.save')}
               </Button>
+              {touched && (
+                <Button type="button" variant="ghost" onClick={() => setDiscardOpen(true)}>
+                  {t('draft.discard_changes')}
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -246,15 +310,42 @@ function ClassificationSettingsForm({ initial }: { initial: EnrichConfig }) {
           {/* Lock the editor while a save is in flight: editing a just-submitted
               row's identifier mid-save would, on success, lock it to a value the
               server never received. */}
-          <DimensionsEditor value={rows} onChange={setRows} disabled={!canEdit || save.isPending} />
+          <DimensionsEditor
+            value={rows}
+            onChange={updateRows}
+            disabled={!canEdit || save.isPending}
+          />
         </CardContent>
       </Card>
 
       <SuggestedValuesPanel
         canEdit={canEdit}
         onPromoted={(dim, value, displayName) =>
-          setRows((prev) => mergePromotedValue(prev, dim, value, displayName))
+          updateRows((prev) => mergePromotedValue(prev, dim, value, displayName))
         }
+      />
+
+      <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
+        <DialogContent showCloseButton={false} role="alertdialog">
+          <DialogHeader>
+            <DialogTitle>{t('draft.discard_confirm_title')}</DialogTitle>
+            <DialogDescription>{t('draft.discard_confirm_body')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDiscardOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleDiscard}>
+              {t('draft.discard_changes')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <UnsavedChangesDialog
+        open={guard.dialogOpen}
+        onConfirmLeave={guard.confirmLeave}
+        onCancelLeave={guard.cancelLeave}
       />
     </section>
   )
