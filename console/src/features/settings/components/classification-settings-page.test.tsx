@@ -1,8 +1,14 @@
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ClassificationSettingsPage } from '@/features/settings/components/classification-settings-page'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+
+vi.mock('@tanstack/react-router', () => ({
+  useBlocker: () => ({ status: 'idle', proceed: undefined, reset: undefined }),
+}))
+
+afterEach(() => sessionStorage.clear())
 
 describe('ClassificationSettingsPage', () => {
   it('renders hero metrics and preview empty state from the enrich config query', async () => {
@@ -287,5 +293,57 @@ describe('ClassificationSettingsPage', () => {
     await waitFor(() => expect(screen.queryByTestId('dim-editor-add-dim')).toBeNull())
     releasePut()
     await waitFor(() => expect(screen.getByTestId('dim-editor-add-dim')).toBeInTheDocument())
+  })
+
+  describe('draft durability (#172)', () => {
+    it('persists draft to sessionStorage after editing the prompt', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await user.clear(textarea)
+      await user.type(textarea, 'New prompt')
+      vi.advanceTimersByTime(600)
+      const stored = sessionStorage.getItem('attune:draft:classification-settings')
+      expect(stored).not.toBeNull()
+      expect(JSON.parse(stored!).prompt).toBe('New prompt')
+      vi.useRealTimers()
+    })
+
+    it('restores draft from sessionStorage on mount', async () => {
+      sessionStorage.setItem(
+        'attune:draft:classification-settings',
+        JSON.stringify({ prompt: 'Stored prompt', rows: [] }),
+      )
+      seedConfig()
+      renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      expect(textarea).toHaveValue('Stored prompt')
+    })
+
+    it('clears sessionStorage on successful save', async () => {
+      sessionStorage.setItem(
+        'attune:draft:classification-settings',
+        JSON.stringify({ prompt: 'Draft', rows: [] }),
+      )
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      await screen.findByLabelText('提示词模板')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => {
+        expect(sessionStorage.getItem('attune:draft:classification-settings')).toBeNull()
+      })
+    })
+
+    it('shows discard button only when touched', async () => {
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      expect(screen.queryByRole('button', { name: '放弃更改' })).not.toBeInTheDocument()
+      await user.clear(textarea)
+      await user.type(textarea, 'edit')
+      expect(screen.getByRole('button', { name: '放弃更改' })).toBeInTheDocument()
+    })
   })
 })
