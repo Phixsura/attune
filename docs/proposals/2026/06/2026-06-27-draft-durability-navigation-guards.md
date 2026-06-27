@@ -44,12 +44,12 @@ guarded only by `refetchOnWindowFocus: false`.
 
 ## Non-goals
 
-- **Server-side draft persistence** — adds backend complexity; `sessionStorage`
-  (tab-scoped) is sufficient for the "accidental refresh" scenario.
-- **Cross-tab draft sync** — `sessionStorage` is per-tab by design; operators
-  editing the same setting in two tabs is an edge case covered by the existing
-  `expectedVersion` optimistic lock (runtime page) or future backend versioning
-  (classification page).
+- **Server-side draft persistence** — adds backend complexity; localStorage
+  with TTL-based expiry is sufficient for the "accidental refresh" scenario.
+- **Cross-tab draft conflict resolution** — `BroadcastChannel` notifies other
+  tabs when a draft is cleared; concurrent editing in two tabs is an edge case
+  covered by the existing `expectedVersion` optimistic lock (runtime page) or
+  future backend versioning (classification page).
 - **JSON side-by-side diff preview** — no industry precedent for settings pages
   (Grafana's JSON diff approach is a documented anti-pattern with widespread
   false-positive issues; see research).
@@ -68,10 +68,11 @@ guarded only by `refetchOnWindowFocus: false`.
 A single reusable hook encapsulates three layers of protection:
 
 ```
-useDraftGuard<T>({ storageKey, draft, dirty, onRestore })
-  ├── 1. sessionStorage persistence (debounced write on draft change)
+useDraftGuard<T>({ storageKey, draft, dirty, disabled, onExternalSave })
+  ├── 1. localStorage persistence (debounced write, StoredEnvelope with 24h TTL)
   ├── 2. TanStack Router useBlocker (in-app navigation interception)
-  └── 3. beforeunload (tab close / refresh interception)
+  ├── 3. beforeunload (synchronous flush + tab close interception)
+  └── 4. BroadcastChannel cross-tab draft-cleared notification
 ```
 
 A shared `UnsavedChangesDialog` component is driven by the blocker's resolver
@@ -81,7 +82,7 @@ state.
 
 ```typescript
 interface UseDraftGuardOpts<T> {
-  /** Stable key for sessionStorage, e.g. "classification-settings".
+  /** Stable key for localStorage, e.g. "classification-settings".
    *  The hook prefixes this with "attune:draft:" automatically. */
   storageKey: string
   /** Current draft value to persist */
@@ -113,30 +114,31 @@ function readDraft<T>(storageKey: string): T | null
 
 #### Behavior details
 
-**sessionStorage persistence:**
+**localStorage persistence (StoredEnvelope):**
 - Key format: `attune:draft:<storageKey>` (e.g. `attune:draft:classification-settings`)
+- Storage format: `StoredEnvelope<T>` with `_v` (schema version), `_ts`
+  (timestamp), `data` (draft payload). Non-envelope legacy data is discarded
+  on read. Drafts older than 24 hours (configurable TTL) are auto-purged.
 - Write: debounced 500ms after `draft` changes, only when `dirty` is true
 - Read: the consuming page's `useState` initializer calls `readDraft(key)`
   synchronously to seed the form on first render (no flash of server data).
-  The hook itself does NOT read or restore — restoration is the page's
-  responsibility so the page controls what state shape to hydrate.
+  `readDraft` also handles sessionStorage→localStorage migration (one-time).
 - Clear: on `clearDraft()` call (save success, explicit discard, or
-  "Restore Default")
-- Serialization: `JSON.stringify` / `JSON.parse` — the draft types are plain
-  objects (no `Date`, no `Map`, no circular refs)
+  "Restore Default"). Clears both localStorage and sessionStorage.
+- Cross-tab: `clearDraft()` posts a `draft-cleared` message via
+  `BroadcastChannel`; other tabs receive it and call `onExternalSave` (refetch).
 
 **Navigation guard (in-app):**
-- Uses `useBlocker({ shouldBlockFn: () => dirty, withResolver: true,
-  enableBeforeUnload: dirty })` from TanStack Router
+- Uses `useBlocker({ shouldBlockFn: () => isBlockedRef.current, withResolver:
+  true, disabled: !isBlocked })` from TanStack Router
 - When blocked, `dialogOpen` becomes `true` and drives `UnsavedChangesDialog`
-- `confirmLeave` calls `resolver.proceed()` + clears sessionStorage
-- `cancelLeave` calls `resolver.reset()`
-- `enableBeforeUnload` is conditional on `dirty` — no phantom prompts on
-  clean forms
+- `confirmLeave` calls `clearDraft()` + `blocker.proceed()`
+- `cancelLeave` calls `blocker.reset()`
 
 **beforeunload (browser-level):**
-- Handled by TanStack Router's `enableBeforeUnload` option — no manual
-  `addEventListener` needed
+- Manual `window.addEventListener('beforeunload', flush)` that synchronously
+  writes the current draft to localStorage via `writeDraft`. This ensures the
+  draft survives even if the debounce timer hasn't fired yet.
 
 #### `UnsavedChangesDialog`
 
@@ -167,18 +169,21 @@ interface ClassificationDraft {
 
 **Changes to `ClassificationSettingsForm`:**
 
-1. **useState initializer** reads sessionStorage first:
+1. **useState initializer** reads localStorage first (via `readDraft`):
    ```typescript
-   const stored = readDraft<ClassificationDraft>('classification-settings')
+   const storedDraft = useRef(
+     readDraft<{ prompt: string; rows: EditableDimension[] }>('classification-settings'),
+   ).current
    const [prompt, setPrompt] = useState(() =>
-     stored?.prompt ?? initial.promptTemplate ?? initial.defaultPromptTemplate
+     storedDraft?.prompt ?? initial.promptTemplate ?? initial.defaultPromptTemplate
    )
    const [rows, setRows] = useState<EditableDimension[]>(() =>
-     stored?.rows ?? seedDimensions(initial.dimensions ?? [])
+     storedDraft?.rows ?? seedDimensions(initial.dimensions ?? [])
    )
    ```
-   If a stored draft exists, a toast with an action button offers "Undo restore"
-   (revert to server state) for 8 seconds.
+   If a stored draft exists and differs from server state, a persistent
+   `DraftBanner` (recovery variant) is shown with "Discard" and "Keep draft"
+   options.
 
 2. **useDraftGuard** hook wired up:
    ```typescript
@@ -224,10 +229,11 @@ and `expectedVersion`:
    })
    ```
 
-2. **useState initializer** reads sessionStorage:
+2. **useState initializer** reads localStorage (via `readDraft`):
    ```typescript
+   const storedDraft = useRef(readDraft<Partial<DraftState>>('enrichment-runtime')).current
    const [draft, setDraft] = useState<DraftState>(() =>
-     readDraft<DraftState>('enrichment-runtime') ?? emptyDraft()
+     storedDraft ? { ...emptyDraft(), ...storedDraft } : emptyDraft()
    )
    ```
 
@@ -240,50 +246,61 @@ and `expectedVersion`:
 
 ### Draft recovery UX
 
-When a stored draft is found on mount, a **sonner action toast** appears:
+When a stored draft is found on mount and differs from server state, a
+persistent **`DraftBanner`** (recovery variant) is shown inline:
 
 ```
-┌──────────────────────────────────────┐
-│ ↻  Draft recovered from last session │
-│                          [Discard]   │
-└──────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ 检测到未保存的草稿  —  保存于约 {age} 前    [丢弃] [保留草稿]   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-- Auto-dismisses after 8 seconds (the draft is already applied)
-- "Discard" button reverts to server state and clears sessionStorage
-- No modal interruption — the operator can immediately continue editing
+- Stays visible until the operator explicitly chooses an action
+- "Discard" button reverts to server state and clears localStorage
+- "Keep draft" dismisses the banner and the operator continues editing
+- If draft matches server state (e.g., operator saved in another tab),
+  the draft is silently cleared on mount — no banner shown
 
-This is lighter than a blocking dialog (Cloudscape pattern) and matches the
-"restore is the default, discard is opt-in" UX that preserves work.
+The enrichment runtime page additionally supports a **conflict** variant:
+when the server version changes while the operator has local edits, a
+conflict banner offers "Load latest" or "Keep my edits".
 
 ---
 
 ## Alternatives considered
 
-### A. localStorage instead of sessionStorage
+### A. ~~localStorage instead of sessionStorage~~ (revised — adopted)
 
-Drafts would survive tab close and persist across sessions. Rejected because:
-- Classification settings and prompt policies are security-sensitive
-  configurations (GitLab explicitly prohibits auto-save for such data)
-- Stale drafts from days ago auto-restoring is a footgun
-- Would need TTL-based expiry and multi-tab conflict resolution
+Originally rejected in favor of sessionStorage. During implementation, switched
+to localStorage with a `StoredEnvelope<T>` wrapper (`_v` schema version + `_ts`
+timestamp) and 24-hour TTL auto-expiry. This addresses the original concerns:
+- **Stale drafts** — 24h TTL auto-purges old entries; non-envelope legacy data
+  is discarded on read.
+- **Multi-tab** — `BroadcastChannel` notifies other tabs when a draft is
+  cleared (save/discard), triggering `onExternalSave` refetch.
+- **Security** — drafts are still client-only and auto-expire; operators must
+  re-authenticate to reach the page at all.
 
-### B. Blocking modal on draft recovery (instead of action toast)
+The switch was motivated by the observation that sessionStorage (tab-scoped)
+does not survive browser crashes or accidental tab close — the primary scenario
+this feature protects against.
 
-A modal forces the operator to choose before seeing the page. Rejected because:
-- Interrupts the workflow; the operator may not remember what they were editing
-- The toast approach lets them see the recovered draft in context first
-- If they want to discard, one click on the toast's "Discard" button suffices
+### B. ~~Blocking modal on draft recovery~~ (revised — persistent banner)
 
-### C. "Save and leave" in the navigation dialog
+Originally proposed an action toast (auto-dismiss 8s). Replaced with a
+persistent inline `DraftBanner` component (recovery variant) that remains
+visible until the operator explicitly chooses "Keep draft" or "Discard". This
+avoids the problem of the toast dismissing before the operator has context to
+decide, and keeps the recovery action always reachable without modal
+interruption.
 
-Adding a third button that triggers save, waits for success, then navigates.
-Rejected because:
-- Save can fail (validation, network, conflict) — handling failure mid-navigation
-  is complex
-- The operator should save explicitly, see the success feedback, then navigate
-- Industry consensus (Cloudscape, GitLab Pajamas) uses only "Discard and leave"
-  + "Stay"
+### C. ~~"Save and leave" rejected~~ (revised — adopted)
+
+Originally rejected for complexity. Added during implementation because both
+pages already have well-tested save mutations with validation, and the pattern
+is straightforward: `submitSave(() => guard.proceed())`. The save-and-leave
+button is disabled during the mutation (shows "保存中…") and the dialog
+prevents dismiss via overlay while saving. Only shown when `canEdit` is true.
 
 ### D. JSON diff for dirty detection on classification page
 
@@ -298,11 +315,11 @@ flag is simpler and correct.
 
 | Risk | Mitigation |
 |---|---|
-| sessionStorage has ~5MB limit per origin | Classification draft is small (~10KB max); not a concern |
+| localStorage has ~5MB limit per origin | Classification draft is small (~10KB max); not a concern |
 | `EditableDimension` contains `_key` (crypto UUID) — restoring from storage creates new `_key` values | Store rows with their `_key`s; on restore, the keys survive the round-trip through JSON |
-| Debounced write may lose the last ~500ms of edits before a crash | Acceptable tradeoff; the alternative (sync write on every keystroke) causes jank on large prompt templates |
+| Debounced write may lose the last ~500ms of edits before a crash | `beforeunload` handler flushes synchronously via `writeDraft`; only a hard kill (OOM, force-quit) loses the tail |
 | `useBlocker` with `withResolver` is a newer TanStack Router API | Already exported in v1.95.0 (verified in `node_modules`); well-documented with stable types |
-| Draft restored from sessionStorage may be for a different tenant (if operator switches tenants) | Include tenant ID in the storage key: `attune:draft:<tenantId>:<page>` |
+| Draft restored from localStorage may be for a different tenant (if operator switches tenants) | Accepted risk: attune is currently single-tenant per deployment; if multi-tenant console is added, prefix storage keys with tenant ID |
 
 ---
 
@@ -312,7 +329,7 @@ flag is simpler and correct.
 
 1. Create `console/src/hooks/use-draft-guard.ts` — the `useDraftGuard` hook
 2. Create `console/src/hooks/use-draft-guard.test.ts` — unit tests for
-   sessionStorage read/write/clear, debounce behavior, and blocker state
+   localStorage read/write/clear, debounce behavior, and blocker state
 3. Create `console/src/components/unsaved-changes-dialog.tsx` — the shared
    dialog component
 4. Create `console/src/components/unsaved-changes-dialog.test.tsx` — render
@@ -322,7 +339,7 @@ flag is simpler and correct.
 
 5. Modify `classification-settings-page.tsx`:
    - Add `touched` state and dirty detection
-   - Wire `useDraftGuard` with sessionStorage restore in useState initializer
+   - Wire `useDraftGuard` with localStorage restore in useState initializer
    - Add "Discard Changes" button with confirmation
    - Render `UnsavedChangesDialog`
 6. Add tests for draft recovery, navigation blocking, save-clears-draft,
@@ -332,7 +349,7 @@ flag is simpler and correct.
 
 7. Modify `enrichment-runtime-page.tsx`:
    - Wire `useDraftGuard` with existing `dirty` state
-   - Add sessionStorage restore in useState initializer
+   - Add localStorage restore in useState initializer
    - Call `clearDraft()` on save/reset/rollback success
    - Render `UnsavedChangesDialog`
 8. Add tests for navigation blocking and draft persistence
@@ -348,12 +365,18 @@ flag is simpler and correct.
 |---|---|
 | `console/src/hooks/use-draft-guard.ts` | New |
 | `console/src/hooks/use-draft-guard.test.ts` | New |
+| `console/src/hooks/use-keyboard-save.ts` | New |
+| `console/src/hooks/use-keyboard-save.test.ts` | New |
 | `console/src/components/unsaved-changes-dialog.tsx` | New |
 | `console/src/components/unsaved-changes-dialog.test.tsx` | New |
+| `console/src/components/draft-banner.tsx` | New |
+| `console/src/components/draft-banner.test.tsx` | New |
+| `console/src/components/save-status.tsx` | New |
+| `console/src/components/save-status.test.tsx` | New |
 | `console/src/features/settings/components/classification-settings-page.tsx` | Modify |
-| `console/src/features/settings/components/classification-settings-page.test.tsx` | New |
+| `console/src/features/settings/components/classification-settings-page.test.tsx` | Modify |
 | `console/src/features/settings/components/enrichment-runtime-page.tsx` | Modify |
-| `console/src/features/settings/components/enrichment-runtime-page.test.tsx` | New or modify |
+| `console/src/features/settings/components/enrichment-runtime-page.test.ts` | Modify |
 | `console/src/i18n/zh-CN.json` | Modify |
 | `CHANGELOG.md` | Modify |
 
@@ -363,15 +386,14 @@ flag is simpler and correct.
 
 - [ ] Classification: edit prompt → navigate away → dialog appears → "Stay"
       keeps draft → "Discard and leave" proceeds
-- [ ] Classification: edit prompt → F5 → page reloads → toast shows "Draft
-      recovered" → edits are restored → "Discard" on toast reverts to server
-      state
+- [ ] Classification: edit prompt → F5 → page reloads → DraftBanner shows
+      "Draft recovered" → edits are restored → "Discard" reverts to server state
 - [ ] Classification: edit → save → navigate away → no dialog (clean state)
 - [ ] Classification: edit → "Discard Changes" → confirm → form resets to
-      server state, sessionStorage cleared
+      server state, localStorage cleared
 - [ ] Runtime: edit fields → navigate away → dialog appears
-- [ ] Runtime: edit fields → F5 → draft recovered from sessionStorage
-- [ ] Runtime: save/reset/rollback → sessionStorage cleared
+- [ ] Runtime: edit fields → F5 → draft recovered from localStorage
+- [ ] Runtime: save/reset/rollback → localStorage cleared
 - [ ] Strict Mode: double-mount does not produce duplicate toasts or phantom
       dirty state
 - [ ] `beforeunload`: dirty form → close tab → browser native prompt fires

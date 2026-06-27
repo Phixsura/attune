@@ -75,4 +75,16 @@ describe('useKeyboardSave', () => {
     fireKey('s', { metaKey: true })
     expect(onSave).toHaveBeenCalledOnce()
   })
+
+  it('calls preventDefault to suppress browser save dialog', () => {
+    renderHook(() => useKeyboardSave({ onSave: vi.fn() }))
+    const event = new KeyboardEvent('keydown', {
+      key: 's',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    document.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+  })
 })
