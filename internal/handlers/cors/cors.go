@@ -34,10 +34,18 @@ type Config struct {
 // DefaultConfig returns a sensible default CORS configuration.
 func DefaultConfig() Config {
 	return Config{
-		AllowedOrigins:   []string{},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID"},
-		ExposedHeaders:   []string{"X-Request-ID", "X-Trace-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
+		AllowedOrigins: []string{},
+		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{
+			"Accept",
+			"Authorization",
+			"Content-Type",
+			"X-Request-ID",
+			"X-API-Key",
+			"Idempotency-Key",
+			"X-Attune-Api-Version",
+		},
+		ExposedHeaders:   []string{"X-Request-ID", "X-Trace-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "X-Attune-Api-Version", "Deprecation", "Sunset"},
 		AllowCredentials: false,
 		MaxAge:           86400, // 24 hours
 	}
@@ -56,9 +64,9 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 	}
 
 	methods := strings.Join(cfg.AllowedMethods, ", ")
-	headers := strings.Join(cfg.AllowedHeaders, ", ")
 	exposed := strings.Join(cfg.ExposedHeaders, ", ")
 	maxAge := strconv.Itoa(cfg.MaxAge)
+	varyByOrigin := !allowAll || cfg.AllowCredentials
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +76,11 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 				return
 			}
 
+			h := w.Header()
+			if varyByOrigin {
+				addVary(h, "Origin")
+			}
+
 			// Check if origin is allowed
 			allowed := allowAll || allowedOrigins[origin]
 			if !allowed {
@@ -75,14 +88,11 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 				return
 			}
 
-			h := w.Header()
-
 			// Set CORS headers
-			if allowAll {
+			if allowAll && !cfg.AllowCredentials {
 				h.Set("Access-Control-Allow-Origin", "*")
 			} else {
 				h.Set("Access-Control-Allow-Origin", origin)
-				h.Add("Vary", "Origin")
 			}
 
 			if cfg.AllowCredentials {
@@ -95,8 +105,9 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 
 			// Handle preflight
 			if r.Method == http.MethodOptions {
+				addVary(h, "Access-Control-Request-Method", "Access-Control-Request-Headers")
 				h.Set("Access-Control-Allow-Methods", methods)
-				h.Set("Access-Control-Allow-Headers", headers)
+				h.Set("Access-Control-Allow-Headers", mergeAllowedHeaders(cfg.AllowedHeaders, r.Header.Get("Access-Control-Request-Headers")))
 				h.Set("Access-Control-Max-Age", maxAge)
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -104,5 +115,72 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func mergeAllowedHeaders(allowed []string, requested string) string {
+	if strings.TrimSpace(requested) == "" {
+		return strings.Join(allowed, ", ")
+	}
+	out := make([]string, 0, len(allowed)+4)
+	seen := make(map[string]struct{}, len(allowed)+4)
+	for _, header := range allowed {
+		trimmed := strings.TrimSpace(header)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	for _, raw := range strings.Split(requested, ",") {
+		trimmed := strings.TrimSpace(raw)
+		if !isHeaderToken(trimmed) {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return strings.Join(out, ", ")
+}
+
+func isHeaderToken(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		b := value[i]
+		if b <= 32 || b >= 127 {
+			return false
+		}
+		switch b {
+		case '(', ')', '<', '>', '@', ',', ';', ':', '\\', '"', '/', '[', ']', '?', '=', '{', '}':
+			return false
+		}
+	}
+	return true
+}
+
+func addVary(h http.Header, names ...string) {
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		for _, existing := range h.Values("Vary") {
+			for _, part := range strings.Split(existing, ",") {
+				if strings.EqualFold(strings.TrimSpace(part), name) {
+					goto next
+				}
+			}
+		}
+		h.Add("Vary", name)
+	next:
 	}
 }

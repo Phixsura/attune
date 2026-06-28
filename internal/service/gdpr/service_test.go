@@ -132,6 +132,8 @@ type schedulingRepo struct {
 	revokedJob         *gdprrepo.ExportJob
 	listResult         gdprrepo.ListRequestResult
 	operationsSummary  *gdprrepo.OperationsSummary
+	createByType       string
+	createBy           string
 	createExecuteAfter time.Time
 	createSubjectHash  string
 	cancelRequestID    string
@@ -157,7 +159,9 @@ func (s *schedulingRepo) GetOperationsSummary(context.Context, string) (*gdprrep
 	return s.operationsSummary, nil
 }
 
-func (s *schedulingRepo) CreateDeleteRequest(_ context.Context, _, _, subjectHash, _ string, executeAfter time.Time) (*gdprrepo.DeleteResult, error) {
+func (s *schedulingRepo) CreateDeleteRequest(_ context.Context, _, _, subjectHash, createdByType, createdBy string, executeAfter time.Time) (*gdprrepo.DeleteResult, error) {
+	s.createByType = createdByType
+	s.createBy = createdBy
 	s.createExecuteAfter = executeAfter
 	s.createSubjectHash = subjectHash
 	return s.deleteResult, nil
@@ -168,7 +172,7 @@ func (s *schedulingRepo) CancelDeleteRequest(_ context.Context, _, requestID str
 	return s.cancelledRequest, nil
 }
 
-func (s *schedulingRepo) CreateExportJob(context.Context, string, string, string, string) (*gdprrepo.ExportJob, error) {
+func (s *schedulingRepo) CreateExportJob(context.Context, string, string, string, string, string) (*gdprrepo.ExportJob, error) {
 	return nil, nil
 }
 
@@ -252,6 +256,9 @@ func TestDeleteSchedulesRequestAndAudits(t *testing.T) {
 	}
 	if repo.createSubjectHash != subjectkey.Hash("tenant-1", "alice@example.com") {
 		t.Fatalf("unexpected subject hash %q", repo.createSubjectHash)
+	}
+	if repo.createByType != "admin" || repo.createBy != "u-1" {
+		t.Fatalf("actor persistence = type:%q id:%q", repo.createByType, repo.createBy)
 	}
 	if len(audit.events) != 1 || audit.events[0].Action != "gdpr.delete.requested" {
 		t.Fatalf("expected gdpr.delete.requested audit event, got %#v", audit.events)
@@ -475,6 +482,16 @@ func TestGetOperationsMapsProtoFields(t *testing.T) {
 	}
 	if opsResp.GetNextExportExpiryAt() == "" || opsResp.GetStepUp().GetMethod() != "password" {
 		t.Fatalf("step up = %#v", opsResp.GetStepUp())
+	}
+}
+
+func TestListRequestsRejectsInvalidRequestType(t *testing.T) {
+	t.Parallel()
+
+	svc := New(ptrext.Of(schedulingRepo{}), ptrext.Of(stubAudit{}))
+	_, err := svc.ListRequests(context.Background(), "tenant-1", "", 25, "typo")
+	if !errors.Is(err, ErrInvalidRequestType) {
+		t.Fatalf("ListRequests err = %v, want ErrInvalidRequestType", err)
 	}
 }
 

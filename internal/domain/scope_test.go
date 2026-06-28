@@ -30,11 +30,25 @@ func TestHasScope_Hierarchy(t *testing.T) {
 	assert.False(t, HasScope(granted, ScopeLLMRead), "should not imply unrelated scope")
 }
 
+func TestHasExplicitScope_Hierarchy(t *testing.T) {
+	granted := []Scope{ScopeFeedbackWrite}
+
+	assert.True(t, HasExplicitScope(granted, ScopeFeedbackWrite))
+	assert.True(t, HasExplicitScope(granted, ScopeFeedbackRead), "write should imply read")
+	assert.False(t, HasExplicitScope(granted, ScopeLLMRead), "should not imply unrelated scope")
+}
+
 func TestHasScope_EmptyGranted_LegacyFullAccess(t *testing.T) {
 	// Backward compat: legacy keys without scopes have full access
 	assert.True(t, HasScope(nil, ScopeFeedbackRead), "nil scopes = legacy full access")
 	assert.True(t, HasScope([]Scope{}, ScopeFeedbackRead), "empty scopes = legacy full access")
 	assert.True(t, HasScope(nil, ScopeAPIKeyAdmin), "legacy keys can even access admin scopes")
+}
+
+func TestHasExplicitScope_EmptyGrantedDenied(t *testing.T) {
+	assert.False(t, HasExplicitScope(nil, ScopeFeedbackRead), "nil scopes must not satisfy explicit scope checks")
+	assert.False(t, HasExplicitScope([]Scope{}, ScopeFeedbackRead), "empty scopes must not satisfy explicit scope checks")
+	assert.False(t, HasExplicitScope(nil, ScopeAPIKeyAdmin), "legacy unscoped keys must not satisfy admin explicit scopes")
 }
 
 func TestParseScope(t *testing.T) {
@@ -62,7 +76,7 @@ func TestScope_String(t *testing.T) {
 }
 
 func TestAllScopes_Count(t *testing.T) {
-	assert.Equal(t, 27, len(AllScopes), "should have 27 scopes")
+	assert.Equal(t, 31, len(AllScopes), "should have 31 scopes")
 }
 
 func TestMCPScopes(t *testing.T) {
@@ -70,6 +84,7 @@ func TestMCPScopes(t *testing.T) {
 		assert.True(t, ScopeMCPRead.IsValid())
 		assert.True(t, ScopeMCPWrite.IsValid())
 		assert.True(t, ScopeMCPIngest.IsValid())
+		assert.True(t, ScopeMCPClientAdmin.IsValid())
 	})
 
 	t.Run("MCP write implies read", func(t *testing.T) {
@@ -89,5 +104,41 @@ func TestMCPScopes(t *testing.T) {
 		assert.True(t, HasScope(granted, ScopeMCPRead))
 		assert.False(t, HasScope(granted, ScopeMCPWrite))
 		assert.False(t, HasScope(granted, ScopeMCPIngest))
+	})
+
+	t.Run("MCP runtime scopes do not imply governance", func(t *testing.T) {
+		granted := []Scope{ScopeMCPWrite}
+		assert.False(t, HasScope(granted, ScopeMCPClientAdmin))
+		assert.False(t, HasExplicitScope(granted, ScopeMCPClientAdmin))
+	})
+}
+
+func TestGDPRScopes(t *testing.T) {
+	t.Run("granular GDPR scopes are valid", func(t *testing.T) {
+		assert.True(t, ScopeGDPRRead.IsValid())
+		assert.True(t, ScopeGDPRExport.IsValid())
+		assert.True(t, ScopeGDPRDelete.IsValid())
+		assert.True(t, ScopeGDPRAdmin.IsValid())
+	})
+
+	t.Run("gdpr export implies read", func(t *testing.T) {
+		granted := []Scope{ScopeGDPRExport}
+		assert.True(t, HasScope(granted, ScopeGDPRExport))
+		assert.True(t, HasScope(granted, ScopeGDPRRead))
+		assert.False(t, HasScope(granted, ScopeGDPRDelete))
+	})
+
+	t.Run("gdpr delete implies read", func(t *testing.T) {
+		granted := []Scope{ScopeGDPRDelete}
+		assert.True(t, HasScope(granted, ScopeGDPRDelete))
+		assert.True(t, HasScope(granted, ScopeGDPRRead))
+		assert.False(t, HasScope(granted, ScopeGDPRExport))
+	})
+
+	t.Run("gdpr admin implies granular scopes", func(t *testing.T) {
+		granted := []Scope{ScopeGDPRAdmin}
+		assert.True(t, HasScope(granted, ScopeGDPRRead))
+		assert.True(t, HasScope(granted, ScopeGDPRExport))
+		assert.True(t, HasScope(granted, ScopeGDPRDelete))
 	})
 }

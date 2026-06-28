@@ -26,9 +26,12 @@ type stubService struct {
 	getErr      error
 	dlBundle    *auditevidencesvc.DownloadBundle
 	dlErr       error
+	startActor  auditlogsvc.Actor
+	dlActor     auditlogsvc.Actor
 }
 
-func (s *stubService) StartExport(_ context.Context, _, _ string, _ auditevidencesvc.ExportFilter) (*auditevidencesvc.StartExportResult, error) {
+func (s *stubService) StartExport(_ context.Context, _ string, actor auditlogsvc.Actor, _ auditevidencesvc.ExportFilter) (*auditevidencesvc.StartExportResult, error) {
+	s.startActor = actor
 	return s.startResult, s.startErr
 }
 
@@ -36,7 +39,8 @@ func (s *stubService) GetJob(_ context.Context, _, _ string) (*aerepo.ExportJob,
 	return s.getJob, s.getErr
 }
 
-func (s *stubService) Download(_ context.Context, _, _ string, _ auditlogsvc.Actor) (*auditevidencesvc.DownloadBundle, error) {
+func (s *stubService) Download(_ context.Context, _, _ string, actor auditlogsvc.Actor) (*auditevidencesvc.DownloadBundle, error) {
+	s.dlActor = actor
 	return s.dlBundle, s.dlErr
 }
 
@@ -65,6 +69,9 @@ func TestCreate_Success(t *testing.T) {
 	}
 	if result.Body.GetStatus() != "queued" {
 		t.Errorf("status: want queued, got %s", result.Body.GetStatus())
+	}
+	if svc.startActor.Type != "admin" || svc.startActor.ID != "admin-1" {
+		t.Errorf("start actor = %+v", svc.startActor)
 	}
 }
 
@@ -131,6 +138,33 @@ func TestGet_Completed(t *testing.T) {
 	}
 }
 
+func TestGet_RewritesDownloadPathForAPIKeys(t *testing.T) {
+	now := time.Now().UTC()
+	expires := now.Add(72 * time.Hour)
+	svc := ptrext.Of(stubService{
+		getJob: ptrext.Of(aerepo.ExportJob{
+			ID:        "job-1",
+			TenantID:  "t-1",
+			Status:    aerepo.JobCompleted,
+			CreatedAt: now,
+			ExpiresAt: ptrext.Of(expires),
+		}),
+	})
+	h := NewHandler(svc)
+	ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth:    ptrext.Of(session.AuthCtx{TenantID: "t-1", UserID: "apikey:1", UserType: "api_key"}),
+	})
+
+	result, err := h.Get(ctx, ptrext.Of(attunev1.GetAuditEvidenceExportRequest{JobId: "job-1"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := result.Body.GetDownloadPath(); got != "/v1/audit-log/evidence/job-1/download" {
+		t.Fatalf("download_path = %q", got)
+	}
+}
+
 func TestDownload_NotDownloadable(t *testing.T) {
 	svc := ptrext.Of(stubService{dlErr: auditevidencesvc.ErrJobNotDownloadable})
 	h := NewHandler(svc)
@@ -185,6 +219,9 @@ func TestDownload_FullHTTP(t *testing.T) {
 	}
 	if cd := rec.Header().Get("Content-Disposition"); cd == "" {
 		t.Error("missing Content-Disposition header")
+	}
+	if svc.dlActor.Type != "admin" || svc.dlActor.ID != "admin-1" {
+		t.Errorf("download actor = %+v", svc.dlActor)
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers"
+	"github.com/Phixsura/attune/internal/handlers/apiversion"
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/handlers/mcp"
 	"github.com/Phixsura/attune/internal/handlers/security"
@@ -105,6 +106,7 @@ func buildRouter(
 	r.Handle("/metrics", metrics.Handler())
 	rateLimiter := buildRateLimiter(cfg)
 	perKeyRateLimiter := buildPerKeyRateLimiter(cfg)
+	versionMW := apiversion.Middleware(apiversion.DefaultConfig())
 
 	r.Route("/v1", func(r chi.Router) {
 		// Inbound adapter mux. Adapters have already registered their
@@ -114,33 +116,55 @@ func buildRouter(
 			r.Mount("/inbound", inboundMux)
 		}
 
-		// Auth verify endpoint - requires valid API key but no specific scope.
-		// Rate-limited to prevent brute-force attacks.
 		r.Group(func(r chi.Router) {
-			r.Use(apikey.MiddlewareWithProxies(apiKeys, cfg.Security.TrustedProxyHops))
-			r.Use(rateLimiter.Middleware)
-			authVerify := handlers.NewAuthVerifyHandler(apikeyrepo.NewAPIKey(pool))
-			r.Get("/auth/verify", dispatcher.Bind(
-				"handlers.AuthVerifyHandler.Verify",
-				dispatcher.Custom(func() *attunev1.VerifyApiKeyRequest { return ptrext.Of(attunev1.VerifyApiKeyRequest{}) }, nil),
-				authVerify.Verify,
-				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.VerifyApiKeyRequest) (*apikey.AuthCtx, error) {
-					return apikey.FromContext(r.Context()), nil
-				}),
-			))
-		})
+			// Auth verify endpoint - requires valid API key but no specific scope.
+			// Rate-limited to prevent brute-force attacks.
+			r.Group(func(r chi.Router) {
+				r.Use(versionMW)
+				r.Use(apikey.MiddlewareWithProxies(apiKeys, cfg.Security.TrustedProxyHops))
+				r.Use(rateLimiter.Middleware)
+				authVerify := handlers.NewAuthVerifyHandler(apikeyrepo.NewAPIKey(pool))
+				r.Get("/auth/verify", dispatcher.Bind(
+					"handlers.AuthVerifyHandler.Verify",
+					dispatcher.Custom(func() *attunev1.VerifyApiKeyRequest { return ptrext.Of(attunev1.VerifyApiKeyRequest{}) }, nil),
+					authVerify.Verify,
+					dispatcher.WithAuth(func(r *http.Request, _ *attunev1.VerifyApiKeyRequest) (*apikey.AuthCtx, error) {
+						return apikey.FromContext(r.Context()), nil
+					}),
+				))
+			})
 
-		r.Group(func(r chi.Router) {
-			r.Use(apikey.MiddlewareWithProxies(apiKeys, cfg.Security.TrustedProxyHops))
-			r.Use(apikey.RequireScope(domain.ScopeIngestWrite))
-			r.Use(rateLimiter.Middleware)       // per-tenant
-			r.Use(perKeyRateLimiter.Middleware) // per-key (key's own rate_limit_rpm)
-			r.Mount("/feedback", ingestHandler.Routes())
-		})
+			r.Group(func(r chi.Router) {
+				if mw := publicIngestCORS(cfg); mw != nil {
+					r.Use(mw)
+				}
+				// Browser-safe ingest needs CORS headers even on version errors, so
+				// its order is CORS -> version contract -> auth.
+				r.Use(versionMW)
+				r.Use(apikey.MiddlewareWithProxies(apiKeys, cfg.Security.TrustedProxyHops))
+				r.Use(apikey.RequireScope(domain.ScopeIngestWrite))
+				r.Use(rateLimiter.Middleware)       // per-tenant
+				r.Use(perKeyRateLimiter.Middleware) // per-key (key's own rate_limit_rpm)
+				r.Mount("/feedback", ingestHandler.Routes())
+			})
 
-		// Tag / workflow config over the API-key surface (scope-gated), reusing
-		// the console handlers — lets the SDKs manage tags/workflow (#36).
-		console.MountAPIKeyAdminRoutes(r, pool, apiKeys, cfg.Security.TrustedProxyHops, perKeyRateLimiter)
+			// Selected management routes over the API-key surface (scope-gated),
+			// reusing the console handlers — lets the SDKs manage admin resources
+			// without cloning business logic (#36, #168).
+			r.Group(func(r chi.Router) {
+				r.Use(versionMW)
+				console.MountAPIKeyAdminRoutes(r, pool, apiKeys, cfg.Security.TrustedProxyHops, perKeyRateLimiter, console.APIKeyAdminRouteOptions{
+					GDPRStepUpTTL:         cfg.GDPRStepUpTTL,
+					GDPRExportTTL:         cfg.GDPRExportTTL,
+					GDPRDeleteGraceWindow: cfg.GDPRDeleteGraceWindow,
+					AuditRetentionDays:    cfg.Audit.RetentionDays,
+					AuditPruneInterval:    cfg.AuditPruneInterval,
+					MCPPublicBaseURL:      cfg.MCPPublicBaseURL,
+					MCPOAuthIssuer:        cfg.MCP.OAuth.Issuer,
+					GDPRAdmins:            adminRepo,
+				})
+			})
+		})
 	})
 
 	// Console UI. Mounted under /fb/v1/console; the reverse

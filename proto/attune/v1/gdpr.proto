@@ -8,46 +8,74 @@ import "google/api/httpbody.proto";
 service GdprService {
   rpc ExportGdprSubject(ExportGdprSubjectRequest) returns (ExportGdprSubjectResponse) {
     option (google.api.http) = {
-      post: "/fb/v1/console/gdpr/export"
+      post: "/v1/gdpr/export"
       body: "*"
+      additional_bindings {
+        post: "/fb/v1/console/gdpr/export"
+        body: "*"
+      }
     };
   }
 
   rpc GetGdprExport(GetGdprExportRequest) returns (GdprExportStatusResponse) {
-    option (google.api.http) = {get: "/fb/v1/console/gdpr/exports/{job_id}"};
+    option (google.api.http) = {
+      get: "/v1/gdpr/exports/{job_id}"
+      additional_bindings {get: "/fb/v1/console/gdpr/exports/{job_id}"}
+    };
   }
 
   rpc DownloadGdprExport(DownloadGdprExportRequest) returns (google.api.HttpBody) {
-    option (google.api.http) = {get: "/fb/v1/console/gdpr/exports/{job_id}/download"};
+    option (google.api.http) = {
+      get: "/v1/gdpr/exports/{job_id}/download"
+      additional_bindings {get: "/fb/v1/console/gdpr/exports/{job_id}/download"}
+    };
   }
 
   rpc RevokeGdprExport(RevokeGdprExportRequest) returns (RevokeGdprExportResponse) {
     option (google.api.http) = {
-      post: "/fb/v1/console/gdpr/exports/{job_id}/revoke"
+      post: "/v1/gdpr/exports/{job_id}/revoke"
       body: "*"
+      additional_bindings {
+        post: "/fb/v1/console/gdpr/exports/{job_id}/revoke"
+        body: "*"
+      }
     };
   }
 
   rpc DeleteGdprSubject(DeleteGdprSubjectRequest) returns (DeleteGdprSubjectResponse) {
     option (google.api.http) = {
-      post: "/fb/v1/console/gdpr/delete"
+      post: "/v1/gdpr/delete"
       body: "*"
+      additional_bindings {
+        post: "/fb/v1/console/gdpr/delete"
+        body: "*"
+      }
     };
   }
 
   rpc CancelGdprRequest(CancelGdprRequestRequest) returns (CancelGdprRequestResponse) {
     option (google.api.http) = {
-      post: "/fb/v1/console/gdpr/requests/{request_id}/cancel"
+      post: "/v1/gdpr/requests/{request_id}/cancel"
       body: "*"
+      additional_bindings {
+        post: "/fb/v1/console/gdpr/requests/{request_id}/cancel"
+        body: "*"
+      }
     };
   }
 
   rpc ListGdprRequests(ListGdprRequestsRequest) returns (ListGdprRequestsResponse) {
-    option (google.api.http) = {get: "/fb/v1/console/gdpr/requests"};
+    option (google.api.http) = {
+      get: "/v1/gdpr/requests"
+      additional_bindings {get: "/fb/v1/console/gdpr/requests"}
+    };
   }
 
   rpc GetGdprOperations(GetGdprOperationsRequest) returns (GdprOperationsResponse) {
-    option (google.api.http) = {get: "/fb/v1/console/gdpr/operations"};
+    option (google.api.http) = {
+      get: "/v1/gdpr/operations"
+      additional_bindings {get: "/fb/v1/console/gdpr/operations"}
+    };
   }
 
   rpc VerifyGdprStepUp(VerifyGdprStepUpRequest) returns (VerifyGdprStepUpResponse) {

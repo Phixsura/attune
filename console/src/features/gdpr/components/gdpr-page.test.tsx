@@ -91,6 +91,22 @@ const downloadedExportRequest = {
   downloadedAt: '2026-06-16T09:00:00Z',
 }
 
+const newReadyExportRequest = {
+  requestId: 'job-new-1',
+  requestType: GdprRequestType.GDPR_REQUEST_TYPE_EXPORT,
+  status: GdprRequestStatus.GDPR_REQUEST_STATUS_READY,
+  subjectKey: 'alice@example.com',
+  subjectDisplay: 'Alice',
+  createdBy: 'admin-1',
+  feedbackCount: 5,
+  tagAssignmentCount: 2,
+  feedbackAuditCount: 4,
+  llmAuditCount: 3,
+  createdAt: '2026-06-17T10:00:00Z',
+  archiveFilename: 'alice-export.zip',
+  expiresAt: '2026-06-18T10:00:00Z',
+}
+
 describe('GDPRPage', () => {
   it('runs the end-to-end operator flow for export, delete, revoke, cancel, filtering, and paging', async () => {
     permissionsMock.mockReturnValue({
@@ -103,6 +119,7 @@ describe('GDPRPage', () => {
     let revokedJobId = ''
     const requestTypeQueries: string[] = []
     let loadMoreCursor = ''
+    let newExportReady = false
 
     server.use(
       http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(baseOperations)),
@@ -117,13 +134,19 @@ describe('GDPRPage', () => {
           return HttpResponse.json({ items: [scheduledDeleteRequest] })
         }
         if (requestType === 'export') {
-          return HttpResponse.json({ items: [readyExportRequest, downloadedExportRequest] })
+          return HttpResponse.json({
+            items: newExportReady
+              ? [newReadyExportRequest, readyExportRequest, downloadedExportRequest]
+              : [readyExportRequest, downloadedExportRequest],
+          })
         }
         if (cursor === 'page-2') {
           return HttpResponse.json({ items: [downloadedExportRequest] })
         }
         return HttpResponse.json({
-          items: [scheduledDeleteRequest, readyExportRequest],
+          items: newExportReady
+            ? [newReadyExportRequest, scheduledDeleteRequest, readyExportRequest]
+            : [scheduledDeleteRequest, readyExportRequest],
           nextCursor: 'page-2',
         })
       }),
@@ -151,21 +174,26 @@ describe('GDPRPage', () => {
         })
       }),
       http.get('/fb/v1/console/gdpr/exports/:id', ({ params }) =>
-        HttpResponse.json({
-          jobId: String(params.id),
-          subjectKey: 'alice@example.com',
-          subjectDisplay: 'Alice',
-          status: GdprExportStatus.GDPR_EXPORT_STATUS_COMPLETED,
-          retryAfterSeconds: 1,
-          downloadPath: `/fb/v1/console/gdpr/exports/${String(params.id)}/download`,
-          archiveFilename: 'alice-export.zip',
-          feedbackCount: 5,
-          tagAssignmentCount: 2,
-          feedbackAuditCount: 4,
-          llmAuditCount: 3,
-          createdAt: '2026-06-17T10:00:00Z',
-          completedAt: '2026-06-17T10:01:00Z',
-        }),
+        (() => {
+          if (String(params.id) === 'job-new-1') {
+            newExportReady = true
+          }
+          return HttpResponse.json({
+            jobId: String(params.id),
+            subjectKey: 'alice@example.com',
+            subjectDisplay: 'Alice',
+            status: GdprExportStatus.GDPR_EXPORT_STATUS_COMPLETED,
+            retryAfterSeconds: 1,
+            downloadPath: `/fb/v1/console/gdpr/exports/${String(params.id)}/download`,
+            archiveFilename: 'alice-export.zip',
+            feedbackCount: 5,
+            tagAssignmentCount: 2,
+            feedbackAuditCount: 4,
+            llmAuditCount: 3,
+            createdAt: '2026-06-17T10:00:00Z',
+            completedAt: '2026-06-17T10:01:00Z',
+          })
+        })(),
       ),
       http.get(
         '/fb/v1/console/gdpr/exports/:id/download',
@@ -208,6 +236,11 @@ describe('GDPRPage', () => {
     })
     expect(screen.getByText('30 天')).toBeInTheDocument()
 
+    await user.click(screen.getByTestId('gdpr-download-export-job-ready-1'))
+    await waitFor(() => {
+      expect(triggerBlobDownloadMock).toHaveBeenCalledTimes(1)
+    })
+
     await user.click(screen.getByTestId('gdpr-cancel-request-req-delete-1'))
     await waitFor(() => {
       expect(cancelledRequestId).toBe('req-delete-1')
@@ -240,11 +273,23 @@ describe('GDPRPage', () => {
 
     await waitFor(() => {
       expect(exportBody).toEqual({ subjectKey: 'alice@example.com' })
-      expect(triggerBlobDownloadMock).toHaveBeenCalled()
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('gdpr-download-current-export')).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('gdpr-request-row-job-new-1')).toBeInTheDocument()
+      expect(screen.getByTestId('gdpr-download-export-job-new-1')).toBeInTheDocument()
+    })
+    expect(triggerBlobDownloadMock).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByTestId('gdpr-download-current-export'))
+    await waitFor(() => {
+      expect(triggerBlobDownloadMock).toHaveBeenCalledTimes(2)
     })
 
-    expect(screen.getByText(/alice-export\.zip/)).toBeInTheDocument()
-    expect(screen.getAllByText(/5\/2\/4\/3/)).toHaveLength(2)
+    expect(screen.getAllByText(/alice-export\.zip/).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText(/5\/2\/4\/3/).length).toBeGreaterThanOrEqual(2)
 
     await user.type(screen.getByTestId('gdpr-confirm-subject-key'), 'alice@example.com')
     await user.click(screen.getByTestId('gdpr-delete-submit'))

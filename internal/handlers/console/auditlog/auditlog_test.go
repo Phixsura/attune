@@ -51,7 +51,19 @@ func TestBindListRequestRejectsOutOfRangeLimit(t *testing.T) {
 		"/fb/v1/console/audit-log?limit=2147483648", nil), req)
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "limit must be an integer")
+	require.Contains(t, err.Error(), "limit must be a positive integer")
+}
+
+func TestBindListRequestRejectsNonPositiveLimit(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{"0", "-10"} {
+		req := ptrext.Of(attunev1.ListAuditLogRequest{})
+		err := BindListRequest(httptest.NewRequest(http.MethodGet,
+			"/fb/v1/console/audit-log?limit="+raw, nil), req)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "limit must be a positive integer")
+	}
 }
 
 func TestExportCSVUsesUnboundedFilterAndSecurityHeaders(t *testing.T) {

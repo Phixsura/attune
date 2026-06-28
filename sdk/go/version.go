@@ -7,4 +7,4 @@ package attune
 // A nested Go module is released with a tag of the form sdk/go/vX.Y.Z; this
 // constant must match the version in that tag (the release workflow enforces
 // it).
-const Version = "0.1.0"
+const Version = "0.2.0"

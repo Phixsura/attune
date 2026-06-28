@@ -41,6 +41,37 @@ describe('constructor', () => {
     expect(() => new Client({ baseURL: BASE, apiKey: '' })).toThrow(AttuneError)
   })
 
+  it('rejects malformed JS option types up front', () => {
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: 123, apiKey: KEY })).toThrow(/baseURL must be a string/)
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: BASE, apiKey: 123 })).toThrow(/apiKey must be a string/)
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: BASE, apiKey: KEY, fetch: 123 })).toThrow(
+      /fetch must be a function/,
+    )
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: BASE, apiKey: KEY, timeout: '30' })).toThrow(
+      /timeout must be a finite number/,
+    )
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: BASE, apiKey: KEY, maxRetries: '2' })).toThrow(
+      /maxRetries must be a finite number/,
+    )
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: BASE, apiKey: KEY, defaultHeaders: 'bad' })).toThrow(
+      /defaultHeaders must be an object of string values/,
+    )
+    expect(
+      () =>
+        new Client({
+          baseURL: BASE,
+          apiKey: KEY,
+          defaultHeaders: { 'x-trace-id': 1 as unknown as string },
+        }),
+    ).toThrow(/defaultHeaders must be an object of string values/)
+  })
+
   it('throws when no fetch is available and none injected', () => {
     const saved = globalThis.fetch
     // @ts-expect-error force-remove for the test
@@ -60,6 +91,15 @@ describe('constructor', () => {
     // host-less inputs that `new URL` tolerates but Go's url.Parse rejects.
     expect(() => new Client({ baseURL: 'http:foo', apiKey: KEY })).toThrow(/invalid baseURL/)
     expect(() => new Client({ baseURL: 'http:///v1/path', apiKey: KEY })).toThrow(/invalid baseURL/)
+    expect(() => new Client({ baseURL: 'https://user:pass@attune.example.test', apiKey: KEY })).toThrow(
+      /baseURL must not include credentials/,
+    )
+    expect(() => new Client({ baseURL: 'https://attune.example.test?x=1', apiKey: KEY })).toThrow(
+      /baseURL must not include query or fragment/,
+    )
+    expect(() => new Client({ baseURL: 'https://attune.example.test#frag', apiKey: KEY })).toThrow(
+      /baseURL must not include query or fragment/,
+    )
     // http and https both accepted.
     expect(() => new Client({ baseURL: 'http://localhost:8080', apiKey: KEY })).not.toThrow()
   })
@@ -79,6 +119,7 @@ describe('reserved headers cannot be overridden by defaultHeaders', () => {
         'Content-Type': 'text/evil',
         'IDEMPOTENCY-KEY': 'spoofed',
         'User-Agent': 'spoofed-ua',
+        'x-attune-api-version': '1900-01-01',
         // A genuinely custom header is preserved.
         'x-trace-id': 'trace-123',
       },
@@ -90,11 +131,71 @@ describe('reserved headers cannot be overridden by defaultHeaders', () => {
     expect(h.get('idempotency-key')).toBe('real-idem-key')
     expect(h.get('user-agent')).toMatch(/^attune-node\//) // SDK UA, not "spoofed-ua"
     expect(h.get('user-agent')).not.toContain('spoofed-ua')
+    expect(h.get('x-attune-api-version')).toBe('2026-06-28')
     expect(h.get('x-trace-id')).toBe('trace-123') // custom header preserved
   })
 })
 
 describe('adversarial inputs / config edges', () => {
+  it('rejects a non-object ingest payload before sending', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    const client = newClient(fetch)
+    // @ts-expect-error deliberate JS-style misuse
+    await expect(client.ingest(null)).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'ingest input must be an object',
+    })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('rejects malformed ingest options before sending', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    const client = newClient(fetch)
+    // @ts-expect-error deliberate JS-style misuse
+    await expect(client.ingest({ content: 'x' }, 'bad')).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'request options must be an object',
+    })
+    // @ts-expect-error deliberate JS-style misuse
+    await expect(client.ingest({ content: 'x' }, { idempotencyKey: 123 })).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'idempotencyKey must be a string',
+    })
+    // @ts-expect-error deliberate JS-style misuse
+    await expect(client.ingest({ content: 'x' }, { signal: 'bad' })).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'signal must be an AbortSignal',
+    })
+    await expect(
+      client.ingest({ content: 'x' }, { signal: { aborted: false } as unknown as AbortSignal }),
+    ).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'signal must be an AbortSignal',
+    })
+    await expect(
+      client.ingest(
+        { content: 'x' },
+        {
+          signal: {
+            aborted: false,
+            addEventListener() {},
+            removeEventListener() {},
+          } as unknown as AbortSignal,
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'signal must be an AbortSignal',
+    })
+    expect(calls).toHaveLength(0)
+  })
+
   it('wraps a non-JSON-serializable body as AttuneError, never a raw TypeError', async () => {
     const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
     const client = newClient(fetch)
@@ -304,11 +405,16 @@ describe('transport: slow / partial / malformed responses', () => {
     })
   })
 
-  it('maps an empty 200 body to AttuneError INTERNAL', async () => {
+  it('maps an empty non-204 success body to AttuneError INTERNAL', async () => {
     const { fetch } = stubFetch([() => new Response('', { status: 200 })])
     await expect(
       newClient(fetch, { maxRetries: 0 }).ingest({ content: 'x' }),
-    ).rejects.toBeInstanceOf(AttuneError)
+    ).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'INTERNAL',
+      status: 200,
+      message: 'empty response body for non-204 success response',
+    })
   })
 
   it('times out a slow/hanging response BODY (not just slow headers)', async () => {
@@ -332,6 +438,29 @@ describe('transport: slow / partial / malformed responses', () => {
       maxRetries: 0,
     })
     await expect(client.ingest({ content: 'x' })).rejects.toMatchObject({ code: 'TIMEOUT' })
+  })
+
+  it('enforces the 1 MiB cap even when fetch only exposes a non-stream body fallback', async () => {
+    const huge = JSON.stringify({
+      id: '1',
+      enrichmentStatus: 'pending',
+      pad: 'x'.repeat(1024 * 1024),
+    })
+    const bytes = new TextEncoder().encode(huge)
+    const fetch: FetchLike = () =>
+      Promise.resolve({
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        body: null,
+        text: () => Promise.resolve(huge),
+        arrayBuffer: () => Promise.resolve(bytes.buffer),
+      } as unknown as Response)
+    await expect(
+      newClient(fetch, { maxRetries: 0 }).ingest({ content: 'x' }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL',
+      message: 'response body exceeds the 1048576-byte cap',
+    })
   })
 })
 
@@ -373,6 +502,35 @@ describe('security: header & response-size hardening', () => {
       code: 'INTERNAL',
     })
   })
+
+  it('rejects an oversized declared content-length before reading a non-stream body', async () => {
+    let called = false
+    const { fetch } = stubFetch([
+      () =>
+        ({
+          status: 200,
+          headers: new Headers({
+            'content-type': 'application/json',
+            'content-length': String(1024 * 1024 + 1),
+          }),
+          body: null,
+          arrayBuffer: async () => {
+            called = true
+            return new TextEncoder().encode(JSON.stringify({ id: '1', enrichmentStatus: 'pending' }))
+              .buffer
+          },
+          text: async () => {
+            called = true
+            return JSON.stringify({ id: '1', enrichmentStatus: 'pending' })
+          },
+        }) as Response,
+    ])
+    await expect(newClient(fetch, { maxRetries: 0 }).ingest({ content: 'x' })).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'INTERNAL',
+    })
+    expect(called).toBe(false)
+  })
 })
 
 describe('constructor: JS-caller misuse (no type checking)', () => {
@@ -394,6 +552,70 @@ describe('headers: User-Agent + defaultHeaders', () => {
     expect(ua).toMatch(/^attune-node\/\d+\.\d+\.\d+/)
   })
 
+  it('omits User-Agent in browser-like runtimes while still pinning the API version', async () => {
+    const browserGlobals = globalThis as { window?: Window; document?: Document }
+    const savedWindow = browserGlobals.window
+    const savedDocument = browserGlobals.document
+    const originalProcess = globalThis.process
+    // Simulate a browser global so the SDK does not try to force a forbidden
+    // User-Agent header on window.fetch.
+    browserGlobals.window = {} as Window
+    browserGlobals.document = {} as Document
+    Object.defineProperty(globalThis, 'process', { value: undefined, configurable: true })
+    try {
+      const { fetch, calls } = stubFetch([
+        () => json(200, { id: '1', enrichmentStatus: 'pending' }),
+      ])
+      await newClient(fetch).ingest({ content: 'x' })
+      const headers = new Headers(calls[0]?.init.headers)
+      expect(headers.has('user-agent')).toBe(false)
+      expect(headers.get('x-attune-api-version')).toBe('2026-06-28')
+    } finally {
+      if (savedWindow === undefined) {
+        delete browserGlobals.window
+      } else {
+        browserGlobals.window = savedWindow
+      }
+      if (savedDocument === undefined) {
+        delete browserGlobals.document
+      } else {
+        browserGlobals.document = savedDocument
+      }
+      Object.defineProperty(globalThis, 'process', {
+        value: originalProcess,
+        configurable: true,
+        writable: true,
+      })
+    }
+  })
+
+  it('omits User-Agent in worker-like runtimes without a real Node process', async () => {
+    const original = globalThis.process
+    Object.defineProperty(globalThis, 'process', { value: undefined, configurable: true })
+    try {
+      const { fetch, calls } = stubFetch([
+        () => json(200, { id: '1', enrichmentStatus: 'pending' }),
+      ])
+      await newClient(fetch).ingest({ content: 'x' })
+      const headers = new Headers(calls[0]?.init.headers)
+      expect(headers.has('user-agent')).toBe(false)
+      expect(headers.get('x-attune-api-version')).toBe('2026-06-28')
+    } finally {
+      Object.defineProperty(globalThis, 'process', {
+        value: original,
+        configurable: true,
+        writable: true,
+      })
+    }
+  })
+
+  it('pins the current public API version header', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    await newClient(fetch).ingest({ content: 'x' })
+    const version = new Headers(calls[0]?.init.headers).get('x-attune-api-version')
+    expect(version).toBe('2026-06-28')
+  })
+
   it('merges defaultHeaders but never lets them override reserved headers', async () => {
     const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
     const client = new Client({
@@ -401,12 +623,82 @@ describe('headers: User-Agent + defaultHeaders', () => {
       apiKey: KEY,
       fetch,
       sleep: noSleep,
-      defaultHeaders: { 'x-trace': 'abc', 'X-API-Key': 'HACKED', 'user-agent': 'evil' },
+      defaultHeaders: {
+        'x-trace': 'abc',
+        'X-API-Key': 'HACKED',
+        'user-agent': 'evil',
+        'X-Attune-Api-Version': '1900-01-01',
+      },
     })
     await client.ingest({ content: 'x' })
     const h = new Headers(calls[0]?.init.headers)
     expect(h.get('x-trace')).toBe('abc') // custom header added
     expect(h.get('x-api-key')).toBe(KEY) // reserved: not overridden
     expect(h.get('user-agent')).toMatch(/^attune-node\//) // reserved: not overridden
+    expect(h.get('x-attune-api-version')).toBe('2026-06-28')
+  })
+})
+
+describe('management binary downloads', () => {
+  it('prefers and decodes RFC 5987 filename* values for audit exports', async () => {
+    const body = 'id,action\n1,tag.create\n'
+    const { fetch } = stubFetch([
+      () =>
+        new Response(body, {
+          status: 200,
+          headers: {
+            'content-type': 'text/csv; charset=utf-8',
+            'content-disposition': `attachment; filename="fallback.csv"; filename*=UTF-8'en'audit-%E2%82%AC.csv`,
+          },
+        }),
+    ])
+    const res = await newClient(fetch).exportAuditLogCSV({ actions: ['tag.create'] })
+    expect(res.filename).toBe('audit-€.csv')
+    expect(new TextDecoder().decode(res.data)).toBe(body)
+  })
+
+  it('preserves quoted fallback filenames containing semicolons', async () => {
+    const { fetch } = stubFetch([
+      () =>
+        new Response('zip', {
+          status: 200,
+          headers: {
+            'content-type': 'application/zip',
+            'content-disposition': `attachment; filename="audit; q2.zip"`,
+          },
+        }),
+    ])
+    const res = await newClient(fetch).downloadAuditEvidenceExport('job_123')
+    expect(res.filename).toBe('audit; q2.zip')
+  })
+
+  it('keeps the raw RFC 5987 suffix when percent-decoding fails', async () => {
+    const { fetch } = stubFetch([
+      () =>
+        new Response('zip', {
+          status: 200,
+          headers: {
+            'content-type': 'application/zip',
+            'content-disposition': `attachment; filename*=UTF-8''gdpr-%ZZ.zip`,
+          },
+        }),
+    ])
+    const res = await newClient(fetch).downloadGdprExport('job_123')
+    expect(res.filename).toBe('gdpr-%ZZ.zip')
+  })
+
+  it('falls back to plain filename when filename* is malformed', async () => {
+    const { fetch } = stubFetch([
+      () =>
+        new Response('zip', {
+          status: 200,
+          headers: {
+            'content-type': 'application/zip',
+            'content-disposition': `attachment; filename="fallback.zip"; filename*=UTF-8''bad-%ZZ.zip`,
+          },
+        }),
+    ])
+    const res = await newClient(fetch).downloadGdprExport('job_123')
+    expect(res.filename).toBe('fallback.zip')
   })
 })

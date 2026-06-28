@@ -44,6 +44,38 @@ func TestValidateScopes(t *testing.T) {
 	}
 }
 
+func TestValidateClientName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+		errMsg  string
+	}{
+		{"simple", "agent", false, ""},
+		{"trimmed allowed", "  ops-agent  ", false, ""},
+		{"empty rejected", "", true, "name is required"},
+		{"whitespace rejected", "   ", true, "name is required"},
+		{"too long rejected", strings.Repeat("x", 129), true, "name exceeds 128 characters"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateClientName(strings.TrimSpace(tt.value))
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("validateClientName(%q) = nil, want error containing %q", tt.value, tt.errMsg)
+				} else if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("validateClientName(%q) error = %q, want containing %q", tt.value, err.Error(), tt.errMsg)
+				}
+			} else if err != nil {
+				t.Errorf("validateClientName(%q) = %v, want nil", tt.value, err)
+			}
+		})
+	}
+}
+
 func TestIsLoopbackURI(t *testing.T) {
 	t.Parallel()
 
@@ -97,6 +129,9 @@ func TestValidateRedirectURIs(t *testing.T) {
 		{"file scheme", []string{"file:///etc/passwd"}, true, "dangerous URI scheme"},
 		{"vbscript scheme", []string{"vbscript:msgbox(1)"}, true, "dangerous URI scheme"},
 		{"invalid url", []string{"://not-a-url"}, true, "invalid URL"},
+		{"hostless https opaque", []string{"https:callback"}, true, "absolute URI with a host"},
+		{"hostless https path", []string{"https:///callback"}, true, "absolute URI with a host"},
+		{"scheme-relative loopback", []string{"//localhost/callback"}, true, "absolute URI with a host"},
 		{"multiple valid", []string{"https://a.com/cb", "http://localhost/cb"}, false, ""},
 	}
 

@@ -7,25 +7,41 @@ import "google/api/httpbody.proto";
 
 service AuditLogService {
   rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse) {
-    option (google.api.http) = {get: "/fb/v1/console/audit-log"};
+    option (google.api.http) = {
+      get: "/v1/audit-log"
+      additional_bindings {get: "/fb/v1/console/audit-log"}
+    };
   }
   rpc ExportAuditLogCSV(ExportAuditLogCSVRequest) returns (google.api.HttpBody) {
-    option (google.api.http) = {get: "/fb/v1/console/audit-log/export.csv"};
+    option (google.api.http) = {
+      get: "/v1/audit-log/export.csv"
+      additional_bindings {get: "/fb/v1/console/audit-log/export.csv"}
+    };
   }
   rpc CreateAuditEvidenceExport(CreateAuditEvidenceExportRequest)
       returns (CreateAuditEvidenceExportResponse) {
     option (google.api.http) = {
+      post: "/v1/audit-log/evidence"
+      body: "*"
+      additional_bindings {
       post: "/fb/v1/console/audit-log/evidence"
       body: "*"
+      }
     };
   }
   rpc GetAuditEvidenceExport(GetAuditEvidenceExportRequest)
       returns (GetAuditEvidenceExportResponse) {
-    option (google.api.http) = {get: "/fb/v1/console/audit-log/evidence/{job_id}"};
+    option (google.api.http) = {
+      get: "/v1/audit-log/evidence/{job_id}"
+      additional_bindings {get: "/fb/v1/console/audit-log/evidence/{job_id}"}
+    };
   }
   rpc DownloadAuditEvidenceExport(DownloadAuditEvidenceExportRequest)
       returns (google.api.HttpBody) {
-    option (google.api.http) = {get: "/fb/v1/console/audit-log/evidence/{job_id}/download"};
+    option (google.api.http) = {
+      get: "/v1/audit-log/evidence/{job_id}/download"
+      additional_bindings {get: "/fb/v1/console/audit-log/evidence/{job_id}/download"}
+    };
   }
 }
 

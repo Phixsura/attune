@@ -3,8 +3,9 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/Phixsura/attune/sdk/go.svg)](https://pkg.go.dev/github.com/Phixsura/attune/sdk/go)
 
 The official Go client for the [attune](https://github.com/Phixsura/attune)
-ingest API. Submit feedback from a Go service without hand-rolling HTTP, retries,
-or idempotency. The request/response types are **generated from the proto
+ingest and tenant management APIs. Submit feedback and automate tenant
+operations from a Go service without hand-rolling HTTP, retries, or
+idempotency. The request/response types are **generated from the proto
 contract** (`proto/attune/v1`) and marshaled with `protojson`, so the wire shape
 is single-sourced from proto, never hand-maintained.
 
@@ -58,6 +59,10 @@ func main() {
 
 The API key needs the `ingest:write` scope. A `*Client` is safe for concurrent
 use — create one and share it across goroutines.
+
+`attune.New(baseURL, apiKey, ...)` expects `baseURL` to be an `http://` or
+`https://` origin (optionally with a path prefix), but it must not include
+embedded credentials, a query string, or a fragment.
 
 ## Request & response
 
@@ -131,7 +136,11 @@ errors), `RequestID`, `Headers` (response headers, `nil` for transport errors).
   generation never fails.
 - **Security.** The client never follows 3xx redirects (so the `X-API-Key`
   header can't leak to a redirect target), rejects CR/LF in the API key and
-  idempotency key, and reads the response body under a 1 MiB cap.
+  idempotency key, pins the public API contract with
+  `X-Attune-Api-Version: 2026-06-28`, and reads the response body under a 1 MiB
+  cap. That redirect guard still applies when you inject your own
+  `*http.Client`; the SDK enforces it on an internal copy and does not mutate
+  your original client object.
 - **Concurrency.** `*Client` is immutable after `New` and safe to share across
   goroutines.
 
@@ -141,11 +150,11 @@ Construction (`attune.New(baseURL, apiKey, opts...)`):
 
 | Option | Default | Purpose |
 |---|---|---|
-| `WithHTTPClient(*http.Client)` | internal client | bring your own transport (e.g. `otelhttp`) |
+| `WithHTTPClient(*http.Client)` | internal client | bring your own transport (e.g. `otelhttp`); redirect-following is still disabled on the SDK's internal copy |
 | `WithMaxRetries(int)` | `2` | max retries for transient failures (negative → 0) |
 | `WithTimeout(time.Duration)` | `30s` | per-attempt request timeout (`≤0` disables) |
 | `WithUserAgentSuffix(string)` | — | append a token to the `User-Agent` |
-| `WithDefaultHeaders(map[string]string)` | — | extra headers on every request (reserved headers always win) |
+| `WithDefaultHeaders(map[string]string)` | — | extra headers on every request (reserved headers like `X-API-Key`, `User-Agent`, and `X-Attune-Api-Version` always win) |
 
 Per call (`c.Ingest(ctx, in, opts...)`):
 
@@ -166,23 +175,57 @@ proto-generated wire types and the retry policy (mirroring `@phixsura/attune`):
 - **Retry policy** — `IsRetryable(status)`, `BackoffDelay(attempt)`,
   `ParseRetryAfter(headers, now)`, for callers building their own loop.
 
-## Tags & workflow
+## Management APIs
 
-Beyond ingest, the client manages tag and workflow-state config (needs a key
-with the `tags:*` / `workflow:*` scopes):
+Beyond ingest, the client manages tag and workflow-state config, audit-log
+queries and exports, GDPR jobs and archive downloads, outbox retries, and MCP
+OAuth clients. These methods need server-only management keys with the matching
+scopes:
+
+- `tags:*`
+- `workflow:*`
+- `audit:read`
+- `gdpr:read` / `gdpr:export` / `gdpr:delete`
+- `notify:read` / `notify:write`
+- `mcpclient:admin`
 
 ```go
 tag, _ := client.CreateTag(ctx, &attune.CreateTagRequest{Name: "bug", Color: ptr("#ef4444")})
 tags, _ := client.ListTags(ctx, false)
 _, _ = client.SeedWorkflowDefaults(ctx)
 states, _ := client.ListWorkflowStates(ctx, false)
+audit, _ := client.ListAuditLog(ctx, &attune.ListAuditLogRequest{Actions: []string{"tag.create"}, Limit: 25})
+auditCSV, _ := client.ExportAuditLogCSV(ctx, &attune.ListAuditLogRequest{Action: "tag.create"})
+_ = auditCSV
+auditPager := client.NewAuditLogPager(&attune.ListAuditLogRequest{Limit: 100})
+_, _ = auditPager.NextPage(ctx)
+gdprExport, _ := client.ExportGdprSubject(ctx, &attune.ExportGdprSubjectRequest{SubjectKey: "user:123"})
+_, _ = client.GetGdprExport(ctx, gdprExport.GetJobId())
+_, _ = client.DownloadGdprExport(ctx, gdprExport.GetJobId())
+deliveries, _ := client.ListOutboxDeliveries(ctx, &attune.ListDeliveriesRequest{Status: []string{"dead"}})
+_, _ = client.ListMCPClients(ctx)
 ```
 
 Tags: `ListTags` / `CreateTag` / `UpdateTag` / `ArchiveTag`. Workflow:
 `ListWorkflowStates` / `CreateWorkflowState` / `UpdateWorkflowState` /
 `ArchiveWorkflowState` / `ListWorkflowTransitions` / `ReplaceWorkflowTransitions`
-/ `SeedWorkflowDefaults`. Update is replace-semantics — send the full desired
-state, not just changed fields.
+/ `SeedWorkflowDefaults`. Audit: `ListAuditLog` / `ExportAuditLogCSV` /
+`CreateAuditEvidenceExport` / `GetAuditEvidenceExport` /
+`DownloadAuditEvidenceExport` plus `NewAuditLogPager`. GDPR:
+`ExportGdprSubject` / `GetGdprExport` / `DownloadGdprExport` /
+`RevokeGdprExport` / `DeleteGdprSubject` / `CancelGdprRequest` /
+`ListGdprRequests` / `GetGdprOperations` plus `NewGdprRequestPager`. Outbox:
+`ListOutboxDeliveries` / `RetryOutboxDelivery` plus `NewOutboxDeliveryPager`.
+MCP clients: `ListMCPClients` / `CreateMCPClient` / `GetMCPClient` /
+`RevokeMCPClient` / `UpdateMCPClient` / `ReplaceMCPClientToolPolicies` /
+`RevokeMCPRefreshGrant` / `RevokeMCPSession`. Update is replace-semantics —
+send the full desired state, not just changed fields. Management `POST`s now
+auto-generate stable idempotency keys, so the same retry policy safely applies
+to machine-safe writes such as tag creation, workflow seeding, GDPR job
+creation, outbox retry, and MCP client provisioning. Binary download helpers
+populate `BinaryResponse.Filename` from `Content-Disposition`, preferring and
+decoding RFC 5987 `filename*=` values when servers send internationalized
+attachment names.
 
 ## Example CLI
 

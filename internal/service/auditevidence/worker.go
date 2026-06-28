@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -133,12 +134,13 @@ func (w *Worker) processNext(ctx context.Context) error {
 	}
 
 	archive, err := buildArchive(archiveParams{
-		jobID:      job.ID,
-		tenantID:   job.TenantID,
-		createdBy:  job.CreatedBy,
-		filterJSON: job.FilterJSON,
-		entries:    entries,
-		signKey:    w.signKey,
+		jobID:         job.ID,
+		tenantID:      job.TenantID,
+		createdByType: job.CreatedByType,
+		createdBy:     job.CreatedBy,
+		filterJSON:    job.FilterJSON,
+		entries:       entries,
+		signKey:       w.signKey,
 	})
 	if err != nil {
 		metrics.AuditEvidenceExportsTotal.WithLabelValues(job.TenantID, "failed").Inc()
@@ -227,6 +229,17 @@ func (w *Worker) heartbeat(ctx context.Context, jobID string, cancelJob context.
 			}
 		}
 	}
+}
+
+func normalizeStoredActorType(actorType, actorID string) string {
+	trimmedType := strings.TrimSpace(actorType)
+	if trimmedType != "" {
+		return trimmedType
+	}
+	if strings.HasPrefix(strings.TrimSpace(actorID), "apikey:") {
+		return "api_key"
+	}
+	return "admin"
 }
 
 func (w *Worker) auditExpiry(ctx context.Context, count int64) {

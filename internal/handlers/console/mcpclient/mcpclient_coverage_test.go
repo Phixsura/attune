@@ -337,10 +337,22 @@ func TestUpdate_InvalidClientID(t *testing.T) {
 	h := NewHandler(ptrext.Of(stubClientStore{}), nil, nil, nil)
 
 	_, err := h.Update(context.Background(), testAuth(), "bad-id",
-		ptrext.Of(UpdateRequest{ToolPolicyMode: domain.MCPToolPolicyModeAllowList}),
+		ptrext.Of(UpdateRequest{ToolPolicyMode: ptrext.Of(domain.MCPToolPolicyModeAllowList)}),
 		httptest.NewRequest(http.MethodPatch, "/", nil))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid client ID")
+}
+
+func TestUpdate_MissingMutableFields(t *testing.T) {
+	t.Parallel()
+	clientID := uuid.New()
+	h := NewHandler(ptrext.Of(stubClientStore{client: testClient(clientID)}), nil, nil, nil)
+
+	_, err := h.Update(context.Background(), testAuth(), clientID.String(),
+		ptrext.Of(UpdateRequest{}),
+		httptest.NewRequest(http.MethodPatch, "/", nil))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one of tool_policy_mode, rate_limit_rpm, or rate_limit_burst is required")
 }
 
 func TestUpdate_InvalidToolPolicyMode(t *testing.T) {
@@ -349,7 +361,7 @@ func TestUpdate_InvalidToolPolicyMode(t *testing.T) {
 	h := NewHandler(ptrext.Of(stubClientStore{client: testClient(clientID)}), nil, nil, nil)
 
 	_, err := h.Update(context.Background(), testAuth(), clientID.String(),
-		ptrext.Of(UpdateRequest{ToolPolicyMode: "nonexistent_mode"}),
+		ptrext.Of(UpdateRequest{ToolPolicyMode: ptrext.Of("nonexistent_mode")}),
 		httptest.NewRequest(http.MethodPatch, "/", nil))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid tool policy mode")
@@ -362,7 +374,7 @@ func TestUpdate_NegativeRateLimitRPM(t *testing.T) {
 
 	_, err := h.Update(context.Background(), testAuth(), clientID.String(),
 		ptrext.Of(UpdateRequest{
-			ToolPolicyMode: domain.MCPToolPolicyModeAllowList,
+			ToolPolicyMode: ptrext.Of(domain.MCPToolPolicyModeAllowList),
 			RateLimitRPM:   ptrext.Of(-1),
 		}),
 		httptest.NewRequest(http.MethodPatch, "/", nil))
@@ -377,7 +389,7 @@ func TestUpdate_NegativeRateLimitBurst(t *testing.T) {
 
 	_, err := h.Update(context.Background(), testAuth(), clientID.String(),
 		ptrext.Of(UpdateRequest{
-			ToolPolicyMode: domain.MCPToolPolicyModeAllowList,
+			ToolPolicyMode: ptrext.Of(domain.MCPToolPolicyModeAllowList),
 			RateLimitRPM:   ptrext.Of(10),
 			RateLimitBurst: ptrext.Of(0),
 		}),
@@ -395,7 +407,7 @@ func TestUpdate_ClientLoadError(t *testing.T) {
 	)
 
 	_, err := h.Update(context.Background(), testAuth(), clientID.String(),
-		ptrext.Of(UpdateRequest{ToolPolicyMode: domain.MCPToolPolicyModeAllowList}),
+		ptrext.Of(UpdateRequest{ToolPolicyMode: ptrext.Of(domain.MCPToolPolicyModeAllowList)}),
 		httptest.NewRequest(http.MethodPatch, "/", nil))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db down")
@@ -409,7 +421,7 @@ func TestUpdate_WithAuditLogger(t *testing.T) {
 	h.SetAuditLogger(audit)
 
 	_, err := h.Update(context.Background(), testAuth(), clientID.String(),
-		ptrext.Of(UpdateRequest{ToolPolicyMode: domain.MCPToolPolicyModeAllowList}),
+		ptrext.Of(UpdateRequest{ToolPolicyMode: ptrext.Of(domain.MCPToolPolicyModeAllowList)}),
 		httptest.NewRequest(http.MethodPatch, "/", nil))
 	require.NoError(t, err)
 	require.Len(t, audit.events, 1)
@@ -428,7 +440,7 @@ func TestUpdate_UpdateGovernanceError(t *testing.T) {
 	)
 
 	_, err := h.Update(context.Background(), testAuth(), clientID.String(),
-		ptrext.Of(UpdateRequest{ToolPolicyMode: domain.MCPToolPolicyModeAllowList}),
+		ptrext.Of(UpdateRequest{ToolPolicyMode: ptrext.Of(domain.MCPToolPolicyModeAllowList)}),
 		httptest.NewRequest(http.MethodPatch, "/", nil))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "update db error")

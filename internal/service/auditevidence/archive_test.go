@@ -123,9 +123,11 @@ func TestBuildChain_TamperDetection(t *testing.T) {
 func TestBuildArchive_ZIPStructure(t *testing.T) {
 	entries := makeTestEntries(3)
 	result, err := buildArchive(archiveParams{
-		jobID:    "job-1",
-		tenantID: "tenant-1",
-		entries:  entries,
+		jobID:         "job-1",
+		tenantID:      "tenant-1",
+		createdByType: "admin",
+		createdBy:     "admin-1",
+		entries:       entries,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -149,6 +151,9 @@ func TestBuildArchive_ZIPStructure(t *testing.T) {
 	}
 	if m.ExportID != "job-1" {
 		t.Errorf("manifest export_id: want job-1, got %s", m.ExportID)
+	}
+	if m.CreatedBy.Type != "admin" {
+		t.Errorf("manifest created_by.type: want admin, got %s", m.CreatedBy.Type)
 	}
 	if m.Stats.TotalEvents != 3 {
 		t.Errorf("manifest stats.total_events: want 3, got %d", m.Stats.TotalEvents)
@@ -205,10 +210,12 @@ func TestBuildArchive_WithSigning(t *testing.T) {
 		seed[i] = byte(i + 1)
 	}
 	result, err := buildArchive(archiveParams{
-		jobID:    "signed-job",
-		tenantID: "tenant-signed",
-		entries:  entries,
-		signKey:  seed,
+		jobID:         "signed-job",
+		tenantID:      "tenant-signed",
+		createdByType: "api_key",
+		createdBy:     "apikey:123",
+		entries:       entries,
+		signKey:       seed,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -234,6 +241,13 @@ func TestBuildArchive_WithSigning(t *testing.T) {
 	if _, err := manifestBuf.ReadFrom(manifestRC); err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
+	var m manifest
+	if err := json.Unmarshal(manifestBuf.Bytes(), &m); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	if m.CreatedBy.Type != "api_key" {
+		t.Errorf("manifest created_by.type: want api_key, got %s", m.CreatedBy.Type)
+	}
 
 	sigRC, _ := sigFile.Open()
 	defer sigRC.Close()
@@ -248,7 +262,6 @@ func TestBuildArchive_WithSigning(t *testing.T) {
 		t.Fatal("Ed25519 signature verification failed")
 	}
 
-	var m manifest
 	if err := json.Unmarshal(manifestBuf.Bytes(), &m); err != nil {
 		t.Fatalf("decode manifest: %v", err)
 	}

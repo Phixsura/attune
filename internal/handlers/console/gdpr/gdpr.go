@@ -81,6 +81,9 @@ func (h *Handler) GetExport(
 	if err != nil {
 		return dispatcher.Result[*attunev1.GdprExportStatusResponse]{}, mapError(err)
 	}
+	if ctx.Auth.UserType == "api_key" && resp.DownloadPath != nil {
+		resp.DownloadPath = ptrext.Of("/v1/gdpr/exports/" + req.GetJobId() + "/download")
+	}
 	return dispatcher.OK(resp)
 }
 
@@ -162,8 +165,8 @@ func BindListRequests(r *http.Request, req *attunev1.ListGdprRequestsRequest) er
 	}
 	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
 		limit, err := strconv.ParseInt(raw, 10, 32)
-		if err != nil {
-			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "limit must be an integer")
+		if err != nil || limit <= 0 {
+			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "limit must be a positive integer")
 		}
 		req.Limit = int32(limit)
 	}
@@ -218,6 +221,10 @@ func mapError(err error) error {
 		return dispatcher.NewError(http.StatusConflict, attunev1.ErrorCode_CONFLICT, "gdpr export archive is not ready for download")
 	case errors.Is(err, gdprsvc.ErrExportJobNotRevocable):
 		return dispatcher.NewError(http.StatusConflict, attunev1.ErrorCode_CONFLICT, "gdpr export archive is not revocable")
+	case errors.Is(err, gdprsvc.ErrInvalidRequestType):
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, gdprsvc.ErrInvalidRequestType.Error())
+	case errors.Is(err, gdprrepo.ErrInvalidRequestCursor):
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, gdprrepo.ErrInvalidRequestCursor.Error())
 	case errors.Is(err, gdprrepo.ErrDeleteRequestNotCancellable):
 		return dispatcher.NewError(http.StatusConflict, attunev1.ErrorCode_CONFLICT, "gdpr delete request is not cancellable")
 	default:
@@ -258,7 +265,7 @@ func (h *Handler) verifyStepUp(
 		return stepUpStatusProto(gdprsvc.StepUpStatus{
 			Satisfied:       true,
 			PasswordAllowed: false,
-			Method:          "session",
+			Method:          stepUpMethod(auth),
 			VerifiedAt:      auth.StepUpAt,
 			ExpiresAt:       authStepUpExpiry(auth.StepUpAt, h.stepUpTTL),
 		}, h.stepUpTTL), nil
@@ -304,6 +311,9 @@ func authStepUpExpiry(verifiedAt *time.Time, ttl time.Duration) *time.Time {
 func stepUpMethod(auth *session.AuthCtx) string {
 	if auth.StepUpAt == nil || auth.StepUpAt.IsZero() {
 		return ""
+	}
+	if auth.UserType == "api_key" {
+		return "api_key"
 	}
 	return "session"
 }

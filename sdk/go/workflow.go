@@ -38,13 +38,20 @@ func (c *Client) ListWorkflowStates(ctx context.Context, includeArchived bool) (
 }
 
 // CreateWorkflowState creates a workflow state (needs `workflow:write`).
-func (c *Client) CreateWorkflowState(ctx context.Context, req *CreateStateRequest) (*CreateStateResponse, error) {
+func (c *Client) CreateWorkflowState(ctx context.Context, req *CreateStateRequest, opts ...RequestOption) (*CreateStateResponse, error) {
+	if err := requireRequest(req, "state request must not be nil"); err != nil {
+		return nil, err
+	}
+	key, err := resolveRetryablePOSTKey(opts)
+	if err != nil {
+		return nil, err
+	}
 	payload, err := protojsonMarshal.Marshal(req)
 	if err != nil {
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "invalid request body", cause: err}
 	}
 	var out attunev1.CreateStateResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/workflow/states", payload, &out, ""); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/workflow/states", payload, &out, key); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -52,6 +59,9 @@ func (c *Client) CreateWorkflowState(ctx context.Context, req *CreateStateReques
 
 // UpdateWorkflowState updates a state by id (needs `workflow:write`). Replace-semantics.
 func (c *Client) UpdateWorkflowState(ctx context.Context, req *UpdateStateRequest) (*UpdateStateResponse, error) {
+	if err := requireRequest(req, "state request must not be nil"); err != nil {
+		return nil, err
+	}
 	if !validPathSegment(req.GetId()) {
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "state id is invalid"}
 	}
@@ -89,6 +99,9 @@ func (c *Client) ListWorkflowTransitions(ctx context.Context) (*ListTransitionsR
 
 // ReplaceWorkflowTransitions replaces the transition set (needs `workflow:write`).
 func (c *Client) ReplaceWorkflowTransitions(ctx context.Context, req *ReplaceTransitionsRequest) (*ReplaceTransitionsResponse, error) {
+	if err := requireRequest(req, "workflow transition request must not be nil"); err != nil {
+		return nil, err
+	}
 	payload, err := protojsonMarshal.Marshal(req)
 	if err != nil {
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "invalid request body", cause: err}
@@ -101,9 +114,13 @@ func (c *Client) ReplaceWorkflowTransitions(ctx context.Context, req *ReplaceTra
 }
 
 // SeedWorkflowDefaults seeds the default workflow states/transitions (needs `workflow:write`).
-func (c *Client) SeedWorkflowDefaults(ctx context.Context) (*SeedDefaultsResponse, error) {
+func (c *Client) SeedWorkflowDefaults(ctx context.Context, opts ...RequestOption) (*SeedDefaultsResponse, error) {
+	key, err := resolveRetryablePOSTKey(opts)
+	if err != nil {
+		return nil, err
+	}
 	var out attunev1.SeedDefaultsResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/workflow/seed", nil, &out, ""); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/workflow/seed", nil, &out, key); err != nil {
 		return nil, err
 	}
 	return &out, nil

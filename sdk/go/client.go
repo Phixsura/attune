@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 const (
 	ingestPath       = "/v1/feedback/ingest"
 	maxResponseBytes = 1 << 20 // 1 MiB cap on the response body we buffer
+	apiVersionHeader = "X-Attune-Api-Version"
+	apiVersion       = "2026-06-28"
 )
 
 // The SDK speaks the same protojson codec the server uses to bind requests, so
@@ -48,20 +51,14 @@ type Client struct {
 }
 
 // New creates a Client for the attune deployment at baseURL authenticating with
-// apiKey (an ingest:write-scoped key). baseURL must be an http or https URL.
+// apiKey (an attune API key whose scopes match the routes you call). baseURL
+// must be an http or https URL.
 func New(baseURL, apiKey string, opts ...Option) (*Client, error) {
-	if apiKey == "" {
-		return nil, &AttuneError{Code: CodeBadRequest, Message: "apiKey is required"}
+	if err := validateAPIKey(apiKey); err != nil {
+		return nil, err
 	}
-	if hasHeaderControlChar(apiKey) {
-		return nil, &AttuneError{Code: CodeBadRequest, Message: "apiKey contains invalid characters"}
-	}
-	u, err := url.Parse(baseURL)
-	if err != nil || u.Host == "" {
-		return nil, &AttuneError{Code: CodeBadRequest, Message: "invalid baseURL"}
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, &AttuneError{Code: CodeBadRequest, Message: "baseURL must be http or https"}
+	if err := validateBaseURL(baseURL); err != nil {
+		return nil, err
 	}
 
 	c := &Client{
@@ -80,15 +77,49 @@ func New(baseURL, apiKey string, opts ...Option) (*Client, error) {
 	switch {
 	case c.httpClient == nil:
 		c.httpClient = &http.Client{CheckRedirect: noRedirect} // lint-slog:allow rule-3 client SDK; callers add otelhttp via WithHTTPClient
-	case c.httpClient.CheckRedirect == nil:
-		// Install the no-redirect guard on a copy so we never mutate a client
-		// the caller shares elsewhere (e.g. http.DefaultClient or one reused
-		// across libraries). A caller who set their own CheckRedirect keeps it.
+	default:
+		// Always install the no-redirect guard on a copy so we never mutate a
+		// client the caller shares elsewhere (e.g. http.DefaultClient or one
+		// reused across libraries), while still guaranteeing X-API-Key is never
+		// re-sent to a redirect target.
 		cp := *c.httpClient
 		cp.CheckRedirect = noRedirect
 		c.httpClient = &cp
 	}
 	return c, nil
+}
+
+func validateAPIKey(apiKey string) error {
+	if apiKey == "" {
+		return &AttuneError{Code: CodeBadRequest, Message: "apiKey is required"}
+	}
+	if hasHeaderControlChar(apiKey) {
+		return &AttuneError{Code: CodeBadRequest, Message: "apiKey contains invalid characters"}
+	}
+	return nil
+}
+
+func validateBaseURL(baseURL string) error {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return &AttuneError{Code: CodeBadRequest, Message: "invalid baseURL"}
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return &AttuneError{Code: CodeBadRequest, Message: "baseURL must be http or https"}
+	}
+	if port := u.Port(); port != "" {
+		value, convErr := strconv.Atoi(port)
+		if convErr != nil || value <= 0 || value > 65535 {
+			return &AttuneError{Code: CodeBadRequest, Message: "baseURL must use a valid port in [1, 65535]"}
+		}
+	}
+	if u.User != nil {
+		return &AttuneError{Code: CodeBadRequest, Message: "baseURL must not include credentials"}
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return &AttuneError{Code: CodeBadRequest, Message: "baseURL must not include query or fragment"}
+	}
+	return nil
 }
 
 // noRedirect refuses to follow any redirect so the X-API-Key header is never
@@ -169,11 +200,24 @@ func validPathSegment(id string) bool {
 	return id != "" && id != "." && id != ".." && !strings.Contains(id, "/")
 }
 
+func requireRequest[T any](req *T, message string) error {
+	if req == nil {
+		return &AttuneError{Code: CodeBadRequest, Message: message}
+	}
+	return nil
+}
+
 // readCappedBody reads the response body under the 1 MiB cap. It returns a
 // non-nil *attemptError for an over-cap body (INTERNAL) or a mid-stream read
 // failure (retryable NETWORK — a truncated/reset 2xx is a transport problem, not
 // a decode error), else the bytes.
 func readCappedBody(resp *http.Response) ([]byte, *attemptError) {
+	if resp.ContentLength > maxResponseBytes {
+		return nil, &attemptError{err: &AttuneError{
+			Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
+			Message: "response body exceeds the 1 MiB cap",
+		}}
+	}
 	// Read one byte past the cap so an over-limit body is detectable without
 	// buffering the whole thing (hostile-server OOM guard).
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
@@ -207,27 +251,10 @@ func (c *Client) doOnce(parent context.Context, method, path string, payload []b
 		defer cancel()
 	}
 
-	var body io.Reader
-	if payload != nil {
-		body = bytes.NewReader(payload)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	req, err := c.newRequest(ctx, method, path, payload, key)
 	if err != nil {
 		return &attemptError{err: &AttuneError{Code: CodeBadRequest, Message: err.Error(), cause: err}}
 	}
-	// Caller-supplied headers first, then the reserved headers override them so
-	// they can never be spoofed via WithDefaultHeaders.
-	for k, v := range c.defaultHeaders {
-		req.Header.Set(k, v)
-	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("X-API-Key", c.apiKey)
-	if key != "" {
-		req.Header.Set("Idempotency-Key", key)
-	}
-	req.Header.Set("User-Agent", c.userAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -241,15 +268,7 @@ func (c *Client) doOnce(parent context.Context, method, path string, payload []b
 	}
 
 	if resp.StatusCode/100 == 2 {
-		if out != nil && len(data) > 0 {
-			if err := protojsonUnmarshal.Unmarshal(data, out); err != nil {
-				return &attemptError{err: &AttuneError{
-					Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
-					Message: "could not decode response body", cause: err,
-				}}
-			}
-		}
-		return nil
+		return handleSuccessResponse(resp, data, out)
 	}
 
 	var env attunev1.ErrorResponse
@@ -265,6 +284,54 @@ func (c *Client) doOnce(parent context.Context, method, path string, payload []b
 		retryAfter:    ra,
 		hasRetryAfter: hasRA,
 	}
+}
+
+func (c *Client) newRequest(ctx context.Context, method, path string, payload []byte, key string) (*http.Request, error) {
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	// Caller-supplied headers first, then the reserved headers override them so
+	// they can never be spoofed via WithDefaultHeaders.
+	for k, v := range c.defaultHeaders {
+		req.Header.Set(k, v)
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-API-Key", c.apiKey)
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set(apiVersionHeader, apiVersion)
+	return req, nil
+}
+
+func handleSuccessResponse(resp *http.Response, data []byte, out proto.Message) *attemptError {
+	if resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if len(data) == 0 {
+		return &attemptError{err: &AttuneError{
+			Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
+			Message: "empty response body for non-204 success response",
+		}}
+	}
+	if out == nil {
+		return nil
+	}
+	if err := protojsonUnmarshal.Unmarshal(data, out); err != nil {
+		return &attemptError{err: &AttuneError{
+			Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
+			Message: "could not decode response body", cause: err,
+		}}
+	}
+	return nil
 }
 
 // classifyTransport turns a transport-level error into an attemptError. A

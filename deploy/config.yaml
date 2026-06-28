@@ -19,6 +19,12 @@ enricher:
   interval: "30s"
   batch: 10
 
+ingest:
+  # Optional: exact browser origins allowed to POST /v1/feedback/ingest
+  # with a publishable ingest:write key. Leave empty if your widget is
+  # same-origin or if a reverse proxy terminates CORS upstream.
+  cors_allowed_origins: []
+
 console:
   base_url: "https://attune.example.com"
   session_key: "replace-with-32-or-more-random-characters"

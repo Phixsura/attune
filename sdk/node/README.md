@@ -1,7 +1,7 @@
 # @phixsura/attune
 
 Official Node / TypeScript client for the [attune](https://github.com/Phixsura/attune)
-feedback **ingest** API. ESM-first, CommonJS-compatible, zero runtime
+ingest and tenant management APIs. ESM-first, CommonJS-compatible, zero runtime
 dependencies — uses the platform `fetch`. Runs on Node 20+ and modern browsers.
 
 ```bash
@@ -47,10 +47,18 @@ new Client({
 })
 ```
 
-Every request carries a versioned `User-Agent` (`attune-node/<version> node/<ver>`)
-so the server can attribute SDK traffic. `defaultHeaders` are added to every
-request; reserved headers (`X-API-Key`, `Idempotency-Key`, `User-Agent`,
-`content-type`) always take precedence and can't be overridden.
+`baseURL` must be an `http://` or `https://` origin (optionally with a path
+prefix), but it must not include embedded credentials, a query string, or a
+fragment.
+
+Node requests carry a versioned `User-Agent`
+(`attune-node/<version> node/<ver>`) so the server can attribute SDK traffic,
+and every runtime also pins attune's current public API contract with
+`X-Attune-Api-Version: 2026-06-28`. Browsers still send the version header, but
+web-platform rules forbid overriding `User-Agent`.
+`defaultHeaders` are added to every request; reserved headers (`X-API-Key`,
+`Idempotency-Key`, `User-Agent`, `X-Attune-Api-Version`, `content-type`)
+always take precedence and can't be overridden.
 
 Per-call cancellation:
 
@@ -105,13 +113,21 @@ await client.ingest({ content: 'x' }, { idempotencyKey: 'order-4242-feedback' })
 Replaying a key with a different body throws `AttuneError` `IDEMPOTENCY_CONFLICT`
 (409).
 
-## Tags & workflow config
+## Management APIs
 
-Beyond ingest, the client can manage a tenant's **tags** and **workflow
-configuration** (states + transitions). These routes need a key with the
-matching scope — `tags:read` / `tags:write` and `workflow:read` /
-`workflow:write` — and are server-side admin operations, so don't ship those
-keys to the browser.
+Beyond ingest, the client can manage a tenant's **tags**, **workflow
+configuration**, **audit log queries and exports**, **GDPR jobs and archive
+downloads**, **outbox retries**, and **MCP OAuth clients**. These routes need
+server-only management keys with the matching scopes:
+
+- `tags:read` / `tags:write`
+- `workflow:read` / `workflow:write`
+- `audit:read`
+- `gdpr:read` / `gdpr:export` / `gdpr:delete`
+- `notify:read` / `notify:write`
+- `mcpclient:admin`
+
+Do not ship those broader-scope keys to the browser.
 
 ```ts
 // Tags (tags:read / tags:write)
@@ -135,13 +151,62 @@ await client.archiveWorkflowState(state!.id)
 
 const { transitions } = await client.listWorkflowTransitions()
 await client.replaceWorkflowTransitions({ transitions })
+
+// Audit log (audit:read)
+const { items } = await client.listAuditLog({ actions: ['tag.create'], limit: 25 })
+const csv = await client.exportAuditLogCSV({ actions: ['tag.create'] })
+const auditJob = await client.createAuditEvidenceExport({
+  from: '2026-06-01T00:00:00Z',
+  to: '2026-06-30T00:00:00Z',
+  actions: ['tag.create'],
+  actorType: '',
+  actorId: '',
+  targetType: '',
+  targetId: '',
+})
+const auditStatus = await client.getAuditEvidenceExport(auditJob.jobId)
+if (auditStatus.downloadPath) {
+  await client.downloadAuditEvidenceExport(auditJob.jobId)
+}
+
+// GDPR jobs (gdpr:read / gdpr:export / gdpr:delete)
+const exportJob = await client.exportGdprSubject({ subjectKey: 'user:123' })
+const exportStatus = await client.getGdprExport(exportJob.jobId)
+if (exportStatus.downloadPath) {
+  await client.downloadGdprExport(exportJob.jobId)
+}
+await client.revokeGdprExport(exportJob.jobId)
+await client.deleteGdprSubject({ subjectKey: 'user:123' })
+await client.cancelGdprRequest('req_123')
+const requests = await client.listGdprRequests({ limit: 20, requestType: 'export' })
+const ops = await client.getGdprOperations()
+
+// Outbox (notify:read / notify:write)
+const deliveries = await client.listOutboxDeliveries({ status: ['dead'], limit: 50 })
+await client.retryOutboxDelivery(deliveries.deliveries[0]!.id)
+
+// MCP client governance (mcpclient:admin)
+const { clients } = await client.listMCPClients()
+const created = await client.createMCPClient({
+  name: 'ops-agent',
+  redirectUris: ['https://example.com/callback'],
+  scopes: ['mcp:read'],
+})
+await client.getMCPClient(created.client!.id)
 ```
 
 `updateTag` / `updateWorkflowState` are **replace-semantics**: send the full
-desired state, not a sparse patch. These methods are idempotent (`GET` / `PUT` /
-`PATCH` / `DELETE`) and so retried on transient failure; `ingest` and the
-non-idempotent `create*` / `seed*` `POST`s are not retried, to avoid creating a
-duplicate resource after a lost response.
+desired state, not a sparse patch. `GET` / `PUT` / `PATCH` / `DELETE` are
+retried on transient failure, and management `POST`s that the server now
+deduplicates (`create*`, `seed*`, audit evidence creation, GDPR export/delete/
+cancel/revoke, outbox retry, MCP client creation) also auto-retry with a stable
+per-call `Idempotency-Key`.
+
+Binary download helpers such as `exportAuditLogCSV()`,
+`downloadAuditEvidenceExport()`, and `downloadGdprExport()` return a
+`BinaryResponse` with `contentType`, `data`, and an optional `filename`
+populated from `Content-Disposition`, preferring and decoding RFC 5987
+`filename*=` values when the server sends internationalized attachment names.
 
 ## Browser use & key safety
 
@@ -157,6 +222,21 @@ spam ingest, so treat it as low-trust:
 - a tenant-wide ingest **rate limit** caps total ingest volume (note: this is
   per-tenant, shared by all keys — not per-key today);
 - **rotate/revoke** the key if it leaks.
+
+If attune serves the public ingest API directly, set:
+
+```yaml
+ingest:
+  cors_allowed_origins:
+    - "https://app.example.com"
+```
+
+to allow those browser widget origins on `POST /v1/feedback/ingest`.
+
+If you terminate CORS upstream instead, allow the SDK's request headers
+`X-API-Key`, `Idempotency-Key`, and `X-Attune-Api-Version`, and expose
+`X-Attune-Api-Version` on the response so browser callers can inspect the
+effective contract if needed.
 
 Never put a broader-scope key in client-side code.
 
@@ -179,24 +259,31 @@ pnpm install
 pnpm test         # unit tests (the live e2e suite auto-skips)
 pnpm build        # dual ESM/CJS via tsdown
 pnpm e2e          # full e2e: boots Postgres + a real attune server, runs the
-                  # live suite against it, checks persistence, then tears down
+                  # live suite, exercises the packed artifact via ESM/CJS and
+                  # a real browser, checks persistence, then tears down
 ```
 
 `pnpm test:e2e` runs the env-driven live suite (`test/e2e`) against any existing
 deployment: set `ATTUNE_E2E_BASE_URL` and `ATTUNE_E2E_API_KEY` first. `pnpm e2e`
-additionally packs the publishable tarball, installs it into a throwaway project,
-ingests through it via both ESM and CJS, and bundles it for the browser
-(esbuild `platform=browser`, asserting no Node built-ins leak) — so the real
-artifact is exercised, not just the source.
+additionally packs the publishable tarball, installs it into a throwaway
+project, ingests through it via both ESM and CJS, drives a real
+Chromium-family browser against that packed artifact from both an allowlisted
+and a blocked origin, and still bundles it for the browser (esbuild
+`platform=browser`, asserting no Node built-ins leak) — so the real artifact is
+exercised, not just the source. If browser auto-detection misses your local
+install, set `ATTUNE_BROWSER_E2E_EXECUTABLE=/absolute/path/to/browser`.
 
 ## Publishing
 
 Releases are automated by the `SDK Release` workflow
 (`.github/workflows/sdk-release.yml`) on an `sdk-vX.Y.Z` tag: it verifies the tag
 matches `package.json`'s `version`, runs the type check + tests, and publishes
-with provenance (a signed SLSA attestation) using the `NPM_TOKEN` repo secret.
-`publishConfig` forces public access to the public registry and `prepack` builds
-`dist/` before packing.
+with provenance (a signed SLSA attestation). The workflow supports either an
+`NPM_TOKEN` repo secret or npm trusted publishing for this GitHub repository;
+in token mode it also checks that the authenticated npm account is actually an
+owner of `@phixsura/attune` before the final publish step. `publishConfig`
+forces public access to the public registry and `prepack` builds `dist/` before
+packing.
 
 ```bash
 # cut a release: bump the version, then tag to trigger publish

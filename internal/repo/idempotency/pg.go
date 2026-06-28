@@ -87,9 +87,8 @@ func (r *Repo) Acquire(ctx context.Context, tenantID, key string, requestHash []
 	// Hash matches — check status.
 	switch existing.Status {
 	case StatusPending:
-		// Same request is already in progress (or was abandoned).
-		// Return acquired=true so caller can proceed.
-		return existing, true, nil
+		// Same request is already in progress.
+		return existing, false, nil
 
 	case StatusCompleted:
 		// Request already completed — caller should return cached response.

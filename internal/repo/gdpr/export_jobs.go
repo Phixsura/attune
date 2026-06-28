@@ -44,6 +44,7 @@ type ExportJob struct {
 	ArchiveFilename string
 	Counts          Counts
 	Error           string
+	CreatedByType   string
 	CreatedBy       string
 	CreatedAt       time.Time
 	StartedAt       *time.Time
@@ -57,7 +58,7 @@ type ExportJob struct {
 
 const exportJobCols = `id, tenant_id, subject_key, subject_hash, subject_display, status,
 	archive, archive_filename, feedback_count, tag_assignment_count, feedback_audit_count,
-	llm_audit_count, COALESCE(error, ''), created_by, created_at, started_at, completed_at,
+	llm_audit_count, COALESCE(error, ''), created_by_type, created_by, created_at, started_at, completed_at,
 	expires_at, downloaded_at, revoked_at, claimed_at, last_heartbeat`
 
 func scanExportJob(row pgx.Row) (*ExportJob, error) {
@@ -65,7 +66,7 @@ func scanExportJob(row pgx.Row) (*ExportJob, error) {
 	err := row.Scan(
 		&job.ID, &job.TenantID, &job.SubjectKey, &job.SubjectHash, &job.SubjectDisplay, &job.Status,
 		&job.Archive, &job.ArchiveFilename, &job.Counts.FeedbackCount, &job.Counts.TagAssignmentCount,
-		&job.Counts.FeedbackAuditCount, &job.Counts.LLMAuditCount, &job.Error, &job.CreatedBy,
+		&job.Counts.FeedbackAuditCount, &job.Counts.LLMAuditCount, &job.Error, &job.CreatedByType, &job.CreatedBy,
 		&job.CreatedAt, &job.StartedAt, &job.CompletedAt, &job.ExpiresAt, &job.DownloadedAt, &job.RevokedAt,
 		&job.ClaimedAt, &job.HeartbeatAt,
 	)
@@ -75,7 +76,10 @@ func scanExportJob(row pgx.Row) (*ExportJob, error) {
 	return ptrext.Of(job), nil
 }
 
-func (r *Repo) CreateExportJob(ctx context.Context, tenantID, subjectKey, subjectHash, createdBy string) (*ExportJob, error) {
+func (r *Repo) CreateExportJob(
+	ctx context.Context,
+	tenantID, subjectKey, subjectHash, createdByType, createdBy string,
+) (*ExportJob, error) {
 	const where = "repo.gdpr.CreateExportJob"
 	id := uuid.NewString()
 	tx, err := r.pool.Begin(ctx)
@@ -87,19 +91,19 @@ func (r *Repo) CreateExportJob(ctx context.Context, tenantID, subjectKey, subjec
 	if _, err := tx.Exec(
 		ctx, `
 		INSERT INTO gdpr_requests (
-			id, tenant_id, request_type, status, subject_key, subject_hash, created_by
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		id, tenantID, RequestTypeExport, RequestStatusQueued, subjectKey, subjectHash, createdBy,
+			id, tenant_id, request_type, status, subject_key, subject_hash, created_by_type, created_by
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		id, tenantID, RequestTypeExport, RequestStatusQueued, subjectKey, subjectHash, createdByType, createdBy,
 	); err != nil {
 		logext.Errorf(ctx, "[%s] insert request failed,tenant_id:%s,err:%+v", where, tenantID, err.Error())
 		return nil, fmt.Errorf("create gdpr request: %w", err)
 	}
 	row := tx.QueryRow(
 		ctx, `
-		INSERT INTO gdpr_export_jobs (id, request_id, tenant_id, subject_key, subject_hash, status, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO gdpr_export_jobs (id, request_id, tenant_id, subject_key, subject_hash, status, created_by_type, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING `+exportJobCols,
-		id, id, tenantID, subjectKey, subjectHash, ExportJobQueued, createdBy,
+		id, id, tenantID, subjectKey, subjectHash, ExportJobQueued, createdByType, createdBy,
 	)
 	job, err := scanExportJob(row)
 	if err != nil {

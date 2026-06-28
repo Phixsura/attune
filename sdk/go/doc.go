@@ -1,8 +1,10 @@
-// Package attune is the official Go client for the attune ingest API.
+// Package attune is the official Go client for the attune ingest and tenant
+// management APIs.
 //
-// It wraps the single public ingest endpoint (POST /v1/feedback/ingest) so a Go
-// service can submit feedback without hand-rolling HTTP, retries, or idempotency
-// handling. The request/response wire types are generated from the proto
+// It wraps the public ingest endpoint (POST /v1/feedback/ingest) plus the
+// scoped management surfaces under /v1/* so a Go service can submit feedback
+// and automate tenant operations without hand-rolling HTTP, retries, or
+// idempotency handling. The request/response wire types are generated from the proto
 // contract (proto/attune/v1) and marshaled with protojson, so the client
 // depends on google.golang.org/protobuf and its proto annotation modules.
 //
@@ -28,9 +30,10 @@
 // key with [WithIdempotencyKey].
 //
 // The client never follows 3xx redirects (so the X-API-Key header can't leak to
-// a redirect target), rejects CR/LF in the key and idempotency key, and reads the
-// response body under a 1 MiB cap. A *[Client] is immutable after [New] and safe
-// for concurrent use across goroutines.
+// a redirect target), pins the current public API contract with the
+// X-Attune-Api-Version header, rejects CR/LF in the key and idempotency key,
+// and reads the response body under a 1 MiB cap. A *[Client] is immutable after
+// [New] and safe for concurrent use across goroutines.
 //
 // # Errors
 //

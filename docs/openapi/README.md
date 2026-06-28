@@ -1,13 +1,18 @@
 # attune public OpenAPI
 
 `openapi.yaml` is generated from `proto/attune/v1/*.proto` via the
-`buf.build/community/google-gnostic-openapi` plugin (see `buf.gen.yaml`).
-Do not edit it by hand — change the `.proto` and re-run `make proto`.
+`buf.build/community/google-gnostic-openapi` plugin (see `buf.gen.yaml`), then
+mechanically repaired by `internal/tools/openapipatch` so the published
+document matches attune's real HTTP error contract and public API version
+headers. Do not edit it by hand — change the `.proto` and re-run `make proto`.
 
-## Error envelope (not in the generated spec)
+## Error envelope
 
-Every error from a `/fb/v1/*` endpoint shares one shape, defined in
-`proto/attune/v1/common.proto`:
+Every non-2xx HTTP response from attune's product APIs uses the shared
+`ErrorResponse` JSON envelope from `proto/attune/v1/common.proto`. The
+post-processing step ensures the schema appears in
+`#/components/schemas/ErrorResponse` and that default JSON error responses point
+to it instead of `google.rpc.Status`.
 
 ```yaml
 ErrorResponse:
@@ -16,30 +21,33 @@ ErrorResponse:
   properties:
     code:
       type: string
-      description: stable machine-readable category (e.g. "bad_request",
-        "unauthorized", "conflict", "body_too_large", "internal")
+      description: stable machine-readable category (ErrorCode enum name)
     message:
       type: string
-      description: human-friendly Chinese explanation
+      description: human-facing explanation; not stable
     requestId:
       type: string
-      description: chi RequestID, echoed for support triage. Optional —
-        may be empty if the middleware didn't run (e.g. a 404 outside
-        the mounted router).
+      description: request id for support / log correlation
 ```
 
-The `gnostic` generator only includes messages that are referenced from
-an RPC's request/response/path/query — `ErrorResponse` is the response
-shape for **all non-2xx replies** rather than a typed return of any
-specific RPC, so it does not surface in the generated `openapi.yaml`.
-This README is the supplementary contract: clients should parse error
-bodies against the schema above regardless of which endpoint produced
-them.
+Clients should parse error bodies against this shape regardless of which
+endpoint produced them.
 
-The `requestId` value matches the `X-Trace-Id` response header (set by
-the chi RequestID middleware) and the `trace_id` field on internal
-structured logs (slog handler in `internal/infra/observability/`), so
-operators can correlate end-to-end.
+## API version header
+
+The API-key product surface keeps stable `/v1/...` paths, but callers may pin a
+supported date-based contract with the optional
+`X-Attune-Api-Version: 2026-06-28` request header.
+
+- If the header is omitted, the server uses its current default and echoes the
+  effective version back in the `X-Attune-Api-Version` response header.
+- If a caller pins a deprecated-but-still-supported version, the response may
+  also include standard `Deprecation` and `Sunset` headers.
+- Unsupported version values fail with the shared `ErrorResponse` envelope.
+
+`internal/tools/openapipatch` injects that request-header parameter and the
+matching response-header docs across the generated public `/v1/...` operations
+so the published OpenAPI stays aligned with the runtime contract.
 
 ## OAuth install endpoints (intentionally outside the spec)
 

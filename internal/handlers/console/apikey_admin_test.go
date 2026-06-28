@@ -59,7 +59,8 @@ func TestApikeyToSessionMapsIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "tenant-7", auth.TenantID)
 	require.Equal(t, "apikey:"+keyID, auth.UserID)
-	require.Equal(t, "admin", auth.UserType)
+	require.Equal(t, "api_key", auth.UserType)
+	require.NotNil(t, auth.StepUpAt)
 }
 
 // TestApikeyToSessionFailsClosedWithoutAuth verifies the adapter fails closed
@@ -80,7 +81,7 @@ func TestAPIKeyAdminRoutesScopeGated(t *testing.T) {
 	t.Parallel()
 	v := scopedVerifier{tenant: "tenant-1", key: uuid.Nil, scopes: []domain.Scope{domain.ScopeIngestWrite}}
 	r := chi.NewRouter()
-	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter())
+	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter(), APIKeyAdminRouteOptions{})
 
 	cases := []struct {
 		name, method, path string
@@ -96,6 +97,22 @@ func TestAPIKeyAdminRoutesScopeGated(t *testing.T) {
 		{"list transitions needs workflow:read", http.MethodGet, "/workflow/transitions"},
 		{"replace transitions needs workflow:write", http.MethodPut, "/workflow/transitions"},
 		{"seed needs workflow:write", http.MethodPost, "/workflow/seed"},
+		{"list audit log needs audit:read", http.MethodGet, "/audit-log"},
+		{"export audit csv needs audit:read", http.MethodGet, "/audit-log/export.csv"},
+		{"create audit evidence needs audit:read", http.MethodPost, "/audit-log/evidence"},
+		{"get audit evidence needs audit:read", http.MethodGet, "/audit-log/evidence/job-1"},
+		{"download audit evidence needs audit:read", http.MethodGet, "/audit-log/evidence/job-1/download"},
+		{"list gdpr requests needs gdpr:read", http.MethodGet, "/gdpr/requests"},
+		{"get gdpr operations needs gdpr:read", http.MethodGet, "/gdpr/operations"},
+		{"cancel gdpr request needs gdpr:delete", http.MethodPost, "/gdpr/requests/req-1/cancel"},
+		{"export gdpr needs gdpr:export", http.MethodPost, "/gdpr/export"},
+		{"get gdpr export needs gdpr:read", http.MethodGet, "/gdpr/exports/job-1"},
+		{"download gdpr export needs gdpr:export", http.MethodGet, "/gdpr/exports/job-1/download"},
+		{"revoke gdpr export needs gdpr:export", http.MethodPost, "/gdpr/exports/job-1/revoke"},
+		{"delete gdpr subject needs gdpr:delete", http.MethodPost, "/gdpr/delete"},
+		{"list outbox needs notify:read", http.MethodGet, "/outbox/deliveries"},
+		{"retry outbox needs notify:write", http.MethodPost, "/outbox/1/retry"},
+		{"list mcp clients needs mcpclient:admin", http.MethodGet, "/mcp/clients"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,7 +144,7 @@ func TestAPIKeyAdminRoutesBindAndAuthorize(t *testing.T) {
 	v := scopedVerifier{tenant: "tenant-1", key: uuid.Nil, scopes: domain.AllScopes}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
-	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter())
+	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter(), APIKeyAdminRouteOptions{})
 
 	cases := []struct {
 		name, method, path, body string
@@ -146,6 +163,29 @@ func TestAPIKeyAdminRoutesBindAndAuthorize(t *testing.T) {
 		{"list transitions", http.MethodGet, "/workflow/transitions", ""},
 		{"replace transitions", http.MethodPut, "/workflow/transitions", `{"transitions":[]}`},
 		{"seed defaults", http.MethodPost, "/workflow/seed", ""},
+		{"list audit log", http.MethodGet, "/audit-log?limit=5&actions=tag.create", ""},
+		{"export audit csv", http.MethodGet, "/audit-log/export.csv?actions=tag.create", ""},
+		{"create audit evidence", http.MethodPost, "/audit-log/evidence", `{"from":"2026-01-01T00:00:00Z","to":"2026-01-31T00:00:00Z"}`},
+		{"get audit evidence", http.MethodGet, "/audit-log/evidence/job-1", ""},
+		{"download audit evidence", http.MethodGet, "/audit-log/evidence/job-1/download", ""},
+		{"list gdpr requests", http.MethodGet, "/gdpr/requests?limit=5&request_type=export", ""},
+		{"get gdpr operations", http.MethodGet, "/gdpr/operations", ""},
+		{"cancel gdpr request", http.MethodPost, "/gdpr/requests/req-1/cancel", ""},
+		{"export gdpr", http.MethodPost, "/gdpr/export", `{"subjectKey":"user:123"}`},
+		{"get gdpr export", http.MethodGet, "/gdpr/exports/job-1", ""},
+		{"download gdpr export", http.MethodGet, "/gdpr/exports/job-1/download", ""},
+		{"revoke gdpr export", http.MethodPost, "/gdpr/exports/job-1/revoke", ""},
+		{"delete gdpr subject", http.MethodPost, "/gdpr/delete", `{"subjectKey":"user:123"}`},
+		{"list outbox", http.MethodGet, "/outbox/deliveries?status=dead&limit=5", ""},
+		{"retry outbox", http.MethodPost, "/outbox/1/retry", ""},
+		{"list mcp clients", http.MethodGet, "/mcp/clients", ""},
+		{"create mcp client", http.MethodPost, "/mcp/clients", `{"name":"agent","redirect_uris":["https://example.com/callback"],"scopes":["mcp:read"]}`},
+		{"get mcp client", http.MethodGet, "/mcp/clients/11111111-1111-1111-1111-111111111111", ""},
+		{"revoke mcp client", http.MethodDelete, "/mcp/clients/11111111-1111-1111-1111-111111111111", ""},
+		{"update mcp client", http.MethodPatch, "/mcp/clients/11111111-1111-1111-1111-111111111111", `{"tool_policy_mode":"legacy_allow_all"}`},
+		{"replace mcp tool policies", http.MethodPut, "/mcp/clients/11111111-1111-1111-1111-111111111111/tool-policies", `{"policies":[]}`},
+		{"revoke mcp grant", http.MethodDelete, "/mcp/clients/11111111-1111-1111-1111-111111111111/grants/22222222-2222-2222-2222-222222222222", ""},
+		{"revoke mcp session", http.MethodDelete, "/mcp/clients/11111111-1111-1111-1111-111111111111/sessions/33333333-3333-3333-3333-333333333333", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -180,7 +220,7 @@ func TestAPIKeyAdminRoutesPerKeyRateLimited(t *testing.T) {
 	v := scopedVerifier{tenant: "tenant-1", key: keyID, scopes: domain.AllScopes, rpm: ptrext.Of(1)}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer) // the admitted request 500s on the nil pool; the limiter is what we assert
-	MountAPIKeyAdminRoutes(r, nil, v, 0, ratelimit.NewPerKey(false, nil))
+	MountAPIKeyAdminRoutes(r, nil, v, 0, ratelimit.NewPerKey(false, nil), APIKeyAdminRouteOptions{})
 
 	do := func() int {
 		req := httptest.NewRequest(http.MethodGet, "/tags", nil)
@@ -199,11 +239,71 @@ func TestAPIKeyAdminRoutesRejectMissingKey(t *testing.T) {
 	t.Parallel()
 	v := scopedVerifier{tenant: "tenant-1", key: uuid.Nil, scopes: domain.AllScopes}
 	r := chi.NewRouter()
-	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter())
+	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter(), APIKeyAdminRouteOptions{})
 
 	req := httptest.NewRequest(http.MethodGet, "/tags", nil) // no X-API-Key
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestAPIKeyAdminRoutesNewManagementRoutesRequireExplicitScopes(t *testing.T) {
+	t.Parallel()
+	v := scopedVerifier{tenant: "tenant-1", key: uuid.Nil, scopes: nil}
+	r := chi.NewRouter()
+	r.Use(middleware.Recoverer)
+	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter(), APIKeyAdminRouteOptions{})
+
+	cases := []struct {
+		name, method, path string
+		wantStatus         int
+	}{
+		{"legacy key still reaches existing tags bridge", http.MethodGet, "/tags", http.StatusInternalServerError},
+		{"legacy key denied on audit", http.MethodGet, "/audit-log", http.StatusForbidden},
+		{"legacy key denied on gdpr", http.MethodGet, "/gdpr/requests", http.StatusForbidden},
+		{"legacy key denied on outbox", http.MethodGet, "/outbox/deliveries", http.StatusForbidden},
+		{"legacy key denied on mcp clients", http.MethodGet, "/mcp/clients", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader("{}"))
+			req.Header.Set("X-API-Key", domain.APIKeyPrefix+"legacy")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
+}
+
+func TestAPIKeyAdminRoutesLegacyGdprAdminScopeStillSatisfiesGranularChecks(t *testing.T) {
+	t.Parallel()
+
+	v := scopedVerifier{tenant: "tenant-1", key: uuid.Nil, scopes: []domain.Scope{domain.ScopeGDPRAdmin}}
+	r := chi.NewRouter()
+	r.Use(middleware.Recoverer)
+	MountAPIKeyAdminRoutes(r, nil, v, 0, disabledLimiter(), APIKeyAdminRouteOptions{})
+
+	cases := []struct {
+		name, method, path, body string
+	}{
+		{"read request list", http.MethodGet, "/gdpr/requests", ""},
+		{"export subject", http.MethodPost, "/gdpr/export", `{"subjectKey":"user:123"}`},
+		{"cancel request", http.MethodPost, "/gdpr/requests/req-1/cancel", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("X-API-Key", domain.APIKeyPrefix+"gdpr-admin")
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.NotEqual(t, http.StatusForbidden, w.Code)
+			require.NotEqual(t, http.StatusUnauthorized, w.Code)
+		})
+	}
 }

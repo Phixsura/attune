@@ -73,9 +73,55 @@ type ClientToolPolicy struct {
 
 // UpdateRequest updates mutable client governance settings.
 type UpdateRequest struct {
-	ToolPolicyMode string `json:"tool_policy_mode"`
-	RateLimitRPM   *int   `json:"rate_limit_rpm"`
-	RateLimitBurst *int   `json:"rate_limit_burst"`
+	ToolPolicyMode *string `json:"tool_policy_mode"`
+	RateLimitRPM   *int    `json:"rate_limit_rpm"`
+	RateLimitBurst *int    `json:"rate_limit_burst"`
+
+	toolPolicyModeSet bool
+	rateLimitRPMSet   bool
+	rateLimitBurstSet bool
+}
+
+func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
+	type updateRequestJSON struct {
+		ToolPolicyMode *string `json:"tool_policy_mode"`
+		RateLimitRPM   *int    `json:"rate_limit_rpm"`
+		RateLimitBurst *int    `json:"rate_limit_burst"`
+	}
+
+	var raw updateRequestJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	r.ToolPolicyMode = raw.ToolPolicyMode
+	r.RateLimitRPM = raw.RateLimitRPM
+	r.RateLimitBurst = raw.RateLimitBurst
+	_, r.toolPolicyModeSet = fields["tool_policy_mode"]
+	_, r.rateLimitRPMSet = fields["rate_limit_rpm"]
+	_, r.rateLimitBurstSet = fields["rate_limit_burst"]
+	return nil
+}
+
+func (r *UpdateRequest) hasAnyField() bool {
+	return r.hasToolPolicyMode() || r.hasRateLimitRPM() || r.hasRateLimitBurst()
+}
+
+func (r *UpdateRequest) hasToolPolicyMode() bool {
+	return r.toolPolicyModeSet || r.ToolPolicyMode != nil
+}
+
+func (r *UpdateRequest) hasRateLimitRPM() bool {
+	return r.rateLimitRPMSet || r.RateLimitRPM != nil
+}
+
+func (r *UpdateRequest) hasRateLimitBurst() bool {
+	return r.rateLimitBurstSet || r.RateLimitBurst != nil
 }
 
 // UpdateResponse returns the updated client.
@@ -155,7 +201,16 @@ func (h *Handler) Update(ctx context.Context, auth *session.AuthCtx, id string, 
 	if err != nil {
 		return nil, ptrext.Of(ValidationError{Field: "id", Message: "invalid client ID"})
 	}
-	if err := validateToolPolicyMode(req.ToolPolicyMode); err != nil {
+	if req == nil {
+		return nil, ptrext.Of(ValidationError{Field: "body", Message: "request body is required"})
+	}
+	if !req.hasAnyField() {
+		return nil, ptrext.Of(ValidationError{
+			Field:   "body",
+			Message: "at least one of tool_policy_mode, rate_limit_rpm, or rate_limit_burst is required",
+		})
+	}
+	if err := validateOptionalToolPolicyMode(req.ToolPolicyMode, req.hasToolPolicyMode()); err != nil {
 		return nil, err
 	}
 	if err := validateOptionalPositiveInt("rate_limit_rpm", req.RateLimitRPM); err != nil {
@@ -173,11 +228,24 @@ func (h *Handler) Update(ctx context.Context, auth *session.AuthCtx, id string, 
 		return nil, err
 	}
 
+	toolPolicyMode := before.ToolPolicyMode
+	if req.hasToolPolicyMode() {
+		toolPolicyMode = strings.TrimSpace(ptrext.IndirectOr(req.ToolPolicyMode, ""))
+	}
+	rateLimitRPM := before.RateLimitRPM
+	if req.hasRateLimitRPM() {
+		rateLimitRPM = req.RateLimitRPM
+	}
+	rateLimitBurst := before.RateLimitBurst
+	if req.hasRateLimitBurst() {
+		rateLimitBurst = req.RateLimitBurst
+	}
+
 	updated, err := h.clients.UpdateGovernance(ctx, mcprepo.UpdateClientGovernanceParams{
 		ID:             clientID,
-		ToolPolicyMode: strings.TrimSpace(req.ToolPolicyMode),
-		RateLimitRPM:   req.RateLimitRPM,
-		RateLimitBurst: req.RateLimitBurst,
+		ToolPolicyMode: toolPolicyMode,
+		RateLimitRPM:   rateLimitRPM,
+		RateLimitBurst: rateLimitBurst,
 	})
 	if err != nil {
 		return nil, err
@@ -211,6 +279,12 @@ func (h *Handler) ReplaceToolPolicies(ctx context.Context, auth *session.AuthCtx
 	}
 	if err := ensureClientMutable(client); err != nil {
 		return nil, err
+	}
+	if req.Policies == nil {
+		return nil, ptrext.Of(ValidationError{
+			Field:   "policies",
+			Message: "field is required; use [] to clear all tool policies",
+		})
 	}
 
 	if err := validateToolPolicyInputs(client.Scopes, req.Policies); err != nil {
@@ -545,6 +619,16 @@ func validateToolPolicyMode(mode string) error {
 	default:
 		return ptrext.Of(ValidationError{Field: "tool_policy_mode", Message: "invalid tool policy mode"})
 	}
+}
+
+func validateOptionalToolPolicyMode(mode *string, set bool) error {
+	if !set {
+		return nil
+	}
+	if mode == nil {
+		return ptrext.Of(ValidationError{Field: "tool_policy_mode", Message: "invalid tool policy mode"})
+	}
+	return validateToolPolicyMode(ptrext.Indirect(mode))
 }
 
 func validateOptionalPositiveInt(field string, v *int) error {

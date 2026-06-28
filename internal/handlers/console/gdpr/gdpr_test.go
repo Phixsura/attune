@@ -127,6 +127,34 @@ func TestGetExportMapsStatus(t *testing.T) {
 	}
 }
 
+func TestGetExportRewritesDownloadPathForAPIKeys(t *testing.T) {
+	t.Parallel()
+
+	h := NewHandler(ptrext.Of(fakeService{
+		getExportResp: ptrext.Of(attunev1.GdprExportStatusResponse{
+			JobId:        "job-123",
+			Status:       attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_COMPLETED,
+			DownloadPath: ptrext.Of("/fb/v1/console/gdpr/exports/job-123/download"),
+		}),
+	}), nil, nil, 0)
+	ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth: ptrext.Of(session.AuthCtx{
+			TenantID: "tenant-1",
+			UserID:   "apikey:1",
+			UserType: "api_key",
+		}),
+	})
+
+	result, err := h.GetExport(ctx, ptrext.Of(attunev1.GetGdprExportRequest{JobId: "job-123"}))
+	if err != nil {
+		t.Fatalf("GetExport err = %v", err)
+	}
+	if got := result.Body.GetDownloadPath(); got != "/v1/gdpr/exports/job-123/download" {
+		t.Fatalf("download_path = %q", got)
+	}
+}
+
 func TestDownloadExportWritesAttachmentResponse(t *testing.T) {
 	t.Parallel()
 
@@ -307,6 +335,21 @@ func TestBindListRequestsRejectsNonIntegerLimit(t *testing.T) {
 	}
 }
 
+func TestBindListRequestsRejectsNonPositiveLimit(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{"0", "-5"} {
+		req := httptest.NewRequest(http.MethodGet, "/fb/v1/console/gdpr/requests?limit="+raw, http.NoBody)
+		err := BindListRequests(req, ptrext.Of(attunev1.ListGdprRequestsRequest{}))
+		if err == nil {
+			t.Fatalf("expected BindListRequests error for %s", raw)
+		}
+		if !strings.Contains(err.Error(), "limit must be a positive integer") {
+			t.Fatalf("unexpected error for %s: %v", raw, err)
+		}
+	}
+}
+
 func TestListRequestsAndOperationsProxyServiceResponses(t *testing.T) {
 	t.Parallel()
 
@@ -348,6 +391,37 @@ func TestListRequestsAndOperationsProxyServiceResponses(t *testing.T) {
 	}
 }
 
+func TestListRequestsMapsValidationErrors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"invalid request type", gdprsvc.ErrInvalidRequestType, gdprsvc.ErrInvalidRequestType.Error()},
+		{"invalid cursor", gdprrepo.ErrInvalidRequestCursor, gdprrepo.ErrInvalidRequestCursor.Error()},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewHandler(ptrext.Of(fakeService{exportErr: tc.err}), nil, nil, 0)
+			ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+				Context: context.Background(),
+				Auth:    ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "admin-1"}),
+			})
+			_, err := h.ListRequests(ctx, ptrext.Of(attunev1.ListGdprRequestsRequest{}))
+			var dispatchErr *dispatcher.Error
+			if !errors.As(err, &dispatchErr) {
+				t.Fatalf("err = %T %v, want *dispatcher.Error", err, err)
+			}
+			if dispatchErr.Status != http.StatusBadRequest || dispatchErr.Code != attunev1.ErrorCode_BAD_REQUEST || dispatchErr.Message != tc.want {
+				t.Fatalf("dispatch err = %#v, want 400 BAD_REQUEST %q", dispatchErr, tc.want)
+			}
+		})
+	}
+}
+
 func TestMapErrorAndHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -357,6 +431,8 @@ func TestMapErrorAndHelpers(t *testing.T) {
 		gdprsvc.ErrExportJobNotFound,
 		gdprsvc.ErrExportJobNotDownloadable,
 		gdprsvc.ErrExportJobNotRevocable,
+		gdprsvc.ErrInvalidRequestType,
+		gdprrepo.ErrInvalidRequestCursor,
 		gdprrepo.ErrDeleteRequestNotCancellable,
 		errors.New("boom"),
 	}
@@ -379,6 +455,9 @@ func TestMapErrorAndHelpers(t *testing.T) {
 	}
 	if stepUpMethod(ptrext.Of(session.AuthCtx{StepUpAt: ptrext.Of(now)})) != "session" {
 		t.Fatal("expected session step-up method")
+	}
+	if stepUpMethod(ptrext.Of(session.AuthCtx{UserType: "api_key", StepUpAt: ptrext.Of(now)})) != "api_key" {
+		t.Fatal("expected api_key step-up method")
 	}
 	if firstQueryValue(url.Values{"type": []string{" export "}}, "request_type", "type") != "export" {
 		t.Fatal("expected firstQueryValue to trim and return alias")

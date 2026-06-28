@@ -12,9 +12,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
-var ErrClientNotFound = errors.New("mcp oauth client not found")
+var (
+	ErrClientNotFound     = errors.New("mcp oauth client not found")
+	ErrClientNameConflict = errors.New("mcp oauth client name already exists for tenant")
+	ErrInvalidInput       = errors.New("mcp oauth client field violates a constraint")
+)
 
 // Client represents an MCP OAuth client (registered agent).
 type Client struct {
@@ -72,6 +77,12 @@ func (r *ClientsRepo) Create(ctx context.Context, p CreateClientParams) (*Client
 		&c.RateLimitRPM, &c.RateLimitBurst, &c.CreatedAt, &c.CreatedBy, &c.RevokedAt,
 	)
 	if err != nil {
+		if pgxutil.IsUniqueViolation(err) {
+			return nil, ErrClientNameConflict
+		}
+		if pgxutil.IsCheckViolation(err) {
+			return nil, ErrInvalidInput
+		}
 		return nil, err
 	}
 	return ptrext.Of(c), nil
@@ -184,6 +195,9 @@ func (r *ClientsRepo) UpdateGovernance(ctx context.Context, p UpdateClientGovern
 		return nil, ErrClientNotFound
 	}
 	if err != nil {
+		if pgxutil.IsCheckViolation(err) {
+			return nil, ErrInvalidInput
+		}
 		return nil, err
 	}
 	return ptrext.Of(c), nil

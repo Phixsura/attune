@@ -24,6 +24,9 @@ func TestParseResourceAction(t *testing.T) {
 		{domain.ScopeLLMRead, "llm", "read"},
 		{domain.ScopeLLMWrite, "llm", "write"},
 		{domain.ScopeAPIKeyAdmin, "apikey", "admin"},
+		{domain.ScopeGDPRRead, "gdpr", "read"},
+		{domain.ScopeGDPRExport, "gdpr", "export"},
+		{domain.ScopeGDPRDelete, "gdpr", "delete"},
 		{domain.ScopeGDPRAdmin, "gdpr", "admin"},
 	}
 
@@ -69,6 +72,10 @@ func TestGetImplies(t *testing.T) {
 		{domain.ScopeDigestWrite, []string{string(domain.ScopeDigestRead)}, false},
 		{domain.ScopeTagsWrite, []string{string(domain.ScopeTagsRead)}, false},
 		{domain.ScopeWorkflowWrite, []string{string(domain.ScopeWorkflowRead)}, false},
+		{domain.ScopeGDPRExport, []string{string(domain.ScopeGDPRRead)}, false},
+		{domain.ScopeGDPRDelete, []string{string(domain.ScopeGDPRRead)}, false},
+		{domain.ScopeGDPRAdmin, []string{string(domain.ScopeGDPRRead), string(domain.ScopeGDPRExport), string(domain.ScopeGDPRDelete)}, false},
+		{domain.ScopeMCPWrite, []string{string(domain.ScopeMCPRead)}, false},
 		{domain.ScopeFeedbackRead, nil, true},
 		{domain.ScopeIngestWrite, nil, true},
 		{domain.ScopeAPIKeyAdmin, nil, true},

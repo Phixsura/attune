@@ -259,10 +259,18 @@ func (s *Signer) RequireSession(next http.Handler) http.Handler {
 // RequireSession. Panics if missing — that's a programming error
 // (handler attached outside the middleware).
 func FromContext(ctx context.Context) *AuthCtx {
-	v, _ := ctx.Value(ctxKey{}).(*AuthCtx)
+	v := OptionalFromContext(ctx)
 	if v == nil {
 		panic("session: AuthCtx missing — handler not behind RequireSession")
 	}
+	return v
+}
+
+// OptionalFromContext returns the auth ctx when present and nil otherwise.
+// Use it only on fail-closed edges that must guard against accidental
+// middleware mis-wiring without panicking the whole request path.
+func OptionalFromContext(ctx context.Context) *AuthCtx {
+	v, _ := ctx.Value(ctxKey{}).(*AuthCtx)
 	return v
 }
 

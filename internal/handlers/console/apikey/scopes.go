@@ -9,30 +9,37 @@ import (
 )
 
 var scopeDescriptions = map[domain.Scope]string{
-	domain.ScopeIngestWrite:   "Submit feedback via API",
-	domain.ScopeFeedbackRead:  "View feedback, clusters, and statistics",
-	domain.ScopeFeedbackWrite: "Modify feedback state, tags, and batch operations",
-	domain.ScopeUsageRead:     "View usage statistics",
-	domain.ScopeAuditRead:     "View audit log",
-	domain.ScopeLLMRead:       "View LLM channels, abilities, and routes",
-	domain.ScopeLLMWrite:      "Configure LLM settings",
-	domain.ScopeEnrichRead:    "View enrichment configuration",
-	domain.ScopeEnrichWrite:   "Modify enrichment settings",
-	domain.ScopeGuardRead:     "View guard policies",
-	domain.ScopeGuardWrite:    "Configure guard policies",
-	domain.ScopeNotifyRead:    "View notification targets",
-	domain.ScopeNotifyWrite:   "Configure notification targets",
-	domain.ScopeInboundRead:   "View inbound sources",
-	domain.ScopeInboundWrite:  "Configure inbound sources",
-	domain.ScopeDigestRead:    "View digest subscription",
-	domain.ScopeDigestWrite:   "Configure digest subscription",
-	domain.ScopeTagsRead:      "View tags",
-	domain.ScopeTagsWrite:     "Configure tags",
-	domain.ScopeWorkflowRead:  "View workflow states",
-	domain.ScopeWorkflowWrite: "Configure workflow",
-	domain.ScopeGDPRAdmin:     "GDPR delete and export operations",
-	domain.ScopeMembersAdmin:  "Manage tenant members",
-	domain.ScopeAPIKeyAdmin:   "Manage API keys",
+	domain.ScopeIngestWrite:    "Submit feedback via API",
+	domain.ScopeFeedbackRead:   "View feedback, clusters, and statistics",
+	domain.ScopeFeedbackWrite:  "Modify feedback state, tags, and batch operations",
+	domain.ScopeUsageRead:      "View usage statistics",
+	domain.ScopeAuditRead:      "View audit log",
+	domain.ScopeLLMRead:        "View LLM channels, abilities, and routes",
+	domain.ScopeLLMWrite:       "Configure LLM settings",
+	domain.ScopeEnrichRead:     "View enrichment configuration",
+	domain.ScopeEnrichWrite:    "Modify enrichment settings",
+	domain.ScopeGuardRead:      "View guard policies",
+	domain.ScopeGuardWrite:     "Configure guard policies",
+	domain.ScopeNotifyRead:     "View notification targets",
+	domain.ScopeNotifyWrite:    "Configure notification targets",
+	domain.ScopeInboundRead:    "View inbound sources",
+	domain.ScopeInboundWrite:   "Configure inbound sources",
+	domain.ScopeDigestRead:     "View digest subscription",
+	domain.ScopeDigestWrite:    "Configure digest subscription",
+	domain.ScopeTagsRead:       "View tags",
+	domain.ScopeTagsWrite:      "Configure tags",
+	domain.ScopeWorkflowRead:   "View workflow states",
+	domain.ScopeWorkflowWrite:  "Configure workflow",
+	domain.ScopeGDPRRead:       "View GDPR requests, export status, and compliance operations metadata",
+	domain.ScopeGDPRExport:     "Create, revoke, and download GDPR subject exports",
+	domain.ScopeGDPRDelete:     "Schedule and cancel GDPR subject deletion requests",
+	domain.ScopeGDPRAdmin:      "Legacy umbrella for all GDPR read/export/delete operations",
+	domain.ScopeMembersAdmin:   "Manage tenant members",
+	domain.ScopeAPIKeyAdmin:    "Manage API keys",
+	domain.ScopeMCPRead:        "Read MCP tool data",
+	domain.ScopeMCPWrite:       "Write MCP tool data",
+	domain.ScopeMCPIngest:      "Submit MCP feedback ingest events",
+	domain.ScopeMCPClientAdmin: "Manage MCP OAuth clients and governance policies",
 }
 
 // ListScopes returns all available scopes with metadata.
@@ -81,6 +88,18 @@ func getImplies(s domain.Scope) []string {
 		return []string{string(domain.ScopeTagsRead)}
 	case domain.ScopeWorkflowWrite:
 		return []string{string(domain.ScopeWorkflowRead)}
+	case domain.ScopeGDPRExport:
+		return []string{string(domain.ScopeGDPRRead)}
+	case domain.ScopeGDPRDelete:
+		return []string{string(domain.ScopeGDPRRead)}
+	case domain.ScopeGDPRAdmin:
+		return []string{
+			string(domain.ScopeGDPRRead),
+			string(domain.ScopeGDPRExport),
+			string(domain.ScopeGDPRDelete),
+		}
+	case domain.ScopeMCPWrite:
+		return []string{string(domain.ScopeMCPRead)}
 	default:
 		return nil
 	}

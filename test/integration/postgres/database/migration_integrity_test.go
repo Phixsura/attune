@@ -461,7 +461,7 @@ func TestMigrations_DetectDuplicatePrefixes(t *testing.T) {
 
 func TestMigrations_MigrationCount(t *testing.T) {
 	count := database.MigrationCount()
-	require.Equal(t, 88, count, "should have 88 migrations")
+	require.Equal(t, 91, count, "should have 91 migrations")
 
 	names, err := database.LoadMigrationNames()
 	require.NoError(t, err)
@@ -1223,12 +1223,12 @@ func TestMigrations_LoadMigrationNames_All(t *testing.T) {
 	names, err := database.LoadMigrationNames()
 	require.NoError(t, err)
 
-	// Should have 88 migrations
-	require.Len(t, names, 88)
+	// Should have 91 migrations.
+	require.Len(t, names, 91)
 
 	// First and last
 	require.Equal(t, "001_init.sql", names[0])
-	require.Equal(t, "088_breakglass_advanced_audit_actions.sql", names[len(names)-1])
+	require.Equal(t, "091_api_key_gdpr_granular_scopes.sql", names[len(names)-1])
 
 	// All should be .sql files
 	for _, n := range names {

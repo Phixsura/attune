@@ -42,6 +42,7 @@ type ExportJob struct {
 	Archive         []byte
 	ArchiveFilename string
 	Error           string
+	CreatedByType   string
 	CreatedBy       string
 	CreatedAt       time.Time
 	StartedAt       *time.Time
@@ -62,7 +63,7 @@ func New(pool *pgxpool.Pool) *Repo {
 }
 
 const jobCols = `id, tenant_id, status, filter_json, total_events,
-	archive, archive_filename, error, created_by, created_at,
+	archive, archive_filename, error, created_by_type, created_by, created_at,
 	started_at, completed_at, expires_at, downloaded_at,
 	claimed_by, claimed_at, last_heartbeat`
 
@@ -70,7 +71,7 @@ func scanJob(row pgx.Row) (*ExportJob, error) {
 	var job ExportJob
 	err := row.Scan(
 		&job.ID, &job.TenantID, &job.Status, &job.FilterJSON, &job.TotalEvents,
-		&job.Archive, &job.ArchiveFilename, &job.Error, &job.CreatedBy, &job.CreatedAt,
+		&job.Archive, &job.ArchiveFilename, &job.Error, &job.CreatedByType, &job.CreatedBy, &job.CreatedAt,
 		&job.StartedAt, &job.CompletedAt, &job.ExpiresAt, &job.DownloadedAt,
 		&job.ClaimedBy, &job.ClaimedAt, &job.LastHeartbeat,
 	)
@@ -80,14 +81,18 @@ func scanJob(row pgx.Row) (*ExportJob, error) {
 	return ptrext.Of(job), nil
 }
 
-func (r *Repo) CreateJob(ctx context.Context, tenantID, createdBy string, filterJSON json.RawMessage) (*ExportJob, error) {
+func (r *Repo) CreateJob(
+	ctx context.Context,
+	tenantID, createdByType, createdBy string,
+	filterJSON json.RawMessage,
+) (*ExportJob, error) {
 	id := uuid.NewString()
 	row := r.pool.QueryRow(
 		ctx,
-		`INSERT INTO audit_evidence_export (id, tenant_id, status, filter_json, created_by)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO audit_evidence_export (id, tenant_id, status, filter_json, created_by_type, created_by)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING `+jobCols,
-		id, tenantID, JobQueued, filterJSON, createdBy,
+		id, tenantID, JobQueued, filterJSON, createdByType, createdBy,
 	)
 	job, err := scanJob(row)
 	if err != nil {

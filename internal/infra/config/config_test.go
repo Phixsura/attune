@@ -91,6 +91,78 @@ func TestLoadPathSecurityDefaultsAreSafe(t *testing.T) {
 	}
 }
 
+func TestLoadPathParsesIngestCORSOrigins(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\ningest:\n  cors_allowed_origins:\n    - \"https://App.Example.com/\"\n    - \" https://app.example.com \"\n    - \"http://localhost:5173\"\n"
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://app.example.com", "http://localhost:5173"}, cfg.IngestCORSAllowedOrigins)
+}
+
+func TestLoadPathNormalizesDefaultPortInIngestCORSOrigins(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\ningest:\n  cors_allowed_origins:\n    - \"https://app.example.com:0443\"\n    - \"http://localhost:080\"\n    - \"https://[::1]:0443\"\n    - \"http://[::1]:8080\"\n"
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		[]string{"https://app.example.com", "http://localhost", "https://[::1]", "http://[::1]:8080"},
+		cfg.IngestCORSAllowedOrigins,
+	)
+}
+
+func TestLoadPathIngestCORSDisabledByDefault(t *testing.T) {
+	cfg, err := LoadPath(writeConfig(t, validConfigYAML(t, validTinkKeyset(t))))
+	require.NoError(t, err)
+	require.Empty(t, cfg.IngestCORSAllowedOrigins)
+}
+
+func TestLoadPathRejectsInvalidIngestCORSOrigins(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "path not allowed",
+			raw:  validConfigYAML(t, validTinkKeyset(t)) + "\ningest:\n  cors_allowed_origins:\n    - \"https://app.example.com/widget\"\n",
+			want: "must not include a path",
+		},
+		{
+			name: "query not allowed",
+			raw:  validConfigYAML(t, validTinkKeyset(t)) + "\ningest:\n  cors_allowed_origins:\n    - \"https://app.example.com?x=1\"\n",
+			want: "must not include query or fragment",
+		},
+		{
+			name: "scheme required",
+			raw:  validConfigYAML(t, validTinkKeyset(t)) + "\ningest:\n  cors_allowed_origins:\n    - \"app.example.com\"\n",
+			want: "must include scheme and host",
+		},
+		{
+			name: "http or https only",
+			raw:  validConfigYAML(t, validTinkKeyset(t)) + "\ningest:\n  cors_allowed_origins:\n    - \"ftp://app.example.com\"\n",
+			want: "must use http or https",
+		},
+		{
+			name: "wildcard mixed with explicit",
+			raw:  validConfigYAML(t, validTinkKeyset(t)) + "\ningest:\n  cors_allowed_origins:\n    - \"*\"\n    - \"https://app.example.com\"\n",
+			want: "cannot mix \"*\" with explicit origins",
+		},
+		{
+			name: "invalid port rejected",
+			raw:  validConfigYAML(t, validTinkKeyset(t)) + "\ningest:\n  cors_allowed_origins:\n    - \"https://app.example.com:99999\"\n",
+			want: "must use a valid port in [1, 65535]",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadPath(writeConfig(t, tc.raw))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "ingest.cors_allowed_origins")
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
 func TestLoadPathRejectsOldLLMFields(t *testing.T) {
 	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nllm_openai_api_key: sk-test\n"
 	_, err := LoadPath(writeConfig(t, raw))

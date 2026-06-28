@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +45,7 @@ func Path() string {
 type Config struct {
 	Port int
 
+	Ingest        IngestConfig
 	Database      DatabaseConfig
 	Migrations    MigrationsConfig
 	Enricher      EnricherConfig
@@ -95,11 +98,19 @@ type Config struct {
 	MCPRateLimitBurst     int
 
 	// Worker convenience fields
-	WorkerHeartbeatInterval time.Duration
-	WorkerStaleDuration     time.Duration
-	WorkerDrainTimeout      time.Duration
-	WorkerPollInterval      time.Duration
-	WorkerMaxAttempts       int
+	WorkerHeartbeatInterval  time.Duration
+	WorkerStaleDuration      time.Duration
+	WorkerDrainTimeout       time.Duration
+	WorkerPollInterval       time.Duration
+	WorkerMaxAttempts        int
+	IngestCORSAllowedOrigins []string
+}
+
+type IngestConfig struct {
+	// CORSAllowedOrigins enables browser cross-origin ingest for the exact
+	// listed origins. Empty keeps first-party CORS disabled; use this only for
+	// publishable ingest:write widgets, not server-only management APIs.
+	CORSAllowedOrigins []string `yaml:"cors_allowed_origins"`
 }
 
 type DatabaseConfig struct {
@@ -237,6 +248,7 @@ type MCPRateLimitConfig struct {
 
 type yamlConfig struct {
 	Port           int                 `yaml:"port"`
+	Ingest         IngestConfig        `yaml:"ingest"`
 	Database       DatabaseConfig      `yaml:"database"`
 	Migrations     MigrationsConfig    `yaml:"migrations"`
 	Enricher       EnricherConfig      `yaml:"enricher"`
@@ -307,6 +319,7 @@ func parseYAML(raw []byte) (*yamlConfig, error) {
 func buildConfig(yc *yamlConfig) (*Config, error) {
 	c := ptrext.Of(Config{
 		Port:           yc.Port,
+		Ingest:         yc.Ingest,
 		Database:       yc.Database,
 		Migrations:     yc.Migrations,
 		Enricher:       yc.Enricher,
@@ -347,6 +360,9 @@ func (c *Config) parseDerivedFields() error {
 		return err
 	}
 	if err := c.parseShutdownFields(); err != nil {
+		return err
+	}
+	if err := c.parseIngestFields(); err != nil {
 		return err
 	}
 	c.parseSimpleFields() // must come before parseMCPFields (uses ConsoleBaseURL)
@@ -438,6 +454,16 @@ func (c *Config) parseShutdownFields() error {
 	}
 	c.ShutdownDrainDelay = shutdownDrainDelay
 	c.ShutdownTimeout = shutdownTimeout
+	return nil
+}
+
+func (c *Config) parseIngestFields() error {
+	origins, err := normalizeConfiguredOrigins(c.Ingest.CORSAllowedOrigins, "ingest.cors_allowed_origins")
+	if err != nil {
+		return err
+	}
+	c.Ingest.CORSAllowedOrigins = origins
+	c.IngestCORSAllowedOrigins = append([]string(nil), origins...)
 	return nil
 }
 
@@ -614,16 +640,8 @@ func (c *Config) validate() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("config: database.url is required")
 	}
-	if strings.TrimSpace(c.Secrets.TinkKeyset) == "" {
-		return fmt.Errorf("config: secrets.tink_keyset is required")
-	}
-	if _, err := secretstore.NewTinkStoreFromJSON(c.Secrets.TinkKeyset); err != nil {
-		return fmt.Errorf("config: secrets.tink_keyset: %w", err)
-	}
-	if strings.TrimSpace(c.Secrets.LegacyInboundMasterKey) != "" {
-		if _, err := secretstore.DecodeLegacyInboundMasterKey(c.Secrets.LegacyInboundMasterKey); err != nil {
-			return fmt.Errorf("config: secrets.legacy_inbound_master_key: %w", err)
-		}
+	if err := c.validateSecretsConfig(); err != nil {
+		return err
 	}
 	if err := c.validateConsole(); err != nil {
 		return err
@@ -652,7 +670,40 @@ func (c *Config) validate() error {
 	if err := c.validateMCPConfig(); err != nil {
 		return err
 	}
+	if err := c.validateIngestConfig(); err != nil {
+		return err
+	}
 	return c.validateCustomWebhooks()
+}
+
+func (c *Config) validateSecretsConfig() error {
+	if strings.TrimSpace(c.Secrets.TinkKeyset) == "" {
+		return fmt.Errorf("config: secrets.tink_keyset is required")
+	}
+	if _, err := secretstore.NewTinkStoreFromJSON(c.Secrets.TinkKeyset); err != nil {
+		return fmt.Errorf("config: secrets.tink_keyset: %w", err)
+	}
+	if strings.TrimSpace(c.Secrets.LegacyInboundMasterKey) == "" {
+		return nil
+	}
+	if _, err := secretstore.DecodeLegacyInboundMasterKey(c.Secrets.LegacyInboundMasterKey); err != nil {
+		return fmt.Errorf("config: secrets.legacy_inbound_master_key: %w", err)
+	}
+	return nil
+}
+
+func (c *Config) validateIngestConfig() error {
+	if len(c.IngestCORSAllowedOrigins) == 0 {
+		return nil
+	}
+	if len(c.IngestCORSAllowedOrigins) > 1 {
+		for _, origin := range c.IngestCORSAllowedOrigins {
+			if origin == "*" {
+				return fmt.Errorf("config: ingest.cors_allowed_origins cannot mix \"*\" with explicit origins")
+			}
+		}
+	}
+	return nil
 }
 
 func (c *Config) validateAuditConfig() error {
@@ -819,4 +870,98 @@ func deriveMCPPublicBaseURL(explicit, issuer, consoleBaseURL string) string {
 		}
 	}
 	return strings.TrimRight(consoleBaseURL, "/")
+}
+
+func normalizeConfiguredOrigins(origins []string, field string) ([]string, error) {
+	if len(origins) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(origins))
+	out := make([]string, 0, len(origins))
+	for _, raw := range origins {
+		origin, err := normalizeOrigin(raw, field)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[origin]; ok {
+			continue
+		}
+		seen[origin] = struct{}{}
+		out = append(out, origin)
+	}
+	return out, nil
+}
+
+func normalizeOrigin(raw, field string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", fmt.Errorf("config: %s entries must not be empty", field)
+	}
+	if trimmed == "*" {
+		return trimmed, nil
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("config: %s contains invalid origin %q: %w", field, trimmed, err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("config: %s origin %q must include scheme and host", field, trimmed)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("config: %s origin %q must use http or https", field, trimmed)
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("config: %s origin %q must not include credentials", field, trimmed)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("config: %s origin %q must not include query or fragment", field, trimmed)
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return "", fmt.Errorf("config: %s origin %q must not include a path", field, trimmed)
+	}
+	if _, err := canonicalPort(parsed, field); err != nil {
+		return "", err
+	}
+	return strings.ToLower(parsed.Scheme) + "://" + canonicalOriginHost(parsed), nil
+}
+
+func canonicalOriginHost(parsed *url.URL) string {
+	hostname := strings.ToLower(parsed.Hostname())
+	port, _ := canonicalPort(parsed, "")
+	if isDefaultOriginPort(strings.ToLower(parsed.Scheme), port) {
+		port = ""
+	}
+	if port == "" {
+		if strings.Contains(hostname, ":") {
+			return "[" + hostname + "]"
+		}
+		return hostname
+	}
+	return net.JoinHostPort(hostname, port)
+}
+
+func canonicalPort(parsed *url.URL, field string) (string, error) {
+	port := parsed.Port()
+	if port == "" {
+		return "", nil
+	}
+	value, err := strconv.Atoi(port)
+	if err != nil || value <= 0 || value > 65535 {
+		if field == "" {
+			return "", fmt.Errorf("invalid port %q", port)
+		}
+		return "", fmt.Errorf("config: %s origin %q must use a valid port in [1, 65535]", field, parsed.String())
+	}
+	return strconv.Itoa(value), nil
+}
+
+func isDefaultOriginPort(scheme, port string) bool {
+	switch scheme {
+	case "http":
+		return port == "80"
+	case "https":
+		return port == "443"
+	default:
+		return false
+	}
 }

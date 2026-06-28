@@ -1,7 +1,7 @@
 {
   "name": "@phixsura/attune",
-  "version": "0.1.0",
-  "description": "Official Node/TypeScript client for the attune feedback ingest API",
+  "version": "0.2.0",
+  "description": "Official Node/TypeScript client for the attune ingest and tenant management APIs",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -61,6 +61,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@types/node": "^22.10.0",
+    "playwright-core": "1.61.1",
     "tsdown": "^0.15.6",
     "typescript": "^5.9.0",
     "vitest": "^4.1.0"

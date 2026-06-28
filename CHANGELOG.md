@@ -9,6 +9,239 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Public management APIs and SDK coverage for audit/GDPR/outbox/MCP governance (#168).**
+  Scoped API-key routes now expose selected admin operations under canonical
+  `/v1/...` paths, with matching Node and Go SDK methods.
+  - New public API-key management routes for audit-log query, GDPR job control,
+    outbox visibility/retry, and MCP OAuth client governance, all reusing the
+    existing console handlers.
+  - New public audit/GDPR binary lifecycle routes for `GET /v1/audit-log/export.csv`,
+    audit evidence export/create/download, and `GET /v1/gdpr/exports/{job_id}/download`,
+    with regenerated OpenAPI and proto bindings.
+  - GDPR management is now least-privilege by default: new `gdpr:read`,
+    `gdpr:export`, and `gdpr:delete` scopes split the old `gdpr:admin` umbrella,
+    while a migration backfills the granular scopes onto existing
+    `gdpr:admin` keys for compatibility.
+  - New `mcpclient:admin` scope for MCP client governance, kept separate from
+    runtime `mcp:*` tool scopes and excluded from the `full_access` preset.
+  - Newly exposed management routes require explicit scopes, so legacy keys
+    without a scopes list do not silently gain access.
+  - Node and Go SDKs now cover the selected audit/GDPR/outbox/MCP management
+    surfaces alongside the existing tags/workflow APIs, including binary
+    download helpers plus audit/GDPR/outbox pagination iterators/pagers.
+  - Management `POST` routes that are safe to deduplicate now honor
+    `Idempotency-Key`, and both SDKs auto-generate stable per-call keys so tag,
+    workflow, audit evidence, GDPR, outbox retry, and MCP client create flows
+    can safely retry transient failures.
+
+- **Date-pinned public API version contract for `/v1` routes.**
+  - API-key product routes now accept an optional
+    `X-Attune-Api-Version: 2026-06-28` request header, echo the effective
+    version on the response, and reject unsupported/empty/ambiguous values with
+    the shared `400 BAD_REQUEST` error envelope.
+  - The official Go and Node SDKs now send that header automatically on every
+    public API request and reserve it against caller override, so published SDK
+    artifacts stay pinned to the contract they were built against.
+  - The generated OpenAPI document now publishes the version request header plus
+    response `X-Attune-Api-Version` / `Deprecation` / `Sunset` metadata for
+    public `/v1/...` operations.
+  - The API-version middleware now preserves optional response-writer
+    interfaces such as `http.Flusher`, `io.ReaderFrom`, and `http.Hijacker`, so
+    `/v1` export/download paths keep their underlying transport behavior while
+    still injecting the contract headers.
+
+### Fixed
+
+- **Generated OpenAPI now publishes attune's real error contract.**
+  - `docs/openapi/openapi.yaml` now includes the shared `ErrorResponse` schema
+    and points default JSON error responses at it instead of
+    `google.rpc.Status`, so the published contract is self-contained for SDKs
+    and external API consumers.
+  - Explicit non-2xx responses that previously carried only descriptions now
+    also declare the shared JSON error schema, including the public
+    `/v1/feedback/ingest` idempotency / body-too-large / rate-limit responses.
+  - `make proto` now runs a deterministic `internal/tools/openapipatch`
+    post-processing step so the `proto-sync` path keeps generating the corrected
+    OpenAPI artifact automatically instead of relying on README-only guidance.
+
+- **Browser ingest now has first-party, route-scoped CORS support.**
+  - attune now accepts optional `ingest.cors_allowed_origins` runtime config
+    and mounts CORS only on the publishable `POST /v1/feedback/ingest` surface,
+    so browser widgets can use official SDK headers (including
+    `X-Attune-Api-Version`) without opening the server-only management API to
+    cross-origin use.
+  - Browser-facing ingest now applies CORS before public API version
+    validation, so an unsupported or malformed `X-Attune-Api-Version` still
+    returns a readable `400 BAD_REQUEST` to allowed origins instead of
+    degrading into an opaque browser CORS failure.
+  - Config validation now normalizes exact origins, rejects invalid
+    scheme/path/query/credential shapes, and keeps CORS disabled by default.
+    Default-port origins are canonicalized too, so
+    `https://app.example.com:443` / `http://localhost:80` still match the
+    browser's serialized `Origin` header. Explicit ports are now also validated
+    and normalized numerically, so malformed values like `:99999` fail fast and
+    equivalent spellings such as `:0443` do not silently miss browser CORS
+    matches.
+  - Explicit-origin responses now always emit cache-safe `Vary` metadata, and
+    wildcard CORS automatically reflects the request origin when credentials are
+    enabled so attune never emits the invalid `Access-Control-Allow-Origin: *`
+    plus `Access-Control-Allow-Credentials: true` combination.
+  - Allowed browser origins now echo additional valid
+    `Access-Control-Request-Headers` values on preflight, so cross-origin SDK
+    callers can attach custom trace or correlation headers without patching the
+    server's fixed allowlist, while malformed header tokens are still ignored.
+
+- **Node SDK publish-artifact e2e now includes a real browser cross-origin smoke.**
+  - `pnpm e2e` now installs the packed npm tarball into a throwaway consumer
+    and loads it in a real Chromium-family browser from both an allowlisted and
+    a blocked origin, verifying actual preflight/CORS behavior, successful
+    browser ingest, exposed `X-Attune-Api-Version`, and blocked-origin failure
+    before release.
+  - That browser smoke now runs with the least-privilege `ingest:write` key
+    rather than the broader management key, prefers the freshly installed or
+    cached Playwright Chromium binary before ambient system channels, and
+    cleans up its temporary files / local static servers even when startup
+    fails partway through.
+  - Browser runtimes no longer try to set a custom `User-Agent` header; Node
+    still sends the versioned SDK `User-Agent`, while browser callers rely on
+    standard platform behavior plus `X-Attune-Api-Version`. Worker-like
+    runtimes without a genuine Node process now follow that same no-custom-UA
+    path instead of incorrectly inheriting the Node-only header behavior.
+  - The Node and Go SDK live e2e harnesses now pick free localhost ports
+    instead of assuming fixed ones, so browser smoke/static servers, webhook
+    receivers, and local attune instances do not collide with parallel SDK
+    runs or unrelated developer processes.
+
+- **Go SDK redirect hardening now survives caller-injected `http.Client`s.**
+  - `attune.WithHTTPClient(...)` now always copies the supplied client and
+    forces the SDK's internal redirect policy to refuse 3xx responses, so a
+    permissive caller `CheckRedirect` callback cannot accidentally re-enable
+    `X-API-Key` leakage to a redirect target.
+  - The caller's original `*http.Client` remains unmodified, so shared
+    transports and library-level client reuse keep their original behavior
+    outside the SDK.
+  - The Node and Go SDKs now reject invalid `baseURL` forms earlier and more
+    consistently: embedded credentials, query strings, fragments, and invalid
+    ports now fail at construction instead of producing malformed outbound URLs
+    or surfacing much later as transport errors.
+  - Go SDK binary download helpers now prefer and decode RFC 5987
+    `Content-Disposition: filename*=` values, so audit/GDPR exports preserve
+    internationalized attachment names instead of falling back to ASCII
+    placeholders or raw percent-encoded filenames. When a server sends both a
+    plain `filename` fallback and a malformed `filename*`, the SDKs now prefer
+    the valid fallback name instead of exposing the broken RFC 5987 value.
+
+- **Production hardening for GDPR exports and console session reads (#168).**
+  - GDPR exports no longer auto-download as soon as a job completes; operators
+    must explicitly download sensitive ZIP archives from the status card or the
+    request center, and previously ready/downloaded exports now keep a visible
+    download action after page reload. Newly completed exports also refresh the
+    request center automatically so operators immediately see the ready state
+    without a manual page refresh.
+  - `GET /fb/v1/console/me` and the legacy admin gate now treat canceled or
+    timed-out requests as client aborts / timeouts instead of logging them as
+    internal `500` errors.
+  - OIDC `/me` no longer clears a valid session when the user lookup fails for
+    an internal repository error; only a real `oidc user not found` condition
+    invalidates the session.
+  - The public API-key MCP client governance routes now emit the published
+    proto/OpenAPI wire contract (lowerCamelCase protojson plus standard
+    `ErrorResponse` codes) instead of the Console-only snake_case payloads, so
+    Node SDK callers see the documented field names on `/v1/mcp/clients/...`
+    responses and both SDKs receive canonical public error codes.
+  - The Node SDK now treats successful `204 No Content` management responses as
+    valid empty results, so MCP revoke routes no longer fail with a client-side
+    JSON parse error during real publish-artifact usage, while still rejecting
+    empty non-`204` success bodies so a broken `200/202` response cannot be
+    silently mistaken for a valid typed payload.
+  - Async GDPR export/delete workers and audit-evidence export jobs now persist
+    and replay the original actor type alongside `created_by`, and the
+    audit-evidence create/download path now respects non-admin session types, so
+    machine, OIDC, and admin initiated compliance operations no longer collapse
+    to `actor_type=admin` after leaving the interactive path.
+  - MCP OAuth client redirect URI validation now rejects hostless or
+    scheme-relative values such as `https:callback`, `https:///callback`, and
+    `//localhost/callback` on both the console and public API-key management
+    routes, closing an edge-case gap where malformed redirect targets could pass
+    the previous scheme-only check.
+  - The Node SDK now rejects ill-typed config, request payloads, request
+    options, and management/query inputs with stable `AttuneError` validation
+    failures before sending any request, so plain JavaScript callers no longer
+    hit raw `TypeError` crashes or accidentally emit malformed bodies, ignore
+    broken or fake `signal`/`options` values, or continue with silently coerced
+    admin inputs.
+  - The Node SDK now also rejects malformed query/options inputs such as
+    `includeArchived: "false"` and `actions: "tag.create"` instead of silently
+    coercing them into wrong query strings or truthy flags, closing another
+    plain-JavaScript edge case where callers could send unintended admin
+    filters without realizing it.
+  - Node SDK binary download helpers now prefer and decode RFC 5987
+    `Content-Disposition: filename*=` values, keeping audit/GDPR attachment
+    names consistent with the Go SDK and preserving internationalized
+    filenames instead of dropping back to ASCII placeholders; quoted fallback
+    `filename="..."` values still parse correctly even when the attachment name
+    itself contains semicolons.
+  - The Node SDK's 1 MiB response-body cap now still applies when a custom or
+    polyfilled `fetch` only exposes non-stream `arrayBuffer()` / `text()`
+    fallbacks, closing a memory-hardening gap outside the standard streaming
+    fetch path. Both SDKs now also short-circuit immediately when the declared
+    `Content-Length` already exceeds the cap, avoiding unnecessary reads of
+    obviously oversized responses.
+  - The Node SDK now rejects malformed admin query scalars such as
+    `limit: NaN`, `cursor: {}`, `from: {}`, and `beforeId: 99`, and it also
+    rejects non-string resource ids like `archiveTag(123)` or
+    `getGdprExport(123)` with stable `AttuneError` validation failures instead
+    of leaking raw `TypeError`s or silently stringifying broken values into
+    outbound `/v1/...` requests.
+  - The Node SDK now also rejects nonsensical pagination and outbox numeric
+    values such as `limit: 0`, `limit: -1`, `beforeId: '-99'`,
+    `beforeId: '92233720368547758070'`, and `retryOutboxDelivery('abc')`
+    instead of quietly sending server-side default-amplifying or overflowed
+    `/v1/...` requests.
+  - The public audit-log, GDPR request-list, and outbox list handlers now also
+    reject explicit non-positive `limit` values at the HTTP boundary, and the
+    outbox list handler rejects negative `before_id`, so raw `/v1/...` callers
+    no longer get silent default/clamped pagination from obviously invalid
+    inputs.
+  - GDPR request-list validation now treats `request_type` as the closed
+    `export|delete` set across the Node SDK, Go SDK, and backend service path,
+    and malformed GDPR list cursors now map to `400 BAD_REQUEST` instead of
+    falling through as internal errors.
+  - The Node and Go SDKs now also treat outbox `status` as the closed
+    `pending|delivered|failed|dead` set, trimming and deduping valid entries
+    while rejecting blank / bogus statuses and negative Go `beforeId` /
+    pagination values before they can silently widen a default query.
+  - The Node and Go SDKs now validate MCP client / session / refresh-grant path
+    IDs as UUIDs, matching the published `/v1/mcp/clients/...` contract so
+    callers fail fast locally instead of sending impossible resource IDs over
+    the network.
+  - The Node and Go SDKs now also enforce MCP governance body constraints
+    before sending: create requests require at least one safe redirect URI and
+    only `mcp:read|mcp:write|mcp:ingest` scopes, update requests require the
+    live `legacy_allow_all|allow_list` mode and positive rate limits, and tool
+    policy replacements reject blank / duplicate tool names, invalid effects,
+    and non-positive per-tool rate limits. The SDKs also normalize trimmed
+    governance mode / tool policy values before serialization, keeping the
+    publishable clients aligned with the backend's real replace-semantics
+    contract.
+  - MCP client creation now rejects blank or over-long names at the handler and
+    SDK layers, and MCP client-name uniqueness / check-constraint failures now
+    map to stable `400/409` validation-style responses instead of falling
+    through as raw database-backed `500 INTERNAL` errors on either the console
+    route or the public API-key proto surface.
+  - MCP tool-policy replacement now requires an explicit `policies` field
+    across the console route, public API-key proto route, and both SDKs, so an
+    accidental `{id}` request can no longer be misread as “clear every tool
+    override”; callers must now send `policies: []` intentionally to wipe all
+    overrides.
+  - MCP client governance PATCH requests now treat omitted fields as unchanged
+    instead of silently clearing them, reject empty `{id}`-style updates, and
+    keep Console's explicit JSON `null` semantics for clearing rate limits on
+    the private admin route.
+  - The Go SDK now rejects nil admin request structs client-side instead of
+    silently serializing them to `{}`, and it now rejects empty non-`204`
+    success bodies across SDK calls so a broken `200/202` response cannot be
+    mistaken for a valid zero-value result.
 - **Draft durability and navigation guards for settings editors (#172).**
   localStorage-backed draft persistence with versioned envelope format and
   unsaved-change protection for classification settings and enrichment runtime
@@ -2536,4 +2769,3 @@ authored — wire-stable, never auto-renamed.
 [Unreleased]: https://github.com/Phixsura/attune/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/Phixsura/attune/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Phixsura/attune/releases/tag/v0.1.0
-

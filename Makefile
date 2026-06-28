@@ -15,15 +15,20 @@ help: ## List targets.
 
 proto: ## Regenerate Go + TS + OpenAPI from proto/, then lint.
 	buf generate
+	go run ./internal/tools/openapipatch
 	$(MAKE) proto-sdk-go
 	buf lint
 
 # Second Go target for the published SDK (#36): a different go_package_prefix
-# than internal/proto, so it needs its own template. Scoped to ingest.proto's
-# import closure (ingest → tag, workflow → common) to keep the SDK module small.
+# than internal/proto, so it needs its own template. Scoped to the public SDK
+# surface (ingest + selected management APIs) to keep the SDK module focused.
 proto-sdk-go: ## Regenerate the Go SDK's proto types (sdk/go/internal).
 	buf generate --template buf.gen.sdk-go.yaml \
 		--path proto/attune/v1/ingest.proto \
+		--path proto/attune/v1/audit.proto \
+		--path proto/attune/v1/gdpr.proto \
+		--path proto/attune/v1/outbox.proto \
+		--path proto/attune/v1/mcp_client.proto \
 		--path proto/attune/v1/tag.proto \
 		--path proto/attune/v1/workflow.proto \
 		--path proto/attune/v1/common.proto

@@ -19,6 +19,8 @@ import (
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
+var ErrInvalidRequestType = errors.New(`request_type must be "export" or "delete"`)
+
 type repo interface {
 	Export(ctx context.Context, tenantID, subjectKey string) (*gdprrepo.ExportData, error)
 	Delete(ctx context.Context, tenantID, subjectKey string) (*gdprrepo.DeleteResult, error)
@@ -27,7 +29,7 @@ type repo interface {
 type requestStore interface {
 	ListRequests(ctx context.Context, filter gdprrepo.ListRequestFilter) (gdprrepo.ListRequestResult, error)
 	GetOperationsSummary(ctx context.Context, tenantID string) (*gdprrepo.OperationsSummary, error)
-	CreateDeleteRequest(ctx context.Context, tenantID, subjectKey, subjectHash, createdBy string, executeAfter time.Time) (*gdprrepo.DeleteResult, error)
+	CreateDeleteRequest(ctx context.Context, tenantID, subjectKey, subjectHash, createdByType, createdBy string, executeAfter time.Time) (*gdprrepo.DeleteResult, error)
 	CancelDeleteRequest(ctx context.Context, tenantID, requestID string) (*gdprrepo.Request, error)
 }
 
@@ -147,7 +149,7 @@ func (s *Service) Delete(ctx context.Context, tenantID, rawSubjectKey string, ac
 		return result, nil
 	}
 	executeAfter := time.Now().UTC().Add(s.deleteGraceWindow)
-	result, err := store.CreateDeleteRequest(ctx, tenantID, subjectKey, subjectHash, actor.ID, executeAfter)
+	result, err := store.CreateDeleteRequest(ctx, tenantID, subjectKey, subjectHash, actor.Type, actor.ID, executeAfter)
 	if err != nil {
 		return nil, translateRepoError(err)
 	}
@@ -229,11 +231,15 @@ func (s *Service) ListRequests(ctx context.Context, tenantID, cursor string, lim
 	if !ok {
 		return nil, fmt.Errorf("gdpr request store is not configured")
 	}
+	normalizedRequestType, err := normalizeListRequestType(requestType)
+	if err != nil {
+		return nil, err
+	}
 	result, err := store.ListRequests(ctx, gdprrepo.ListRequestFilter{
 		TenantID:    tenantID,
 		Cursor:      cursor,
 		Limit:       limit,
-		RequestType: requestType,
+		RequestType: normalizedRequestType,
 	})
 	if err != nil {
 		return nil, err
@@ -247,6 +253,18 @@ func (s *Service) ListRequests(ctx context.Context, tenantID, cursor string, lim
 		resp.NextCursor = ptrext.Of(result.NextCursor)
 	}
 	return resp, nil
+}
+
+func normalizeListRequestType(requestType string) (string, error) {
+	trimmed := strings.TrimSpace(requestType)
+	switch trimmed {
+	case "":
+		return "", nil
+	case string(gdprrepo.RequestTypeExport), string(gdprrepo.RequestTypeDelete):
+		return trimmed, nil
+	default:
+		return "", ErrInvalidRequestType
+	}
 }
 
 func (s *Service) GetOperations(ctx context.Context, tenantID string, stepUp StepUpStatus) (*attunev1.GdprOperationsResponse, error) {
