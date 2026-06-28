@@ -23,6 +23,10 @@ import (
 	"github.com/Phixsura/attune/internal/testdb"
 )
 
+func adminActor(id string) auditlog.Actor {
+	return auditlog.Actor{Type: "admin", ID: id}
+}
+
 func TestPG_EvidenceExportFullLifecycle(t *testing.T) {
 	pool := testdb.NewPool(t)
 	ctx := context.Background()
@@ -84,7 +88,7 @@ func TestPG_EvidenceExportFullLifecycle(t *testing.T) {
 
 func startAndAssertQueued(t *testing.T, ctx context.Context, svc *auditevidence.Service, tenantID string) *auditevidence.StartExportResult {
 	t.Helper()
-	result, err := svc.StartExport(ctx, tenantID, "admin-1", auditevidence.ExportFilter{})
+	result, err := svc.StartExport(ctx, tenantID, adminActor("admin-1"), auditevidence.ExportFilter{})
 	if err != nil {
 		t.Fatalf("StartExport: %v", err)
 	}
@@ -141,7 +145,7 @@ func TestPG_EvidenceExportExpiry(t *testing.T) {
 	auditSvc := auditlog.New(auditlogrepo.New(pool))
 	svc := auditevidence.New(repo, auditSvc, auditSvc)
 
-	result, err := svc.StartExport(ctx, tenantID, "admin-1", auditevidence.ExportFilter{})
+	result, err := svc.StartExport(ctx, tenantID, adminActor("admin-1"), auditevidence.ExportFilter{})
 	if err != nil {
 		t.Fatalf("StartExport: %v", err)
 	}
@@ -191,7 +195,7 @@ func TestPG_EvidenceExportFailAndRequeueStale(t *testing.T) {
 	auditSvc := auditlog.New(auditlogrepo.New(pool))
 	svc := auditevidence.New(repo, auditSvc, auditSvc)
 
-	result, err := svc.StartExport(ctx, tenantID, "admin-1", auditevidence.ExportFilter{})
+	result, err := svc.StartExport(ctx, tenantID, adminActor("admin-1"), auditevidence.ExportFilter{})
 	if err != nil {
 		t.Fatalf("StartExport: %v", err)
 	}
@@ -227,7 +231,7 @@ func TestPG_EvidenceExportRequeueStaleJobs(t *testing.T) {
 	auditSvc := auditlog.New(auditlogrepo.New(pool))
 	svc := auditevidence.New(repo, auditSvc, auditSvc)
 
-	if _, err := svc.StartExport(ctx, tenantID, "admin-1", auditevidence.ExportFilter{}); err != nil {
+	if _, err := svc.StartExport(ctx, tenantID, adminActor("admin-1"), auditevidence.ExportFilter{}); err != nil {
 		t.Fatalf("StartExport: %v", err)
 	}
 
@@ -275,7 +279,7 @@ func TestPG_EvidenceExportFencingPreventsCompleteByStalledWorker(t *testing.T) {
 	auditSvc := auditlog.New(auditlogrepo.New(pool))
 	svc := auditevidence.New(repo, auditSvc, auditSvc)
 
-	if _, err := svc.StartExport(ctx, tenantID, "admin-1", auditevidence.ExportFilter{}); err != nil {
+	if _, err := svc.StartExport(ctx, tenantID, adminActor("admin-1"), auditevidence.ExportFilter{}); err != nil {
 		t.Fatalf("StartExport: %v", err)
 	}
 
@@ -333,7 +337,7 @@ func TestPG_EvidenceExportWorkerProducesVerifiableArchive(t *testing.T) {
 	svc := auditevidence.New(repo, auditSvc, auditSvc)
 	worker := auditevidence.NewWorker(repo, auditSvc, auditSvc)
 
-	if _, err := svc.StartExport(ctx, tenantID, "admin-1", auditevidence.ExportFilter{}); err != nil {
+	if _, err := svc.StartExport(ctx, tenantID, adminActor("admin-1"), auditevidence.ExportFilter{}); err != nil {
 		t.Fatalf("StartExport: %v", err)
 	}
 
@@ -467,7 +471,7 @@ func TestPG_EvidenceExportTenantIsolation(t *testing.T) {
 	auditSvc := auditlog.New(auditlogrepo.New(pool))
 	svc := auditevidence.New(repo, auditSvc, auditSvc)
 
-	resultA, err := svc.StartExport(ctx, tenantA, "admin-a", auditevidence.ExportFilter{})
+	resultA, err := svc.StartExport(ctx, tenantA, adminActor("admin-a"), auditevidence.ExportFilter{})
 	if err != nil {
 		t.Fatalf("StartExport A: %v", err)
 	}
