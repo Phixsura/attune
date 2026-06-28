@@ -245,9 +245,12 @@ artifact is exercised, not just the source.
 Releases are automated by the `SDK Release` workflow
 (`.github/workflows/sdk-release.yml`) on an `sdk-vX.Y.Z` tag: it verifies the tag
 matches `package.json`'s `version`, runs the type check + tests, and publishes
-with provenance (a signed SLSA attestation) using the `NPM_TOKEN` repo secret.
-`publishConfig` forces public access to the public registry and `prepack` builds
-`dist/` before packing.
+with provenance (a signed SLSA attestation). The workflow supports either an
+`NPM_TOKEN` repo secret or npm trusted publishing for this GitHub repository;
+in token mode it also checks that the authenticated npm account is actually an
+owner of `@phixsura/attune` before the final publish step. `publishConfig`
+forces public access to the public registry and `prepack` builds `dist/` before
+packing.
 
 ```bash
 # cut a release: bump the version, then tag to trigger publish

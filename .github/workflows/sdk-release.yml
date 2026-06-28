@@ -24,6 +24,8 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN_PRESENT: ${{ secrets.NPM_TOKEN != '' }}
     defaults:
       run:
         working-directory: sdk/node
@@ -66,13 +68,46 @@ jobs:
       - run: pnpm exec tsc --noEmit
       - run: pnpm exec vitest run
 
+      - name: Select publish strategy
+        if: github.event_name == 'push'
+        run: |
+          if [ "${NPM_TOKEN_PRESENT}" = "true" ]; then
+            echo "Using NPM_TOKEN-based publish."
+          else
+            echo "Using trusted publishing (no NPM_TOKEN configured)."
+          fi
+
+      - name: Verify npm publisher identity
+        if: github.event_name == 'push' && env.NPM_TOKEN_PRESENT == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          pkg_name="$(node -p "require('./package.json').name")"
+          publisher="$(npm whoami)"
+          owners="$(npm owner ls "$pkg_name" 2>/dev/null || true)"
+          echo "npm publisher: ${publisher}"
+          if [ -n "$owners" ]; then
+            echo "package owners:"
+            printf '%s\n' "$owners"
+            if ! printf '%s\n' "$owners" | awk '{print $1}' | grep -Fxq "$publisher"; then
+              echo "::error::NPM_TOKEN authenticates as ${publisher}, but that account is not an owner of ${pkg_name}."
+              exit 1
+            fi
+          else
+            echo "::warning::Could not list package owners for ${pkg_name}; continuing to publish attempt."
+          fi
+
       # prepack (tsdown) builds dist; publishConfig forces public access + npmjs.
       - name: Publish (dry-run on manual dispatch)
         if: github.event_name == 'workflow_dispatch'
         run: npm publish --provenance --dry-run
 
-      - name: Publish to npm
-        if: github.event_name == 'push'
+      - name: Publish to npm (token)
+        if: github.event_name == 'push' && env.NPM_TOKEN_PRESENT == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance
+
+      - name: Publish to npm (trusted publishing)
+        if: github.event_name == 'push' && env.NPM_TOKEN_PRESENT != 'true'
         run: npm publish --provenance
