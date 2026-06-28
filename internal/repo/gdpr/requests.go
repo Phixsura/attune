@@ -24,6 +24,8 @@ const (
 	RequestTypeDelete RequestType = "delete"
 )
 
+var ErrInvalidRequestCursor = errors.New("cursor must be gdpr request pagination token")
+
 type RequestStatus string
 
 const (
@@ -49,6 +51,7 @@ type Request struct {
 	SubjectDisplay  string
 	ArchiveFilename string
 	Error           string
+	CreatedByType   string
 	CreatedBy       string
 	Counts          Counts
 	CreatedAt       time.Time
@@ -83,7 +86,7 @@ type OperationsSummary struct {
 
 const requestCols = `id, tenant_id, request_type, status, subject_key, subject_hash, subject_display,
 	feedback_count, tag_assignment_count, feedback_audit_count, llm_audit_count,
-	archive_filename, COALESCE(error, ''), created_by, created_at, started_at, completed_at, expires_at, downloaded_at, execute_after, cancelled_at, revoked_at`
+	archive_filename, COALESCE(error, ''), created_by_type, created_by, created_at, started_at, completed_at, expires_at, downloaded_at, execute_after, cancelled_at, revoked_at`
 
 func scanRequest(row pgx.Row) (*Request, error) {
 	var req Request
@@ -101,6 +104,7 @@ func scanRequest(row pgx.Row) (*Request, error) {
 		&req.Counts.LLMAuditCount,
 		&req.ArchiveFilename,
 		&req.Error,
+		&req.CreatedByType,
 		&req.CreatedBy,
 		&req.CreatedAt,
 		&req.StartedAt,
@@ -201,7 +205,7 @@ func (r *Repo) GetOperationsSummary(ctx context.Context, tenantID string) (*Oper
 
 func (r *Repo) CreateDeleteRequest(
 	ctx context.Context,
-	tenantID, subjectKey, subjectHash, createdBy string,
+	tenantID, subjectKey, subjectHash, createdByType, createdBy string,
 	executeAfter time.Time,
 ) (*DeleteResult, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -234,11 +238,11 @@ func (r *Repo) CreateDeleteRequest(
 		INSERT INTO gdpr_requests (
 			id, tenant_id, request_type, status, subject_key, subject_hash, subject_display,
 			feedback_count, tag_assignment_count, feedback_audit_count, llm_audit_count,
-			created_by, execute_after
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+			created_by_type, created_by, execute_after
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		requestID, tenantID, RequestTypeDelete, RequestStatusScheduled, subjectKey, subjectHash, info.subjectDisplay,
 		counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
-		createdBy, executeAfter.UTC(),
+		createdByType, createdBy, executeAfter.UTC(),
 	); err != nil {
 		return nil, fmt.Errorf("insert gdpr delete request: %w", err)
 	}
@@ -370,14 +374,14 @@ func formatRequestCursor(item Request) string {
 func parseRequestCursor(raw string) (time.Time, string, error) {
 	parts := strings.SplitN(strings.TrimSpace(raw), ":", 2)
 	if len(parts) != 2 {
-		return time.Time{}, "", fmt.Errorf("invalid gdpr request cursor format")
+		return time.Time{}, "", fmt.Errorf("%w", ErrInvalidRequestCursor)
 	}
 	unixNanos, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return time.Time{}, "", fmt.Errorf("invalid gdpr request cursor timestamp: %w", err)
+		return time.Time{}, "", fmt.Errorf("%w", ErrInvalidRequestCursor)
 	}
 	if strings.TrimSpace(parts[1]) == "" {
-		return time.Time{}, "", fmt.Errorf("invalid gdpr request cursor id")
+		return time.Time{}, "", fmt.Errorf("%w", ErrInvalidRequestCursor)
 	}
 	return time.Unix(0, unixNanos).UTC(), parts[1], nil
 }

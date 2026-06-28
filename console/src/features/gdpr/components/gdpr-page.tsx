@@ -50,12 +50,7 @@ import {
   useVerifyGdprStepUp,
 } from '@/features/gdpr/api/gdpr-control'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
-import {
-  GdprExportStatus,
-  type GdprExportStatusResponse,
-  GdprRequestStatus,
-  GdprRequestType,
-} from '@/proto/attune/v1/gdpr'
+import { GdprExportStatus, GdprRequestStatus, GdprRequestType } from '@/proto/attune/v1/gdpr'
 
 type RequestFilter = '' | 'delete' | 'export'
 
@@ -76,9 +71,8 @@ export function GDPRPage() {
   const [subjectKey, setSubjectKey] = useState('')
   const [confirmSubjectKey, setConfirmSubjectKey] = useState('')
   const [exportJobId, setExportJobId] = useState<null | string>(null)
-  const [downloadedJobId, setDownloadedJobId] = useState<null | string>(null)
   const [notifiedTerminalState, setNotifiedTerminalState] = useState<null | string>(null)
-  const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadingJobId, setDownloadingJobId] = useState<null | string>(null)
   const [revokingJobId, setRevokingJobId] = useState<null | string>(null)
   const [cancellingRequestId, setCancellingRequestId] = useState<null | string>(null)
   const [requestFilter, setRequestFilter] = useState<RequestFilter>('')
@@ -93,7 +87,7 @@ export function GDPRPage() {
   const exportStatus = exportStatusQuery.data?.status
   const exportBusy =
     startExportMutation.isPending ||
-    isDownloading ||
+    downloadingJobId !== null ||
     (exportStatus ? isActiveStatus(exportStatus) : false)
 
   const stepUp = operationsQuery.data?.stepUp
@@ -136,7 +130,6 @@ export function GDPRPage() {
     startExportMutation.mutate(normalizedSubjectKey, {
       onSuccess: async (resp) => {
         setExportJobId(resp.jobId)
-        setDownloadedJobId(null)
         setNotifiedTerminalState(null)
         toast.success(t('gdpr.export_queued'))
         await refreshCenter()
@@ -172,23 +165,23 @@ export function GDPRPage() {
   }
 
   const handleDownload = useCallback(
-    async (data?: GdprExportStatusResponse | null) => {
-      if (!exportJobId) return
-      const exportData = data ?? exportStatusQuery.data
-      if (!exportData) return
-      setIsDownloading(true)
+    async (jobId: string, filename?: string) => {
+      if (downloadingJobId !== null) return
+      setDownloadingJobId(jobId)
       try {
-        await downloadGdprExport(exportJobId, exportData.archiveFilename)
-        setDownloadedJobId(exportJobId)
+        await downloadGdprExport(jobId, filename)
         toast.success(t('gdpr.export_downloaded'))
+        if (exportJobId === jobId) {
+          await queryClient.invalidateQueries({ queryKey: ['console', 'gdpr-export', jobId] })
+        }
         await refreshCenter()
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t('gdpr.export_failed'))
       } finally {
-        setIsDownloading(false)
+        setDownloadingJobId(null)
       }
     },
-    [exportJobId, exportStatusQuery.data, refreshCenter, t],
+    [downloadingJobId, exportJobId, queryClient, refreshCenter, t],
   )
 
   const handleVerifyStepUp = () => {
@@ -237,37 +230,28 @@ export function GDPRPage() {
   useEffect(() => {
     const data = exportStatusQuery.data
     if (!data || !exportJobId) return
-    if (
-      data.status === GdprExportStatus.GDPR_EXPORT_STATUS_COMPLETED &&
-      data.downloadPath &&
-      downloadedJobId !== exportJobId &&
-      !isDownloading
-    ) {
-      void handleDownload(data)
-      return
-    }
     const terminalKey = `${exportJobId}:${data.status}:${data.error ?? ''}`
     if (notifiedTerminalState === terminalKey) return
     if (data.status === GdprExportStatus.GDPR_EXPORT_STATUS_FAILED) {
       setNotifiedTerminalState(terminalKey)
       toast.error(data.error || t('gdpr.export_failed'))
+      void refreshCenter()
       return
     }
     if (data.status === GdprExportStatus.GDPR_EXPORT_STATUS_EXPIRED) {
       setNotifiedTerminalState(terminalKey)
       toast.error(t('gdpr.export_expired'))
       void refreshCenter()
+      return
     }
-  }, [
-    downloadedJobId,
-    exportJobId,
-    exportStatusQuery.data,
-    handleDownload,
-    isDownloading,
-    notifiedTerminalState,
-    refreshCenter,
-    t,
-  ])
+    if (
+      data.status === GdprExportStatus.GDPR_EXPORT_STATUS_COMPLETED ||
+      data.status === GdprExportStatus.GDPR_EXPORT_STATUS_REVOKED
+    ) {
+      setNotifiedTerminalState(terminalKey)
+      void refreshCenter()
+    }
+  }, [exportJobId, exportStatusQuery.data, notifiedTerminalState, refreshCenter, t])
 
   if (!canView) {
     return (
@@ -384,11 +368,17 @@ export function GDPRPage() {
                       GdprExportStatus.GDPR_EXPORT_STATUS_COMPLETED ? (
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button
+                            data-testid="gdpr-download-current-export"
                             variant="outline"
-                            onClick={() => void handleDownload()}
-                            disabled={isDownloading}
+                            onClick={() =>
+                              void handleDownload(
+                                exportStatusQuery.data.jobId,
+                                exportStatusQuery.data.archiveFilename,
+                              )
+                            }
+                            disabled={downloadingJobId !== null}
                           >
-                            {isDownloading ? (
+                            {downloadingJobId === exportStatusQuery.data.jobId ? (
                               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             ) : (
                               <Download className="mr-2 h-4 w-4" />
@@ -548,23 +538,47 @@ export function GDPRPage() {
                               ) : null}
                               {t('gdpr.cancel_delete_button')}
                             </Button>
-                          ) : canRevokeRequest(item.status, item.requestType) ? (
-                            <Button
-                              data-testid={`gdpr-revoke-export-${item.requestId}`}
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleRevokeExport(item.requestId)}
-                              disabled={
-                                revokingJobId === item.requestId || revokeExportMutation.isPending
-                              }
-                            >
-                              {revokingJobId === item.requestId ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : (
-                                <ShieldX className="mr-2 h-4 w-4" />
-                              )}
-                              {t('gdpr.revoke_export_button')}
-                            </Button>
+                          ) : canDownloadRequest(item.status, item.requestType) ||
+                            canRevokeRequest(item.status, item.requestType) ? (
+                            <div className="flex justify-end gap-2">
+                              {canDownloadRequest(item.status, item.requestType) ? (
+                                <Button
+                                  data-testid={`gdpr-download-export-${item.requestId}`}
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() =>
+                                    void handleDownload(item.requestId, item.archiveFilename)
+                                  }
+                                  disabled={downloadingJobId !== null}
+                                >
+                                  {downloadingJobId === item.requestId ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Download className="mr-2 h-4 w-4" />
+                                  )}
+                                  {t('gdpr.export_download_button')}
+                                </Button>
+                              ) : null}
+                              {canRevokeRequest(item.status, item.requestType) ? (
+                                <Button
+                                  data-testid={`gdpr-revoke-export-${item.requestId}`}
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleRevokeExport(item.requestId)}
+                                  disabled={
+                                    revokingJobId === item.requestId ||
+                                    revokeExportMutation.isPending
+                                  }
+                                >
+                                  {revokingJobId === item.requestId ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <ShieldX className="mr-2 h-4 w-4" />
+                                  )}
+                                  {t('gdpr.revoke_export_button')}
+                                </Button>
+                              ) : null}
+                            </div>
                           ) : (
                             <span className="text-xs text-muted-foreground">
                               {t('gdpr.request_action_none')}
@@ -844,6 +858,14 @@ function canCancelRequest(status: GdprRequestStatus, type: GdprRequestType) {
 }
 
 function canRevokeRequest(status: GdprRequestStatus, type: GdprRequestType) {
+  return (
+    type === GdprRequestType.GDPR_REQUEST_TYPE_EXPORT &&
+    (status === GdprRequestStatus.GDPR_REQUEST_STATUS_READY ||
+      status === GdprRequestStatus.GDPR_REQUEST_STATUS_DOWNLOADED)
+  )
+}
+
+function canDownloadRequest(status: GdprRequestStatus, type: GdprRequestType) {
   return (
     type === GdprRequestType.GDPR_REQUEST_TYPE_EXPORT &&
     (status === GdprRequestStatus.GDPR_REQUEST_STATUS_READY ||

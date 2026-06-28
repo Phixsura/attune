@@ -490,7 +490,7 @@ func (r *Router) useRBACForRequest(req *http.Request) bool {
 	if r.rbac == nil {
 		return false
 	}
-	auth := session.FromContext(req.Context())
+	auth := session.OptionalFromContext(req.Context())
 	if auth == nil {
 		return false
 	}
@@ -500,7 +500,12 @@ func (r *Router) useRBACForRequest(req *http.Request) bool {
 func (r *Router) requireAdminLegacy(next http.Handler) http.Handler {
 	const where = "console.Router.requireAdminLegacy"
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		authCtx := session.FromContext(req.Context())
+		authCtx := session.OptionalFromContext(req.Context())
+		if authCtx == nil {
+			logext.Warnf(req.Context(), "[%s] reject: missing auth context", where)
+			dispatcher.Reject(req.Context(), w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "session required")
+			return
+		}
 		if r.admins == nil {
 			logext.Warnf(req.Context(), "[%s] reject: admin repo not configured,user_id:%s", where, authCtx.UserID)
 			dispatcher.Reject(req.Context(), w, http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "admin session required")
@@ -511,6 +516,16 @@ func (r *Router) requireAdminLegacy(next http.Handler) http.Handler {
 			if errors.Is(err, admin.ErrNotFound) {
 				logext.Warnf(req.Context(), "[%s] reject: non-admin session,user_id:%s", where, authCtx.UserID)
 				dispatcher.Reject(req.Context(), w, http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "admin session required")
+				return
+			}
+			if errors.Is(err, context.Canceled) {
+				logext.Warnf(req.Context(), "[%s] canceled,user_id:%s", where, authCtx.UserID)
+				dispatcher.Reject(req.Context(), w, dispatcher.StatusClientClosedRequest, attunev1.ErrorCode_CLIENT_CANCELED, "client canceled request")
+				return
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				logext.Warnf(req.Context(), "[%s] deadline exceeded,user_id:%s", where, authCtx.UserID)
+				dispatcher.Reject(req.Context(), w, http.StatusGatewayTimeout, attunev1.ErrorCode_DEADLINE_EXCEEDED, "request deadline exceeded")
 				return
 			}
 			logext.Errorf(req.Context(), "[%s] admin lookup failed,user_id:%s,err:%+v",
@@ -1989,7 +2004,7 @@ func (r *Router) mountOutbox(m chi.Router) {
 			"console.OutboxHandler.List",
 			dispatcher.Query(
 				func() *attunev1.ListDeliveriesRequest { return ptrext.Of(attunev1.ListDeliveriesRequest{}) },
-				bindListDeliveriesRequest,
+				consoleoutbox.BindListRequest,
 			),
 			r.outbox.List,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListDeliveriesRequest) (*session.AuthCtx, error) {
@@ -2012,28 +2027,8 @@ func (r *Router) mountOutbox(m chi.Router) {
 	})
 }
 
-// bindListDeliveriesRequest fills the list request from query params:
-// ?status=dead&status=failed&limit=50&before_id=123
 func bindListDeliveriesRequest(r *http.Request, req *attunev1.ListDeliveriesRequest) error {
-	q := r.URL.Query()
-	req.Status = q["status"]
-	if v := q.Get("limit"); v != "" {
-		// ParseInt with bitSize=32 rejects values that don't fit int32, so the
-		// conversion below can't overflow (the repo clamps the value anyway).
-		n, err := strconv.ParseInt(v, 10, 32)
-		if err != nil {
-			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid limit")
-		}
-		req.Limit = int32(n)
-	}
-	if v := q.Get("before_id"); v != "" {
-		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil {
-			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid before_id")
-		}
-		req.BeforeId = n
-	}
-	return nil
+	return consoleoutbox.BindListRequest(r, req)
 }
 
 // SetMCPClientHandler injects the MCP OAuth client handler (#93). Optional, so

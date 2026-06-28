@@ -21,11 +21,14 @@ func TestFullAccessScopes(t *testing.T) {
 		if s == string(domain.ScopeAPIKeyAdmin) {
 			t.Error("fullAccessScopes should not include apikey:admin")
 		}
+		if s == string(domain.ScopeMCPClientAdmin) {
+			t.Error("fullAccessScopes should not include mcpclient:admin")
+		}
 	}
 
-	if len(scopes) != len(domain.AllScopes)-1 {
-		t.Errorf("fullAccessScopes length = %d, want %d (all scopes minus apikey:admin)",
-			len(scopes), len(domain.AllScopes)-1)
+	if len(scopes) != len(domain.AllScopes)-2 {
+		t.Errorf("fullAccessScopes length = %d, want %d (all scopes minus privileged admin scopes)",
+			len(scopes), len(domain.AllScopes)-2)
 	}
 }
 
@@ -42,11 +45,14 @@ func TestGetFullAccessScopes(t *testing.T) {
 		if s == domain.ScopeAPIKeyAdmin {
 			t.Error("GetFullAccessScopes should not include apikey:admin")
 		}
+		if s == domain.ScopeMCPClientAdmin {
+			t.Error("GetFullAccessScopes should not include mcpclient:admin")
+		}
 	}
 
-	if len(scopes) != len(domain.AllScopes)-1 {
-		t.Errorf("GetFullAccessScopes length = %d, want %d (all scopes minus apikey:admin)",
-			len(scopes), len(domain.AllScopes)-1)
+	if len(scopes) != len(domain.AllScopes)-2 {
+		t.Errorf("GetFullAccessScopes length = %d, want %d (all scopes minus privileged admin scopes)",
+			len(scopes), len(domain.AllScopes)-2)
 	}
 }
 

@@ -72,12 +72,13 @@ type manifest struct {
 }
 
 type archiveParams struct {
-	jobID      string
-	tenantID   string
-	createdBy  string
-	filterJSON json.RawMessage
-	entries    []auditlogrepo.Entry
-	signKey    []byte
+	jobID         string
+	tenantID      string
+	createdByType string
+	createdBy     string
+	filterJSON    json.RawMessage
+	entries       []auditlogrepo.Entry
+	signKey       []byte
 }
 
 type archiveResult struct {
@@ -128,9 +129,12 @@ func buildArchive(p archiveParams) (*archiveResult, error) {
 		ExportID:   p.jobID,
 		TenantID:   p.tenantID,
 		ExportedAt: now,
-		CreatedBy:  manifestActor{Type: "admin", ID: p.createdBy},
-		Filter:     filterData,
-		Stats:      computeStats(p.entries),
+		CreatedBy: manifestActor{
+			Type: normalizeStoredActorType(p.createdByType, p.createdBy),
+			ID:   p.createdBy,
+		},
+		Filter: filterData,
+		Stats:  computeStats(p.entries),
 		Files: []manifestFile{
 			{Name: "events.jsonl", SizeBytes: len(eventsData), SHA256: sha256Hex(eventsData)},
 			{Name: "events.csv", SizeBytes: len(csvData), SHA256: sha256Hex(csvData)},

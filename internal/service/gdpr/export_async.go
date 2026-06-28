@@ -29,7 +29,7 @@ const (
 )
 
 type exportJobStore interface {
-	CreateExportJob(ctx context.Context, tenantID, subjectKey, subjectHash, createdBy string) (*gdprrepo.ExportJob, error)
+	CreateExportJob(ctx context.Context, tenantID, subjectKey, subjectHash, createdByType, createdBy string) (*gdprrepo.ExportJob, error)
 	GetExportJob(ctx context.Context, tenantID, jobID string) (*gdprrepo.ExportJob, error)
 	RevokeExportJob(ctx context.Context, tenantID, jobID string) (*gdprrepo.ExportJob, error)
 	ClaimNextExportJob(ctx context.Context) (*gdprrepo.ExportJob, error)
@@ -63,7 +63,7 @@ func (s *Service) StartExport(ctx context.Context, tenantID, rawSubjectKey strin
 	if !ok {
 		return nil, fmt.Errorf("gdpr export job store is not configured")
 	}
-	job, err := store.CreateExportJob(ctx, tenantID, subjectKey, subjectkey.Hash(tenantID, subjectKey), actor.ID)
+	job, err := store.CreateExportJob(ctx, tenantID, subjectKey, subjectkey.Hash(tenantID, subjectKey), actor.Type, actor.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func (w *Worker) processNextExport(ctx context.Context) error {
 	if w.audit != nil {
 		if err := w.audit.Record(ctx, auditlogsvc.Event{
 			TenantID:   job.TenantID,
-			Actor:      auditlogsvc.Actor{Type: "admin", ID: job.CreatedBy},
+			Actor:      storedActor(job.CreatedByType, job.CreatedBy),
 			Action:     "gdpr.export",
 			TargetType: "gdpr_subject",
 			TargetID:   job.SubjectHash,
@@ -319,7 +319,7 @@ func (w *Worker) processNextDelete(ctx context.Context) error {
 	if w.audit != nil {
 		if err := w.audit.Record(ctx, auditlogsvc.Event{
 			TenantID:   req.TenantID,
-			Actor:      auditlogsvc.Actor{Type: "admin", ID: req.CreatedBy},
+			Actor:      storedActor(req.CreatedByType, req.CreatedBy),
 			Action:     "gdpr.delete",
 			TargetType: "gdpr_subject",
 			TargetID:   req.SubjectHash,
@@ -337,6 +337,19 @@ func (w *Worker) processNextDelete(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func storedActor(actorType, actorID string) auditlogsvc.Actor {
+	normalizedType := stringsTrim(actorType)
+	normalizedID := stringsTrim(actorID)
+	if normalizedType == "" && normalizedID != "" {
+		if strings.HasPrefix(normalizedID, "apikey:") {
+			normalizedType = "api_key"
+		} else {
+			normalizedType = "admin"
+		}
+	}
+	return auditlogsvc.Actor{Type: normalizedType, ID: normalizedID}
 }
 
 func (w *Worker) heartbeat(ctx context.Context, jobID string, cancelJob context.CancelFunc) {

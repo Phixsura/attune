@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -134,6 +135,10 @@ type CreateResponse struct {
 
 // Create registers a new MCP OAuth client.
 func (h *Handler) Create(ctx context.Context, auth *session.AuthCtx, req *CreateRequest, r *http.Request) (*CreateResponse, error) {
+	name := strings.TrimSpace(req.Name)
+	if err := validateClientName(name); err != nil {
+		return nil, err
+	}
 	if err := validateScopes(req.Scopes); err != nil {
 		return nil, err
 	}
@@ -146,7 +151,7 @@ func (h *Handler) Create(ctx context.Context, auth *session.AuthCtx, req *Create
 
 	client, err := h.clients.Create(ctx, mcprepo.CreateClientParams{
 		TenantID:     auth.TenantID,
-		Name:         req.Name,
+		Name:         name,
 		RedirectURIs: req.RedirectURIs,
 		Scopes:       req.Scopes,
 		CreatedBy:    auth.UserID,
@@ -268,6 +273,16 @@ func validateScopes(scopes []string) error {
 	return nil
 }
 
+func validateClientName(name string) error {
+	if name == "" {
+		return ptrext.Of(ValidationError{Field: "name", Message: "name is required"})
+	}
+	if utf8.RuneCountInString(name) > 128 {
+		return ptrext.Of(ValidationError{Field: "name", Message: "name exceeds 128 characters"})
+	}
+	return nil
+}
+
 func validateRedirectURIs(uris []string) error {
 	for _, uri := range uris {
 		u, err := url.Parse(uri)
@@ -279,6 +294,12 @@ func validateRedirectURIs(uris []string) error {
 		}
 		if u.Scheme == "javascript" || u.Scheme == "data" || u.Scheme == "file" || u.Scheme == "vbscript" {
 			return ptrext.Of(ValidationError{Field: "redirect_uris", Message: "dangerous URI scheme not allowed"})
+		}
+		if u.Scheme == "" || u.Host == "" || u.Opaque != "" {
+			return ptrext.Of(ValidationError{
+				Field:   "redirect_uris",
+				Message: "redirect URI must be an absolute URI with a host",
+			})
 		}
 		if u.Scheme != "https" && !isLoopbackURI(u) {
 			return ptrext.Of(ValidationError{Field: "redirect_uris", Message: "redirect URI must use HTTPS (except for localhost)"})
@@ -356,6 +377,14 @@ func writeError(w http.ResponseWriter, err error) {
 	var ve *ValidationError
 	if errors.As(err, &ve) {
 		writeErrorJSON(w, http.StatusBadRequest, "validation_error", ve.Error())
+		return
+	}
+	if errors.Is(err, mcprepo.ErrClientNameConflict) {
+		writeErrorJSON(w, http.StatusConflict, "conflict", "client name already exists")
+		return
+	}
+	if errors.Is(err, mcprepo.ErrInvalidInput) {
+		writeErrorJSON(w, http.StatusBadRequest, "validation_error", "client field is invalid")
 		return
 	}
 	if errors.Is(err, mcprepo.ErrClientNotFound) {

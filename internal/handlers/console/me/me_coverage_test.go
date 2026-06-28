@@ -18,6 +18,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	"github.com/Phixsura/attune/internal/repo/oidcuser"
 	tenantrepo "github.com/Phixsura/attune/internal/repo/tenant"
 )
 
@@ -209,6 +210,26 @@ func TestMe_AdminLookupInternalError(t *testing.T) {
 	require.Equal(t, attunev1.ErrorCode_INTERNAL, de.Code)
 }
 
+func TestMe_AdminLookupContextCanceled_MapsToClientCanceled(t *testing.T) {
+	t.Parallel()
+
+	signer := testSigner(t)
+	h := ptrext.Of(MeHandler{
+		signer: signer,
+		admins: ptrext.Of(stubAdminReader{
+			err: context.Canceled,
+		}),
+		tenants: ptrext.Of(stubTenantGetter{}),
+	})
+
+	w := httpDispatch(t, h, "t-1", "adm-1", "")
+	require.Equal(t, dispatcher.StatusClientClosedRequest, w.Code)
+
+	body, err := dispatchtest.DecodeJSON(w.Body)
+	require.NoError(t, err)
+	require.Equal(t, "CLIENT_CANCELED", body["code"])
+}
+
 func TestMe_AdminNotFound_NoTenant_ClearsSession(t *testing.T) {
 	t.Parallel()
 
@@ -287,7 +308,7 @@ func TestMe_OIDC_UserNotFound_ClearsSession(t *testing.T) {
 	h := ptrext.Of(MeHandler{
 		signer: signer,
 		oidcUsers: ptrext.Of(stubOIDCUserReader{
-			err: errors.New("not found"),
+			err: oidcuser.ErrNotFound,
 		}),
 	})
 
@@ -301,6 +322,46 @@ func TestMe_OIDC_UserNotFound_ClearsSession(t *testing.T) {
 	setCookie := w.Header().Get("Set-Cookie")
 	require.Contains(t, setCookie, session.SessionCookieName)
 	require.Contains(t, setCookie, "Max-Age=0")
+}
+
+func TestMe_OIDC_InternalErrorReturns500WithoutClearingSession(t *testing.T) {
+	t.Parallel()
+
+	signer := testSigner(t)
+	h := ptrext.Of(MeHandler{
+		signer: signer,
+		oidcUsers: ptrext.Of(stubOIDCUserReader{
+			err: errors.New("database unavailable"),
+		}),
+	})
+
+	ctx := directCtx("", "ou-broken", "oidc")
+	_, err := h.Me(ctx, ptrext.Of(attunev1.GetMeRequest{}))
+	require.Error(t, err)
+
+	var de *dispatcher.Error
+	require.ErrorAs(t, err, &de)
+	require.Equal(t, http.StatusInternalServerError, de.Status)
+	require.Equal(t, attunev1.ErrorCode_INTERNAL, de.Code)
+	require.Contains(t, de.Message, "failed to load OIDC user")
+}
+
+func TestMe_OIDC_UserNotFound_ClearsSessionWhenRepoReturnsSentinel(t *testing.T) {
+	t.Parallel()
+
+	signer := testSigner(t)
+	h := ptrext.Of(MeHandler{
+		signer: signer,
+		oidcUsers: ptrext.Of(stubOIDCUserReader{
+			err: oidcuser.ErrNotFound,
+		}),
+	})
+
+	w := httpDispatch(t, h, "", "ou-gone", "oidc")
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	body, err := dispatchtest.DecodeJSON(w.Body)
+	require.NoError(t, err)
+	require.Equal(t, "USER_GONE", body["code"])
 }
 
 func TestMe_OIDC_EmptyDisplayName_FallsBackToEmail(t *testing.T) {

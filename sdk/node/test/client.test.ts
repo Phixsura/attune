@@ -41,6 +41,37 @@ describe('constructor', () => {
     expect(() => new Client({ baseURL: BASE, apiKey: '' })).toThrow(AttuneError)
   })
 
+  it('rejects malformed JS option types up front', () => {
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: 123, apiKey: KEY })).toThrow(/baseURL must be a string/)
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: BASE, apiKey: 123 })).toThrow(/apiKey must be a string/)
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: BASE, apiKey: KEY, fetch: 123 })).toThrow(
+      /fetch must be a function/,
+    )
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: BASE, apiKey: KEY, timeout: '30' })).toThrow(
+      /timeout must be a finite number/,
+    )
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: BASE, apiKey: KEY, maxRetries: '2' })).toThrow(
+      /maxRetries must be a finite number/,
+    )
+    // @ts-expect-error deliberate JS-style misuse
+    expect(() => new Client({ baseURL: BASE, apiKey: KEY, defaultHeaders: 'bad' })).toThrow(
+      /defaultHeaders must be an object of string values/,
+    )
+    expect(
+      () =>
+        new Client({
+          baseURL: BASE,
+          apiKey: KEY,
+          defaultHeaders: { 'x-trace-id': 1 as unknown as string },
+        }),
+    ).toThrow(/defaultHeaders must be an object of string values/)
+  })
+
   it('throws when no fetch is available and none injected', () => {
     const saved = globalThis.fetch
     // @ts-expect-error force-remove for the test
@@ -95,6 +126,65 @@ describe('reserved headers cannot be overridden by defaultHeaders', () => {
 })
 
 describe('adversarial inputs / config edges', () => {
+  it('rejects a non-object ingest payload before sending', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    const client = newClient(fetch)
+    // @ts-expect-error deliberate JS-style misuse
+    await expect(client.ingest(null)).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'ingest input must be an object',
+    })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('rejects malformed ingest options before sending', async () => {
+    const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
+    const client = newClient(fetch)
+    // @ts-expect-error deliberate JS-style misuse
+    await expect(client.ingest({ content: 'x' }, 'bad')).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'request options must be an object',
+    })
+    // @ts-expect-error deliberate JS-style misuse
+    await expect(client.ingest({ content: 'x' }, { idempotencyKey: 123 })).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'idempotencyKey must be a string',
+    })
+    // @ts-expect-error deliberate JS-style misuse
+    await expect(client.ingest({ content: 'x' }, { signal: 'bad' })).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'signal must be an AbortSignal',
+    })
+    await expect(
+      client.ingest({ content: 'x' }, { signal: { aborted: false } as unknown as AbortSignal }),
+    ).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'signal must be an AbortSignal',
+    })
+    await expect(
+      client.ingest(
+        { content: 'x' },
+        {
+          signal: {
+            aborted: false,
+            addEventListener() {},
+            removeEventListener() {},
+          } as unknown as AbortSignal,
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'BAD_REQUEST',
+      message: 'signal must be an AbortSignal',
+    })
+    expect(calls).toHaveLength(0)
+  })
+
   it('wraps a non-JSON-serializable body as AttuneError, never a raw TypeError', async () => {
     const { fetch, calls } = stubFetch([() => json(200, { id: '1', enrichmentStatus: 'pending' })])
     const client = newClient(fetch)
@@ -304,11 +394,16 @@ describe('transport: slow / partial / malformed responses', () => {
     })
   })
 
-  it('maps an empty 200 body to AttuneError INTERNAL', async () => {
+  it('maps an empty non-204 success body to AttuneError INTERNAL', async () => {
     const { fetch } = stubFetch([() => new Response('', { status: 200 })])
     await expect(
       newClient(fetch, { maxRetries: 0 }).ingest({ content: 'x' }),
-    ).rejects.toBeInstanceOf(AttuneError)
+    ).rejects.toMatchObject({
+      name: 'AttuneError',
+      code: 'INTERNAL',
+      status: 200,
+      message: 'empty response body for non-204 success response',
+    })
   })
 
   it('times out a slow/hanging response BODY (not just slow headers)', async () => {

@@ -17,7 +17,7 @@ import (
 )
 
 type stubJobStore struct {
-	createJobFn    func(ctx context.Context, tenantID, createdBy string, filterJSON json.RawMessage) (*aerepo.ExportJob, error)
+	createJobFn    func(ctx context.Context, tenantID, createdByType, createdBy string, filterJSON json.RawMessage) (*aerepo.ExportJob, error)
 	getJobFn       func(ctx context.Context, tenantID, jobID string) (*aerepo.ExportJob, error)
 	markDownloadFn func(ctx context.Context, tenantID, jobID string) (*aerepo.ExportJob, error)
 	claimNextJobFn func(ctx context.Context, owner string) (*aerepo.ExportJob, error)
@@ -28,8 +28,8 @@ type stubJobStore struct {
 	requeueStaleFn func(ctx context.Context, staleThreshold time.Duration) (int64, error)
 }
 
-func (s *stubJobStore) CreateJob(ctx context.Context, tenantID, createdBy string, filterJSON json.RawMessage) (*aerepo.ExportJob, error) {
-	return s.createJobFn(ctx, tenantID, createdBy, filterJSON)
+func (s *stubJobStore) CreateJob(ctx context.Context, tenantID, createdByType, createdBy string, filterJSON json.RawMessage) (*aerepo.ExportJob, error) {
+	return s.createJobFn(ctx, tenantID, createdByType, createdBy, filterJSON)
 }
 
 func (s *stubJobStore) GetJob(ctx context.Context, tenantID, jobID string) (*aerepo.ExportJob, error) {
@@ -100,8 +100,12 @@ func (s *stubAuditRecorder) Record(_ context.Context, event auditlogsvc.Event) e
 }
 
 func TestStartExport_CreatesJobAndRecordsAudit(t *testing.T) {
+	var capturedType string
+	var capturedID string
 	store := &stubJobStore{
-		createJobFn: func(_ context.Context, tenantID, createdBy string, _ json.RawMessage) (*aerepo.ExportJob, error) {
+		createJobFn: func(_ context.Context, tenantID, createdByType, createdBy string, _ json.RawMessage) (*aerepo.ExportJob, error) {
+			capturedType = createdByType
+			capturedID = createdBy
 			return ptrext.Of(aerepo.ExportJob{
 				ID:       "job-1",
 				TenantID: tenantID,
@@ -112,7 +116,7 @@ func TestStartExport_CreatesJobAndRecordsAudit(t *testing.T) {
 	recorder := &stubAuditRecorder{}
 	svc := New(store, nil, recorder)
 
-	result, err := svc.StartExport(context.Background(), "t1", "admin-1", ExportFilter{
+	result, err := svc.StartExport(context.Background(), "t1", auditlogsvc.Actor{Type: "oidc", ID: "ou-1"}, ExportFilter{
 		Actions: []string{"api_key.create"},
 	})
 	if err != nil {
@@ -130,17 +134,23 @@ func TestStartExport_CreatesJobAndRecordsAudit(t *testing.T) {
 	if recorder.events[0].Action != "audit_evidence.create" {
 		t.Errorf("audit action = %s", recorder.events[0].Action)
 	}
+	if recorder.events[0].Actor.Type != "oidc" {
+		t.Errorf("audit actor type = %s, want oidc", recorder.events[0].Actor.Type)
+	}
+	if capturedType != "oidc" || capturedID != "ou-1" {
+		t.Errorf("captured actor = %s/%s, want oidc/ou-1", capturedType, capturedID)
+	}
 }
 
 func TestStartExport_PropagatesStoreError(t *testing.T) {
 	store := &stubJobStore{
-		createJobFn: func(context.Context, string, string, json.RawMessage) (*aerepo.ExportJob, error) {
+		createJobFn: func(context.Context, string, string, string, json.RawMessage) (*aerepo.ExportJob, error) {
 			return nil, errors.New("db down")
 		},
 	}
 	svc := New(store, nil, nil)
 
-	_, err := svc.StartExport(context.Background(), "t1", "a", ExportFilter{})
+	_, err := svc.StartExport(context.Background(), "t1", auditlogsvc.Actor{Type: "admin", ID: "a"}, ExportFilter{})
 	if err == nil || err.Error() != "db down" {
 		t.Fatalf("expected db error, got %v", err)
 	}

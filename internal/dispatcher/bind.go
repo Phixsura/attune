@@ -20,6 +20,17 @@ import (
 // intentionally has no constant for it because it is not an IETF status code.
 const statusClientClosedRequest = 499
 
+// StatusClientClosedRequest exposes the non-standard 499 status for callers
+// outside this package that need to reject on a client-aborted request while
+// preserving the shared error-code contract.
+const StatusClientClosedRequest = statusClientClosedRequest
+
+// IsRequestContextError reports whether err represents a client-aborted request
+// or a request deadline being exceeded.
+func IsRequestContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
 // Bind adapts a typed handler into an http.HandlerFunc using route options,
 // input binders, and the shared envelope/logging rules.
 func Bind[Auth any, Req, Resp proto.Message](

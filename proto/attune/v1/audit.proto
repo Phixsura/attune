@@ -7,7 +7,10 @@ import "google/api/httpbody.proto";
 
 service AuditLogService {
   rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse) {
-    option (google.api.http) = {get: "/fb/v1/console/audit-log"};
+    option (google.api.http) = {
+      get: "/v1/audit-log"
+      additional_bindings {get: "/fb/v1/console/audit-log"}
+    };
   }
   rpc ExportAuditLogCSV(ExportAuditLogCSVRequest) returns (google.api.HttpBody) {
     option (google.api.http) = {get: "/fb/v1/console/audit-log/export.csv"};

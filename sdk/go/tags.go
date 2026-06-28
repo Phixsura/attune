@@ -34,6 +34,9 @@ func (c *Client) ListTags(ctx context.Context, includeArchived bool) (*ListTagsR
 
 // CreateTag creates a tag (needs `tags:write`).
 func (c *Client) CreateTag(ctx context.Context, req *CreateTagRequest) (*Tag, error) {
+	if err := requireRequest(req, "tag request must not be nil"); err != nil {
+		return nil, err
+	}
 	payload, err := protojsonMarshal.Marshal(req)
 	if err != nil {
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "invalid request body", cause: err}
@@ -49,6 +52,9 @@ func (c *Client) CreateTag(ctx context.Context, req *CreateTagRequest) (*Tag, er
 // Update replaces the tag's fields, so send the full desired state (e.g. a valid
 // Color), not just the fields you want to change.
 func (c *Client) UpdateTag(ctx context.Context, req *UpdateTagRequest) (*Tag, error) {
+	if err := requireRequest(req, "tag request must not be nil"); err != nil {
+		return nil, err
+	}
 	if !validPathSegment(req.GetId()) {
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "tag id is invalid"}
 	}

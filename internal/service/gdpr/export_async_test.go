@@ -62,6 +62,7 @@ type exportJobStoreStub struct {
 	failJobID          string
 	failErrMsg         string
 	heartbeatJobID     string
+	createdByType      string
 	createdSubjectKey  string
 	createdSubjectHash string
 	createdBy          string
@@ -75,7 +76,8 @@ func (s *exportJobStoreStub) Delete(context.Context, string, string) (*gdprrepo.
 	return nil, nil
 }
 
-func (s *exportJobStoreStub) CreateExportJob(_ context.Context, _, subjectKey, subjectHash, createdBy string) (*gdprrepo.ExportJob, error) {
+func (s *exportJobStoreStub) CreateExportJob(_ context.Context, _, subjectKey, subjectHash, createdByType, createdBy string) (*gdprrepo.ExportJob, error) {
+	s.createdByType = createdByType
 	s.createdSubjectKey = subjectKey
 	s.createdSubjectHash = subjectHash
 	s.createdBy = createdBy
@@ -176,7 +178,7 @@ func TestStartExportCreatesQueuedJob(t *testing.T) {
 	})
 	svc := New(store, nil)
 
-	resp, err := svc.StartExport(context.Background(), "tenant-1", "  alice@example.com  ", auditlogsvc.Actor{ID: "admin-1"})
+	resp, err := svc.StartExport(context.Background(), "tenant-1", "  alice@example.com  ", auditlogsvc.Actor{Type: "admin", ID: "admin-1"})
 	if err != nil {
 		t.Fatalf("StartExport err = %v", err)
 	}
@@ -191,6 +193,9 @@ func TestStartExportCreatesQueuedJob(t *testing.T) {
 	}
 	if store.createdBy != "admin-1" {
 		t.Fatalf("createdBy = %q", store.createdBy)
+	}
+	if store.createdByType != "admin" {
+		t.Fatalf("createdByType = %q", store.createdByType)
 	}
 }
 
@@ -341,6 +346,9 @@ func TestWorkerProcessNextExportCompletesAndAudits(t *testing.T) {
 	if len(audit.events) != 1 || audit.events[0].Action != "gdpr.export" {
 		t.Fatalf("expected gdpr.export audit event, got %#v", audit.events)
 	}
+	if audit.events[0].Actor.Type != "admin" {
+		t.Fatalf("audit actor type = %q", audit.events[0].Actor.Type)
+	}
 }
 
 func TestJobStatusResponseIncludesDownloadPathAndMetadata(t *testing.T) {
@@ -409,10 +417,11 @@ func TestWorkerProcessNextDeleteCompletesAndAudits(t *testing.T) {
 
 	store := ptrext.Of(deleteStoreStub{
 		request: ptrext.Of(gdprrepo.Request{
-			ID:          "req-123",
-			TenantID:    "tenant-1",
-			CreatedBy:   "admin-1",
-			SubjectHash: "hash-123",
+			ID:            "req-123",
+			TenantID:      "tenant-1",
+			CreatedByType: "admin",
+			CreatedBy:     "admin-1",
+			SubjectHash:   "hash-123",
 		}),
 	})
 	audit := ptrext.Of(stubAudit{})
@@ -430,6 +439,9 @@ func TestWorkerProcessNextDeleteCompletesAndAudits(t *testing.T) {
 	}
 	if len(audit.events) != 1 || audit.events[0].Action != "gdpr.delete" {
 		t.Fatalf("expected gdpr.delete audit event, got %#v", audit.events)
+	}
+	if audit.events[0].Actor.Type != "admin" {
+		t.Fatalf("audit actor type = %q", audit.events[0].Actor.Type)
 	}
 }
 
@@ -819,10 +831,11 @@ func TestWorkerProcessNextDeleteAuditFailure(t *testing.T) {
 
 	store := ptrext.Of(deleteStoreStub{
 		request: ptrext.Of(gdprrepo.Request{
-			ID:          "req-123",
-			TenantID:    "tenant-1",
-			CreatedBy:   "admin-1",
-			SubjectHash: "hash-123",
+			ID:            "req-123",
+			TenantID:      "tenant-1",
+			CreatedByType: "admin",
+			CreatedBy:     "admin-1",
+			SubjectHash:   "hash-123",
 		}),
 	})
 	worker := ptrext.Of(Worker{
@@ -841,10 +854,11 @@ func TestWorkerProcessNextDeleteNilAudit(t *testing.T) {
 
 	store := ptrext.Of(deleteStoreStub{
 		request: ptrext.Of(gdprrepo.Request{
-			ID:          "req-123",
-			TenantID:    "tenant-1",
-			CreatedBy:   "admin-1",
-			SubjectHash: "hash-123",
+			ID:            "req-123",
+			TenantID:      "tenant-1",
+			CreatedByType: "admin",
+			CreatedBy:     "admin-1",
+			SubjectHash:   "hash-123",
 		}),
 	})
 	worker := ptrext.Of(Worker{
@@ -891,6 +905,101 @@ func TestJobStatusResponseNoOptionalFields(t *testing.T) {
 	}
 	if resp.GetDownloadPath() != "" {
 		t.Fatalf("unexpected download_path for queued job = %q", resp.GetDownloadPath())
+	}
+}
+
+func TestStartExportStoresAPIKeyActorType(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		createJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:     "job-123",
+			Status: gdprrepo.ExportJobQueued,
+		}),
+	})
+	svc := New(store, nil)
+
+	_, err := svc.StartExport(context.Background(), "tenant-1", "alice@example.com", auditlogsvc.Actor{
+		Type: "api_key",
+		ID:   "apikey:123",
+	})
+	if err != nil {
+		t.Fatalf("StartExport err = %v", err)
+	}
+	if store.createdByType != "api_key" {
+		t.Fatalf("createdByType = %q", store.createdByType)
+	}
+}
+
+func TestWorkerProcessNextExportPreservesStoredActorType(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(exportJobStoreStub{
+		claimJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:            "job-123",
+			TenantID:      "tenant-1",
+			SubjectKey:    "alice@example.com",
+			SubjectHash:   "hash-123",
+			CreatedByType: "api_key",
+			CreatedBy:     "apikey:123",
+		}),
+	})
+	repo := ptrext.Of(exportRepoStub{
+		exportData: ptrext.Of(gdprrepo.ExportData{
+			SubjectKey:  "alice@example.com",
+			GeneratedAt: time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC),
+			Counts:      gdprrepo.Counts{FeedbackCount: 1},
+		}),
+	})
+	audit := ptrext.Of(stubAudit{})
+	worker := NewWorker(repo, store, audit)
+
+	if err := worker.processNextExport(context.Background()); err != nil {
+		t.Fatalf("processNextExport err = %v", err)
+	}
+	if got := audit.events[0].Actor.Type; got != "api_key" {
+		t.Fatalf("audit actor type = %q", got)
+	}
+}
+
+func TestWorkerProcessNextDeletePreservesStoredActorType(t *testing.T) {
+	t.Parallel()
+
+	store := ptrext.Of(deleteStoreStub{
+		request: ptrext.Of(gdprrepo.Request{
+			ID:            "req-123",
+			TenantID:      "tenant-1",
+			CreatedByType: "oidc",
+			CreatedBy:     "ou-123",
+			SubjectHash:   "hash-123",
+		}),
+	})
+	audit := ptrext.Of(stubAudit{})
+	worker := ptrext.Of(Worker{
+		deleteStore:    store,
+		deleteExecutor: ptrext.Of(deleteExecutorStub{result: ptrext.Of(gdprrepo.DeleteResult{Counts: gdprrepo.Counts{FeedbackCount: 2}})}),
+		audit:          audit,
+	})
+
+	if err := worker.processNextDelete(context.Background()); err != nil {
+		t.Fatalf("processNextDelete err = %v", err)
+	}
+	if got := audit.events[0].Actor.Type; got != "oidc" {
+		t.Fatalf("audit actor type = %q", got)
+	}
+}
+
+func TestStoredActorFallbacks(t *testing.T) {
+	t.Parallel()
+
+	if got := storedActor("", "apikey:123"); got.Type != "api_key" {
+		t.Fatalf("storedActor api_key fallback = %#v", got)
+	}
+	if got := storedActor("", "admin-1"); got.Type != "admin" {
+		t.Fatalf("storedActor admin fallback = %#v", got)
+	}
+	if got := storedActor("oidc", "ou-1"); got.Type != "oidc" {
+		t.Fatalf("storedActor explicit type = %#v", got)
 	}
 }
 

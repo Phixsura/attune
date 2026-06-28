@@ -138,7 +138,7 @@ func TestScanExportJob(t *testing.T) {
 
 	job, err := scanExportJob(fakeRow{values: []any{
 		"job-1", "tenant-1", "subject-1", "hash-1", "Subject One", ExportJobCompleted,
-		[]byte("zip"), "export.zip", 1, 2, 3, 4, "", "admin-1", now, ptrext.Of(startedAt), ptrext.Of(completedAt),
+		[]byte("zip"), "export.zip", 1, 2, 3, 4, "", "admin", "admin-1", now, ptrext.Of(startedAt), ptrext.Of(completedAt),
 		ptrext.Of(expiresAt), ptrext.Of(downloadedAt), ptrext.Of(revokedAt), ptrext.Of(claimedAt), ptrext.Of(heartbeatAt),
 	}})
 	if err != nil {
@@ -152,6 +152,9 @@ func TestScanExportJob(t *testing.T) {
 	}
 	if job.HeartbeatAt == nil || !job.HeartbeatAt.Equal(heartbeatAt) {
 		t.Fatalf("HeartbeatAt = %v, want %v", job.HeartbeatAt, heartbeatAt)
+	}
+	if job.CreatedByType != "admin" {
+		t.Fatalf("CreatedByType = %q, want admin", job.CreatedByType)
 	}
 }
 
@@ -176,7 +179,7 @@ func TestScanRequest(t *testing.T) {
 
 	req, err := scanRequest(fakeRow{values: []any{
 		"req-1", "tenant-1", RequestTypeDelete, RequestStatusScheduled, "subject-1", "hash-1", "Subject One",
-		1, 2, 3, 4, "bundle.zip", "", "admin-1", now, ptrext.Of(startedAt), ptrext.Of(completedAt), ptrext.Of(expiresAt), ptrext.Of(downloadedAt),
+		1, 2, 3, 4, "bundle.zip", "", "admin", "admin-1", now, ptrext.Of(startedAt), ptrext.Of(completedAt), ptrext.Of(expiresAt), ptrext.Of(downloadedAt),
 		ptrext.Of(executeAfter), ptrext.Of(cancelledAt), ptrext.Of(revokedAt),
 	}})
 	if err != nil {
@@ -190,6 +193,9 @@ func TestScanRequest(t *testing.T) {
 	}
 	if req.RevokedAt == nil || !req.RevokedAt.Equal(revokedAt) {
 		t.Fatalf("RevokedAt = %v, want %v", req.RevokedAt, revokedAt)
+	}
+	if req.CreatedByType != "admin" {
+		t.Fatalf("CreatedByType = %q, want admin", req.CreatedByType)
 	}
 }
 

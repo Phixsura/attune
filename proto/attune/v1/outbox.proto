@@ -12,14 +12,21 @@ service NotifyOutboxService {
   // List deliveries for the caller's tenant, filtered by status (defaults to
   // dead when none given), newest first, keyset-paginated on id.
   rpc ListDeliveries(ListDeliveriesRequest) returns (ListDeliveriesResponse) {
-    option (google.api.http) = {get: "/fb/v1/console/outbox/deliveries"};
+    option (google.api.http) = {
+      get: "/v1/outbox/deliveries"
+      additional_bindings {get: "/fb/v1/console/outbox/deliveries"}
+    };
   }
   // Manually re-arm one dead/failed delivery (retry-in-place). Asynchronous:
   // the worker redelivers on its next poll, so a successful call is 202.
   rpc RetryDelivery(RetryDeliveryRequest) returns (RetryDeliveryResponse) {
     option (google.api.http) = {
-      post: "/fb/v1/console/outbox/{id}/retry"
+      post: "/v1/outbox/{id}/retry"
       body: "*"
+      additional_bindings {
+        post: "/fb/v1/console/outbox/{id}/retry"
+        body: "*"
+      }
     };
   }
 }

@@ -22,6 +22,7 @@ import (
 type fakeClientStore struct {
 	client    mcprepo.Client
 	revokedID uuid.UUID
+	createErr error
 }
 
 func (f *fakeClientStore) ListByTenant(context.Context, string) ([]mcprepo.Client, error) {
@@ -29,6 +30,9 @@ func (f *fakeClientStore) ListByTenant(context.Context, string) ([]mcprepo.Clien
 }
 
 func (f *fakeClientStore) Create(context.Context, mcprepo.CreateClientParams) (*mcprepo.Client, error) {
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
 	return ptrext.Of(f.client), nil
 }
 
@@ -224,7 +228,7 @@ func TestHandlerUpdateChangesClientGovernance(t *testing.T) {
 		ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "admin", UserType: "admin"}),
 		clientID.String(),
 		ptrext.Of(mcpclient.UpdateRequest{
-			ToolPolicyMode: domain.MCPToolPolicyModeAllowList,
+			ToolPolicyMode: ptrext.Of(domain.MCPToolPolicyModeAllowList),
 			RateLimitRPM:   ptrext.Of(rpm),
 			RateLimitBurst: ptrext.Of(burst),
 		}),
@@ -234,6 +238,42 @@ func TestHandlerUpdateChangesClientGovernance(t *testing.T) {
 	require.Equal(t, domain.MCPToolPolicyModeAllowList, resp.Client.ToolPolicyMode)
 	require.NotNil(t, clients.client.RateLimitRPM)
 	require.Equal(t, 45, ptrext.IndirectOr(clients.client.RateLimitRPM, 0))
+}
+
+func TestHandlerUpdatePreservesOmittedFields(t *testing.T) {
+	t.Parallel()
+
+	clientID := uuid.New()
+	existingBurst := 9
+	clients := ptrext.Of(fakeClientStore{client: mcprepo.Client{
+		ID:             clientID,
+		TenantID:       "tenant-1",
+		Name:           "agent",
+		RedirectURIs:   []string{"https://example.com/callback"},
+		Scopes:         []string{domain.MCPScopeRead},
+		ToolPolicyMode: domain.MCPToolPolicyModeLegacyAllowAll,
+		RateLimitBurst: ptrext.Of(existingBurst),
+		CreatedAt:      time.Now(),
+		CreatedBy:      "admin",
+	}})
+	handler := mcpclient.NewHandler(clients, nil, nil, nil)
+
+	rpm := 45
+	resp, err := handler.Update(
+		context.Background(),
+		ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "admin", UserType: "admin"}),
+		clientID.String(),
+		ptrext.Of(mcpclient.UpdateRequest{
+			RateLimitRPM: ptrext.Of(rpm),
+		}),
+		httptest.NewRequest(http.MethodPatch, "/", nil),
+	)
+	require.NoError(t, err)
+	require.Equal(t, domain.MCPToolPolicyModeLegacyAllowAll, resp.Client.ToolPolicyMode)
+	require.NotNil(t, clients.client.RateLimitRPM)
+	require.Equal(t, 45, ptrext.IndirectOr(clients.client.RateLimitRPM, 0))
+	require.NotNil(t, clients.client.RateLimitBurst)
+	require.Equal(t, existingBurst, ptrext.IndirectOr(clients.client.RateLimitBurst, 0))
 }
 
 func TestHandlerUpdateRejectsRevokedClient(t *testing.T) {
@@ -257,7 +297,7 @@ func TestHandlerUpdateRejectsRevokedClient(t *testing.T) {
 		context.Background(),
 		ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "admin", UserType: "admin"}),
 		clientID.String(),
-		ptrext.Of(mcpclient.UpdateRequest{ToolPolicyMode: domain.MCPToolPolicyModeAllowList}),
+		ptrext.Of(mcpclient.UpdateRequest{ToolPolicyMode: ptrext.Of(domain.MCPToolPolicyModeAllowList)}),
 		httptest.NewRequest(http.MethodPatch, "/", nil),
 	)
 	require.Error(t, err)

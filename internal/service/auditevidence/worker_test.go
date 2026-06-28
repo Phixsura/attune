@@ -78,11 +78,12 @@ func TestWorkerProcessNext_CompletesSuccessfully(t *testing.T) {
 	store := &stubJobStore{
 		claimNextJobFn: func(context.Context, string) (*aerepo.ExportJob, error) {
 			return ptrext.Of(aerepo.ExportJob{
-				ID:         "job-1",
-				TenantID:   "t1",
-				CreatedBy:  "admin-1",
-				FilterJSON: json.RawMessage("{}"),
-				Status:     aerepo.JobRunning,
+				ID:            "job-1",
+				TenantID:      "t1",
+				CreatedByType: "admin",
+				CreatedBy:     "admin-1",
+				FilterJSON:    json.RawMessage("{}"),
+				Status:        aerepo.JobRunning,
 			}), nil
 		},
 		completeJobFn: func(_ context.Context, jobID, _, _ string, _ []byte, _ int, _ time.Time) (int64, error) {
@@ -112,11 +113,12 @@ func TestWorkerProcessNext_ReClaimedJobIsNoop(t *testing.T) {
 	store := &stubJobStore{
 		claimNextJobFn: func(context.Context, string) (*aerepo.ExportJob, error) {
 			return ptrext.Of(aerepo.ExportJob{
-				ID:         "job-1",
-				TenantID:   "t1",
-				CreatedBy:  "admin-1",
-				FilterJSON: json.RawMessage("{}"),
-				Status:     aerepo.JobRunning,
+				ID:            "job-1",
+				TenantID:      "t1",
+				CreatedByType: "admin",
+				CreatedBy:     "admin-1",
+				FilterJSON:    json.RawMessage("{}"),
+				Status:        aerepo.JobRunning,
 			}), nil
 		},
 		completeJobFn: func(context.Context, string, string, string, []byte, int, time.Time) (int64, error) {
@@ -196,11 +198,12 @@ func TestWorkerProcessNext_BuildArchiveError_MarksJobFailed(t *testing.T) {
 	store := &stubJobStore{
 		claimNextJobFn: func(context.Context, string) (*aerepo.ExportJob, error) {
 			return ptrext.Of(aerepo.ExportJob{
-				ID:         "job-bad-archive",
-				TenantID:   "t1",
-				CreatedBy:  "admin-1",
-				FilterJSON: json.RawMessage("{}"),
-				Status:     aerepo.JobRunning,
+				ID:            "job-bad-archive",
+				TenantID:      "t1",
+				CreatedByType: "admin",
+				CreatedBy:     "admin-1",
+				FilterJSON:    json.RawMessage("{}"),
+				Status:        aerepo.JobRunning,
 			}), nil
 		},
 		failJobFn: func(_ context.Context, _, _, errMsg string) (int64, error) {
@@ -237,11 +240,12 @@ func TestWorkerProcessNext_CompleteJobError(t *testing.T) {
 	store := &stubJobStore{
 		claimNextJobFn: func(context.Context, string) (*aerepo.ExportJob, error) {
 			return ptrext.Of(aerepo.ExportJob{
-				ID:         "job-cje",
-				TenantID:   "t1",
-				CreatedBy:  "admin-1",
-				FilterJSON: json.RawMessage("{}"),
-				Status:     aerepo.JobRunning,
+				ID:            "job-cje",
+				TenantID:      "t1",
+				CreatedByType: "admin",
+				CreatedBy:     "admin-1",
+				FilterJSON:    json.RawMessage("{}"),
+				Status:        aerepo.JobRunning,
 			}), nil
 		},
 		completeJobFn: func(context.Context, string, string, string, []byte, int, time.Time) (int64, error) {

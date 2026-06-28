@@ -138,9 +138,19 @@ func buildRouter(
 			r.Mount("/feedback", ingestHandler.Routes())
 		})
 
-		// Tag / workflow config over the API-key surface (scope-gated), reusing
-		// the console handlers — lets the SDKs manage tags/workflow (#36).
-		console.MountAPIKeyAdminRoutes(r, pool, apiKeys, cfg.Security.TrustedProxyHops, perKeyRateLimiter)
+		// Selected management routes over the API-key surface (scope-gated),
+		// reusing the console handlers — lets the SDKs manage admin resources
+		// without cloning business logic (#36, #168).
+		console.MountAPIKeyAdminRoutes(r, pool, apiKeys, cfg.Security.TrustedProxyHops, perKeyRateLimiter, console.APIKeyAdminRouteOptions{
+			GDPRStepUpTTL:         cfg.GDPRStepUpTTL,
+			GDPRExportTTL:         cfg.GDPRExportTTL,
+			GDPRDeleteGraceWindow: cfg.GDPRDeleteGraceWindow,
+			AuditRetentionDays:    cfg.Audit.RetentionDays,
+			AuditPruneInterval:    cfg.AuditPruneInterval,
+			MCPPublicBaseURL:      cfg.MCPPublicBaseURL,
+			MCPOAuthIssuer:        cfg.MCP.OAuth.Issuer,
+			GDPRAdmins:            adminRepo,
+		})
 	})
 
 	// Console UI. Mounted under /fb/v1/console; the reverse

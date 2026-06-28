@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,30 @@ type Handler struct {
 
 func NewHandler(r outboxRepo) *Handler {
 	return ptrext.Of(Handler{repo: r})
+}
+
+// BindListRequest fills the list request from query params:
+// ?status=dead&status=failed&limit=50&before_id=123
+func BindListRequest(r *http.Request, req *attunev1.ListDeliveriesRequest) error {
+	q := r.URL.Query()
+	req.Status = q["status"]
+	if v := q.Get("limit"); v != "" {
+		// ParseInt with bitSize=32 rejects values that don't fit int32, so the
+		// conversion below can't overflow (the repo clamps the value anyway).
+		n, err := strconv.ParseInt(v, 10, 32)
+		if err != nil || n <= 0 {
+			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid limit")
+		}
+		req.Limit = int32(n)
+	}
+	if v := q.Get("before_id"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid before_id")
+		}
+		req.BeforeId = n
+	}
+	return nil
 }
 
 // List returns the caller's dead/failed deliveries, newest first.

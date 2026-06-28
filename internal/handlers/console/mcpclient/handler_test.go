@@ -91,6 +91,16 @@ func TestHandler_Create_ValidatesRedirectURIs(t *testing.T) {
 			redirectURI: "http://example.com/callback",
 			wantErr:     "must use HTTPS",
 		},
+		{
+			name:        "hostless https opaque rejected",
+			redirectURI: "https:callback",
+			wantErr:     "absolute URI with a host",
+		},
+		{
+			name:        "scheme-relative loopback rejected",
+			redirectURI: "//localhost/callback",
+			wantErr:     "absolute URI with a host",
+		},
 	}
 
 	for _, tt := range tests {

@@ -172,22 +172,22 @@ export interface RevokeMCPRefreshGrantResponse {
 
 /** MCPClientService manages MCP OAuth clients and their governance surface. */
 export interface MCPClientService {
-  /** GET /fb/v1/console/mcp/clients */
+  /** GET /v1/mcp/clients */
   ListMCPClients(request: ListMCPClientsRequest): Promise<ListMCPClientsResponse>;
-  /** POST /fb/v1/console/mcp/clients */
+  /** POST /v1/mcp/clients */
   CreateMCPClient(request: CreateMCPClientRequest): Promise<CreateMCPClientResponse>;
-  /** GET /fb/v1/console/mcp/clients/{id} */
+  /** GET /v1/mcp/clients/{id} */
   GetMCPClient(request: GetMCPClientRequest): Promise<GetMCPClientResponse>;
-  /** DELETE /fb/v1/console/mcp/clients/{id} */
+  /** DELETE /v1/mcp/clients/{id} */
   RevokeMCPClient(request: RevokeMCPClientRequest): Promise<RevokeMCPClientResponse>;
-  /** PATCH /fb/v1/console/mcp/clients/{id} */
+  /** PATCH /v1/mcp/clients/{id} */
   UpdateMCPClient(request: UpdateMCPClientRequest): Promise<UpdateMCPClientResponse>;
-  /** PUT /fb/v1/console/mcp/clients/{id}/tool-policies */
+  /** PUT /v1/mcp/clients/{id}/tool-policies */
   ReplaceMCPClientToolPolicies(
     request: ReplaceMCPClientToolPoliciesRequest,
   ): Promise<ReplaceMCPClientToolPoliciesResponse>;
-  /** DELETE /fb/v1/console/mcp/clients/{id}/sessions/{session_id} */
+  /** DELETE /v1/mcp/clients/{id}/sessions/{session_id} */
   RevokeMCPSession(request: RevokeMCPSessionRequest): Promise<RevokeMCPSessionResponse>;
-  /** DELETE /fb/v1/console/mcp/clients/{id}/grants/{grant_id} */
+  /** DELETE /v1/mcp/clients/{id}/grants/{grant_id} */
   RevokeMCPRefreshGrant(request: RevokeMCPRefreshGrantRequest): Promise<RevokeMCPRefreshGrantResponse>;
 }

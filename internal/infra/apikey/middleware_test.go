@@ -377,6 +377,69 @@ func TestRequireScope_MissingScope(t *testing.T) {
 	}
 }
 
+func TestRequireExplicitScope_DeniesLegacyUnscopedKey(t *testing.T) {
+	kid := uuid.New()
+	mw := Middleware(stubVerifier{
+		tid:    "tenant-x",
+		kid:    kid,
+		scopes: nil, // legacy full-access key for RequireScope; must NOT pass explicit checks
+	})
+	scope := RequireExplicitScope(domain.ScopeAuditRead)
+
+	srv := httptest.NewServer(wrap(mw(scope(next(t)))))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/audit-log", nil)
+	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"legacy")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+	body, _ := readAll(resp)
+	m := decode(t, body)
+	if m["code"] != "FORBIDDEN" {
+		t.Errorf("code = %v, want FORBIDDEN; body=%s", m["code"], body)
+	}
+}
+
+func TestRequireExplicitScope_HonorsHierarchy(t *testing.T) {
+	kid := uuid.New()
+	mw := Middleware(stubVerifier{
+		tid:    "tenant-x",
+		kid:    kid,
+		scopes: []domain.Scope{domain.ScopeNotifyWrite},
+	})
+	scope := RequireExplicitScope(domain.ScopeNotifyRead)
+
+	called := false
+	final := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(wrap(mw(scope(final))))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/outbox/deliveries", nil)
+	req.Header.Set("X-API-Key", domain.APIKeyPrefix+"scoped")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if !called {
+		t.Error("handler should be called when explicit scope hierarchy matches")
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
 func TestMiddleware_ExpiredKey_401(t *testing.T) {
 	t.Parallel()
 	mw := Middleware(stubVerifier{err: domain.ErrAPIKeyExpired})

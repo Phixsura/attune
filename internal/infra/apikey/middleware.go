@@ -199,11 +199,26 @@ func KeyIDFromContext(ctx context.Context) (uuid.UUID, bool) {
 // RequireScope returns middleware that checks API key scopes.
 // Must be used after Middleware. Rejects with 403 if scope missing.
 func RequireScope(required domain.Scope) func(http.Handler) http.Handler {
+	return requireScope(required, false)
+}
+
+// RequireExplicitScope is like RequireScope but does not grant legacy unscoped
+// keys implicit access. Use this for newly exposed APIs so old keys without a
+// scopes list do not silently gain new privileges.
+func RequireExplicitScope(required domain.Scope) func(http.Handler) http.Handler {
+	return requireScope(required, true)
+}
+
+func requireScope(required domain.Scope, explicitOnly bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 			auth := FromContext(ctx)
-			if !domain.HasScope(auth.Scopes, required) {
+			hasScope := domain.HasScope(auth.Scopes, required)
+			if explicitOnly {
+				hasScope = domain.HasExplicitScope(auth.Scopes, required)
+			}
+			if !hasScope {
 				metrics.APIKeyScopeDeniedTotal.WithLabelValues(string(required)).Inc()
 				logext.Warnf(ctx, "[scope] deny,key_id:%s,required:%s", auth.KeyID, required)
 				dispatcher.Reject(ctx, w, http.StatusForbidden,

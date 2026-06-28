@@ -39,6 +39,9 @@ func (c *Client) ListWorkflowStates(ctx context.Context, includeArchived bool) (
 
 // CreateWorkflowState creates a workflow state (needs `workflow:write`).
 func (c *Client) CreateWorkflowState(ctx context.Context, req *CreateStateRequest) (*CreateStateResponse, error) {
+	if err := requireRequest(req, "state request must not be nil"); err != nil {
+		return nil, err
+	}
 	payload, err := protojsonMarshal.Marshal(req)
 	if err != nil {
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "invalid request body", cause: err}
@@ -52,6 +55,9 @@ func (c *Client) CreateWorkflowState(ctx context.Context, req *CreateStateReques
 
 // UpdateWorkflowState updates a state by id (needs `workflow:write`). Replace-semantics.
 func (c *Client) UpdateWorkflowState(ctx context.Context, req *UpdateStateRequest) (*UpdateStateResponse, error) {
+	if err := requireRequest(req, "state request must not be nil"); err != nil {
+		return nil, err
+	}
 	if !validPathSegment(req.GetId()) {
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "state id is invalid"}
 	}
@@ -89,6 +95,9 @@ func (c *Client) ListWorkflowTransitions(ctx context.Context) (*ListTransitionsR
 
 // ReplaceWorkflowTransitions replaces the transition set (needs `workflow:write`).
 func (c *Client) ReplaceWorkflowTransitions(ctx context.Context, req *ReplaceTransitionsRequest) (*ReplaceTransitionsResponse, error) {
+	if err := requireRequest(req, "workflow transition request must not be nil"); err != nil {
+		return nil, err
+	}
 	payload, err := protojsonMarshal.Marshal(req)
 	if err != nil {
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "invalid request body", cause: err}

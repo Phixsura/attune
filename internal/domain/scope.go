@@ -6,7 +6,7 @@ import "errors"
 // Format: "resource:action" (e.g., "feedback:read").
 type Scope string
 
-// Scope constants — 27 total.
+// Scope constants — 28 total.
 const (
 	// Core resources
 	ScopeIngestWrite   Scope = "ingest:write"
@@ -43,9 +43,10 @@ const (
 	ScopeAPIKeyAdmin  Scope = "apikey:admin"
 
 	// MCP (Model Context Protocol)
-	ScopeMCPRead   Scope = "mcp:read"
-	ScopeMCPWrite  Scope = "mcp:write"
-	ScopeMCPIngest Scope = "mcp:ingest"
+	ScopeMCPRead        Scope = "mcp:read"
+	ScopeMCPWrite       Scope = "mcp:write"
+	ScopeMCPIngest      Scope = "mcp:ingest"
+	ScopeMCPClientAdmin Scope = "mcpclient:admin"
 )
 
 // AllScopes is the complete set of valid scopes.
@@ -62,7 +63,7 @@ var AllScopes = []Scope{
 	ScopeTagsRead, ScopeTagsWrite,
 	ScopeWorkflowRead, ScopeWorkflowWrite,
 	ScopeGDPRAdmin, ScopeMembersAdmin, ScopeAPIKeyAdmin,
-	ScopeMCPRead, ScopeMCPWrite, ScopeMCPIngest,
+	ScopeMCPRead, ScopeMCPWrite, ScopeMCPIngest, ScopeMCPClientAdmin,
 }
 
 // scopeHierarchy defines implicit scope grants: write implies read.
@@ -109,6 +110,14 @@ func HasScope(granted []Scope, required Scope) bool {
 	if len(granted) == 0 {
 		return true // legacy key without scopes → full access
 	}
+	return HasExplicitScope(granted, required)
+}
+
+// HasExplicitScope checks if the granted scopes satisfy the required scope,
+// respecting hierarchy (write implies read), without the legacy empty-scope
+// full-access fallback. Use this for newly exposed APIs so old unscoped keys do
+// not silently gain access.
+func HasExplicitScope(granted []Scope, required Scope) bool {
 	for _, s := range granted {
 		if s == required {
 			return true

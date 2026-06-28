@@ -435,6 +435,23 @@ func TestIngestResponseBodyCapped(t *testing.T) {
 	}
 }
 
+func TestIngestEmptyNon204SuccessBodyReturnsInternal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv, WithMaxRetries(0))
+	_, err := c.Ingest(context.Background(), IngestInput{Content: "x"})
+	ae, ok := err.(*AttuneError)
+	if !ok || ae.Code != CodeInternal || ae.Status != http.StatusOK {
+		t.Fatalf("err = %v, want INTERNAL/200 for empty non-204 success body", err)
+	}
+	if ae.Message != "empty response body for non-204 success response" {
+		t.Errorf("message = %q", ae.Message)
+	}
+}
+
 func TestIngestPerAttemptTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(150 * time.Millisecond)

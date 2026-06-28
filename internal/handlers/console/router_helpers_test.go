@@ -1,6 +1,7 @@
 package console
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/rbac"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
@@ -63,9 +65,8 @@ func TestBindListDeliveriesRequest_NegativeBeforeID(t *testing.T) {
 		"/outbox/deliveries?before_id=-99", nil)
 	lr := ptrext.Of(attunev1.ListDeliveriesRequest{})
 	err := bindListDeliveriesRequest(req, lr)
-	// Negative int64 is technically valid parse; the repo will handle semantics.
-	require.NoError(t, err)
-	require.Equal(t, int64(-99), lr.BeforeId)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid before_id")
 }
 
 func TestBindListDeliveriesRequest_ZeroLimit(t *testing.T) {
@@ -74,8 +75,8 @@ func TestBindListDeliveriesRequest_ZeroLimit(t *testing.T) {
 		"/outbox/deliveries?limit=0", nil)
 	lr := ptrext.Of(attunev1.ListDeliveriesRequest{})
 	err := bindListDeliveriesRequest(req, lr)
-	require.NoError(t, err)
-	require.Equal(t, int32(0), lr.Limit)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid limit")
 }
 
 func TestBindListDeliveriesRequest_NegativeLimit(t *testing.T) {
@@ -84,9 +85,8 @@ func TestBindListDeliveriesRequest_NegativeLimit(t *testing.T) {
 		"/outbox/deliveries?limit=-10", nil)
 	lr := ptrext.Of(attunev1.ListDeliveriesRequest{})
 	err := bindListDeliveriesRequest(req, lr)
-	// Negative int32 parses fine; clamping is the repo's responsibility.
-	require.NoError(t, err)
-	require.Equal(t, int32(-10), lr.Limit)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid limit")
 }
 
 func TestBindListDeliveriesRequest_LargeBeforeID(t *testing.T) {
@@ -211,6 +211,22 @@ func TestRequireAdminLegacy_AdminLookupError(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
+func TestRequireAdminLegacy_ContextCanceled(t *testing.T) {
+	t.Parallel()
+	r := ptrext.Of(Router{admins: roleAdminReader{err: context.Canceled}})
+	called := false
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req = req.WithContext(session.WithAuthCtx(req.Context(), ptrext.Of(session.AuthCtx{UserID: "u1"})))
+
+	r.requireAdminLegacy(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	})).ServeHTTP(w, req)
+
+	require.False(t, called)
+	require.Equal(t, dispatcher.StatusClientClosedRequest, w.Code)
+}
+
 func TestRequireAdminLegacy_UserNotFound(t *testing.T) {
 	t.Parallel()
 	r := ptrext.Of(Router{admins: roleAdminReader{err: admin.ErrNotFound}})
@@ -289,6 +305,22 @@ func TestRequireAdminLegacy_InternalErrorResponseBody(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Equal(t, "INTERNAL", body.Code)
+}
+
+func TestRequireAdminLegacy_MissingAuthContext(t *testing.T) {
+	t.Parallel()
+	r := ptrext.Of(Router{admins: roleAdminReader{row: admin.Admin{ID: "u1", Role: "admin"}}})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	r.requireAdminLegacy(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	var body struct {
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "UNAUTHORIZED", body.Code)
 }
 
 // ---------------------------------------------------------------------------

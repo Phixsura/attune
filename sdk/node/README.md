@@ -105,13 +105,21 @@ await client.ingest({ content: 'x' }, { idempotencyKey: 'order-4242-feedback' })
 Replaying a key with a different body throws `AttuneError` `IDEMPOTENCY_CONFLICT`
 (409).
 
-## Tags & workflow config
+## Management APIs
 
-Beyond ingest, the client can manage a tenant's **tags** and **workflow
-configuration** (states + transitions). These routes need a key with the
-matching scope — `tags:read` / `tags:write` and `workflow:read` /
-`workflow:write` — and are server-side admin operations, so don't ship those
-keys to the browser.
+Beyond ingest, the client can manage a tenant's **tags**, **workflow
+configuration**, **audit log queries**, **GDPR jobs**, **outbox retries**, and
+**MCP OAuth clients**. These routes need server-only management keys with the
+matching scopes:
+
+- `tags:read` / `tags:write`
+- `workflow:read` / `workflow:write`
+- `audit:read`
+- `gdpr:admin`
+- `notify:read` / `notify:write`
+- `mcpclient:admin`
+
+Do not ship those broader-scope keys to the browser.
 
 ```ts
 // Tags (tags:read / tags:write)
@@ -135,13 +143,39 @@ await client.archiveWorkflowState(state!.id)
 
 const { transitions } = await client.listWorkflowTransitions()
 await client.replaceWorkflowTransitions({ transitions })
+
+// Audit log (audit:read)
+const { items } = await client.listAuditLog({ actions: ['tag.create'], limit: 25 })
+
+// GDPR jobs (gdpr:admin)
+const exportJob = await client.exportGdprSubject({ subjectKey: 'user:123' })
+const exportStatus = await client.getGdprExport(exportJob.jobId)
+await client.revokeGdprExport(exportJob.jobId)
+await client.deleteGdprSubject({ subjectKey: 'user:123' })
+await client.cancelGdprRequest('req_123')
+const requests = await client.listGdprRequests({ limit: 20, requestType: 'export' })
+const ops = await client.getGdprOperations()
+
+// Outbox (notify:read / notify:write)
+const deliveries = await client.listOutboxDeliveries({ status: ['dead'], limit: 50 })
+await client.retryOutboxDelivery(deliveries.deliveries[0]!.id)
+
+// MCP client governance (mcpclient:admin)
+const { clients } = await client.listMCPClients()
+const created = await client.createMCPClient({
+  name: 'ops-agent',
+  redirectUris: ['https://example.com/callback'],
+  scopes: ['mcp:read'],
+})
+await client.getMCPClient(created.client!.id)
 ```
 
 `updateTag` / `updateWorkflowState` are **replace-semantics**: send the full
 desired state, not a sparse patch. These methods are idempotent (`GET` / `PUT` /
 `PATCH` / `DELETE`) and so retried on transient failure; `ingest` and the
-non-idempotent `create*` / `seed*` `POST`s are not retried, to avoid creating a
-duplicate resource after a lost response.
+non-idempotent `POST`s such as `create*`, `seed*`, `exportGdprSubject`,
+`deleteGdprSubject`, `retryOutboxDelivery`, and `createMCPClient` are not
+retried, to avoid creating a duplicate resource after a lost response.
 
 ## Browser use & key safety
 

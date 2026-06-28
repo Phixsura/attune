@@ -22,7 +22,7 @@ import (
 )
 
 type evidenceService interface {
-	StartExport(ctx context.Context, tenantID, createdBy string, filter auditevidencesvc.ExportFilter) (*auditevidencesvc.StartExportResult, error)
+	StartExport(ctx context.Context, tenantID string, actor auditlogsvc.Actor, filter auditevidencesvc.ExportFilter) (*auditevidencesvc.StartExportResult, error)
 	GetJob(ctx context.Context, tenantID, jobID string) (*aerepo.ExportJob, error)
 	Download(ctx context.Context, tenantID, jobID string, actor auditlogsvc.Actor) (*auditevidencesvc.DownloadBundle, error)
 }
@@ -47,7 +47,7 @@ func (h *Handler) Create(
 		return dispatcher.Fail[*attunev1.CreateAuditEvidenceExportResponse](
 			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, err.Error())
 	}
-	result, err := h.svc.StartExport(ctx, ctx.Auth.TenantID, ctx.Auth.UserID, filter)
+	result, err := h.svc.StartExport(ctx, ctx.Auth.TenantID, auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()), filter)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] start failed,tenant_id:%s,err:%+v", where, ctx.Auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.CreateAuditEvidenceExportResponse](
@@ -78,10 +78,7 @@ func (h *Handler) Download(
 	req *attunev1.DownloadAuditEvidenceExportRequest,
 ) (dispatcher.Result[*httpbody.HttpBody], error) {
 	const where = "console.auditevidence.Download"
-	actor := auditlogsvc.Actor{
-		Type: "admin",
-		ID:   ctx.Auth.UserID,
-	}
+	actor := auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request())
 	bundle, err := h.svc.Download(ctx, ctx.Auth.TenantID, req.GetJobId(), actor)
 	if err != nil {
 		return dispatcher.Result[*httpbody.HttpBody]{}, mapError(err)

@@ -9,6 +9,120 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Public management APIs and SDK coverage for audit/GDPR/outbox/MCP governance (#168).**
+  Scoped API-key routes now expose selected admin operations under canonical
+  `/v1/...` paths, with matching Node and Go SDK methods.
+  - New public API-key management routes for audit-log query, GDPR job control,
+    outbox visibility/retry, and MCP OAuth client governance, all reusing the
+    existing console handlers.
+  - New `mcpclient:admin` scope for MCP client governance, kept separate from
+    runtime `mcp:*` tool scopes and excluded from the `full_access` preset.
+  - Newly exposed management routes require explicit scopes, so legacy keys
+    without a scopes list do not silently gain access.
+  - Node and Go SDKs now cover the selected audit/GDPR/outbox/MCP management
+    surfaces alongside the existing tags/workflow APIs.
+
+### Fixed
+
+- **Production hardening for GDPR exports and console session reads (#168).**
+  - GDPR exports no longer auto-download as soon as a job completes; operators
+    must explicitly download sensitive ZIP archives from the status card or the
+    request center, and previously ready/downloaded exports now keep a visible
+    download action after page reload. Newly completed exports also refresh the
+    request center automatically so operators immediately see the ready state
+    without a manual page refresh.
+  - `GET /fb/v1/console/me` and the legacy admin gate now treat canceled or
+    timed-out requests as client aborts / timeouts instead of logging them as
+    internal `500` errors.
+  - OIDC `/me` no longer clears a valid session when the user lookup fails for
+    an internal repository error; only a real `oidc user not found` condition
+    invalidates the session.
+  - The public API-key MCP client governance routes now emit the published
+    proto/OpenAPI wire contract (lowerCamelCase protojson plus standard
+    `ErrorResponse` codes) instead of the Console-only snake_case payloads, so
+    Node SDK callers see the documented field names on `/v1/mcp/clients/...`
+    responses and both SDKs receive canonical public error codes.
+  - The Node SDK now treats successful `204 No Content` management responses as
+    valid empty results, so MCP revoke routes no longer fail with a client-side
+    JSON parse error during real publish-artifact usage, while still rejecting
+    empty non-`204` success bodies so a broken `200/202` response cannot be
+    silently mistaken for a valid typed payload.
+  - Async GDPR export/delete workers and audit-evidence export jobs now persist
+    and replay the original actor type alongside `created_by`, and the
+    audit-evidence create/download path now respects non-admin session types, so
+    machine, OIDC, and admin initiated compliance operations no longer collapse
+    to `actor_type=admin` after leaving the interactive path.
+  - MCP OAuth client redirect URI validation now rejects hostless or
+    scheme-relative values such as `https:callback`, `https:///callback`, and
+    `//localhost/callback` on both the console and public API-key management
+    routes, closing an edge-case gap where malformed redirect targets could pass
+    the previous scheme-only check.
+  - The Node SDK now rejects ill-typed config, request payloads, request
+    options, and management/query inputs with stable `AttuneError` validation
+    failures before sending any request, so plain JavaScript callers no longer
+    hit raw `TypeError` crashes or accidentally emit malformed bodies, ignore
+    broken or fake `signal`/`options` values, or continue with silently coerced
+    admin inputs.
+  - The Node SDK now also rejects malformed query/options inputs such as
+    `includeArchived: "false"` and `actions: "tag.create"` instead of silently
+    coercing them into wrong query strings or truthy flags, closing another
+    plain-JavaScript edge case where callers could send unintended admin
+    filters without realizing it.
+  - The Node SDK now rejects malformed admin query scalars such as
+    `limit: NaN`, `cursor: {}`, `from: {}`, and `beforeId: 99`, and it also
+    rejects non-string resource ids like `archiveTag(123)` or
+    `getGdprExport(123)` with stable `AttuneError` validation failures instead
+    of leaking raw `TypeError`s or silently stringifying broken values into
+    outbound `/v1/...` requests.
+  - The Node SDK now also rejects nonsensical pagination and outbox numeric
+    values such as `limit: 0`, `limit: -1`, `beforeId: '-99'`,
+    `beforeId: '92233720368547758070'`, and `retryOutboxDelivery('abc')`
+    instead of quietly sending server-side default-amplifying or overflowed
+    `/v1/...` requests.
+  - The public audit-log, GDPR request-list, and outbox list handlers now also
+    reject explicit non-positive `limit` values at the HTTP boundary, and the
+    outbox list handler rejects negative `before_id`, so raw `/v1/...` callers
+    no longer get silent default/clamped pagination from obviously invalid
+    inputs.
+  - GDPR request-list validation now treats `request_type` as the closed
+    `export|delete` set across the Node SDK, Go SDK, and backend service path,
+    and malformed GDPR list cursors now map to `400 BAD_REQUEST` instead of
+    falling through as internal errors.
+  - The Node and Go SDKs now also treat outbox `status` as the closed
+    `pending|delivered|failed|dead` set, trimming and deduping valid entries
+    while rejecting blank / bogus statuses and negative Go `beforeId` /
+    pagination values before they can silently widen a default query.
+  - The Node and Go SDKs now validate MCP client / session / refresh-grant path
+    IDs as UUIDs, matching the published `/v1/mcp/clients/...` contract so
+    callers fail fast locally instead of sending impossible resource IDs over
+    the network.
+  - The Node and Go SDKs now also enforce MCP governance body constraints
+    before sending: create requests require at least one safe redirect URI and
+    only `mcp:read|mcp:write|mcp:ingest` scopes, update requests require the
+    live `legacy_allow_all|allow_list` mode and positive rate limits, and tool
+    policy replacements reject blank / duplicate tool names, invalid effects,
+    and non-positive per-tool rate limits. The SDKs also normalize trimmed
+    governance mode / tool policy values before serialization, keeping the
+    publishable clients aligned with the backend's real replace-semantics
+    contract.
+  - MCP client creation now rejects blank or over-long names at the handler and
+    SDK layers, and MCP client-name uniqueness / check-constraint failures now
+    map to stable `400/409` validation-style responses instead of falling
+    through as raw database-backed `500 INTERNAL` errors on either the console
+    route or the public API-key proto surface.
+  - MCP tool-policy replacement now requires an explicit `policies` field
+    across the console route, public API-key proto route, and both SDKs, so an
+    accidental `{id}` request can no longer be misread as “clear every tool
+    override”; callers must now send `policies: []` intentionally to wipe all
+    overrides.
+  - MCP client governance PATCH requests now treat omitted fields as unchanged
+    instead of silently clearing them, reject empty `{id}`-style updates, and
+    keep Console's explicit JSON `null` semantics for clearing rate limits on
+    the private admin route.
+  - The Go SDK now rejects nil admin request structs client-side instead of
+    silently serializing them to `{}`, and it now rejects empty non-`204`
+    success bodies across SDK calls so a broken `200/202` response cannot be
+    mistaken for a valid zero-value result.
 - **Draft durability and navigation guards for settings editors (#172).**
   localStorage-backed draft persistence with versioned envelope format and
   unsaved-change protection for classification settings and enrichment runtime
@@ -2536,4 +2650,3 @@ authored — wire-stable, never auto-renamed.
 [Unreleased]: https://github.com/Phixsura/attune/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/Phixsura/attune/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Phixsura/attune/releases/tag/v0.1.0
-

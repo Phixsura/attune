@@ -22,7 +22,7 @@ var (
 )
 
 type jobStore interface {
-	CreateJob(ctx context.Context, tenantID, createdBy string, filterJSON json.RawMessage) (*aerepo.ExportJob, error)
+	CreateJob(ctx context.Context, tenantID, createdByType, createdBy string, filterJSON json.RawMessage) (*aerepo.ExportJob, error)
 	GetJob(ctx context.Context, tenantID, jobID string) (*aerepo.ExportJob, error)
 	ClaimNextJob(ctx context.Context, owner string) (*aerepo.ExportJob, error)
 	HeartbeatJob(ctx context.Context, jobID, owner string) (int64, error)
@@ -86,19 +86,19 @@ type StartExportResult struct {
 	Status string
 }
 
-func (s *Service) StartExport(ctx context.Context, tenantID, createdBy string, filter ExportFilter) (*StartExportResult, error) {
+func (s *Service) StartExport(ctx context.Context, tenantID string, actor auditlogsvc.Actor, filter ExportFilter) (*StartExportResult, error) {
 	filterJSON, err := json.Marshal(filter)
 	if err != nil {
 		return nil, err
 	}
-	job, err := s.jobs.CreateJob(ctx, tenantID, createdBy, filterJSON)
+	job, err := s.jobs.CreateJob(ctx, tenantID, actor.Type, actor.ID, filterJSON)
 	if err != nil {
 		return nil, err
 	}
 	if s.audit != nil {
 		_ = s.audit.Record(ctx, auditlogsvc.Event{
 			TenantID:   tenantID,
-			Actor:      auditlogsvc.Actor{Type: "admin", ID: createdBy},
+			Actor:      actor,
 			Action:     "audit_evidence.create",
 			TargetType: "audit_evidence_export",
 			TargetID:   job.ID,

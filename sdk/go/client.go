@@ -169,6 +169,13 @@ func validPathSegment(id string) bool {
 	return id != "" && id != "." && id != ".." && !strings.Contains(id, "/")
 }
 
+func requireRequest[T any](req *T, message string) error {
+	if req == nil {
+		return &AttuneError{Code: CodeBadRequest, Message: message}
+	}
+	return nil
+}
+
 // readCappedBody reads the response body under the 1 MiB cap. It returns a
 // non-nil *attemptError for an over-cap body (INTERNAL) or a mid-stream read
 // failure (retryable NETWORK — a truncated/reset 2xx is a transport problem, not
@@ -207,27 +214,10 @@ func (c *Client) doOnce(parent context.Context, method, path string, payload []b
 		defer cancel()
 	}
 
-	var body io.Reader
-	if payload != nil {
-		body = bytes.NewReader(payload)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	req, err := c.newRequest(ctx, method, path, payload, key)
 	if err != nil {
 		return &attemptError{err: &AttuneError{Code: CodeBadRequest, Message: err.Error(), cause: err}}
 	}
-	// Caller-supplied headers first, then the reserved headers override them so
-	// they can never be spoofed via WithDefaultHeaders.
-	for k, v := range c.defaultHeaders {
-		req.Header.Set(k, v)
-	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("X-API-Key", c.apiKey)
-	if key != "" {
-		req.Header.Set("Idempotency-Key", key)
-	}
-	req.Header.Set("User-Agent", c.userAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -241,15 +231,7 @@ func (c *Client) doOnce(parent context.Context, method, path string, payload []b
 	}
 
 	if resp.StatusCode/100 == 2 {
-		if out != nil && len(data) > 0 {
-			if err := protojsonUnmarshal.Unmarshal(data, out); err != nil {
-				return &attemptError{err: &AttuneError{
-					Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
-					Message: "could not decode response body", cause: err,
-				}}
-			}
-		}
-		return nil
+		return handleSuccessResponse(resp, data, out)
 	}
 
 	var env attunev1.ErrorResponse
@@ -265,6 +247,53 @@ func (c *Client) doOnce(parent context.Context, method, path string, payload []b
 		retryAfter:    ra,
 		hasRetryAfter: hasRA,
 	}
+}
+
+func (c *Client) newRequest(ctx context.Context, method, path string, payload []byte, key string) (*http.Request, error) {
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	// Caller-supplied headers first, then the reserved headers override them so
+	// they can never be spoofed via WithDefaultHeaders.
+	for k, v := range c.defaultHeaders {
+		req.Header.Set(k, v)
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-API-Key", c.apiKey)
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+	return req, nil
+}
+
+func handleSuccessResponse(resp *http.Response, data []byte, out proto.Message) *attemptError {
+	if resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if len(data) == 0 {
+		return &attemptError{err: &AttuneError{
+			Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
+			Message: "empty response body for non-204 success response",
+		}}
+	}
+	if out == nil {
+		return nil
+	}
+	if err := protojsonUnmarshal.Unmarshal(data, out); err != nil {
+		return &attemptError{err: &AttuneError{
+			Code: CodeInternal, Status: resp.StatusCode, Headers: resp.Header,
+			Message: "could not decode response body", cause: err,
+		}}
+	}
+	return nil
 }
 
 // classifyTransport turns a transport-level error into an attemptError. A

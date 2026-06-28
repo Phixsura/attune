@@ -10,6 +10,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	"github.com/Phixsura/attune/internal/repo/oidcuser"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
@@ -30,6 +31,8 @@ func (h *MeHandler) Me(ctx *dispatcher.RequestContext[*session.AuthCtx], _ *attu
 	if h.admins != nil {
 		if a, err := h.admins.GetByID(ctx, auth.UserID); err == nil {
 			return h.meAdmin(ctx, a, auth.TenantID)
+		} else if dispatcher.IsRequestContextError(err) {
+			return dispatcher.Result[*attunev1.GetMeResponse]{}, err
 		} else if !errors.Is(err, admin.ErrNotFound) {
 			logext.Errorf(ctx, "[%s] admins.GetByID failed,user_id:%s,err:%+v",
 				where, auth.UserID, err.Error())
@@ -67,6 +70,8 @@ func (h *MeHandler) meAdmin(ctx *dispatcher.RequestContext[*session.AuthCtx], a 
 				Locale:   row.Locale,
 				Timezone: row.Timezone,
 			})
+		} else if dispatcher.IsRequestContextError(err) {
+			return dispatcher.Result[*attunev1.GetMeResponse]{}, err
 		} else {
 			logext.Warnf(ctx, "[%s] tenant load failed,tenant_id:%s,err:%+v", where, tenantID, err.Error())
 		}
@@ -102,6 +107,14 @@ func (h *MeHandler) meOIDCUser(ctx *dispatcher.RequestContext[*session.AuthCtx],
 
 	user, err := h.oidcUsers.GetByID(ctx, userID)
 	if err != nil {
+		if dispatcher.IsRequestContextError(err) {
+			return dispatcher.Result[*attunev1.GetMeResponse]{}, err
+		}
+		if !errors.Is(err, oidcuser.ErrNotFound) {
+			logext.Errorf(ctx, "[%s] oidc user lookup failed,user_id:%s,err:%s", where, userID, err.Error())
+			return dispatcher.Fail[*attunev1.GetMeResponse](
+				http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to load OIDC user")
+		}
 		logext.Warnf(ctx, "[%s] oidc user not found,user_id:%s,err:%s", where, userID, err.Error())
 		h.signer.ClearSessionCookie(ctx)
 		return dispatcher.Fail[*attunev1.GetMeResponse](
@@ -125,6 +138,8 @@ func (h *MeHandler) meOIDCUser(ctx *dispatcher.RequestContext[*session.AuthCtx],
 				Locale:   row.Locale,
 				Timezone: row.Timezone,
 			})
+		} else if dispatcher.IsRequestContextError(err) {
+			return dispatcher.Result[*attunev1.GetMeResponse]{}, err
 		}
 	}
 
@@ -150,6 +165,9 @@ func (h *MeHandler) meTenantUser(ctx *dispatcher.RequestContext[*session.AuthCtx
 	const where = "console.MeHandler.meTenantUser"
 	user, err := h.users.GetByID(ctx, userID)
 	if err != nil {
+		if dispatcher.IsRequestContextError(err) {
+			return dispatcher.Result[*attunev1.GetMeResponse]{}, err
+		}
 		if errors.Is(err, tenant.ErrTenantUserNotFound) {
 			logext.Warnf(ctx, "[%s] reject: user gone,user_id:%s", where, userID)
 			h.signer.ClearSessionCookie(ctx)
@@ -163,6 +181,9 @@ func (h *MeHandler) meTenantUser(ctx *dispatcher.RequestContext[*session.AuthCtx
 	}
 	tenantRow, err := h.tenants.GetByID(ctx, tenantID)
 	if err != nil {
+		if dispatcher.IsRequestContextError(err) {
+			return dispatcher.Result[*attunev1.GetMeResponse]{}, err
+		}
 		logext.Errorf(ctx, "[%s] tenants.GetByID failed,tenant_id:%s,err:%+v",
 			where, tenantID, err.Error())
 		return dispatcher.Fail[*attunev1.GetMeResponse](

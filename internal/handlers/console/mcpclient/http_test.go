@@ -77,6 +77,175 @@ func TestHandlerServeCreateRejectsInvalidJSON(t *testing.T) {
 	require.Contains(t, resp["message"], "body")
 }
 
+func TestHandlerServeCreateRejectsInvalidName(t *testing.T) {
+	t.Parallel()
+
+	handler := mcpclient.NewHandler(nil, nil, nil, nil)
+	req := authRequest(
+		http.MethodPost,
+		"/",
+		bytes.NewBufferString(`{"name":"   ","redirect_uris":["https://example.com/callback"],"scopes":["mcp:read"]}`),
+	)
+	rec := httptest.NewRecorder()
+
+	handler.ServeCreate(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "validation_error", resp["code"])
+	require.Contains(t, resp["message"], "name is required")
+}
+
+func TestHandlerServeCreateMapsNameConflictTo409(t *testing.T) {
+	t.Parallel()
+
+	handler := mcpclient.NewHandler(
+		ptrext.Of(fakeClientStore{createErr: mcprepo.ErrClientNameConflict}),
+		nil,
+		nil,
+		nil,
+	)
+	req := authRequest(
+		http.MethodPost,
+		"/",
+		bytes.NewBufferString(`{"name":"agent","redirect_uris":["https://example.com/callback"],"scopes":["mcp:read"]}`),
+	)
+	rec := httptest.NewRecorder()
+
+	handler.ServeCreate(rec, req)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "conflict", resp["code"])
+	require.Equal(t, "client name already exists", resp["message"])
+}
+
+func TestHandlerServeReplaceToolPoliciesRequiresExplicitPoliciesField(t *testing.T) {
+	t.Parallel()
+
+	clientID := uuid.New()
+	handler := mcpclient.NewHandler(
+		ptrext.Of(fakeClientStore{client: mcprepo.Client{
+			ID:             clientID,
+			TenantID:       "tenant-1",
+			Name:           "agent",
+			RedirectURIs:   []string{"https://example.com/callback"},
+			Scopes:         []string{domain.MCPScopeRead},
+			ToolPolicyMode: domain.MCPToolPolicyModeLegacyAllowAll,
+			CreatedAt:      time.Now(),
+			CreatedBy:      "admin",
+		}}),
+		nil,
+		nil,
+		ptrext.Of(fakeToolPolicyStore{}),
+	)
+	req := routeRequest(
+		authRequest(http.MethodPut, "/", bytes.NewBufferString(`{}`)),
+		map[string]string{"id": clientID.String()},
+	)
+	rec := httptest.NewRecorder()
+
+	handler.ServeReplaceToolPolicies(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "validation_error", resp["code"])
+	require.Contains(t, resp["message"], "use [] to clear all tool policies")
+}
+
+func TestHandlerServeUpdateRequiresAtLeastOneField(t *testing.T) {
+	t.Parallel()
+
+	clientID := uuid.New()
+	handler := mcpclient.NewHandler(
+		ptrext.Of(fakeClientStore{client: mcprepo.Client{
+			ID:             clientID,
+			TenantID:       "tenant-1",
+			Name:           "agent",
+			RedirectURIs:   []string{"https://example.com/callback"},
+			Scopes:         []string{domain.MCPScopeRead},
+			ToolPolicyMode: domain.MCPToolPolicyModeLegacyAllowAll,
+			CreatedAt:      time.Now(),
+			CreatedBy:      "admin",
+		}}),
+		nil,
+		nil,
+		nil,
+	)
+	req := routeRequest(
+		authRequest(http.MethodPatch, "/", bytes.NewBufferString(`{}`)),
+		map[string]string{"id": clientID.String()},
+	)
+	rec := httptest.NewRecorder()
+
+	handler.ServeUpdate(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var resp map[string]string
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "validation_error", resp["code"])
+	require.Contains(t, resp["message"], "at least one of tool_policy_mode, rate_limit_rpm, or rate_limit_burst is required")
+}
+
+func TestHandlerServeUpdatePreservesOmittedFieldsAndClearsExplicitNulls(t *testing.T) {
+	t.Parallel()
+
+	clientID := uuid.New()
+	existingRPM := 30
+	existingBurst := 7
+	clients := ptrext.Of(fakeClientStore{client: mcprepo.Client{
+		ID:             clientID,
+		TenantID:       "tenant-1",
+		Name:           "agent",
+		RedirectURIs:   []string{"https://example.com/callback"},
+		Scopes:         []string{domain.MCPScopeRead},
+		ToolPolicyMode: domain.MCPToolPolicyModeLegacyAllowAll,
+		RateLimitRPM:   ptrext.Of(existingRPM),
+		RateLimitBurst: ptrext.Of(existingBurst),
+		CreatedAt:      time.Now(),
+		CreatedBy:      "admin",
+	}})
+	handler := mcpclient.NewHandler(clients, nil, nil, nil)
+
+	t.Run("omitted fields stay unchanged", func(t *testing.T) {
+		req := routeRequest(
+			authRequest(http.MethodPatch, "/", bytes.NewBufferString(`{"rate_limit_rpm":45}`)),
+			map[string]string{"id": clientID.String()},
+		)
+		rec := httptest.NewRecorder()
+
+		handler.ServeUpdate(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, domain.MCPToolPolicyModeLegacyAllowAll, clients.client.ToolPolicyMode)
+		require.Equal(t, 45, ptrext.IndirectOr(clients.client.RateLimitRPM, 0))
+		require.NotNil(t, clients.client.RateLimitBurst)
+		require.Equal(t, existingBurst, ptrext.IndirectOr(clients.client.RateLimitBurst, 0))
+	})
+
+	t.Run("explicit null clears a limit", func(t *testing.T) {
+		req := routeRequest(
+			authRequest(http.MethodPatch, "/", bytes.NewBufferString(`{"rate_limit_rpm":null}`)),
+			map[string]string{"id": clientID.String()},
+		)
+		rec := httptest.NewRecorder()
+
+		handler.ServeUpdate(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Nil(t, clients.client.RateLimitRPM)
+		require.NotNil(t, clients.client.RateLimitBurst)
+		require.Equal(t, existingBurst, ptrext.IndirectOr(clients.client.RateLimitBurst, 0))
+	})
+}
+
 func TestHandlerServeRevokeCascadesClientRevocation(t *testing.T) {
 	t.Parallel()
 
