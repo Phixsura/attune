@@ -3,8 +3,9 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/Phixsura/attune/sdk/go.svg)](https://pkg.go.dev/github.com/Phixsura/attune/sdk/go)
 
 The official Go client for the [attune](https://github.com/Phixsura/attune)
-ingest and tenant management APIs. Submit feedback from a Go service without
-hand-rolling HTTP, retries, or idempotency. The request/response types are **generated from the proto
+ingest and tenant management APIs. Submit feedback and automate tenant
+operations from a Go service without hand-rolling HTTP, retries, or
+idempotency. The request/response types are **generated from the proto
 contract** (`proto/attune/v1`) and marshaled with `protojson`, so the wire shape
 is single-sourced from proto, never hand-maintained.
 
@@ -58,6 +59,10 @@ func main() {
 
 The API key needs the `ingest:write` scope. A `*Client` is safe for concurrent
 use — create one and share it across goroutines.
+
+`attune.New(baseURL, apiKey, ...)` expects `baseURL` to be an `http://` or
+`https://` origin (optionally with a path prefix), but it must not include
+embedded credentials, a query string, or a fragment.
 
 ## Request & response
 
@@ -131,7 +136,11 @@ errors), `RequestID`, `Headers` (response headers, `nil` for transport errors).
   generation never fails.
 - **Security.** The client never follows 3xx redirects (so the `X-API-Key`
   header can't leak to a redirect target), rejects CR/LF in the API key and
-  idempotency key, and reads the response body under a 1 MiB cap.
+  idempotency key, pins the public API contract with
+  `X-Attune-Api-Version: 2026-06-28`, and reads the response body under a 1 MiB
+  cap. That redirect guard still applies when you inject your own
+  `*http.Client`; the SDK enforces it on an internal copy and does not mutate
+  your original client object.
 - **Concurrency.** `*Client` is immutable after `New` and safe to share across
   goroutines.
 
@@ -141,11 +150,11 @@ Construction (`attune.New(baseURL, apiKey, opts...)`):
 
 | Option | Default | Purpose |
 |---|---|---|
-| `WithHTTPClient(*http.Client)` | internal client | bring your own transport (e.g. `otelhttp`) |
+| `WithHTTPClient(*http.Client)` | internal client | bring your own transport (e.g. `otelhttp`); redirect-following is still disabled on the SDK's internal copy |
 | `WithMaxRetries(int)` | `2` | max retries for transient failures (negative → 0) |
 | `WithTimeout(time.Duration)` | `30s` | per-attempt request timeout (`≤0` disables) |
 | `WithUserAgentSuffix(string)` | — | append a token to the `User-Agent` |
-| `WithDefaultHeaders(map[string]string)` | — | extra headers on every request (reserved headers always win) |
+| `WithDefaultHeaders(map[string]string)` | — | extra headers on every request (reserved headers like `X-API-Key`, `User-Agent`, and `X-Attune-Api-Version` always win) |
 
 Per call (`c.Ingest(ctx, in, opts...)`):
 
@@ -213,7 +222,10 @@ MCP clients: `ListMCPClients` / `CreateMCPClient` / `GetMCPClient` /
 send the full desired state, not just changed fields. Management `POST`s now
 auto-generate stable idempotency keys, so the same retry policy safely applies
 to machine-safe writes such as tag creation, workflow seeding, GDPR job
-creation, outbox retry, and MCP client provisioning.
+creation, outbox retry, and MCP client provisioning. Binary download helpers
+populate `BinaryResponse.Filename` from `Content-Disposition`, preferring and
+decoding RFC 5987 `filename*=` values when servers send internationalized
+attachment names.
 
 ## Example CLI
 

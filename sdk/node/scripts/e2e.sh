@@ -14,11 +14,15 @@ set -euo pipefail
 
 SDK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$SDK_DIR/../.." && pwd)"
+PICK_FREE_PORT="$REPO_ROOT/scripts/pick-free-port.mjs"
 
 CONTAINER="attune-sdk-e2e-$$"
-DB_PORT=55444
-SRV_PORT=8097
-WEBHOOK_PORT=18097
+DB_PORT="$(node "$PICK_FREE_PORT" random)"
+SRV_PORT="$(node "$PICK_FREE_PORT" random "$DB_PORT")"
+WEBHOOK_PORT="$(node "$PICK_FREE_PORT" random "$DB_PORT" "$SRV_PORT")"
+BROWSER_ALLOWED_PORT="$(node "$PICK_FREE_PORT" random "$DB_PORT" "$SRV_PORT" "$WEBHOOK_PORT")"
+BROWSER_BLOCKED_PORT="$(node "$PICK_FREE_PORT" random "$DB_PORT" "$SRV_PORT" "$WEBHOOK_PORT" "$BROWSER_ALLOWED_PORT")"
+BROWSER_ALLOWED_ORIGIN="http://127.0.0.1:${BROWSER_ALLOWED_PORT}"
 BASE_URL="http://127.0.0.1:${SRV_PORT}"
 MARKER="sdk-e2e-$$"
 WORK="$(mktemp -d)"
@@ -80,6 +84,9 @@ security:
   allow_loopback_egress: true
 audit_evidence:
   signing_key: "${AUDIT_SIGNING_KEY}"
+ingest:
+  cors_allowed_origins:
+    - "${BROWSER_ALLOWED_ORIGIN}"
 secrets:
   tink_keyset: |
     ${KEYSET}
@@ -483,6 +490,37 @@ new Client({ baseURL: process.env.B, apiKey: process.env.K })
 JS
 B="$BASE_URL" K="$KEY" MARK="$MARKER" AUDIT_ZIP="$CONSUMER/audit-evidence.zip" GDPR_ZIP="$CONSUMER/gdpr-export.zip" OUTBOX_DELIVERY_ID="$CONSUMER/outbox-delivery-id.txt" node "$CONSUMER/esm.mjs"
 B="$BASE_URL" K="$KEY" MARK="$MARKER" node "$CONSUMER/cjs.cjs"
+
+log "verify the packed artifact from a real browser across allowed + blocked origins"
+(
+  cd "$SDK_DIR"
+  ATTUNE_BROWSER_E2E_CONSUMER_DIR="$CONSUMER" \
+    ATTUNE_BROWSER_E2E_BASE_URL="$BASE_URL" \
+    ATTUNE_BROWSER_E2E_API_KEY="$RKEY" \
+    ATTUNE_BROWSER_E2E_MARKER="$MARKER" \
+    ATTUNE_BROWSER_E2E_ALLOWED_PORT="$BROWSER_ALLOWED_PORT" \
+    ATTUNE_BROWSER_E2E_BLOCKED_PORT="$BROWSER_BLOCKED_PORT" \
+    node scripts/browser-smoke.mjs
+)
+
+log "verify browser ingest persisted only from the allowlisted origin"
+BROWSER_ALLOWED_ROWS="$(docker exec "$CONTAINER" psql -U attune -d attune -tAc \
+  "select count(*) from user_feedback where content = '${MARKER} browser-allowed';")"
+echo "  rows for allowlisted browser origin: ${BROWSER_ALLOWED_ROWS}"
+[ "$BROWSER_ALLOWED_ROWS" = "1" ] || {
+  echo "expected exactly 1 allowlisted browser row, got ${BROWSER_ALLOWED_ROWS}"; exit 1;
+}
+docker exec "$CONTAINER" psql -U attune -d attune -tAc \
+  "select source, page_url from user_feedback where content = '${MARKER} browser-allowed';" \
+  | tee "$WORK/browser-allowed.txt"
+grep -q "^web|${BROWSER_ALLOWED_ORIGIN}/browser-smoke.html$" "$WORK/browser-allowed.txt" \
+  || { echo "browser allowlisted row missing expected source/page_url"; exit 1; }
+BROWSER_BLOCKED_ROWS="$(docker exec "$CONTAINER" psql -U attune -d attune -tAc \
+  "select count(*) from user_feedback where content = '${MARKER} browser-blocked';")"
+echo "  rows for blocked browser origin: ${BROWSER_BLOCKED_ROWS}"
+[ "$BROWSER_BLOCKED_ROWS" = "0" ] || {
+  echo "expected 0 rows from blocked browser origin, got ${BROWSER_BLOCKED_ROWS}"; exit 1;
+}
 
 log "verify downloaded audit evidence and GDPR bundles like a real operator"
 "$BIN" audit verify-export --public-key "$AUDIT_PUBLIC_KEY" "$CONSUMER/audit-evidence.zip"

@@ -135,6 +135,19 @@ audit:
   prune_interval: 1h
 ```
 
+If you embed a browser widget from a different origin, allow only those exact
+origins on the publishable ingest route:
+
+```yaml
+ingest:
+  cors_allowed_origins:
+    - "https://app.example.com"
+```
+
+This enables first-party CORS only for `POST /v1/feedback/ingest`. Leave it
+empty if your widget is same-origin or if CORS is terminated at a reverse
+proxy.
+
 - `audit.retention_days` defines how long immutable Console audit rows are kept.
 - `audit.prune_interval` controls how often the background pruner removes expired rows.
 - CSV audit exports contain actor metadata and sanitized before/after payloads; treat them like internal security records and avoid sharing them through public channels.

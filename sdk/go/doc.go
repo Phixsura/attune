@@ -30,9 +30,10 @@
 // key with [WithIdempotencyKey].
 //
 // The client never follows 3xx redirects (so the X-API-Key header can't leak to
-// a redirect target), rejects CR/LF in the key and idempotency key, and reads the
-// response body under a 1 MiB cap. A *[Client] is immutable after [New] and safe
-// for concurrent use across goroutines.
+// a redirect target), pins the current public API contract with the
+// X-Attune-Api-Version header, rejects CR/LF in the key and idempotency key,
+// and reads the response body under a 1 MiB cap. A *[Client] is immutable after
+// [New] and safe for concurrent use across goroutines.
 //
 // # Errors
 //

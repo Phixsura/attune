@@ -309,7 +309,12 @@ Add `Client` methods and index exports for:
 
 Node already has the generated proto types for most of these surfaces under
 `sdk/node/src/proto/attune/v1/`; the missing work is the client surface,
-exports, docs, and tests.
+exports, docs, and tests. Binary download helpers should surface
+`BinaryResponse.filename` from `Content-Disposition`, preferring RFC 5987
+`filename*=` values for internationalized names while still honoring quoted
+plain `filename="..."` fallbacks, and the existing 1 MiB response cap must
+continue to hold even when a custom or polyfilled `fetch` falls back to
+non-stream `arrayBuffer()` / `text()` reads.
 
 #### Go
 
@@ -443,6 +448,8 @@ evidence exists:
 - `make proto`
 - `go test ./sdk/go/...`
 - `pnpm --dir sdk/node test`
+- focused Node unit coverage for binary `Content-Disposition filename*=`
+  handling and non-stream response-cap fallbacks
 - focused Go handler tests for each new API-key route group
 - real-server e2e covering at least one happy-path and one scope-denied case for
   each of: audit, GDPR, outbox, and MCP governance

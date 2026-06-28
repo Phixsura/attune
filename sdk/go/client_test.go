@@ -3,6 +3,7 @@ package attune
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -46,6 +47,18 @@ func TestNewValidation(t *testing.T) {
 	if _, err := New("ftp://x.example", "k"); err == nil {
 		t.Error("non-http(s) scheme should error")
 	}
+	if _, err := New("https://user:pass@x.example", "k"); err == nil {
+		t.Error("baseURL with credentials should error")
+	}
+	if _, err := New("https://x.example:99999", "k"); err == nil {
+		t.Error("baseURL with invalid port should error")
+	}
+	if _, err := New("https://x.example?q=1", "k"); err == nil {
+		t.Error("baseURL with query should error")
+	}
+	if _, err := New("https://x.example#frag", "k"); err == nil {
+		t.Error("baseURL with fragment should error")
+	}
 	if _, err := New("https://x.example", "k"); err != nil {
 		t.Errorf("valid args should not error: %v", err)
 	}
@@ -83,6 +96,9 @@ func TestIngestHappyPath(t *testing.T) {
 	}
 	if ua := gotReq.Header.Get("User-Agent"); !strings.HasPrefix(ua, "attune-go/"+Version+" go/") {
 		t.Errorf("User-Agent = %q, want prefix attune-go/%s go/", ua, Version)
+	}
+	if got := gotReq.Header.Get(apiVersionHeader); got != apiVersion {
+		t.Errorf("%s = %q, want %q", apiVersionHeader, got, apiVersion)
 	}
 	if k := gotReq.Header.Get("Idempotency-Key"); !serverKeyShape.MatchString(k) {
 		t.Errorf("Idempotency-Key %q does not match server shape", k)
@@ -311,10 +327,11 @@ func TestWithDefaultHeaders(t *testing.T) {
 	defer srv.Close()
 
 	c, _ := newTestClient(t, srv, WithDefaultHeaders(map[string]string{
-		"X-Trace-Id":   "trace-123",
-		"X-API-Key":    "attacker-override", // reserved header: must NOT win
-		"content-type": "text/evil",         // case-variant reserved: must NOT win either
-		"USER-AGENT":   "spoofed",
+		"X-Trace-Id":           "trace-123",
+		"X-API-Key":            "attacker-override", // reserved header: must NOT win
+		"content-type":         "text/evil",         // case-variant reserved: must NOT win either
+		"USER-AGENT":           "spoofed",
+		"x-attune-api-version": "1900-01-01",
 	}))
 	if _, err := c.Ingest(context.Background(), IngestInput{Content: "x"}); err != nil {
 		t.Fatalf("Ingest: %v", err)
@@ -330,6 +347,9 @@ func TestWithDefaultHeaders(t *testing.T) {
 	}
 	if got.Get("User-Agent") == "spoofed" {
 		t.Errorf("case-variant User-Agent was overridden by defaultHeaders")
+	}
+	if got.Get(apiVersionHeader) != apiVersion {
+		t.Errorf("reserved %s was overridden by defaultHeaders: %q", apiVersionHeader, got.Get(apiVersionHeader))
 	}
 }
 
@@ -392,6 +412,38 @@ func TestWithHTTPClientStillRefusesRedirect(t *testing.T) {
 	}
 }
 
+func TestWithHTTPClientOverridesPermissiveRedirectPolicyOnInternalCopy(t *testing.T) {
+	allowRedirect := func(*http.Request, []*http.Request) error { return nil }
+	hc := &http.Client{CheckRedirect: allowRedirect}
+
+	var targetHit bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHit = true
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "evil", "enrichmentStatus": "pending"})
+	}))
+	defer target.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/v1/feedback/ingest", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "att_sk_test", WithHTTPClient(hc))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c.rand = func() float64 { return 0.5 }
+	c.sleep = func(_ context.Context, _ time.Duration) error { return nil }
+	if _, err := c.Ingest(context.Background(), IngestInput{Content: "x"}); err == nil {
+		t.Fatal("expected error on 3xx with permissive caller-supplied client")
+	}
+	if err := hc.CheckRedirect(nil, nil); err != nil {
+		t.Fatalf("caller client was mutated: CheckRedirect returned %v, want nil", err)
+	}
+	if targetHit {
+		t.Error("redirect followed despite overriding the internal redirect policy")
+	}
+}
+
 func TestIngestDoesNotFollowRedirect(t *testing.T) {
 	var targetHit bool
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -432,6 +484,23 @@ func TestIngestResponseBodyCapped(t *testing.T) {
 	}
 	if !strings.Contains(ae.Message, "cap") {
 		t.Errorf("message = %q, want it to mention the response-size cap", ae.Message)
+	}
+}
+
+func TestReadCappedBody_RejectsOversizedDeclaredContentLengthBeforeReading(t *testing.T) {
+	resp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Header:        make(http.Header),
+		ContentLength: maxResponseBytes + 1,
+		Body:          errReadCloser{err: errors.New("body should not be read")},
+	}
+
+	_, ae := readCappedBody(resp)
+	if ae == nil {
+		t.Fatal("expected oversized content-length error")
+	}
+	if ae.err.Code != CodeInternal {
+		t.Fatalf("code = %s, want %s", ae.err.Code, CodeInternal)
 	}
 }
 
@@ -482,3 +551,11 @@ func TestIngestCallerCancel(t *testing.T) {
 		t.Fatalf("err = %v, want ABORTED", err)
 	}
 }
+
+type errReadCloser struct {
+	err error
+}
+
+func (r errReadCloser) Read([]byte) (int, error) { return 0, r.err }
+
+func (r errReadCloser) Close() error { return nil }

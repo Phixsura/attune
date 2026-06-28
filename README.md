@@ -110,6 +110,18 @@ Repeated delivery is safe: pass an `Idempotency-Key` header (the SDK sends one
 per call) and a replay returns the original id instead of a duplicate row. See
 the [SDK README](sdk/node/README.md) for retries, errors, and browser use.
 
+If you ingest directly from a browser on a different origin, enable first-party
+CORS only for the publishable ingest surface with:
+
+```yaml
+ingest:
+  cors_allowed_origins:
+    - "https://app.example.com"
+```
+
+Only `/v1/feedback/ingest` is intended for browser cross-origin use. Keep
+management APIs server-side.
+
 Attune is config-first: process config is loaded from one private YAML file
 (`--config ./config.yaml`) and env-var overrides are intentionally unsupported.
 LLM provider channels and routes are runtime state managed in Postgres through

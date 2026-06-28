@@ -32,7 +32,8 @@ half. It must reproduce the same behavior, not invent a second one.
 - **Behavioral parity with the Node SDK** on the wire contract: same retryable
   status set, same bounded backoff, same idempotency-key semantics, same
   `code`-based error model, same security posture (no redirect-follow, CRLF
-  guard, bounded response read, versioned `User-Agent`).
+  guard, bounded response read, versioned `User-Agent`), and matching download
+  filename handling for `Content-Disposition` including RFC 5987 `filename*=`.
 - **Wire types generated from the #19 contract** (`proto/attune/v1/ingest.proto`)
   and marshaled with `protojson` — the same codec the server binds with — so the
   SDK cannot drift from the wire format by construction (matches the Node SDK,
@@ -203,9 +204,12 @@ These are copied from the Node SDK's locked contract, re-expressed in Go:
   server-side. Caller can override via `WithIdempotencyKey`. Reject keys with
   CR/LF before sending; the server enforces the `[A-Za-z0-9_-]{8,64}` shape.
 - **Security posture:**
-  - `http.Client.CheckRedirect` returns `http.ErrUseLastResponse` — never follow
-    a 3xx, so a compromised endpoint can't redirect the request and have Go
-    re-send `X-API-Key` to an attacker host. A 3xx surfaces as an `AttuneError`.
+  - `http.Client.CheckRedirect` returns `http.ErrUseLastResponse` on the SDK's
+    internal client copy — even when the caller injects their own
+    `*http.Client` with a permissive redirect policy — so a compromised
+    endpoint can't redirect the request and have Go re-send `X-API-Key` to an
+    attacker host. A 3xx surfaces as an `AttuneError`, and the caller's
+    original client object is not mutated.
   - Response body read under a 1 MiB `io.LimitReader` cap (hostile-server OOM
     guard).
   - `User-Agent: attune-go/<version> go/<goversion>` on every request, so the
@@ -333,9 +337,11 @@ sdk/go/
   network + timeout + ctx-cancel; retry count + backoff sequence (deterministic
   via injected jitter/clock); `Retry-After` (seconds and HTTP-date); idempotency
   key auto-gen, stability across retries, and override; CRLF rejection on
-  apiKey/idempotencyKey; redirect (3xx) surfaced as error, not followed; 1 MiB
-  body cap; `code`-not-`message` error mapping. Table-driven, sharing the Node
-  suite's cases.
+  apiKey/idempotencyKey; redirect (3xx) surfaced as error, not followed,
+  including when the caller injects a permissive `CheckRedirect`; 1 MiB body
+  cap; RFC 5987 `Content-Disposition filename*=` decoding for binary downloads;
+  `code`-not-`message` error mapping. Table-driven, sharing the Node suite's
+  cases.
 - **Examples build** in CI (`sdk-go` job).
 - **e2e** (`scripts/e2e.sh`) against a real server + Postgres — this is the
   acceptance gate, not just unit green: live ingest persists, replay with the

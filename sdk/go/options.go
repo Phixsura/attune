@@ -14,15 +14,17 @@ var reservedHeaders = map[string]bool{
 	"X-Api-Key":       true, // textproto canonical form of X-API-Key
 	"Idempotency-Key": true,
 	"User-Agent":      true,
+	apiVersionHeader:  true,
 }
 
 // Option configures a Client at construction time. Pass options to New.
 type Option func(*Client)
 
 // WithHTTPClient supplies a custom *http.Client (e.g. with an otelhttp transport
-// or proxy settings). If the supplied client has no CheckRedirect set, the SDK
-// installs one that refuses to follow 3xx responses, preserving the guarantee
-// that the X-API-Key header is never re-sent to a redirect target.
+// or proxy settings). The SDK always copies it and installs a redirect policy
+// that refuses 3xx responses, preserving the guarantee that the X-API-Key
+// header is never re-sent to a redirect target without mutating the caller's
+// original client.
 func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Client) { c.httpClient = hc }
 }
@@ -53,9 +55,10 @@ func WithUserAgentSuffix(s string) Option {
 
 // WithDefaultHeaders sets extra headers sent on every request (e.g. a trace or
 // proxy token). The map is copied. The reserved headers Content-Type,
-// X-API-Key, Idempotency-Key, and User-Agent always take precedence and cannot
-// be overridden here — they are dropped (compared canonically, so any casing is
-// caught) so they can never enter the default-header set.
+// X-API-Key, Idempotency-Key, User-Agent, and X-Attune-Api-Version always take
+// precedence and cannot be overridden here — they are dropped (compared
+// canonically, so any casing is caught) so they can never enter the
+// default-header set.
 func WithDefaultHeaders(h map[string]string) Option {
 	return func(c *Client) {
 		if len(h) == 0 {

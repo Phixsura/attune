@@ -4,6 +4,7 @@ import (
 	"context"
 	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -120,12 +121,64 @@ func filenameFromHeader(header string) string {
 	if strings.TrimSpace(header) == "" {
 		return ""
 	}
+	rawStar, hasRawStar := rawDispositionParam(header, "filename*")
+	if hasRawStar {
+		if decoded, ok := decodeContentDispositionFilename(rawStar); ok {
+			return decoded
+		}
+	}
 	_, params, err := mime.ParseMediaType(header)
 	if err != nil {
+		if hasRawStar {
+			return undecodedContentDispositionFilename(rawStar)
+		}
 		return ""
 	}
 	if filename := strings.TrimSpace(params["filename"]); filename != "" {
 		return filename
 	}
-	return strings.TrimSpace(params["filename*"])
+	if decoded, ok := decodeContentDispositionFilename(params["filename*"]); ok {
+		return decoded
+	}
+	if hasRawStar {
+		return undecodedContentDispositionFilename(rawStar)
+	}
+	return undecodedContentDispositionFilename(params["filename*"])
+}
+
+func rawDispositionParam(header, name string) (string, bool) {
+	prefix := strings.ToLower(name) + "="
+	for _, part := range strings.Split(header, ";") {
+		part = strings.TrimSpace(part)
+		if len(part) < len(prefix) || !strings.EqualFold(part[:len(prefix)], prefix) {
+			continue
+		}
+		return strings.TrimSpace(part[len(prefix):]), true
+	}
+	return "", false
+}
+
+func undecodedContentDispositionFilename(raw string) string {
+	raw = strings.Trim(strings.TrimSpace(raw), `"`)
+	if raw == "" {
+		return ""
+	}
+	if first := strings.IndexByte(raw, '\''); first >= 0 {
+		if second := strings.IndexByte(raw[first+1:], '\''); second >= 0 {
+			raw = raw[first+1+second+1:]
+		}
+	}
+	return raw
+}
+
+func decodeContentDispositionFilename(raw string) (string, bool) {
+	raw = undecodedContentDispositionFilename(raw)
+	if raw == "" {
+		return "", false
+	}
+	decoded, err := url.PathUnescape(raw)
+	if err != nil {
+		return "", false
+	}
+	return decoded, true
 }

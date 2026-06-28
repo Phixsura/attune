@@ -1,4 +1,10 @@
-export type { BinaryResponse, ClientOptions, FetchLike, IngestInput, RequestOptions } from './client'
+export type {
+  BinaryResponse,
+  ClientOptions,
+  FetchLike,
+  IngestInput,
+  RequestOptions,
+} from './client'
 export { Client } from './client'
 export type { AttuneErrorInit } from './errors'
 export { AttuneError, TransportErrorCode } from './errors'

@@ -62,13 +62,21 @@ import type {
 import { backoffDelay, isRetryable, parseRetryAfter } from './retry'
 import { VERSION } from './version'
 
-// Versioned client identifier, sent as User-Agent so the server can attribute
-// SDK traffic by version (support, deprecation, abuse triage). Includes the
-// Node version when running on Node; browsers ignore a custom User-Agent.
-const USER_AGENT =
-  typeof process !== 'undefined' && process.versions?.node
-    ? `attune-node/${VERSION} node/${process.versions.node}`
-    : `attune-node/${VERSION}`
+// Versioned client identifier for genuine Node runtimes, sent as User-Agent so
+// the server can attribute SDK traffic by version (support, deprecation, abuse
+// triage). Browsers and worker/edge runtimes forbid or ignore custom
+// User-Agent headers, so web callers rely on the platform UA plus
+// X-Attune-Api-Version.
+function nodeUserAgent(): string | undefined {
+  if (
+    typeof process === 'undefined' ||
+    process.release?.name !== 'node' ||
+    !process.versions?.node
+  ) {
+    return undefined
+  }
+  return `attune-node/${VERSION} node/${process.versions.node}`
+}
 
 /**
  * Caller-facing ingest payload. Derived from the proto-generated
@@ -85,8 +93,9 @@ export interface ClientOptions {
   /** Base URL of the attune deployment, e.g. `https://attune.example.com`. */
   baseURL: string
   /**
-   * API key with the `ingest:write` scope. Sent as the `X-API-Key` header.
-   * `ingest:write` keys are publishable (browser-safe) — see the package README.
+   * API key whose scopes match the routes you call. Sent as the `X-API-Key`
+   * header. `ingest:write` keys are publishable (browser-safe); broader
+   * management keys must stay server-side.
    */
   apiKey: string
   /** Inject a custom `fetch` (older runtimes, tests). Defaults to `globalThis.fetch`. */
@@ -98,7 +107,8 @@ export interface ClientOptions {
   /**
    * Extra headers added to every request (e.g. a proxy token or a trace header).
    * Reserved headers (`content-type`, `X-API-Key`, `Idempotency-Key`,
-   * `User-Agent`) take precedence and cannot be overridden here.
+   * `User-Agent`, `X-Attune-Api-Version`) take precedence and cannot be
+   * overridden here.
    */
   defaultHeaders?: Record<string, string>
   /** @internal Override the inter-attempt sleep (tests). */
@@ -126,6 +136,8 @@ export interface BinaryResponse {
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_RETRIES = 2
 const API_KEY_HEADER = 'X-API-Key'
+const API_VERSION_HEADER = 'X-Attune-Api-Version'
+const API_VERSION = '2026-06-28'
 const MAX_INT32 = 2_147_483_647
 const MAX_INT64_DECIMAL = '9223372036854775807'
 const GDPR_REQUEST_TYPES = new Set(['export', 'delete'])
@@ -139,7 +151,17 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // `Headers` constructor lowercases names and would otherwise *concatenate* a
 // case-variant duplicate (e.g. `content-type` + `Content-Type`) into one
 // malformed header. Keys are stored lowercased for comparison.
-const RESERVED_HEADERS = new Set(['content-type', 'x-api-key', 'idempotency-key', 'user-agent'])
+const RESERVED_HEADERS = new Set([
+  'content-type',
+  'x-api-key',
+  'idempotency-key',
+  'user-agent',
+  'x-attune-api-version',
+])
+
+function shouldSendUserAgentHeader(): boolean {
+  return nodeUserAgent() !== undefined
+}
 
 // A path-segment id must be non-empty and must not be a dot-segment or contain a
 // slash: encodeURIComponent leaves '.' untouched, so `archiveTag('..')` would
@@ -605,7 +627,7 @@ function validatePositiveInt64String(value: unknown, message: string): string | 
 }
 
 /**
- * Client for the attune ingest API.
+ * Client for the attune ingest and tenant management APIs.
  *
  * ```ts
  * const client = new Client({ baseURL, apiKey });
@@ -650,6 +672,18 @@ export class Client {
     // silently sending every request to the wrong host.
     if (!/^https?:\/\/[^/]/i.test(options.baseURL))
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'invalid baseURL' })
+    if (parsedBase.username || parsedBase.password) {
+      throw new AttuneError({
+        code: 'BAD_REQUEST',
+        message: 'baseURL must not include credentials',
+      })
+    }
+    if (parsedBase.search || parsedBase.hash) {
+      throw new AttuneError({
+        code: 'BAD_REQUEST',
+        message: 'baseURL must not include query or fragment',
+      })
+    }
     if (typeof options.apiKey !== 'string') {
       throw new AttuneError({ code: 'BAD_REQUEST', message: 'apiKey must be a string' })
     }
@@ -823,7 +857,10 @@ export class Client {
   }
 
   /** Create a workflow state. */
-  createWorkflowState(req: CreateStateRequest, opts?: RequestOptions): Promise<CreateStateResponse> {
+  createWorkflowState(
+    req: CreateStateRequest,
+    opts?: RequestOptions,
+  ): Promise<CreateStateResponse> {
     const validated = validateObjectRequest(req, 'state request must be an object')
     if (validated instanceof AttuneError) return Promise.reject(validated)
     const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
@@ -1021,7 +1058,10 @@ export class Client {
   // ── GDPR jobs (needs gdpr:read / gdpr:export / gdpr:delete) ──────────────
 
   /** Start a GDPR export job. */
-  exportGdprSubject(req: ExportGdprSubjectRequest, opts?: RequestOptions): Promise<ExportGdprSubjectResponse> {
+  exportGdprSubject(
+    req: ExportGdprSubjectRequest,
+    opts?: RequestOptions,
+  ): Promise<ExportGdprSubjectResponse> {
     const validated = validateObjectRequest(req, 'gdpr export request must be an object')
     if (validated instanceof AttuneError) return Promise.reject(validated)
     const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
@@ -1080,7 +1120,10 @@ export class Client {
   }
 
   /** Start a GDPR delete request for one subject. */
-  deleteGdprSubject(req: DeleteGdprSubjectRequest, opts?: RequestOptions): Promise<DeleteGdprSubjectResponse> {
+  deleteGdprSubject(
+    req: DeleteGdprSubjectRequest,
+    opts?: RequestOptions,
+  ): Promise<DeleteGdprSubjectResponse> {
     const validated = validateObjectRequest(req, 'gdpr delete request must be an object')
     if (validated instanceof AttuneError) return Promise.reject(validated)
     const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
@@ -1274,7 +1317,10 @@ export class Client {
   }
 
   /** Create one MCP OAuth client. */
-  createMCPClient(req: CreateMCPClientRequest, opts?: RequestOptions): Promise<CreateMCPClientResponse> {
+  createMCPClient(
+    req: CreateMCPClientRequest,
+    opts?: RequestOptions,
+  ): Promise<CreateMCPClientResponse> {
     const validated = validateObjectRequest(req, 'mcp client request must be an object')
     if (validated instanceof AttuneError) return Promise.reject(validated)
     const name = validateRequiredMCPClientName(validated.name)
@@ -1680,9 +1726,11 @@ export class Client {
     try {
       const headers: Record<string, string> = {
         ...this.#defaultHeaders,
-        'user-agent': USER_AGENT,
         [API_KEY_HEADER]: this.#apiKey,
+        [API_VERSION_HEADER]: API_VERSION,
       }
+      const userAgent = shouldSendUserAgentHeader() ? nodeUserAgent() : undefined
+      if (userAgent) headers['user-agent'] = userAgent
       if (payload !== undefined) headers['content-type'] = 'application/json'
       if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey
       const response = await this.#fetch(url, {
@@ -1747,9 +1795,11 @@ export class Client {
     try {
       const headers: Record<string, string> = {
         ...this.#defaultHeaders,
-        'user-agent': USER_AGENT,
         [API_KEY_HEADER]: this.#apiKey,
+        [API_VERSION_HEADER]: API_VERSION,
       }
+      const userAgent = shouldSendUserAgentHeader() ? nodeUserAgent() : undefined
+      if (userAgent) headers['user-agent'] = userAgent
       if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey
       const response = await this.#fetch(url, {
         method,
@@ -1804,11 +1854,38 @@ function parseErrorBody(text: string): ErrorResponse | undefined {
 // from OOM-ing the client by streaming an unbounded body.
 const MAX_RESPONSE_BYTES = 1024 * 1024
 
+function contentLengthExceedsCap(headers: Headers): boolean {
+  const raw = headers.get('content-length')
+  if (!raw) return false
+  const length = Number(raw)
+  return Number.isInteger(length) && length > MAX_RESPONSE_BYTES
+}
+
+function oversizedBodyError(status: number): AttuneError {
+  return new AttuneError({
+    code: 'INTERNAL',
+    status,
+    message: `response body exceeds the ${MAX_RESPONSE_BYTES}-byte cap`,
+  })
+}
+
 // Read a response body to text under a hard byte cap. Falls back to
 // response.text() when the body isn't a readable stream (some test doubles).
 async function readCappedText(response: Response): Promise<string> {
+  if (contentLengthExceedsCap(response.headers)) {
+    throw oversizedBodyError(response.status)
+  }
   const body = response.body
-  if (!body || typeof body.getReader !== 'function') return response.text()
+  if (!body || typeof body.getReader !== 'function') {
+    if (typeof response.arrayBuffer === 'function') {
+      return new TextDecoder().decode(await readCappedBytes(response))
+    }
+    const text = await response.text()
+    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
+      throw oversizedBodyError(response.status)
+    }
+    return text
+  }
   const reader = body.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
@@ -1818,11 +1895,7 @@ async function readCappedText(response: Response): Promise<string> {
       if (chunk.value) {
         total += chunk.value.byteLength
         if (total > MAX_RESPONSE_BYTES) {
-          throw new AttuneError({
-            code: 'INTERNAL',
-            status: response.status,
-            message: `response body exceeds the ${MAX_RESPONSE_BYTES}-byte cap`,
-          })
+          throw oversizedBodyError(response.status)
         }
         chunks.push(chunk.value)
       }
@@ -1841,15 +1914,14 @@ async function readCappedText(response: Response): Promise<string> {
 }
 
 async function readCappedBytes(response: Response): Promise<Uint8Array> {
+  if (contentLengthExceedsCap(response.headers)) {
+    throw oversizedBodyError(response.status)
+  }
   const body = response.body
   if (!body || typeof body.getReader !== 'function') {
     const buf = new Uint8Array(await response.arrayBuffer())
     if (buf.byteLength > MAX_RESPONSE_BYTES) {
-      throw new AttuneError({
-        code: 'INTERNAL',
-        status: response.status,
-        message: `response body exceeds the ${MAX_RESPONSE_BYTES}-byte cap`,
-      })
+      throw oversizedBodyError(response.status)
     }
     return buf
   }
@@ -1862,11 +1934,7 @@ async function readCappedBytes(response: Response): Promise<Uint8Array> {
       if (chunk.value) {
         total += chunk.value.byteLength
         if (total > MAX_RESPONSE_BYTES) {
-          throw new AttuneError({
-            code: 'INTERNAL',
-            status: response.status,
-            message: `response body exceeds the ${MAX_RESPONSE_BYTES}-byte cap`,
-          })
+          throw oversizedBodyError(response.status)
         }
         chunks.push(chunk.value)
       }
@@ -1891,21 +1959,130 @@ function hasHeaderControlChar(s: string): boolean {
   return s.includes('\r') || s.includes('\n')
 }
 
+function stripDispositionQuotes(value: string): string {
+  if (value.length < 2 || value[0] !== '"' || value[value.length - 1] !== '"') {
+    return value
+  }
+  let out = ''
+  let escaped = false
+  for (const ch of value.slice(1, -1)) {
+    if (escaped) {
+      out += ch
+      escaped = false
+      continue
+    }
+    if (ch === '\\') {
+      escaped = true
+      continue
+    }
+    out += ch
+  }
+  if (escaped) out += '\\'
+  return out
+}
+
+function splitDispositionParams(header: string): string[] {
+  const parts: string[] = []
+  let start = 0
+  let inQuotes = false
+  let escaped = false
+  for (let i = 0; i < header.length; i++) {
+    const ch = header[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (ch === '\\' && inQuotes) {
+      escaped = true
+      continue
+    }
+    if (ch === '"') {
+      inQuotes = !inQuotes
+      continue
+    }
+    if (ch === ';' && !inQuotes) {
+      parts.push(header.slice(start, i))
+      start = i + 1
+    }
+  }
+  parts.push(header.slice(start))
+  return parts
+}
+
+function rawContentDispositionParam(header: string, name: string): string | undefined {
+  const prefix = `${name.toLowerCase()}=`
+  for (const part of splitDispositionParams(header)) {
+    const trimmed = part.trim()
+    if (trimmed.length < prefix.length) continue
+    if (trimmed.slice(0, prefix.length).toLowerCase() !== prefix) continue
+    return trimmed.slice(prefix.length).trim()
+  }
+  return undefined
+}
+
+function decodeContentDispositionFilename(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined
+  let value = stripDispositionQuotes(raw.trim())
+  if (!value) return undefined
+  const first = value.indexOf("'")
+  if (first >= 0) {
+    const second = value.indexOf("'", first + 1)
+    if (second >= 0) {
+      value = value.slice(second + 1)
+    }
+  }
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return undefined
+  }
+}
+
+function undecodedContentDispositionFilename(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined
+  let value = stripDispositionQuotes(raw.trim())
+  if (!value) return undefined
+  const first = value.indexOf("'")
+  if (first >= 0) {
+    const second = value.indexOf("'", first + 1)
+    if (second >= 0) {
+      value = value.slice(second + 1)
+    }
+  }
+  return value || undefined
+}
+
+function fallbackContentDispositionFilename(headers: Headers): string | undefined {
+  const contentDisposition = headers.get('content-disposition')
+  if (!contentDisposition) return undefined
+  return undecodedContentDispositionFilename(
+    rawContentDispositionParam(contentDisposition, 'filename*'),
+  )
+}
+
+function parsePlainContentDispositionFilename(headers: Headers): string | undefined {
+  const contentDisposition = headers.get('content-disposition')
+  if (!contentDisposition) return undefined
+  const plain = rawContentDispositionParam(contentDisposition, 'filename')
+  if (plain === undefined) return undefined
+  const filename = stripDispositionQuotes(plain.trim())
+  return filename || undefined
+}
+
 function parseContentDispositionFilename(headers: Headers): string | undefined {
   const contentDisposition = headers.get('content-disposition')
   if (!contentDisposition) return undefined
-  const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
-  if (encoded?.[1]) {
-    try {
-      return decodeURIComponent(encoded[1])
-    } catch {
-      return encoded[1]
-    }
+  const encoded = decodeContentDispositionFilename(
+    rawContentDispositionParam(contentDisposition, 'filename*'),
+  )
+  if (encoded) return encoded
+  const plain = parsePlainContentDispositionFilename(headers)
+  if (plain) return plain
+  const fallback = fallbackContentDispositionFilename(headers)
+  if (fallback) {
+    return fallback
   }
-  const quoted = contentDisposition.match(/filename="([^"]+)"/i)
-  if (quoted?.[1]) return quoted[1]
-  const bare = contentDisposition.match(/filename=([^;]+)/i)
-  return bare?.[1]?.trim()
+  return undefined
 }
 
 // A dedup token valid against the server's key format ([A-Za-z0-9_-]{8,64}).

@@ -104,11 +104,13 @@ jobs:
               - 'proto/**'
               - 'buf.gen.yaml'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/sdk-release.yml'
             sdkgo:
               - 'sdk/go/**'
               - 'proto/**'
               - 'buf.gen.sdk-go.yaml'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/sdk-go-release.yml'
 
   # ── Go: integration tier — real Postgres service container ────────────────
   # Gated behind the `integration` build tag so the unit tier (go-checks)

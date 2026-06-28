@@ -2,8 +2,8 @@
 # provenance (a signed SLSA attestation via OIDC). The SDK versions
 # independently from the server image (which uses `v*` tags in release.yml).
 #
-# workflow_dispatch runs a publish dry-run (build + pack, no publish, no token)
-# so the path can be exercised without cutting a tag.
+# workflow_dispatch runs a publish dry-run (including the live e2e gate, but no
+# publish, no token) so the path can be exercised without cutting a tag.
 #
 # Setup required once: an `NPM_TOKEN` repo secret (npm automation token with
 # publish rights to the @phixsura scope), or npm trusted publishing.
@@ -41,6 +41,14 @@ jobs:
         with:
           package_json_file: sdk/node/package.json
 
+      # The SDK release gate boots a real attune server from source in
+      # `pnpm e2e`, so the workflow needs the repo's Go toolchain too. As with
+      # setup-node below, caching stays disabled in publish workflows.
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
       # Caching is intentionally NOT enabled here (no `cache:`): a publish
       # workflow must not restore a potentially poisoned cache into an artifact
       # it then signs and ships. The ignore is for zizmor's conservative default
@@ -65,8 +73,17 @@ jobs:
             exit 1
           fi
 
+      - run: pnpm biome check src test
       - run: pnpm exec tsc --noEmit
       - run: pnpm exec vitest run
+
+      - name: Install Chromium for real-browser SDK e2e
+        run: |
+          playwright_version="$(node -p "require('./package.json').devDependencies['playwright-core']")"
+          npx -y "playwright@${playwright_version}" install --with-deps chromium
+
+      - name: Full live SDK e2e
+        run: pnpm e2e
 
       - name: Select publish strategy
         if: github.event_name == 'push'

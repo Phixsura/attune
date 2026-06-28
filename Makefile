@@ -15,6 +15,7 @@ help: ## List targets.
 
 proto: ## Regenerate Go + TS + OpenAPI from proto/, then lint.
 	buf generate
+	go run ./internal/tools/openapipatch
 	$(MAKE) proto-sdk-go
 	buf lint
 

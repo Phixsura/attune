@@ -4,11 +4,12 @@
 # directly via the Go module proxy. A nested module is versioned with a tag whose
 # prefix is the module subdirectory, so the tag MUST be `sdk/go/vX.Y.Z` and
 # `go get github.com/Phixsura/attune/sdk/go@vX.Y.Z` resolves it. This workflow
-# verifies the tag matches version.go, re-runs the gates, warms the module proxy,
-# and cuts a GitHub Release.
+# verifies the tag matches version.go, re-runs the gates, proves the SDK against
+# a live attune server + Postgres, warms the module proxy, and cuts a GitHub
+# Release.
 #
-# workflow_dispatch runs a dry-run (verify + gates, no Release) so the path can be
-# exercised without cutting a tag.
+# workflow_dispatch runs a dry-run (verify + gates + live e2e, no Release) so
+# the path can be exercised without cutting a tag.
 name: SDK Go Release
 
 on:
@@ -59,6 +60,8 @@ jobs:
       - run: go vet ./...
       - run: go build ./...
       - run: go test -race ./...
+      - name: Full live SDK e2e
+        run: ./scripts/e2e.sh
 
       - name: Warm the Go module proxy
         if: github.event_name == 'push'

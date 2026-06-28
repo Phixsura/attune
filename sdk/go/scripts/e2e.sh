@@ -15,11 +15,12 @@ set -euo pipefail
 
 SDK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$SDK_DIR/../.." && pwd)"
+PICK_FREE_PORT="$REPO_ROOT/scripts/pick-free-port.mjs"
 
 CONTAINER="attune-sdkgo-e2e-$$"
-DB_PORT=55445
-SRV_PORT=8098
-WEBHOOK_PORT=18098
+DB_PORT="$(node "$PICK_FREE_PORT" random)"
+SRV_PORT="$(node "$PICK_FREE_PORT" random "$DB_PORT")"
+WEBHOOK_PORT="$(node "$PICK_FREE_PORT" random "$DB_PORT" "$SRV_PORT")"
 BASE_URL="http://127.0.0.1:${SRV_PORT}"
 MARKER="sdkgo-e2e-$$"
 WORK="$(mktemp -d)"

@@ -479,7 +479,7 @@ func TestExportAuditLogCSV(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotReq = r
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-		w.Header().Set("Content-Disposition", `attachment; filename="audit-log.csv"`)
+		w.Header().Set("Content-Disposition", `attachment; filename="fallback.csv"; filename*=UTF-8''audit-%E6%97%A5%E5%BF%97.csv`)
 		_, _ = io.WriteString(w, "id,action\n1,tag.create\n")
 	}))
 	defer srv.Close()
@@ -492,7 +492,7 @@ func TestExportAuditLogCSV(t *testing.T) {
 	if gotReq.URL.Path != "/v1/audit-log/export.csv" || gotReq.URL.RawQuery != "action=tag.create" {
 		t.Fatalf("request = %s?%s", gotReq.URL.Path, gotReq.URL.RawQuery)
 	}
-	if resp.Filename != "audit-log.csv" || string(resp.Data) != "id,action\n1,tag.create\n" {
+	if resp.Filename != "audit-日志.csv" || string(resp.Data) != "id,action\n1,tag.create\n" {
 		t.Fatalf("response = %+v", resp)
 	}
 }
@@ -681,7 +681,7 @@ func TestDownloadGdprExport(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotReq = r
 		w.Header().Set("Content-Type", "application/zip")
-		w.Header().Set("Content-Disposition", `attachment; filename="gdpr-export.zip"`)
+		w.Header().Set("Content-Disposition", `attachment; filename="fallback.zip"; filename*=UTF-8''gdpr-%E6%8A%A5%E5%91%8A.zip`)
 		_, _ = io.WriteString(w, "zipdata")
 	}))
 	defer srv.Close()
@@ -694,7 +694,7 @@ func TestDownloadGdprExport(t *testing.T) {
 	if gotReq.URL.Path != "/v1/gdpr/exports/job-1/download" {
 		t.Fatalf("path = %s", gotReq.URL.Path)
 	}
-	if resp.Filename != "gdpr-export.zip" || string(resp.Data) != "zipdata" {
+	if resp.Filename != "gdpr-报告.zip" || string(resp.Data) != "zipdata" {
 		t.Fatalf("response = %+v", resp)
 	}
 }

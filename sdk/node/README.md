@@ -47,10 +47,18 @@ new Client({
 })
 ```
 
-Every request carries a versioned `User-Agent` (`attune-node/<version> node/<ver>`)
-so the server can attribute SDK traffic. `defaultHeaders` are added to every
-request; reserved headers (`X-API-Key`, `Idempotency-Key`, `User-Agent`,
-`content-type`) always take precedence and can't be overridden.
+`baseURL` must be an `http://` or `https://` origin (optionally with a path
+prefix), but it must not include embedded credentials, a query string, or a
+fragment.
+
+Node requests carry a versioned `User-Agent`
+(`attune-node/<version> node/<ver>`) so the server can attribute SDK traffic,
+and every runtime also pins attune's current public API contract with
+`X-Attune-Api-Version: 2026-06-28`. Browsers still send the version header, but
+web-platform rules forbid overriding `User-Agent`.
+`defaultHeaders` are added to every request; reserved headers (`X-API-Key`,
+`Idempotency-Key`, `User-Agent`, `X-Attune-Api-Version`, `content-type`)
+always take precedence and can't be overridden.
 
 Per-call cancellation:
 
@@ -194,6 +202,12 @@ deduplicates (`create*`, `seed*`, audit evidence creation, GDPR export/delete/
 cancel/revoke, outbox retry, MCP client creation) also auto-retry with a stable
 per-call `Idempotency-Key`.
 
+Binary download helpers such as `exportAuditLogCSV()`,
+`downloadAuditEvidenceExport()`, and `downloadGdprExport()` return a
+`BinaryResponse` with `contentType`, `data`, and an optional `filename`
+populated from `Content-Disposition`, preferring and decoding RFC 5987
+`filename*=` values when the server sends internationalized attachment names.
+
 ## Browser use & key safety
 
 The SDK runs in the browser with no special flag, so you can ingest directly
@@ -208,6 +222,21 @@ spam ingest, so treat it as low-trust:
 - a tenant-wide ingest **rate limit** caps total ingest volume (note: this is
   per-tenant, shared by all keys — not per-key today);
 - **rotate/revoke** the key if it leaks.
+
+If attune serves the public ingest API directly, set:
+
+```yaml
+ingest:
+  cors_allowed_origins:
+    - "https://app.example.com"
+```
+
+to allow those browser widget origins on `POST /v1/feedback/ingest`.
+
+If you terminate CORS upstream instead, allow the SDK's request headers
+`X-API-Key`, `Idempotency-Key`, and `X-Attune-Api-Version`, and expose
+`X-Attune-Api-Version` on the response so browser callers can inspect the
+effective contract if needed.
 
 Never put a broader-scope key in client-side code.
 
@@ -230,15 +259,19 @@ pnpm install
 pnpm test         # unit tests (the live e2e suite auto-skips)
 pnpm build        # dual ESM/CJS via tsdown
 pnpm e2e          # full e2e: boots Postgres + a real attune server, runs the
-                  # live suite against it, checks persistence, then tears down
+                  # live suite, exercises the packed artifact via ESM/CJS and
+                  # a real browser, checks persistence, then tears down
 ```
 
 `pnpm test:e2e` runs the env-driven live suite (`test/e2e`) against any existing
 deployment: set `ATTUNE_E2E_BASE_URL` and `ATTUNE_E2E_API_KEY` first. `pnpm e2e`
-additionally packs the publishable tarball, installs it into a throwaway project,
-ingests through it via both ESM and CJS, and bundles it for the browser
-(esbuild `platform=browser`, asserting no Node built-ins leak) — so the real
-artifact is exercised, not just the source.
+additionally packs the publishable tarball, installs it into a throwaway
+project, ingests through it via both ESM and CJS, drives a real
+Chromium-family browser against that packed artifact from both an allowlisted
+and a blocked origin, and still bundles it for the browser (esbuild
+`platform=browser`, asserting no Node built-ins leak) — so the real artifact is
+exercised, not just the source. If browser auto-detection misses your local
+install, set `ATTUNE_BROWSER_E2E_EXECUTABLE=/absolute/path/to/browser`.
 
 ## Publishing
 
