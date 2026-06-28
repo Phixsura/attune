@@ -248,9 +248,8 @@ func TestWorkflowMethodsPathsAndMethods(t *testing.T) {
 	}
 }
 
-// TestCreateTagNotRetried: a non-idempotent POST without an idempotency key must
-// not be retried (a retry after a lost response could create a duplicate).
-func TestCreateTagNotRetried(t *testing.T) {
+// Management POSTs auto-generate idempotency keys and are safe to retry.
+func TestCreateTagRetriesWithAutoIdempotency(t *testing.T) {
 	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
@@ -261,8 +260,8 @@ func TestCreateTagNotRetried(t *testing.T) {
 	if _, err := c.CreateTag(context.Background(), &CreateTagRequest{Name: "x"}); err == nil {
 		t.Fatal("expected error")
 	}
-	if hits != 1 {
-		t.Errorf("CreateTag hit the server %d times, want 1 (non-idempotent POST must not retry)", hits)
+	if hits != 3 {
+		t.Errorf("CreateTag hit the server %d times, want 3", hits)
 	}
 }
 
@@ -367,10 +366,7 @@ func TestWorkflowEmptyIDGuards(t *testing.T) {
 	}
 }
 
-// The non-idempotent workflow POSTs must NOT retry on a transient failure — a
-// retry after a lost response could create a duplicate state (same bug class as
-// CreateTag). seed is a POST too and carries no idempotency key, so same rule.
-func TestCreateWorkflowStateNotRetried(t *testing.T) {
+func TestCreateWorkflowStateRetriesWithAutoIdempotency(t *testing.T) {
 	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits++
@@ -381,12 +377,12 @@ func TestCreateWorkflowStateNotRetried(t *testing.T) {
 	if _, err := c.CreateWorkflowState(context.Background(), &CreateStateRequest{Name: "s"}); err == nil {
 		t.Fatal("expected error")
 	}
-	if hits != 1 {
-		t.Errorf("CreateWorkflowState hit the server %d times, want 1", hits)
+	if hits != 3 {
+		t.Errorf("CreateWorkflowState hit the server %d times, want 3", hits)
 	}
 }
 
-func TestSeedWorkflowDefaultsNotRetried(t *testing.T) {
+func TestSeedWorkflowDefaultsRetriesWithAutoIdempotency(t *testing.T) {
 	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits++
@@ -397,8 +393,8 @@ func TestSeedWorkflowDefaultsNotRetried(t *testing.T) {
 	if _, err := c.SeedWorkflowDefaults(context.Background()); err == nil {
 		t.Fatal("expected error")
 	}
-	if hits != 1 {
-		t.Errorf("SeedWorkflowDefaults hit the server %d times, want 1", hits)
+	if hits != 3 {
+		t.Errorf("SeedWorkflowDefaults hit the server %d times, want 3", hits)
 	}
 }
 
@@ -475,6 +471,83 @@ func TestListAuditLogRejectsNegativeLimitBeforeSending(t *testing.T) {
 	}
 	if hits != 0 {
 		t.Fatalf("server hits = %d, want 0", hits)
+	}
+}
+
+func TestExportAuditLogCSV(t *testing.T) {
+	var gotReq *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotReq = r
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="audit-log.csv"`)
+		_, _ = io.WriteString(w, "id,action\n1,tag.create\n")
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+
+	resp, err := c.ExportAuditLogCSV(context.Background(), &ListAuditLogRequest{Action: "tag.create"})
+	if err != nil {
+		t.Fatalf("ExportAuditLogCSV: %v", err)
+	}
+	if gotReq.URL.Path != "/v1/audit-log/export.csv" || gotReq.URL.RawQuery != "action=tag.create" {
+		t.Fatalf("request = %s?%s", gotReq.URL.Path, gotReq.URL.RawQuery)
+	}
+	if resp.Filename != "audit-log.csv" || string(resp.Data) != "id,action\n1,tag.create\n" {
+		t.Fatalf("response = %+v", resp)
+	}
+}
+
+func TestCreateAuditEvidenceExportRetriesWithAutoIdempotency(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		if hits < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jobId":"job-1","status":"queued","retryAfterSeconds":2}`)
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+
+	resp, err := c.CreateAuditEvidenceExport(context.Background(), &CreateAuditEvidenceExportRequest{
+		From: "2026-06-01T00:00:00Z",
+		To:   "2026-06-30T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("CreateAuditEvidenceExport: %v", err)
+	}
+	if hits != 3 || resp.GetJobId() != "job-1" {
+		t.Fatalf("hits=%d resp=%+v", hits, resp)
+	}
+}
+
+func TestAuditLogPager(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		if hits == 1 {
+			_, _ = io.WriteString(w, `{"items":[{"id":"1","action":"tag.create"}],"nextCursor":"c2"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"items":[{"id":"2","action":"tag.archive"}]}`)
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+
+	pager := c.NewAuditLogPager(nil)
+	first, err := pager.NextPage(context.Background())
+	if err != nil || first.GetNextCursor() != "c2" {
+		t.Fatalf("first page err=%v page=%+v", err, first)
+	}
+	second, err := pager.NextPage(context.Background())
+	if err != nil || len(second.GetItems()) != 1 {
+		t.Fatalf("second page err=%v page=%+v", err, second)
+	}
+	if _, err := pager.NextPage(context.Background()); err != io.EOF {
+		t.Fatalf("expected EOF, got %v", err)
 	}
 }
 
@@ -587,7 +660,7 @@ func TestListGdprRequestsRejectsNegativeLimitBeforeSending(t *testing.T) {
 	}
 }
 
-func TestExportGdprSubjectNotRetried(t *testing.T) {
+func TestExportGdprSubjectRetriesWithAutoIdempotency(t *testing.T) {
 	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits++
@@ -598,8 +671,59 @@ func TestExportGdprSubjectNotRetried(t *testing.T) {
 	if _, err := c.ExportGdprSubject(context.Background(), &ExportGdprSubjectRequest{SubjectKey: "user:1"}); err == nil {
 		t.Fatal("expected error")
 	}
-	if hits != 1 {
-		t.Errorf("ExportGdprSubject hit the server %d times, want 1", hits)
+	if hits != 3 {
+		t.Errorf("ExportGdprSubject hit the server %d times, want 3", hits)
+	}
+}
+
+func TestDownloadGdprExport(t *testing.T) {
+	var gotReq *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotReq = r
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", `attachment; filename="gdpr-export.zip"`)
+		_, _ = io.WriteString(w, "zipdata")
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+
+	resp, err := c.DownloadGdprExport(context.Background(), "job-1")
+	if err != nil {
+		t.Fatalf("DownloadGdprExport: %v", err)
+	}
+	if gotReq.URL.Path != "/v1/gdpr/exports/job-1/download" {
+		t.Fatalf("path = %s", gotReq.URL.Path)
+	}
+	if resp.Filename != "gdpr-export.zip" || string(resp.Data) != "zipdata" {
+		t.Fatalf("response = %+v", resp)
+	}
+}
+
+func TestGdprRequestPager(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		if hits == 1 {
+			_, _ = io.WriteString(w, `{"items":[{"requestId":"req-1"}],"nextCursor":"c2"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"items":[{"requestId":"req-2"}]}`)
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+
+	pager := c.NewGdprRequestPager(nil)
+	first, err := pager.NextPage(context.Background())
+	if err != nil || first.GetNextCursor() != "c2" {
+		t.Fatalf("first page err=%v page=%+v", err, first)
+	}
+	second, err := pager.NextPage(context.Background())
+	if err != nil || len(second.GetItems()) != 1 {
+		t.Fatalf("second page err=%v page=%+v", err, second)
+	}
+	if _, err := pager.NextPage(context.Background()); err != io.EOF {
+		t.Fatalf("expected EOF, got %v", err)
 	}
 }
 
@@ -692,6 +816,34 @@ func TestRetryOutboxDeliveryPathAndInvalidID(t *testing.T) {
 	}
 	if gotReq.Method != http.MethodPost || gotReq.URL.Path != "/v1/outbox/1/retry" {
 		t.Errorf("request = %s %s, want POST /v1/outbox/1/retry", gotReq.Method, gotReq.URL.Path)
+	}
+}
+
+func TestOutboxDeliveryPager(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		if hits == 1 {
+			_, _ = io.WriteString(w, `{"deliveries":[{"id":"2"}],"nextBeforeId":"1"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"deliveries":[{"id":"1"}],"nextBeforeId":"0"}`)
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv)
+
+	pager := c.NewOutboxDeliveryPager(nil)
+	first, err := pager.NextPage(context.Background())
+	if err != nil || first.GetNextBeforeId() != 1 {
+		t.Fatalf("first page err=%v page=%+v", err, first)
+	}
+	second, err := pager.NextPage(context.Background())
+	if err != nil || len(second.GetDeliveries()) != 1 {
+		t.Fatalf("second page err=%v page=%+v", err, second)
+	}
+	if _, err := pager.NextPage(context.Background()); err != io.EOF {
+		t.Fatalf("expected EOF, got %v", err)
 	}
 }
 

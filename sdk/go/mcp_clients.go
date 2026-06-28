@@ -40,7 +40,7 @@ func (c *Client) ListMCPClients(ctx context.Context) (*ListMCPClientsResponse, e
 }
 
 // CreateMCPClient creates one MCP OAuth client.
-func (c *Client) CreateMCPClient(ctx context.Context, req *CreateMCPClientRequest) (*CreateMCPClientResponse, error) {
+func (c *Client) CreateMCPClient(ctx context.Context, req *CreateMCPClientRequest, opts ...RequestOption) (*CreateMCPClientResponse, error) {
 	if err := requireRequest(req, "mcp client request must not be nil"); err != nil {
 		return nil, err
 	}
@@ -58,12 +58,16 @@ func (c *Client) CreateMCPClient(ctx context.Context, req *CreateMCPClientReques
 	req.Name = name
 	req.RedirectUris = append([]string(nil), req.GetRedirectUris()...)
 	req.Scopes = scopes
+	key, err := resolveRetryablePOSTKey(opts)
+	if err != nil {
+		return nil, err
+	}
 	payload, err := protojsonMarshal.Marshal(req)
 	if err != nil {
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "invalid request body", cause: err}
 	}
 	var out attunev1.CreateMCPClientResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/mcp/clients", payload, &out, ""); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/mcp/clients", payload, &out, key); err != nil {
 		return nil, err
 	}
 	return &out, nil

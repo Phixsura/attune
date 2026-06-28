@@ -1,7 +1,7 @@
 # @phixsura/attune
 
 Official Node / TypeScript client for the [attune](https://github.com/Phixsura/attune)
-feedback **ingest** API. ESM-first, CommonJS-compatible, zero runtime
+ingest and tenant management APIs. ESM-first, CommonJS-compatible, zero runtime
 dependencies — uses the platform `fetch`. Runs on Node 20+ and modern browsers.
 
 ```bash
@@ -108,14 +108,14 @@ Replaying a key with a different body throws `AttuneError` `IDEMPOTENCY_CONFLICT
 ## Management APIs
 
 Beyond ingest, the client can manage a tenant's **tags**, **workflow
-configuration**, **audit log queries**, **GDPR jobs**, **outbox retries**, and
-**MCP OAuth clients**. These routes need server-only management keys with the
-matching scopes:
+configuration**, **audit log queries and exports**, **GDPR jobs and archive
+downloads**, **outbox retries**, and **MCP OAuth clients**. These routes need
+server-only management keys with the matching scopes:
 
 - `tags:read` / `tags:write`
 - `workflow:read` / `workflow:write`
 - `audit:read`
-- `gdpr:admin`
+- `gdpr:read` / `gdpr:export` / `gdpr:delete`
 - `notify:read` / `notify:write`
 - `mcpclient:admin`
 
@@ -146,10 +146,27 @@ await client.replaceWorkflowTransitions({ transitions })
 
 // Audit log (audit:read)
 const { items } = await client.listAuditLog({ actions: ['tag.create'], limit: 25 })
+const csv = await client.exportAuditLogCSV({ actions: ['tag.create'] })
+const auditJob = await client.createAuditEvidenceExport({
+  from: '2026-06-01T00:00:00Z',
+  to: '2026-06-30T00:00:00Z',
+  actions: ['tag.create'],
+  actorType: '',
+  actorId: '',
+  targetType: '',
+  targetId: '',
+})
+const auditStatus = await client.getAuditEvidenceExport(auditJob.jobId)
+if (auditStatus.downloadPath) {
+  await client.downloadAuditEvidenceExport(auditJob.jobId)
+}
 
-// GDPR jobs (gdpr:admin)
+// GDPR jobs (gdpr:read / gdpr:export / gdpr:delete)
 const exportJob = await client.exportGdprSubject({ subjectKey: 'user:123' })
 const exportStatus = await client.getGdprExport(exportJob.jobId)
+if (exportStatus.downloadPath) {
+  await client.downloadGdprExport(exportJob.jobId)
+}
 await client.revokeGdprExport(exportJob.jobId)
 await client.deleteGdprSubject({ subjectKey: 'user:123' })
 await client.cancelGdprRequest('req_123')
@@ -171,11 +188,11 @@ await client.getMCPClient(created.client!.id)
 ```
 
 `updateTag` / `updateWorkflowState` are **replace-semantics**: send the full
-desired state, not a sparse patch. These methods are idempotent (`GET` / `PUT` /
-`PATCH` / `DELETE`) and so retried on transient failure; `ingest` and the
-non-idempotent `POST`s such as `create*`, `seed*`, `exportGdprSubject`,
-`deleteGdprSubject`, `retryOutboxDelivery`, and `createMCPClient` are not
-retried, to avoid creating a duplicate resource after a lost response.
+desired state, not a sparse patch. `GET` / `PUT` / `PATCH` / `DELETE` are
+retried on transient failure, and management `POST`s that the server now
+deduplicates (`create*`, `seed*`, audit evidence creation, GDPR export/delete/
+cancel/revoke, outbox retry, MCP client creation) also auto-retry with a stable
+per-call `Idempotency-Key`.
 
 ## Browser use & key safety
 

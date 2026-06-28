@@ -127,6 +127,34 @@ func TestGetExportMapsStatus(t *testing.T) {
 	}
 }
 
+func TestGetExportRewritesDownloadPathForAPIKeys(t *testing.T) {
+	t.Parallel()
+
+	h := NewHandler(ptrext.Of(fakeService{
+		getExportResp: ptrext.Of(attunev1.GdprExportStatusResponse{
+			JobId:        "job-123",
+			Status:       attunev1.GdprExportStatus_GDPR_EXPORT_STATUS_COMPLETED,
+			DownloadPath: ptrext.Of("/fb/v1/console/gdpr/exports/job-123/download"),
+		}),
+	}), nil, nil, 0)
+	ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth: ptrext.Of(session.AuthCtx{
+			TenantID: "tenant-1",
+			UserID:   "apikey:1",
+			UserType: "api_key",
+		}),
+	})
+
+	result, err := h.GetExport(ctx, ptrext.Of(attunev1.GetGdprExportRequest{JobId: "job-123"}))
+	if err != nil {
+		t.Fatalf("GetExport err = %v", err)
+	}
+	if got := result.Body.GetDownloadPath(); got != "/v1/gdpr/exports/job-123/download" {
+		t.Fatalf("download_path = %q", got)
+	}
+}
+
 func TestDownloadExportWritesAttachmentResponse(t *testing.T) {
 	t.Parallel()
 

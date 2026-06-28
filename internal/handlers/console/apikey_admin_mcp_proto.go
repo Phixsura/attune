@@ -16,7 +16,7 @@ import (
 	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
 )
 
-func mountAPIKeyMCPClients(g chi.Router, clients *consolemcpclient.Handler) {
+func mountAPIKeyMCPClients(g chi.Router, clients *consolemcpclient.Handler, idem func(http.Handler) http.Handler) {
 	g.Route("/mcp/clients", func(c chi.Router) {
 		c.Use(apikey.RequireExplicitScope(domain.ScopeMCPClientAdmin))
 		c.Get("/", dispatcher.Bind(
@@ -40,7 +40,7 @@ func mountAPIKeyMCPClients(g chi.Router, clients *consolemcpclient.Handler) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		c.Post("/", dispatcher.Bind(
+		c.With(idem).Post("/", dispatcher.Bind(
 			"apikey.mcpclient.Create",
 			dispatcher.JSON(func() *attunev1.CreateMCPClientRequest {
 				return ptrext.Of(attunev1.CreateMCPClientRequest{})

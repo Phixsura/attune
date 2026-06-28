@@ -24,11 +24,14 @@ func TestFullAccessScopes(t *testing.T) {
 		if s == string(domain.ScopeMCPClientAdmin) {
 			t.Error("fullAccessScopes should not include mcpclient:admin")
 		}
+		if s == string(domain.ScopeGDPRAdmin) {
+			t.Error("fullAccessScopes should not include legacy gdpr:admin")
+		}
 	}
 
-	if len(scopes) != len(domain.AllScopes)-2 {
+	if len(scopes) != len(domain.AllScopes)-3 {
 		t.Errorf("fullAccessScopes length = %d, want %d (all scopes minus privileged admin scopes)",
-			len(scopes), len(domain.AllScopes)-2)
+			len(scopes), len(domain.AllScopes)-3)
 	}
 }
 
@@ -48,11 +51,14 @@ func TestGetFullAccessScopes(t *testing.T) {
 		if s == domain.ScopeMCPClientAdmin {
 			t.Error("GetFullAccessScopes should not include mcpclient:admin")
 		}
+		if s == domain.ScopeGDPRAdmin {
+			t.Error("GetFullAccessScopes should not include legacy gdpr:admin")
+		}
 	}
 
-	if len(scopes) != len(domain.AllScopes)-2 {
+	if len(scopes) != len(domain.AllScopes)-3 {
 		t.Errorf("GetFullAccessScopes length = %d, want %d (all scopes minus privileged admin scopes)",
-			len(scopes), len(domain.AllScopes)-2)
+			len(scopes), len(domain.AllScopes)-3)
 	}
 }
 

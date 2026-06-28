@@ -81,6 +81,9 @@ func (h *Handler) GetExport(
 	if err != nil {
 		return dispatcher.Result[*attunev1.GdprExportStatusResponse]{}, mapError(err)
 	}
+	if ctx.Auth.UserType == "api_key" && resp.DownloadPath != nil {
+		resp.DownloadPath = ptrext.Of("/v1/gdpr/exports/" + req.GetJobId() + "/download")
+	}
 	return dispatcher.OK(resp)
 }
 

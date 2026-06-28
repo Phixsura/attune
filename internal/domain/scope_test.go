@@ -76,7 +76,7 @@ func TestScope_String(t *testing.T) {
 }
 
 func TestAllScopes_Count(t *testing.T) {
-	assert.Equal(t, 28, len(AllScopes), "should have 28 scopes")
+	assert.Equal(t, 31, len(AllScopes), "should have 31 scopes")
 }
 
 func TestMCPScopes(t *testing.T) {
@@ -110,5 +110,35 @@ func TestMCPScopes(t *testing.T) {
 		granted := []Scope{ScopeMCPWrite}
 		assert.False(t, HasScope(granted, ScopeMCPClientAdmin))
 		assert.False(t, HasExplicitScope(granted, ScopeMCPClientAdmin))
+	})
+}
+
+func TestGDPRScopes(t *testing.T) {
+	t.Run("granular GDPR scopes are valid", func(t *testing.T) {
+		assert.True(t, ScopeGDPRRead.IsValid())
+		assert.True(t, ScopeGDPRExport.IsValid())
+		assert.True(t, ScopeGDPRDelete.IsValid())
+		assert.True(t, ScopeGDPRAdmin.IsValid())
+	})
+
+	t.Run("gdpr export implies read", func(t *testing.T) {
+		granted := []Scope{ScopeGDPRExport}
+		assert.True(t, HasScope(granted, ScopeGDPRExport))
+		assert.True(t, HasScope(granted, ScopeGDPRRead))
+		assert.False(t, HasScope(granted, ScopeGDPRDelete))
+	})
+
+	t.Run("gdpr delete implies read", func(t *testing.T) {
+		granted := []Scope{ScopeGDPRDelete}
+		assert.True(t, HasScope(granted, ScopeGDPRDelete))
+		assert.True(t, HasScope(granted, ScopeGDPRRead))
+		assert.False(t, HasScope(granted, ScopeGDPRExport))
+	})
+
+	t.Run("gdpr admin implies granular scopes", func(t *testing.T) {
+		granted := []Scope{ScopeGDPRAdmin}
+		assert.True(t, HasScope(granted, ScopeGDPRRead))
+		assert.True(t, HasScope(granted, ScopeGDPRExport))
+		assert.True(t, HasScope(granted, ScopeGDPRDelete))
 	})
 }

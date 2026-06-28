@@ -2,6 +2,7 @@ package attune
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -63,13 +64,57 @@ func (c *Client) ListOutboxDeliveries(ctx context.Context, req *ListDeliveriesRe
 }
 
 // RetryOutboxDelivery retries one outbox delivery by id (needs `notify:write`).
-func (c *Client) RetryOutboxDelivery(ctx context.Context, id int64) (*RetryDeliveryResponse, error) {
+func (c *Client) RetryOutboxDelivery(ctx context.Context, id int64, opts ...RequestOption) (*RetryDeliveryResponse, error) {
 	if id <= 0 {
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "delivery id is invalid"}
 	}
+	key, err := resolveRetryablePOSTKey(opts)
+	if err != nil {
+		return nil, err
+	}
 	var out attunev1.RetryDeliveryResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/outbox/"+strconv.FormatInt(id, 10)+"/retry", nil, &out, ""); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/outbox/"+strconv.FormatInt(id, 10)+"/retry", nil, &out, key); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// OutboxDeliveryPager walks outbox pages without manual before_id plumbing.
+type OutboxDeliveryPager struct {
+	client *Client
+	req    *ListDeliveriesRequest
+	done   bool
+}
+
+// NewOutboxDeliveryPager creates a pager for ListOutboxDeliveries.
+func (c *Client) NewOutboxDeliveryPager(req *ListDeliveriesRequest) *OutboxDeliveryPager {
+	return &OutboxDeliveryPager{client: c, req: cloneOutboxDeliveriesRequest(req)}
+}
+
+// NextPage returns the next outbox page, or io.EOF once exhausted.
+func (p *OutboxDeliveryPager) NextPage(ctx context.Context) (*ListDeliveriesResponse, error) {
+	if p.done {
+		return nil, io.EOF
+	}
+	resp, err := p.client.ListOutboxDeliveries(ctx, p.req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.GetNextBeforeId() <= 0 {
+		p.done = true
+	} else {
+		p.req.BeforeId = resp.GetNextBeforeId()
+	}
+	return resp, nil
+}
+
+func cloneOutboxDeliveriesRequest(req *ListDeliveriesRequest) *ListDeliveriesRequest {
+	if req == nil {
+		return &attunev1.ListDeliveriesRequest{}
+	}
+	return &attunev1.ListDeliveriesRequest{
+		Status:   append([]string(nil), req.GetStatus()...),
+		Limit:    req.GetLimit(),
+		BeforeId: req.GetBeforeId(),
+	}
 }

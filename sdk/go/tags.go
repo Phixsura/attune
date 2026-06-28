@@ -33,8 +33,12 @@ func (c *Client) ListTags(ctx context.Context, includeArchived bool) (*ListTagsR
 }
 
 // CreateTag creates a tag (needs `tags:write`).
-func (c *Client) CreateTag(ctx context.Context, req *CreateTagRequest) (*Tag, error) {
+func (c *Client) CreateTag(ctx context.Context, req *CreateTagRequest, opts ...RequestOption) (*Tag, error) {
 	if err := requireRequest(req, "tag request must not be nil"); err != nil {
+		return nil, err
+	}
+	key, err := resolveRetryablePOSTKey(opts)
+	if err != nil {
 		return nil, err
 	}
 	payload, err := protojsonMarshal.Marshal(req)
@@ -42,7 +46,7 @@ func (c *Client) CreateTag(ctx context.Context, req *CreateTagRequest) (*Tag, er
 		return nil, &AttuneError{Code: CodeBadRequest, Message: "invalid request body", cause: err}
 	}
 	var out attunev1.Tag
-	if err := c.do(ctx, http.MethodPost, "/v1/tags", payload, &out, ""); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/tags", payload, &out, key); err != nil {
 		return nil, err
 	}
 	return &out, nil

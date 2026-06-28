@@ -15,12 +15,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - New public API-key management routes for audit-log query, GDPR job control,
     outbox visibility/retry, and MCP OAuth client governance, all reusing the
     existing console handlers.
+  - New public audit/GDPR binary lifecycle routes for `GET /v1/audit-log/export.csv`,
+    audit evidence export/create/download, and `GET /v1/gdpr/exports/{job_id}/download`,
+    with regenerated OpenAPI and proto bindings.
+  - GDPR management is now least-privilege by default: new `gdpr:read`,
+    `gdpr:export`, and `gdpr:delete` scopes split the old `gdpr:admin` umbrella,
+    while a migration backfills the granular scopes onto existing
+    `gdpr:admin` keys for compatibility.
   - New `mcpclient:admin` scope for MCP client governance, kept separate from
     runtime `mcp:*` tool scopes and excluded from the `full_access` preset.
   - Newly exposed management routes require explicit scopes, so legacy keys
     without a scopes list do not silently gain access.
   - Node and Go SDKs now cover the selected audit/GDPR/outbox/MCP management
-    surfaces alongside the existing tags/workflow APIs.
+    surfaces alongside the existing tags/workflow APIs, including binary
+    download helpers plus audit/GDPR/outbox pagination iterators/pagers.
+  - Management `POST` routes that are safe to deduplicate now honor
+    `Idempotency-Key`, and both SDKs auto-generate stable per-call keys so tag,
+    workflow, audit evidence, GDPR, outbox retry, and MCP client create flows
+    can safely retry transient failures.
 
 ### Fixed
 

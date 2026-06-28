@@ -25,7 +25,10 @@ service GdprService {
   }
 
   rpc DownloadGdprExport(DownloadGdprExportRequest) returns (google.api.HttpBody) {
-    option (google.api.http) = {get: "/fb/v1/console/gdpr/exports/{job_id}/download"};
+    option (google.api.http) = {
+      get: "/v1/gdpr/exports/{job_id}/download"
+      additional_bindings {get: "/fb/v1/console/gdpr/exports/{job_id}/download"}
+    };
   }
 
   rpc RevokeGdprExport(RevokeGdprExportRequest) returns (RevokeGdprExportResponse) {

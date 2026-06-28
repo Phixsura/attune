@@ -15,6 +15,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
+	consoleauditevidence "github.com/Phixsura/attune/internal/handlers/console/auditevidence"
 	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
@@ -27,13 +28,16 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	aerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	feedbackauditrepo "github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	feedbacktagrepo "github.com/Phixsura/attune/internal/repo/feedbacktag"
 	gdprrepo "github.com/Phixsura/attune/internal/repo/gdpr"
+	"github.com/Phixsura/attune/internal/repo/idempotency"
 	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
+	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
@@ -114,6 +118,10 @@ func withAPIKeySession(next http.Handler) http.Handler {
 // handlers. Operators cap machine keys by setting rate_limit_rpm.
 func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Verifier, trustedProxyHops int, perKeyLimiter *ratelimit.PerKeyLimiter, opts APIKeyAdminRouteOptions) {
 	audit := auditlogsvc.New(auditlogrepo.New(pool))
+	var idempotencyStore idempotency.Store
+	if pool != nil {
+		idempotencyStore = idempotency.New(pool)
+	}
 
 	tags := consoletag.NewHandler(feedbacktagrepo.New(pool))
 	tags.SetAuditLogger(audit)
@@ -139,6 +147,10 @@ func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Ver
 	outbox := consoleoutbox.NewHandler(outboxrepo.NewOutbox(pool))
 	outbox.SetAuditLogger(audit)
 
+	auditEvidence := consoleauditevidence.NewHandler(
+		auditevidencesvc.New(aerepo.New(pool), audit, audit),
+	)
+
 	mcpClients := consolemcpclient.NewHandler(
 		mcprepo.NewClients(pool),
 		mcprepo.NewTokens(pool),
@@ -152,16 +164,16 @@ func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Ver
 		g.Use(apikey.MiddlewareWithProxies(apiKeys, trustedProxyHops))
 		g.Use(perKeyLimiter.Middleware)
 		g.Use(withAPIKeySession)
-		mountAPIKeyTags(g, tags)
-		mountAPIKeyWorkflow(g, wf)
-		mountAPIKeyAuditLog(g, consoleauditlog.NewHandler(audit))
-		mountAPIKeyGDPR(g, gdpr)
-		mountAPIKeyOutbox(g, outbox)
-		mountAPIKeyMCPClients(g, mcpClients)
+		mountAPIKeyTags(g, tags, withAPIKeyIdempotency(idempotencyStore))
+		mountAPIKeyWorkflow(g, wf, withAPIKeyIdempotency(idempotencyStore))
+		mountAPIKeyAuditLog(g, consoleauditlog.NewHandler(audit), auditEvidence, withAPIKeyIdempotency(idempotencyStore))
+		mountAPIKeyGDPR(g, gdpr, withAPIKeyIdempotency(idempotencyStore))
+		mountAPIKeyOutbox(g, outbox, withAPIKeyIdempotency(idempotencyStore))
+		mountAPIKeyMCPClients(g, mcpClients, withAPIKeyIdempotency(idempotencyStore))
 	})
 }
 
-func mountAPIKeyTags(g chi.Router, tags *consoletag.Handler) {
+func mountAPIKeyTags(g chi.Router, tags *consoletag.Handler, idem func(http.Handler) http.Handler) {
 	g.Route("/tags", func(t chi.Router) {
 		t.With(apikey.RequireScope(domain.ScopeTagsRead)).Get("/", dispatcher.Bind(
 			"apikey.TagHandler.List",
@@ -179,7 +191,7 @@ func mountAPIKeyTags(g chi.Router, tags *consoletag.Handler) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		t.With(apikey.RequireScope(domain.ScopeTagsWrite)).Post("/", dispatcher.Bind(
+		t.With(apikey.RequireScope(domain.ScopeTagsWrite), idem).Post("/", dispatcher.Bind(
 			"apikey.TagHandler.Create",
 			dispatcher.JSON(func() *attunev1.CreateTagRequest { return ptrext.Of(attunev1.CreateTagRequest{}) }),
 			tags.Create,
@@ -213,7 +225,7 @@ func mountAPIKeyTags(g chi.Router, tags *consoletag.Handler) {
 	})
 }
 
-func mountAPIKeyWorkflow(g chi.Router, wf *consoleworkflow.Handler) {
+func mountAPIKeyWorkflow(g chi.Router, wf *consoleworkflow.Handler, idem func(http.Handler) http.Handler) {
 	g.Route("/workflow", func(w chi.Router) {
 		w.With(apikey.RequireScope(domain.ScopeWorkflowRead)).Get("/states", dispatcher.Bind(
 			"apikey.WorkflowHandler.ListStates",
@@ -231,7 +243,7 @@ func mountAPIKeyWorkflow(g chi.Router, wf *consoleworkflow.Handler) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		w.With(apikey.RequireScope(domain.ScopeWorkflowWrite)).Post("/states", dispatcher.Bind(
+		w.With(apikey.RequireScope(domain.ScopeWorkflowWrite), idem).Post("/states", dispatcher.Bind(
 			"apikey.WorkflowHandler.CreateState",
 			dispatcher.JSON(func() *attunev1.CreateStateRequest { return ptrext.Of(attunev1.CreateStateRequest{}) }),
 			wf.CreateState,
@@ -278,7 +290,7 @@ func mountAPIKeyWorkflow(g chi.Router, wf *consoleworkflow.Handler) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		w.With(apikey.RequireScope(domain.ScopeWorkflowWrite)).Post("/seed", dispatcher.Bind(
+		w.With(apikey.RequireScope(domain.ScopeWorkflowWrite), idem).Post("/seed", dispatcher.Bind(
 			"apikey.WorkflowHandler.SeedDefaults",
 			dispatcher.Empty(func() *attunev1.SeedDefaultsRequest { return ptrext.Of(attunev1.SeedDefaultsRequest{}) }),
 			wf.SeedDefaults,

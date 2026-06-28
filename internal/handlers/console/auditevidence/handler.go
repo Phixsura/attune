@@ -70,7 +70,11 @@ func (h *Handler) Get(
 		return dispatcher.Result[*attunev1.GetAuditEvidenceExportResponse]{}, mapError(err)
 	}
 	logext.Infof(ctx, "[%s] ok,tenant_id:%s,job_id:%s,status:%s", where, ctx.Auth.TenantID, job.ID, job.Status)
-	return dispatcher.OK(jobToProto(job))
+	resp := jobToProto(job)
+	if ctx.Auth.UserType == "api_key" && resp.DownloadPath != nil {
+		resp.DownloadPath = ptrext.Of("/v1/audit-log/evidence/" + job.ID + "/download")
+	}
+	return dispatcher.OK(resp)
 }
 
 func (h *Handler) Download(

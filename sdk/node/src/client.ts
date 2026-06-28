@@ -1,5 +1,11 @@
 import { AttuneError, TransportErrorCode } from './errors'
-import type { ListAuditLogRequest, ListAuditLogResponse } from './proto/attune/v1/audit'
+import type {
+  CreateAuditEvidenceExportRequest,
+  CreateAuditEvidenceExportResponse,
+  GetAuditEvidenceExportResponse,
+  ListAuditLogRequest,
+  ListAuditLogResponse,
+} from './proto/attune/v1/audit'
 import type { ErrorResponse } from './proto/attune/v1/common'
 import type {
   CancelGdprRequestResponse,
@@ -9,6 +15,7 @@ import type {
   ExportGdprSubjectResponse,
   GdprExportStatusResponse,
   GdprOperationsResponse,
+  GdprRequestSummary,
   ListGdprRequestsRequest,
   ListGdprRequestsResponse,
   RevokeGdprExportResponse,
@@ -28,7 +35,11 @@ import type {
   UpdateMCPClientRequest,
   UpdateMCPClientResponse,
 } from './proto/attune/v1/mcp_client'
-import type { ListDeliveriesResponse, RetryDeliveryResponse } from './proto/attune/v1/outbox'
+import type {
+  ListDeliveriesResponse,
+  OutboxDelivery,
+  RetryDeliveryResponse,
+} from './proto/attune/v1/outbox'
 import type {
   ArchiveTagResponse,
   CreateTagRequest,
@@ -104,6 +115,12 @@ export interface RequestOptions {
    * ingest idempotent across separate `ingest()` calls.
    */
   idempotencyKey?: string
+}
+
+export interface BinaryResponse {
+  contentType: string
+  data: Uint8Array
+  filename?: string
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -500,6 +517,35 @@ function validateSignalOptions(
   return signal === undefined ? undefined : { signal }
 }
 
+function validateRequestOptions(
+  value: RequestOptions | null | undefined,
+  message: string,
+): RequestOptions | AttuneError | undefined {
+  const validated = validateOptionalOptionsObject(value, message)
+  if (validated instanceof AttuneError) return validated
+  const signal = validateOptionalAbortSignal(validated?.signal, 'signal must be an AbortSignal')
+  if (signal instanceof AttuneError) return signal
+  const idempotencyKey = validateOptionalString(
+    validated?.idempotencyKey,
+    'idempotencyKey must be a string',
+  )
+  if (idempotencyKey instanceof AttuneError) return idempotencyKey
+  if (idempotencyKey !== undefined && hasHeaderControlChar(idempotencyKey)) {
+    return new AttuneError({
+      code: 'BAD_REQUEST',
+      message: 'idempotencyKey contains invalid characters',
+    })
+  }
+  return {
+    ...(signal !== undefined ? { signal } : {}),
+    ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+  }
+}
+
+function resolveIdempotencyKey(value: string | undefined): string {
+  return value && value.length > 0 ? value : randomIdempotencyKey()
+}
+
 function validateObjectRequestWithPathId<T extends { id?: string }>(
   value: T | null | undefined,
   objectMessage: string,
@@ -663,33 +709,18 @@ export class Client {
   ingest(input: IngestInput, options?: RequestOptions): Promise<IngestResponse> {
     const validated = validateObjectRequest(input, 'ingest input must be an object')
     if (validated instanceof AttuneError) return Promise.reject(validated)
-    const validatedOptions = validateOptionalOptionsObject(
-      options,
-      'request options must be an object',
-    )
+    const validatedOptions = validateRequestOptions(options, 'request options must be an object')
     if (validatedOptions instanceof AttuneError) return Promise.reject(validatedOptions)
-    const signal = validateOptionalAbortSignal(
-      validatedOptions?.signal,
-      'signal must be an AbortSignal',
-    )
-    if (signal instanceof AttuneError) return Promise.reject(signal)
-    const providedIdempotencyKey = validateOptionalString(
-      validatedOptions?.idempotencyKey,
-      'idempotencyKey must be a string',
-    )
-    if (providedIdempotencyKey instanceof AttuneError) return Promise.reject(providedIdempotencyKey)
     // One key per call, reused across this call's retries — that is what makes
     // a retry safe against the non-idempotent ingest POST.
-    const idempotencyKey = providedIdempotencyKey ?? randomIdempotencyKey()
-    if (hasHeaderControlChar(idempotencyKey)) {
-      return Promise.reject(
-        new AttuneError({
-          code: 'BAD_REQUEST',
-          message: 'idempotencyKey contains invalid characters',
-        }),
-      )
-    }
-    return this.#request<IngestResponse>('POST', INGEST_PATH, validated, idempotencyKey, signal)
+    const idempotencyKey = resolveIdempotencyKey(validatedOptions?.idempotencyKey)
+    return this.#request<IngestResponse>(
+      'POST',
+      INGEST_PATH,
+      validated,
+      idempotencyKey,
+      validatedOptions?.signal,
+    )
   }
 
   // ── Tags (needs a key with the tags:read / tags:write scope) ──────────────
@@ -710,12 +741,18 @@ export class Client {
   }
 
   /** Create a tag. */
-  createTag(req: CreateTagRequest, opts?: { signal?: AbortSignal }): Promise<Tag> {
+  createTag(req: CreateTagRequest, opts?: RequestOptions): Promise<Tag> {
     const validated = validateObjectRequest(req, 'tag request must be an object')
     if (validated instanceof AttuneError) return Promise.reject(validated)
-    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
     if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
-    return this.#request<Tag>('POST', '/v1/tags', validated, '', validatedOpts?.signal)
+    return this.#request<Tag>(
+      'POST',
+      '/v1/tags',
+      validated,
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
+      validatedOpts?.signal,
+    )
   }
 
   /**
@@ -786,19 +823,16 @@ export class Client {
   }
 
   /** Create a workflow state. */
-  createWorkflowState(
-    req: CreateStateRequest,
-    opts?: { signal?: AbortSignal },
-  ): Promise<CreateStateResponse> {
+  createWorkflowState(req: CreateStateRequest, opts?: RequestOptions): Promise<CreateStateResponse> {
     const validated = validateObjectRequest(req, 'state request must be an object')
     if (validated instanceof AttuneError) return Promise.reject(validated)
-    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
     if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
     return this.#request<CreateStateResponse>(
       'POST',
       '/v1/workflow/states',
       validated,
-      '',
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
       validatedOpts?.signal,
     )
   }
@@ -872,14 +906,14 @@ export class Client {
   }
 
   /** Seed the default workflow states/transitions. */
-  seedWorkflowDefaults(opts?: { signal?: AbortSignal }): Promise<SeedDefaultsResponse> {
-    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+  seedWorkflowDefaults(opts?: RequestOptions): Promise<SeedDefaultsResponse> {
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
     if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
     return this.#request<SeedDefaultsResponse>(
       'POST',
       '/v1/workflow/seed',
       {},
-      '',
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
       validatedOpts?.signal,
     )
   }
@@ -890,85 +924,113 @@ export class Client {
   listAuditLog(
     req: Partial<ListAuditLogRequest> & { signal?: AbortSignal } = {},
   ): Promise<ListAuditLogResponse> {
-    const validated = validateOptionalObjectRequest(req, 'audit log query must be an object')
+    const validated = this.#validateAuditLogQuery(req)
     if (validated instanceof AttuneError) return Promise.reject(validated)
-    const signal = validateOptionalAbortSignal(validated.signal, 'signal must be an AbortSignal')
-    if (signal instanceof AttuneError) return Promise.reject(signal)
-    const actions = validateOptionalStringArray(
-      validated.actions,
-      'audit log actions must be an array of strings',
-    )
-    if (actions instanceof AttuneError) return Promise.reject(actions)
-    const action = validateOptionalString(validated.action, 'audit log action must be a string')
-    if (action instanceof AttuneError) return Promise.reject(action)
-    const actorType = validateOptionalString(
-      validated.actorType,
-      'audit log actorType must be a string',
-    )
-    if (actorType instanceof AttuneError) return Promise.reject(actorType)
-    const actorId = validateOptionalString(validated.actorId, 'audit log actorId must be a string')
-    if (actorId instanceof AttuneError) return Promise.reject(actorId)
-    const targetType = validateOptionalString(
-      validated.targetType,
-      'audit log targetType must be a string',
-    )
-    if (targetType instanceof AttuneError) return Promise.reject(targetType)
-    const targetId = validateOptionalString(
-      validated.targetId,
-      'audit log targetId must be a string',
-    )
-    if (targetId instanceof AttuneError) return Promise.reject(targetId)
-    const from = validateOptionalString(validated.from, 'audit log from must be a string')
-    if (from instanceof AttuneError) return Promise.reject(from)
-    const to = validateOptionalString(validated.to, 'audit log to must be a string')
-    if (to instanceof AttuneError) return Promise.reject(to)
-    const limit = validateOptionalPositiveInt32(
-      validated.limit,
-      'audit log limit must be a positive integer',
-    )
-    if (limit instanceof AttuneError) return Promise.reject(limit)
-    const cursor = validateOptionalString(validated.cursor, 'audit log cursor must be a string')
-    if (cursor instanceof AttuneError) return Promise.reject(cursor)
-    const query = new URLSearchParams()
-    for (const action of actions ?? []) {
-      if (action) query.append('actions', action)
-    }
-    setQueryValue(query, 'action', action)
-    setQueryValue(query, 'actor_type', actorType)
-    setQueryValue(query, 'actor_id', actorId)
-    setQueryValue(query, 'target_type', targetType)
-    setQueryValue(query, 'target_id', targetId)
-    setQueryValue(query, 'from', from)
-    setQueryValue(query, 'to', to)
-    if (limit !== undefined) setQueryValue(query, 'limit', limit)
-    setQueryValue(query, 'cursor', cursor)
-    const encoded = query.toString()
+    const encoded = validated.query.toString()
     const suffix = encoded ? `?${encoded}` : ''
     return this.#request<ListAuditLogResponse>(
       'GET',
       `/v1/audit-log${suffix}`,
       undefined,
       '',
-      signal,
+      validated.signal,
     )
   }
 
-  // ── GDPR jobs (needs the gdpr:admin scope) ───────────────────────────────
+  /** Download the current audit-log query as CSV. */
+  exportAuditLogCSV(
+    req: Partial<ListAuditLogRequest> & { signal?: AbortSignal } = {},
+  ): Promise<BinaryResponse> {
+    const validated = this.#validateAuditLogQuery(req)
+    if (validated instanceof AttuneError) return Promise.reject(validated)
+    const encoded = validated.query.toString()
+    const suffix = encoded ? `?${encoded}` : ''
+    return this.#requestBinary('GET', `/v1/audit-log/export.csv${suffix}`, '', validated.signal)
+  }
+
+  /** Create an asynchronous audit evidence export job. */
+  createAuditEvidenceExport(
+    req: CreateAuditEvidenceExportRequest,
+    opts?: RequestOptions,
+  ): Promise<CreateAuditEvidenceExportResponse> {
+    const validated = validateObjectRequest(req, 'audit evidence export request must be an object')
+    if (validated instanceof AttuneError) return Promise.reject(validated)
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#request<CreateAuditEvidenceExportResponse>(
+      'POST',
+      '/v1/audit-log/evidence',
+      validated,
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
+      validatedOpts?.signal,
+    )
+  }
+
+  /** Get one audit evidence export job by id. */
+  getAuditEvidenceExport(
+    jobId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<GetAuditEvidenceExportResponse> {
+    const validatedJobId = validatePathSegment(jobId, 'audit evidence job id is invalid')
+    if (validatedJobId instanceof AttuneError) return Promise.reject(validatedJobId)
+    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#request<GetAuditEvidenceExportResponse>(
+      'GET',
+      `/v1/audit-log/evidence/${encodeURIComponent(validatedJobId)}`,
+      undefined,
+      '',
+      validatedOpts?.signal,
+    )
+  }
+
+  /** Download one audit evidence export archive by id. */
+  downloadAuditEvidenceExport(
+    jobId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<BinaryResponse> {
+    const validatedJobId = validatePathSegment(jobId, 'audit evidence job id is invalid')
+    if (validatedJobId instanceof AttuneError) return Promise.reject(validatedJobId)
+    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#requestBinary(
+      'GET',
+      `/v1/audit-log/evidence/${encodeURIComponent(validatedJobId)}/download`,
+      '',
+      validatedOpts?.signal,
+    )
+  }
+
+  /** Iterate across all audit log pages. */
+  async *iterateAuditLog(
+    req: Partial<ListAuditLogRequest> & { signal?: AbortSignal } = {},
+  ): AsyncGenerator<ListAuditLogResponse['items'][number], void, void> {
+    let cursor = req.cursor
+    while (true) {
+      const page = await this.listAuditLog({ ...req, cursor })
+      for (const item of page.items ?? []) {
+        yield item
+      }
+      if (!page.nextCursor) {
+        return
+      }
+      cursor = page.nextCursor
+    }
+  }
+
+  // ── GDPR jobs (needs gdpr:read / gdpr:export / gdpr:delete) ──────────────
 
   /** Start a GDPR export job. */
-  exportGdprSubject(
-    req: ExportGdprSubjectRequest,
-    opts?: { signal?: AbortSignal },
-  ): Promise<ExportGdprSubjectResponse> {
+  exportGdprSubject(req: ExportGdprSubjectRequest, opts?: RequestOptions): Promise<ExportGdprSubjectResponse> {
     const validated = validateObjectRequest(req, 'gdpr export request must be an object')
     if (validated instanceof AttuneError) return Promise.reject(validated)
-    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
     if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
     return this.#request<ExportGdprSubjectResponse>(
       'POST',
       '/v1/gdpr/export',
       validated,
-      '',
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
       validatedOpts?.signal,
     )
   }
@@ -988,56 +1050,61 @@ export class Client {
     )
   }
 
-  /** Revoke a GDPR export job by id. */
-  revokeGdprExport(
-    jobId: string,
-    opts?: { signal?: AbortSignal },
-  ): Promise<RevokeGdprExportResponse> {
+  /** Download one GDPR export archive by id. */
+  downloadGdprExport(jobId: string, opts?: { signal?: AbortSignal }): Promise<BinaryResponse> {
     const validatedJobId = validatePathSegment(jobId, 'gdpr export job id is invalid')
     if (validatedJobId instanceof AttuneError) return Promise.reject(validatedJobId)
     const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#requestBinary(
+      'GET',
+      `/v1/gdpr/exports/${encodeURIComponent(validatedJobId)}/download`,
+      '',
+      validatedOpts?.signal,
+    )
+  }
+
+  /** Revoke a GDPR export job by id. */
+  revokeGdprExport(jobId: string, opts?: RequestOptions): Promise<RevokeGdprExportResponse> {
+    const validatedJobId = validatePathSegment(jobId, 'gdpr export job id is invalid')
+    if (validatedJobId instanceof AttuneError) return Promise.reject(validatedJobId)
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
     if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
     return this.#request<RevokeGdprExportResponse>(
       'POST',
       `/v1/gdpr/exports/${encodeURIComponent(validatedJobId)}/revoke`,
       {},
-      '',
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
       validatedOpts?.signal,
     )
   }
 
   /** Start a GDPR delete request for one subject. */
-  deleteGdprSubject(
-    req: DeleteGdprSubjectRequest,
-    opts?: { signal?: AbortSignal },
-  ): Promise<DeleteGdprSubjectResponse> {
+  deleteGdprSubject(req: DeleteGdprSubjectRequest, opts?: RequestOptions): Promise<DeleteGdprSubjectResponse> {
     const validated = validateObjectRequest(req, 'gdpr delete request must be an object')
     if (validated instanceof AttuneError) return Promise.reject(validated)
-    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
     if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
     return this.#request<DeleteGdprSubjectResponse>(
       'POST',
       '/v1/gdpr/delete',
       validated,
-      '',
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
       validatedOpts?.signal,
     )
   }
 
   /** Cancel one GDPR request by id. */
-  cancelGdprRequest(
-    requestId: string,
-    opts?: { signal?: AbortSignal },
-  ): Promise<CancelGdprRequestResponse> {
+  cancelGdprRequest(requestId: string, opts?: RequestOptions): Promise<CancelGdprRequestResponse> {
     const validatedRequestId = validatePathSegment(requestId, 'gdpr request id is invalid')
     if (validatedRequestId instanceof AttuneError) return Promise.reject(validatedRequestId)
-    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
     if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
     return this.#request<CancelGdprRequestResponse>(
       'POST',
       `/v1/gdpr/requests/${encodeURIComponent(validatedRequestId)}/cancel`,
       {},
-      '',
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
       validatedOpts?.signal,
     )
   }
@@ -1075,6 +1142,23 @@ export class Client {
       '',
       signal,
     )
+  }
+
+  /** Iterate across all GDPR request pages. */
+  async *iterateGdprRequests(
+    req: Partial<ListGdprRequestsRequest> & { signal?: AbortSignal } = {},
+  ): AsyncGenerator<GdprRequestSummary, void, void> {
+    let cursor = req.cursor
+    while (true) {
+      const page = await this.listGdprRequests({ ...req, cursor })
+      for (const item of page.items ?? []) {
+        yield item
+      }
+      if (!page.nextCursor) {
+        return
+      }
+      cursor = page.nextCursor
+    }
   }
 
   /** Get GDPR operational status and retention metadata. */
@@ -1140,18 +1224,38 @@ export class Client {
   }
 
   /** Retry one outbox delivery by id. */
-  retryOutboxDelivery(id: string, opts?: { signal?: AbortSignal }): Promise<RetryDeliveryResponse> {
+  retryOutboxDelivery(id: string, opts?: RequestOptions): Promise<RetryDeliveryResponse> {
     const validatedId = validatePositiveInt64String(id, 'delivery id is invalid')
     if (validatedId instanceof AttuneError) return Promise.reject(validatedId)
-    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
     if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
     return this.#request<RetryDeliveryResponse>(
       'POST',
       `/v1/outbox/${encodeURIComponent(validatedId)}/retry`,
       {},
-      '',
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
       validatedOpts?.signal,
     )
+  }
+
+  /** Iterate across all outbox delivery pages. */
+  async *iterateOutboxDeliveries(opts?: {
+    status?: string[]
+    limit?: number
+    beforeId?: string
+    signal?: AbortSignal
+  }): AsyncGenerator<OutboxDelivery, void, void> {
+    let beforeId = opts?.beforeId
+    while (true) {
+      const page = await this.listOutboxDeliveries({ ...opts, beforeId })
+      for (const item of page.deliveries ?? []) {
+        yield item
+      }
+      if (!page.nextBeforeId || page.nextBeforeId === '0') {
+        return
+      }
+      beforeId = page.nextBeforeId
+    }
   }
 
   // ── MCP client governance (needs mcpclient:admin) ────────────────────────
@@ -1170,10 +1274,7 @@ export class Client {
   }
 
   /** Create one MCP OAuth client. */
-  createMCPClient(
-    req: CreateMCPClientRequest,
-    opts?: { signal?: AbortSignal },
-  ): Promise<CreateMCPClientResponse> {
+  createMCPClient(req: CreateMCPClientRequest, opts?: RequestOptions): Promise<CreateMCPClientResponse> {
     const validated = validateObjectRequest(req, 'mcp client request must be an object')
     if (validated instanceof AttuneError) return Promise.reject(validated)
     const name = validateRequiredMCPClientName(validated.name)
@@ -1186,7 +1287,7 @@ export class Client {
       'mcp scope must be one of "mcp:read", "mcp:write", or "mcp:ingest"',
     )
     if (scopes instanceof AttuneError) return Promise.reject(scopes)
-    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
     if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
     return this.#request<CreateMCPClientResponse>(
       'POST',
@@ -1197,7 +1298,7 @@ export class Client {
         redirectUris,
         ...(scopes !== undefined ? { scopes } : {}),
       },
-      '',
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
       validatedOpts?.signal,
     )
   }
@@ -1354,6 +1455,117 @@ export class Client {
     )
   }
 
+  #validateAuditLogQuery(
+    req: Partial<ListAuditLogRequest> & { signal?: AbortSignal },
+  ): { query: URLSearchParams; signal?: AbortSignal } | AttuneError {
+    const validated = validateOptionalObjectRequest(req, 'audit log query must be an object')
+    if (validated instanceof AttuneError) return validated
+    const signal = validateOptionalAbortSignal(validated.signal, 'signal must be an AbortSignal')
+    if (signal instanceof AttuneError) return signal
+    const actions = validateOptionalStringArray(
+      validated.actions,
+      'audit log actions must be an array of strings',
+    )
+    if (actions instanceof AttuneError) return actions
+    const action = validateOptionalString(validated.action, 'audit log action must be a string')
+    if (action instanceof AttuneError) return action
+    const actorType = validateOptionalString(
+      validated.actorType,
+      'audit log actorType must be a string',
+    )
+    if (actorType instanceof AttuneError) return actorType
+    const actorId = validateOptionalString(validated.actorId, 'audit log actorId must be a string')
+    if (actorId instanceof AttuneError) return actorId
+    const targetType = validateOptionalString(
+      validated.targetType,
+      'audit log targetType must be a string',
+    )
+    if (targetType instanceof AttuneError) return targetType
+    const targetId = validateOptionalString(
+      validated.targetId,
+      'audit log targetId must be a string',
+    )
+    if (targetId instanceof AttuneError) return targetId
+    const from = validateOptionalString(validated.from, 'audit log from must be a string')
+    if (from instanceof AttuneError) return from
+    const to = validateOptionalString(validated.to, 'audit log to must be a string')
+    if (to instanceof AttuneError) return to
+    const limit = validateOptionalPositiveInt32(
+      validated.limit,
+      'audit log limit must be a positive integer',
+    )
+    if (limit instanceof AttuneError) return limit
+    const cursor = validateOptionalString(validated.cursor, 'audit log cursor must be a string')
+    if (cursor instanceof AttuneError) return cursor
+
+    const query = new URLSearchParams()
+    for (const item of actions ?? []) {
+      if (item) query.append('actions', item)
+    }
+    setQueryValue(query, 'action', action)
+    setQueryValue(query, 'actor_type', actorType)
+    setQueryValue(query, 'actor_id', actorId)
+    setQueryValue(query, 'target_type', targetType)
+    setQueryValue(query, 'target_id', targetId)
+    setQueryValue(query, 'from', from)
+    setQueryValue(query, 'to', to)
+    if (limit !== undefined) setQueryValue(query, 'limit', limit)
+    setQueryValue(query, 'cursor', cursor)
+    return signal === undefined ? { query } : { query, signal }
+  }
+
+  async #requestBinary(
+    method: string,
+    path: string,
+    idempotencyKey: string,
+    userSignal?: AbortSignal,
+  ): Promise<BinaryResponse> {
+    const url = this.#baseURL + path
+    const retrySafe = method !== 'POST' || idempotencyKey !== ''
+    let lastError: AttuneError | undefined
+
+    for (let attempt = 0; attempt <= this.#maxRetries; attempt++) {
+      if (userSignal?.aborted) {
+        throw new AttuneError({ code: TransportErrorCode.Aborted, message: 'request aborted' })
+      }
+
+      let result: { status: number; headers: Headers; data: Uint8Array }
+      try {
+        result = await this.#fetchBinaryOnce(method, url, idempotencyKey, userSignal)
+      } catch (err) {
+        const transportError = err as AttuneError
+        if (transportError.code === TransportErrorCode.Aborted) throw transportError
+        lastError = transportError
+        if (retrySafe && attempt < this.#maxRetries) {
+          await this.#sleep(backoffDelay(attempt))
+          continue
+        }
+        throw transportError
+      }
+
+      const { status, headers, data } = result
+      if (status >= 200 && status < 300) {
+        const filename = parseContentDispositionFilename(headers)
+        return {
+          contentType: headers.get('content-type') ?? 'application/octet-stream',
+          data,
+          ...(filename !== undefined ? { filename } : {}),
+        }
+      }
+
+      const text = new TextDecoder().decode(data)
+      const error = AttuneError.fromResponse(status, parseErrorBody(text), headers)
+      if (isRetryable(status) && retrySafe && attempt < this.#maxRetries) {
+        lastError = error
+        await this.#sleep(parseRetryAfter(headers) ?? backoffDelay(attempt))
+        continue
+      }
+      throw error
+    }
+
+    throw lastError ?? new AttuneError({ code: 'INTERNAL', message: 'request failed' })
+  }
+
   async #request<T>(
     method: string,
     path: string,
@@ -1377,9 +1589,9 @@ export class Client {
         })
       }
     }
-    // A non-idempotent POST without a server-honored idempotency key must NOT be
-    // retried: a retry after a lost response could create a duplicate resource.
-    // (Ingest's POST carries an Idempotency-Key; GET/PUT/PATCH/DELETE are idempotent.)
+    // POST retries are only safe when the server honors a stable
+    // Idempotency-Key; the management writes that use this helper now auto-
+    // generate one per call. GET/PUT/PATCH/DELETE remain retry-safe by method.
     const retrySafe = method !== 'POST' || idempotencyKey !== ''
     let lastError: AttuneError | undefined
 
@@ -1513,6 +1725,62 @@ export class Client {
       if (userSignal) userSignal.removeEventListener('abort', onUserAbort)
     }
   }
+
+  async #fetchBinaryOnce(
+    method: string,
+    url: string,
+    idempotencyKey: string,
+    userSignal?: AbortSignal,
+  ): Promise<{ status: number; headers: Headers; data: Uint8Array }> {
+    const controller = new AbortController()
+    let timedOut = false
+    const timer =
+      this.#timeout > 0
+        ? setTimeout(() => {
+            timedOut = true
+            controller.abort()
+          }, this.#timeout)
+        : undefined
+    const onUserAbort = () => controller.abort()
+    if (userSignal) userSignal.addEventListener('abort', onUserAbort, { once: true })
+
+    try {
+      const headers: Record<string, string> = {
+        ...this.#defaultHeaders,
+        'user-agent': USER_AGENT,
+        [API_KEY_HEADER]: this.#apiKey,
+      }
+      if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey
+      const response = await this.#fetch(url, {
+        method,
+        headers,
+        signal: controller.signal,
+        redirect: 'manual',
+      })
+      const data = await readCappedBytes(response)
+      return { status: response.status, headers: response.headers, data }
+    } catch (cause) {
+      if (cause instanceof AttuneError) throw cause
+      if (userSignal?.aborted) {
+        throw new AttuneError({
+          code: TransportErrorCode.Aborted,
+          message: 'request aborted',
+          cause,
+        })
+      }
+      if (timedOut) {
+        throw new AttuneError({
+          code: TransportErrorCode.Timeout,
+          message: 'request timed out',
+          cause,
+        })
+      }
+      throw new AttuneError({ code: TransportErrorCode.Network, message: 'network error', cause })
+    } finally {
+      if (timer) clearTimeout(timer)
+      if (userSignal) userSignal.removeEventListener('abort', onUserAbort)
+    }
+  }
 }
 
 // Strip trailing '/' with a single linear scan — avoids the /\/+$/ regex, which
@@ -1572,11 +1840,72 @@ async function readCappedText(response: Response): Promise<string> {
   return new TextDecoder().decode(buf)
 }
 
+async function readCappedBytes(response: Response): Promise<Uint8Array> {
+  const body = response.body
+  if (!body || typeof body.getReader !== 'function') {
+    const buf = new Uint8Array(await response.arrayBuffer())
+    if (buf.byteLength > MAX_RESPONSE_BYTES) {
+      throw new AttuneError({
+        code: 'INTERNAL',
+        status: response.status,
+        message: `response body exceeds the ${MAX_RESPONSE_BYTES}-byte cap`,
+      })
+    }
+    return buf
+  }
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    let chunk = await reader.read()
+    while (!chunk.done) {
+      if (chunk.value) {
+        total += chunk.value.byteLength
+        if (total > MAX_RESPONSE_BYTES) {
+          throw new AttuneError({
+            code: 'INTERNAL',
+            status: response.status,
+            message: `response body exceeds the ${MAX_RESPONSE_BYTES}-byte cap`,
+          })
+        }
+        chunks.push(chunk.value)
+      }
+      chunk = await reader.read()
+    }
+  } finally {
+    await reader.cancel().catch(() => {})
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return out
+}
+
 // CR/LF in a header value enables header injection; fetch would reject it as an
 // opaque (retryable-looking) network error, so reject it up front as a clear
 // non-retryable client error.
 function hasHeaderControlChar(s: string): boolean {
   return s.includes('\r') || s.includes('\n')
+}
+
+function parseContentDispositionFilename(headers: Headers): string | undefined {
+  const contentDisposition = headers.get('content-disposition')
+  if (!contentDisposition) return undefined
+  const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1])
+    } catch {
+      return encoded[1]
+    }
+  }
+  const quoted = contentDisposition.match(/filename="([^"]+)"/i)
+  if (quoted?.[1]) return quoted[1]
+  const bare = contentDisposition.match(/filename=([^;]+)/i)
+  return bare?.[1]?.trim()
 }
 
 // A dedup token valid against the server's key format ([A-Za-z0-9_-]{8,64}).

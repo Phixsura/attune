@@ -3,8 +3,8 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/Phixsura/attune/sdk/go.svg)](https://pkg.go.dev/github.com/Phixsura/attune/sdk/go)
 
 The official Go client for the [attune](https://github.com/Phixsura/attune)
-ingest API. Submit feedback from a Go service without hand-rolling HTTP, retries,
-or idempotency. The request/response types are **generated from the proto
+ingest and tenant management APIs. Submit feedback from a Go service without
+hand-rolling HTTP, retries, or idempotency. The request/response types are **generated from the proto
 contract** (`proto/attune/v1`) and marshaled with `protojson`, so the wire shape
 is single-sourced from proto, never hand-maintained.
 
@@ -169,13 +169,14 @@ proto-generated wire types and the retry policy (mirroring `@phixsura/attune`):
 ## Management APIs
 
 Beyond ingest, the client manages tag and workflow-state config, audit-log
-queries, GDPR jobs, outbox retries, and MCP OAuth clients. These methods need
-server-only management keys with the matching scopes:
+queries and exports, GDPR jobs and archive downloads, outbox retries, and MCP
+OAuth clients. These methods need server-only management keys with the matching
+scopes:
 
 - `tags:*`
 - `workflow:*`
 - `audit:read`
-- `gdpr:admin`
+- `gdpr:read` / `gdpr:export` / `gdpr:delete`
 - `notify:read` / `notify:write`
 - `mcpclient:admin`
 
@@ -185,8 +186,13 @@ tags, _ := client.ListTags(ctx, false)
 _, _ = client.SeedWorkflowDefaults(ctx)
 states, _ := client.ListWorkflowStates(ctx, false)
 audit, _ := client.ListAuditLog(ctx, &attune.ListAuditLogRequest{Actions: []string{"tag.create"}, Limit: 25})
+auditCSV, _ := client.ExportAuditLogCSV(ctx, &attune.ListAuditLogRequest{Action: "tag.create"})
+_ = auditCSV
+auditPager := client.NewAuditLogPager(&attune.ListAuditLogRequest{Limit: 100})
+_, _ = auditPager.NextPage(ctx)
 gdprExport, _ := client.ExportGdprSubject(ctx, &attune.ExportGdprSubjectRequest{SubjectKey: "user:123"})
 _, _ = client.GetGdprExport(ctx, gdprExport.GetJobId())
+_, _ = client.DownloadGdprExport(ctx, gdprExport.GetJobId())
 deliveries, _ := client.ListOutboxDeliveries(ctx, &attune.ListDeliveriesRequest{Status: []string{"dead"}})
 _, _ = client.ListMCPClients(ctx)
 ```
@@ -194,14 +200,20 @@ _, _ = client.ListMCPClients(ctx)
 Tags: `ListTags` / `CreateTag` / `UpdateTag` / `ArchiveTag`. Workflow:
 `ListWorkflowStates` / `CreateWorkflowState` / `UpdateWorkflowState` /
 `ArchiveWorkflowState` / `ListWorkflowTransitions` / `ReplaceWorkflowTransitions`
-/ `SeedWorkflowDefaults`. Audit: `ListAuditLog`. GDPR:
-`ExportGdprSubject` / `GetGdprExport` / `RevokeGdprExport` /
-`DeleteGdprSubject` / `CancelGdprRequest` / `ListGdprRequests` /
-`GetGdprOperations`. Outbox: `ListOutboxDeliveries` / `RetryOutboxDelivery`.
+/ `SeedWorkflowDefaults`. Audit: `ListAuditLog` / `ExportAuditLogCSV` /
+`CreateAuditEvidenceExport` / `GetAuditEvidenceExport` /
+`DownloadAuditEvidenceExport` plus `NewAuditLogPager`. GDPR:
+`ExportGdprSubject` / `GetGdprExport` / `DownloadGdprExport` /
+`RevokeGdprExport` / `DeleteGdprSubject` / `CancelGdprRequest` /
+`ListGdprRequests` / `GetGdprOperations` plus `NewGdprRequestPager`. Outbox:
+`ListOutboxDeliveries` / `RetryOutboxDelivery` plus `NewOutboxDeliveryPager`.
 MCP clients: `ListMCPClients` / `CreateMCPClient` / `GetMCPClient` /
 `RevokeMCPClient` / `UpdateMCPClient` / `ReplaceMCPClientToolPolicies` /
 `RevokeMCPRefreshGrant` / `RevokeMCPSession`. Update is replace-semantics —
-send the full desired state, not just changed fields.
+send the full desired state, not just changed fields. Management `POST`s now
+auto-generate stable idempotency keys, so the same retry policy safely applies
+to machine-safe writes such as tag creation, workflow seeding, GDPR job
+creation, outbox retry, and MCP client provisioning.
 
 ## Example CLI
 

@@ -138,6 +138,33 @@ func TestGet_Completed(t *testing.T) {
 	}
 }
 
+func TestGet_RewritesDownloadPathForAPIKeys(t *testing.T) {
+	now := time.Now().UTC()
+	expires := now.Add(72 * time.Hour)
+	svc := ptrext.Of(stubService{
+		getJob: ptrext.Of(aerepo.ExportJob{
+			ID:        "job-1",
+			TenantID:  "t-1",
+			Status:    aerepo.JobCompleted,
+			CreatedAt: now,
+			ExpiresAt: ptrext.Of(expires),
+		}),
+	})
+	h := NewHandler(svc)
+	ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth:    ptrext.Of(session.AuthCtx{TenantID: "t-1", UserID: "apikey:1", UserType: "api_key"}),
+	})
+
+	result, err := h.Get(ctx, ptrext.Of(attunev1.GetAuditEvidenceExportRequest{JobId: "job-1"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := result.Body.GetDownloadPath(); got != "/v1/audit-log/evidence/job-1/download" {
+		t.Fatalf("download_path = %q", got)
+	}
+}
+
 func TestDownload_NotDownloadable(t *testing.T) {
 	svc := ptrext.Of(stubService{dlErr: auditevidencesvc.ErrJobNotDownloadable})
 	h := NewHandler(svc)

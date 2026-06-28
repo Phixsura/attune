@@ -69,11 +69,8 @@ smuggling the entire Console verbatim into the public contract.
 - **Do not make management keys browser-safe.**
   Only `ingest:write` keeps the publishable-key posture. Management keys are
   server-only credentials.
-- **Do not solve binary download helpers in both SDKs here.**
-  `google.api.HttpBody` endpoints are intentionally deferred unless they are
-  required by the selected automation scope.
-- **Do not generalize pagination into a new cross-resource SDK abstraction.**
-  Existing cursor fields remain resource-specific in this issue.
+- **Do not add a generic cross-resource pagination framework.**
+  Resource-local async iterators / pagers are enough for this issue.
 - **Do not redefine the MCP runtime tool scopes.**
   `mcp:read/write/ingest` remain the OAuth-granted scopes for MCP tool use.
 - **Do not expose enrichment-runtime APIs over tenant API keys in this issue.**
@@ -146,18 +143,13 @@ The selected operations for #168 are:
 
 | Resource | Public methods in scope | Required scope |
 |---|---|---|
-| Audit log | `ListAuditLog` | `audit:read` |
-| GDPR jobs | `ExportGdprSubject`, `GetGdprExport`, `RevokeGdprExport`, `DeleteGdprSubject`, `CancelGdprRequest`, `ListGdprRequests`, `GetGdprOperations` | `gdpr:admin` |
+| Audit log | `ListAuditLog`, `ExportAuditLogCSV`, `CreateAuditEvidenceExport`, `GetAuditEvidenceExport`, `DownloadAuditEvidenceExport` | `audit:read` |
+| GDPR jobs | `ExportGdprSubject`, `GetGdprExport`, `DownloadGdprExport`, `RevokeGdprExport`, `DeleteGdprSubject`, `CancelGdprRequest`, `ListGdprRequests`, `GetGdprOperations` | `gdpr:read` / `gdpr:export` / `gdpr:delete` (`gdpr:admin` implied for compatibility) |
 | Outbox | `ListDeliveries`, `RetryDelivery` | `notify:read` / `notify:write` |
 | MCP client governance | full `MCPClientService` | `mcpclient:admin` |
 
 Explicitly deferred from this issue:
 
-- `ExportAuditLogCSV`
-- `CreateAuditEvidenceExport`
-- `GetAuditEvidenceExport`
-- `DownloadAuditEvidenceExport`
-- `DownloadGdprExport`
 - `VerifyGdprStepUp`
 - `GetEnrichmentRuntime`
 - `UpdateEnrichmentRuntime`
@@ -166,8 +158,6 @@ Explicitly deferred from this issue:
 
 Why these are deferred:
 
-- audit/GDPR downloads and evidence exports need binary-response helpers in both
-  SDKs;
 - `VerifyGdprStepUp` is deliberately session/password-based;
 - enrichment runtime is deployment-scoped, so even the status surface does not
   belong under the tenant-scoped `enrich:read` key family.
@@ -226,7 +216,7 @@ Rules:
 This is the cleanest way to keep "MCP runtime permissions" and "MCP control
 plane permissions" from collapsing into one ambiguous scope.
 
-### 5. Treat GDPR API-key auth as machine step-up, not session step-up
+### 5. Split GDPR permissions while preserving legacy compatibility
 
 The current GDPR console flow requires recent step-up verification tied to a
 session cookie and, when needed, a password prompt. That is correct for human
@@ -235,40 +225,48 @@ console use and wrong for machine automation.
 For API-key-authenticated GDPR calls:
 
 - `VerifyGdprStepUp` remains console-session-only.
-- The API-key route path treats possession of a valid `gdpr:admin` key as a
-  machine-authenticated step-up equivalent.
-- Audit records must carry the actor as `apikey:<keyID>` and the step-up method
-  as `api_key` or equivalent structured metadata.
+- Public routes are split by least privilege:
+  - `gdpr:read` for list/status/operations
+  - `gdpr:export` for export/download/revoke
+  - `gdpr:delete` for delete/cancel
+- `gdpr:admin` remains valid and now implies the new granular scopes so
+  existing machine keys keep working during migration.
+- A migration backfills the new granular scopes onto keys that already hold
+  `gdpr:admin`.
+- Audit records must carry the actor as `apikey:<keyID>`.
 
 This preserves the human step-up flow for browser sessions while making the
 privacy job APIs usable for server-side automation.
 
 Tradeoff:
 
-- Existing keys that already hold `gdpr:admin` gain real machine GDPR power once
-  these routes are exposed. That is an intentional activation of an existing
-  scope, not a silent new permission name, and it must be called out in the
-  changelog and release notes when implemented.
+- Existing keys that already hold `gdpr:admin` keep real machine GDPR power once
+  these routes are exposed. That remains an intentional activation of an
+  existing scope and must be called out in release notes.
 
-### 6. Keep the existing SDK retry contract; do not invent per-endpoint magic
+### 6. Keep the existing SDK retry contract, but add idempotency where the server supports it
 
 The new SDK methods should inherit the existing attune SDK rules:
 
 - `GET`, `PUT`, `PATCH`, and `DELETE` retry on transient transport or retryable
   HTTP failure.
-- `POST` methods that do not carry a server-honored idempotency key do **not**
+- Management `POST` methods that now carry a server-honored idempotency key
+  auto-retry safely.
+- `POST` methods without a server-honored idempotency key still do **not**
   auto-retry.
 
 That means:
 
-- `RetryDelivery`, `ExportGdprSubject`, `DeleteGdprSubject`, and
-  `CreateMCPClient` remain single-attempt methods in v1.
+- `CreateTag`, `CreateWorkflowState`, `SeedWorkflowDefaults`,
+  `CreateAuditEvidenceExport`, `ExportGdprSubject`, `RevokeGdprExport`,
+  `DeleteGdprSubject`, `CancelGdprRequest`, `RetryDelivery`, and
+  `CreateMCPClient` now auto-generate a stable per-call idempotency key and
+  inherit the normal retry loop.
 - `ListAuditLog`, `ListGdprRequests`, `GetGdprExport`, `ListDeliveries`, and
   `GetMCPClient` keep the existing retry behavior.
 
-This keeps #168 consistent with the current Node and Go client posture and
-avoids smuggling a broad idempotency project into what is otherwise a route and
-SDK coverage issue.
+This keeps #168 consistent with world-class SDK ergonomics without broadening
+the idempotency work past the routes the backend now explicitly supports.
 
 ### 7. Add SDK methods, not generated RPC stubs
 
@@ -283,14 +281,22 @@ Both SDKs should continue their current design:
 Add `Client` methods and index exports for:
 
 - `listAuditLog`
+- `exportAuditLogCsv`
+- `createAuditEvidenceExport`
+- `getAuditEvidenceExport`
+- `downloadAuditEvidenceExport`
+- `iterateAuditLog`
 - `exportGdprSubject`
 - `getGdprExport`
+- `downloadGdprExport`
 - `revokeGdprExport`
 - `deleteGdprSubject`
 - `cancelGdprRequest`
 - `listGdprRequests`
+- `iterateGdprRequests`
 - `getGdprOperations`
 - `listOutboxDeliveries`
+- `iterateOutboxDeliveries`
 - `retryOutboxDelivery`
 - `listMcpClients`
 - `createMcpClient`
@@ -317,14 +323,22 @@ Expand the SDK Go proto generation to include:
 Then add wrapper files and methods matching the established style:
 
 - `ListAuditLog`
+- `ExportAuditLogCSV`
+- `CreateAuditEvidenceExport`
+- `GetAuditEvidenceExport`
+- `DownloadAuditEvidenceExport`
+- `NewAuditLogPager`
 - `ExportGdprSubject`
 - `GetGdprExport`
+- `DownloadGdprExport`
 - `RevokeGdprExport`
 - `DeleteGdprSubject`
 - `CancelGdprRequest`
 - `ListGdprRequests`
+- `NewGdprRequestPager`
 - `GetGdprOperations`
 - `ListDeliveries`
+- `NewOutboxDeliveryPager`
 - `RetryDelivery`
 - `ListMCPClients`
 - `CreateMCPClient`

@@ -37,6 +37,11 @@ const (
 	ScopeWorkflowRead  Scope = "workflow:read"
 	ScopeWorkflowWrite Scope = "workflow:write"
 
+	// GDPR
+	ScopeGDPRRead   Scope = "gdpr:read"
+	ScopeGDPRExport Scope = "gdpr:export"
+	ScopeGDPRDelete Scope = "gdpr:delete"
+
 	// Admin
 	ScopeGDPRAdmin    Scope = "gdpr:admin"
 	ScopeMembersAdmin Scope = "members:admin"
@@ -62,7 +67,8 @@ var AllScopes = []Scope{
 	ScopeDigestRead, ScopeDigestWrite,
 	ScopeTagsRead, ScopeTagsWrite,
 	ScopeWorkflowRead, ScopeWorkflowWrite,
-	ScopeGDPRAdmin, ScopeMembersAdmin, ScopeAPIKeyAdmin,
+	ScopeGDPRRead, ScopeGDPRExport, ScopeGDPRDelete, ScopeGDPRAdmin,
+	ScopeMembersAdmin, ScopeAPIKeyAdmin,
 	ScopeMCPRead, ScopeMCPWrite, ScopeMCPIngest, ScopeMCPClientAdmin,
 }
 
@@ -77,6 +83,9 @@ var scopeHierarchy = map[Scope][]Scope{
 	ScopeDigestWrite:   {ScopeDigestRead},
 	ScopeTagsWrite:     {ScopeTagsRead},
 	ScopeWorkflowWrite: {ScopeWorkflowRead},
+	ScopeGDPRExport:    {ScopeGDPRRead},
+	ScopeGDPRDelete:    {ScopeGDPRRead},
+	ScopeGDPRAdmin:     {ScopeGDPRRead, ScopeGDPRExport, ScopeGDPRDelete},
 	ScopeMCPWrite:      {ScopeMCPRead},
 }
 

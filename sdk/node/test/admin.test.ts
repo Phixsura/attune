@@ -26,6 +26,16 @@ const json = (status: number, body: unknown, headers?: Record<string, string>): 
     headers: { 'content-type': 'application/json', ...headers },
   })
 
+const binary = (
+  status: number,
+  body: string | Uint8Array,
+  headers?: Record<string, string>,
+): Response =>
+  new Response(body as BodyInit, {
+    status,
+    headers,
+  })
+
 const noSleep = () => Promise.resolve()
 const newClient = (fetch: FetchLike, overrides = {}): Client =>
   new Client({ baseURL: BASE, apiKey: KEY, fetch, sleep: noSleep, ...overrides })
@@ -180,10 +190,11 @@ describe('tags', () => {
 })
 
 describe('retry safety (bug fix)', () => {
-  it('does NOT retry a non-idempotent POST (createTag)', async () => {
+  it('retries createTag with an auto-generated idempotency key', async () => {
     const { fetch, calls } = stubFetch([() => json(503, { code: 'INTERNAL', message: 'down' })])
     await expect(newClient(fetch).createTag({ name: 'x' })).rejects.toBeInstanceOf(AttuneError)
-    expect(calls.length).toBe(1) // no retry
+    expect(calls.length).toBe(3)
+    expect(calls[0]?.init.headers).toBeDefined()
   })
 
   it('DOES retry an idempotent DELETE (archiveTag)', async () => {
@@ -195,7 +206,7 @@ describe('retry safety (bug fix)', () => {
     expect(calls.length).toBe(3) // retried twice
   })
 
-  it('does NOT retry a non-idempotent POST (createWorkflowState)', async () => {
+  it('retries createWorkflowState with an auto-generated idempotency key', async () => {
     const { fetch, calls } = stubFetch([() => json(503, { code: 'INTERNAL', message: 'down' })])
     await expect(
       newClient(fetch).createWorkflowState({
@@ -205,13 +216,13 @@ describe('retry safety (bug fix)', () => {
         position: 1,
       }),
     ).rejects.toBeInstanceOf(AttuneError)
-    expect(calls.length).toBe(1) // no retry — could otherwise duplicate the state
+    expect(calls.length).toBe(3)
   })
 
-  it('does NOT retry seedWorkflowDefaults (non-idempotent POST)', async () => {
+  it('retries seedWorkflowDefaults with an auto-generated idempotency key', async () => {
     const { fetch, calls } = stubFetch([() => json(503, { code: 'INTERNAL', message: 'down' })])
     await expect(newClient(fetch).seedWorkflowDefaults()).rejects.toBeInstanceOf(AttuneError)
-    expect(calls.length).toBe(1)
+    expect(calls.length).toBe(3)
   })
 
   it('DOES retry replaceWorkflowTransitions (idempotent PUT)', async () => {
@@ -364,6 +375,41 @@ describe('audit log', () => {
     )
   })
 
+  it('exportAuditLogCSV returns binary bytes and filename', async () => {
+    const { fetch, calls } = stubFetch([
+      () =>
+        binary(200, 'id,action\n1,tag.create\n', {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': 'attachment; filename="audit-log.csv"',
+        }),
+    ])
+    const resp = await newClient(fetch).exportAuditLogCSV({ action: 'tag.create' })
+    expect(calls[0]?.url).toBe(`${BASE}/v1/audit-log/export.csv?action=tag.create`)
+    expect(resp.filename).toBe('audit-log.csv')
+    expect(new TextDecoder().decode(resp.data)).toContain('tag.create')
+  })
+
+  it('createAuditEvidenceExport retries with an idempotency key', async () => {
+    let n = 0
+    const { fetch, calls } = stubFetch([
+      () =>
+        ++n < 3
+          ? json(503, { code: 'INTERNAL', message: 'down' })
+          : json(200, { jobId: 'job-1', status: 'queued', retryAfterSeconds: 2 }),
+    ])
+    const resp = await newClient(fetch).createAuditEvidenceExport({
+      from: '2026-06-01T00:00:00Z',
+      to: '2026-06-30T00:00:00Z',
+      actions: [],
+      actorType: '',
+      actorId: '',
+      targetType: '',
+      targetId: '',
+    })
+    expect(resp.jobId).toBe('job-1')
+    expect(calls.length).toBe(3)
+  })
+
   it('rejects a non-object audit log query before sending', async () => {
     const { fetch, calls } = stubFetch([() => json(200, { items: [] })])
     const c = newClient(fetch)
@@ -474,12 +520,39 @@ describe('gdpr', () => {
     expect(calls[0]?.url).toBe(`${BASE}/v1/gdpr/requests?cursor=c1&limit=10&request_type=export`)
   })
 
-  it('does NOT retry exportGdprSubject (non-idempotent POST)', async () => {
+  it('retries exportGdprSubject with an auto-generated idempotency key', async () => {
     const { fetch, calls } = stubFetch([() => json(503, { code: 'INTERNAL', message: 'down' })])
     await expect(
       newClient(fetch).exportGdprSubject({ subjectKey: 'user:1' }),
     ).rejects.toBeInstanceOf(AttuneError)
-    expect(calls.length).toBe(1)
+    expect(calls.length).toBe(3)
+  })
+
+  it('downloadGdprExport returns binary bytes and filename', async () => {
+    const { fetch, calls } = stubFetch([
+      () =>
+        binary(200, 'zipdata', {
+          'content-type': 'application/zip',
+          'content-disposition': 'attachment; filename="gdpr-export.zip"',
+        }),
+    ])
+    const resp = await newClient(fetch).downloadGdprExport('job-1')
+    expect(calls[0]?.url).toBe(`${BASE}/v1/gdpr/exports/job-1/download`)
+    expect(resp.contentType).toBe('application/zip')
+    expect(resp.filename).toBe('gdpr-export.zip')
+    expect(new TextDecoder().decode(resp.data)).toBe('zipdata')
+  })
+
+  it('iterateGdprRequests walks every page', async () => {
+    const { fetch } = stubFetch([
+      () => json(200, { items: [{ requestId: 'req-1' }], nextCursor: 'c2' }),
+      () => json(200, { items: [{ requestId: 'req-2' }] }),
+    ])
+    const items: string[] = []
+    for await (const item of newClient(fetch).iterateGdprRequests()) {
+      items.push(item.requestId)
+    }
+    expect(items).toEqual(['req-1', 'req-2'])
   })
 
   it('rejects non-object gdpr request/query payloads before sending', async () => {

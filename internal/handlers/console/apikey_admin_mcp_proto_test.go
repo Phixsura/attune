@@ -98,7 +98,7 @@ func newAPIKeyMCPProtoRouter(handler *consolemcpclient.Handler) http.Handler {
 		scopes: []domain.Scope{domain.ScopeMCPClientAdmin},
 	}, 0))
 	r.Use(withAPIKeySession)
-	mountAPIKeyMCPClients(r, handler)
+	mountAPIKeyMCPClients(r, handler, withAPIKeyIdempotency(nil))
 	return r
 }
 

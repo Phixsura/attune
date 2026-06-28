@@ -71,16 +71,16 @@ func WithDefaultHeaders(h map[string]string) Option {
 	}
 }
 
-// RequestOption configures a single Ingest call.
+// RequestOption configures a single client request.
 type RequestOption func(*requestConfig)
 
 type requestConfig struct {
 	idempotencyKey string
 }
 
-// WithIdempotencyKey overrides the auto-generated idempotency key for one Ingest
-// call. The key must be 8-64 chars of [A-Za-z0-9_-]; the server rejects other
-// shapes. Use it to make a specific submission replayable across processes.
+// WithIdempotencyKey overrides the auto-generated idempotency key for one
+// request. The key must be 8-64 chars of [A-Za-z0-9_-]; the server rejects
+// other shapes. Use it to make a specific write replayable across processes.
 func WithIdempotencyKey(key string) RequestOption {
 	return func(rc *requestConfig) { rc.idempotencyKey = key }
 }

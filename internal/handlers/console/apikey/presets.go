@@ -50,10 +50,10 @@ var presetsData = []presetData{
 }
 
 func fullAccessScopes() []string {
-	scopes := make([]string, 0, len(domain.AllScopes)-2)
+	scopes := make([]string, 0, len(domain.AllScopes)-3)
 	for _, s := range domain.AllScopes {
 		switch s {
-		case domain.ScopeAPIKeyAdmin, domain.ScopeMCPClientAdmin:
+		case domain.ScopeAPIKeyAdmin, domain.ScopeMCPClientAdmin, domain.ScopeGDPRAdmin:
 			continue
 		}
 		scopes = append(scopes, string(s))
@@ -64,10 +64,10 @@ func fullAccessScopes() []string {
 // GetFullAccessScopes returns all scopes except the highest-risk control-plane
 // admin scopes.
 func GetFullAccessScopes() []domain.Scope {
-	scopes := make([]domain.Scope, 0, len(domain.AllScopes)-2)
+	scopes := make([]domain.Scope, 0, len(domain.AllScopes)-3)
 	for _, s := range domain.AllScopes {
 		switch s {
-		case domain.ScopeAPIKeyAdmin, domain.ScopeMCPClientAdmin:
+		case domain.ScopeAPIKeyAdmin, domain.ScopeMCPClientAdmin, domain.ScopeGDPRAdmin:
 			continue
 		}
 		scopes = append(scopes, s)
