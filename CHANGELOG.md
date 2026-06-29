@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Keyboard shortcuts for feedback page (#202).**
+  `?` opens help dialog, `j`/`k` navigate rows, `Enter` opens detail,
+  `/` focuses search, `x` toggles selection, `Cmd+Shift+E` exports CSV.
+  Focused row shows ring highlight. Generic `useHotkeys` hook and
+  `KeyboardShortcutsDialog` component. 4 tests.
+
+- **CSV export for feedback data (#202).**
+  Client-side CSV export of currently filtered feedback items. Includes
+  all enriched attributes, tags, workflow state. Proper CSV escaping for
+  quotes, commas, newlines. 2 tests.
+
+- **Response templates for feedback replies (#202).**
+  localStorage-backed reusable reply templates with save/update/delete.
+  Dropdown menu integrates with detail sheet reply workflow.
+  `useSyncExternalStore` hook pattern. 7 tests.
+
 - **Embeddable feedback widget for `@phixsura/attune` SDK (#202).**
   Standalone IIFE bundle (`attune-widget.iife.js`, 9 kB gzip) that
   product teams include with a single `<script>` tag. Renders a floating

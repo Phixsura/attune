@@ -2268,6 +2268,13 @@
       "title": "视图",
       "save_current": "保存当前筛选",
       "name_placeholder": "视图名称"
+    },
+    "exported_csv": "已导出 CSV 文件",
+    "templates": {
+      "title": "模板",
+      "saved": "已保存模板",
+      "save_current": "保存当前内容为模板",
+      "name_placeholder": "模板名称"
     }
   },
   "usage": {
@@ -2846,5 +2853,19 @@
     "dim_overview": "分类分布",
     "dim_overview_hint": "本月各维度的 Top 值分布，帮助识别主要信号。",
     "trend_card": "接收趋势"
+  },
+  "shortcuts": {
+    "title": "键盘快捷键",
+    "general": "通用",
+    "navigation": "导航",
+    "actions": "操作",
+    "show_help": "显示快捷键",
+    "focus_search": "搜索",
+    "next_item": "下一条",
+    "prev_item": "上一条",
+    "open_detail": "查看详情",
+    "close": "关闭",
+    "select_item": "选中/取消",
+    "export_csv": "导出 CSV"
   }
 }
