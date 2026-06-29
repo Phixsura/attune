@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 ### Fixed
 
 - Restore the Postgres migration target for destination-type checks and cover the remaining CI regressions in the console `detail-sheet` and Node SDK test suites.
+- Restore the Postgres migration target for destination-type checks, cover the remaining CI regressions in the console `detail-sheet` and Node SDK test suites, and remove the console analytics dashboard cross-feature dependency violation.
 
 ### Added
 

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { queryOptions, useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { AlertTriangle, BarChart3, Loader2, SmilePlus, TrendingUp } from 'lucide-react'
@@ -10,10 +10,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
 import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
 import { SentimentChart } from '@/features/feedback/components/sentiment-chart'
-import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
-import { usageQuery } from '@/features/usage/api/get-usage'
-import { UsageBarChart } from '@/features/usage/components/bar-chart'
-import { UsageSparkline } from '@/features/usage/components/sparkline'
+import { api } from '@/lib/api-client'
+import type { GetEnrichConfigResponse } from '@/proto/attune/v1/enrich_config'
+import type { GetUsageResponse } from '@/proto/attune/v1/usage'
 
 export function AnalyticsDashboard() {
   const { t } = useTranslation()
@@ -187,5 +186,176 @@ export function AnalyticsDashboard() {
         </>
       )}
     </div>
+  )
+}
+
+type Usage = GetUsageResponse
+
+interface UsageBucket {
+  bucket: string
+  value: number
+}
+
+function usageQuery() {
+  return queryOptions({
+    queryKey: ['console', 'usage'],
+    queryFn: ({ signal }) => api<Usage>('/fb/v1/console/usage', { signal }),
+    // 1 min - usage updates as ingest comes in; no need to thrash refetch.
+    staleTime: 60_000,
+  })
+}
+
+function enrichConfigQuery() {
+  return queryOptions({
+    queryKey: ['console', 'enrich-config'],
+    queryFn: async ({ signal }) => {
+      const resp = await api<GetEnrichConfigResponse>('/fb/v1/console/enrich-config', { signal })
+      return resp.config
+    },
+    staleTime: 30_000,
+  })
+}
+
+function UsageSparkline({ series }: { series: UsageBucket[] }) {
+  const { t } = useTranslation()
+  if (series.length === 0) return null
+  const WIDTH = 220
+  const HEIGHT = 36
+  const PAD_X = 4
+  const PAD_Y = 4
+  const max = Math.max(...series.map((b) => b.value), 1)
+  const barAreaW = WIDTH - PAD_X * 2
+  const barAreaH = HEIGHT - PAD_Y * 2
+  const gap = 2
+  const maxBarW = 10
+  const computedBarW = Math.max((barAreaW - gap * (series.length - 1)) / series.length, 2)
+  const barW = Math.min(computedBarW, maxBarW)
+  const usedW = barW * series.length + gap * Math.max(series.length - 1, 0)
+  const offsetX = PAD_X + Math.max((barAreaW - usedW) / 2, 0)
+  return (
+    <svg
+      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+      className="h-9 w-[220px]"
+      role="img"
+      aria-label="Daily ingest sparkline"
+    >
+      <line
+        x1={PAD_X}
+        x2={WIDTH - PAD_X}
+        y1={HEIGHT - PAD_Y}
+        y2={HEIGHT - PAD_Y}
+        className="stroke-border/70"
+        strokeWidth={1}
+      />
+      {series.map((b, i) => {
+        const h = (b.value / max) * barAreaH
+        const x = offsetX + i * (barW + gap)
+        const y = HEIGHT - PAD_Y - h
+        return (
+          <rect
+            key={b.bucket}
+            x={x}
+            y={y}
+            width={barW}
+            height={h}
+            className="fill-primary/75"
+            rx={1.5}
+          >
+            <title>
+              {t('usage.bar_tooltip', {
+                date: format(new Date(b.bucket), t('usage.bar_date_format'), { locale: zhCN }),
+                count: b.value,
+              })}
+            </title>
+          </rect>
+        )
+      })}
+    </svg>
+  )
+}
+
+function UsageBarChart({ series }: { series: UsageBucket[] }) {
+  const { t } = useTranslation()
+  if (series.length === 0) return null
+  const WIDTH = 600
+  const HEIGHT = 220
+  const PAD_X = 28
+  const PAD_Y = 18
+  const max = Math.max(...series.map((b) => b.value), 1)
+  const barAreaW = WIDTH - PAD_X * 2
+  const barAreaH = HEIGHT - PAD_Y * 2
+  const gap = series.length > 12 ? 4 : 8
+  const maxBarW = 30
+  const computedBarW = Math.max((barAreaW - gap * (series.length - 1)) / series.length, 8)
+  const barW = Math.min(computedBarW, maxBarW)
+  const usedW = barW * series.length + gap * Math.max(series.length - 1, 0)
+  const offsetX = PAD_X + Math.max((barAreaW - usedW) / 2, 0)
+  const guideValues = [0.25, 0.5, 0.75, 1]
+  return (
+    <svg
+      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+      className="h-56 w-full"
+      role="img"
+      aria-label="Daily ingest counts"
+    >
+      {guideValues.map((ratio) => {
+        const y = HEIGHT - PAD_Y - barAreaH * ratio
+        return (
+          <line
+            key={ratio}
+            x1={PAD_X}
+            x2={WIDTH - PAD_X}
+            y1={y}
+            y2={y}
+            className="stroke-border/70"
+            strokeWidth={1}
+            strokeDasharray="3 5"
+          />
+        )
+      })}
+      <line
+        x1={PAD_X}
+        x2={WIDTH - PAD_X}
+        y1={HEIGHT - PAD_Y}
+        y2={HEIGHT - PAD_Y}
+        className="stroke-border"
+        strokeWidth={1.2}
+      />
+      {series.map((b, i) => {
+        const h = (b.value / max) * barAreaH
+        const x = offsetX + i * (barW + gap)
+        const y = HEIGHT - PAD_Y - h
+        const showTick = series.length <= 7 || i === 0 || i === series.length - 1
+        return (
+          <g key={b.bucket}>
+            <rect
+              x={x}
+              y={y}
+              width={barW}
+              height={h}
+              className="fill-primary/85"
+              rx={barW > 10 ? 4 : 2}
+            >
+              <title>
+                {t('usage.bar_tooltip', {
+                  date: format(new Date(b.bucket), t('usage.bar_date_format'), { locale: zhCN }),
+                  count: b.value,
+                })}
+              </title>
+            </rect>
+            {showTick && (
+              <text
+                x={x + barW / 2}
+                y={HEIGHT - 4}
+                textAnchor="middle"
+                className="fill-muted-foreground text-[10px]"
+              >
+                {format(new Date(b.bucket), 'M/d', { locale: zhCN })}
+              </text>
+            )}
+          </g>
+        )
+      })}
+    </svg>
   )
 }
