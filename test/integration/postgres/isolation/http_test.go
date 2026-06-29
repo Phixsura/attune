@@ -260,7 +260,7 @@ func TestHTTP_APIKey_CrossTenantGetDenied(t *testing.T) {
 	}{
 		{"audit-log/evidence/{job_id}", fmt.Sprintf("/audit-log/evidence/%s", env.Fixture.TenantB.AuditEvidenceID)},
 		{"mcp/clients/{id}", fmt.Sprintf("/mcp/clients/%s", env.Fixture.TenantB.MCPClientID.String())},
-		{"gdpr/exports/{job_id}", fmt.Sprintf("/gdpr/exports/%s", env.Fixture.TenantB.AuditEvidenceID)},
+		{"gdpr/exports/{job_id}", fmt.Sprintf("/gdpr/exports/%s", env.Fixture.TenantB.GDPRExportJobID)},
 	}
 
 	// IDs that must never appear in tenant A's cross-tenant get responses.
@@ -331,6 +331,12 @@ func TestHTTP_APIKey_CrossTenantWritesDenied(t *testing.T) {
 			`{"name":"hijacked"}`},
 		{"DELETE /mcp/clients/{id}", "DELETE",
 			fmt.Sprintf("/mcp/clients/%s", env.Fixture.TenantB.MCPClientID), ""},
+
+		// GDPR: cancel + revoke cross-tenant
+		{"POST /gdpr/requests/{id}/cancel", "POST",
+			fmt.Sprintf("/gdpr/requests/%s/cancel", env.Fixture.TenantB.GDPRDeleteReqID), ""},
+		{"POST /gdpr/exports/{id}/revoke", "POST",
+			fmt.Sprintf("/gdpr/exports/%s/revoke", env.Fixture.TenantB.GDPRExportJobID), ""},
 	}
 
 	forbiddenIDs := []string{
@@ -338,6 +344,8 @@ func TestHTTP_APIKey_CrossTenantWritesDenied(t *testing.T) {
 		env.Fixture.TenantB.TagID.String(),
 		env.Fixture.TenantB.WorkflowID,
 		env.Fixture.TenantB.MCPClientID.String(),
+		env.Fixture.TenantB.GDPRDeleteReqID,
+		env.Fixture.TenantB.GDPRExportJobID,
 	}
 
 	for _, ep := range writeEndpoints {
