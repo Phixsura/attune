@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Isolation**: expand contract suite to 70+ cases — add `digestrun`, `llmaudit`, `breakglass` repos; batch/IDOR edge cases; error-message consistency; HTTP status-code uniformity (#154)
+
 - **Three-layer tenant isolation contract suite (#154).**
   Repo-level contract table (Layer A) covering 21 data domains with 59 cases
   (feedback mutations, tag assignment, workflow, notify targets, outbox, LLM

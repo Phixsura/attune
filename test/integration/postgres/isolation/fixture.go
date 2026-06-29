@@ -5,6 +5,7 @@ package isolation
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -14,10 +15,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/llmguard"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/auditevidence"
 	"github.com/Phixsura/attune/internal/repo/auditlog"
+	"github.com/Phixsura/attune/internal/repo/breakglass"
+	"github.com/Phixsura/attune/internal/repo/digestrun"
 	"github.com/Phixsura/attune/internal/repo/digestsubscription"
 	"github.com/Phixsura/attune/internal/repo/embedding"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -26,9 +30,9 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedbacktag"
 	"github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	"github.com/Phixsura/attune/internal/repo/gdpr"
-	"github.com/Phixsura/attune/internal/infra/llmguard"
 	"github.com/Phixsura/attune/internal/repo/guardpolicy"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
+	"github.com/Phixsura/attune/internal/repo/llmaudit"
 	"github.com/Phixsura/attune/internal/repo/llmconfig"
 	"github.com/Phixsura/attune/internal/repo/mcp"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
@@ -66,6 +70,10 @@ type TenantData struct {
 	GDPRExportJobID    string
 	GuardPolicyID      string
 	ReplyDraftFBID     int64
+
+	DigestRunID    int64
+	LLMAuditRowOK  bool
+	BreakGlassID   string
 }
 
 // Fixture is the shared test environment for tenant-isolation contracts.
@@ -99,6 +107,9 @@ type Fixture struct {
 	EmbeddingTasks *embedding.TaskRepo
 	GuardPolicy    *guardpolicy.Repo
 	ReplyDrafts    *replydraft.DraftTaskRepo
+	DigestRuns     *digestrun.Repo
+	LLMAudit       *llmaudit.Repo
+	BreakGlass     *breakglass.Repo
 }
 
 // NewFixture creates two tenants and seeds data for each across feedback,
@@ -134,6 +145,9 @@ func NewFixture(t *testing.T) *Fixture {
 		EmbeddingTasks: embedding.NewTaskRepo(pool),
 		GuardPolicy:    guardpolicy.New(pool),
 		ReplyDrafts:    replydraft.NewDraftTaskRepo(pool),
+		DigestRuns:     digestrun.New(pool),
+		LLMAudit:       llmaudit.New(pool),
+		BreakGlass:     breakglass.NewRepo(pool),
 	}
 
 	f.TenantA = seedTenant(t, f, "iso-alpha", "Isolation Alpha")
@@ -222,6 +236,16 @@ func seedTenant(t *testing.T, f *Fixture, slug, name string) TenantData {
 
 	// --- reply draft (needs a feedback row with enrichment_status='enriched') ---
 	td.ReplyDraftFBID = seedReplyDraftFeedback(t, ctx, pool, tid)
+
+	// --- digest run (raw SQL — ClaimDay requires a pgx.Tx) ---
+	td.DigestRunID = seedDigestRun(t, ctx, pool, tid, td.DigestSubID)
+
+	// --- llm audit (needs FeedbackID) ---
+	seedLLMAudit(t, ctx, f.LLMAudit, tid, td.FeedbackID)
+	td.LLMAuditRowOK = true
+
+	// --- break glass ---
+	td.BreakGlassID = seedBreakGlass(t, ctx, f.BreakGlass, tid, slug)
 
 	return td
 }
@@ -507,4 +531,52 @@ func seedReplyDraftFeedback(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		t.Fatalf("seed reply draft feedback for %s: %v", tenantID, err)
 	}
 	return id
+}
+
+func seedDigestRun(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string, subID uuid.UUID) int64 {
+	t.Helper()
+	var id int64
+	err := pool.QueryRow(ctx, `
+		INSERT INTO digest_runs (tenant_id, subscription_id, run_date, status)
+		VALUES ($1, $2, CURRENT_DATE, 'pending')
+		RETURNING id`, tenantID, subID).Scan(&id) // ptrext:allow scan-out-param
+	if err != nil {
+		t.Fatalf("seed digest run for %s: %v", tenantID, err)
+	}
+	return id
+}
+
+func seedLLMAudit(t *testing.T, ctx context.Context, repo *llmaudit.Repo, tenantID string, feedbackID int64) {
+	t.Helper()
+	err := repo.Insert(ctx, llmaudit.Row{
+		TenantID:         tenantID,
+		FeedbackID:       feedbackID,
+		ModelID:          "gpt-4o-mini",
+		ProviderModelID:  "gpt-4o-mini",
+		Purpose:          "enrichment",
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		CostUSD:          0.001,
+		Status:           "ok",
+		LatencyMS:        200,
+	})
+	if err != nil {
+		t.Fatalf("seed llm audit for %s: %v", tenantID, err)
+	}
+}
+
+func seedBreakGlass(t *testing.T, ctx context.Context, repo *breakglass.Repo, tenantID, slug string) string {
+	t.Helper()
+	h := sha256.Sum256([]byte(fmt.Sprintf("bg-token-%s", slug)))
+	tok, err := repo.Issue(ctx, breakglass.NewToken{
+		TenantID:   tenantID,
+		AdminEmail: fmt.Sprintf("admin@%s.test", slug),
+		TokenHash:  hex.EncodeToString(h[:]),
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
+		IssuedBy:   "iso-seed",
+	})
+	if err != nil {
+		t.Fatalf("seed breakglass for %s: %v", tenantID, err)
+	}
+	return tok.ID
 }

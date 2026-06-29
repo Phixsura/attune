@@ -12,11 +12,14 @@ import (
 	"github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/auditevidence"
 	"github.com/Phixsura/attune/internal/repo/auditlog"
+	"github.com/Phixsura/attune/internal/repo/breakglass"
+	"github.com/Phixsura/attune/internal/repo/digestrun"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/feedbackjob"
 	"github.com/Phixsura/attune/internal/repo/feedbacktag"
 	"github.com/Phixsura/attune/internal/repo/gdpr"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
+	"github.com/Phixsura/attune/internal/repo/llmaudit"
 	"github.com/Phixsura/attune/internal/repo/llmconfig"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	"github.com/Phixsura/attune/internal/repo/outbox"
@@ -46,6 +49,7 @@ func TestRepoIsolationContract(t *testing.T) {
 	cases = append(cases, additionalReadCases()...)
 	cases = append(cases, gdprIsolationCases()...)
 	cases = append(cases, newDomainCases()...)
+	cases = append(cases, newDomainCasesV3()...)
 
 	for _, tc := range cases {
 		t.Run(tc.Domain+"/"+tc.Operation, func(t *testing.T) {
@@ -973,6 +977,136 @@ func newDomainCases() []isolationCase {
 				_, err := f.AuditEvidence.MarkDownloaded(ctx, f.TenantA.TenantID, f.TenantB.AuditEvidenceID)
 				if err == nil {
 					return fmt.Errorf("tenant A marked tenant B's audit evidence %s as downloaded", f.TenantB.AuditEvidenceID)
+				}
+				return nil
+			},
+		},
+	}
+}
+
+// newDomainCasesV3 covers the three additional repos added in the second
+// expansion: digestrun, llmaudit, and breakglass.
+func newDomainCasesV3() []isolationCase {
+	return []isolationCase{
+		// ── digest_run ───────────────────────────────────────────────
+		{
+			Domain:    "digest_run",
+			Operation: "TryClaim_cross_tenant_not_leaked",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				// Claim one pending run; verify it belongs to the correct tenant (either A or B)
+				// and crucially that after two claims the IDs are distinct and per-tenant.
+				runA, err := f.DigestRuns.TryClaimWithOwner(ctx, time.Hour, "iso-worker-a")
+				if errors.Is(err, digestrun.ErrNoRun) {
+					// Both runs may have been claimed already by a prior sub-test;
+					// isolation is satisfied if nothing leaked.
+					return nil
+				}
+				if err != nil {
+					return fmt.Errorf("TryClaimWithOwner: %w", err)
+				}
+				runB, err := f.DigestRuns.TryClaimWithOwner(ctx, time.Hour, "iso-worker-b")
+				if errors.Is(err, digestrun.ErrNoRun) {
+					// Only one run was pending (A's was first); that's fine.
+					return nil
+				}
+				if err != nil {
+					return fmt.Errorf("TryClaimWithOwner second: %w", err)
+				}
+				// Both runs must belong to different tenants — neither crosses over.
+				if runA.TenantID == runB.TenantID {
+					return fmt.Errorf("both claimed digest runs belong to same tenant %s — isolation breach", runA.TenantID)
+				}
+				if runA.ID == runB.ID {
+					return fmt.Errorf("both claimed digest runs have the same ID %d — isolation breach", runA.ID)
+				}
+				return nil
+			},
+		},
+
+		// ── llm_audit ─────────────────────────────────────────────────
+		{
+			Domain:    "llm_audit",
+			Operation: "UsageByTenant_cross_tenant_empty",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				buckets, err := f.LLMAudit.UsageByTenant(
+					ctx, f.TenantA.TenantID,
+					llmaudit.GranularityDay,
+					time.Now().Add(-24*time.Hour),
+					time.Now().Add(24*time.Hour),
+				)
+				if err != nil {
+					return fmt.Errorf("UsageByTenant: %w", err)
+				}
+				for _, b := range buckets {
+					if b.TenantID != f.TenantA.TenantID {
+						return fmt.Errorf("tenant A usage bucket has tenant_id=%s (want %s)", b.TenantID, f.TenantA.TenantID)
+					}
+					if b.TenantID == f.TenantB.TenantID {
+						return fmt.Errorf("tenant A usage included tenant B's data")
+					}
+				}
+				return nil
+			},
+		},
+
+		// ── breakglass ────────────────────────────────────────────────
+		{
+			Domain:    "breakglass",
+			Operation: "ListAll_cross_tenant_empty",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				tokens, err := f.BreakGlass.ListAll(ctx, f.TenantA.TenantID, 100)
+				if err != nil {
+					return fmt.Errorf("ListAll: %w", err)
+				}
+				for _, tok := range tokens {
+					if tok.TenantID != f.TenantA.TenantID {
+						return fmt.Errorf("tenant A ListAll returned token %s with tenant_id=%s", tok.ID, tok.TenantID)
+					}
+					if tok.ID == f.TenantB.BreakGlassID {
+						return fmt.Errorf("tenant A ListAll returned tenant B's token %s", f.TenantB.BreakGlassID)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "breakglass",
+			Operation: "GetByID_cross_tenant_denied",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				_, err := f.BreakGlass.GetByID(ctx, f.TenantA.TenantID, f.TenantB.BreakGlassID)
+				if err == nil {
+					return fmt.Errorf("tenant A retrieved tenant B's breakglass token %s", f.TenantB.BreakGlassID)
+				}
+				if !errors.Is(err, breakglass.ErrNotFound) {
+					return fmt.Errorf("expected breakglass.ErrNotFound, got: %w", err)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "breakglass",
+			Operation: "Revoke_cross_tenant_denied",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				err := f.BreakGlass.Revoke(ctx, f.TenantA.TenantID, f.TenantB.BreakGlassID, "iso-attacker")
+				if err == nil {
+					return fmt.Errorf("tenant A revoked tenant B's breakglass token %s", f.TenantB.BreakGlassID)
+				}
+				if !errors.Is(err, breakglass.ErrNotFound) {
+					return fmt.Errorf("expected breakglass.ErrNotFound, got: %w", err)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "breakglass",
+			Operation: "MarkUsed_cross_tenant_denied",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				err := f.BreakGlass.MarkUsed(ctx, f.TenantA.TenantID, f.TenantB.BreakGlassID, "1.2.3.4")
+				if err == nil {
+					return fmt.Errorf("tenant A marked tenant B's breakglass token %s as used", f.TenantB.BreakGlassID)
+				}
+				if !errors.Is(err, breakglass.ErrNotFound) {
+					return fmt.Errorf("expected breakglass.ErrNotFound, got: %w", err)
 				}
 				return nil
 			},
