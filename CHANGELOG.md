@@ -10,14 +10,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 ### Added
 
 - **Three-layer tenant isolation contract suite (#154).**
-  Repo-level contract table (Layer A) covering 18 data domains with 46 cases
+  Repo-level contract table (Layer A) covering 21 data domains with 59 cases
   (feedback mutations, tag assignment, workflow, notify targets, outbox, LLM
-  config, system settings, digest subscriptions), per-domain edge-case tests
-  (Layer B) across 9 packages, and HTTP black-box tests through both auth
-  surfaces (Layer C): API-key with 18 endpoint assertions including cross-tenant
-  write isolation and integrity verification, plus MCP OAuth Bearer JWT with
-  full coverage of all 10 registered MCP tools (list/get/write/ingest) via
-  JSON-RPC against real repos.
+  config, system settings, digest subscriptions, GDPR, guard policy, reply
+  drafts, audit evidence, tenant members), per-domain edge-case tests
+  (Layer B) with 5 targeted cross-tenant edge cases (batch mixed-tenant
+  queries, policy replace isolation, audit trail separation, settings
+  independence, subscription isolation), and HTTP black-box tests through
+  both auth surfaces (Layer C): API-key with 23 endpoint assertions including
+  GDPR write/get and cross-tenant integrity verification, plus MCP OAuth
+  Bearer JWT with full coverage of all 10 registered MCP tools via JSON-RPC
+  with structural assertion helpers (typed JSON-RPC parsing, per-ID leak
+  detection).
 
 - **Public management APIs and SDK coverage for audit/GDPR/outbox/MCP governance (#168).**
   Scoped API-key routes now expose selected admin operations under canonical
