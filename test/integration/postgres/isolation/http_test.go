@@ -192,6 +192,15 @@ func containsAny(body []byte, needles ...string) bool {
 	return false
 }
 
+func assertBodyNoLeak(t *testing.T, label string, body []byte, forbidden []string) {
+	t.Helper()
+	for _, id := range forbidden {
+		if id != "" && strings.Contains(string(body), id) {
+			t.Errorf("ISOLATION BREACH: %s response contains forbidden ID %s", label, id)
+		}
+	}
+}
+
 // TestHTTP_APIKey_CrossTenantListsDenied verifies that every list endpoint
 // returns only the requesting tenant's data. Tenant A's key must never see
 // tenant B's resource IDs in any list response.
@@ -226,22 +235,8 @@ func TestHTTP_APIKey_CrossTenantListsDenied(t *testing.T) {
 
 	for _, ep := range listEndpoints {
 		t.Run(ep.name, func(t *testing.T) {
-			status, body := doGet(t, env, env.APIKeyA, ep.path)
-
-			// A 200 is expected for well-formed list calls. If the handler
-			// panics (nil service dep), Recoverer turns it into 500 — still
-			// fine as long as no tenant B data appears.
-			if status == http.StatusOK {
-				if containsAny(body, forbiddenIDs...) {
-					t.Errorf("list %s leaked tenant B data in 200 response:\n%s", ep.name, string(body))
-				}
-			} else {
-				// Non-200 (e.g. 500 from a nil dependency): verify the
-				// error body still doesn't leak tenant B identifiers.
-				if containsAny(body, forbiddenIDs...) {
-					t.Errorf("list %s leaked tenant B data in %d response:\n%s", ep.name, status, string(body))
-				}
-			}
+			_, body := doGet(t, env, env.APIKeyA, ep.path)
+			assertBodyNoLeak(t, "list "+ep.name, body, forbiddenIDs)
 		})
 	}
 }
@@ -277,20 +272,8 @@ func TestHTTP_APIKey_CrossTenantGetDenied(t *testing.T) {
 
 	for _, ep := range getEndpoints {
 		t.Run(ep.name, func(t *testing.T) {
-			status, body := doGet(t, env, env.APIKeyA, ep.path)
-
-			if status == http.StatusOK {
-				// A 200 for a cross-tenant resource is a breach if the
-				// body contains any of tenant B's identifiers.
-				if containsAny(body, forbiddenIDs...) {
-					t.Errorf("GET %s returned 200 with tenant B data:\n%s", ep.path, string(body))
-				}
-			}
-			// Non-200 (404, 500, etc.) is the expected isolation behavior.
-			// Still verify the error body doesn't leak IDs.
-			if containsAny(body, forbiddenIDs...) {
-				t.Errorf("GET %s leaked tenant B data in %d response:\n%s", ep.path, status, string(body))
-			}
+			_, body := doGet(t, env, env.APIKeyA, ep.path)
+			assertBodyNoLeak(t, "GET "+ep.name, body, forbiddenIDs)
 		})
 	}
 }
@@ -364,12 +347,7 @@ func TestHTTP_APIKey_CrossTenantWritesDenied(t *testing.T) {
 				status, body = doPut(t, env, env.APIKeyA, ep.path, ep.body)
 			}
 
-			// Cross-tenant writes: expect 404/4xx/5xx — never 200 with tenant B data.
-			if containsAny(body, forbiddenIDs...) {
-				t.Errorf("%s leaked tenant B data in %d response:\n%s",
-					ep.name, status, string(body))
-			}
-
+			assertBodyNoLeak(t, ep.name, body, forbiddenIDs)
 			if status == http.StatusOK {
 				t.Errorf("ISOLATION BREACH: %s returned 200 for cross-tenant write", ep.name)
 			}

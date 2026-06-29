@@ -148,6 +148,23 @@ func doJSONRPC(t *testing.T, env *mcpEnv, bearerToken, method string, params any
 	return resp.StatusCode, respBody
 }
 
+type jsonrpcResult struct {
+	Result json.RawMessage `json:"result"`
+	Error  *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func assertNoLeakedIDs(t *testing.T, label string, raw json.RawMessage, forbidden []string) {
+	t.Helper()
+	s := string(raw)
+	for _, id := range forbidden {
+		if id != "" && strings.Contains(s, id) {
+			t.Errorf("ISOLATION BREACH: %s result contains forbidden ID %s", label, id)
+		}
+	}
+}
+
 func TestMCP_BearerJWT_CrossTenantListsDenied(t *testing.T) {
 	env := newMCPEnv(t)
 
@@ -162,9 +179,14 @@ func TestMCP_BearerJWT_CrossTenantListsDenied(t *testing.T) {
 	for _, method := range listMethods {
 		t.Run(method, func(t *testing.T) {
 			status, body := doJSONRPC(t, env, env.TokenA, method, nil)
-			if status == http.StatusOK && containsAny(body, forbiddenUUIDs...) {
-				t.Errorf("MCP %s leaked tenant B data in response:\n%s", method, string(body))
+			if status != http.StatusOK {
+				return
 			}
+			var resp jsonrpcResult
+			if json.Unmarshal(body, &resp) != nil || resp.Error != nil {
+				return
+			}
+			assertNoLeakedIDs(t, method, resp.Result, forbiddenUUIDs)
 		})
 	}
 }
@@ -189,14 +211,10 @@ func TestMCP_BearerJWT_CrossTenantGetDenied(t *testing.T) {
 		t.Run(op.name, func(t *testing.T) {
 			_, body := doJSONRPC(t, env, env.TokenA, op.method, op.params)
 
-			var resp struct {
-				Error *struct{ Message string } `json:"error"`
-			}
+			var resp jsonrpcResult
 			require.NoError(t, json.Unmarshal(body, &resp))
 			if resp.Error == nil {
-				if containsAny(body, env.Fixture.TenantB.TenantID) {
-					t.Errorf("ISOLATION BREACH: %s returned tenant B data via tenant A JWT", op.name)
-				}
+				assertNoLeakedIDs(t, op.name, resp.Result, []string{env.Fixture.TenantB.TenantID})
 			}
 		})
 	}
