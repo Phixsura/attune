@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Three-layer tenant isolation contract suite (#154).**
+  Repo-level contract table (Layer A) covering 18 data domains with 27 cases,
+  per-domain edge-case tests (Layer B) across 9 packages, and HTTP black-box
+  tests through both auth surfaces (Layer C): API-key with 18 endpoint
+  assertions including cross-tenant write isolation and integrity verification,
+  plus MCP OAuth Bearer JWT with cross-tenant list/get/write coverage via
+  JSON-RPC against real repos.
+
 - **Public management APIs and SDK coverage for audit/GDPR/outbox/MCP governance (#168).**
   Scoped API-key routes now expose selected admin operations under canonical
   `/v1/...` paths, with matching Node and Go SDK methods.
