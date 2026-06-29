@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Fixed
+
+- Restore the Postgres migration target for destination-type checks and cover the remaining CI regressions in the console `detail-sheet` and Node SDK test suites.
+
 ### Added
 
 - **Isolation**: expand contract suite to 65+ Layer A cases + 8 Layer B edge cases — add `digestrun`, `llmaudit`, `breakglass` repo coverage; batch soft-delete, digest conflict, error-message consistency (no existence leakage); Layer C HTTP expanded with CSV export, download, MCP grant/session/tool-policy routes and status-code uniformity check (#154)

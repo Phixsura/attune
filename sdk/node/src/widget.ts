@@ -141,10 +141,14 @@ class WidgetInstance {
 
     const status = el('div', { className: 'attune-w-status', style: 'display:none' })
 
-    return el('div', {
-      className: 'attune-w-panel',
-      style: this.positionStyle(),
-    }, [header, form, status]) as HTMLDivElement
+    return el(
+      'div',
+      {
+        className: 'attune-w-panel',
+        style: this.positionStyle(),
+      },
+      [header, form, status],
+    ) as HTMLDivElement
   }
 
   private bind(): void {

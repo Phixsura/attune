@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { widget, type WidgetOptions } from '../src/widget'
+import { type WidgetOptions, widget } from '../src/widget'
 
 function stubFetch(): typeof fetch {
   return vi.fn().mockResolvedValue(
