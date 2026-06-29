@@ -45,6 +45,7 @@ import (
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/githubissue"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/lark"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/slack"
+	_ "github.com/Phixsura/attune/internal/outbound/adapter/teams"
 )
 
 // subcommands routes each CLI verb to its handler. `server` ignores its args

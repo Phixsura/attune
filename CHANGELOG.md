@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Microsoft Teams outbound adapter (#202).**
+  Delivers event and digest notifications as Adaptive Card 1.4 messages
+  via Teams incoming-webhook connectors. URL-as-credential pattern (like
+  Slack/Discord). Migration 092 adds 'teams' to destination_type CHECK.
+  8 tests.
+
 - **Python SDK with zero dependencies (#202).**
   Synchronous client for the attune API using only stdlib (urllib).
   Covers ingest, list, and get-detail endpoints with typed dataclasses.

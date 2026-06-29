@@ -41,6 +41,7 @@ const (
 	DestSlack       = "slack"     // Slack incoming webhook (Block Kit)
 	DestLark        = "lark"      // Lark/Feishu incoming webhook (interactive card)
 	DestDiscord     = "discord"   // Discord incoming webhook (embed objects)
+	DestTeams       = "teams"     // Microsoft Teams incoming webhook (Adaptive Card)
 	DestEmail       = "email"
 	DestGitHubIssue = "github-issue"
 )
@@ -51,7 +52,7 @@ const (
 // beyond its host — even the path is secret. Mirrors config.secretOptionalDestTypes.
 func URLIsCredential(destType string) bool {
 	switch destType {
-	case DestSlack, DestLark, DestDiscord:
+	case DestSlack, DestLark, DestDiscord, DestTeams:
 		return true
 	default:
 		return false
