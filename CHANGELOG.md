@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Saved views for feedback filters (#202).**
+  Filter presets (dimension filters, tags, workflow state, queue mode,
+  sort, search) can be saved, loaded, and deleted from a dropdown in the
+  feedback list. Persisted in localStorage via `useSavedViews` hook.
+  6 tests (4 hook + 2 component).
+
 - **Analytics dashboard home page in Console (#202).**
   New `/analytics/dashboard` route aggregates feedback stats (total,
   urgent count, dimension distributions) and usage trends into a unified

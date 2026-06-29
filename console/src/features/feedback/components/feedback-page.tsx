@@ -50,8 +50,10 @@ import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet
 import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
 import { LanguageBadge } from '@/features/feedback/components/language-badge'
 import { RetryEnrichmentDialog } from '@/features/feedback/components/retry-enrichment-dialog'
+import { SavedViewsMenu } from '@/features/feedback/components/saved-views-menu'
 import { SelectionActionBar } from '@/features/feedback/components/selection-action-bar'
 import { useRowSelection } from '@/features/feedback/hooks/use-row-selection'
+import { useSavedViews } from '@/features/feedback/hooks/use-saved-views'
 import {
   isTerminalFailure,
   MAX_ENRICHMENT_ATTEMPTS,
@@ -104,6 +106,7 @@ export function FeedbackPage({
   const [queueMode, setQueueMode] = useState<FeedbackQueueMode>('all')
   const qDeferred = useDeferredValue(qInput)
   const [detailId, setDetailId] = useState<string | null>(null)
+  const savedViews = useSavedViews()
 
   const filters: FeedbackListFilters = useMemo(() => {
     const attrs: AttrFilterEntry[] = Object.entries(attrFilters)
@@ -405,6 +408,19 @@ export function FeedbackPage({
     setQInput('')
   }
 
+  const loadSavedView = (view: {
+    filters: import('@/features/feedback/hooks/use-saved-views').SavedViewFilters
+  }) => {
+    setAttrFilters(view.filters.attrFilters)
+    setTagFilter(view.filters.tagFilter)
+    setWorkflowFilter(view.filters.workflowFilter)
+    setEnrichmentFilter(view.filters.enrichmentFilter)
+    setUrgentOnly(view.filters.urgentOnly)
+    setQueueMode(view.filters.queueMode as FeedbackQueueMode)
+    setSortMode(view.filters.sortMode as FeedbackSortMode)
+    setQInput(view.filters.q)
+  }
+
   return (
     <div className="space-y-5">
       <section className="rounded-[1.45rem] border border-border/70 bg-[linear-gradient(180deg,rgba(255,252,248,0.9),rgba(255,255,255,0.995)_24%,rgba(249,250,251,0.99))] p-2 shadow-[0_24px_70px_-58px_rgba(15,23,42,0.2)]">
@@ -530,6 +546,22 @@ export function FeedbackPage({
                   value={t('feedback.focus_items.selection_active', { count: selected.size })}
                 />
               )}
+              <SavedViewsMenu
+                views={savedViews.views}
+                onSave={savedViews.save}
+                onLoad={loadSavedView}
+                onRemove={savedViews.remove}
+                currentFilters={{
+                  attrFilters,
+                  tagFilter,
+                  workflowFilter,
+                  enrichmentFilter,
+                  urgentOnly,
+                  queueMode,
+                  sortMode,
+                  q: qInput,
+                }}
+              />
               {hasActiveFilters && (
                 <Button variant="ghost" className="h-9 px-3 text-sm" onClick={clearFilters}>
                   {t('feedback.clear_filters')}

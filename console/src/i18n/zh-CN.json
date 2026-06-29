@@ -2263,6 +2263,11 @@
       },
       "load_more": "加载更多",
       "loaded_of_total": "已加载 {{loaded}} / {{total}} 条"
+    },
+    "saved_views": {
+      "title": "视图",
+      "save_current": "保存当前筛选",
+      "name_placeholder": "视图名称"
     }
   },
   "usage": {
