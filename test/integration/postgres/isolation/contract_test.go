@@ -20,6 +20,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/llmconfig"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	"github.com/Phixsura/attune/internal/repo/outbox"
+	"github.com/Phixsura/attune/internal/repo/replydraft"
 	"github.com/Phixsura/attune/internal/repo/systemsettings"
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
@@ -43,6 +44,8 @@ func TestRepoIsolationContract(t *testing.T) {
 	cases = append(cases, expandedDomainCases()...)
 	cases = append(cases, mutationWriteCases()...)
 	cases = append(cases, additionalReadCases()...)
+	cases = append(cases, gdprIsolationCases()...)
+	cases = append(cases, newDomainCases()...)
 
 	for _, tc := range cases {
 		t.Run(tc.Domain+"/"+tc.Operation, func(t *testing.T) {
@@ -783,6 +786,193 @@ func additionalReadCases() []isolationCase {
 				}
 				if !exists {
 					return fmt.Errorf("tenant A route not found via TenantExists")
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "replydraft",
+			Operation: "QueueDepth_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				depth, err := f.ReplyDrafts.QueueDepth(ctx, f.TenantA.TenantID)
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				_ = depth
+				return nil
+			},
+		},
+		{
+			Domain:    "replydraft",
+			Operation: "LoadForDraft_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				draft, err := f.ReplyDrafts.LoadForDraft(ctx, f.TenantB.ReplyDraftFBID, f.TenantA.TenantID)
+				if err == nil && draft != nil {
+					return fmt.Errorf("tenant A loaded draft for tenant B's feedback %d", f.TenantB.ReplyDraftFBID)
+				}
+				if err != nil && !errors.Is(err, replydraft.ErrNotFound) {
+					return fmt.Errorf("expected ErrNotFound, got: %w", err)
+				}
+				return nil
+			},
+		},
+	}
+}
+
+// gdprIsolationCases covers GDPR delete requests and export jobs.
+func gdprIsolationCases() []isolationCase {
+	return []isolationCase{
+		{
+			Domain:    "gdpr",
+			Operation: "ListRequests_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				result, err := f.GDPR.ListRequests(ctx, gdpr.ListRequestFilter{
+					TenantID: f.TenantA.TenantID, Limit: 100,
+				})
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				for _, req := range result.Items {
+					if req.TenantID != f.TenantA.TenantID {
+						return fmt.Errorf("tenant A list returned request %s belonging to tenant %s", req.ID, req.TenantID)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "gdpr",
+			Operation: "GetExportJob_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				_, err := f.GDPR.GetExportJob(ctx, f.TenantA.TenantID, f.TenantB.GDPRExportJobID)
+				if err == nil {
+					return fmt.Errorf("tenant A retrieved tenant B's export job %s", f.TenantB.GDPRExportJobID)
+				}
+				if !errors.Is(err, gdpr.ErrExportJobNotFound) {
+					return fmt.Errorf("expected ErrExportJobNotFound, got: %w", err)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "gdpr",
+			Operation: "CancelDeleteRequest_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				req, err := f.GDPR.CancelDeleteRequest(ctx, f.TenantA.TenantID, f.TenantB.GDPRDeleteReqID)
+				if err != nil {
+					return nil
+				}
+				if req != nil && req.TenantID == f.TenantB.TenantID {
+					return fmt.Errorf("tenant A cancelled tenant B's delete request %s", f.TenantB.GDPRDeleteReqID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "gdpr",
+			Operation: "RevokeExportJob_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				_, err := f.GDPR.RevokeExportJob(ctx, f.TenantA.TenantID, f.TenantB.GDPRExportJobID)
+				if err == nil {
+					return fmt.Errorf("tenant A revoked tenant B's export job %s", f.TenantB.GDPRExportJobID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "gdpr",
+			Operation: "GetOperationsSummary_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				_, err := f.GDPR.GetOperationsSummary(ctx, f.TenantA.TenantID)
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				return nil
+			},
+		},
+	}
+}
+
+// newDomainCases covers guard_policy, tenant_members (additional), and
+// feedback batch operations.
+func newDomainCases() []isolationCase {
+	return []isolationCase{
+		{
+			Domain:    "guard_policy",
+			Operation: "ListForConsole_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				policies, err := f.GuardPolicy.ListForConsole(ctx, f.TenantA.TenantID)
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				for _, p := range policies {
+					if p.TenantID != "" && p.TenantID != f.TenantA.TenantID {
+						return fmt.Errorf("tenant A list returned tenant-scoped policy %s belonging to tenant %s", p.ID, p.TenantID)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "guard_policy",
+			Operation: "DeleteTenantPolicy_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				err := f.GuardPolicy.DeleteTenantPolicy(ctx, f.TenantA.TenantID, f.TenantB.GuardPolicyID)
+				if err == nil {
+					return fmt.Errorf("tenant A deleted tenant B's guard policy %s", f.TenantB.GuardPolicyID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "tenant_members",
+			Operation: "CountAdmins_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				count, err := f.TenantMembers.CountAdmins(ctx, f.TenantA.TenantID)
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				if count < 1 {
+					return fmt.Errorf("tenant A admin count = %d, want >= 1", count)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "feedback",
+			Operation: "CountByFilter_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				countA, err := f.Feedback.CountByFilter(ctx, f.TenantA.TenantID, nil)
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				if countA == 0 {
+					return fmt.Errorf("tenant A count = 0, expected > 0")
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "feedback",
+			Operation: "BatchSoftDelete_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				result, err := f.Feedback.BatchSoftDelete(ctx, f.TenantA.TenantID, []int64{f.TenantB.FeedbackID}, nil)
+				if err != nil {
+					return nil
+				}
+				if result != nil && result.Succeeded > 0 {
+					return fmt.Errorf("tenant A soft-deleted tenant B's feedback %d", f.TenantB.FeedbackID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "audit_evidence",
+			Operation: "MarkDownloaded_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				_, err := f.AuditEvidence.MarkDownloaded(ctx, f.TenantA.TenantID, f.TenantB.AuditEvidenceID)
+				if err == nil {
+					return fmt.Errorf("tenant A marked tenant B's audit evidence %s as downloaded", f.TenantB.AuditEvidenceID)
 				}
 				return nil
 			},

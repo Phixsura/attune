@@ -26,11 +26,14 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedbacktag"
 	"github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	"github.com/Phixsura/attune/internal/repo/gdpr"
+	"github.com/Phixsura/attune/internal/infra/llmguard"
+	"github.com/Phixsura/attune/internal/repo/guardpolicy"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
 	"github.com/Phixsura/attune/internal/repo/llmconfig"
 	"github.com/Phixsura/attune/internal/repo/mcp"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	"github.com/Phixsura/attune/internal/repo/outbox"
+	"github.com/Phixsura/attune/internal/repo/replydraft"
 	"github.com/Phixsura/attune/internal/repo/systemsettings"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
@@ -56,9 +59,13 @@ type TenantData struct {
 	DigestSubID     uuid.UUID
 	LLMRouteID      uuid.UUID
 	IdempotencyKey  string
-	EmbeddingTaskID int64
-	MemberID        string
-	TagName         string
+	EmbeddingTaskID    int64
+	MemberID           string
+	TagName            string
+	GDPRDeleteReqID    string
+	GDPRExportJobID    string
+	GuardPolicyID      string
+	ReplyDraftFBID     int64
 }
 
 // Fixture is the shared test environment for tenant-isolation contracts.
@@ -90,6 +97,8 @@ type Fixture struct {
 	Idempotency    *idempotency.Repo
 	FeedbackAudit  *feedbackaudit.Repo
 	EmbeddingTasks *embedding.TaskRepo
+	GuardPolicy    *guardpolicy.Repo
+	ReplyDrafts    *replydraft.DraftTaskRepo
 }
 
 // NewFixture creates two tenants and seeds data for each across feedback,
@@ -123,6 +132,8 @@ func NewFixture(t *testing.T) *Fixture {
 		Idempotency:    idempotency.New(pool),
 		FeedbackAudit:  feedbackaudit.New(pool),
 		EmbeddingTasks: embedding.NewTaskRepo(pool),
+		GuardPolicy:    guardpolicy.New(pool),
+		ReplyDrafts:    replydraft.NewDraftTaskRepo(pool),
 	}
 
 	f.TenantA = seedTenant(t, f, "iso-alpha", "Isolation Alpha")
@@ -202,6 +213,15 @@ func seedTenant(t *testing.T, f *Fixture, slug, name string) TenantData {
 
 	// --- tag assignment (needs FeedbackID + TagID) ---
 	seedTagAssignment(t, ctx, f.TagAssign, tid, td.FeedbackID, td.TagID)
+
+	// --- GDPR delete request + export job ---
+	td.GDPRDeleteReqID, td.GDPRExportJobID = seedGDPR(t, ctx, f.GDPR, tid, slug)
+
+	// --- guard policy ---
+	td.GuardPolicyID = seedGuardPolicy(t, ctx, f.GuardPolicy, tid, slug)
+
+	// --- reply draft (needs a feedback row with enrichment_status='enriched') ---
+	td.ReplyDraftFBID = seedReplyDraftFeedback(t, ctx, pool, tid)
 
 	return td
 }
@@ -441,6 +461,50 @@ func seedEmbeddingTask(t *testing.T, ctx context.Context, repo *embedding.TaskRe
 	id, err := repo.CreateTask(ctx, feedbackID, tenantID)
 	if err != nil {
 		t.Fatalf("seed embedding task for %s: %v", tenantID, err)
+	}
+	return id
+}
+
+func seedGDPR(t *testing.T, ctx context.Context, repo *gdpr.Repo, tenantID, _ string) (string, string) {
+	t.Helper()
+	subjectKey := "iso-user"
+	subjectHash := fmt.Sprintf("%x", sha256.Sum256([]byte(subjectKey)))
+
+	delResult, err := repo.CreateDeleteRequest(ctx, tenantID, subjectKey, subjectHash, "admin", "iso-seed", time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("seed GDPR delete request for %s: %v", tenantID, err)
+	}
+
+	exportJob, err := repo.CreateExportJob(ctx, tenantID, subjectKey, subjectHash, "admin", "iso-seed")
+	if err != nil {
+		t.Fatalf("seed GDPR export job for %s: %v", tenantID, err)
+	}
+	return delResult.RequestID, exportJob.ID
+}
+
+func seedGuardPolicy(t *testing.T, ctx context.Context, repo *guardpolicy.Repo, tenantID, slug string) string {
+	t.Helper()
+	p, err := repo.CreateTenantPolicy(ctx, tenantID, "iso-seed", llmguard.Policy{
+		Name:     fmt.Sprintf("iso-policy-%s", slug),
+		Kind:     llmguard.KindDefault,
+		Enabled:  true,
+		Priority: 100,
+	})
+	if err != nil {
+		t.Fatalf("seed guard policy for %s: %v", tenantID, err)
+	}
+	return p.ID
+}
+
+func seedReplyDraftFeedback(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string) int64 {
+	t.Helper()
+	var id int64
+	err := pool.QueryRow(ctx, `
+		INSERT INTO user_feedback (tenant_id, user_id, source, content, enrichment_status)
+		VALUES ($1, 'iso-user', 'api', 'isolation seed for reply draft', 'enriched')
+		RETURNING id`, tenantID).Scan(&id) // ptrext:allow scan-out-param
+	if err != nil {
+		t.Fatalf("seed reply draft feedback for %s: %v", tenantID, err)
 	}
 	return id
 }
