@@ -10,11 +10,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 ### Added
 
 - **Three-layer tenant isolation contract suite (#154).**
-  Repo-level contract table (Layer A) covering 18 data domains with 27 cases,
-  per-domain edge-case tests (Layer B) across 9 packages, and HTTP black-box
-  tests through both auth surfaces (Layer C): API-key with 18 endpoint
-  assertions including cross-tenant write isolation and integrity verification,
-  plus MCP OAuth Bearer JWT with cross-tenant list/get/write coverage via
+  Repo-level contract table (Layer A) covering 18 data domains with 46 cases
+  (feedback mutations, tag assignment, workflow, notify targets, outbox, LLM
+  config, system settings, digest subscriptions), per-domain edge-case tests
+  (Layer B) across 9 packages, and HTTP black-box tests through both auth
+  surfaces (Layer C): API-key with 18 endpoint assertions including cross-tenant
+  write isolation and integrity verification, plus MCP OAuth Bearer JWT with
+  full coverage of all 10 registered MCP tools (list/get/write/ingest) via
   JSON-RPC against real repos.
 
 - **Public management APIs and SDK coverage for audit/GDPR/outbox/MCP governance (#168).**
@@ -57,6 +59,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     interfaces such as `http.Flusher`, `io.ReaderFrom`, and `http.Hijacker`, so
     `/v1` export/download paths keep their underlying transport behavior while
     still injecting the contract headers.
+
+### Security
+
+- **Fix cross-tenant tag assignment in `feedbacktagassignment.Add` (#154).**
+  The INSERT subquery only checked `user_feedback.tenant_id` but not
+  `tenant_feedback_tags.tenant_id`, allowing a caller to assign a tag
+  belonging to another tenant to their own feedback. Added a JOIN on
+  `tenant_feedback_tags` to verify both entities belong to the same tenant.
 
 ### Fixed
 
