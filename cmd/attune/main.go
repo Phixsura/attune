@@ -31,6 +31,7 @@ import (
 	// only legal site per the inbound-boundary depguard rule; cmd/attune
 	// owns this entrypoint so the framework registry is populated before
 	// inbound.Manager.StartAll runs in server.go.
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/discord"
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/email"
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/webhook"

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Discord Interactions inbound adapter (#202).**
+  Push-mode adapter receiving Discord Interactions (slash commands,
+  message components, modal submits) via Ed25519-verified webhook.
+  Responds to PING challenges, extracts feedback content, and ingests
+  with channel metadata (guild, channel, user). 20 tests (6 conformance
+  + 14 adapter-specific).
+
 - **Saved views for feedback filters (#202).**
   Filter presets (dimension filters, tags, workflow state, queue mode,
   sort, search) can be saved, loaded, and deleted from a dropdown in the
