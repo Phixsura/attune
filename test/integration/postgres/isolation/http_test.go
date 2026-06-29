@@ -227,6 +227,7 @@ func TestHTTP_APIKey_CrossTenantListsDenied(t *testing.T) {
 		{"workflow/states", "/workflow/states"},
 		{"workflow/transitions", "/workflow/transitions"},
 		{"audit-log", "/audit-log"},
+		{"audit-log/export.csv", "/audit-log/export.csv"},
 		{"outbox/deliveries", "/outbox/deliveries"},
 		{"mcp/clients", "/mcp/clients"},
 		{"gdpr/requests", "/gdpr/requests"},
@@ -254,8 +255,10 @@ func TestHTTP_APIKey_CrossTenantGetDenied(t *testing.T) {
 		path string
 	}{
 		{"audit-log/evidence/{job_id}", fmt.Sprintf("/audit-log/evidence/%s", env.Fixture.TenantB.AuditEvidenceID)},
+		{"audit-log/evidence/{job_id}/download", fmt.Sprintf("/audit-log/evidence/%s/download", env.Fixture.TenantB.AuditEvidenceID)},
 		{"mcp/clients/{id}", fmt.Sprintf("/mcp/clients/%s", env.Fixture.TenantB.MCPClientID.String())},
 		{"gdpr/exports/{job_id}", fmt.Sprintf("/gdpr/exports/%s", env.Fixture.TenantB.GDPRExportJobID)},
+		{"gdpr/exports/{job_id}/download", fmt.Sprintf("/gdpr/exports/%s/download", env.Fixture.TenantB.GDPRExportJobID)},
 	}
 
 	// IDs that must never appear in tenant A's cross-tenant get responses.
@@ -320,6 +323,15 @@ func TestHTTP_APIKey_CrossTenantWritesDenied(t *testing.T) {
 			fmt.Sprintf("/gdpr/requests/%s/cancel", env.Fixture.TenantB.GDPRDeleteReqID), ""},
 		{"POST /gdpr/exports/{id}/revoke", "POST",
 			fmt.Sprintf("/gdpr/exports/%s/revoke", env.Fixture.TenantB.GDPRExportJobID), ""},
+
+		// MCP clients: tool-policy + grant/session cross-tenant
+		{"PUT /mcp/clients/{id}/tool-policies", "PUT",
+			fmt.Sprintf("/mcp/clients/%s/tool-policies", env.Fixture.TenantB.MCPClientID),
+			`{"policies":[]}`},
+		{"DELETE /mcp/clients/{id}/grants/{grant_id}", "DELETE",
+			fmt.Sprintf("/mcp/clients/%s/grants/%s", env.Fixture.TenantB.MCPClientID, uuid.New()), ""},
+		{"DELETE /mcp/clients/{id}/sessions/{session_id}", "DELETE",
+			fmt.Sprintf("/mcp/clients/%s/sessions/%s", env.Fixture.TenantB.MCPClientID, uuid.New()), ""},
 	}
 
 	forbiddenIDs := []string{
@@ -384,4 +396,48 @@ func verifyTenantBIntegrity(t *testing.T, env *httpEnv) {
 			t.Errorf("tenant B's workflow state %s missing from list after cross-tenant write attempt", env.Fixture.TenantB.WorkflowID)
 		}
 	})
+}
+
+// TestHTTP_APIKey_ErrorStatusConsistency verifies that cross-tenant single-resource
+// GETs return the same status code (404) regardless of whether the resource belongs
+// to another tenant or simply does not exist. This prevents information leakage
+// about resource existence across tenants.
+func TestHTTP_APIKey_ErrorStatusConsistency(t *testing.T) {
+	env := newHTTPEnv(t)
+
+	nonexistentID := uuid.New().String()
+
+	probes := []struct {
+		name           string
+		crossTenantURL string
+		nonexistentURL string
+	}{
+		{
+			"mcp/clients/{id}",
+			fmt.Sprintf("/mcp/clients/%s", env.Fixture.TenantB.MCPClientID),
+			fmt.Sprintf("/mcp/clients/%s", nonexistentID),
+		},
+		{
+			"audit-log/evidence/{job_id}",
+			fmt.Sprintf("/audit-log/evidence/%s", env.Fixture.TenantB.AuditEvidenceID),
+			fmt.Sprintf("/audit-log/evidence/%s", nonexistentID),
+		},
+		{
+			"gdpr/exports/{job_id}",
+			fmt.Sprintf("/gdpr/exports/%s", env.Fixture.TenantB.GDPRExportJobID),
+			fmt.Sprintf("/gdpr/exports/%s", nonexistentID),
+		},
+	}
+
+	for _, p := range probes {
+		t.Run(p.name, func(t *testing.T) {
+			crossStatus, _ := doGet(t, env, env.APIKeyA, p.crossTenantURL)
+			missingStatus, _ := doGet(t, env, env.APIKeyA, p.nonexistentURL)
+
+			if crossStatus != missingStatus {
+				t.Errorf("status code mismatch for %s: cross-tenant=%d nonexistent=%d (leaks existence)",
+					p.name, crossStatus, missingStatus)
+			}
+		})
+	}
 }
