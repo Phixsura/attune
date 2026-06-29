@@ -43,6 +43,11 @@ func (w *OutboxWorker) sendByDestType(
 	env.DeliveryID = fmt.Sprintf("%d", row.ID)
 
 	dst := toOutboundTarget(target)
+
+	if ds := outbound.LookupDirectEvent(row.DestinationType); ds != nil {
+		return ds.SendEvent(ctx, env, dst)
+	}
+
 	rendered, err := ch.RenderEvent(env, dst)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] render failed,id:%d,dest_type:%s,err:%+v",

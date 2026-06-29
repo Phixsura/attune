@@ -62,6 +62,32 @@ func LookupDigest(destType string) DigestChannel {
 	return nil
 }
 
+// LookupDirectEvent returns the DirectEventSender for the given destination
+// type, or nil if the channel is not registered or does not implement the role.
+func LookupDirectEvent(destType string) DirectEventSender {
+	mu.RLock()
+	defer mu.RUnlock()
+	if ch, ok := channels[destType]; ok {
+		if ds, ok := ch.(DirectEventSender); ok {
+			return ds
+		}
+	}
+	return nil
+}
+
+// LookupDirectDigest returns the DirectDigestSender for the given destination
+// type, or nil if the channel is not registered or does not implement the role.
+func LookupDirectDigest(destType string) DirectDigestSender {
+	mu.RLock()
+	defer mu.RUnlock()
+	if ch, ok := channels[destType]; ok {
+		if ds, ok := ch.(DirectDigestSender); ok {
+			return ds
+		}
+	}
+	return nil
+}
+
 // Entry — what Channels() returns. Named struct for consumable public API.
 type Entry struct {
 	ID             string

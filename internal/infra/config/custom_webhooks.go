@@ -36,6 +36,7 @@ var validDestTypes = map[string]bool{
 	"slack":        true,
 	"lark":         true,
 	"discord":      true,
+	"email":        true,
 	"github-issue": true,
 }
 

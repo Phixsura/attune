@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Email outbound adapter with SMTP delivery (#202).**
+  New `internal/outbound/adapter/email` package delivers per-event and digest
+  notifications via SMTP (STARTTLS or implicit TLS). The outbound framework
+  gains `DirectEventSender` / `DirectDigestSender` optional interfaces so
+  non-HTTP adapters bypass the HTTP transport. The email adapter supports
+  configurable SMTP host/port/auth, RFC 822 plain-text messages, and
+  SSRF-guarded host validation.
+
+
 - **Public management APIs and SDK coverage for audit/GDPR/outbox/MCP governance (#168).**
   Scoped API-key routes now expose selected admin operations under canonical
   `/v1/...` paths, with matching Node and Go SDK methods.
