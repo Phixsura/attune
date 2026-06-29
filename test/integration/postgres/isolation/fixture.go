@@ -24,6 +24,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	"github.com/Phixsura/attune/internal/repo/feedbackjob"
 	"github.com/Phixsura/attune/internal/repo/feedbacktag"
+	"github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	"github.com/Phixsura/attune/internal/repo/gdpr"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
 	"github.com/Phixsura/attune/internal/repo/llmconfig"
@@ -57,6 +58,7 @@ type TenantData struct {
 	IdempotencyKey  string
 	EmbeddingTaskID int64
 	MemberID        string
+	TagName         string
 }
 
 // Fixture is the shared test environment for tenant-isolation contracts.
@@ -77,6 +79,7 @@ type Fixture struct {
 	NotifyTargets *notifytarget.NotifyTargetRepo
 	GDPR          *gdpr.Repo
 
+	TagAssign      *feedbacktagassignment.Repo
 	MCPClients     *mcp.ClientsRepo
 	FeedbackJobs   *feedbackjob.Repo
 	AuditEvidence  *auditevidence.Repo
@@ -109,6 +112,7 @@ func NewFixture(t *testing.T) *Fixture {
 		NotifyTargets: notifytarget.NewNotifyTarget(pool),
 		GDPR:          gdpr.New(pool),
 
+		TagAssign:      feedbacktagassignment.New(pool),
 		MCPClients:     mcp.NewClients(pool),
 		FeedbackJobs:   feedbackjob.New(pool),
 		AuditEvidence:  auditevidence.New(pool),
@@ -148,7 +152,8 @@ func seedTenant(t *testing.T, f *Fixture, slug, name string) TenantData {
 	td.FeedbackID = seedFeedback(t, ctx, pool, tid)
 
 	// --- tag ---
-	td.TagID = seedTag(t, ctx, f.Tags, tid)
+	td.TagName = fmt.Sprintf("iso-tag-%s", slug)
+	td.TagID = seedTag(t, ctx, f.Tags, tid, td.TagName)
 
 	// --- workflow state ---
 	td.WorkflowID = seedWorkflowState(t, ctx, f.Workflow, tid)
@@ -195,6 +200,9 @@ func seedTenant(t *testing.T, f *Fixture, slug, name string) TenantData {
 	// --- embedding task (needs FeedbackID) ---
 	td.EmbeddingTaskID = seedEmbeddingTask(t, ctx, f.EmbeddingTasks, td.FeedbackID, tid)
 
+	// --- tag assignment (needs FeedbackID + TagID) ---
+	seedTagAssignment(t, ctx, f.TagAssign, tid, td.FeedbackID, td.TagID)
+
 	return td
 }
 
@@ -211,11 +219,11 @@ func seedFeedback(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantI
 	return id
 }
 
-func seedTag(t *testing.T, ctx context.Context, repo *feedbacktag.Repo, tenantID string) uuid.UUID {
+func seedTag(t *testing.T, ctx context.Context, repo *feedbacktag.Repo, tenantID, tagName string) uuid.UUID {
 	t.Helper()
 	tag, err := repo.Create(ctx, feedbacktag.Tag{
 		TenantID:  tenantID,
-		Name:      "iso-tag",
+		Name:      tagName,
 		Color:     "#ff0000",
 		CreatedBy: "iso-seed",
 	})
@@ -417,6 +425,14 @@ func seedFeedbackAudit(t *testing.T, ctx context.Context, repo *feedbackaudit.Re
 	})
 	if err != nil {
 		t.Fatalf("seed feedback audit for %s: %v", tenantID, err)
+	}
+}
+
+func seedTagAssignment(t *testing.T, ctx context.Context, repo *feedbacktagassignment.Repo, tenantID string, feedbackID int64, tagID uuid.UUID) {
+	t.Helper()
+	_, err := repo.Add(ctx, tenantID, feedbackID, tagID, "iso-seed")
+	if err != nil {
+		t.Fatalf("seed tag assignment for %s: %v", tenantID, err)
 	}
 }
 

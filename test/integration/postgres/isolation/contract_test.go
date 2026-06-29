@@ -12,6 +12,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/apikey"
 	"github.com/Phixsura/attune/internal/repo/auditevidence"
 	"github.com/Phixsura/attune/internal/repo/auditlog"
+	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/feedbackjob"
 	"github.com/Phixsura/attune/internal/repo/feedbacktag"
 	"github.com/Phixsura/attune/internal/repo/gdpr"
@@ -40,6 +41,8 @@ func TestRepoIsolationContract(t *testing.T) {
 	var cases []isolationCase
 	cases = append(cases, coreDomainCases()...)
 	cases = append(cases, expandedDomainCases()...)
+	cases = append(cases, mutationWriteCases()...)
+	cases = append(cases, additionalReadCases()...)
 
 	for _, tc := range cases {
 		t.Run(tc.Domain+"/"+tc.Operation, func(t *testing.T) {
@@ -499,6 +502,287 @@ func expandedDomainCases() []isolationCase {
 				}
 				if depthB != 1 {
 					return fmt.Errorf("tenant B queue depth = %d, want 1", depthB)
+				}
+				return nil
+			},
+		},
+	}
+}
+
+// mutationWriteCases returns isolation cases for cross-tenant write attempts.
+func mutationWriteCases() []isolationCase {
+	return []isolationCase{
+		// ── feedback mutations ────────────────────────────────────
+		{
+			Domain:    "feedback",
+			Operation: "SetUrgent_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				err := f.Feedback.SetUrgent(ctx, f.TenantA.TenantID, f.TenantB.FeedbackID, true)
+				if err == nil {
+					return fmt.Errorf("tenant A set urgent on tenant B's feedback %d", f.TenantB.FeedbackID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "feedback",
+			Operation: "RetryEnrichment_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				_, err := f.Feedback.RetryEnrichment(ctx, f.TenantA.TenantID, f.TenantB.FeedbackID)
+				if err == nil {
+					return fmt.Errorf("tenant A retried enrichment on tenant B's feedback %d", f.TenantB.FeedbackID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "tags",
+			Operation: "Archive_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				err := f.Tags.Archive(ctx, f.TenantA.TenantID, f.TenantB.TagID)
+				if err == nil {
+					return fmt.Errorf("tenant A archived tenant B's tag %s", f.TenantB.TagID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "workflow",
+			Operation: "Archive_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				err := f.Workflow.Archive(ctx, f.TenantA.TenantID, f.TenantB.WorkflowID)
+				if err == nil {
+					return fmt.Errorf("tenant A archived tenant B's workflow state %s", f.TenantB.WorkflowID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "tag_assignment",
+			Operation: "Add_cross_tenant_tag",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				added, err := f.TagAssign.Add(ctx, f.TenantA.TenantID, f.TenantA.FeedbackID, f.TenantB.TagID, "iso-attacker")
+				if err == nil && added {
+					return fmt.Errorf("tenant A assigned tenant B's tag %s to own feedback", f.TenantB.TagID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "tag_assignment",
+			Operation: "Remove_cross_tenant_tag",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				removed, err := f.TagAssign.Remove(ctx, f.TenantA.TenantID, f.TenantB.FeedbackID, f.TenantB.TagID)
+				if err == nil && removed {
+					return fmt.Errorf("tenant A removed tag from tenant B's feedback %d", f.TenantB.FeedbackID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "notify_targets",
+			Operation: "UpdateByID_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				err := f.NotifyTargets.UpdateByID(ctx, f.TenantA.TenantID, f.TenantB.NotifyID, notifytarget.NotifyTarget{
+					DestinationType: notifytarget.DestRawWebhook,
+					URL:             "https://hijacked.test/hook",
+					Secret:          "hijack-secret-16chars",
+					TimeoutSeconds:  10,
+				})
+				if err == nil {
+					return fmt.Errorf("tenant A updated tenant B's notify target %s", f.TenantB.NotifyID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "outbox",
+			Operation: "RetryOne_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				outcome, err := f.Outbox.RetryOne(ctx, f.TenantA.TenantID, f.TenantB.OutboxID, "iso-attacker", nil)
+				if err != nil {
+					return nil
+				}
+				if outcome.Found && outcome.Retried {
+					return fmt.Errorf("tenant A retried tenant B's outbox row %d", f.TenantB.OutboxID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "system_settings",
+			Operation: "Set_cross_tenant_no_overwrite",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				bKey := fmt.Sprintf("iso-unique-%s", f.TenantB.Slug)
+				err := f.SystemSettings.Set(ctx, f.TenantA.TenantID, bKey, "hijacked", "iso-attacker")
+				if err != nil {
+					return nil
+				}
+				val, err := f.SystemSettings.Get(ctx, f.TenantB.TenantID, bKey)
+				if err != nil {
+					return fmt.Errorf("unexpected error reading B's setting: %w", err)
+				}
+				if val == "hijacked" {
+					return fmt.Errorf("tenant A's Set overwrote tenant B's setting")
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "digest_subscription",
+			Operation: "DeleteByTenant_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				err := f.DigestSubs.DeleteByTenant(ctx, f.TenantA.TenantID)
+				if err != nil {
+					return fmt.Errorf("unexpected error deleting tenant A sub: %w", err)
+				}
+				subB, err := f.DigestSubs.GetByTenant(ctx, f.TenantB.TenantID)
+				if err != nil {
+					return fmt.Errorf("tenant B subscription gone after deleting tenant A: %w", err)
+				}
+				if subB.TenantID != f.TenantB.TenantID {
+					return fmt.Errorf("tenant B subscription corrupted after deleting tenant A")
+				}
+				return nil
+			},
+		},
+	}
+}
+
+// additionalReadCases returns isolation cases for reads and lookups not
+// covered by the core/expanded sets.
+func additionalReadCases() []isolationCase {
+	return []isolationCase{
+		{
+			Domain:    "feedback",
+			Operation: "GetForConsole_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				row, err := f.Feedback.GetForConsole(ctx, f.TenantA.TenantID, f.TenantB.FeedbackID)
+				if err == nil && row != nil {
+					return fmt.Errorf("tenant A retrieved tenant B's feedback %d via GetForConsole", f.TenantB.FeedbackID)
+				}
+				if err != nil && !errors.Is(err, feedback.ErrFeedbackNotFound) {
+					return fmt.Errorf("expected ErrFeedbackNotFound, got: %w", err)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "feedback",
+			Operation: "ListForConsole_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				rows, err := f.Feedback.ListForConsole(ctx, f.TenantA.TenantID, feedback.ConsoleListOpts{Limit: 100})
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				for _, r := range rows {
+					if r.ID == f.TenantB.FeedbackID {
+						return fmt.Errorf("tenant A console list returned tenant B's feedback %d", f.TenantB.FeedbackID)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "tags",
+			Operation: "GetByName_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				tag, err := f.Tags.GetByName(ctx, f.TenantA.TenantID, f.TenantB.TagName)
+				if err == nil && tag != nil {
+					return fmt.Errorf("tenant A found tenant B's tag by name %q", f.TenantB.TagName)
+				}
+				if err != nil && !errors.Is(err, feedbacktag.ErrNotFound) {
+					return fmt.Errorf("expected ErrNotFound, got: %w", err)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "workflow",
+			Operation: "ListTransitions_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				transitions, err := f.Workflow.ListTransitions(ctx, f.TenantA.TenantID)
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				for _, tr := range transitions {
+					if tr.TenantID != f.TenantA.TenantID {
+						return fmt.Errorf("tenant A transitions list returned entry belonging to tenant %s", tr.TenantID)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "tag_assignment",
+			Operation: "ListByFeedback_cross_tenant",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				tags, err := f.TagAssign.ListByFeedback(ctx, f.TenantA.TenantID, f.TenantB.FeedbackID)
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				if len(tags) > 0 {
+					return fmt.Errorf("tenant A listed %d tags for tenant B's feedback %d", len(tags), f.TenantB.FeedbackID)
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "tag_assignment",
+			Operation: "ListByFeedback_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				tags, err := f.TagAssign.ListByFeedback(ctx, f.TenantA.TenantID, f.TenantA.FeedbackID)
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				for _, tag := range tags {
+					if tag.TagID != f.TenantA.TagID {
+						return fmt.Errorf("tenant A tag list for own feedback included foreign tag %s", tag.TagID)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "notify_targets",
+			Operation: "ListByTenant_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				targets, err := f.NotifyTargets.ListByTenant(ctx, f.TenantA.TenantID)
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				for _, tgt := range targets {
+					if tgt.TenantID != f.TenantA.TenantID {
+						return fmt.Errorf("tenant A list returned notify target %s belonging to tenant %s", tgt.ID, tgt.TenantID)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			Domain:    "mcp_clients",
+			Operation: "GetByID_no_tenant_scope",
+			Exec: func(_ context.Context, _ *Fixture) error {
+				return nil
+			},
+		},
+		{
+			Domain:    "api_keys",
+			Operation: "LookupByHash_no_tenant_scope",
+			Exec: func(_ context.Context, _ *Fixture) error {
+				return nil
+			},
+		},
+		{
+			Domain:    "llm_config",
+			Operation: "TenantExists_isolation",
+			Exec: func(ctx context.Context, f *Fixture) error {
+				exists, err := f.LLMConfig.TenantExists(ctx, f.TenantA.TenantID)
+				if err != nil {
+					return fmt.Errorf("unexpected error: %w", err)
+				}
+				if !exists {
+					return fmt.Errorf("tenant A route not found via TenantExists")
 				}
 				return nil
 			},

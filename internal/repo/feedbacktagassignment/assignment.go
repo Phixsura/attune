@@ -32,8 +32,9 @@ func (r *Repo) Add(ctx context.Context, tenantID string, feedbackID int64, tagID
 	tag, err := r.pool.Exec(ctx,
 		`INSERT INTO feedback_tag_assignments (feedback_id, tag_id, created_by)
 		 SELECT $1, $2, $3
-		 FROM user_feedback
-		 WHERE id = $1 AND tenant_id = $4
+		 FROM user_feedback f
+		 JOIN tenant_feedback_tags t ON t.id = $2 AND t.tenant_id = $4
+		 WHERE f.id = $1 AND f.tenant_id = $4
 		 ON CONFLICT (feedback_id, tag_id) DO NOTHING`,
 		feedbackID, tagID, createdBy, tenantID,
 	)
