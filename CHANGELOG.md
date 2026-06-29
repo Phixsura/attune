@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Embeddable feedback widget for `@phixsura/attune` SDK (#202).**
+  Standalone IIFE bundle (`attune-widget.iife.js`, 9 kB gzip) that
+  product teams include with a single `<script>` tag. Renders a floating
+  feedback button + slide-up form overlay, submits via the ingest API
+  with a publishable `ingest:write` key. Safe DOM construction (no
+  innerHTML), CSS-color sanitization. 8 tests.
+
 - **Discord Interactions inbound adapter (#202).**
   Push-mode adapter receiving Discord Interactions (slash commands,
   message components, modal submits) via Ed25519-verified webhook.
