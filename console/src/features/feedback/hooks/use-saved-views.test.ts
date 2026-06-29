@@ -55,7 +55,10 @@ describe('useSavedViews', () => {
     unmount()
     const raw = localStorage.getItem('attune:feedback:savedViews')
     expect(raw).toBeTruthy()
-    const parsed = JSON.parse(raw!)
+    if (!raw) {
+      throw new Error('expected saved views to be persisted')
+    }
+    const parsed = JSON.parse(raw)
     expect(parsed).toHaveLength(1)
     expect(parsed[0].name).toBe('Persistent')
   })
