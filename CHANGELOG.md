@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Sentiment distribution chart on analytics dashboard (#202).**
+  SVG horizontal bar chart showing positive/neutral/mixed/negative
+  sentiment breakdown from enrichment stats. Sorted by sentiment order
+  with color-coded bars. 3 tests.
+
 - **Keyboard shortcuts for feedback page (#202).**
   `?` opens help dialog, `j`/`k` navigate rows, `Enter` opens detail,
   `/` focuses search, `x` toggles selection, `Cmd+Shift+E` exports CSV.

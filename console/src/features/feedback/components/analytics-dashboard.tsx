@@ -1,13 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { AlertTriangle, BarChart3, Loader2, TrendingUp } from 'lucide-react'
+import { AlertTriangle, BarChart3, Loader2, SmilePlus, TrendingUp } from 'lucide-react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { EmptyState } from '@/components/empty-state'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
 import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
+import { SentimentChart } from '@/features/feedback/components/sentiment-chart'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { usageQuery } from '@/features/usage/api/get-usage'
 import { UsageBarChart } from '@/features/usage/components/bar-chart'
@@ -18,6 +20,13 @@ export function AnalyticsDashboard() {
   const stats = useQuery(feedbackStatsQuery())
   const config = useQuery(enrichConfigQuery())
   const usage = useQuery(usageQuery())
+
+  const dimStats = stats.data?.dims ?? []
+  const sentimentData = useMemo(() => {
+    const sentimentDim = dimStats.find((d) => d.dim === 'sentiment')
+    if (!sentimentDim) return []
+    return sentimentDim.top.map((v) => ({ value: v.value, count: Number(v.count) }))
+  }, [dimStats])
 
   if (stats.isPending || config.isPending || usage.isPending) {
     return (
@@ -31,7 +40,6 @@ export function AnalyticsDashboard() {
   const total = Number(stats.data?.total ?? 0)
   const urgentCount = Number(stats.data?.urgentCount ?? 0)
   const dims = config.data?.dimensions ?? []
-  const dimStats = stats.data?.dims ?? []
   const periodStart = stats.data?.periodStart ?? ''
   const periodEnd = stats.data?.periodEnd ?? ''
   const urgentPct = total > 0 ? Math.round((urgentCount / total) * 100) : 0
@@ -148,17 +156,34 @@ export function AnalyticsDashboard() {
             </Card>
           </div>
 
-          {usageSeries.length > 0 && (
-            <Card className="border-border/70 shadow-none">
-              <CardHeader className="border-b border-border/60 bg-muted/15">
-                <CardTitle>{t('usage.by_day')}</CardTitle>
-                <CardDescription>{t('usage.by_day_hint')}</CardDescription>
-              </CardHeader>
-              <CardContent className="pt-6">
-                <UsageBarChart series={usageSeries} />
-              </CardContent>
-            </Card>
-          )}
+          <div className="grid gap-6 xl:grid-cols-2">
+            {usageSeries.length > 0 && (
+              <Card className="border-border/70 shadow-none">
+                <CardHeader className="border-b border-border/60 bg-muted/15">
+                  <CardTitle>{t('usage.by_day')}</CardTitle>
+                  <CardDescription>{t('usage.by_day_hint')}</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <UsageBarChart series={usageSeries} />
+                </CardContent>
+              </Card>
+            )}
+
+            {sentimentData.length > 0 && (
+              <Card className="border-border/70 shadow-none">
+                <CardHeader className="border-b border-border/60 bg-muted/15">
+                  <CardTitle className="flex items-center gap-2">
+                    <SmilePlus className="h-4 w-4" />
+                    {t('analytics.sentiment_distribution')}
+                  </CardTitle>
+                  <CardDescription>{t('analytics.sentiment_hint')}</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <SentimentChart data={sentimentData} />
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </>
       )}
     </div>

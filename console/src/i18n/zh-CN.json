@@ -2867,5 +2867,9 @@
     "close": "关闭",
     "select_item": "选中/取消",
     "export_csv": "导出 CSV"
+  },
+  "analytics": {
+    "sentiment_distribution": "情感分布",
+    "sentiment_hint": "反馈内容的情感分类统计"
   }
 }
