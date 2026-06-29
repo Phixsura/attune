@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Public voting portal API (#202).**
+  REST handler (`internal/handlers/portal`) for public feedback browsing
+  and voting. List published feedback with vote counts; cast votes with
+  browser fingerprint deduplication. Migration 094 adds feedback_votes
+  table. 3 Go tests.
+
 - **Custom fields schema (#202).**
   Tenants can define custom metadata fields (text/number/boolean/enum)
   for feedback. Migration 093 adds tenant_custom_fields table. Go repo
