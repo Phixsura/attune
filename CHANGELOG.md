@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **NPS/CSAT/CES survey builder (#202).**
+  Migration 095 adds tenant_surveys and survey_responses tables. Go repo
+  with CRUD + response recording + NPS stats query. Service layer with
+  NPSScore/CSATScore/CESScore calculators. Console survey builder page
+  with type selection, default questions, enable/disable toggle.
+  12 Go tests, 3 TS tests.
+
+- **Jira Cloud outbound adapter (#202).**
+  Creates Jira issues via REST API v3 with Basic Auth (email:token).
+  Configurable project_key. Event and digest rendering. Migration 096.
+  3 Go tests.
+
+- **Linear outbound adapter (#202).**
+  Creates Linear issues via GraphQL API. Configurable team_id.
+  Event and digest rendering. Migration 097. 2 Go tests.
+
+- **Zapier REST Hook connector (#202).**
+  Subscribe/unsubscribe endpoints for Zapier webhook integration.
+  In-memory store for testing. 2 Go tests.
+
+- **App Store review ingest adapter (#202).**
+  Inbound adapter for Apple App Store / Google Play review webhooks.
+  Rating-to-severity mapping. Self-registers via init().
+  2 Go tests.
+
+- **Public roadmap page (#202).**
+  Kanban board with planned/in-progress/completed columns.
+  Vote button per item. Console component with add/remove/vote actions.
+  3 TS tests.
+
+- **Changelog / release notes page (#202).**
+  Publish/draft workflow for changelog entries. Console component with
+  create/publish/remove actions. 3 TS tests.
+
+- **RICE/ICE scoring panel (#202).**
+  Interactive calculator for RICE and ICE prioritization frameworks.
+  Real-time score computation. Console component with model toggle.
+  3 TS tests.
+
+- **Anomaly/spike detection service (#202).**
+  Z-score based spike detection on time-bucketed feedback volumes.
+  Configurable threshold. 5 Go tests.
+
 - **Public voting portal API (#202).**
   REST handler (`internal/handlers/portal`) for public feedback browsing
   and voting. List published feedback with vote counts; cast votes with

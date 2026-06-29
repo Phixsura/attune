@@ -44,6 +44,8 @@ const (
 	DestTeams       = "teams"     // Microsoft Teams incoming webhook (Adaptive Card)
 	DestEmail       = "email"
 	DestGitHubIssue = "github-issue"
+	DestJira        = "jira"   // Jira Cloud REST API v3
+	DestLinear      = "linear" // Linear GraphQL API
 )
 
 // URLIsCredential reports whether the destination type's webhook URL carries

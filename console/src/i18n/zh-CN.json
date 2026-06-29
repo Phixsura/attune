@@ -2892,5 +2892,73 @@
     "required": "必填",
     "save": "保存",
     "empty": "暂无自定义字段"
+  },
+  "surveys": {
+    "title": "调查问卷",
+    "create": "创建调查",
+    "name": "名称",
+    "name_placeholder": "调查名称",
+    "type": "类型",
+    "type_nps": "NPS (净推荐值)",
+    "type_csat": "CSAT (客户满意度)",
+    "type_ces": "CES (客户费力度)",
+    "question": "问题",
+    "question_placeholder": "调查问题内容",
+    "status": "状态",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "save": "保存",
+    "empty": "暂无调查问卷"
+  },
+  "roadmap": {
+    "title": "产品路线图",
+    "planned": "计划中",
+    "in_progress": "进行中",
+    "completed": "已完成",
+    "empty": "暂无路线图条目",
+    "votes": "投票",
+    "add_item": "添加条目",
+    "item_title": "标题",
+    "item_description": "描述",
+    "status": "状态"
+  },
+  "changelog_page": {
+    "title": "更新日志",
+    "empty": "暂无更新",
+    "publish": "发布",
+    "draft": "草稿",
+    "published": "已发布",
+    "entry_title": "标题",
+    "entry_body": "内容",
+    "create_entry": "新建更新"
+  },
+  "scoring": {
+    "title": "优先级评分",
+    "rice": "RICE 评分",
+    "ice": "ICE 评分",
+    "reach": "覆盖范围",
+    "impact": "影响力",
+    "confidence": "确信度",
+    "effort": "工作量",
+    "ease": "容易度",
+    "score": "评分",
+    "apply": "应用",
+    "reset": "重置"
+  },
+  "segmentation": {
+    "title": "客户分群",
+    "segment_name": "分群名称",
+    "plan_tier": "计划层级",
+    "cohort": "群组",
+    "create": "创建分群",
+    "empty": "暂无分群"
+  },
+  "anomaly": {
+    "title": "异常检测",
+    "spike_detected": "检测到波动",
+    "baseline": "基线值",
+    "current": "当前值",
+    "deviation": "偏差",
+    "no_anomalies": "当前无异常"
   }
 }

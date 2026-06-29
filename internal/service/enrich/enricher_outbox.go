@@ -305,6 +305,8 @@ var outboxDestTypes = map[string]bool{
 	notifytarget.DestLark:        true,
 	notifytarget.DestDiscord:     true,
 	notifytarget.DestTeams:       true,
+	notifytarget.DestJira:        true,
+	notifytarget.DestLinear:      true,
 }
 
 // selectOutboxTargets returns the destination rows that should receive
