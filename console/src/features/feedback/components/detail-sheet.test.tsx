@@ -145,6 +145,55 @@ describe('FeedbackDetailSheet', () => {
       expect(screen.getByText('这条反馈暂时没有可用的 AI 富化结果')).toBeInTheDocument(),
     )
     expect(screen.getAllByText('llm: llm_not_configured').length).toBeGreaterThanOrEqual(1)
+    await userEvent.click(screen.getByRole('button', { name: /复制/ }))
+  })
+
+  it('shows pending classification and ready workbench guidance when AI signals are missing', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-ready',
+          content: 'payment failed at checkout',
+          enrichedTitle: '',
+          enrichedDisplayTitle: '',
+          enrichedRationale: '',
+          enrichedDisplayRationale: '',
+          enrichedDisplayLocale: 'zh-CN',
+          enrichedAttrs: {},
+          enrichedAt: '',
+          language: 'en',
+          isUrgent: false,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentError: '',
+          enrichmentStatus: 'pending',
+          classificationConfidence: undefined,
+        }),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-ready"
+        dims={dims}
+        availableTags={[]}
+        workbenchMode="ready"
+        onOpenChange={vi.fn()}
+      />,
+    )
+    await waitFor(() =>
+      expect(screen.getByText('这条反馈还没有形成稳定分类结果')).toBeInTheDocument(),
+    )
+    expect(screen.getByText('这条反馈还没有可用分类结果。')).toBeInTheDocument()
+    expect(screen.getByText('当前工作面：AI 已就绪')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '这条反馈虽然在 AI 已就绪工作面中被打开，但当前可见 AI 信号仍不完整，建议先核对分类和富化状态。',
+      ),
+    ).toBeInTheDocument()
   })
 
   it('shows workbench guidance for active queue context', async () => {

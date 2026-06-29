@@ -36,6 +36,7 @@ var validDestTypes = map[string]bool{
 	"slack":        true,
 	"lark":         true,
 	"discord":      true,
+	"email":        true,
 	"github-issue": true,
 }
 
@@ -45,6 +46,7 @@ var secretOptionalDestTypes = map[string]bool{
 	"slack":   true,
 	"lark":    true,
 	"discord": true,
+	"teams":   true,
 }
 
 func (c *Config) validateCustomWebhooks() error {

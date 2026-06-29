@@ -128,7 +128,8 @@
     "outbox_dead": "死信投递",
     "mcp_clients": "MCP 客户端",
     "system_readiness": "系统就绪",
-    "security": "安全设置"
+    "security": "安全设置",
+    "dashboard": "分析总览"
   },
   "shell": {
     "primary_nav": "主导航",
@@ -1806,7 +1807,11 @@
         "semantic": "语义匹配",
         "keyword": "关键词匹配",
         "hybrid": "混合匹配"
-      }
+      },
+      "add_facet": "添加筛选",
+      "select_dimension": "选择维度",
+      "facet_value": "筛选值",
+      "apply_facet": "应用"
     },
     "untitled": "无标题",
     "batch": {
@@ -1956,7 +1961,9 @@
       "retry_enrichment_success": "已加入重试队列",
       "retry_enrichment_failed": "重试失败，请稍后再试",
       "terminal_failure_title": "这条反馈已永久失败",
-      "terminal_failure_body": "富化已尝试 {{count}} 次，均未成功。你可以点击下方按钮手动触发重试，或先检查 LLM 配置。"
+      "terminal_failure_body": "富化已尝试 {{count}} 次，均未成功。你可以点击下方按钮手动触发重试，或先检查 LLM 配置。",
+      "reply_draft_edit": "编辑",
+      "reply_draft_cancel_edit": "取消编辑"
     },
     "error_title": "反馈列表暂时无法加载",
     "error_body": "保留当前筛选条件后重试；如果问题持续，优先检查控制台 API 与当前租户权限。",
@@ -2262,6 +2269,18 @@
       },
       "load_more": "加载更多",
       "loaded_of_total": "已加载 {{loaded}} / {{total}} 条"
+    },
+    "saved_views": {
+      "title": "视图",
+      "save_current": "保存当前筛选",
+      "name_placeholder": "视图名称"
+    },
+    "exported_csv": "已导出 CSV 文件",
+    "templates": {
+      "title": "模板",
+      "saved": "已保存模板",
+      "save_current": "保存当前内容为模板",
+      "name_placeholder": "模板名称"
     }
   },
   "usage": {
@@ -2831,5 +2850,128 @@
       "prev": "上一页",
       "next": "下一页"
     }
+  },
+  "dashboard": {
+    "title": "分析总览",
+    "subtitle": "本月反馈量、紧急程度与分类分布一览。",
+    "empty_title": "本月暂无反馈",
+    "empty_body": "当客户开始提交反馈后，这里会展示总览数据。",
+    "dim_overview": "分类分布",
+    "dim_overview_hint": "本月各维度的 Top 值分布，帮助识别主要信号。",
+    "trend_card": "接收趋势"
+  },
+  "shortcuts": {
+    "title": "键盘快捷键",
+    "general": "通用",
+    "navigation": "导航",
+    "actions": "操作",
+    "show_help": "显示快捷键",
+    "focus_search": "搜索",
+    "next_item": "下一条",
+    "prev_item": "上一条",
+    "open_detail": "查看详情",
+    "close": "关闭",
+    "select_item": "选中/取消",
+    "export_csv": "导出 CSV"
+  },
+  "analytics": {
+    "sentiment_distribution": "情感分布",
+    "sentiment_hint": "反馈内容的情感分类统计"
+  },
+  "custom_fields": {
+    "title": "自定义字段",
+    "add": "添加字段",
+    "field_key": "字段键",
+    "display_name": "显示名称",
+    "type": "类型",
+    "type_text": "文本",
+    "type_number": "数字",
+    "type_boolean": "布尔",
+    "type_enum": "枚举",
+    "enum_values_hint": "枚举值 (逗号分隔)",
+    "required": "必填",
+    "save": "保存",
+    "empty": "暂无自定义字段"
+  },
+  "surveys": {
+    "title": "调查问卷",
+    "create": "创建调查",
+    "name": "名称",
+    "name_placeholder": "调查名称",
+    "type": "类型",
+    "type_nps": "NPS (净推荐值)",
+    "type_csat": "CSAT (客户满意度)",
+    "type_ces": "CES (客户费力度)",
+    "question": "问题",
+    "question_placeholder": "调查问题内容",
+    "status": "状态",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "save": "保存",
+    "empty": "暂无调查问卷"
+  },
+  "roadmap": {
+    "title": "产品路线图",
+    "planned": "计划中",
+    "in_progress": "进行中",
+    "completed": "已完成",
+    "empty": "暂无路线图条目",
+    "votes": "投票",
+    "add_item": "添加条目",
+    "item_title": "标题",
+    "item_description": "描述",
+    "status": "状态"
+  },
+  "changelog_page": {
+    "title": "更新日志",
+    "empty": "暂无更新",
+    "publish": "发布",
+    "draft": "草稿",
+    "published": "已发布",
+    "entry_title": "标题",
+    "entry_body": "内容",
+    "create_entry": "新建更新"
+  },
+  "scoring": {
+    "title": "优先级评分",
+    "rice": "RICE 评分",
+    "ice": "ICE 评分",
+    "reach": "覆盖范围",
+    "impact": "影响力",
+    "confidence": "确信度",
+    "effort": "工作量",
+    "ease": "容易度",
+    "score": "评分",
+    "apply": "应用",
+    "reset": "重置"
+  },
+  "segmentation": {
+    "title": "客户分群",
+    "segment_name": "分群名称",
+    "plan_tier": "计划层级",
+    "cohort": "群组",
+    "create": "创建分群",
+    "empty": "暂无客户分群",
+    "customers": "客户"
+  },
+  "portal": {
+    "title": "反馈门户",
+    "enable": "启用公开反馈门户",
+    "slug": "门户路径",
+    "brand_color": "品牌颜色",
+    "welcome_message": "欢迎消息",
+    "save": "保存"
+  },
+  "activity": {
+    "title": "活动记录",
+    "empty": "暂无活动记录"
+  },
+  "anomaly": {
+    "title": "异常检测",
+    "spike_detected": "检测到波动",
+    "baseline": "基线值",
+    "current": "当前值",
+    "deviation": "偏差",
+    "no_anomalies": "当前无异常"
   }
 }

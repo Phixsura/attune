@@ -332,14 +332,17 @@ func TestCoverageOutboxDestTypes_KnownTypes(t *testing.T) {
 		notifytarget.DestSlack,
 		notifytarget.DestLark,
 		notifytarget.DestDiscord,
+		notifytarget.DestTeams,
+		notifytarget.DestJira,
+		notifytarget.DestLinear,
 	}
 	for _, dt := range known {
 		if !outboxDestTypes[dt] {
 			t.Errorf("dest type %q should be in outboxDestTypes", dt)
 		}
 	}
-	if len(outboxDestTypes) != 5 {
-		t.Errorf("outboxDestTypes has %d entries; want 5", len(outboxDestTypes))
+	if len(outboxDestTypes) != 8 {
+		t.Errorf("outboxDestTypes has %d entries; want 8", len(outboxDestTypes))
 	}
 }
 

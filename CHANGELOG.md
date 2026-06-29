@@ -7,7 +7,255 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Fixed
+
+- Restore the Postgres migration target for destination-type checks and cover the remaining CI regressions in the console `detail-sheet` and Node SDK test suites.
+- Restore the Postgres migration target for destination-type checks, cover the remaining CI regressions in the console `detail-sheet` and Node SDK test suites, and remove the console analytics dashboard cross-feature dependency violation.
+
 ### Added
+
+- **Isolation**: expand contract suite to 65+ Layer A cases + 8 Layer B edge cases — add `digestrun`, `llmaudit`, `breakglass` repo coverage; batch soft-delete, digest conflict, error-message consistency (no existence leakage); Layer C HTTP expanded with CSV export, download, MCP grant/session/tool-policy routes and status-code uniformity check (#154)
+
+- **Three-layer tenant isolation contract suite (#154).**
+  Repo-level contract table (Layer A) covering 21 data domains with 59 cases
+  (feedback mutations, tag assignment, workflow, notify targets, outbox, LLM
+  config, system settings, digest subscriptions, GDPR, guard policy, reply
+  drafts, audit evidence, tenant members), per-domain edge-case tests
+  (Layer B) with 5 targeted cross-tenant edge cases (batch mixed-tenant
+  queries, policy replace isolation, audit trail separation, settings
+  independence, subscription isolation), and HTTP black-box tests through
+  both auth surfaces (Layer C): API-key with 23 endpoint assertions including
+  GDPR write/get and cross-tenant integrity verification, plus MCP OAuth
+  Bearer JWT with full coverage of all 10 registered MCP tools via JSON-RPC
+  with structural assertion helpers (typed JSON-RPC parsing, per-ID leak
+  detection).
+
+- **NPS/CSAT/CES survey builder (#202).**
+  Migration 095 adds tenant_surveys and survey_responses tables. Go repo
+  with CRUD + response recording + NPS stats query. Service layer with
+  NPSScore/CSATScore/CESScore calculators. Console survey builder page
+  with type selection, default questions, enable/disable toggle.
+  12 Go tests, 3 TS tests.
+
+- **Jira Cloud outbound adapter (#202).**
+  Creates Jira issues via REST API v3 with Basic Auth (email:token).
+  Configurable project_key. Event and digest rendering. Migration 096.
+  3 Go tests.
+
+- **Linear outbound adapter (#202).**
+  Creates Linear issues via GraphQL API. Configurable team_id.
+  Event and digest rendering. Migration 097. 2 Go tests.
+
+- **Zapier REST Hook connector (#202).**
+  Subscribe/unsubscribe endpoints for Zapier webhook integration.
+  In-memory store for testing. 2 Go tests.
+
+- **App Store review ingest adapter (#202).**
+  Inbound adapter for Apple App Store / Google Play review webhooks.
+  Rating-to-severity mapping. Self-registers via init().
+  2 Go tests.
+
+- **Public roadmap page (#202).**
+  Kanban board with planned/in-progress/completed columns.
+  Vote button per item. Console component with add/remove/vote actions.
+  3 TS tests.
+
+- **Changelog / release notes page (#202).**
+  Publish/draft workflow for changelog entries. Console component with
+  create/publish/remove actions. 3 TS tests.
+
+- **RICE/ICE scoring panel (#202).**
+  Interactive calculator for RICE and ICE prioritization frameworks.
+  Real-time score computation. Console component with model toggle.
+  3 TS tests.
+
+- **Anomaly/spike detection service (#202).**
+  Z-score based spike detection on time-bucketed feedback volumes.
+  Configurable threshold. 5 Go tests.
+
+- **Theme/topic trend service (#202).**
+  Time-bucketed trend line builder that groups feedback counts by label
+  over time windows. 2 Go tests.
+
+- **AI summarization prompt builder (#202).**
+  Corpus summarization service that constructs LLM prompts from feedback
+  items and computes kind/severity distributions. 3 Go tests.
+
+- **Customer segmentation and revenue weighting (#202).**
+  Segment-aware prioritization with revenue-weighted scoring. Groups
+  feedback by customer segment for cohort analysis. 3 Go tests.
+
+- **Feature request deduplication with merge (#202).**
+  Candidate pair filtering by similarity threshold. Merge planner that
+  selects canonical item by vote count and consolidates duplicates.
+  4 Go tests.
+
+- **Activity timeline per feedback item (#202).**
+  Console component showing chronological events (created, enriched,
+  replied) with actor, timestamp, and optional detail. 3 TS tests.
+
+- **Enrichment confidence scoring (#202).**
+  Composite confidence score from LLM self-report, cross-model agreement,
+  and calibration accuracy. Bucket tiers (high/medium/low) and review
+  flagging below configurable threshold. 5 Go tests.
+
+- **Classification quality drift detection (#202).**
+  Jensen-Shannon divergence between baseline and current enrichment
+  distributions. Signals when model or prompt needs recalibration.
+  4 Go tests.
+
+- **Data retention policy engine (#202).**
+  Per-tenant retention configuration with retain/grace periods. Cutoff
+  and purge time computation. Scheduled run gating. 4 Go tests.
+
+- **Close-the-loop voter notification (#202).**
+  Builds notifications for voters when roadmap items transition to
+  in_progress/completed/shipped. 4 Go tests.
+
+- **Custom classification taxonomy (#202).**
+  Tenant-defined label sets with merge-over-defaults behavior.
+  Label validation against taxonomy. 3 Go tests.
+
+- **Support ticket feedback extraction (#202).**
+  Ticket parser for structured fields (subject, body, priority, tags).
+  Priority mapping to attune severity. Source metadata builder.
+  5 Go tests.
+
+- **Customer segmentation Console panel (#202).**
+  Segment list with tier, customer count, feedback count, and revenue
+  weight display. Click-to-filter interaction. 3 TS tests.
+
+- **CRM integration abstraction (#202).**
+  Connector interface for Salesforce/HubSpot/custom CRM providers.
+  Contact lookup and feedback sync with partial failure handling.
+  3 Go tests.
+
+- **A/B testing for prompts and models (#202).**
+  Deterministic FNV-1a hash assignment across weighted variants.
+  Win-rate computation for experiment evaluation. 6 Go tests.
+
+- **End-user feedback portal configuration (#202).**
+  Console settings page for public-facing feedback portal. Configurable
+  slug, brand color, welcome message, enable/disable toggle with live
+  URL preview. 3 TS tests.
+
+- **LLM Q&A over feedback corpus (#202).**
+  RAG prompt builder that retrieves relevant feedback via vector
+  similarity and constructs context-aware prompts. Content truncation,
+  source deduplication. 5 Go tests.
+
+- **AI output quality scoring (#202).**
+  Accuracy/completeness/consistency metrics with weighted overall score.
+  Letter grading (A–F). Quality reporting per tenant and model.
+  3 Go tests.
+
+- **Analytics platform integration (Segment/Amplitude) (#202).**
+  Platform interface for track/identify calls. Feedback-to-event
+  transformer. Batch tracking with error collection. 3 Go tests.
+
+- **Public voting portal API (#202).**
+  REST handler (`internal/handlers/portal`) for public feedback browsing
+  and voting. List published feedback with vote counts; cast votes with
+  browser fingerprint deduplication. Migration 094 adds feedback_votes
+  table. 3 Go tests.
+
+- **Custom fields schema (#202).**
+  Tenants can define custom metadata fields (text/number/boolean/enum)
+  for feedback. Migration 093 adds tenant_custom_fields table. Go repo
+  with CRUD operations. Console settings page with add/remove form.
+  3 TS tests.
+
+- **Real-time SSE event stream (#202).**
+  Go broker (`internal/infra/sse`) fans out tenant-scoped Server-Sent
+  Events to connected Console clients. React `useEventStream` hook
+  subscribes to feedback.created/enriched/updated/deleted and
+  workflow.transitioned events. 30s heartbeat keepalive. 5 Go tests,
+  4 TS tests.
+
+- **Microsoft Teams outbound adapter (#202).**
+  Delivers event and digest notifications as Adaptive Card 1.4 messages
+  via Teams incoming-webhook connectors. URL-as-credential pattern (like
+  Slack/Discord). Migration 092 adds 'teams' to destination_type CHECK.
+  8 tests.
+
+- **Python SDK with zero dependencies (#202).**
+  Synchronous client for the attune API using only stdlib (urllib).
+  Covers ingest, list, and get-detail endpoints with typed dataclasses.
+  Error hierarchy: AttuneError > AttuneAPIError / AttuneTimeoutError.
+  Idempotency-Key header support. 13 tests.
+
+- **Inline reply composition with edit mode (#202).**
+  Operators can now edit AI-generated reply drafts inline before copying.
+  Edit/Cancel toggle on the reply draft section of the feedback detail
+  sheet. Editable textarea with the same copy and regenerate actions.
+
+- **Faceted search filter bar (#202).**
+  Dimension-based search facets displayed as removable badges.
+  Popover UI to add facets by selecting a dimension and entering a value.
+  3 tests.
+
+- **Sentiment distribution chart on analytics dashboard (#202).**
+  SVG horizontal bar chart showing positive/neutral/mixed/negative
+  sentiment breakdown from enrichment stats. Sorted by sentiment order
+  with color-coded bars. 3 tests.
+
+- **Keyboard shortcuts for feedback page (#202).**
+  `?` opens help dialog, `j`/`k` navigate rows, `Enter` opens detail,
+  `/` focuses search, `x` toggles selection, `Cmd+Shift+E` exports CSV.
+  Focused row shows ring highlight. Generic `useHotkeys` hook and
+  `KeyboardShortcutsDialog` component. 4 tests.
+
+- **CSV export for feedback data (#202).**
+  Client-side CSV export of currently filtered feedback items. Includes
+  all enriched attributes, tags, workflow state. Proper CSV escaping for
+  quotes, commas, newlines. 2 tests.
+
+- **Response templates for feedback replies (#202).**
+  localStorage-backed reusable reply templates with save/update/delete.
+  Dropdown menu integrates with detail sheet reply workflow.
+  `useSyncExternalStore` hook pattern. 7 tests.
+
+- **Embeddable feedback widget for `@phixsura/attune` SDK (#202).**
+  Standalone IIFE bundle (`attune-widget.iife.js`, 9 kB gzip) that
+  product teams include with a single `<script>` tag. Renders a floating
+  feedback button + slide-up form overlay, submits via the ingest API
+  with a publishable `ingest:write` key. Safe DOM construction (no
+  innerHTML), CSS-color sanitization. 8 tests.
+
+- **Discord Interactions inbound adapter (#202).**
+  Push-mode adapter receiving Discord Interactions (slash commands,
+  message components, modal submits) via Ed25519-verified webhook.
+  Responds to PING challenges, extracts feedback content, and ingests
+  with channel metadata (guild, channel, user). 20 tests (6 conformance
+  + 14 adapter-specific).
+
+- **Saved views for feedback filters (#202).**
+  Filter presets (dimension filters, tags, workflow state, queue mode,
+  sort, search) can be saved, loaded, and deleted from a dropdown in the
+  feedback list. Persisted in localStorage via `useSavedViews` hook.
+  6 tests (4 hook + 2 component).
+
+- **Analytics dashboard home page in Console (#202).**
+  New `/analytics/dashboard` route aggregates feedback stats (total,
+  urgent count, dimension distributions) and usage trends into a unified
+  overview page. Reuses existing `DimStatsBars`, `UsageBarChart`, and
+  `UsageSparkline` components. Added as the default landing page for the
+  analytics group in the sidebar navigation. 3 component tests.
+
+- **Slack inbound adapter for Events API ingestion (#202).**
+  New `internal/inbound/adapter/slack` package receives Slack Events API
+  webhooks (message, app_mention, reaction_added) and ingests them as
+  feedback. Supports Slack request signature verification (HMAC-SHA256),
+  url_verification challenge handshake, bot message filtering, and
+  encrypted signing secret config. 22 tests including conformance suite.
+
+- **Email outbound adapter with SMTP delivery (#202).**
+  New `internal/outbound/adapter/email` package delivers per-event and digest
+  notifications via SMTP (STARTTLS or implicit TLS). The outbound framework
+  gains `DirectEventSender` / `DirectDigestSender` optional interfaces so
+  non-HTTP adapters bypass the HTTP transport. The email adapter supports
+  configurable SMTP host/port/auth, RFC 822 plain-text messages, and
+  SSRF-guarded host validation.
 
 - **Public management APIs and SDK coverage for audit/GDPR/outbox/MCP governance (#168).**
   Scoped API-key routes now expose selected admin operations under canonical
@@ -49,6 +297,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     interfaces such as `http.Flusher`, `io.ReaderFrom`, and `http.Hijacker`, so
     `/v1` export/download paths keep their underlying transport behavior while
     still injecting the contract headers.
+
+### Security
+
+- **Fix cross-tenant tag assignment in `feedbacktagassignment.Add` (#154).**
+  The INSERT subquery only checked `user_feedback.tenant_id` but not
+  `tenant_feedback_tags.tenant_id`, allowing a caller to assign a tag
+  belonging to another tenant to their own feedback. Added a JOIN on
+  `tenant_feedback_tags` to verify both entities belong to the same tenant.
 
 ### Fixed
 

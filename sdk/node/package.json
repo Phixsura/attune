@@ -14,6 +14,12 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./widget": {
+      "import": {
+        "types": "./dist/widget.d.ts",
+        "default": "./dist/widget.js"
+      }
     }
   },
   "main": "./dist/index.cjs",
@@ -61,6 +67,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@types/node": "^22.10.0",
+    "jsdom": "^29.1.1",
     "playwright-core": "1.61.1",
     "tsdown": "^0.15.6",
     "typescript": "^5.9.0",
