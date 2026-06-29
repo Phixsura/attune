@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Custom fields schema (#202).**
+  Tenants can define custom metadata fields (text/number/boolean/enum)
+  for feedback. Migration 093 adds tenant_custom_fields table. Go repo
+  with CRUD operations. Console settings page with add/remove form.
+  3 TS tests.
+
 - **Real-time SSE event stream (#202).**
   Go broker (`internal/infra/sse`) fans out tenant-scoped Server-Sent
   Events to connected Console clients. React `useEventStream` hook
