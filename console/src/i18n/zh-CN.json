@@ -2954,6 +2954,14 @@
     "empty": "暂无客户分群",
     "customers": "客户"
   },
+  "portal": {
+    "title": "反馈门户",
+    "enable": "启用公开反馈门户",
+    "slug": "门户路径",
+    "brand_color": "品牌颜色",
+    "welcome_message": "欢迎消息",
+    "save": "保存"
+  },
   "activity": {
     "title": "活动记录",
     "empty": "暂无活动记录"

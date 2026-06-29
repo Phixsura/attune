@@ -120,6 +120,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Segment list with tier, customer count, feedback count, and revenue
   weight display. Click-to-filter interaction. 3 TS tests.
 
+- **CRM integration abstraction (#202).**
+  Connector interface for Salesforce/HubSpot/custom CRM providers.
+  Contact lookup and feedback sync with partial failure handling.
+  3 Go tests.
+
+- **A/B testing for prompts and models (#202).**
+  Deterministic FNV-1a hash assignment across weighted variants.
+  Win-rate computation for experiment evaluation. 6 Go tests.
+
+- **End-user feedback portal configuration (#202).**
+  Console settings page for public-facing feedback portal. Configurable
+  slug, brand color, welcome message, enable/disable toggle with live
+  URL preview. 3 TS tests.
+
 - **Public voting portal API (#202).**
   REST handler (`internal/handlers/portal`) for public feedback browsing
   and voting. List published feedback with vote counts; cast votes with
