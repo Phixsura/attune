@@ -1,7 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { AlertCircle, Check, Copy, Loader2, RefreshCw, RotateCcw, Sparkles } from 'lucide-react'
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  Loader2,
+  Pencil,
+  RefreshCw,
+  RotateCcw,
+  Sparkles,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -376,21 +385,27 @@ function ReplyDraftSection({
   const { t } = useTranslation()
   const regen = useRegenerateReplyDraft(id)
   const [justCopied, setJustCopied] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editValue, setEditValue] = useState('')
   const copyTimer = useRef<number | undefined>(undefined)
   useEffect(() => () => window.clearTimeout(copyTimer.current), [])
 
-  // Explicit empty check: an empty string is a valid state and must NOT fall
-  // through to a stale prop value via `??`. A fresh regenerate response wins
-  // over the prop once it lands.
   const current = regen.data ? regen.data.replyDraft : draft
   const stamp = regen.data ? regen.data.replyDraftGeneratedAt : generatedAt
   const ago = relativeTime(stamp)
   const hasDraft = current !== ''
   const pending = regen.isPending
 
+  const startEdit = () => {
+    setEditValue(current)
+    setEditing(true)
+  }
+  const cancelEdit = () => setEditing(false)
+
   const onCopy = () => {
+    const text = editing ? editValue : current
     navigator.clipboard
-      .writeText(current)
+      .writeText(text)
       .then(() => {
         toast.success(t('feedback.detail.reply_draft_copied'))
         setJustCopied(true)
@@ -399,10 +414,9 @@ function ReplyDraftSection({
       .catch(() => toast.error(t('feedback.detail.reply_draft_copy_failed')))
   }
   const onRegenerate = () => {
+    setEditing(false)
     regen.mutate(undefined, {
       onError: (err) => {
-        // A 429 is the per-row cooldown backstop — message it distinctly so the
-        // operator knows to wait, not that generation broke.
         const status = (err as { status?: number }).status
         toast.error(
           status === 429
@@ -430,6 +444,13 @@ function ReplyDraftSection({
       <div className="rounded-md border border-primary/20 bg-primary/[0.04] p-4">
         {pending ? (
           <DraftSkeleton />
+        ) : editing ? (
+          <textarea
+            className="w-full resize-y rounded-md border border-border bg-background p-3 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/30"
+            rows={6}
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+          />
         ) : hasDraft ? (
           <p className="whitespace-pre-wrap break-words leading-relaxed">{current}</p>
         ) : (
@@ -447,7 +468,7 @@ function ReplyDraftSection({
         )}
 
         <div className="mt-4 flex items-center gap-1.5">
-          {hasDraft ? (
+          {hasDraft || editing ? (
             <Button
               type="button"
               size="sm"
@@ -461,22 +482,49 @@ function ReplyDraftSection({
                 : t('feedback.detail.reply_draft_copy')}
             </Button>
           ) : null}
+          {hasDraft && !editing ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={startEdit}
+              disabled={pending}
+              className="text-muted-foreground motion-safe:active:scale-[0.98]"
+            >
+              <Pencil className="size-3.5" />
+              {t('feedback.detail.reply_draft_edit')}
+            </Button>
+          ) : null}
+          {editing ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={cancelEdit}
+              className="text-muted-foreground motion-safe:active:scale-[0.98]"
+            >
+              {t('feedback.detail.reply_draft_cancel_edit')}
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"
-            variant={hasDraft ? 'ghost' : 'default'}
+            variant={hasDraft || editing ? 'ghost' : 'default'}
             onClick={onRegenerate}
             disabled={pending}
-            className={cn('motion-safe:active:scale-[0.98]', hasDraft && 'text-muted-foreground')}
+            className={cn(
+              'motion-safe:active:scale-[0.98]',
+              (hasDraft || editing) && 'text-muted-foreground',
+            )}
           >
             {pending ? (
               <Loader2 className="size-3.5 animate-spin" />
-            ) : hasDraft ? (
+            ) : hasDraft || editing ? (
               <RefreshCw className="size-3.5" />
             ) : (
               <Sparkles className="size-3.5" />
             )}
-            {hasDraft
+            {hasDraft || editing
               ? t('feedback.detail.reply_draft_regenerate')
               : t('feedback.detail.reply_draft_generate')}
           </Button>

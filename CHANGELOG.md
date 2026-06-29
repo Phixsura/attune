@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Inline reply composition with edit mode (#202).**
+  Operators can now edit AI-generated reply drafts inline before copying.
+  Edit/Cancel toggle on the reply draft section of the feedback detail
+  sheet. Editable textarea with the same copy and regenerate actions.
+
+- **Faceted search filter bar (#202).**
+  Dimension-based search facets displayed as removable badges.
+  Popover UI to add facets by selecting a dimension and entering a value.
+  3 tests.
+
 - **Sentiment distribution chart on analytics dashboard (#202).**
   SVG horizontal bar chart showing positive/neutral/mixed/negative
   sentiment breakdown from enrichment stats. Sorted by sentiment order

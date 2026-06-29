@@ -1807,7 +1807,11 @@
         "semantic": "语义匹配",
         "keyword": "关键词匹配",
         "hybrid": "混合匹配"
-      }
+      },
+      "add_facet": "添加筛选",
+      "select_dimension": "选择维度",
+      "facet_value": "筛选值",
+      "apply_facet": "应用"
     },
     "untitled": "无标题",
     "batch": {
@@ -1957,7 +1961,9 @@
       "retry_enrichment_success": "已加入重试队列",
       "retry_enrichment_failed": "重试失败，请稍后再试",
       "terminal_failure_title": "这条反馈已永久失败",
-      "terminal_failure_body": "富化已尝试 {{count}} 次，均未成功。你可以点击下方按钮手动触发重试，或先检查 LLM 配置。"
+      "terminal_failure_body": "富化已尝试 {{count}} 次，均未成功。你可以点击下方按钮手动触发重试，或先检查 LLM 配置。",
+      "reply_draft_edit": "编辑",
+      "reply_draft_cancel_edit": "取消编辑"
     },
     "error_title": "反馈列表暂时无法加载",
     "error_body": "保留当前筛选条件后重试；如果问题持续，优先检查控制台 API 与当前租户权限。",
