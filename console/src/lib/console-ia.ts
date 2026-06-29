@@ -10,6 +10,7 @@ import {
   Layers,
   LayoutDashboard,
   Lock,
+  PieChart,
   Radio,
   Scale,
   Settings2,
@@ -71,6 +72,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     icon: Layers,
     labelKey: 'nav.clusters',
     path: '/feedback/clusters',
+  },
+  {
+    group: 'analytics',
+    icon: PieChart,
+    labelKey: 'nav.dashboard',
+    path: '/analytics/dashboard',
+    permission: 'usage:view',
   },
   {
     group: 'analytics',

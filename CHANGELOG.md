@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Analytics dashboard home page in Console (#202).**
+  New `/analytics/dashboard` route aggregates feedback stats (total,
+  urgent count, dimension distributions) and usage trends into a unified
+  overview page. Reuses existing `DimStatsBars`, `UsageBarChart`, and
+  `UsageSparkline` components. Added as the default landing page for the
+  analytics group in the sidebar navigation. 3 component tests.
+
 - **Slack inbound adapter for Events API ingestion (#202).**
   New `internal/inbound/adapter/slack` package receives Slack Events API
   webhooks (message, app_mention, reaction_added) and ingests them as
