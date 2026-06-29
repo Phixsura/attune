@@ -134,6 +134,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   slug, brand color, welcome message, enable/disable toggle with live
   URL preview. 3 TS tests.
 
+- **LLM Q&A over feedback corpus (#202).**
+  RAG prompt builder that retrieves relevant feedback via vector
+  similarity and constructs context-aware prompts. Content truncation,
+  source deduplication. 5 Go tests.
+
+- **AI output quality scoring (#202).**
+  Accuracy/completeness/consistency metrics with weighted overall score.
+  Letter grading (A–F). Quality reporting per tenant and model.
+  3 Go tests.
+
+- **Analytics platform integration (Segment/Amplitude) (#202).**
+  Platform interface for track/identify calls. Feedback-to-event
+  transformer. Batch tracking with error collection. 3 Go tests.
+
 - **Public voting portal API (#202).**
   REST handler (`internal/handlers/portal`) for public feedback browsing
   and voting. List published feedback with vote counts; cast votes with
