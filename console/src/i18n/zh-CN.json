@@ -2953,6 +2953,10 @@
     "create": "创建分群",
     "empty": "暂无分群"
   },
+  "activity": {
+    "title": "活动记录",
+    "empty": "暂无活动记录"
+  },
   "anomaly": {
     "title": "异常检测",
     "spike_detected": "检测到波动",

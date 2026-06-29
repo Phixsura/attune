@@ -52,6 +52,27 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Z-score based spike detection on time-bucketed feedback volumes.
   Configurable threshold. 5 Go tests.
 
+- **Theme/topic trend service (#202).**
+  Time-bucketed trend line builder that groups feedback counts by label
+  over time windows. 2 Go tests.
+
+- **AI summarization prompt builder (#202).**
+  Corpus summarization service that constructs LLM prompts from feedback
+  items and computes kind/severity distributions. 3 Go tests.
+
+- **Customer segmentation and revenue weighting (#202).**
+  Segment-aware prioritization with revenue-weighted scoring. Groups
+  feedback by customer segment for cohort analysis. 3 Go tests.
+
+- **Feature request deduplication with merge (#202).**
+  Candidate pair filtering by similarity threshold. Merge planner that
+  selects canonical item by vote count and consolidates duplicates.
+  4 Go tests.
+
+- **Activity timeline per feedback item (#202).**
+  Console component showing chronological events (created, enriched,
+  replied) with actor, timestamp, and optional detail. 3 TS tests.
+
 - **Public voting portal API (#202).**
   REST handler (`internal/handlers/portal`) for public feedback browsing
   and voting. List published feedback with vote counts; cast votes with
