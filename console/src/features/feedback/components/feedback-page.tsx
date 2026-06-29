@@ -15,10 +15,11 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react'
-import { type ReactNode, useDeferredValue, useMemo, useState } from 'react'
+import { type ReactNode, useCallback, useDeferredValue, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
+import { KeyboardShortcutsDialog } from '@/components/keyboard-shortcuts-dialog'
 import { Loading } from '@/components/loading'
 import { TagBadgeTooltip } from '@/components/tag/tag-badge-tooltip'
 import { Button } from '@/components/ui/button'
@@ -50,12 +51,16 @@ import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet
 import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
 import { LanguageBadge } from '@/features/feedback/components/language-badge'
 import { RetryEnrichmentDialog } from '@/features/feedback/components/retry-enrichment-dialog'
+import { SavedViewsMenu } from '@/features/feedback/components/saved-views-menu'
 import { SelectionActionBar } from '@/features/feedback/components/selection-action-bar'
 import { useRowSelection } from '@/features/feedback/hooks/use-row-selection'
+import { useSavedViews } from '@/features/feedback/hooks/use-saved-views'
 import {
   isTerminalFailure,
   MAX_ENRICHMENT_ATTEMPTS,
 } from '@/features/feedback/lib/enrichment-utils'
+import { exportFeedbackCSV } from '@/features/feedback/lib/export-csv'
+import { type HotkeyBinding, useHotkeys } from '@/hooks/use-hotkeys'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Dimension } from '@/proto/attune/v1/common'
 import type { Tag } from '@/proto/attune/v1/tag'
@@ -104,6 +109,7 @@ export function FeedbackPage({
   const [queueMode, setQueueMode] = useState<FeedbackQueueMode>('all')
   const qDeferred = useDeferredValue(qInput)
   const [detailId, setDetailId] = useState<string | null>(null)
+  const savedViews = useSavedViews()
 
   const filters: FeedbackListFilters = useMemo(() => {
     const attrs: AttrFilterEntry[] = Object.entries(attrFilters)
@@ -181,6 +187,81 @@ export function FeedbackPage({
   const batchDelete = useBatchDeleteFeedback()
   const [retryDialogOpen, setRetryDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [focusedIndex, setFocusedIndex] = useState(-1)
+
+  const handleExportCSV = useCallback(() => {
+    if (displayedItems.length === 0) return
+    exportFeedbackCSV(displayedItems)
+    toast.success(t('feedback.exported_csv'))
+  }, [displayedItems, t])
+
+  const hotkeyBindings: HotkeyBinding[] = useMemo(
+    () => [
+      {
+        key: '?',
+        handler: () => setShortcutsOpen(true),
+        description: t('shortcuts.show_help'),
+        group: t('shortcuts.general'),
+      },
+      {
+        key: '/',
+        handler: () => document.querySelector<HTMLInputElement>('[data-search-input]')?.focus(),
+        description: t('shortcuts.focus_search'),
+        group: t('shortcuts.navigation'),
+      },
+      {
+        key: 'j',
+        handler: () => setFocusedIndex((i) => Math.min(i + 1, displayedItems.length - 1)),
+        description: t('shortcuts.next_item'),
+        group: t('shortcuts.navigation'),
+      },
+      {
+        key: 'k',
+        handler: () => setFocusedIndex((i) => Math.max(i - 1, 0)),
+        description: t('shortcuts.prev_item'),
+        group: t('shortcuts.navigation'),
+      },
+      {
+        key: 'Enter',
+        handler: () => {
+          if (focusedIndex >= 0 && displayedItems[focusedIndex])
+            setDetailId(displayedItems[focusedIndex].id)
+        },
+        description: t('shortcuts.open_detail'),
+        group: t('shortcuts.navigation'),
+      },
+      {
+        key: 'Escape',
+        handler: () => {
+          if (detailId) setDetailId(null)
+          else setFocusedIndex(-1)
+        },
+        description: t('shortcuts.close'),
+        group: t('shortcuts.general'),
+      },
+      {
+        key: 'x',
+        handler: () => {
+          if (focusedIndex >= 0 && displayedItems[focusedIndex])
+            toggle(displayedItems[focusedIndex].id)
+        },
+        description: t('shortcuts.select_item'),
+        group: t('shortcuts.actions'),
+      },
+      {
+        key: 'e',
+        mod: true,
+        shift: true,
+        handler: handleExportCSV,
+        description: t('shortcuts.export_csv'),
+        group: t('shortcuts.actions'),
+      },
+    ],
+    [t, displayedItems, focusedIndex, detailId, toggle, handleExportCSV],
+  )
+
+  useHotkeys(hotkeyBindings)
 
   const selectedTerminalFailures = useMemo(() => {
     return items.filter((i) => selected.has(i.id) && isTerminalFailure(i))
@@ -405,6 +486,19 @@ export function FeedbackPage({
     setQInput('')
   }
 
+  const loadSavedView = (view: {
+    filters: import('@/features/feedback/hooks/use-saved-views').SavedViewFilters
+  }) => {
+    setAttrFilters(view.filters.attrFilters)
+    setTagFilter(view.filters.tagFilter)
+    setWorkflowFilter(view.filters.workflowFilter)
+    setEnrichmentFilter(view.filters.enrichmentFilter)
+    setUrgentOnly(view.filters.urgentOnly)
+    setQueueMode(view.filters.queueMode as FeedbackQueueMode)
+    setSortMode(view.filters.sortMode as FeedbackSortMode)
+    setQInput(view.filters.q)
+  }
+
   return (
     <div className="space-y-5">
       <section className="rounded-[1.45rem] border border-border/70 bg-[linear-gradient(180deg,rgba(255,252,248,0.9),rgba(255,255,255,0.995)_24%,rgba(249,250,251,0.99))] p-2 shadow-[0_24px_70px_-58px_rgba(15,23,42,0.2)]">
@@ -530,6 +624,22 @@ export function FeedbackPage({
                   value={t('feedback.focus_items.selection_active', { count: selected.size })}
                 />
               )}
+              <SavedViewsMenu
+                views={savedViews.views}
+                onSave={savedViews.save}
+                onLoad={loadSavedView}
+                onRemove={savedViews.remove}
+                currentFilters={{
+                  attrFilters,
+                  tagFilter,
+                  workflowFilter,
+                  enrichmentFilter,
+                  urgentOnly,
+                  queueMode,
+                  sortMode,
+                  q: qInput,
+                }}
+              />
               {hasActiveFilters && (
                 <Button variant="ghost" className="h-9 px-3 text-sm" onClick={clearFilters}>
                   {t('feedback.clear_filters')}
@@ -690,6 +800,7 @@ export function FeedbackPage({
                       selected={selected}
                       onToggle={toggle}
                       onRowClick={setDetailId}
+                      focusedIndex={focusedIndex}
                     />
                   )}
                   {list.hasNextPage && (
@@ -799,6 +910,12 @@ export function FeedbackPage({
         onConfirm={confirmBatchDelete}
         onCancel={() => setDeleteDialogOpen(false)}
       />
+
+      <KeyboardShortcutsDialog
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+        bindings={hotkeyBindings}
+      />
     </div>
   )
 }
@@ -846,6 +963,7 @@ function FilterBar({
       <div className="relative">
         <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
+          data-search-input
           type="search"
           placeholder={t('feedback.filter.search_placeholder')}
           value={q}
@@ -1004,6 +1122,7 @@ function FeedbackTable({
   selected,
   onToggle,
   onRowClick,
+  focusedIndex = -1,
 }: {
   items: Feedback[]
   dims: Dimension[]
@@ -1011,6 +1130,7 @@ function FeedbackTable({
   selected: Set<string>
   onToggle: (id: string) => void
   onRowClick: (id: string) => void
+  focusedIndex?: number
 }) {
   const { t } = useTranslation()
   const displayOf = useDisplayName()
@@ -1024,9 +1144,10 @@ function FeedbackTable({
   return (
     <div>
       <div className="space-y-3 px-3 py-3 sm:px-4">
-        {items.map((f) => {
+        {items.map((f, idx) => {
           const title = f.enrichedDisplayTitle || f.enrichedTitle || `#${f.id}`
           const isSelected = selected.has(f.id)
+          const isFocused = idx === focusedIndex
           const workflowCategory = f.workflowState?.category ?? ''
           const filledDims = dims.filter((d) => {
             const value = (f.enrichedAttrs as Record<string, unknown> | undefined)?.[d.name]
@@ -1038,7 +1159,7 @@ function FeedbackTable({
           return (
             <div
               key={f.id}
-              className={`grid gap-3 rounded-[1rem] border px-3.5 py-3.5 shadow-[0_18px_40px_-34px_rgba(15,23,42,0.18)] transition-[border-color,background-color,box-shadow,transform] hover:-translate-y-[1px] hover:border-border/85 hover:shadow-[0_22px_46px_-34px_rgba(15,23,42,0.22)] sm:px-4 lg:grid-cols-[1.75rem_minmax(0,1.15fr)_14rem] ${rowTone}`}
+              className={`grid gap-3 rounded-[1rem] border px-3.5 py-3.5 shadow-[0_18px_40px_-34px_rgba(15,23,42,0.18)] transition-[border-color,background-color,box-shadow,transform] hover:-translate-y-[1px] hover:border-border/85 hover:shadow-[0_22px_46px_-34px_rgba(15,23,42,0.22)] sm:px-4 lg:grid-cols-[1.75rem_minmax(0,1.15fr)_14rem] ${rowTone} ${isFocused ? 'ring-2 ring-primary/50' : ''}`}
             >
               <div className="flex items-start justify-center pt-1">
                 <Checkbox

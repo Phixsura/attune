@@ -69,3 +69,18 @@ type Rendered struct {
 // ResponseChecker maps an HTTP response to success (nil), a retriable
 // error, or ErrTerminal. Reuses the notify.ResponseChecker signature.
 type ResponseChecker func(ctx context.Context, status int, body []byte) error
+
+// DirectEventSender — optional role for adapters that deliver via a non-HTTP
+// protocol (e.g. SMTP). When an EventChannel also implements this interface,
+// the outbox worker calls SendEvent directly instead of going through the
+// HTTP transport. The adapter owns its own retry/timeout behaviour.
+type DirectEventSender interface {
+	SendEvent(ctx context.Context, envelope *Envelope, dst Target) error
+}
+
+// DirectDigestSender — optional role for adapters that deliver digests via a
+// non-HTTP protocol. When a DigestChannel also implements this interface,
+// the digest sender calls SendDigest directly.
+type DirectDigestSender interface {
+	SendDigest(ctx context.Context, view any, dst Target) error
+}

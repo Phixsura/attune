@@ -36,6 +36,11 @@ func (s *sender) send(
 	}
 
 	dst := toOutboundTarget(target)
+
+	if ds := outbound.LookupDirectDigest(target.DestinationType); ds != nil {
+		return ds.SendDigest(ctx, view, dst)
+	}
+
 	rendered, err := ch.RenderDigest(view, dst)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] render failed,dest_type:%s,err:%+v",

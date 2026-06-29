@@ -31,17 +31,24 @@ import (
 	// only legal site per the inbound-boundary depguard rule; cmd/attune
 	// owns this entrypoint so the framework registry is populated before
 	// inbound.Manager.StartAll runs in server.go.
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/appstore"
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/discord"
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/email"
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/webhook"
 
 	// #34 outbound adapters self-register via init(). Same boundary rule
 	// applies: cmd/attune is the only legal blank-import site per the
 	// outbound-boundary depguard rule.
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/discord"
+	_ "github.com/Phixsura/attune/internal/outbound/adapter/email"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/generic"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/githubissue"
+	_ "github.com/Phixsura/attune/internal/outbound/adapter/jira"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/lark"
+	_ "github.com/Phixsura/attune/internal/outbound/adapter/linear"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/slack"
+	_ "github.com/Phixsura/attune/internal/outbound/adapter/teams"
 )
 
 // subcommands routes each CLI verb to its handler. `server` ignores its args
