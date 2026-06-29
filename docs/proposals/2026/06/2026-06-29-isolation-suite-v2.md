@@ -3,7 +3,7 @@
 | Field   | Value |
 |---------|-------|
 | Issue   | #154 |
-| Status  | Proposed |
+| Status  | Implemented |
 | Started | 2026-06-29 |
 | Related | PR #200 (v1 implementation) |
 
