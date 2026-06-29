@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/mcp/jsonrpc"
 	"github.com/Phixsura/attune/internal/mcp/oauth"
 	"github.com/Phixsura/attune/internal/mcp/server"
@@ -44,6 +45,24 @@ func (m *mockSessionValidator) IsActive(_ context.Context, _ uuid.UUID) (bool, e
 	return m.active, nil
 }
 
+type mockWorkflowTransitioner struct {
+	lastTenantID string
+}
+
+func (m *mockWorkflowTransitioner) Transition(_ context.Context, tenantID string, _ int64, _, _, _ string) error {
+	m.lastTenantID = tenantID
+	return fmt.Errorf("feedback not found")
+}
+
+type mockIngestor struct {
+	lastTenantID string
+}
+
+func (m *mockIngestor) Ingest(_ context.Context, tenantID, _ string, _ domain.IngestInput) (int64, error) {
+	m.lastTenantID = tenantID
+	return 0, nil
+}
+
 func newMCPEnv(t *testing.T) *mcpEnv {
 	t.Helper()
 
@@ -58,17 +77,22 @@ func newMCPEnv(t *testing.T) *mcpEnv {
 		"",
 	)
 
+	wfTransit := &mockWorkflowTransitioner{}
+	ingestor := &mockIngestor{}
 	deps := &tools.Deps{
-		Feedback:       f.Feedback,
-		FeedbackWriter: feedback.NewFeedback(f.Pool),
-		WorkflowState:  f.Workflow,
-		Tag:            f.Tags,
-		TagAssign:      feedbacktagassignment.New(f.Pool),
+		Feedback:        f.Feedback,
+		FeedbackWriter:  feedback.NewFeedback(f.Pool),
+		WorkflowState:   f.Workflow,
+		WorkflowTransit: wfTransit,
+		Tag:             f.Tags,
+		TagAssign:       feedbacktagassignment.New(f.Pool),
+		Ingestor:        ingestor,
 	}
 
 	d := jsonrpc.NewDispatcher()
 	tools.RegisterReadTools(d, deps)
 	tools.RegisterWriteTools(d, deps)
+	tools.RegisterIngestTools(d, deps)
 
 	r := chi.NewRouter()
 	r.Group(func(r chi.Router) {
@@ -91,7 +115,7 @@ func signJWT(t *testing.T, signer *oauth.JWTSigner, tenantID string, clientID uu
 		TenantID:  tenantID,
 		ClientID:  clientID,
 		SessionID: uuid.New(),
-		Scopes:    []string{"mcp:read", "mcp:write"},
+		Scopes:    []string{"mcp:read", "mcp:write", "mcp:ingest"},
 	}, time.Hour)
 	require.NoError(t, err)
 	return token
@@ -148,18 +172,33 @@ func TestMCP_BearerJWT_CrossTenantListsDenied(t *testing.T) {
 func TestMCP_BearerJWT_CrossTenantGetDenied(t *testing.T) {
 	env := newMCPEnv(t)
 
-	_, body := doJSONRPC(t, env, env.TokenA, "get_feedback", map[string]any{
-		"id": env.Fixture.TenantB.FeedbackID,
-	})
-
-	var resp struct {
-		Error *struct{ Message string } `json:"error"`
+	getOps := []struct {
+		name   string
+		method string
+		params map[string]any
+	}{
+		{"get_feedback", "get_feedback", map[string]any{
+			"id": env.Fixture.TenantB.FeedbackID,
+		}},
+		{"get_workflow_state", "get_workflow_state", map[string]any{
+			"id": env.Fixture.TenantB.WorkflowID,
+		}},
 	}
-	require.NoError(t, json.Unmarshal(body, &resp))
-	if resp.Error == nil {
-		if containsAny(body, env.Fixture.TenantB.TenantID, fmt.Sprintf("%d", env.Fixture.TenantB.FeedbackID)) {
-			t.Error("ISOLATION BREACH: get_feedback returned tenant B data via tenant A JWT")
-		}
+
+	for _, op := range getOps {
+		t.Run(op.name, func(t *testing.T) {
+			_, body := doJSONRPC(t, env, env.TokenA, op.method, op.params)
+
+			var resp struct {
+				Error *struct{ Message string } `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(body, &resp))
+			if resp.Error == nil {
+				if containsAny(body, env.Fixture.TenantB.TenantID) {
+					t.Errorf("ISOLATION BREACH: %s returned tenant B data via tenant A JWT", op.name)
+				}
+			}
+		})
 	}
 }
 
@@ -178,6 +217,14 @@ func TestMCP_BearerJWT_CrossTenantWriteDenied(t *testing.T) {
 			"feedback_id": env.Fixture.TenantB.FeedbackID,
 			"tag_id":      env.Fixture.TenantA.TagID.String(),
 		}},
+		{"remove_tag", "remove_tag", map[string]any{
+			"feedback_id": env.Fixture.TenantB.FeedbackID,
+			"tag_id":      env.Fixture.TenantB.TagID.String(),
+		}},
+		{"update_workflow_state", "update_workflow_state", map[string]any{
+			"feedback_id": env.Fixture.TenantB.FeedbackID,
+			"state_id":    env.Fixture.TenantB.WorkflowID,
+		}},
 	}
 
 	for _, op := range writeOps {
@@ -190,6 +237,34 @@ func TestMCP_BearerJWT_CrossTenantWriteDenied(t *testing.T) {
 	}
 
 	verifyFeedbackBIntact(t, env)
+}
+
+func TestMCP_BearerJWT_SubmitFeedbackTenantBinding(t *testing.T) {
+	env := newMCPEnv(t)
+
+	_, _ = doJSONRPC(t, env, env.TokenA, "submit_feedback", map[string]any{
+		"content": "isolation test feedback",
+		"source":  "api",
+	})
+
+	_, body := doJSONRPC(t, env, env.TokenB, "list_feedback", nil)
+	if containsAny(body, "isolation test feedback") {
+		t.Error("ISOLATION BREACH: feedback submitted via tenant A JWT appeared in tenant B list")
+	}
+}
+
+func TestMCP_BearerJWT_TokenSwapDenied(t *testing.T) {
+	env := newMCPEnv(t)
+
+	_, bodyA := doJSONRPC(t, env, env.TokenA, "list_feedback", nil)
+	_, bodyB := doJSONRPC(t, env, env.TokenB, "list_feedback", nil)
+
+	if containsAny(bodyA, env.Fixture.TenantB.TenantID) {
+		t.Error("tenant A token returned tenant B data")
+	}
+	if containsAny(bodyB, env.Fixture.TenantA.TenantID) {
+		t.Error("tenant B token returned tenant A data")
+	}
 }
 
 func verifyFeedbackBIntact(t *testing.T, env *mcpEnv) {
