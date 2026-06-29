@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Python SDK with zero dependencies (#202).**
+  Synchronous client for the attune API using only stdlib (urllib).
+  Covers ingest, list, and get-detail endpoints with typed dataclasses.
+  Error hierarchy: AttuneError > AttuneAPIError / AttuneTimeoutError.
+  Idempotency-Key header support. 13 tests.
+
 - **Inline reply composition with edit mode (#202).**
   Operators can now edit AI-generated reply drafts inline before copying.
   Edit/Cancel toggle on the reply draft section of the feedback detail
