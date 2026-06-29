@@ -258,8 +258,6 @@ func TestHTTP_APIKey_CrossTenantGetDenied(t *testing.T) {
 		name string
 		path string
 	}{
-		{"tags/{id}", fmt.Sprintf("/tags/%s", env.Fixture.TenantB.TagID.String())},
-		{"workflow/states/{id}", fmt.Sprintf("/workflow/states/%s", env.Fixture.TenantB.WorkflowID)},
 		{"audit-log/evidence/{job_id}", fmt.Sprintf("/audit-log/evidence/%s", env.Fixture.TenantB.AuditEvidenceID)},
 		{"mcp/clients/{id}", fmt.Sprintf("/mcp/clients/%s", env.Fixture.TenantB.MCPClientID.String())},
 		{"gdpr/exports/{job_id}", fmt.Sprintf("/gdpr/exports/%s", env.Fixture.TenantB.AuditEvidenceID)},
@@ -364,9 +362,8 @@ func TestHTTP_APIKey_CrossTenantWritesDenied(t *testing.T) {
 					ep.name, status, string(body))
 			}
 
-			// A 200 on a cross-tenant write is suspicious.
 			if status == http.StatusOK {
-				t.Logf("WARNING: %s returned 200 for cross-tenant write", ep.name)
+				t.Errorf("ISOLATION BREACH: %s returned 200 for cross-tenant write", ep.name)
 			}
 		})
 	}
@@ -381,21 +378,24 @@ func TestHTTP_APIKey_CrossTenantWritesDenied(t *testing.T) {
 func verifyTenantBIntegrity(t *testing.T, env *httpEnv) {
 	t.Helper()
 
-	checks := []struct {
-		name string
-		path string
-	}{
-		{"tag", fmt.Sprintf("/tags/%s", env.Fixture.TenantB.TagID)},
-		{"workflow_state", fmt.Sprintf("/workflow/states/%s", env.Fixture.TenantB.WorkflowID)},
-		{"mcp_client", fmt.Sprintf("/mcp/clients/%s", env.Fixture.TenantB.MCPClientID)},
-	}
+	t.Run("verify_mcp_client_intact", func(t *testing.T) {
+		status, _ := doGet(t, env, env.APIKeyB, fmt.Sprintf("/mcp/clients/%s", env.Fixture.TenantB.MCPClientID))
+		if status == http.StatusNotFound {
+			t.Errorf("tenant B's MCP client was deleted by cross-tenant write attempt")
+		}
+	})
 
-	for _, c := range checks {
-		t.Run("verify_"+c.name+"_intact", func(t *testing.T) {
-			status, _ := doGet(t, env, env.APIKeyB, c.path)
-			if status == http.StatusNotFound {
-				t.Errorf("tenant B's %s was deleted by cross-tenant write attempt", c.name)
-			}
-		})
-	}
+	t.Run("verify_tags_list_intact", func(t *testing.T) {
+		status, body := doGet(t, env, env.APIKeyB, "/tags")
+		if status == http.StatusOK && !containsAny(body, env.Fixture.TenantB.TagID.String()) {
+			t.Errorf("tenant B's tag %s missing from list after cross-tenant write attempt", env.Fixture.TenantB.TagID)
+		}
+	})
+
+	t.Run("verify_workflow_list_intact", func(t *testing.T) {
+		status, body := doGet(t, env, env.APIKeyB, "/workflow/states")
+		if status == http.StatusOK && !containsAny(body, env.Fixture.TenantB.WorkflowID) {
+			t.Errorf("tenant B's workflow state %s missing from list after cross-tenant write attempt", env.Fixture.TenantB.WorkflowID)
+		}
+	})
 }

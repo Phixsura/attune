@@ -178,7 +178,7 @@ func seedTenant(t *testing.T, f *Fixture, slug, name string) TenantData {
 	td.DigestSubID = seedDigestSubscription(t, ctx, f.DigestSubs, tid)
 
 	// --- system setting ---
-	seedSystemSetting(t, ctx, f.SystemSettings, tid)
+	seedSystemSetting(t, ctx, f.SystemSettings, tid, slug)
 
 	// --- tenant member ---
 	td.MemberID = seedTenantMember(t, ctx, f.TenantMembers, tid, slug)
@@ -351,11 +351,16 @@ func seedDigestSubscription(t *testing.T, ctx context.Context, repo *digestsubsc
 	return sub.ID
 }
 
-func seedSystemSetting(t *testing.T, ctx context.Context, repo *systemsettings.Repo, tenantID string) {
+func seedSystemSetting(t *testing.T, ctx context.Context, repo *systemsettings.Repo, tenantID, slug string) {
 	t.Helper()
 	err := repo.Set(ctx, tenantID, "iso-test-key", "iso-test-value", "iso-seed")
 	if err != nil {
 		t.Fatalf("seed system setting for %s: %v", tenantID, err)
+	}
+	uniqueKey := fmt.Sprintf("iso-unique-%s", slug)
+	err = repo.Set(ctx, tenantID, uniqueKey, "iso-unique-value", "iso-seed")
+	if err != nil {
+		t.Fatalf("seed unique system setting for %s: %v", tenantID, err)
 	}
 }
 

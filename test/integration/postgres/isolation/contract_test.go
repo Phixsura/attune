@@ -379,10 +379,10 @@ func expandedDomainCases() []isolationCase {
 			Domain:    "system_settings",
 			Operation: "Get_cross_tenant",
 			Exec: func(ctx context.Context, f *Fixture) error {
-				// Tenant A reads a key that only tenant B would have.
-				_, err := f.SystemSettings.Get(ctx, f.TenantA.TenantID, "iso-key-only-in-B")
+				// Tenant A reads the unique key seeded only for tenant B.
+				_, err := f.SystemSettings.Get(ctx, f.TenantA.TenantID, fmt.Sprintf("iso-unique-%s", f.TenantB.Slug))
 				if err == nil {
-					return fmt.Errorf("tenant A retrieved a setting that should not exist for A")
+					return fmt.Errorf("tenant A retrieved tenant B's unique setting iso-unique-%s", f.TenantB.Slug)
 				}
 				if !errors.Is(err, systemsettings.ErrNotFound) {
 					return fmt.Errorf("expected ErrNotFound, got: %w", err)
