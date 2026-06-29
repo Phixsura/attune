@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Slack inbound adapter for Events API ingestion (#202).**
+  New `internal/inbound/adapter/slack` package receives Slack Events API
+  webhooks (message, app_mention, reaction_added) and ingests them as
+  feedback. Supports Slack request signature verification (HMAC-SHA256),
+  url_verification challenge handshake, bot message filtering, and
+  encrypted signing secret config. 22 tests including conformance suite.
+
 - **Email outbound adapter with SMTP delivery (#202).**
   New `internal/outbound/adapter/email` package delivers per-event and digest
   notifications via SMTP (STARTTLS or implicit TLS). The outbound framework
