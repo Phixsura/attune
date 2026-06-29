@@ -2951,7 +2951,8 @@
     "plan_tier": "计划层级",
     "cohort": "群组",
     "create": "创建分群",
-    "empty": "暂无分群"
+    "empty": "暂无客户分群",
+    "customers": "客户"
   },
   "activity": {
     "title": "活动记录",

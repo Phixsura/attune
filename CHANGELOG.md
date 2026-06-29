@@ -89,6 +89,37 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Console component showing chronological events (created, enriched,
   replied) with actor, timestamp, and optional detail. 3 TS tests.
 
+- **Enrichment confidence scoring (#202).**
+  Composite confidence score from LLM self-report, cross-model agreement,
+  and calibration accuracy. Bucket tiers (high/medium/low) and review
+  flagging below configurable threshold. 5 Go tests.
+
+- **Classification quality drift detection (#202).**
+  Jensen-Shannon divergence between baseline and current enrichment
+  distributions. Signals when model or prompt needs recalibration.
+  4 Go tests.
+
+- **Data retention policy engine (#202).**
+  Per-tenant retention configuration with retain/grace periods. Cutoff
+  and purge time computation. Scheduled run gating. 4 Go tests.
+
+- **Close-the-loop voter notification (#202).**
+  Builds notifications for voters when roadmap items transition to
+  in_progress/completed/shipped. 4 Go tests.
+
+- **Custom classification taxonomy (#202).**
+  Tenant-defined label sets with merge-over-defaults behavior.
+  Label validation against taxonomy. 3 Go tests.
+
+- **Support ticket feedback extraction (#202).**
+  Ticket parser for structured fields (subject, body, priority, tags).
+  Priority mapping to attune severity. Source metadata builder.
+  5 Go tests.
+
+- **Customer segmentation Console panel (#202).**
+  Segment list with tier, customer count, feedback count, and revenue
+  weight display. Click-to-filter interaction. 3 TS tests.
+
 - **Public voting portal API (#202).**
   REST handler (`internal/handlers/portal`) for public feedback browsing
   and voting. List published feedback with vote counts; cast votes with
