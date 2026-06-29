@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Real-time SSE event stream (#202).**
+  Go broker (`internal/infra/sse`) fans out tenant-scoped Server-Sent
+  Events to connected Console clients. React `useEventStream` hook
+  subscribes to feedback.created/enriched/updated/deleted and
+  workflow.transitioned events. 30s heartbeat keepalive. 5 Go tests,
+  4 TS tests.
+
 - **Microsoft Teams outbound adapter (#202).**
   Delivers event and digest notifications as Adaptive Card 1.4 messages
   via Teams incoming-webhook connectors. URL-as-credential pattern (like
