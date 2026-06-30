@@ -9,5 +9,8 @@ internal/infra/config/config_test.go
 internal/infra/database/pool_coverage_test.go
 internal/restoredrill/orchestrate_test.go
 
+# Node SDK test with a fake embedded-credentials URL used for validation
+sdk/node/test/client.test.ts
+
 # Documentation with example localhost postgres URIs
 docs/private-deploy.md
