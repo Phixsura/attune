@@ -26,7 +26,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -50,7 +50,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys:
         get:
             tags:
@@ -69,7 +69,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -93,7 +93,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/analytics:
         get:
             tags:
@@ -121,7 +121,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/approvals:
         get:
             tags:
@@ -147,7 +147,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -171,7 +171,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/approvals/{id}/review:
         post:
             tags:
@@ -202,7 +202,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/event-subscriptions:
         get:
             tags:
@@ -223,7 +223,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -247,7 +247,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/expiring:
         get:
             tags:
@@ -271,7 +271,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/leaks:
         get:
             tags:
@@ -297,7 +297,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/policy:
         get:
             tags:
@@ -318,7 +318,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         put:
             tags:
                 - ApiKeyService
@@ -342,7 +342,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/presets:
         get:
             tags:
@@ -361,7 +361,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/scopes:
         get:
             tags:
@@ -380,7 +380,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}:
         delete:
             tags:
@@ -405,7 +405,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/analytics:
         get:
             tags:
@@ -440,7 +440,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/budget:
         put:
             tags:
@@ -473,7 +473,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/environment:
         patch:
             tags:
@@ -504,7 +504,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/health:
         get:
             tags:
@@ -531,7 +531,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/logs:
         get:
             tags:
@@ -561,7 +561,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/project:
         post:
             tags:
@@ -592,7 +592,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/rotate:
         post:
             tags:
@@ -623,7 +623,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/rotation-schedule:
         get:
             tags:
@@ -650,7 +650,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -680,7 +680,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/signing-keys:
         get:
             tags:
@@ -707,7 +707,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -737,7 +737,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/tags:
         get:
             tags:
@@ -764,7 +764,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         put:
             tags:
                 - ApiKeyService
@@ -794,7 +794,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/temp-token:
         post:
             tags:
@@ -827,7 +827,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/api-keys/{id}/unused-scopes:
         get:
             tags:
@@ -854,7 +854,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/audit-log:
         get:
             tags:
@@ -916,7 +916,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/audit-log/evidence:
         post:
             tags:
@@ -940,7 +940,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/audit-log/evidence/{jobId}:
         get:
             tags:
@@ -964,7 +964,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/audit-log/evidence/{jobId}/download:
         get:
             tags:
@@ -986,7 +986,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/audit-log/export.csv:
         get:
             tags:
@@ -1037,7 +1037,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/clusters:
         get:
             tags:
@@ -1084,7 +1084,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/clusters/{clusterId}/members:
         get:
             tags:
@@ -1118,7 +1118,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/digest-subscription:
         get:
             tags:
@@ -1137,7 +1137,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         put:
             tags:
                 - DigestSubscriptionService
@@ -1161,7 +1161,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         delete:
             tags:
                 - DigestSubscriptionService
@@ -1179,7 +1179,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrich-config:
         get:
             tags:
@@ -1198,7 +1198,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         put:
             tags:
                 - EnrichConfigService
@@ -1222,7 +1222,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrich-config/eval-suggestions:analyze:
         post:
             tags:
@@ -1249,7 +1249,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrich-config/preview:
         post:
             tags:
@@ -1274,7 +1274,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrich-config/promote:
         post:
             tags:
@@ -1301,7 +1301,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrich-config/versions:
         get:
             tags:
@@ -1340,7 +1340,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrich-config/versions/{versionId}:activate:
         post:
             tags:
@@ -1373,7 +1373,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrichment-runtime:
         get:
             tags:
@@ -1391,7 +1391,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         put:
             tags:
                 - EnrichmentRuntimeService
@@ -1414,7 +1414,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrichment-runtime:reset:
         post:
             tags:
@@ -1438,7 +1438,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/enrichment-runtime:rollback:
         post:
             tags:
@@ -1462,7 +1462,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback:
         get:
             tags:
@@ -1524,7 +1524,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/batch:
         post:
             tags:
@@ -1548,7 +1548,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/batch/tags:
         post:
             tags:
@@ -1572,7 +1572,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/search:
         post:
             tags:
@@ -1596,7 +1596,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/stats:
         get:
             tags:
@@ -1615,7 +1615,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/terminal-failures:
         get:
             tags:
@@ -1634,7 +1634,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/transition/batch:
         post:
             tags:
@@ -1658,7 +1658,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/{feedbackId}/audit:
         get:
             tags:
@@ -1691,7 +1691,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/{feedbackId}/tags:
         post:
             tags:
@@ -1721,7 +1721,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/{feedbackId}/tags/{tagId}:
         delete:
             tags:
@@ -1750,7 +1750,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/{feedbackId}/transition:
         post:
             tags:
@@ -1780,7 +1780,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/{id}:
         get:
             tags:
@@ -1805,7 +1805,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/{id}/reply-draft/regenerate:
         post:
             tags:
@@ -1836,7 +1836,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/feedback/{id}/retry-enrichment:
         post:
             tags:
@@ -1869,7 +1869,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/gdpr/delete:
         post:
             tags:
@@ -1893,7 +1893,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/gdpr/export:
         post:
             tags:
@@ -1917,7 +1917,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/gdpr/exports/{jobId}:
         get:
             tags:
@@ -1941,7 +1941,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/gdpr/exports/{jobId}/download:
         get:
             tags:
@@ -1963,7 +1963,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/gdpr/exports/{jobId}/revoke:
         post:
             tags:
@@ -1993,7 +1993,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/gdpr/operations:
         get:
             tags:
@@ -2011,7 +2011,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/gdpr/requests:
         get:
             tags:
@@ -2043,7 +2043,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/gdpr/requests/{requestId}/cancel:
         post:
             tags:
@@ -2073,7 +2073,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/gdpr/step-up/verify:
         post:
             tags:
@@ -2097,7 +2097,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/guard-policies:
         get:
             tags:
@@ -2116,7 +2116,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         put:
             tags:
                 - GuardPolicyService
@@ -2140,7 +2140,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - GuardPolicyService
@@ -2164,7 +2164,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/guard-policies/effective:
         post:
             tags:
@@ -2189,7 +2189,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/guard-policies/{id}:
         delete:
             tags:
@@ -2214,7 +2214,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         patch:
             tags:
                 - GuardPolicyService
@@ -2244,7 +2244,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/inbound/sources:
         get:
             tags:
@@ -2263,7 +2263,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - InboundSourceService
@@ -2290,7 +2290,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/inbound/sources/test-connection:
         post:
             tags:
@@ -2317,7 +2317,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/inbound/sources/{id}:
         get:
             tags:
@@ -2342,7 +2342,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         delete:
             tags:
                 - InboundSourceService
@@ -2366,7 +2366,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/inbound/sources/{id}/pause:
         post:
             tags:
@@ -2397,7 +2397,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/inbound/sources/{id}/resume:
         post:
             tags:
@@ -2428,7 +2428,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/inbound/sources/{id}/rotate-secret:
         post:
             tags:
@@ -2462,7 +2462,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/install/login:
         post:
             tags:
@@ -2490,7 +2490,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/jobs:
         get:
             tags:
@@ -2525,7 +2525,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/jobs/{jobId}:
         get:
             tags:
@@ -2549,7 +2549,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/jobs/{jobId}/cancel:
         post:
             tags:
@@ -2579,7 +2579,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/llm-usage:
         get:
             tags:
@@ -2615,7 +2615,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/llm/channels:
         get:
             tags:
@@ -2633,7 +2633,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - LLMConfigService
@@ -2656,7 +2656,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/llm/channels/{channelId}/abilities:
         get:
             tags:
@@ -2680,7 +2680,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         put:
             tags:
                 - LLMConfigService
@@ -2709,7 +2709,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/llm/channels/{channelId}/abilities/delete:
         post:
             tags:
@@ -2739,7 +2739,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/llm/channels/{channelId}/models:
         get:
             tags:
@@ -2763,7 +2763,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/llm/channels/{id}:
         get:
             tags:
@@ -2787,7 +2787,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         delete:
             tags:
                 - LLMConfigService
@@ -2810,7 +2810,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         patch:
             tags:
                 - LLMConfigService
@@ -2839,7 +2839,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/llm/channels/{id}/test:
         post:
             tags:
@@ -2869,7 +2869,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/llm/routes:
         get:
             tags:
@@ -2887,7 +2887,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         put:
             tags:
                 - LLMConfigService
@@ -2910,7 +2910,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/llm/routes/delete:
         post:
             tags:
@@ -2934,7 +2934,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/logout:
         post:
             tags:
@@ -2959,7 +2959,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/managed-identities:
         get:
             tags:
@@ -2980,7 +2980,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -3004,7 +3004,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/mcp/clients:
         get:
             tags:
@@ -3023,7 +3023,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - MCPClientService
@@ -3047,7 +3047,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/mcp/clients/{id}:
         get:
             tags:
@@ -3072,7 +3072,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         delete:
             tags:
                 - MCPClientService
@@ -3096,7 +3096,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         patch:
             tags:
                 - MCPClientService
@@ -3126,7 +3126,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/mcp/clients/{id}/grants/{grantId}:
         delete:
             tags:
@@ -3156,7 +3156,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/mcp/clients/{id}/sessions/{sessionId}:
         delete:
             tags:
@@ -3186,7 +3186,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/mcp/clients/{id}/tool-policies:
         put:
             tags:
@@ -3217,7 +3217,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/me:
         get:
             tags:
@@ -3236,7 +3236,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/me/change-password:
         post:
             tags:
@@ -3268,7 +3268,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/members:
         get:
             tags:
@@ -3287,7 +3287,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - MemberService
@@ -3311,7 +3311,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/members/{id}:
         delete:
             tags:
@@ -3336,7 +3336,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         patch:
             tags:
                 - MemberService
@@ -3366,7 +3366,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/notify-targets:
         get:
             tags:
@@ -3385,7 +3385,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - NotifyTargetService
@@ -3409,7 +3409,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/notify-targets/{id}:
         delete:
             tags:
@@ -3434,7 +3434,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         patch:
             tags:
                 - NotifyTargetService
@@ -3464,7 +3464,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/notify-targets/{id}/test:
         post:
             tags:
@@ -3495,7 +3495,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/oauth2/clients:
         get:
             tags:
@@ -3516,7 +3516,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -3540,7 +3540,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/outbox/deliveries:
         get:
             tags:
@@ -3577,7 +3577,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/outbox/{id}/retry:
         post:
             tags:
@@ -3610,7 +3610,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/projects:
         get:
             tags:
@@ -3631,7 +3631,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -3655,7 +3655,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/secret-managers:
         get:
             tags:
@@ -3676,7 +3676,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -3700,7 +3700,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/service-accounts:
         get:
             tags:
@@ -3721,7 +3721,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -3745,7 +3745,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/siem-integrations:
         get:
             tags:
@@ -3766,7 +3766,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - ApiKeyService
@@ -3790,7 +3790,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/tags:
         get:
             tags:
@@ -3813,7 +3813,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - FeedbackTagService
@@ -3836,7 +3836,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/tags/{id}:
         delete:
             tags:
@@ -3860,7 +3860,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         patch:
             tags:
                 - FeedbackTagService
@@ -3889,7 +3889,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/usage:
         get:
             tags:
@@ -3918,7 +3918,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/workflow/seed:
         post:
             tags:
@@ -3942,7 +3942,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/workflow/states:
         get:
             tags:
@@ -3965,7 +3965,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - WorkflowService
@@ -3988,7 +3988,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/workflow/states/{id}:
         delete:
             tags:
@@ -4012,7 +4012,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         patch:
             tags:
                 - WorkflowService
@@ -4041,7 +4041,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /fb/v1/console/workflow/transitions:
         get:
             tags:
@@ -4059,7 +4059,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
         put:
             tags:
                 - WorkflowService
@@ -4082,7 +4082,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
+                                $ref: '#/components/schemas/Status'
     /v1/audit-log:
         get:
             tags:
@@ -4132,13 +4132,6 @@ paths:
                     type: array
                     items:
                         type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
@@ -4146,40 +4139,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ListAuditLogResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/audit-log/evidence:
         post:
             tags:
@@ -4198,48 +4163,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/CreateAuditEvidenceExportResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
-            parameters:
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
+                                $ref: '#/components/schemas/Status'
     /v1/audit-log/evidence/{jobId}:
         get:
             tags:
@@ -4251,13 +4180,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
@@ -4265,40 +4187,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/GetAuditEvidenceExportResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/audit-log/evidence/{jobId}/download:
         get:
             tags:
@@ -4310,52 +4204,17 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
                     content:
                         '*/*': {}
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/audit-log/export.csv:
         get:
             tags:
@@ -4396,52 +4255,17 @@ paths:
                     type: array
                     items:
                         type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
                     content:
                         '*/*': {}
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/auth/verify:
         get:
             tags:
@@ -4455,48 +4279,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/VerifyApiKeyResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
-            parameters:
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
+                                $ref: '#/components/schemas/Status'
     /v1/feedback/ingest:
         post:
             tags:
@@ -4515,13 +4303,6 @@ paths:
                   description: Optional dedup token (8-64 chars, [A-Za-z0-9_-]). Replaying the same key with the same body returns the original feedback id; reusing it with a different body fails with 409 IDEMPOTENCY_CONFLICT. When omitted, each request is treated as distinct.
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             requestBody:
                 content:
                     application/json:
@@ -4535,100 +4316,18 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/IngestResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
                 "409":
                     description: Idempotency-Key was reused with a different request body (error code IDEMPOTENCY_CONFLICT).
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 "413":
                     description: Request body exceeds the 64 KiB ingest limit (error code BODY_TOO_LARGE).
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 "429":
                     description: Rate limited by the per-tenant or per-key limiter; response carries a Retry-After header (error code RATE_LIMITED).
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
     /v1/gdpr/delete:
         post:
             tags:
@@ -4647,48 +4346,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/DeleteGdprSubjectResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
-            parameters:
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
+                                $ref: '#/components/schemas/Status'
     /v1/gdpr/export:
         post:
             tags:
@@ -4707,48 +4370,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ExportGdprSubjectResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
-            parameters:
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
+                                $ref: '#/components/schemas/Status'
     /v1/gdpr/exports/{jobId}:
         get:
             tags:
@@ -4760,13 +4387,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
@@ -4774,40 +4394,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/GdprExportStatusResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/gdpr/exports/{jobId}/download:
         get:
             tags:
@@ -4819,52 +4411,17 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
                     content:
                         '*/*': {}
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/gdpr/exports/{jobId}/revoke:
         post:
             tags:
@@ -4876,13 +4433,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             requestBody:
                 content:
                     application/json:
@@ -4896,40 +4446,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/RevokeGdprExportResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/gdpr/operations:
         get:
             tags:
@@ -4942,48 +4464,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/GdprOperationsResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
-            parameters:
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
+                                $ref: '#/components/schemas/Status'
     /v1/gdpr/requests:
         get:
             tags:
@@ -5003,13 +4489,6 @@ paths:
                   in: query
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
@@ -5017,40 +4496,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ListGdprRequestsResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/gdpr/requests/{requestId}/cancel:
         post:
             tags:
@@ -5062,13 +4513,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             requestBody:
                 content:
                     application/json:
@@ -5082,40 +4526,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/CancelGdprRequestResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/mcp/clients:
         get:
             tags:
@@ -5129,48 +4545,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ListMCPClientsResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
-            parameters:
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
+                                $ref: '#/components/schemas/Status'
         post:
             tags:
                 - MCPClientService
@@ -5189,48 +4569,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/CreateMCPClientResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
-            parameters:
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
+                                $ref: '#/components/schemas/Status'
     /v1/mcp/clients/{id}:
         get:
             tags:
@@ -5243,13 +4587,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
@@ -5257,40 +4594,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/GetMCPClientResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
         delete:
             tags:
                 - MCPClientService
@@ -5302,13 +4611,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
@@ -5316,40 +4618,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/RevokeMCPClientResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
         patch:
             tags:
                 - MCPClientService
@@ -5361,13 +4635,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             requestBody:
                 content:
                     application/json:
@@ -5381,40 +4648,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/UpdateMCPClientResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/mcp/clients/{id}/grants/{grantId}:
         delete:
             tags:
@@ -5432,13 +4671,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
@@ -5446,40 +4678,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/RevokeMCPRefreshGrantResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/mcp/clients/{id}/sessions/{sessionId}:
         delete:
             tags:
@@ -5497,13 +4701,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
@@ -5511,40 +4708,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/RevokeMCPSessionResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/mcp/clients/{id}/tool-policies:
         put:
             tags:
@@ -5557,13 +4726,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             requestBody:
                 content:
                     application/json:
@@ -5577,40 +4739,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ReplaceMCPClientToolPoliciesResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/outbox/deliveries:
         get:
             tags:
@@ -5635,13 +4769,6 @@ paths:
                   in: query
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             responses:
                 "200":
                     description: OK
@@ -5649,40 +4776,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ListDeliveriesResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
     /v1/outbox/{id}/retry:
         post:
             tags:
@@ -5697,13 +4796,6 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: X-Attune-Api-Version
-                  in: header
-                  required: false
-                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
-                  schema:
-                    type: string
-                    example: "2026-06-28"
             requestBody:
                 content:
                     application/json:
@@ -5717,40 +4809,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/RetryDeliveryResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
                 default:
                     description: Default error response
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    headers:
-                        X-Attune-Api-Version:
-                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
-                            schema:
-                                type: string
-                                example: "2026-06-28"
-                        Deprecation:
-                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
-                            schema:
-                                type: string
-                        Sunset:
-                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
-                            schema:
-                                type: string
+                                $ref: '#/components/schemas/Status'
 components:
     schemas:
         AIAgentConfig:
@@ -10153,22 +9217,6 @@ components:
                     type: string
                 toStateId:
                     type: string
-        ErrorResponse:
-            required:
-                - code
-                - message
-            type: object
-            properties:
-                code:
-                    type: string
-                    description: Stable machine-readable error code. Values are the attune ErrorCode enum names, such as VALIDATION or RATE_LIMITED.
-                message:
-                    type: string
-                    description: Human-facing error message. Not stable; do not switch on it.
-                requestId:
-                    type: string
-                    description: Request id for support and log correlation. Mirrors the HTTP request-id/trace identifier when available.
-            description: attune-standard error envelope for all non-2xx HTTP responses.
 tags:
     - name: ApiKeyService
       description: ApiKeyService manages a tenant's external ingest API keys (console).
