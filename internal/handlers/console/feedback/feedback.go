@@ -101,6 +101,7 @@ type feedbackRepo interface {
 	UsageByDay(ctx context.Context, tenantID string, from, to time.Time) ([]feedback.UsageBucket, error)
 	UrgentCount(ctx context.Context, tenantID string, from, to time.Time) (int64, error)
 	TopValuesByDim(ctx context.Context, tenantID, dim string, multi bool, from, to time.Time, limit int) ([]feedback.ValueCount, error)
+	TerminalFailureWorkbench(ctx context.Context, tenantID string, from, to time.Time) (*feedback.TerminalFailureWorkbench, error)
 	RetryEnrichment(ctx context.Context, tenantID string, id int64) (*feedback.RetryResult, error)
 }
 
@@ -142,22 +143,28 @@ func attrsToStruct(raw []byte) *structpb.Struct {
 
 func toProtoFeedback(row feedback.ConsoleListRow) *attunev1.Feedback {
 	f := ptrext.Of(attunev1.Feedback{
-		Id:                       row.ID,
-		Content:                  row.Content,
-		Source:                   row.Source,
-		Type:                     row.Type,
-		UserId:                   row.UserID,
-		Language:                 nullableString(row.Language),
-		PageUrl:                  row.PageURL,
-		EnrichedTitle:            nullableString(row.EnrichedTitle),
-		EnrichedDisplayTitle:     nullableString(row.EnrichedDisplayTitle),
-		EnrichedDisplayLocale:    nullableString(row.EnrichedDisplayLocale),
-		EnrichedAttrs:            attrsToStruct(row.EnrichedAttrs),
-		IsUrgent:                 row.IsUrgent,
-		ClassificationConfidence: row.ClassificationConfidence,
-		EnrichmentStatus:         row.EnrichmentStatus,
-		CreatedAt:                row.CreatedAt.UTC().Format(time.RFC3339),
-		EnrichmentAttempts:       ptrext.Of(int32(row.EnrichmentAttempts)),
+		Id:                                 row.ID,
+		Content:                            row.Content,
+		Source:                             row.Source,
+		Type:                               row.Type,
+		UserId:                             row.UserID,
+		Language:                           nullableString(row.Language),
+		PageUrl:                            row.PageURL,
+		EnrichedTitle:                      nullableString(row.EnrichedTitle),
+		EnrichedDisplayTitle:               nullableString(row.EnrichedDisplayTitle),
+		EnrichedDisplayLocale:              nullableString(row.EnrichedDisplayLocale),
+		EnrichedAttrs:                      attrsToStruct(row.EnrichedAttrs),
+		IsUrgent:                           row.IsUrgent,
+		ClassificationConfidence:           row.ClassificationConfidence,
+		EnrichmentStatus:                   row.EnrichmentStatus,
+		CreatedAt:                          row.CreatedAt.UTC().Format(time.RFC3339),
+		EnrichmentAttempts:                 ptrext.Of(int32(row.EnrichmentAttempts)),
+		EnrichmentFailureReasonClass:       nullableString(row.TerminalFailureReasonClass),
+		EnrichmentFailureModel:             nullableString(row.TerminalFailureModel),
+		EnrichmentFailureChannelId:         nullableString(row.TerminalFailureChannelID),
+		EnrichmentFailureChannelName:       nullableString(row.TerminalFailureChannelName),
+		EnrichmentFailureConfigFingerprint: nullableString(row.TerminalFailureConfigFingerprint),
+		EnrichmentFailurePromptVersion:     nullableString(row.TerminalFailurePromptVersion),
 	})
 	if row.EnrichmentNextRetryAt != nil {
 		f.EnrichmentNextRetryAt = ptrext.Of(row.EnrichmentNextRetryAt.UTC().Format(time.RFC3339))

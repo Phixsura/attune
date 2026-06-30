@@ -136,6 +136,17 @@ var EnrichmentTerminalFailuresTotal = prometheus.NewCounterVec(
 	[]string{"tenant"},
 )
 
+// EnrichmentTerminalFailuresByReasonTotal counts terminal failures by stable
+// reason class so operators can see whether llm, parse, or other failures are
+// dominating without exporting raw error text as a label.
+var EnrichmentTerminalFailuresByReasonTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_enrichment_terminal_failures_by_reason_total",
+		Help: "Feedback rows that exhausted enrichment retries, split by reason class.",
+	},
+	[]string{"tenant", "reason_class"},
+)
+
 // NotifyFailuresTotal increments on every notifier push that didn't
 // return nil. destination_type ∈ {raw-webhook, slack, lark, discord,
 // github-issue}; reason is the error class (transport | terminal).
@@ -868,6 +879,7 @@ var allMetrics = []prometheus.Collector{
 	EnrichBatchSize,
 	EnrichSweepSubmittedTotal,
 	EnrichmentTerminalFailuresTotal,
+	EnrichmentTerminalFailuresByReasonTotal,
 	NotifyFailuresTotal,
 	OutboxLagSeconds,
 	OutboxDeadRows,
@@ -955,6 +967,7 @@ func RegisteredMetricNames() []string {
 		"attune_enrich_batch_size",
 		"attune_enrich_sweep_submitted_total",
 		"attune_enrichment_terminal_failures_total",
+		"attune_enrichment_terminal_failures_by_reason_total",
 		"attune_notify_failures_total",
 		"attune_outbox_lag_seconds",
 		"attune_outbox_dead_rows",

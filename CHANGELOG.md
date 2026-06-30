@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Terminal failure workbench for the feedback console (#159).**
+  - Added a dedicated `/feedback/terminal-failures` console view that opens on terminal rows and surfaces bounded cluster summaries by failure class, routed model/channel, terminal config fingerprint, and age bucket.
+  - The workbench now highlights a global priority cluster, with evidence panels for the first cluster in each dimension so operators can see the strongest signal before drilling into samples.
+  - The main feedback queue now reuses the same terminal-failure priority signal, so the list view and the dedicated workbench point at the same next sample.
+  - The priority rail now also exposes direct navigation to the matching remediation surface when the operator can access it.
+  - The queue view and the dedicated workbench now include explicit one-click switches between each other, so operators can move between the overview and the deep-dive surface without hunting through the sidebar.
+  - The terminal workbench now exposes in-page jump links to each failure dimension, making the busiest review flows faster on long pages.
+  - Sample rows in the workbench now include direct retry actions, and successful retries refresh the feedback workbench cache family so operators see the updated terminal counts immediately.
+  - Terminal enrichment failures now persist failure-time snapshots on the row itself so the console can show stable remediation context even after config changes.
+  - Added a bounded reason-class metric breakdown for terminal failures, plus the supporting proto, OpenAPI, console navigation, and detail-sheet snapshot fields.
+
 - **Public management APIs and SDK coverage for audit/GDPR/outbox/MCP governance (#168).**
   Scoped API-key routes now expose selected admin operations under canonical
   `/v1/...` paths, with matching Node and Go SDK methods.
@@ -51,6 +62,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     still injecting the contract headers.
 
 ### Fixed
+
+- **Terminal failure detail sheet close affordance now stays above the sticky header.**
+  - The terminal failure detail sheet's visible close button now renders above the sticky workbench header and can be dismissed reliably from the UI.
 
 - **Generated OpenAPI now publishes attune's real error contract.**
   - `docs/openapi/openapi.yaml` now includes the shared `ErrorResponse` schema

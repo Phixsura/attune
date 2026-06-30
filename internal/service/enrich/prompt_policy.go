@@ -256,6 +256,34 @@ func promptFingerprint(tmpl string, cfg ClassifyConfig, templateLanguage, schema
 	)
 }
 
+type terminalFailurePolicySnapshot struct {
+	PolicyID          string                          `json:"policy_id"`
+	PolicyVersion     string                          `json:"policy_version"`
+	PromptVersion     string                          `json:"prompt_version"`
+	PromptFingerprint string                          `json:"prompt_fingerprint"`
+	SchemaFingerprint string                          `json:"schema_fingerprint,omitempty"`
+	Mode              string                          `json:"mode"`
+	PromptSource      string                          `json:"prompt_source"`
+	TemplateLanguage  string                          `json:"template_language"`
+	DisplayLocale     string                          `json:"display_locale"`
+	PolicyConfig      domain.EnrichPromptPolicyConfig `json:"policy_config"`
+}
+
+func terminalFailureConfigFingerprint(p resolvedPromptPolicy) string {
+	return fingerprintJSON(terminalFailurePolicySnapshot{
+		PolicyID:          p.PolicyID,
+		PolicyVersion:     p.PolicyVersion,
+		PromptVersion:     p.PromptVersion,
+		PromptFingerprint: p.PromptFingerprint,
+		SchemaFingerprint: p.SchemaFingerprint,
+		Mode:              p.Mode,
+		PromptSource:      p.PromptSource,
+		TemplateLanguage:  p.TemplateLanguage,
+		DisplayLocale:     p.DisplayLocale,
+		PolicyConfig:      p.PolicyConfig,
+	})
+}
+
 func fingerprintJSON(v any) string {
 	raw, err := json.Marshal(v)
 	if err != nil {

@@ -10,9 +10,7 @@ export function useRetryEnrichment(id: string) {
         method: 'POST',
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['console', 'feedback', 'detail', id] })
-      queryClient.invalidateQueries({ queryKey: ['console', 'feedback', 'list'] })
-      queryClient.invalidateQueries({ queryKey: ['console', 'feedback', 'stats'] })
+      queryClient.invalidateQueries({ queryKey: ['console', 'feedback'] })
     },
   })
 }

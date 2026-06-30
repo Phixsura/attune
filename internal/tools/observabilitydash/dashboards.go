@@ -181,6 +181,10 @@ func aiPipelineDashboard() dashboard {
 			targetExpr("C", `sum by (reason) (rate(attune_digest_clustering_fallback_total{tenant=~"$tenant"}[$__rate_interval]))`, "fallback / {{reason}}"),
 			targetExpr("D", `histogram_quantile(0.95, sum by (le) (rate(attune_digest_cluster_count_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "clusters p95"),
 		}, "short", gp(12, 42, 12, 8)),
+		rowPanel(19, "Terminal failure forensics", 50),
+		barDesc(20, "Terminal failures by reason", "Terminal enrichment failures split by stable reason class. Use this with the workbench to decide whether the issue is provider, parser, or something else.", []target{
+			targetExprSparse("A", `sum by (reason_class) (increase(attune_enrichment_terminal_failures_by_reason_total{tenant=~"$tenant"}[$__range]))`, "{{reason_class}}"),
+		}, "short", gp(0, 56, 24, 8)),
 	}
 	d.Panels = layoutSixCardDashboard(d.Panels, 8, 6)
 	return d

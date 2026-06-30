@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS user_feedback (
     enrichment_attempts INTEGER NOT NULL DEFAULT 0
         CONSTRAINT chk_user_feedback_enrichment_attempts_nonnegative CHECK (enrichment_attempts >= 0),
     enrichment_next_retry_at TIMESTAMPTZ,
+    -- Terminal-failure snapshot used by the console workbench.
+    enrichment_failure_reason_class TEXT,
+    enrichment_failure_model TEXT,
+    enrichment_failure_channel_id TEXT,
+    enrichment_failure_channel_name TEXT,
+    enrichment_failure_config_fingerprint TEXT,
+    enrichment_failure_prompt_version TEXT,
     -- Historical mirror columns (formerly migration 003). The mirror
     -- collaborator was abandoned in Wave 1.1; columns retained so an
     -- ops mistake reverting code doesn't crash on missing columns.

@@ -197,7 +197,7 @@ func (e *Enricher) runFullEnrich(ctx context.Context, id int64, row *feedback.En
 		}
 		metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "db_err").
 			Observe(time.Since(start).Seconds())
-		e.markFailed(ctx, id, err.Error())
+		e.markFailed(ctx, id, err.Error(), e.failureSnapshot(cfg, result.Route, err))
 		return err
 	}
 	metrics.EnrichDuration.WithLabelValues(row.TenantID, mode, "ok").
@@ -276,12 +276,12 @@ func (e *Enricher) classifyWithDiagnostics(ctx context.Context, content string, 
 	if err != nil {
 		logext.Errorf(ctx, "[%s] llm.Complete failed,model:%s,err:%+v",
 			where, e.model, err.Error())
-		return classifyResult{}, fmt.Errorf("llm: %w", err)
+		return classifyResult{Route: resp.Route}, fmt.Errorf("llm: %w", err)
 	}
 	parsed, err := parseEnrichJSON(resp.Text)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] parse failed,err:%s", where, err.Error())
-		return classifyResult{}, fmt.Errorf("parse: %w", err)
+		return classifyResult{Route: resp.Route}, fmt.Errorf("parse: %w", err)
 	}
 	parsed = normalizeEnrichedDisplay(parsed, cfg.Language, cfg.DisplayLocale)
 	tenant := cfg.TenantID
@@ -313,9 +313,9 @@ func (e *Enricher) classify(ctx context.Context, id int64, content string, cfg C
 	parsed, err := e.classifyWithDiagnostics(ctx, content, cfg)
 	if err != nil {
 		if shouldMarkEnrichFailed(err) {
-			e.markFailed(ctx, id, err.Error())
+			e.markFailed(ctx, id, err.Error(), e.failureSnapshot(cfg, parsed.Route, err))
 		}
-		return classifyResult{}, err
+		return parsed, err
 	}
 	return parsed, nil
 }

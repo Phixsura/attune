@@ -3,6 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { type ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
+import { terminalFailureWorkbenchQueryKey } from '@/features/feedback/api/get-terminal-failure-workbench'
 import { useRetryEnrichment } from '@/features/feedback/api/retry-enrichment'
 import { server } from '@/testing/mocks/server'
 
@@ -13,9 +14,10 @@ function createWrapper() {
       mutations: { retry: false },
     },
   })
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  }
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  )
+  return { queryClient, wrapper }
 }
 
 describe('useRetryEnrichment', () => {
@@ -32,9 +34,19 @@ describe('useRetryEnrichment', () => {
       }),
     )
 
-    const { result } = renderHook(() => useRetryEnrichment('f-123'), {
-      wrapper: createWrapper(),
+    const { queryClient, wrapper } = createWrapper()
+    queryClient.setQueryData(terminalFailureWorkbenchQueryKey, {
+      periodStart: '2026-06-01T00:00:00Z',
+      periodEnd: '2026-06-30T00:00:00Z',
+      totalTerminalFailures: '1',
+      oldestCreatedAt: '2026-06-01T00:00:00Z',
+      reasonClassClusters: [],
+      modelChannelClusters: [],
+      configFingerprintClusters: [],
+      ageBucketClusters: [],
     })
+
+    const { result } = renderHook(() => useRetryEnrichment('f-123'), { wrapper })
 
     result.current.mutate()
 
@@ -43,6 +55,7 @@ describe('useRetryEnrichment', () => {
     })
 
     expect(requestReceived).toBe(true)
+    expect(queryClient.getQueryState(terminalFailureWorkbenchQueryKey)?.isInvalidated).toBe(true)
   })
 
   it('handles error responses', async () => {
@@ -55,9 +68,8 @@ describe('useRetryEnrichment', () => {
       ),
     )
 
-    const { result } = renderHook(() => useRetryEnrichment('f-456'), {
-      wrapper: createWrapper(),
-    })
+    const { wrapper } = createWrapper()
+    const { result } = renderHook(() => useRetryEnrichment('f-456'), { wrapper })
 
     result.current.mutate()
 

@@ -147,6 +147,45 @@ describe('FeedbackDetailSheet', () => {
     expect(screen.getAllByText('llm: llm_not_configured').length).toBeGreaterThanOrEqual(1)
   })
 
+  it('closes the detail sheet when the visible close button is used', async () => {
+    const onOpenChange = vi.fn()
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-close',
+          content: 'payment failed at checkout',
+          enrichedTitle: 'Payment failed',
+          enrichedDisplayTitle: '支付失败',
+          enrichedRationale: 'AI rationale',
+          enrichedDisplayRationale: 'AI 中文解读',
+          enrichedDisplayLocale: 'zh',
+          enrichedAttrs: { severity: 'P0' },
+          enrichedAt: '2026-06-07T10:30:00Z',
+          language: 'en',
+          isUrgent: true,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentError: '',
+        }),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-close"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={onOpenChange}
+      />,
+    )
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it('shows workbench guidance for active queue context', async () => {
     server.use(
       http.get('/fb/v1/console/feedback/:id', () =>

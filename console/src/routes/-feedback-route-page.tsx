@@ -7,7 +7,15 @@ import { useBatchTransitionFeedback } from '@/features/workflow/api/transition-f
 import { AuditTimeline } from '@/features/workflow/components/audit-timeline'
 import { WorkflowTransitionSelect } from '@/features/workflow/components/workflow-transition-select'
 
-export function FeedbackRoutePage() {
+type FeedbackRoutePageProps = {
+  initialQueueMode?: 'all' | 'urgent' | 'active' | 'failed' | 'terminal' | 'ready'
+  showTerminalWorkbench?: boolean
+}
+
+export function FeedbackRoutePage({
+  initialQueueMode = 'all',
+  showTerminalWorkbench = false,
+}: FeedbackRoutePageProps = {}) {
   const config = useQuery(enrichConfigQuery())
   const allTags = useQuery(tagsQuery())
   const allStates = useQuery(workflowStatesQuery())
@@ -19,6 +27,8 @@ export function FeedbackRoutePage() {
       tagList={allTags.data ?? []}
       stateList={allStates.data ?? []}
       batchTransition={batchTransition}
+      initialQueueMode={initialQueueMode}
+      showTerminalWorkbench={showTerminalWorkbench}
       renderWorkflowTransition={(data) => (
         <WorkflowTransitionSelect
           feedbackId={String(data.id)}

@@ -32,6 +32,12 @@ type fakeFeedbackRepo struct {
 	usageRows []feedbackrepo.UsageBucket
 	urgent    int64
 	topValues map[string][]feedbackrepo.ValueCount
+
+	workbench       *feedbackrepo.TerminalFailureWorkbench
+	workbenchErr    error
+	workbenchTenant string
+	workbenchFrom   time.Time
+	workbenchTo     time.Time
 }
 
 func (f *fakeFeedbackRepo) ListForConsole(
@@ -64,6 +70,15 @@ func (f *fakeFeedbackRepo) TopValuesByDim(
 	_ context.Context, _ string, dim string, _ bool, _, _ time.Time, _ int,
 ) ([]feedbackrepo.ValueCount, error) {
 	return f.topValues[dim], nil
+}
+
+func (f *fakeFeedbackRepo) TerminalFailureWorkbench(
+	_ context.Context, tenantID string, from, to time.Time,
+) (*feedbackrepo.TerminalFailureWorkbench, error) {
+	f.workbenchTenant = tenantID
+	f.workbenchFrom = from
+	f.workbenchTo = to
+	return f.workbench, f.workbenchErr
 }
 
 func (f *fakeFeedbackRepo) RetryEnrichment(
@@ -279,6 +294,56 @@ func TestHTTPDispatchSmoke(t *testing.T) {
 		require.NotNil(t, repo.listOpts.TerminalFailedOnly)
 		require.True(t, *repo.listOpts.TerminalFailedOnly)
 		require.Equal(t, 50, repo.listOpts.Limit)
+	})
+
+	t.Run("terminal workbench", func(t *testing.T) {
+		oldest := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+		repo := &fakeFeedbackRepo{
+			workbench: &feedbackrepo.TerminalFailureWorkbench{
+				PeriodStart:           time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+				PeriodEnd:             time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
+				TotalTerminalFailures: 4,
+				OldestCreatedAt:       &oldest,
+				ReasonClassClusters: []feedbackrepo.TerminalFailureCluster{
+					{
+						Key:               "llm_err",
+						Label:             "LLM error",
+						Count:             3,
+						OldestCreatedAt:   oldest,
+						NewestCreatedAt:   oldest.Add(2 * time.Hour),
+						SampleFeedbackIDs: []int64{123, 124, 125},
+						RemediationHint:   "Check the routed LLM channel and provider health.",
+					},
+				},
+			},
+		}
+		h := &FeedbackHandler{repo: repo, tenants: tenants}
+		handler := dispatcher.Bind(
+			"console.FeedbackHandler.GetTerminalFailureWorkbench",
+			dispatcher.Empty(func() *attunev1.GetTerminalFailureWorkbenchRequest {
+				return &attunev1.GetTerminalFailureWorkbenchRequest{}
+			}),
+			h.GetTerminalFailureWorkbench,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetTerminalFailureWorkbenchRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodGet, "/fb/v1/console/feedback/terminal-failures", ""))
+
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, dispatchtest.TenantID, repo.workbenchTenant)
+		require.False(t, repo.workbenchFrom.IsZero())
+		require.False(t, repo.workbenchTo.IsZero())
+		body, err := dispatchtest.DecodeJSON(w.Body)
+		require.NoError(t, err)
+		require.Equal(t, "4", body["totalTerminalFailures"])
+		clusters := body["reasonClassClusters"].([]any)
+		require.Len(t, clusters, 1)
+		cluster := clusters[0].(map[string]any)
+		require.Equal(t, "llm_err", cluster["key"])
+		require.Equal(t, "LLM error", cluster["label"])
 	})
 
 	t.Run("stats", func(t *testing.T) {

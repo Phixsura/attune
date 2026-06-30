@@ -1616,6 +1616,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/feedback/terminal-failures:
+        get:
+            tags:
+                - FeedbackService
+            description: GET /fb/v1/console/feedback/terminal-failures
+            operationId: FeedbackService_GetTerminalFailureWorkbench
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetTerminalFailureWorkbenchResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/feedback/transition/batch:
         post:
             tags:
@@ -7458,6 +7477,18 @@ components:
                 enrichmentNextRetryAt:
                     type: string
                     description: RFC3339 timestamp of next scheduled retry; absent if terminal or not failed
+                enrichmentFailureReasonClass:
+                    type: string
+                enrichmentFailureModel:
+                    type: string
+                enrichmentFailureChannelId:
+                    type: string
+                enrichmentFailureChannelName:
+                    type: string
+                enrichmentFailureConfigFingerprint:
+                    type: string
+                enrichmentFailurePromptVersion:
+                    type: string
             description: |-
                 Feedback is a console feedback list row. Post-E3 (metadata-driven
                  Dimensions): the per-row classification lives in `enriched_attrs`, a
@@ -7539,6 +7570,18 @@ components:
                 enrichmentNextRetryAt:
                     type: string
                     description: RFC3339 timestamp of next scheduled retry; absent if terminal or not failed
+                enrichmentFailureReasonClass:
+                    type: string
+                enrichmentFailureModel:
+                    type: string
+                enrichmentFailureChannelId:
+                    type: string
+                enrichmentFailureChannelName:
+                    type: string
+                enrichmentFailureConfigFingerprint:
+                    type: string
+                enrichmentFailurePromptVersion:
+                    type: string
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         FeedbackFilter:
             type: object
@@ -7919,6 +7962,33 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ApiKeyAnalytics'
+        GetTerminalFailureWorkbenchResponse:
+            type: object
+            properties:
+                periodStart:
+                    type: string
+                periodEnd:
+                    type: string
+                totalTerminalFailures:
+                    type: string
+                oldestCreatedAt:
+                    type: string
+                reasonClassClusters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/TerminalFailureCluster'
+                modelChannelClusters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/TerminalFailureCluster'
+                configFingerprintClusters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/TerminalFailureCluster'
+                ageBucketClusters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/TerminalFailureCluster'
         GetUnusedScopesResponse:
             type: object
             properties:
@@ -9625,6 +9695,25 @@ components:
                 timezone:
                     type: string
             description: Tenant is the console-facing tenant record.
+        TerminalFailureCluster:
+            type: object
+            properties:
+                key:
+                    type: string
+                label:
+                    type: string
+                count:
+                    type: string
+                oldestCreatedAt:
+                    type: string
+                newestCreatedAt:
+                    type: string
+                sampleFeedbackIds:
+                    type: array
+                    items:
+                        type: string
+                remediationHint:
+                    type: string
         TestInboundConnectionRequest:
             required:
                 - channel

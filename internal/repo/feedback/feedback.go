@@ -336,6 +336,12 @@ const markDoneSQL = `
 		 enrichment_error = NULL,
 		 enrichment_attempts = 0,
 		 enrichment_next_retry_at = NULL,
+		 enrichment_failure_reason_class = NULL,
+		 enrichment_failure_model = NULL,
+		 enrichment_failure_channel_id = NULL,
+		 enrichment_failure_channel_name = NULL,
+		 enrichment_failure_config_fingerprint = NULL,
+		 enrichment_failure_prompt_version = NULL,
 		 enrichment_claimed_at = NULL,
 		 enrichment_claimed_by = NULL,
 		 enriched_at = NOW()
@@ -357,6 +363,12 @@ const markDoneWithOwnerSQL = `
 		 enrichment_error = NULL,
 		 enrichment_attempts = 0,
 		 enrichment_next_retry_at = NULL,
+		 enrichment_failure_reason_class = NULL,
+		 enrichment_failure_model = NULL,
+		 enrichment_failure_channel_id = NULL,
+		 enrichment_failure_channel_name = NULL,
+		 enrichment_failure_config_fingerprint = NULL,
+		 enrichment_failure_prompt_version = NULL,
 		 enrichment_claimed_at = NULL,
 		 enrichment_claimed_by = NULL,
 		 enriched_at = NOW()
@@ -482,14 +494,18 @@ func (r *FeedbackRepo) BeginTx(ctx context.Context) (pgx.Tx, error) {
 // It returns whether this attempt was terminal (retries now exhausted) and the
 // row's tenant, so the caller can record attune_enrichment_terminal_failures_total
 // (#64). On a DB error it returns (false, "").
-func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string) (terminal bool, tenant string) {
-	return r.MarkFailedWithOwner(ctx, id, "", errMsg)
+func (r *FeedbackRepo) MarkFailed(ctx context.Context, id int64, errMsg string, snapshots ...EnrichmentFailureSnapshot) (terminal bool, tenant string) {
+	return r.MarkFailedWithOwner(ctx, id, "", errMsg, snapshots...)
 }
 
 // MarkFailedWithOwner is like MarkFailed but includes claimed_by fencing.
 // If owner is non-empty, only updates if enrichment_claimed_by matches.
-func (r *FeedbackRepo) MarkFailedWithOwner(ctx context.Context, id int64, owner, errMsg string) (terminal bool, tenant string) {
+func (r *FeedbackRepo) MarkFailedWithOwner(ctx context.Context, id int64, owner, errMsg string, snapshots ...EnrichmentFailureSnapshot) (terminal bool, tenant string) {
 	const where = "repo.FeedbackRepo.MarkFailedWithOwner"
+	snapshot := EnrichmentFailureSnapshot{}
+	if len(snapshots) > 0 {
+		snapshot = snapshots[0]
+	}
 	var sql string
 	var args []any
 	if owner == "" {
@@ -504,6 +520,12 @@ func (r *FeedbackRepo) MarkFailedWithOwner(ctx context.Context, id int64, owner,
 		            $5
 		          ))
 		        END,
+		        enrichment_failure_reason_class = NULLIF($6, ''),
+		        enrichment_failure_model = NULLIF($7, ''),
+		        enrichment_failure_channel_id = NULLIF($8, ''),
+		        enrichment_failure_channel_name = NULLIF($9, ''),
+		        enrichment_failure_config_fingerprint = NULLIF($10, ''),
+		        enrichment_failure_prompt_version = NULLIF($11, ''),
 		        enrichment_claimed_at = NULL,
 		        enrichment_claimed_by = NULL
 		  WHERE id = $2
@@ -511,6 +533,8 @@ func (r *FeedbackRepo) MarkFailedWithOwner(ctx context.Context, id int64, owner,
 		args = []any{
 			pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
 			int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()),
+			snapshot.ReasonClass, snapshot.Model, snapshot.ChannelID,
+			snapshot.ChannelName, snapshot.ConfigFingerprint, snapshot.PromptVersion,
 		}
 	} else {
 		sql = `UPDATE user_feedback
@@ -524,6 +548,12 @@ func (r *FeedbackRepo) MarkFailedWithOwner(ctx context.Context, id int64, owner,
 		            $5
 		          ))
 		        END,
+		        enrichment_failure_reason_class = NULLIF($7, ''),
+		        enrichment_failure_model = NULLIF($8, ''),
+		        enrichment_failure_channel_id = NULLIF($9, ''),
+		        enrichment_failure_channel_name = NULLIF($10, ''),
+		        enrichment_failure_config_fingerprint = NULLIF($11, ''),
+		        enrichment_failure_prompt_version = NULLIF($12, ''),
 		        enrichment_claimed_at = NULL,
 		        enrichment_claimed_by = NULL
 		  WHERE id = $2 AND enrichment_claimed_by = $6
@@ -531,6 +561,8 @@ func (r *FeedbackRepo) MarkFailedWithOwner(ctx context.Context, id int64, owner,
 		args = []any{
 			pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
 			int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()), owner,
+			snapshot.ReasonClass, snapshot.Model, snapshot.ChannelID,
+			snapshot.ChannelName, snapshot.ConfigFingerprint, snapshot.PromptVersion,
 		}
 	}
 	if err := r.pool.QueryRow(ctx, sql, args...).Scan(&terminal, &tenant); err != nil {

@@ -893,6 +893,57 @@
           "sort": "none"
         }
       }
+    },
+    {
+      "id": 19,
+      "type": "row",
+      "title": "Terminal failure forensics",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      }
+    },
+    {
+      "id": 20,
+      "type": "barchart",
+      "title": "Terminal failures by reason",
+      "description": "Terminal enrichment failures split by stable reason class. Use this with the workbench to decide whether the issue is provider, parser, or something else.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 62
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason_class) (increase(attune_enrichment_terminal_failures_by_reason_total{tenant=~\"$tenant\"}[$__range]))",
+          "legendFormat": "{{reason_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal"
+      }
     }
   ]
 }
