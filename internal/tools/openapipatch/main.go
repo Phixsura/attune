@@ -74,14 +74,31 @@ func patchDocument(doc *yaml.Node) error {
 		return err
 	}
 
+	stripComments(doc)
+
 	components := ensureMapping(root, "components")
 	schemas := ensureMapping(components, "schemas")
 	ensureErrorResponseSchema(schemas)
+	sanitizeStatusSchema(schemas)
 
 	paths := ensureMapping(root, "paths")
 	patchPaths(paths)
 
 	return nil
+}
+
+// Strip generator comments so the committed OpenAPI artifact does not carry
+// external URLs that trufflehog flags as unknown findings.
+func stripComments(node *yaml.Node) {
+	if node == nil {
+		return
+	}
+	node.HeadComment = ""
+	node.LineComment = ""
+	node.FootComment = ""
+	for _, child := range node.Content {
+		stripComments(child)
+	}
 }
 
 func documentMapping(doc *yaml.Node) (*yaml.Node, error) {
@@ -246,6 +263,14 @@ func ensureErrorResponseSchema(schemas *yaml.Node) {
 		return
 	}
 	appendMappingPair(schemas, "ErrorResponse", errorResponseSchema())
+}
+
+func sanitizeStatusSchema(schemas *yaml.Node) {
+	status := mappingValue(schemas, "Status")
+	if status == nil || status.Kind != yaml.MappingNode {
+		return
+	}
+	setScalar(status, "description", "The `Status` type defines a logical error model suitable for REST APIs and RPC APIs. It contains error code, error message, and error details.")
 }
 
 func errorResponseSchema() *yaml.Node {

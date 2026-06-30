@@ -4,7 +4,8 @@
 `buf.build/community/google-gnostic-openapi` plugin (see `buf.gen.yaml`), then
 mechanically repaired by `internal/tools/openapipatch` so the published
 document matches attune's real HTTP error contract and public API version
-headers. Do not edit it by hand — change the `.proto` and re-run `make proto`.
+headers while dropping generator-only comments and external documentation links.
+Do not edit it by hand — change the `.proto` and re-run `make proto`.
 
 ## Error envelope
 
