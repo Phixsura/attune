@@ -461,7 +461,7 @@ func TestMigrations_DetectDuplicatePrefixes(t *testing.T) {
 
 func TestMigrations_MigrationCount(t *testing.T) {
 	count := database.MigrationCount()
-	require.Equal(t, 91, count, "should have 91 migrations")
+	require.Equal(t, 92, count, "should have 92 migrations")
 
 	names, err := database.LoadMigrationNames()
 	require.NoError(t, err)
