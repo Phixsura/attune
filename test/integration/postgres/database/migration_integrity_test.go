@@ -1223,12 +1223,12 @@ func TestMigrations_LoadMigrationNames_All(t *testing.T) {
 	names, err := database.LoadMigrationNames()
 	require.NoError(t, err)
 
-	// Should have 91 migrations.
-	require.Len(t, names, 91)
+	// Should have 92 migrations.
+	require.Len(t, names, 92)
 
 	// First and last
 	require.Equal(t, "001_init.sql", names[0])
-	require.Equal(t, "091_api_key_gdpr_granular_scopes.sql", names[len(names)-1])
+	require.Equal(t, "092_terminal_failure_workbench.sql", names[len(names)-1])
 
 	// All should be .sql files
 	for _, n := range names {
