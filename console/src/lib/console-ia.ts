@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   ShieldEllipsis,
   Stethoscope,
+  TriangleAlert,
   Users,
   Workflow,
 } from 'lucide-react'
@@ -65,6 +66,12 @@ export const consoleNavItems: ConsoleNavItem[] = [
     labelKey: 'nav.feedback',
     path: '/feedback',
     exact: true,
+  },
+  {
+    group: 'feedback',
+    icon: TriangleAlert,
+    labelKey: 'nav.terminal_failures',
+    path: '/feedback/terminal-failures',
   },
   {
     group: 'feedback',

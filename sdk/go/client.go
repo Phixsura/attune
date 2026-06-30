@@ -74,8 +74,8 @@ func New(baseURL, apiKey string, opts ...Option) (*Client, error) {
 	}
 	c.userAgent = buildUserAgent(c.uaSuffix)
 
-	switch {
-	case c.httpClient == nil:
+	switch c.httpClient {
+	case nil:
 		c.httpClient = &http.Client{CheckRedirect: noRedirect} // lint-slog:allow rule-3 client SDK; callers add otelhttp via WithHTTPClient
 	default:
 		// Always install the no-redirect guard on a copy so we never mutate a

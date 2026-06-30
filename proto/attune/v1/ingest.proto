@@ -75,6 +75,10 @@ service FeedbackService {
   rpc GetFeedbackStats(GetFeedbackStatsRequest) returns (GetFeedbackStatsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/feedback/stats"};
   }
+  // GET /fb/v1/console/feedback/terminal-failures
+  rpc GetTerminalFailureWorkbench(GetTerminalFailureWorkbenchRequest) returns (GetTerminalFailureWorkbenchResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/terminal-failures"};
+  }
   // POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; session auth)
   rpc RegenerateReplyDraft(RegenerateReplyDraftRequest) returns (RegenerateReplyDraftResponse) {
     option (google.api.http) = {
@@ -155,6 +159,12 @@ message Feedback {
   optional int32 enrichment_attempts = 19;
   // RFC3339 timestamp of next scheduled retry; absent if terminal or not failed
   optional string enrichment_next_retry_at = 20;
+  optional string enrichment_failure_reason_class = 21;
+  optional string enrichment_failure_model = 22;
+  optional string enrichment_failure_channel_id = 23;
+  optional string enrichment_failure_channel_name = 24;
+  optional string enrichment_failure_config_fingerprint = 25;
+  optional string enrichment_failure_prompt_version = 26;
 }
 
 // FeedbackDetail is the single-row view: the list fields plus extras (flat).
@@ -193,6 +203,12 @@ message FeedbackDetail {
   optional int32 enrichment_attempts = 28;
   // RFC3339 timestamp of next scheduled retry; absent if terminal or not failed
   optional string enrichment_next_retry_at = 29;
+  optional string enrichment_failure_reason_class = 30;
+  optional string enrichment_failure_model = 31;
+  optional string enrichment_failure_channel_id = 32;
+  optional string enrichment_failure_channel_name = 33;
+  optional string enrichment_failure_config_fingerprint = 34;
+  optional string enrichment_failure_prompt_version = 35;
 }
 
 message Attachment {
@@ -262,6 +278,8 @@ message RetryEnrichmentResponse {
 
 message GetFeedbackStatsRequest {}
 
+message GetTerminalFailureWorkbenchRequest {}
+
 // ValueCount is one bucket of a per-dim distribution.
 message ValueCount {
   string value = 1;
@@ -282,4 +300,25 @@ message GetFeedbackStatsResponse {
   repeated DimStats dims = 4;
   // Count of is_urgent = true rows within the window.
   int64 urgent_count = 5;
+}
+
+message TerminalFailureCluster {
+  string key = 1;
+  string label = 2;
+  int64 count = 3;
+  string oldest_created_at = 4;
+  string newest_created_at = 5;
+  repeated int64 sample_feedback_ids = 6;
+  optional string remediation_hint = 7;
+}
+
+message GetTerminalFailureWorkbenchResponse {
+  string period_start = 1;
+  string period_end = 2;
+  int64 total_terminal_failures = 3;
+  optional string oldest_created_at = 4;
+  repeated TerminalFailureCluster reason_class_clusters = 5;
+  repeated TerminalFailureCluster model_channel_clusters = 6;
+  repeated TerminalFailureCluster config_fingerprint_clusters = 7;
+  repeated TerminalFailureCluster age_bucket_clusters = 8;
 }

@@ -95,6 +95,12 @@ export interface Feedback {
     | undefined;
   /** RFC3339 timestamp of next scheduled retry; absent if terminal or not failed */
   enrichmentNextRetryAt?: string | undefined;
+  enrichmentFailureReasonClass?: string | undefined;
+  enrichmentFailureModel?: string | undefined;
+  enrichmentFailureChannelId?: string | undefined;
+  enrichmentFailureChannelName?: string | undefined;
+  enrichmentFailureConfigFingerprint?: string | undefined;
+  enrichmentFailurePromptVersion?: string | undefined;
 }
 
 /** FeedbackDetail is the single-row view: the list fields plus extras (flat). */
@@ -166,6 +172,12 @@ export interface FeedbackDetail {
     | undefined;
   /** RFC3339 timestamp of next scheduled retry; absent if terminal or not failed */
   enrichmentNextRetryAt?: string | undefined;
+  enrichmentFailureReasonClass?: string | undefined;
+  enrichmentFailureModel?: string | undefined;
+  enrichmentFailureChannelId?: string | undefined;
+  enrichmentFailureChannelName?: string | undefined;
+  enrichmentFailureConfigFingerprint?: string | undefined;
+  enrichmentFailurePromptVersion?: string | undefined;
 }
 
 export interface Attachment {
@@ -258,6 +270,9 @@ export interface RetryEnrichmentResponse {
 export interface GetFeedbackStatsRequest {
 }
 
+export interface GetTerminalFailureWorkbenchRequest {
+}
+
 /** ValueCount is one bucket of a per-dim distribution. */
 export interface ValueCount {
   value: string;
@@ -278,6 +293,27 @@ export interface GetFeedbackStatsResponse {
   dims: DimStats[];
   /** Count of is_urgent = true rows within the window. */
   urgentCount: string;
+}
+
+export interface TerminalFailureCluster {
+  key: string;
+  label: string;
+  count: string;
+  oldestCreatedAt: string;
+  newestCreatedAt: string;
+  sampleFeedbackIds: string[];
+  remediationHint?: string | undefined;
+}
+
+export interface GetTerminalFailureWorkbenchResponse {
+  periodStart: string;
+  periodEnd: string;
+  totalTerminalFailures: string;
+  oldestCreatedAt?: string | undefined;
+  reasonClassClusters: TerminalFailureCluster[];
+  modelChannelClusters: TerminalFailureCluster[];
+  configFingerprintClusters: TerminalFailureCluster[];
+  ageBucketClusters: TerminalFailureCluster[];
 }
 
 /**
@@ -305,6 +341,10 @@ export interface FeedbackService {
   GetFeedback(request: GetFeedbackRequest): Promise<FeedbackDetail>;
   /** GET /fb/v1/console/feedback/stats */
   GetFeedbackStats(request: GetFeedbackStatsRequest): Promise<GetFeedbackStatsResponse>;
+  /** GET /fb/v1/console/feedback/terminal-failures */
+  GetTerminalFailureWorkbench(
+    request: GetTerminalFailureWorkbenchRequest,
+  ): Promise<GetTerminalFailureWorkbenchResponse>;
   /** POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; session auth) */
   RegenerateReplyDraft(request: RegenerateReplyDraftRequest): Promise<RegenerateReplyDraftResponse>;
   /**

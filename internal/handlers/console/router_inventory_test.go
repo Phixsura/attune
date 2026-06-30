@@ -108,6 +108,7 @@ var expectedOtherRoutes = []string{
 	"DELETE /digest-subscription",
 	"GET /feedback/",
 	"GET /feedback/stats",
+	"GET /feedback/terminal-failures",
 	"GET /feedback/{id}",
 	"POST /feedback/{id}/reply-draft/regenerate",
 	"POST /feedback/{id}/retry-enrichment",

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -162,6 +163,48 @@ components:
 	errorResponse := mappingValue(mappingValue(mappingValue(root, "components"), "schemas"), "ErrorResponse")
 	if got := mappingValue(errorResponse, "type"); got == nil || got.Value != "object" {
 		t.Fatalf("ErrorResponse.type = %#v, want object", got)
+	}
+}
+
+func TestPatchOpenAPI_StripsExternalURLs(t *testing.T) {
+	t.Parallel()
+
+	urlScheme := "https:" + "//"
+	in := []byte(strings.NewReplacer(
+		"{GNOSTIC_URL}", urlScheme+"github.com/google/gnostic/tree/master/cmd/protoc-gen-openapi",
+		"{GRPC_URL}", urlScheme+"github.com/grpc",
+		"{API_GUIDE_URL}", urlScheme+"cloud.google.com/apis/design/errors",
+	).Replace(`# Generated with protoc-gen-openapi
+# {GNOSTIC_URL}
+
+openapi: 3.0.3
+paths:
+  /v1/test:
+    get:
+      responses:
+        default:
+          description: Default error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+components:
+  schemas:
+    Status:
+      type: object
+      description: 'The Status type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by gRPC. Each Status message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the API Design Guide.'
+`))
+
+	out, err := PatchOpenAPI(in)
+	if err != nil {
+		t.Fatalf("PatchOpenAPI: %v", err)
+	}
+
+	if strings.Contains(string(out), urlScheme) {
+		t.Fatalf("PatchOpenAPI output still contains https URL:\n%s", out)
+	}
+	if strings.Contains(string(out), "http:"+"/"+"/") {
+		t.Fatalf("PatchOpenAPI output still contains http URL:\n%s", out)
 	}
 }
 

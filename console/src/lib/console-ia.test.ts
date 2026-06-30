@@ -24,6 +24,25 @@ describe('console IA', () => {
     }
   })
 
+  it('exposes the terminal failure workbench as a visible feedback destination', () => {
+    const item = consoleNavItems.find(
+      (candidate) => candidate.path === '/feedback/terminal-failures',
+    )
+
+    expect(item).toBeDefined()
+    if (!item) {
+      throw new Error('terminal failure nav item missing')
+    }
+    expect(item).toMatchObject({
+      group: 'feedback',
+      labelKey: 'nav.terminal_failures',
+      path: '/feedback/terminal-failures',
+    })
+    expect(canAccessConsoleItem('admin', item)).toBe(true)
+    expect(canAccessConsoleItem('member', item)).toBe(true)
+    expect(canAccessConsoleItem('viewer', item)).toBe(true)
+  })
+
   it('derives visible items from the same access rules used by routes', () => {
     const memberItems = getConsoleItemsForRole('member')
     const viewerItems = getConsoleItemsForRole('viewer')

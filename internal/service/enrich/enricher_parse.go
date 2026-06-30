@@ -155,14 +155,7 @@ func classifyErrResult(err error) string {
 	if err == nil {
 		return "ok"
 	}
-	msg := err.Error()
-	if len(msg) >= 4 && msg[:4] == "llm:" {
-		return "llm_err"
-	}
-	if len(msg) >= 5 && msg[:5] == "parse" {
-		return "parse_err"
-	}
-	return "other_err"
+	return failureReasonClass(err)
 }
 
 func truncate(s string, n int) string {

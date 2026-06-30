@@ -38,6 +38,7 @@ import { useBatchRetryEnrichment } from '@/features/feedback/api/batch-retry-enr
 import { useBatchUpdateTags } from '@/features/feedback/api/batch-update-tags'
 import type { FeedbackDetail } from '@/features/feedback/api/get-feedback-detail'
 import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
+import { terminalFailureWorkbenchQuery } from '@/features/feedback/api/get-terminal-failure-workbench'
 import {
   type AttrFilterEntry,
   type Feedback,
@@ -51,11 +52,17 @@ import { DimStatsBars } from '@/features/feedback/components/dim-stats-bars'
 import { LanguageBadge } from '@/features/feedback/components/language-badge'
 import { RetryEnrichmentDialog } from '@/features/feedback/components/retry-enrichment-dialog'
 import { SelectionActionBar } from '@/features/feedback/components/selection-action-bar'
+import { TerminalFailureWorkbenchPanel } from '@/features/feedback/components/terminal-failure-workbench'
 import { useRowSelection } from '@/features/feedback/hooks/use-row-selection'
 import {
   isTerminalFailure,
   MAX_ENRICHMENT_ATTEMPTS,
 } from '@/features/feedback/lib/enrichment-utils'
+import {
+  selectTerminalFailurePriority,
+  type TerminalFailureWorkbenchSectionLike,
+} from '@/features/feedback/lib/terminal-failure-workbench'
+import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { Dimension } from '@/proto/attune/v1/common'
 import type { Tag } from '@/proto/attune/v1/tag'
@@ -81,6 +88,8 @@ interface FeedbackPageProps {
   batchTransition: BatchTransitionFeedbackMutation
   renderWorkflowTransition?: (data: FeedbackDetail) => ReactNode
   renderAuditLog?: (data: FeedbackDetail) => ReactNode
+  initialQueueMode?: FeedbackQueueMode
+  showTerminalWorkbench?: boolean
 }
 
 export function FeedbackPage({
@@ -90,9 +99,14 @@ export function FeedbackPage({
   batchTransition,
   renderWorkflowTransition,
   renderAuditLog,
+  initialQueueMode = 'all',
+  showTerminalWorkbench = false,
 }: FeedbackPageProps) {
   const { t } = useTranslation()
   const displayOf = useDisplayName()
+  const { can } = usePermissions()
+  const canViewLLMConfig = can('llm_config:view')
+  const canViewRuntimeConfig = can('settings:enrichment_runtime:view')
 
   const [attrFilters, setAttrFilters] = useState<Record<string, string>>({})
   const [tagFilter, setTagFilter] = useState<string>('')
@@ -101,9 +115,48 @@ export function FeedbackPage({
   const [urgentOnly, setUrgentOnly] = useState(false)
   const [qInput, setQInput] = useState('')
   const [sortMode, setSortMode] = useState<FeedbackSortMode>('newest')
-  const [queueMode, setQueueMode] = useState<FeedbackQueueMode>('all')
+  const [queueMode, setQueueMode] = useState<FeedbackQueueMode>(initialQueueMode)
   const qDeferred = useDeferredValue(qInput)
   const [detailId, setDetailId] = useState<string | null>(null)
+  const terminalWorkbench = useQuery({
+    ...terminalFailureWorkbenchQuery(),
+    enabled: showTerminalWorkbench,
+  })
+  const terminalWorkbenchPriority = useMemo(() => {
+    if (!showTerminalWorkbench || !terminalWorkbench.data) return null
+    const workbench = terminalWorkbench.data
+    const sections: TerminalFailureWorkbenchSectionLike[] = [
+      {
+        key: 'reason_class',
+        title: t('feedback.terminal_workbench.reason_class_title'),
+        clusters: workbench.reasonClassClusters,
+      },
+      {
+        key: 'model_channel',
+        title: t('feedback.terminal_workbench.model_channel_title'),
+        clusters: workbench.modelChannelClusters,
+        remediationPath: canViewLLMConfig ? '/configuration/llm' : undefined,
+        remediationLabel: canViewLLMConfig
+          ? t('feedback.terminal_workbench.remediation_llm')
+          : undefined,
+      },
+      {
+        key: 'config_fingerprint',
+        title: t('feedback.terminal_workbench.config_fingerprint_title'),
+        clusters: workbench.configFingerprintClusters,
+        remediationPath: canViewRuntimeConfig ? '/configuration/enrichment-runtime' : undefined,
+        remediationLabel: canViewRuntimeConfig
+          ? t('feedback.terminal_workbench.remediation_runtime')
+          : undefined,
+      },
+      {
+        key: 'age_bucket',
+        title: t('feedback.terminal_workbench.age_bucket_title'),
+        clusters: workbench.ageBucketClusters,
+      },
+    ]
+    return selectTerminalFailurePriority(sections)
+  }, [canViewLLMConfig, canViewRuntimeConfig, showTerminalWorkbench, terminalWorkbench.data, t])
 
   const filters: FeedbackListFilters = useMemo(() => {
     const attrs: AttrFilterEntry[] = Object.entries(attrFilters)
@@ -133,7 +186,7 @@ export function FeedbackPage({
     (workflowFilter ? 1 : 0) +
     (enrichmentFilter ? 1 : 0) +
     (urgentOnly ? 1 : 0) +
-    (queueMode !== 'all' ? 1 : 0) +
+    (queueMode !== initialQueueMode ? 1 : 0) +
     (qInput.trim() ? 1 : 0)
   const hasActiveFilters = activeFilterCount > 0
   const workflowLabel = workflowFilter
@@ -276,13 +329,13 @@ export function FeedbackPage({
       })
     }
 
-    if (queueMode !== 'all') {
+    if (queueMode !== initialQueueMode) {
       chips.push({
         key: 'queue',
         label: t('feedback.queue_mode.label'),
         value: queueModeLabel(queueMode, t),
         tone: 'active',
-        onRemove: () => setQueueMode('all'),
+        onRemove: () => setQueueMode(initialQueueMode),
       })
     }
 
@@ -292,6 +345,7 @@ export function FeedbackPage({
     dims,
     displayOf,
     enrichmentFilter,
+    initialQueueMode,
     queueMode,
     qInput,
     sortMode,
@@ -401,7 +455,7 @@ export function FeedbackPage({
     setWorkflowFilter('')
     setEnrichmentFilter('')
     setUrgentOnly(false)
-    setQueueMode('all')
+    setQueueMode(initialQueueMode)
     setQInput('')
   }
 
@@ -541,6 +595,21 @@ export function FeedbackPage({
       </section>
 
       <section className="space-y-4">
+        {showTerminalWorkbench && (
+          <TerminalFailureWorkbenchPanel
+            data={terminalWorkbench.data}
+            isLoading={terminalWorkbench.isPending}
+            isError={terminalWorkbench.isError}
+            errorMessage={
+              terminalWorkbench.error instanceof Error
+                ? terminalWorkbench.error.message
+                : t('common.error')
+            }
+            onRetry={() => void terminalWorkbench.refetch()}
+            onOpenFeedback={(feedbackId) => setDetailId(feedbackId)}
+          />
+        )}
+
         <Card className="gap-0 overflow-hidden rounded-[1.2rem] border-border/75 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(249,250,251,0.985))] py-0 shadow-[0_28px_72px_-52px_rgba(15,23,42,0.22)]">
           <CardHeader className="border-b border-border/55 bg-[linear-gradient(180deg,rgba(248,250,252,0.82),rgba(255,255,255,0.92))] px-5 py-4 sm:px-6">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
@@ -664,6 +733,8 @@ export function FeedbackPage({
                         isAllSelected={isAllSelected}
                         onToggleAll={toggleAll}
                         onOpenPriority={(id) => setDetailId(id)}
+                        terminalWorkbenchPriority={terminalWorkbenchPriority}
+                        showTerminalWorkbench={showTerminalWorkbench}
                         onClearFilters={clearFilters}
                         onChangeQueueMode={setQueueMode}
                         nextStepLabel={queuePrimaryActionLabel(
@@ -679,7 +750,7 @@ export function FeedbackPage({
                   {hasQueueScopedEmpty ? (
                     <FeedbackSubqueueEmptyState
                       queueMode={queueMode}
-                      onResetQueue={() => setQueueMode('all')}
+                      onResetQueue={() => setQueueMode(initialQueueMode)}
                       onResetAll={clearFilters}
                     />
                   ) : (
@@ -736,7 +807,7 @@ export function FeedbackPage({
           </CardContent>
         </Card>
 
-        {displayedTerminalCount > 0 && (
+        {!showTerminalWorkbench && displayedTerminalCount > 0 && (
           <TerminalFailuresSummaryCard
             terminalCount={displayedTerminalCount}
             failedCount={displayedFailedCount}
@@ -1647,6 +1718,8 @@ function QueueActionStrip({
   readyCount,
   pendingAiCount,
   priorityItem,
+  terminalWorkbenchPriority,
+  showTerminalWorkbench,
   hasActiveFilters,
   onOpenPriority,
   onClearFilters,
@@ -1660,6 +1733,8 @@ function QueueActionStrip({
   readyCount: number
   pendingAiCount: number
   priorityItem: Feedback | null
+  terminalWorkbenchPriority: ReturnType<typeof selectTerminalFailurePriority> | null
+  showTerminalWorkbench: boolean
   hasActiveFilters: boolean
   onOpenPriority: (id: string) => void
   onClearFilters: () => void
@@ -1680,6 +1755,11 @@ function QueueActionStrip({
     readyCount,
     pendingAiCount,
   )
+  const shouldShowWorkbenchLink =
+    showTerminalWorkbench || queueMode === 'terminal' || terminalCount > 0
+  const workbenchLink = showTerminalWorkbench
+    ? { label: t('feedback.terminal_workbench.back_to_queue'), to: '/feedback' }
+    : { label: t('feedback.terminal_workbench.open_workbench'), to: '/feedback/terminal-failures' }
   const shellClass =
     variant === 'embedded'
       ? 'flex h-full flex-col rounded-none border-0 bg-transparent px-0 py-0 shadow-none'
@@ -1707,8 +1787,84 @@ function QueueActionStrip({
                 : t('feedback.queue.actions.empty')
             }
           />
+          {shouldShowWorkbenchLink ? (
+            <Button
+              asChild
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-full px-3 text-xs"
+            >
+              <Link to={workbenchLink.to}>
+                {workbenchLink.label}
+                <ArrowRight className="size-3.5" />
+              </Link>
+            </Button>
+          ) : null}
         </div>
       </div>
+      {terminalWorkbenchPriority ? (
+        <div className="mt-3 rounded-[1rem] border border-amber-200/75 bg-amber-50/55 px-3 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/70 bg-amber-100/80 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] text-amber-800 uppercase">
+                <TriangleAlert className="size-3.5" />
+                {t('feedback.terminal_workbench.priority_title')}
+              </div>
+              <div className="mt-2 truncate text-sm font-semibold text-foreground">
+                {terminalWorkbenchPriority.cluster.label}
+              </div>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground text-pretty">
+                {t('feedback.terminal_workbench.priority_scope', {
+                  dimension: terminalWorkbenchPriority.sectionTitle,
+                })}{' '}
+                ·{' '}
+                {t('feedback.terminal_workbench.count', {
+                  count: Number(terminalWorkbenchPriority.cluster.count),
+                })}
+              </p>
+              {terminalWorkbenchPriority.cluster.remediationHint ? (
+                <p className="mt-2 text-xs leading-5 text-muted-foreground text-pretty">
+                  {terminalWorkbenchPriority.cluster.remediationHint}
+                </p>
+              ) : null}
+            </div>
+            {terminalWorkbenchPriority.cluster.sampleFeedbackIds[0] ? (
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="h-9 rounded-full px-3 text-xs"
+                  onClick={() =>
+                    onOpenPriority(String(terminalWorkbenchPriority.cluster.sampleFeedbackIds[0]))
+                  }
+                >
+                  {t('feedback.terminal_workbench.open_sample_with_id', {
+                    id: String(terminalWorkbenchPriority.cluster.sampleFeedbackIds[0]),
+                  })}
+                </Button>
+              </div>
+            ) : null}
+            {terminalWorkbenchPriority.remediationPath &&
+            terminalWorkbenchPriority.remediationLabel ? (
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Button
+                  asChild
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-9 rounded-full px-3 text-xs"
+                >
+                  <Link to={terminalWorkbenchPriority.remediationPath}>
+                    {terminalWorkbenchPriority.remediationLabel}
+                  </Link>
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       <div className="mt-auto pt-3">
         <div className="flex flex-wrap items-center gap-2.5">
           <Button
@@ -1899,6 +2055,8 @@ function QueueOperatorDeck({
   isAllSelected,
   onToggleAll,
   onOpenPriority,
+  terminalWorkbenchPriority,
+  showTerminalWorkbench,
   onClearFilters,
   onChangeQueueMode,
   nextStepLabel,
@@ -1919,6 +2077,8 @@ function QueueOperatorDeck({
   isAllSelected: boolean
   onToggleAll: () => void
   onOpenPriority: (id: string) => void
+  terminalWorkbenchPriority: ReturnType<typeof selectTerminalFailurePriority> | null
+  showTerminalWorkbench: boolean
   onClearFilters: () => void
   onChangeQueueMode: (mode: FeedbackQueueMode) => void
   nextStepLabel: string
@@ -1943,6 +2103,8 @@ function QueueOperatorDeck({
             readyCount={readyCount}
             pendingAiCount={pendingAiCount}
             priorityItem={priorityItem}
+            terminalWorkbenchPriority={terminalWorkbenchPriority}
+            showTerminalWorkbench={showTerminalWorkbench}
             hasActiveFilters={hasActiveFilters}
             onOpenPriority={onOpenPriority}
             onClearFilters={onClearFilters}

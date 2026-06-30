@@ -19,6 +19,12 @@ vi.mock('@tanstack/react-router', async () => {
   }
 })
 
+vi.mock('@/features/session/hooks/use-permissions', () => ({
+  usePermissions: () => ({
+    can: () => true,
+  }),
+}))
+
 // Route-level smoke test for the feedback page. The unit tests cover
 // individual hooks + components in isolation; this test covers the
 // composition layer where users actually live — the wiring between
@@ -62,6 +68,19 @@ const itemFixture = {
   tags: [],
 }
 
+const terminalItemFixture = {
+  ...itemFixture,
+  id: '201',
+  content: 'terminal failure during enrichment',
+  enrichedTitle: 'Terminal enrichment failure',
+  enrichedDisplayTitle: '终态失败样本',
+  enrichmentStatus: 'failed',
+  enrichmentAttempts: 5,
+  enrichmentNextRetryAt: '',
+  isUrgent: false,
+  createdAt: '2026-06-07T09:00:00Z',
+}
+
 const detailFixture = {
   id: '101',
   content: 'login is broken when password has unicode',
@@ -82,6 +101,26 @@ const detailFixture = {
   attachments: [],
   enrichmentError: '',
   enrichedAt: '2026-06-07T08:31:00Z',
+}
+
+const terminalDetailFixture = {
+  ...detailFixture,
+  id: '201',
+  content: 'terminal failure during enrichment',
+  enrichedTitle: 'Terminal enrichment failure',
+  enrichedDisplayTitle: '终态失败样本',
+  enrichedDisplayRationale: '终态失败的聚类样本',
+  enrichedRationale: 'terminal failure sample',
+  enrichmentStatus: 'failed',
+  enrichmentAttempts: 5,
+  enrichmentNextRetryAt: '',
+  enrichmentError: 'llm: upstream exhausted',
+  enrichmentFailureReasonClass: 'llm_err',
+  enrichmentFailureModel: 'gpt-4.1',
+  enrichmentFailureChannelName: 'Primary',
+  enrichmentFailureChannelId: 'chan-primary',
+  enrichmentFailureConfigFingerprint: 'sha256:abc123',
+  enrichmentFailurePromptVersion: 'v1',
 }
 
 describe('_authed.feedback route — user flow smoke', () => {
@@ -192,6 +231,136 @@ describe('_authed.feedback route — user flow smoke', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Unicode 规范化问题')).toBeInTheDocument()
+    })
+  })
+
+  it('terminal queue exposes a shortcut to the dedicated workbench', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        const url = new URL(request.url)
+        const terminalOnly = url.searchParams.get('terminal_failed_only') === 'true'
+        return HttpResponse.json({
+          items: terminalOnly ? [terminalItemFixture] : [itemFixture],
+          nextCursor: undefined,
+        })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    renderWithProviders(<FeedbackRoutePage initialQueueMode="terminal" />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: '打开终态失败工位' })).toBeInTheDocument()
+    })
+    expect(screen.getByRole('link', { name: '打开终态失败工位' })).toHaveAttribute(
+      'href',
+      '/feedback/terminal-failures',
+    )
+  })
+
+  it('terminal workbench priority is reflected in the queue deck', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        const url = new URL(request.url)
+        const terminalOnly = url.searchParams.get('terminal_failed_only') === 'true'
+        return HttpResponse.json({
+          items: terminalOnly ? [terminalItemFixture] : [itemFixture],
+          nextCursor: undefined,
+        })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/terminal-failures', () =>
+        HttpResponse.json({
+          periodStart: '2026-06-01T00:00:00Z',
+          periodEnd: '2026-06-30T12:00:00Z',
+          totalTerminalFailures: '1',
+          oldestCreatedAt: '2026-06-01T00:00:00Z',
+          reasonClassClusters: [
+            {
+              key: 'llm_err',
+              label: 'LLM error',
+              count: '1',
+              oldestCreatedAt: '2026-06-01T00:00:00Z',
+              newestCreatedAt: '2026-06-01T00:00:00Z',
+              sampleFeedbackIds: ['201'],
+              remediationHint: 'Check the routed LLM channel and provider health.',
+            },
+          ],
+          modelChannelClusters: [
+            {
+              key: 'gpt-4.1::primary',
+              label: 'GPT-4.1 / Primary',
+              count: '2',
+              oldestCreatedAt: '2026-06-01T00:00:00Z',
+              newestCreatedAt: '2026-06-02T00:00:00Z',
+              sampleFeedbackIds: ['201'],
+              remediationHint: 'Check the routed LLM channel and provider health.',
+            },
+          ],
+          configFingerprintClusters: [],
+          ageBucketClusters: [],
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/:id', ({ params }) =>
+        HttpResponse.json(
+          params.id === '201' ? terminalDetailFixture : { ...detailFixture, id: params.id },
+        ),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/feedback/:id/audit', ({ params }) =>
+        HttpResponse.json({ entries: [], feedbackId: params.id }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <FeedbackRoutePage initialQueueMode="terminal" showTerminalWorkbench />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '打开样本 #201' })).toBeInTheDocument()
+    })
+    expect(screen.getByRole('link', { name: '返回反馈队列' })).toHaveAttribute('href', '/feedback')
+    expect(screen.getAllByRole('link', { name: '打开 LLM 配置' }).length).toBeGreaterThanOrEqual(2)
+
+    await user.click(screen.getByRole('button', { name: '打开样本 #201' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('终态失败的聚类样本')).toBeInTheDocument()
     })
   })
 

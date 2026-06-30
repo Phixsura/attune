@@ -568,6 +568,65 @@ func TestFingerprintJSON_DifferentForDifferentInput(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// failureReasonClass / normalizeFailureReasonClass / failureSnapshot
+// ---------------------------------------------------------------------------
+
+func TestFailureReasonClass_BucketsLLMAndParseAndOther(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "llm_err", failureReasonClass(errors.New("llm: upstream timeout")))
+	require.Equal(t, "parse_err", failureReasonClass(errors.New("parse: invalid json")))
+	require.Equal(t, "other_err", failureReasonClass(errors.New("db: unavailable")))
+	require.Equal(t, "other_err", failureReasonClass(nil))
+}
+
+func TestNormalizeFailureReasonClass_OnlyAllowsKnownValues(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "llm_err", normalizeFailureReasonClass("llm_err"))
+	require.Equal(t, "parse_err", normalizeFailureReasonClass("parse_err"))
+	require.Equal(t, "other_err", normalizeFailureReasonClass("other_err"))
+	require.Equal(t, "other_err", normalizeFailureReasonClass("unexpected"))
+}
+
+func TestFailureSnapshot_CapturesRouteAndPolicyMetadata(t *testing.T) {
+	t.Parallel()
+	e := &Enricher{model: "fallback-model"}
+	cfg := ClassifyConfig{
+		TenantID:        "tenant-1",
+		PolicyConfig:    domain.EnrichPromptPolicyConfig{Tone: "concise"},
+		PromptVersionID: "prompt-ver-1",
+	}
+	snapshot := e.failureSnapshot(cfg, llmclient.RouteMetadata{
+		ChannelID:     "chan-1",
+		ChannelName:   "anthropic-prod",
+		Protocol:      "anthropic",
+		LogicalModel:  "logical-model",
+		ProviderModel: "provider-model",
+	}, errors.New("llm: timeout"))
+
+	require.Equal(t, "llm_err", snapshot.ReasonClass)
+	require.Equal(t, "provider-model", snapshot.Model)
+	require.Equal(t, "chan-1", snapshot.ChannelID)
+	require.Equal(t, "anthropic-prod", snapshot.ChannelName)
+	require.Equal(t, "llm_err", normalizeFailureReasonClass(snapshot.ReasonClass))
+	require.NotEmpty(t, snapshot.ConfigFingerprint)
+	require.NotEmpty(t, snapshot.PromptVersion)
+}
+
+func TestFailureSnapshot_FallsBackToLogicalModelThenEnricherModel(t *testing.T) {
+	t.Parallel()
+	e := &Enricher{model: "fallback-model"}
+	cfg := ClassifyConfig{}
+
+	withLogical := e.failureSnapshot(cfg, llmclient.RouteMetadata{
+		LogicalModel: "logical-model",
+	}, errors.New("parse: bad json"))
+	require.Equal(t, "logical-model", withLogical.Model)
+
+	withFallback := e.failureSnapshot(cfg, llmclient.RouteMetadata{}, errors.New("db: down"))
+	require.Equal(t, "fallback-model", withFallback.Model)
+}
+
+// ---------------------------------------------------------------------------
 // canonicalTemplate
 // ---------------------------------------------------------------------------
 

@@ -147,6 +147,108 @@ describe('FeedbackDetailSheet', () => {
     expect(screen.getAllByText('llm: llm_not_configured').length).toBeGreaterThanOrEqual(1)
   })
 
+  it('renders terminal failure snapshot details and copies the error message', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-terminal',
+          content: 'payment failed at checkout',
+          enrichedTitle: '',
+          enrichedDisplayTitle: '',
+          enrichedRationale: '',
+          enrichedDisplayRationale: '',
+          enrichedDisplayLocale: 'zh',
+          enrichedAttrs: {},
+          enrichedAt: '',
+          language: 'en',
+          isUrgent: false,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: { ticket: 'T-1' },
+          attachments: [{ name: 'receipt.png', size: 1234 }],
+          enrichmentError: 'LLM provider timeout',
+          enrichmentStatus: 'failed',
+          enrichmentAttempts: 5,
+          enrichmentFailureReasonClass: 'mystery_reason',
+          enrichmentFailureModel: 'gpt-4.1',
+          enrichmentFailureChannelName: 'openai',
+          enrichmentFailureChannelId: 'ch-1',
+          enrichmentFailureConfigFingerprint: 'abc123',
+          enrichmentFailurePromptVersion: 'v7',
+          replyDraftEnabled: false,
+        }),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-terminal"
+        dims={dims}
+        availableTags={[]}
+        workbenchMode="terminal"
+        onOpenChange={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText(/LLM provider timeout/)).toBeInTheDocument())
+    expect(screen.getByText('mystery_reason')).toBeInTheDocument()
+    expect(screen.getByText('gpt-4.1')).toBeInTheDocument()
+    expect(screen.getByText('openai')).toBeInTheDocument()
+    expect(screen.getByText('ch-1')).toBeInTheDocument()
+    expect(screen.getByText('abc123')).toBeInTheDocument()
+    expect(screen.getByText('v7')).toBeInTheDocument()
+    expect(
+      screen.getAllByText((_, node) => node?.textContent?.includes('"ticket": "T-1"') ?? false)
+        .length,
+    ).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(
+        (_, node) => node?.textContent?.includes('"name": "receipt.png"') ?? false,
+      ).length,
+    ).toBeGreaterThan(0)
+
+    await userEvent.click(screen.getByTitle('复制'))
+  })
+
+  it('closes the detail sheet when the visible close button is used', async () => {
+    const onOpenChange = vi.fn()
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-close',
+          content: 'payment failed at checkout',
+          enrichedTitle: 'Payment failed',
+          enrichedDisplayTitle: '支付失败',
+          enrichedRationale: 'AI rationale',
+          enrichedDisplayRationale: 'AI 中文解读',
+          enrichedDisplayLocale: 'zh',
+          enrichedAttrs: { severity: 'P0' },
+          enrichedAt: '2026-06-07T10:30:00Z',
+          language: 'en',
+          isUrgent: true,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentError: '',
+        }),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-close"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={onOpenChange}
+      />,
+    )
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it('shows workbench guidance for active queue context', async () => {
     server.use(
       http.get('/fb/v1/console/feedback/:id', () =>

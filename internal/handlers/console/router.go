@@ -120,6 +120,7 @@ var (
 //	 DELETE /notify-targets/{id} -> dispatcher.Bind(notifytarget.Handler.Delete)
 //	 POST /notify-targets/{id}/test -> dispatcher.Bind(notifytarget.Handler.Test)
 //	 GET /feedback -> dispatcher.Bind(feedback.Handler.List)
+//	 GET /feedback/terminal-failures -> dispatcher.Bind(feedback.Handler.GetTerminalFailureWorkbench)
 //	 GET /feedback/stats -> dispatcher.Bind(feedback.Handler.Stats)
 //	 POST /feedback/search -> dispatcher.Bind(feedback.SearchHandler.Search)
 //	 GET /feedback/{id} -> dispatcher.Bind(feedback.Handler.Get)
@@ -1459,7 +1460,17 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		// /stats and /batch/tags must come BEFORE /{id}; source order keeps the intent clear.
+		// /terminal-failures, /stats and /batch/tags must come BEFORE /{id}; source order keeps the intent clear.
+		f.Get("/terminal-failures", dispatcher.Bind(
+			"console.FeedbackHandler.GetTerminalFailureWorkbench",
+			dispatcher.Empty(func() *attunev1.GetTerminalFailureWorkbenchRequest {
+				return ptrext.Of(attunev1.GetTerminalFailureWorkbenchRequest{})
+			}),
+			r.feedback.GetTerminalFailureWorkbench,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetTerminalFailureWorkbenchRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 		f.Get("/stats", dispatcher.Bind(
 			"console.FeedbackHandler.Stats",
 			dispatcher.Empty(func() *attunev1.GetFeedbackStatsRequest { return ptrext.Of(attunev1.GetFeedbackStatsRequest{}) }),

@@ -49,24 +49,30 @@ type ConsoleListOpts struct {
 // EnrichedAttrs is returned as a raw JSONB byte slice — the handler
 // decodes it into a structpb.Struct for the proto wire shape.
 type ConsoleListRow struct {
-	ID                       int64
-	Content                  string
-	Source                   string
-	Type                     string
-	UserID                   string
-	Language                 string
-	PageURL                  string
-	EnrichedTitle            string
-	EnrichedDisplayTitle     string
-	EnrichedDisplayLocale    string
-	EnrichedAttrs            []byte // raw JSONB
-	IsUrgent                 bool
-	ClassificationConfidence *float64
-	EnrichmentStatus         string
-	CreatedAt                time.Time
-	WorkflowStateID          *string
-	EnrichmentAttempts       int        // 0-5; number of enrichment attempts made
-	EnrichmentNextRetryAt    *time.Time // nil if terminal or not failed
+	ID                               int64
+	Content                          string
+	Source                           string
+	Type                             string
+	UserID                           string
+	Language                         string
+	PageURL                          string
+	EnrichedTitle                    string
+	EnrichedDisplayTitle             string
+	EnrichedDisplayLocale            string
+	EnrichedAttrs                    []byte // raw JSONB
+	IsUrgent                         bool
+	ClassificationConfidence         *float64
+	EnrichmentStatus                 string
+	CreatedAt                        time.Time
+	WorkflowStateID                  *string
+	EnrichmentAttempts               int        // 0-5; number of enrichment attempts made
+	EnrichmentNextRetryAt            *time.Time // nil if terminal or not failed
+	TerminalFailureReasonClass       string
+	TerminalFailureModel             string
+	TerminalFailureChannelID         string
+	TerminalFailureChannelName       string
+	TerminalFailureConfigFingerprint string
+	TerminalFailurePromptVersion     string
 }
 
 type queryBuilder struct {
@@ -153,7 +159,13 @@ func (r *FeedbackRepo) ListForConsole(
 		 created_at,
 		 workflow_state_id,
 		 enrichment_attempts,
-		 enrichment_next_retry_at
+		 enrichment_next_retry_at,
+		 COALESCE(enrichment_failure_reason_class, ''),
+		 COALESCE(enrichment_failure_model, ''),
+		 COALESCE(enrichment_failure_channel_id, ''),
+		 COALESCE(enrichment_failure_channel_name, ''),
+		 COALESCE(enrichment_failure_config_fingerprint, ''),
+		 COALESCE(enrichment_failure_prompt_version, '')
 		 FROM user_feedback
 		 ` + qb.where + `
 		 ORDER BY id DESC
@@ -177,9 +189,15 @@ func (r *FeedbackRepo) ListForConsole(
 			&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale, // ptrext:allow scan-target
 			&row.EnrichedAttrs, &row.IsUrgent, &confidence, // ptrext:allow scan-target
 			&row.EnrichmentStatus, &row.CreatedAt, // ptrext:allow scan-target
-			&wsID,                   // ptrext:allow scan-target
-			&row.EnrichmentAttempts, // ptrext:allow scan-target
-			&nextRetry,              // ptrext:allow scan-target
+			&wsID,                                 // ptrext:allow scan-target
+			&row.EnrichmentAttempts,               // ptrext:allow scan-target
+			&nextRetry,                            // ptrext:allow scan-target
+			&row.TerminalFailureReasonClass,       // ptrext:allow scan-target
+			&row.TerminalFailureModel,             // ptrext:allow scan-target
+			&row.TerminalFailureChannelID,         // ptrext:allow scan-target
+			&row.TerminalFailureChannelName,       // ptrext:allow scan-target
+			&row.TerminalFailureConfigFingerprint, // ptrext:allow scan-target
+			&row.TerminalFailurePromptVersion,     // ptrext:allow scan-target
 		); err != nil {
 			return nil, fmt.Errorf("scan feedback row: %w", err)
 		}
@@ -254,7 +272,13 @@ func (r *FeedbackRepo) GetForConsole(
 		 COALESCE((SELECT reply_draft_enabled FROM tenants WHERE id = $2), FALSE),
 		 workflow_state_id,
 		 enrichment_attempts,
-		 enrichment_next_retry_at
+		 enrichment_next_retry_at,
+		 COALESCE(enrichment_failure_reason_class, ''),
+		 COALESCE(enrichment_failure_model, ''),
+		 COALESCE(enrichment_failure_channel_id, ''),
+		 COALESCE(enrichment_failure_channel_name, ''),
+		 COALESCE(enrichment_failure_config_fingerprint, ''),
+		 COALESCE(enrichment_failure_prompt_version, '')
 		 FROM user_feedback
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
@@ -267,9 +291,15 @@ func (r *FeedbackRepo) GetForConsole(
 		&row.EnrichmentError, &row.EnrichedAt, // ptrext:allow scan-target
 		&row.EnrichedRationale, &row.EnrichedDisplayRationale, // ptrext:allow scan-target
 		&row.ReplyDraft, &row.ReplyDraftGeneratedAt, &row.ReplyDraftEnabled, // ptrext:allow scan-target
-		&wsID,                   // ptrext:allow scan-target
-		&row.EnrichmentAttempts, // ptrext:allow scan-target
-		&nextRetry,              // ptrext:allow scan-target
+		&wsID,                                 // ptrext:allow scan-target
+		&row.EnrichmentAttempts,               // ptrext:allow scan-target
+		&nextRetry,                            // ptrext:allow scan-target
+		&row.TerminalFailureReasonClass,       // ptrext:allow scan-target
+		&row.TerminalFailureModel,             // ptrext:allow scan-target
+		&row.TerminalFailureChannelID,         // ptrext:allow scan-target
+		&row.TerminalFailureChannelName,       // ptrext:allow scan-target
+		&row.TerminalFailureConfigFingerprint, // ptrext:allow scan-target
+		&row.TerminalFailurePromptVersion,     // ptrext:allow scan-target
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrFeedbackNotFound

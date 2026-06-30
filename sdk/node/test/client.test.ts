@@ -91,7 +91,10 @@ describe('constructor', () => {
     // host-less inputs that `new URL` tolerates but Go's url.Parse rejects.
     expect(() => new Client({ baseURL: 'http:foo', apiKey: KEY })).toThrow(/invalid baseURL/)
     expect(() => new Client({ baseURL: 'http:///v1/path', apiKey: KEY })).toThrow(/invalid baseURL/)
-    expect(() => new Client({ baseURL: 'https://user:pass@attune.example.test', apiKey: KEY })).toThrow(
+    const credentialedBaseURL = new URL(BASE)
+    credentialedBaseURL.username = 'user'
+    credentialedBaseURL.password = 'pass'
+    expect(() => new Client({ baseURL: credentialedBaseURL.toString(), apiKey: KEY })).toThrow(
       /baseURL must not include credentials/,
     )
     expect(() => new Client({ baseURL: 'https://attune.example.test?x=1', apiKey: KEY })).toThrow(
@@ -516,8 +519,9 @@ describe('security: header & response-size hardening', () => {
           body: null,
           arrayBuffer: async () => {
             called = true
-            return new TextEncoder().encode(JSON.stringify({ id: '1', enrichmentStatus: 'pending' }))
-              .buffer
+            return new TextEncoder().encode(
+              JSON.stringify({ id: '1', enrichmentStatus: 'pending' }),
+            ).buffer
           },
           text: async () => {
             called = true
@@ -525,7 +529,9 @@ describe('security: header & response-size hardening', () => {
           },
         }) as Response,
     ])
-    await expect(newClient(fetch, { maxRetries: 0 }).ingest({ content: 'x' })).rejects.toMatchObject({
+    await expect(
+      newClient(fetch, { maxRetries: 0 }).ingest({ content: 'x' }),
+    ).rejects.toMatchObject({
       name: 'AttuneError',
       code: 'INTERNAL',
     })

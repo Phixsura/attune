@@ -1,6 +1,3 @@
-# Generated with protoc-gen-openapi
-# https://github.com/google/gnostic/tree/master/cmd/protoc-gen-openapi
-
 openapi: 3.0.3
 info:
     title: ""
@@ -1610,6 +1607,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/GetFeedbackStatsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/feedback/terminal-failures:
+        get:
+            tags:
+                - FeedbackService
+            description: GET /fb/v1/console/feedback/terminal-failures
+            operationId: FeedbackService_GetTerminalFailureWorkbench
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetTerminalFailureWorkbenchResponse'
                 default:
                     description: Default error response
                     content:
@@ -7458,6 +7474,18 @@ components:
                 enrichmentNextRetryAt:
                     type: string
                     description: RFC3339 timestamp of next scheduled retry; absent if terminal or not failed
+                enrichmentFailureReasonClass:
+                    type: string
+                enrichmentFailureModel:
+                    type: string
+                enrichmentFailureChannelId:
+                    type: string
+                enrichmentFailureChannelName:
+                    type: string
+                enrichmentFailureConfigFingerprint:
+                    type: string
+                enrichmentFailurePromptVersion:
+                    type: string
             description: |-
                 Feedback is a console feedback list row. Post-E3 (metadata-driven
                  Dimensions): the per-row classification lives in `enriched_attrs`, a
@@ -7539,6 +7567,18 @@ components:
                 enrichmentNextRetryAt:
                     type: string
                     description: RFC3339 timestamp of next scheduled retry; absent if terminal or not failed
+                enrichmentFailureReasonClass:
+                    type: string
+                enrichmentFailureModel:
+                    type: string
+                enrichmentFailureChannelId:
+                    type: string
+                enrichmentFailureChannelName:
+                    type: string
+                enrichmentFailureConfigFingerprint:
+                    type: string
+                enrichmentFailurePromptVersion:
+                    type: string
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         FeedbackFilter:
             type: object
@@ -7919,6 +7959,33 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ApiKeyAnalytics'
+        GetTerminalFailureWorkbenchResponse:
+            type: object
+            properties:
+                periodStart:
+                    type: string
+                periodEnd:
+                    type: string
+                totalTerminalFailures:
+                    type: string
+                oldestCreatedAt:
+                    type: string
+                reasonClassClusters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/TerminalFailureCluster'
+                modelChannelClusters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/TerminalFailureCluster'
+                configFingerprintClusters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/TerminalFailureCluster'
+                ageBucketClusters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/TerminalFailureCluster'
         GetUnusedScopesResponse:
             type: object
             properties:
@@ -9543,7 +9610,7 @@ components:
                     items:
                         $ref: '#/components/schemas/GoogleProtobufAny'
                     description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
-            description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
+            description: 'The `Status` type defines a logical error model suitable for REST APIs and RPC APIs. It contains error code, error message, and error details.'
         SuggestedCandidate:
             type: object
             properties:
@@ -9625,6 +9692,25 @@ components:
                 timezone:
                     type: string
             description: Tenant is the console-facing tenant record.
+        TerminalFailureCluster:
+            type: object
+            properties:
+                key:
+                    type: string
+                label:
+                    type: string
+                count:
+                    type: string
+                oldestCreatedAt:
+                    type: string
+                newestCreatedAt:
+                    type: string
+                sampleFeedbackIds:
+                    type: array
+                    items:
+                        type: string
+                remediationHint:
+                    type: string
         TestInboundConnectionRequest:
             required:
                 - channel

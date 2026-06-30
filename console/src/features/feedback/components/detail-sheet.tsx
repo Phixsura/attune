@@ -166,6 +166,7 @@ function DetailBody({
     data.enrichedRationale !== data.enrichedDisplayRationale
   const summaryState = detailSummaryState(data, hasClassificationSignal, t)
   const workbenchCue = detailWorkbenchCue(workbenchMode, hasClassificationSignal, t)
+  const hasFailureSnapshot = terminalFailureSnapshotPresent(data)
   return (
     <div className="space-y-5">
       <Card className="border-border/60 shadow-none">
@@ -229,6 +230,51 @@ function DetailBody({
           title={workbenchCue.title}
           body={workbenchCue.body}
           tone={workbenchCue.tone}
+        />
+      ) : null}
+
+      {hasFailureSnapshot ? (
+        <Section label={t('feedback.detail.failure_snapshot')}>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <SummaryItem
+              label={t('feedback.detail.failure_reason_class')}
+              value={terminalFailureReasonClassLabel(data.enrichmentFailureReasonClass, t)}
+            />
+            <SummaryItem
+              label={t('feedback.detail.failure_model')}
+              value={data.enrichmentFailureModel || '—'}
+              mono
+            />
+            <SummaryItem
+              label={t('feedback.detail.failure_channel')}
+              valueNode={
+                <div className="space-y-1">
+                  <div>{data.enrichmentFailureChannelName || '—'}</div>
+                  {data.enrichmentFailureChannelId ? (
+                    <div className="font-mono text-xs text-muted-foreground">
+                      {data.enrichmentFailureChannelId}
+                    </div>
+                  ) : null}
+                </div>
+              }
+            />
+            <SummaryItem
+              label={t('feedback.detail.failure_config_fingerprint')}
+              value={data.enrichmentFailureConfigFingerprint || '—'}
+              mono
+            />
+            <SummaryItem
+              label={t('feedback.detail.failure_prompt_version')}
+              value={data.enrichmentFailurePromptVersion || '—'}
+              mono
+            />
+          </div>
+        </Section>
+      ) : data.enrichmentStatus === 'failed' ? (
+        <DetailStateBanner
+          tone="muted"
+          title={t('feedback.detail.failure_snapshot')}
+          body={t('feedback.detail.failure_snapshot_missing')}
         />
       ) : null}
 
@@ -743,6 +789,27 @@ function detailWorkbenchCue(
     }
   }
   return null
+}
+
+function terminalFailureSnapshotPresent(data: FeedbackDetail) {
+  return Boolean(
+    data.enrichmentFailureReasonClass ||
+      data.enrichmentFailureModel ||
+      data.enrichmentFailureChannelId ||
+      data.enrichmentFailureChannelName ||
+      data.enrichmentFailureConfigFingerprint ||
+      data.enrichmentFailurePromptVersion,
+  )
+}
+
+function terminalFailureReasonClassLabel(
+  reasonClass: string | undefined | null,
+  t: (key: string) => string,
+) {
+  if (reasonClass === 'llm_err') return t('feedback.detail.failure_reason_class_llm')
+  if (reasonClass === 'parse_err') return t('feedback.detail.failure_reason_class_parse')
+  if (reasonClass === 'other_err') return t('feedback.detail.failure_reason_class_other')
+  return reasonClass || '—'
 }
 
 function ErrorMessageBlock({ error }: { error: string }) {
