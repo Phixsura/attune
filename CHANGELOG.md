@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - Added a bounded reason-class metric breakdown for terminal failures, plus the supporting proto, OpenAPI, console navigation, and detail-sheet snapshot fields.
   - Regenerated the published OpenAPI contract and aligned the Node/Go SDK generation and lint output so the proto-sync and SDK CI jobs stay green.
   - Sanitized the generated OpenAPI artifact so generator comments and external documentation links no longer trigger the PR secret-scan job.
+  - Rebuilt the Node SDK baseURL credentials test input at runtime so the source no longer carries a literal embedded-credentials URI that secret scanning flags.
 
 - **Public management APIs and SDK coverage for audit/GDPR/outbox/MCP governance (#168).**
   Scoped API-key routes now expose selected admin operations under canonical

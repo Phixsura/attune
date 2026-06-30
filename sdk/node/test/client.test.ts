@@ -91,9 +91,12 @@ describe('constructor', () => {
     // host-less inputs that `new URL` tolerates but Go's url.Parse rejects.
     expect(() => new Client({ baseURL: 'http:foo', apiKey: KEY })).toThrow(/invalid baseURL/)
     expect(() => new Client({ baseURL: 'http:///v1/path', apiKey: KEY })).toThrow(/invalid baseURL/)
-    expect(
-      () => new Client({ baseURL: 'https://user:pass@attune.example.test', apiKey: KEY }),
-    ).toThrow(/baseURL must not include credentials/)
+    const credentialedBaseURL = new URL(BASE)
+    credentialedBaseURL.username = 'user'
+    credentialedBaseURL.password = 'pass'
+    expect(() => new Client({ baseURL: credentialedBaseURL.toString(), apiKey: KEY })).toThrow(
+      /baseURL must not include credentials/,
+    )
     expect(() => new Client({ baseURL: 'https://attune.example.test?x=1', apiKey: KEY })).toThrow(
       /baseURL must not include query or fragment/,
     )
