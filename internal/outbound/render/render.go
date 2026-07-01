@@ -21,6 +21,9 @@ import (
 // multibyte UTF-8 sequence). When it cuts, it reserves 3 runes for an ellipsis
 // so the result still never exceeds n.
 func Truncate(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
 	runes := []rune(s)
 	if len(runes) <= n {
 		return s

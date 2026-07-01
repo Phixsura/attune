@@ -90,6 +90,8 @@ type ResponseChecker func(ctx context.Context, status int, body []byte) error
 // stops retrying and returns the error.
 var ErrTerminal = errors.New("terminal failure")
 
+const maxDuration = time.Duration(1<<63 - 1)
+
 type attemptResult struct {
 	err        error
 	retryAfter time.Duration
@@ -124,6 +126,10 @@ func (t *Transport) Send(
 	const where = "notify.Transport.Send"
 	var lastErr error
 	var retryAfter time.Duration
+	sleep := t.sleep
+	if sleep == nil {
+		sleep = sleepWithTimer
+	}
 	for attempt := 1; attempt <= t.retry.MaxAttempts; attempt++ {
 		if attempt > 1 {
 			delay := t.retry.backoff(attempt - 1)
@@ -132,7 +138,7 @@ func (t *Transport) Send(
 			}
 			logext.Infof(ctx, "[%s] retry,dest:%s,attempt:%d,delay:%s,prev_err:%+v",
 				where, label, attempt, delay, lastErr)
-			if err := t.sleep(ctx, delay); err != nil {
+			if err := sleep(ctx, delay); err != nil {
 				return err
 			}
 		}
@@ -186,12 +192,21 @@ func (t *Transport) attempt(
 // backoff returns the delay before retry n (1-indexed: n=1 is between
 // attempt 1 and 2). Doubles each step, capped at MaxDelay.
 func (p RetryPolicy) backoff(n int) time.Duration {
-	if p.BaseDelay <= 0 {
+	if p.BaseDelay <= 0 || n <= 0 {
 		return 0
 	}
-	delay := p.BaseDelay << (n - 1) // BaseDelay * 2^(n-1)
-	if p.MaxDelay > 0 && delay > p.MaxDelay {
-		delay = p.MaxDelay
+	delay := p.BaseDelay
+	if p.MaxDelay > 0 && delay >= p.MaxDelay {
+		return p.MaxDelay
+	}
+	for shifts := n - 1; shifts > 0; shifts-- {
+		if delay > maxDuration/2 {
+			return clampRetryAfter(maxDuration, p.MaxDelay)
+		}
+		delay *= 2
+		if p.MaxDelay > 0 && delay >= p.MaxDelay {
+			return p.MaxDelay
+		}
 	}
 	return delay
 }
@@ -222,9 +237,9 @@ func retryAfterDelay(value string, now time.Time, maxDelay time.Duration) time.D
 		if maxDelay > 0 && seconds > int64(maxDelay/time.Second) {
 			return maxDelay
 		}
-		const maxDurationSeconds = int64(1<<63-1) / int64(time.Second)
+		const maxDurationSeconds = int64(maxDuration / time.Second)
 		if seconds > maxDurationSeconds {
-			return time.Duration(1<<63 - 1)
+			return maxDuration
 		}
 		return clampRetryAfter(time.Duration(seconds)*time.Second, maxDelay)
 	}

@@ -50,6 +50,15 @@ func TestRetryPolicy_Backoff_ZeroBaseDelay(t *testing.T) {
 	}
 }
 
+func TestRetryPolicy_Backoff_NonPositiveRetryNumber(t *testing.T) {
+	t.Parallel()
+
+	p := RetryPolicy{BaseDelay: time.Second, MaxDelay: time.Minute}
+	if got := p.backoff(0); got != 0 {
+		t.Fatalf("backoff(0) = %v, want 0", got)
+	}
+}
+
 func TestRetryPolicy_Backoff_NegativeBaseDelay(t *testing.T) {
 	t.Parallel()
 
@@ -79,6 +88,24 @@ func TestRetryPolicy_Backoff_BaseEqualMax(t *testing.T) {
 	}
 	if got := p.backoff(2); got != 5*time.Second {
 		t.Errorf("backoff(2) = %v, want 5s (clamped)", got)
+	}
+}
+
+func TestRetryPolicy_Backoff_ClampsBeforeDurationOverflow(t *testing.T) {
+	t.Parallel()
+
+	p := RetryPolicy{BaseDelay: time.Second, MaxDelay: 10 * time.Minute}
+	if got := p.backoff(1000); got != 10*time.Minute {
+		t.Fatalf("backoff(1000) = %v, want 10m clamp", got)
+	}
+}
+
+func TestRetryPolicy_Backoff_SaturatesWithoutMaxDelay(t *testing.T) {
+	t.Parallel()
+
+	p := RetryPolicy{BaseDelay: time.Second}
+	if got := p.backoff(1000); got != maxDuration {
+		t.Fatalf("backoff(1000) = %v, want max duration", got)
 	}
 }
 
@@ -152,7 +179,7 @@ func TestRetryAfterDelay(t *testing.T) {
 		{
 			name:  "huge seconds saturates without max delay",
 			value: "9223372036854775807",
-			want:  time.Duration(1<<63 - 1),
+			want:  maxDuration,
 		},
 		{name: "clamped http date", value: future, maxDelay: 5 * time.Second, want: 5 * time.Second},
 	}

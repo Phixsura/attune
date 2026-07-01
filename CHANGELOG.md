@@ -78,7 +78,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   classification, Lark malformed-provider-body handling, and GitHub/Lark
   rendering of outbox-shaped envelopes and mention-bearing user text. Outbound
   delivery retry timing now honors valid provider `Retry-After` headers on
-  retryable responses while still short-circuiting terminal failures.
+  retryable responses while still short-circuiting terminal failures, clamps
+  oversized retry backoff without overflowing, and handles non-positive render
+  truncation limits safely.
+
+- **Local duplication gate.**
+  Aligned `scripts/check.sh` and the contributor guide with the CI-backed
+  `.jscpd.json` configuration, so local checks use the same threshold and test
+  fixture exclusions as pull requests.
 
 - **Console accessibility and keyboard triage for critical workbenches (#171).**
   - Added a dev-only `axe-core` Vitest helper and smoke coverage for selected

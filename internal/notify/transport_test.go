@@ -72,6 +72,37 @@ func TestTransport_RetryThenSuccess(t *testing.T) {
 	}
 }
 
+func TestTransport_NilSleepUsesTimerFallback(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tr := NewTransport(srv.Client(), RetryPolicy{MaxAttempts: 2, BaseDelay: 0})
+	tr.sleep = nil
+	build := func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, bytes.NewReader([]byte(`{}`)))
+	}
+	check := func(_ context.Context, status int, body []byte) error {
+		if status >= 200 && status < 300 {
+			return nil
+		}
+		return errors.New("retry-me")
+	}
+
+	if err := tr.Send(context.Background(), "nil-sleep", build, check); err != nil {
+		t.Fatalf("want nil after retry, got %v", err)
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("want 2 attempts, got %d", attempts.Load())
+	}
+}
+
 func TestTransport_UsesRetryAfterWhenRetryable(t *testing.T) {
 	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
