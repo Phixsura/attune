@@ -5,6 +5,7 @@ import {
   RevokeKeyDialog,
   SecretKeyDialog,
 } from '@/features/api-keys/components/dialogs'
+import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 
@@ -102,8 +103,33 @@ describe('CreateKeyDialog', () => {
       <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={vi.fn()} pending={false} />,
     )
     await waitFor(() => {
-      expect(screen.getByRole('combobox')).toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: '权限模板' })).toBeInTheDocument()
     })
+  })
+
+  it('exposes the effective scope disclosure state and controlled region', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json(mockPresets)),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json(mockScopes)),
+    )
+    const { container, user } = renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={vi.fn()} pending={false} />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: '权限模板' })).toBeInTheDocument()
+    })
+    const disclosure = screen.getByRole('button', { name: '查看生效权限' })
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+    expect(disclosure).toHaveAttribute('aria-controls', 'api-key-effective-scopes')
+    expect(document.querySelector('#api-key-effective-scopes')).toHaveAttribute('hidden')
+
+    await user.click(disclosure)
+
+    expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+    const region = screen.getByRole('region', { name: '生效权限' })
+    expect(disclosure).toHaveAttribute('aria-controls', region.id)
+    await expectNoA11yViolations(container)
   })
 
   it('submits empty scopes when preset not found', async () => {
@@ -172,7 +198,7 @@ describe('SecretKeyDialog', () => {
     // user-event v14's setup() installs its own (non-vitest) clipboard mock;
     // spy AFTER renderWithProviders to wrap whatever user-event installed.
     const writeSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
-    await user.click(screen.getByTestId('secret-copy'))
+    await user.click(screen.getByRole('button', { name: '复制新 API key' }))
     expect(writeSpy).toHaveBeenCalledWith(issued.secret)
   })
 

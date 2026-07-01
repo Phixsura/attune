@@ -1,6 +1,7 @@
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import { MCPClientsPage } from '@/features/mcp-clients/components/mcp-clients-page'
+import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
@@ -212,7 +213,7 @@ describe('MCPClientsPage user flow', () => {
       .find((row) => row && within(row).queryByRole('checkbox'))
     expect(toolRow).toBeTruthy()
     if (!toolRow) return
-    await user.click(within(toolRow).getByRole('checkbox'))
+    await user.click(within(toolRow).getByRole('checkbox', { name: '允许工具 list_feedback' }))
     await user.click(screen.getByRole('button', { name: '保存工具策略' }))
 
     await waitFor(() => {
@@ -237,6 +238,56 @@ describe('MCPClientsPage user flow', () => {
     await waitFor(() => {
       expect(revokedGrantId).toBe('grant-uuid-2222')
     })
+  })
+
+  it('selects a client and edits tool policy controls without pointer-only row behavior', async () => {
+    const secondClient = {
+      ...clientFixture,
+      id: 'client-uuid-9999',
+      name: 'vscode-agent',
+      redirect_uris: ['http://127.0.0.1:33418'],
+      scopes: ['mcp:read'],
+    }
+
+    server.use(
+      http.get('/fb/v1/console/mcp/clients', () =>
+        HttpResponse.json({ clients: [clientFixture, secondClient] }),
+      ),
+      http.get('/fb/v1/console/mcp/clients/:id', ({ params }) => {
+        const id = String(params.id)
+        return HttpResponse.json({
+          ...baseDetail,
+          client: id === secondClient.id ? secondClient : clientFixture,
+        })
+      }),
+      http.put('/fb/v1/console/mcp/clients/:id/tool-policies', () =>
+        HttpResponse.json({ tools: baseDetail.tools }),
+      ),
+    )
+
+    const { container, user } = renderWithProviders(<MCPClientsPage />)
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: '选择 MCP 客户端 vscode-agent' }),
+      ).toBeInTheDocument()
+    })
+
+    screen.getByRole('button', { name: '选择 MCP 客户端 vscode-agent' }).focus()
+    await user.keyboard('[Enter]')
+
+    await waitFor(() => {
+      expect(screen.getByText('client-uuid-9999')).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('checkbox', { name: '阻止工具 list_feedback' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('textbox', { name: '设置工具 list_feedback 的每分钟请求数' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('textbox', { name: '设置工具 list_feedback 的突发上限' }),
+    ).toBeInTheDocument()
+    await expectNoA11yViolations(container)
   })
 
   it('creates a new client and revokes a client', async () => {
@@ -316,12 +367,22 @@ describe('MCPClientsPage user flow', () => {
     const createdRow = screen
       .getAllByText('vscode-agent')
       .map((node) => node.closest('tr'))
-      .find((row) => row && within(row).queryByRole('button', { name: '撤销' }))
+      .find((row) => row && within(row).queryByRole('button', { name: '撤销客户端 vscode-agent' }))
     expect(createdRow).toBeTruthy()
     if (!createdRow) return
-    await user.click(within(createdRow).getByRole('button', { name: '撤销' }))
+    const revokeButton = within(createdRow).getByRole('button', { name: '撤销客户端 vscode-agent' })
+    revokeButton.focus()
+    await user.keyboard('[Enter]')
     const revokeDialog = screen.getByRole('dialog', { name: '撤销此客户端？' })
-    await user.click(within(revokeDialog).getByRole('button', { name: '撤销' }))
+    expect(revokeDialog).toBeInTheDocument()
+    await expectNoA11yViolations(document.body)
+    await user.keyboard('[Escape]')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(revokeButton).toHaveFocus()
+
+    await user.click(revokeButton)
+    const confirmDialog = screen.getByRole('dialog', { name: '撤销此客户端？' })
+    await user.click(within(confirmDialog).getByRole('button', { name: '撤销' }))
     await waitFor(() => {
       expect(deletedId).toBe('client-uuid-5678')
     })

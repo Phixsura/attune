@@ -48,6 +48,7 @@ export function SemanticSearchBar({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={placeholder ?? t('feedback.search.placeholder')}
+          aria-label={placeholder ?? t('feedback.search.input_label')}
           className="pl-10 pr-10"
           disabled={isLoading}
         />
@@ -55,9 +56,10 @@ export function SemanticSearchBar({
           <button
             type="button"
             onClick={handleClear}
+            aria-label={t('feedback.search.clear')}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           >
-            <X className="h-4 w-4" />
+            <X aria-hidden="true" className="h-4 w-4" />
           </button>
         )}
       </div>

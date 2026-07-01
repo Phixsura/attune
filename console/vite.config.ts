@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 // vitest/config re-exports vite's defineConfig with the `test` option
 // typed in. Importing from 'vite' would surface a TS error on the test
 // block because vite's UserConfig has no `test` property.
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 // attune console dev server. Proxies /fb/v1 to local attune backend on
 // :8090 so the SPA can be developed against the real Go service without
@@ -61,6 +61,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    exclude: [...configDefaults.exclude, 'e2e/**', 'playwright.config.ts'],
     setupFiles: ['./src/testing/setup-tests.ts'],
     // V8 coverage plus jsdom/Radix/user-event flows can exceed the normal
     // fast-fail budget in full-suite CI. Keep ordinary test runs strict.

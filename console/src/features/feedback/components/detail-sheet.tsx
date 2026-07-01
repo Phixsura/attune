@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
+import { Loading } from '@/components/loading'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -30,6 +31,8 @@ import {
   isTerminalFailure,
   MAX_ENRICHMENT_ATTEMPTS,
 } from '@/features/feedback/lib/enrichment-utils'
+import { useRestoreFocusOnClose } from '@/hooks/use-restore-focus-on-close'
+import { restoreFocusWhenReady } from '@/lib/focus'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import { cn } from '@/lib/utils'
 import type { Dimension } from '@/proto/attune/v1/common'
@@ -48,6 +51,7 @@ export function FeedbackDetailSheet({
   availableTags,
   workbenchMode = 'all',
   onOpenChange,
+  restoreFocusRef,
   renderWorkflowTransition,
   renderAuditLog,
 }: {
@@ -56,15 +60,34 @@ export function FeedbackDetailSheet({
   availableTags: Tag[]
   workbenchMode?: FeedbackWorkbenchMode
   onOpenChange: (v: boolean) => void
+  restoreFocusRef?: React.RefObject<HTMLElement | null>
   renderWorkflowTransition?: (data: FeedbackDetail) => React.ReactNode
   renderAuditLog?: (data: FeedbackDetail) => React.ReactNode
 }) {
   const { t } = useTranslation()
   const open = id !== null
   const detail = useQuery({ ...feedbackDetailQuery(id ?? ''), enabled: open })
+  const internalRestoreFocusRef = useRef<HTMLElement | null>(null)
+  const focusRestoreRef = restoreFocusRef ?? internalRestoreFocusRef
+  useRestoreFocusOnClose(open, focusRestoreRef)
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full gap-0 overflow-y-auto bg-muted/10 sm:max-w-3xl">
+      <SheetContent
+        className="w-full gap-0 overflow-y-auto bg-muted/10 sm:max-w-3xl"
+        onOpenAutoFocus={() => {
+          if (focusRestoreRef.current?.isConnected) return
+          const active = document.activeElement
+          focusRestoreRef.current =
+            active instanceof HTMLElement && active !== document.body ? active : null
+        }}
+        onCloseAutoFocus={(event) => {
+          const restoreFocusTo = focusRestoreRef.current
+          if (!restoreFocusTo?.isConnected) return
+          event.preventDefault()
+          restoreFocusWhenReady(restoreFocusTo)
+          focusRestoreRef.current = null
+        }}
+      >
         <SheetHeader className="sticky top-0 z-10 gap-3 border-b bg-background/96 px-6 pt-6 pb-5 pr-12 backdrop-blur">
           <SheetTitle>
             <span className="inline-flex items-center gap-2">
@@ -111,12 +134,7 @@ export function FeedbackDetailSheet({
           </SheetDescription>
         </SheetHeader>
         <div className="space-y-5 px-6 py-6 text-sm">
-          {detail.isPending && (
-            <div className="flex justify-center py-8 text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              {t('app.loading')}
-            </div>
-          )}
+          {detail.isPending && <Loading />}
           {detail.data && (
             <DetailBody
               data={detail.data}
@@ -463,9 +481,9 @@ function ReplyDraftSection({
     <div>
       <div className="mb-2 flex items-center gap-2">
         <Sparkles className="size-3.5 text-primary" />
-        <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {t('feedback.detail.reply_draft')}
-        </h4>
+        </h3>
         {hasDraft && ago ? (
           <span className="ml-auto text-[11px] text-muted-foreground">
             {t('feedback.detail.reply_draft_generated_at', { ago })}
@@ -516,7 +534,7 @@ function ReplyDraftSection({
             className={cn('motion-safe:active:scale-[0.98]', hasDraft && 'text-muted-foreground')}
           >
             {pending ? (
-              <Loader2 className="size-3.5 animate-spin" />
+              <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
             ) : hasDraft ? (
               <RefreshCw className="size-3.5" />
             ) : (
@@ -558,9 +576,9 @@ function DraftSkeleton() {
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <section className="rounded-xl border border-border/60 bg-background p-4">
-      <h4 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
-      </h4>
+      </h3>
       {children}
     </section>
   )
@@ -673,7 +691,7 @@ function DetailStateBanner({
           <AlertCircle className="size-4" />
         </div>
         <div className="min-w-0">
-          <h4 className="text-sm font-semibold text-foreground">{title}</h4>
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           <p className="mt-1 text-sm leading-6 text-muted-foreground text-pretty">{body}</p>
           {detail ? (
             <p className="mt-3 rounded-lg border border-border/50 bg-background/80 px-3 py-2 font-mono text-xs text-muted-foreground">
@@ -896,11 +914,11 @@ function EnrichmentStatusBanner({
           <AlertCircle className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <h4 className="text-sm font-semibold text-foreground">
+          <h3 className="text-sm font-semibold text-foreground">
             {terminal
               ? t('feedback.detail.terminal_failure_title')
               : t('feedback.detail.enrichment_failed_title')}
-          </h4>
+          </h3>
           <p className="mt-1 text-sm leading-6 text-muted-foreground text-pretty">
             {terminal
               ? t('feedback.detail.terminal_failure_body', { count: attempts })
@@ -970,7 +988,7 @@ function EnrichmentStatusBanner({
                 className="motion-safe:active:scale-[0.98]"
               >
                 {retry.isPending ? (
-                  <Loader2 className="size-3.5 animate-spin" />
+                  <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
                 ) : (
                   <RotateCcw className="size-3.5" />
                 )}

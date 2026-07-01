@@ -10,7 +10,7 @@ import {
   ShieldX,
   Trash2,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
@@ -30,6 +30,7 @@ import { Label } from '@/components/ui/label'
 import {
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -50,12 +51,16 @@ import {
   useVerifyGdprStepUp,
 } from '@/features/gdpr/api/gdpr-control'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
+import { useDocumentTitle } from '@/hooks/use-document-title'
+import { useRestoreFocusOnClose } from '@/hooks/use-restore-focus-on-close'
+import { restoreFocusWhenReady } from '@/lib/focus'
 import { GdprExportStatus, GdprRequestStatus, GdprRequestType } from '@/proto/attune/v1/gdpr'
 
 type RequestFilter = '' | 'delete' | 'export'
 
 export function GDPRPage() {
   const { t } = useTranslation()
+  useDocumentTitle(t('gdpr.title'))
   const queryClient = useQueryClient()
   const { can } = usePermissions()
   const canView = can('settings:gdpr:view')
@@ -78,6 +83,8 @@ export function GDPRPage() {
   const [requestFilter, setRequestFilter] = useState<RequestFilter>('')
   const [stepUpOpen, setStepUpOpen] = useState(false)
   const [stepUpPassword, setStepUpPassword] = useState('')
+  const stepUpRestoreFocusRef = useRef<HTMLElement | null>(null)
+  useRestoreFocusOnClose(stepUpOpen, stepUpRestoreFocusRef)
   const exportStatusQuery = useGdprExportStatus(exportJobId)
   const requestsQuery = useInfiniteQuery(gdprRequestsInfiniteQuery(requestFilter))
 
@@ -114,9 +121,16 @@ export function GDPRPage() {
     ])
   }, [queryClient])
 
+  const openStepUpDialog = () => {
+    const active = document.activeElement
+    stepUpRestoreFocusRef.current =
+      active instanceof HTMLElement && active !== document.body ? active : null
+    setStepUpOpen(true)
+  }
+
   const ensureStepUp = () => {
     if (stepUpSatisfied) return true
-    setStepUpOpen(true)
+    openStepUpDialog()
     toast.error(t('gdpr.step_up_required'))
     return false
   }
@@ -267,10 +281,7 @@ export function GDPRPage() {
           title={t('gdpr.title')}
           subtitle={t('gdpr.subtitle')}
           actions={
-            <Button
-              variant={stepUpSatisfied ? 'outline' : 'default'}
-              onClick={() => setStepUpOpen(true)}
-            >
+            <Button variant={stepUpSatisfied ? 'outline' : 'default'} onClick={openStepUpDialog}>
               <ShieldCheck className="mr-2 h-4 w-4" />
               {stepUpSatisfied ? t('gdpr.step_up_verified') : t('gdpr.step_up_button')}
             </Button>
@@ -308,7 +319,7 @@ export function GDPRPage() {
         />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
-          <div className="space-y-6">
+          <div className="min-w-0 space-y-6">
             <Card className="border-border/60 shadow-none">
               <CardHeader>
                 <CardTitle className="text-base">{t('gdpr.subject_title')}</CardTitle>
@@ -339,7 +350,7 @@ export function GDPRPage() {
                   <p className="text-sm leading-6 text-muted-foreground">{t('gdpr.export_body')}</p>
                   <Button onClick={() => void handleExport()} disabled={!canExport || exportBusy}>
                     {exportBusy ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
                       <Download className="mr-2 h-4 w-4" />
                     )}
@@ -379,7 +390,7 @@ export function GDPRPage() {
                             disabled={downloadingJobId !== null}
                           >
                             {downloadingJobId === exportStatusQuery.data.jobId ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
                             ) : (
                               <Download className="mr-2 h-4 w-4" />
                             )}
@@ -391,7 +402,7 @@ export function GDPRPage() {
                             disabled={revokingJobId === exportStatusQuery.data.jobId}
                           >
                             {revokingJobId === exportStatusQuery.data.jobId ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
                             ) : (
                               <ShieldX className="mr-2 h-4 w-4" />
                             )}
@@ -407,7 +418,9 @@ export function GDPRPage() {
               <Card className="border-destructive/25 shadow-none">
                 <CardHeader className="border-b border-destructive/15 bg-destructive/[0.03]">
                   <CardTitle className="text-base">{t('gdpr.delete_title')}</CardTitle>
-                  <CardDescription>{t('gdpr.delete_help')}</CardDescription>
+                  <CardDescription className="text-zinc-700 dark:text-zinc-300">
+                    {t('gdpr.delete_help')}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-6">
                   <p className="text-sm leading-6 text-muted-foreground">{t('gdpr.delete_body')}</p>
@@ -428,7 +441,7 @@ export function GDPRPage() {
                     disabled={!canDelete || deleteMutation.isPending || !deleteConfirmed}
                   >
                     {deleteMutation.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
                       <Trash2 className="mr-2 h-4 w-4" />
                     )}
@@ -444,7 +457,8 @@ export function GDPRPage() {
                 <CardDescription>{t('gdpr.request_center_help')}</CardDescription>
               </CardHeader>
               <CardContent>
-                <Table>
+                <Table aria-label={t('gdpr.request_table_aria')}>
+                  <TableCaption className="sr-only">{t('gdpr.request_table_aria')}</TableCaption>
                   <TableHeader>
                     <TableRow>
                       <TableHead>{t('gdpr.request_col_type')}</TableHead>
@@ -534,7 +548,7 @@ export function GDPRPage() {
                               }
                             >
                               {cancellingRequestId === item.requestId ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
                               ) : null}
                               {t('gdpr.cancel_delete_button')}
                             </Button>
@@ -552,7 +566,10 @@ export function GDPRPage() {
                                   disabled={downloadingJobId !== null}
                                 >
                                   {downloadingJobId === item.requestId ? (
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    <Loader2
+                                      aria-hidden="true"
+                                      className="mr-2 h-4 w-4 animate-spin"
+                                    />
                                   ) : (
                                     <Download className="mr-2 h-4 w-4" />
                                   )}
@@ -571,7 +588,10 @@ export function GDPRPage() {
                                   }
                                 >
                                   {revokingJobId === item.requestId ? (
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    <Loader2
+                                      aria-hidden="true"
+                                      className="mr-2 h-4 w-4 animate-spin"
+                                    />
                                   ) : (
                                     <ShieldX className="mr-2 h-4 w-4" />
                                   )}
@@ -607,7 +627,7 @@ export function GDPRPage() {
                       disabled={requestsQuery.isFetchingNextPage}
                     >
                       {requestsQuery.isFetchingNextPage ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
                       ) : null}
                       {t('gdpr.load_more')}
                     </Button>
@@ -617,7 +637,7 @@ export function GDPRPage() {
             </Card>
           </div>
 
-          <div className="space-y-6">
+          <div className="min-w-0 space-y-6">
             <Card className="border-border/60 shadow-none">
               <CardHeader>
                 <CardTitle className="text-base">{t('gdpr.ops_title')}</CardTitle>
@@ -704,14 +724,14 @@ export function GDPRPage() {
                   </div>
                 </div>
                 <div className="space-y-2 rounded-md border border-destructive/20 bg-destructive/5 p-3 text-sm">
-                  <div className="flex items-center gap-2 font-medium text-destructive">
+                  <div className="flex items-center gap-2 font-medium text-red-700 dark:text-red-300">
                     <AlertTriangle className="h-4 w-4" />
                     {t('gdpr.guardrail_warning_title')}
                   </div>
-                  <p className="leading-6 text-muted-foreground">
+                  <p className="leading-6 text-zinc-700 dark:text-zinc-300">
                     {t('gdpr.guardrail_warning_body')}
                   </p>
-                  <p className="leading-6 text-muted-foreground">
+                  <p className="leading-6 text-zinc-700 dark:text-zinc-300">
                     {t('gdpr.guardrail_recovery_body')}
                   </p>
                 </div>
@@ -738,6 +758,7 @@ export function GDPRPage() {
                       key={value || 'all'}
                       variant={requestFilter === value ? 'default' : 'outline'}
                       size="sm"
+                      aria-pressed={requestFilter === value}
                       onClick={() => setRequestFilter(value)}
                     >
                       {label}
@@ -758,7 +779,16 @@ export function GDPRPage() {
       </section>
 
       <Dialog open={stepUpOpen} onOpenChange={setStepUpOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          className="sm:max-w-md"
+          onCloseAutoFocus={(event) => {
+            const restoreFocusTo = stepUpRestoreFocusRef.current
+            if (!restoreFocusTo?.isConnected) return
+            event.preventDefault()
+            restoreFocusWhenReady(restoreFocusTo)
+            stepUpRestoreFocusRef.current = null
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{t('gdpr.step_up_dialog_title')}</DialogTitle>
             <DialogDescription>{t('gdpr.step_up_dialog_body')}</DialogDescription>
@@ -769,6 +799,7 @@ export function GDPRPage() {
               <Input
                 id="gdpr-step-up-password"
                 type="password"
+                autoFocus
                 value={stepUpPassword}
                 onChange={(e) => setStepUpPassword(e.target.value)}
                 placeholder={t('gdpr.step_up_password_placeholder')}
@@ -784,7 +815,7 @@ export function GDPRPage() {
             </Button>
             <Button onClick={handleVerifyStepUp} disabled={verifyStepUpMutation.isPending}>
               {verifyStepUpMutation.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
               ) : null}
               {t('gdpr.step_up_confirm')}
             </Button>

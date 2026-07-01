@@ -66,6 +66,62 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Console accessibility and keyboard triage for critical workbenches (#171).**
+  - Added a dev-only `axe-core` Vitest helper and smoke coverage for selected
+    Console workbench states.
+  - Added an app-shell skip link, a stable `#main-content` target, and polite
+    loading status semantics.
+  - Made MCP client selection keyboard reachable with real controls, and added
+    tool-specific labels for MCP policy toggles and rate-limit inputs.
+  - Added accessible names and state for semantic search clearing, API-key scope
+    disclosure, GDPR request filters, outbox retry actions, and audit-log
+    shortcut/search affordances.
+  - Fixed GDPR request-center mobile overflow by allowing the main grid columns
+    to shrink before dense table and card content scrolls.
+  - Covered the new keyboard, focus, pressed-state, and disclosure behavior in
+    focused Console tests.
+  - Added a Playwright browser accessibility gate for the critical Console
+    routes in desktop and mobile Chromium, including real-browser axe checks,
+    document-overflow assertions, console-error failure, and deterministic
+    Console API route mocks.
+  - Fixed the Console skip link so activation moves focus to the main content
+    landmark instead of leaving keyboard users in the app chrome.
+  - Fixed Console shell header overflow on narrow mobile viewports by collapsing
+    low-priority account chrome before it can widen the document.
+  - Added browser coverage for legacy Console route redirects and shell
+    navigation to canonical MCP client and dead-delivery pages.
+  - Added MCP clients to the primary Console navigation for administrators.
+  - Extended the browser accessibility gate to cover API-key create/revoke
+    success and error paths plus success and error status messages for feedback
+    retry-enrichment, MCP tool policies, MCP session/grant revocation, GDPR
+    validation, and dead-delivery retry, with toast checks bound to the Sonner
+    polite live region.
+  - Added accessible names for MCP session and refresh-grant tables.
+  - Added route-specific Console document titles for the critical workbenches.
+  - Tightened Console status, dialog-helper, toast, selected-row, warning, and
+    token colors so the browser axe gate passes WCAG AA contrast checks in the
+    covered states.
+  - Extended the browser gate with narrow-viewport route churn, long GDPR
+    subject keys, repeated dialog/sheet open-close cycles, and terminal
+    workbench jump-link checks; fixed the workflow transition select so its
+    placeholder state has an accessible name.
+  - Added feedback-id context to terminal workbench sample retry buttons so
+    assistive technology and browser tests can distinguish each retry target.
+  - Added Console accessibility component contracts, WCAG 2.2 A/AA
+    traceability, and an assistive-technology matrix for manual screen-reader
+    evidence.
+  - Added a Console accessibility release checklist and opt-in supplemental
+    Playwright projects for Edge, Firefox, and WebKit desktop browser sweeps.
+  - Hardened controlled Dialog and Sheet focus restoration so WebKit/Safari
+    routes return focus to the invoking control instead of the main landmark.
+  - Extended the browser accessibility gate with forced-colors, WCAG
+    text-spacing, and 200% text-sizing sweeps for the critical Console routes,
+    and fixed terminal-failure metrics plus MCP client layout so text-resize
+    reflow does not create document-level horizontal overflow.
+  - Added a manual/scheduled Console accessibility supplemental workflow for
+    the CI-safe Firefox and WebKit browser sweep, while keeping Edge available
+    in the local supplemental Playwright script.
+
 - **Terminal failure detail sheet close affordance now stays above the sticky header.**
   - The terminal failure detail sheet's visible close button now renders above the sticky workbench header and can be dismissed reliably from the UI.
 

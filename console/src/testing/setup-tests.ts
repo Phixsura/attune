@@ -3,6 +3,8 @@ import { cleanup } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest'
 import { server } from '@/testing/mocks/server'
 
+const nativeGetComputedStyle = window.getComputedStyle.bind(window)
+
 // Network-boundary mock lifecycle (TkDodo's Testing React Query + Kent
 // C. Dodds's Stop mocking fetch). onUnhandledRequest: 'error' makes
 // "added an endpoint and forgot to mock it" fail loudly instead of
@@ -63,6 +65,34 @@ beforeEach(() => {
   if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = vi.fn(() => false)
   if (!Element.prototype.releasePointerCapture) Element.prototype.releasePointerCapture = vi.fn()
   if (!Element.prototype.setPointerCapture) Element.prototype.setPointerCapture = vi.fn()
+  window.getComputedStyle = ((element: Element) =>
+    nativeGetComputedStyle(element)) as typeof window.getComputedStyle
+  HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+    arc: vi.fn(),
+    beginPath: vi.fn(),
+    clearRect: vi.fn(),
+    clip: vi.fn(),
+    closePath: vi.fn(),
+    createImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
+    drawImage: vi.fn(),
+    fill: vi.fn(),
+    fillRect: vi.fn(),
+    fillText: vi.fn(),
+    getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
+    lineTo: vi.fn(),
+    measureText: vi.fn(() => ({ width: 0 })),
+    moveTo: vi.fn(),
+    putImageData: vi.fn(),
+    rect: vi.fn(),
+    restore: vi.fn(),
+    rotate: vi.fn(),
+    save: vi.fn(),
+    scale: vi.fn(),
+    setTransform: vi.fn(),
+    stroke: vi.fn(),
+    transform: vi.fn(),
+    translate: vi.fn(),
+  })) as unknown as typeof HTMLCanvasElement.prototype.getContext
 
   // Note: navigator.clipboard is NOT shimmed here. user-event v14's
   // setup() installs its own Clipboard mock that survives the test

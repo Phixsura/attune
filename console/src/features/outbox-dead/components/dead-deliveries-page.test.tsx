@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 import { DeadDeliveriesPage } from '@/features/outbox-dead/components/dead-deliveries-page'
 import { OutboxFailureKind } from '@/proto/attune/v1/outbox'
+import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
@@ -39,12 +40,12 @@ describe('DeadDeliveriesPage', () => {
         HttpResponse.json({ deliveries: [baseDelivery], nextBeforeId: '0' }),
       ),
     )
-    renderWithProviders(<DeadDeliveriesPage />)
+    const { container } = renderWithProviders(<DeadDeliveriesPage />)
 
     await waitFor(() => {
       expect(screen.getByText('https://example.com/hook')).toBeInTheDocument()
     })
-    expect(screen.getByText('异常投递队列')).toBeInTheDocument()
+    expect(screen.getAllByText('异常投递队列').length).toBeGreaterThan(0)
     expect(screen.getByText('排障建议')).toBeInTheDocument()
     // failure kind enum → "HTTP 5xx" badge, http code → "HTTP 503" badge.
     expect(screen.getByText('HTTP 5xx')).toBeInTheDocument()
@@ -52,6 +53,7 @@ describe('DeadDeliveriesPage', () => {
     // dead reason / attempts render.
     expect(screen.getByText('max attempts exhausted')).toBeInTheDocument()
     expect(screen.getByText('6')).toBeInTheDocument()
+    await expectNoA11yViolations(container)
   })
 
   it('retry fires the POST and refetches the list', async () => {
@@ -72,7 +74,9 @@ describe('DeadDeliveriesPage', () => {
     )
     const { user } = renderWithProviders(<DeadDeliveriesPage />)
 
-    const retryBtn = await screen.findByRole('button', { name: '重试' })
+    const retryBtn = await screen.findByRole('button', {
+      name: '重试投递 https://example.com/hook',
+    })
     const callsBeforeRetry = listCalls
     await user.click(retryBtn)
 
@@ -97,7 +101,9 @@ describe('DeadDeliveriesPage', () => {
     )
     renderWithProviders(<DeadDeliveriesPage />)
 
-    const retryBtn = await screen.findByRole('button', { name: '重试' })
+    const retryBtn = await screen.findByRole('button', {
+      name: '重试投递 https://example.com/hook',
+    })
     expect(retryBtn).toBeDisabled()
   })
 
@@ -115,7 +121,9 @@ describe('DeadDeliveriesPage', () => {
     )
     const { user } = renderWithProviders(<DeadDeliveriesPage />)
 
-    const retryBtn = await screen.findByRole('button', { name: '重试' })
+    const retryBtn = await screen.findByRole('button', {
+      name: '重试投递 https://example.com/hook',
+    })
     await user.click(retryBtn)
 
     await waitFor(() => {
@@ -155,6 +163,8 @@ describe('DeadDeliveriesPage', () => {
     await waitFor(() => {
       expect(screen.getByText('https://failed.example.com/hook')).toBeInTheDocument()
     })
+    expect(screen.getByRole('button', { name: '失败' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '死信' })).toHaveAttribute('aria-pressed', 'false')
   })
 })
 

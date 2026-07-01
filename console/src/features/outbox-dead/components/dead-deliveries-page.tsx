@@ -15,11 +15,13 @@ import {
 } from '@/features/outbox-dead/api/list-deliveries'
 import { useRetryDelivery } from '@/features/outbox-dead/api/retry-delivery'
 import { DeliveriesTable } from '@/features/outbox-dead/components/deliveries-table'
+import { useDocumentTitle } from '@/hooks/use-document-title'
 
 const FILTERS: DeliveryStatusFilter[] = ['dead', 'failed']
 
 export function DeadDeliveriesPage() {
   const { t } = useTranslation()
+  useDocumentTitle(t('nav.outbox_dead'))
   const [status, setStatus] = useState<DeliveryStatusFilter>('dead')
   const list = useQuery(deliveriesQuery(status))
   const retry = useRetryDelivery()

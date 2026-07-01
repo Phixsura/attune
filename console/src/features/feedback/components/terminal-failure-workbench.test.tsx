@@ -1,6 +1,7 @@
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { TerminalFailureWorkbenchPanel } from '@/features/feedback/components/terminal-failure-workbench'
+import { expectNoA11yViolations } from '@/testing/a11y'
 import { renderWithProviders, screen } from '@/testing/test-utils'
 
 vi.mock('@tanstack/react-router', async () => {
@@ -95,7 +96,7 @@ describe('TerminalFailureWorkbenchPanel', () => {
       />,
     )
 
-    await user.click(screen.getAllByRole('button', { name: '重试' })[0])
+    await user.click(screen.getByRole('button', { name: '重试富化 #123' }))
 
     expect(retryMutate).toHaveBeenCalledTimes(1)
   })
@@ -172,7 +173,7 @@ describe('TerminalFailureWorkbenchPanel', () => {
   it('renders the cluster summary and sample drill-down controls', async () => {
     retryMutate.mockReset()
     const onOpenFeedback = vi.fn()
-    const { user } = renderWithProviders(
+    const { container, user } = renderWithProviders(
       <TerminalFailureWorkbenchPanel
         data={sampleWorkbench}
         isLoading={false}
@@ -189,5 +190,6 @@ describe('TerminalFailureWorkbenchPanel', () => {
     await user.click(screen.getByRole('button', { name: '#123' }))
 
     expect(onOpenFeedback).toHaveBeenCalledWith('123')
+    await expectNoA11yViolations(container)
   })
 })

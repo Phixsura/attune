@@ -6,6 +6,7 @@ import { type ReactNode, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
+import { Loading } from '@/components/loading'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { TerminalFailureWorkbench } from '@/features/feedback/api/get-terminal-failure-workbench'
@@ -96,10 +97,7 @@ export function TerminalFailureWorkbenchPanel({
   if (isLoading) {
     return (
       <WorkbenchShell tone="loading">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          <span>{t('app.loading')}</span>
-        </div>
+        <Loading className="py-0" />
       </WorkbenchShell>
     )
   }
@@ -169,7 +167,7 @@ export function TerminalFailureWorkbenchPanel({
           </p>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[34rem]">
+        <div className="grid min-w-0 gap-2 sm:grid-cols-3 xl:flex-1">
           <WorkbenchMetric
             label={t('feedback.terminal_workbench.total')}
             value={String(totalTerminalFailures)}
@@ -289,22 +287,22 @@ function WorkbenchMetric({
   return (
     <div
       className={cn(
-        'rounded-[1rem] border bg-background/90 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]',
+        'min-w-0 rounded-[1rem] border bg-background/90 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]',
         tone === 'danger' ? 'border-destructive/15' : 'border-border/60',
       )}
     >
-      <div className="text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+      <div className="break-words text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
         {label}
       </div>
       <div
         className={cn(
-          'mt-1 text-sm font-semibold tabular-nums',
+          'mt-1 break-words text-sm font-semibold tabular-nums',
           tone === 'danger' && 'text-destructive',
         )}
       >
         {value}
       </div>
-      <div className="mt-1 text-xs leading-5 text-muted-foreground">{hint}</div>
+      <div className="mt-1 break-words text-xs leading-5 text-muted-foreground">{hint}</div>
     </div>
   )
 }
@@ -460,7 +458,7 @@ function WorkbenchSectionJumpNav({
           >
             <a href={`#terminal-workbench-${section.sectionKey}`}>
               <span className="truncate">{section.title}</span>
-              <span className="text-[10px] font-medium text-muted-foreground">
+              <span className="text-[10px] font-medium text-zinc-700 dark:text-zinc-300">
                 {t('feedback.terminal_workbench.count', { count: section.totalCount })}
               </span>
               {section.isPriority ? (
@@ -681,12 +679,13 @@ function WorkbenchSampleActions({
         type="button"
         size="sm"
         variant="outline"
+        aria-label={`${t('feedback.detail.retry_enrichment')} #${id}`}
         className="h-7 rounded-full border-border/50 bg-background/85 px-2.5 text-xs"
         onClick={onRetry}
         disabled={retry.isPending}
       >
         {retry.isPending ? (
-          <Loader2 className="size-3.5 animate-spin" />
+          <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
         ) : (
           <RotateCcw className="size-3.5" />
         )}

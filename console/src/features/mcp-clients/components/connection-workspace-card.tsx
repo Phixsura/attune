@@ -184,7 +184,7 @@ export function ConnectionWorkspaceCard({
             ) : null}
           </div>
 
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-3">
             <Alert>
               <CircleAlert className="h-4 w-4" />
               <AlertTitle>{t('mcp_clients.connection.interactive_only_title')}</AlertTitle>
@@ -220,7 +220,7 @@ export function ConnectionWorkspaceCard({
                     {selectedTemplate.requiredRedirects.map((uri) => (
                       <code
                         key={uri}
-                        className="block rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs"
+                        className="block break-all rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs"
                       >
                         {uri}
                       </code>
@@ -235,7 +235,7 @@ export function ConnectionWorkspaceCard({
                     {missingRedirects.map((uri) => (
                       <code
                         key={uri}
-                        className="block rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs"
+                        className="block break-all rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs"
                       >
                         {uri}
                       </code>
@@ -275,9 +275,15 @@ export function ConnectionWorkspaceCard({
                   {t('mcp_clients.connection.revoked_snippet_hint')}
                 </div>
               ) : (
-                <pre className="overflow-x-auto bg-muted/30 p-3 font-mono text-xs leading-5">
-                  {selectedTemplate.snippet}
-                </pre>
+                <textarea
+                  aria-label={t('mcp_clients.connection.snippet_hint')}
+                  className="block w-full resize-none overflow-x-auto border-0 bg-muted/30 p-3 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  readOnly
+                  rows={Math.min(selectedTemplate.snippet.split('\n').length + 1, 18)}
+                  spellCheck={false}
+                  value={selectedTemplate.snippet}
+                  wrap="off"
+                />
               )}
             </div>
           </div>

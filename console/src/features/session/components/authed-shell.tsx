@@ -92,6 +92,31 @@ export function AuthedShell({ me, children }: AuthedShellProps) {
     })
   }
 
+  const focusMainContent = () => {
+    const mainContent = document.getElementById('main-content')
+    if (!mainContent) return
+    if (window.location.hash !== '#main-content') {
+      window.history.pushState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}#main-content`,
+      )
+    }
+    mainContent.focus({ preventScroll: true })
+    mainContent.scrollIntoView?.({ block: 'start' })
+  }
+
+  const handleSkipToContent = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault()
+    focusMainContent()
+  }
+
+  const handleSkipToContentKeyDown = (event: React.KeyboardEvent<HTMLAnchorElement>) => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    focusMainContent()
+  }
+
   const sidebar = (
     <nav aria-label={t('shell.primary_nav')} className="space-y-5">
       {visibleGroups.map((group) => (
@@ -131,6 +156,15 @@ export function AuthedShell({ me, children }: AuthedShellProps) {
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.9)),radial-gradient(circle_at_top_left,rgba(251,191,36,0.08),transparent_22%),var(--background)]">
+      {/* biome-ignore lint/a11y/useValidAnchor: Skip links are intra-page anchors; the handler preserves focus across SPA routing. */}
+      <a
+        href="#main-content"
+        onClick={handleSkipToContent}
+        onKeyDown={handleSkipToContentKeyDown}
+        className="sr-only fixed top-3 left-3 z-50 rounded-md bg-background px-3 py-2 text-sm font-medium text-foreground shadow-md focus:not-sr-only focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        {t('shell.skip_to_content')}
+      </a>
       <header className="sticky top-0 z-30 border-b border-border/60 bg-background/92 backdrop-blur">
         <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center gap-3 px-4 sm:px-6">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -165,21 +199,23 @@ export function AuthedShell({ me, children }: AuthedShellProps) {
             <Logo />
           </Link>
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">{me.tenant?.name}</div>
             <div className="truncate text-xs text-muted-foreground">
               {activeGroup?.key ?? t('shell.groups.feedback')}
             </div>
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             <ThemeToggle label={t('shell.toggle_theme')} />
-            <RoleBadge role={role} />
+            <RoleBadge role={role} className="hidden sm:inline-flex" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-2">
+                <Button variant="ghost" size="sm" className="gap-2 px-2 sm:px-3">
                   <User className="size-4" />
-                  {me.user?.name}
+                  <span className="sr-only sm:not-sr-only sm:inline-block sm:max-w-40 sm:truncate">
+                    {me.user?.name}
+                  </span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -224,7 +260,7 @@ export function AuthedShell({ me, children }: AuthedShellProps) {
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1 pb-10">
+        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 pb-10">
           <div className="mx-auto max-w-[1440px]">{children}</div>
         </main>
       </div>

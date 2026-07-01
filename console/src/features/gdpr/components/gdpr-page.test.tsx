@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 import { GDPRPage } from '@/features/gdpr/components/gdpr-page'
 import { GdprExportStatus, GdprRequestStatus, GdprRequestType } from '@/proto/attune/v1/gdpr'
+import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
@@ -221,7 +222,7 @@ describe('GDPRPage', () => {
       }),
     )
 
-    const { user } = renderWithProviders(<GDPRPage />)
+    const { container, user } = renderWithProviders(<GDPRPage />)
 
     await waitFor(() => {
       expect(screen.getByText('GDPR 数据请求')).toBeInTheDocument()
@@ -235,6 +236,7 @@ describe('GDPRPage', () => {
       expect(screen.getByTestId('gdpr-request-row-job-ready-1')).toBeInTheDocument()
     })
     expect(screen.getByText('30 天')).toBeInTheDocument()
+    await expectNoA11yViolations(container)
 
     await user.click(screen.getByTestId('gdpr-download-export-job-ready-1'))
     await waitFor(() => {
@@ -262,6 +264,8 @@ describe('GDPRPage', () => {
       expect(screen.queryByTestId('gdpr-request-row-req-delete-1')).not.toBeInTheDocument()
       expect(screen.getByTestId('gdpr-request-row-job-ready-1')).toBeInTheDocument()
     })
+    expect(screen.getByRole('button', { name: '导出' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '全部' })).toHaveAttribute('aria-pressed', 'false')
 
     await user.click(screen.getByRole('button', { name: '全部' }))
     await waitFor(() => {
@@ -365,11 +369,25 @@ describe('GDPRPage', () => {
     })
 
     await user.type(screen.getByTestId('gdpr-subject-key'), 'protected@example.com')
-    await user.click(screen.getByRole('button', { name: '导出 ZIP' }))
+    const exportButton = screen.getByRole('button', { name: '导出 ZIP' })
+    exportButton.focus()
+    await user.keyboard('[Enter]')
 
     const dialog = await screen.findByRole('dialog', { name: '确认敏感操作' })
-    await user.type(within(dialog).getByLabelText('当前密码'), 'correct horse battery staple')
-    await user.click(within(dialog).getByRole('button', { name: '验证并继续' }))
+    expect(within(dialog).getByLabelText('当前密码')).toHaveFocus()
+    await expectNoA11yViolations(document.body)
+    await user.keyboard('[Escape]')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(exportButton).toHaveFocus()
+
+    await user.click(exportButton)
+    const reopenedDialog = await screen.findByRole('dialog', { name: '确认敏感操作' })
+    expect(within(reopenedDialog).getByLabelText('当前密码')).toHaveFocus()
+    await user.type(
+      within(reopenedDialog).getByLabelText('当前密码'),
+      'correct horse battery staple',
+    )
+    await user.click(within(reopenedDialog).getByRole('button', { name: '验证并继续' }))
 
     await waitFor(() => {
       expect(verifyBody).toEqual({ password: 'correct horse battery staple' })
