@@ -134,6 +134,7 @@
   "shell": {
     "primary_nav": "主导航",
     "open_nav": "打开导航",
+    "skip_to_content": "跳到主要内容",
     "mobile_nav_description": "在移动端查看并切换 Console 的主要导航分区。",
     "toggle_theme": "切换明暗主题",
     "console_overview": "围绕运营、配置与治理建立的统一工作台。",
@@ -1030,25 +1031,34 @@
       "created": "签发于",
       "last_used": "最近使用",
       "status": "状态",
-      "actions": "操作"
+      "actions": "操作",
+      "aria_label": "API key 列表"
     },
     "status": {
       "active": "可用",
       "revoked": "已撤销"
     },
     "revoke_button": "撤销",
+    "revoke_key_aria": "撤销 API key {{label}}",
     "revoke_confirm_title": "撤销这把 key？",
     "revoke_confirm_body": "撤销后用这把 key 调 ingest API 会被拒。已撤销的 key 不可恢复，只能重铸。",
     "create_dialog": {
       "title": "签发新 API key",
       "label_field": "用途备注",
       "label_placeholder": "例如：prod-app / dev-test",
-      "label_help": "便于日后辨识。不影响 key 本身。"
+      "label_help": "便于日后辨识。不影响 key 本身。",
+      "scope_preset": "权限模板",
+      "custom_scopes": "自定义权限",
+      "select_scopes": "选择权限",
+      "show_scopes": "查看生效权限",
+      "effective_scopes": "生效权限",
+      "no_scopes": "无权限"
     },
     "secret_dialog": {
       "title": "你的新 key（仅此一次显示）",
       "body": "请立刻保存这个 key。关闭对话框后将无法再次查看，丢失只能撤销重铸。",
-      "copy_hint": "已复制到剪贴板"
+      "copy_hint": "已复制到剪贴板",
+      "copy_secret": "复制新 API key"
     },
     "empty_title": "还没有 API key",
     "empty_body": "签一把就能把 ingest API 接到你的产品里。明文 key 仅签发时返回一次。"
@@ -1518,6 +1528,7 @@
     "request_center_title": "GDPR 请求中心",
     "request_center_help": "查看导出和删除请求的生命周期、下载状态，以及已过期工件。",
     "request_center_empty": "还没有 GDPR 请求记录。",
+    "request_table_aria": "GDPR 请求中心列表",
     "request_col_type": "类型",
     "request_col_subject": "主体",
     "request_col_status": "状态",
@@ -1645,6 +1656,7 @@
       "escalate_body": "当同一目标反复进入死信，优先检查通知目标配置、secret、超时和下游服务健康。"
     },
     "retry_button": "重试",
+    "retry_delivery_aria": "重试投递 {{target}}",
     "retry_inflight": "正在投递中，无法重试",
     "retry_queued": "已重新排队，worker 将在下次轮询时投递。",
     "retry_failed": "重试失败",
@@ -1661,7 +1673,8 @@
       "failure": "失败类型",
       "reason": "原因 / 最近错误",
       "last_attempt": "最近一次",
-      "actions": "操作"
+      "actions": "操作",
+      "aria_label": "异常投递队列"
     },
     "failure_kind": {
       "unspecified": "未知",
@@ -1800,7 +1813,9 @@
     "clear_filters": "清空筛选",
     "search": {
       "placeholder": "搜索反馈内容...",
+      "input_label": "搜索反馈内容",
       "semantic": "语义搜索",
+      "clear": "清除搜索内容",
       "no_results": "未找到匹配的反馈",
       "keyword_fallback": "使用关键词搜索",
       "match_type": {
@@ -2652,7 +2667,9 @@
       "policy_mode": "策略模式",
       "created": "创建于",
       "status": "状态",
-      "actions": "操作"
+      "actions": "操作",
+      "aria_label": "MCP 客户端列表",
+      "select_client": "选择 MCP 客户端 {{name}}"
     },
     "status": {
       "active": "可用",
@@ -2674,6 +2691,7 @@
         "allow_list": "白名单模式"
       }
     },
+    "revoke_client_aria": "撤销客户端 {{name}}",
     "tools": {
       "title": "工具策略",
       "allow_list_hint": "白名单模式下，勾选的工具会被显式允许；未勾选的工具默认拒绝。",
@@ -2698,7 +2716,11 @@
         "toggle": "规则开关",
         "rpm": "RPM",
         "burst": "Burst"
-      }
+      },
+      "table_aria_label": "MCP 工具策略列表",
+      "toggle_label": "{{effect}}工具 {{tool}}",
+      "rpm_label": "设置工具 {{tool}} 的每分钟请求数",
+      "burst_label": "设置工具 {{tool}} 的突发上限"
     },
     "sessions": {
       "title": "会话",
@@ -2706,6 +2728,7 @@
       "empty": "还没有会话记录。",
       "revoke_button": "终止",
       "revoked": "会话已终止",
+      "table_aria_label": "MCP 会话列表",
       "table": {
         "session": "会话 ID",
         "last_tool": "最近工具",
@@ -2721,6 +2744,7 @@
       "empty": "当前没有有效的刷新授权。",
       "revoke_button": "撤销授权",
       "revoked": "刷新授权已撤销",
+      "table_aria_label": "MCP 刷新授权列表",
       "table": {
         "grant": "授权 ID",
         "session": "所属会话",

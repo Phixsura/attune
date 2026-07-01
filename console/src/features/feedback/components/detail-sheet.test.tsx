@@ -1,9 +1,11 @@
 import userEvent from '@testing-library/user-event'
 import { delay, HttpResponse, http } from 'msw'
+import { useState } from 'react'
 import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
 import type { Dimension } from '@/proto/attune/v1/common'
+import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 
@@ -247,6 +249,65 @@ describe('FeedbackDetailSheet', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('restores focus to the opener after Escape closes the controlled sheet', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json({
+          id: 'f-focus',
+          content: 'payment failed at checkout',
+          enrichedTitle: 'Payment failed',
+          enrichedDisplayTitle: '支付失败',
+          enrichedRationale: 'AI rationale',
+          enrichedDisplayRationale: 'AI 中文解读',
+          enrichedDisplayLocale: 'zh',
+          enrichedAttrs: { severity: 'P0' },
+          enrichedAt: '2026-06-07T10:30:00Z',
+          language: 'en',
+          isUrgent: true,
+          source: 'web',
+          userId: 'u-1',
+          pageUrl: '',
+          createdAt: '2026-06-07T10:00:00Z',
+          sourceMeta: null,
+          attachments: [],
+          enrichmentError: '',
+        }),
+      ),
+    )
+
+    function SheetHarness() {
+      const [id, setId] = useState<string | null>(null)
+      return (
+        <>
+          <button type="button" onClick={() => setId('f-focus')}>
+            Open feedback detail
+          </button>
+          <FeedbackDetailSheet
+            id={id}
+            dims={dims}
+            availableTags={[]}
+            onOpenChange={(open) => setId(open ? 'f-focus' : null)}
+          />
+        </>
+      )
+    }
+
+    const { user } = renderWithProviders(<SheetHarness />)
+    const opener = screen.getByRole('button', { name: 'Open feedback detail' })
+
+    opener.focus()
+    await user.keyboard('[Enter]')
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('支付失败').length).toBeGreaterThanOrEqual(1))
+    await expectNoA11yViolations(document.body)
+
+    await user.keyboard('[Escape]')
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(opener).toHaveFocus()
   })
 
   it('shows workbench guidance for active queue context', async () => {

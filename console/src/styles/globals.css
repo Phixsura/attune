@@ -17,12 +17,12 @@
        Attune is about receiving signals, so warm orange reads like
        sunlight on attention. Distinguishes the console from generic
        SaaS zinc+blue without going aggressive-red. */
-    --primary: oklch(0.68 0.17 55);
+    --primary: oklch(0.5 0.16 55);
     --primary-foreground: oklch(1 0 0);
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
     --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
+    --muted-foreground: oklch(0.47 0 0);
     --accent: oklch(0.97 0 0);
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
@@ -47,7 +47,7 @@
     --secondary: oklch(0.269 0 0);
     --secondary-foreground: oklch(0.985 0 0);
     --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
+    --muted-foreground: oklch(0.78 0 0);
     --accent: oklch(0.269 0 0);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
@@ -94,6 +94,20 @@ html, body, #root {
   height: 100%;
   background-color: var(--background);
   color: var(--foreground);
+}
+
+[data-sonner-toast] {
+  transition-property: transform, height, box-shadow !important;
+}
+
+[data-sonner-toast][data-styled='true'] {
+  opacity: 1 !important;
+}
+
+[data-sonner-toast][data-visible='false'],
+[data-sonner-toast][data-removed='true'],
+[data-sonner-toast][data-expanded='false'][data-front='false'] > * {
+  visibility: hidden !important;
 }
 
 /* Honor prefers-reduced-motion globally: neutralize animations (skeleton

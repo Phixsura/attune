@@ -358,7 +358,7 @@ jobs:
         continue-on-error: true
         run: govulncheck ./...
 
-  # ── Console SPA: biome + tsc ───────────────────────────────────────────────
+  # ── Console SPA: biome + build + browser accessibility ─────────────────────
   console:
     needs: changes
     if: needs.changes.outputs.console == 'true'
@@ -386,6 +386,8 @@ jobs:
       # TanStack Router plugin) that tsc needs — and doubles as a build smoke test.
       - run: pnpm exec vite build
       - run: pnpm tsc -b --noEmit
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e:a11y
       - run: pnpm vitest run --coverage
       - name: Upload console coverage to Codecov
         if: >-

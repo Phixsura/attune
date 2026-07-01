@@ -8,7 +8,9 @@
   "files": {
     "includes": [
       "src/**/*.{ts,tsx,js,jsx,json,jsonc}",
+      "e2e/**/*.{ts,tsx,js,jsx,json,jsonc}",
       "vite.config.ts",
+      "playwright.config.ts",
       "biome.json",
       "components.json"
     ],

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { FeedbackPage } from '@/features/feedback/components/feedback-page'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { tagsQuery } from '@/features/tags/api/list-tags'
@@ -6,6 +7,7 @@ import { workflowStatesQuery } from '@/features/workflow/api/list-states'
 import { useBatchTransitionFeedback } from '@/features/workflow/api/transition-feedback'
 import { AuditTimeline } from '@/features/workflow/components/audit-timeline'
 import { WorkflowTransitionSelect } from '@/features/workflow/components/workflow-transition-select'
+import { useDocumentTitle } from '@/hooks/use-document-title'
 
 type FeedbackRoutePageProps = {
   initialQueueMode?: 'all' | 'urgent' | 'active' | 'failed' | 'terminal' | 'ready'
@@ -16,6 +18,8 @@ export function FeedbackRoutePage({
   initialQueueMode = 'all',
   showTerminalWorkbench = false,
 }: FeedbackRoutePageProps = {}) {
+  const { t } = useTranslation()
+  useDocumentTitle(t(initialQueueMode === 'terminal' ? 'nav.terminal_failures' : 'nav.feedback'))
   const config = useQuery(enrichConfigQuery())
   const allTags = useQuery(tagsQuery())
   const allStates = useQuery(workflowStatesQuery())

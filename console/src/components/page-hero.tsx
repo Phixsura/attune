@@ -50,7 +50,7 @@ export function PageHeroMetric({
     tone === 'urgent'
       ? 'text-destructive'
       : tone === 'active'
-        ? 'text-amber-600 dark:text-amber-400'
+        ? 'text-amber-800 dark:text-amber-300'
         : 'text-foreground'
   return (
     <span className="inline-flex items-center gap-1.5" title={hint}>

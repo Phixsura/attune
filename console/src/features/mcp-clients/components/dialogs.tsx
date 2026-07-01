@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useRestoreFocusOnClose } from '@/hooks/use-restore-focus-on-close'
+import { restoreFocusWhenReady } from '@/lib/focus'
 import type { CreateMCPClientRequest, MCPClient } from '../api/types'
 
 const AVAILABLE_SCOPES = [
@@ -128,7 +130,7 @@ export function CreateMCPClientDialog({
                 pending || !name.trim() || parsedRedirectURIs.length === 0 || scopes.length === 0
               }
             >
-              {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {pending && <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />}
               {t('mcp_clients.create_button')}
             </Button>
           </DialogFooter>
@@ -159,17 +161,28 @@ export function RevokeMCPClientDialog({
   onCancel,
   onConfirm,
   pending,
+  restoreFocusRef,
 }: {
   target: MCPClient | null
   onCancel: () => void
   onConfirm: () => void
   pending: boolean
+  restoreFocusRef?: React.RefObject<HTMLElement | null>
 }) {
   const { t } = useTranslation()
+  const open = !!target
+  useRestoreFocusOnClose(open, restoreFocusRef)
 
   return (
-    <Dialog open={!!target} onOpenChange={(open: boolean) => !open && onCancel()}>
-      <DialogContent>
+    <Dialog open={open} onOpenChange={(open: boolean) => !open && onCancel()}>
+      <DialogContent
+        onCloseAutoFocus={(event) => {
+          const restoreFocusTo = restoreFocusRef?.current
+          if (!restoreFocusTo?.isConnected) return
+          event.preventDefault()
+          restoreFocusWhenReady(restoreFocusTo)
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t('mcp_clients.revoke_dialog.title')}</DialogTitle>
           <DialogDescription>
@@ -181,7 +194,7 @@ export function RevokeMCPClientDialog({
             {t('common.cancel')}
           </Button>
           <Button variant="destructive" onClick={onConfirm} disabled={pending}>
-            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {pending && <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />}
             {t('mcp_clients.revoke_button')}
           </Button>
         </DialogFooter>

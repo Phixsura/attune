@@ -25,23 +25,33 @@ import {
 import type { CreateApiKeyParams, NewApiKey } from '@/features/api-keys/api/create-api-key'
 import type { ApiKey } from '@/features/api-keys/api/list-api-keys'
 import { presetsQuery, scopesQuery } from '@/features/api-keys/api/list-scopes'
+import { useRestoreFocusOnClose } from '@/hooks/use-restore-focus-on-close'
+import { restoreFocusWhenReady } from '@/lib/focus'
 
 export function CreateKeyDialog({
   open,
   onOpenChange,
   onSubmit,
   pending,
+  restoreFocusRef,
+  restoreFocusOnClose = true,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   onSubmit: (params: CreateApiKeyParams) => Promise<unknown>
   pending: boolean
+  restoreFocusRef?: React.RefObject<HTMLElement | null>
+  restoreFocusOnClose?: boolean
 }) {
   const { t } = useTranslation()
   const [label, setLabel] = useState('')
   const [selectedPreset, setSelectedPreset] = useState<string>('full_access')
   const [customScopes, setCustomScopes] = useState<Set<string>>(new Set())
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const scopePresetLabelId = 'api-key-scope-preset-label'
+  const scopePresetTriggerId = 'api-key-scope-preset-trigger'
+  const effectiveScopesId = 'api-key-effective-scopes'
+  useRestoreFocusOnClose(open, restoreFocusRef, restoreFocusOnClose)
 
   const { data: scopesData } = useQuery(scopesQuery())
   const { data: presetsData } = useQuery(presetsQuery())
@@ -89,7 +99,19 @@ export function CreateKeyDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent
+        className="max-w-lg"
+        onCloseAutoFocus={(event) => {
+          if (!restoreFocusOnClose) {
+            event.preventDefault()
+            return
+          }
+          const restoreFocusTo = restoreFocusRef?.current
+          if (!restoreFocusTo?.isConnected) return
+          event.preventDefault()
+          restoreFocusWhenReady(restoreFocusTo)
+        }}
+      >
         <form
           onSubmit={(e) => {
             e.preventDefault()
@@ -115,9 +137,11 @@ export function CreateKeyDialog({
             </div>
 
             <div className="space-y-2">
-              <Label>{t('api_keys.create_dialog.scope_preset', '权限模板')}</Label>
+              <Label id={scopePresetLabelId} htmlFor={scopePresetTriggerId}>
+                {t('api_keys.create_dialog.scope_preset')}
+              </Label>
               <Select value={selectedPreset} onValueChange={setSelectedPreset} disabled={pending}>
-                <SelectTrigger>
+                <SelectTrigger id={scopePresetTriggerId} aria-labelledby={scopePresetLabelId}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -127,7 +151,7 @@ export function CreateKeyDialog({
                     </SelectItem>
                   ))}
                   <SelectItem value="custom">
-                    {t('api_keys.create_dialog.custom_scopes', '自定义权限')}
+                    {t('api_keys.create_dialog.custom_scopes')}
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -141,7 +165,7 @@ export function CreateKeyDialog({
             {selectedPreset === 'custom' && (
               <div className="space-y-2 rounded-md border p-3">
                 <Label className="text-sm font-medium">
-                  {t('api_keys.create_dialog.select_scopes', '选择权限')}
+                  {t('api_keys.create_dialog.select_scopes')}
                 </Label>
                 <div className="max-h-48 space-y-3 overflow-y-auto">
                   {Object.entries(groupedScopes).map(([resource, resourceScopes]) => (
@@ -178,36 +202,41 @@ export function CreateKeyDialog({
                 size="sm"
                 className="gap-1 text-xs text-muted-foreground"
                 onClick={() => setShowAdvanced(!showAdvanced)}
+                aria-expanded={showAdvanced}
+                aria-controls={effectiveScopesId}
               >
                 <ChevronDown
                   className={`h-3 w-3 transition-transform ${showAdvanced ? 'rotate-180' : ''}`}
                 />
-                {t('api_keys.create_dialog.show_scopes', '查看生效权限')}
+                {t('api_keys.create_dialog.show_scopes')}
               </Button>
-              {showAdvanced && (
-                <div className="mt-2 rounded-md bg-muted/50 p-2">
-                  <p className="mb-1 text-xs font-medium text-muted-foreground">
-                    {t('api_keys.create_dialog.effective_scopes', '生效权限')}:
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {getEffectiveScopes().length > 0 ? (
-                      getEffectiveScopes().map((s) => (
-                        <span
-                          key={s}
-                          className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs"
-                        >
-                          <Check className="h-2.5 w-2.5 text-primary" />
-                          {s}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-xs text-muted-foreground italic">
-                        {t('api_keys.create_dialog.no_scopes', '无权限')}
+              <section
+                id={effectiveScopesId}
+                aria-label={t('api_keys.create_dialog.effective_scopes')}
+                className="mt-2 rounded-md bg-muted/50 p-2"
+                hidden={!showAdvanced}
+              >
+                <p className="mb-1 text-xs font-medium text-muted-foreground">
+                  {t('api_keys.create_dialog.effective_scopes')}:
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {getEffectiveScopes().length > 0 ? (
+                    getEffectiveScopes().map((s) => (
+                      <span
+                        key={s}
+                        className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs"
+                      >
+                        <Check className="h-2.5 w-2.5 text-primary" />
+                        {s}
                       </span>
-                    )}
-                  </div>
+                    ))
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">
+                      {t('api_keys.create_dialog.no_scopes')}
+                    </span>
+                  )}
                 </div>
-              )}
+              </section>
             </div>
           </div>
           <DialogFooter>
@@ -225,7 +254,7 @@ export function CreateKeyDialog({
               disabled={pending || !label.trim()}
               data-testid="create-key-submit"
             >
-              {pending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+              {pending && <Loader2 aria-hidden="true" className="mr-2 h-3.5 w-3.5 animate-spin" />}
               {t('common.create')}
             </Button>
           </DialogFooter>
@@ -238,11 +267,15 @@ export function CreateKeyDialog({
 export function SecretKeyDialog({
   issued,
   onClose,
+  restoreFocusRef,
 }: {
   issued: NewApiKey | null
   onClose: () => void
+  restoreFocusRef?: React.RefObject<HTMLElement | null>
 }) {
   const { t } = useTranslation()
+  const open = issued !== null
+  useRestoreFocusOnClose(open, restoreFocusRef)
   const onCopy = () => {
     if (!issued) return
     void navigator.clipboard.writeText(issued.secret).then(() => {
@@ -250,8 +283,16 @@ export function SecretKeyDialog({
     })
   }
   return (
-    <Dialog open={issued !== null} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent onPointerDownOutside={(e) => e.preventDefault()}>
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onCloseAutoFocus={(event) => {
+          const restoreFocusTo = restoreFocusRef?.current
+          if (!restoreFocusTo?.isConnected) return
+          event.preventDefault()
+          restoreFocusWhenReady(restoreFocusTo)
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t('api_keys.secret_dialog.title')}</DialogTitle>
           <DialogDescription>{t('api_keys.secret_dialog.body')}</DialogDescription>
@@ -259,7 +300,13 @@ export function SecretKeyDialog({
         {issued && (
           <div className="my-4 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
             <code className="flex-1 break-all font-mono text-xs">{issued.secret}</code>
-            <Button size="sm" variant="ghost" onClick={onCopy} data-testid="secret-copy">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onCopy}
+              data-testid="secret-copy"
+              aria-label={t('api_keys.secret_dialog.copy_secret')}
+            >
               <Copy className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -277,16 +324,27 @@ export function RevokeKeyDialog({
   onCancel,
   onConfirm,
   pending,
+  restoreFocusRef,
 }: {
   target: ApiKey | null
   onCancel: () => void
   onConfirm: () => void
   pending: boolean
+  restoreFocusRef?: React.RefObject<HTMLElement | null>
 }) {
   const { t } = useTranslation()
+  const open = target !== null
+  useRestoreFocusOnClose(open, restoreFocusRef)
   return (
-    <Dialog open={target !== null} onOpenChange={(v) => !v && onCancel()}>
-      <DialogContent>
+    <Dialog open={open} onOpenChange={(v) => !v && onCancel()}>
+      <DialogContent
+        onCloseAutoFocus={(event) => {
+          const restoreFocusTo = restoreFocusRef?.current
+          if (!restoreFocusTo?.isConnected) return
+          event.preventDefault()
+          restoreFocusWhenReady(restoreFocusTo)
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t('api_keys.revoke_confirm_title')}</DialogTitle>
           <DialogDescription>{t('api_keys.revoke_confirm_body')}</DialogDescription>
@@ -311,7 +369,7 @@ export function RevokeKeyDialog({
             disabled={pending}
             data-testid="revoke-key-confirm"
           >
-            {pending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+            {pending && <Loader2 aria-hidden="true" className="mr-2 h-3.5 w-3.5 animate-spin" />}
             {t('api_keys.revoke_button')}
           </Button>
         </DialogFooter>

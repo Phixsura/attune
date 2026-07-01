@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { AuthedShell } from '@/features/session/components/authed-shell'
+import { expectNoA11yViolations } from '@/testing/a11y'
 import { renderWithProviders, screen } from '@/testing/test-utils'
 
 vi.mock('@tanstack/react-router', async () => {
@@ -52,7 +53,9 @@ vi.mock('@/features/session/components/theme-toggle', () => ({
 }))
 
 vi.mock('@/features/session/components/auth/role-badge', () => ({
-  RoleBadge: ({ role }: { role?: string }) => <span>{role}</span>,
+  RoleBadge: ({ className, role }: { className?: string; role?: string }) => (
+    <span className={className}>{role}</span>
+  ),
 }))
 
 describe('AuthedShell', () => {
@@ -83,5 +86,81 @@ describe('AuthedShell', () => {
     expect(sidebarScroll).toHaveClass('overflow-y-auto')
     expect(sidebarScroll).toHaveClass('overscroll-contain')
     expect(sidebarScroll.className).toContain('max-h-[calc(100dvh-7rem)]')
+  })
+
+  it('exposes a skip link and main-content target', async () => {
+    const { container, user } = renderWithProviders(
+      <AuthedShell
+        me={{
+          tenant: {
+            id: 'tenant-1',
+            name: 'Test Tenant',
+            slug: 'test-tenant',
+            locale: 'zh-CN',
+            timezone: 'Asia/Shanghai',
+          },
+          user: {
+            openId: 'user-1',
+            name: 'admin@test.com',
+            role: 'admin',
+          },
+          csrfToken: 'csrf-token',
+        }}
+      >
+        <h1>content</h1>
+      </AuthedShell>,
+    )
+
+    expect(screen.getByRole('link', { name: '跳到主要内容' })).toHaveAttribute(
+      'href',
+      '#main-content',
+    )
+    const skipLink = screen.getByRole('link', { name: '跳到主要内容' })
+    const mainContent = document.getElementById('main-content')
+    expect(mainContent).toHaveAttribute('tabindex', '-1')
+
+    await user.click(skipLink)
+
+    expect(window.location.hash).toBe('#main-content')
+    expect(document.activeElement).toBe(mainContent)
+
+    window.history.replaceState(null, '', '/')
+    skipLink.focus()
+    await user.keyboard('{Enter}')
+
+    expect(window.location.hash).toBe('#main-content')
+    expect(document.activeElement).toBe(mainContent)
+    await expectNoA11yViolations(container)
+  })
+
+  it('keeps low-priority account chrome from widening the mobile header', () => {
+    renderWithProviders(
+      <AuthedShell
+        me={{
+          tenant: {
+            id: 'tenant-1',
+            name: 'Test Tenant',
+            slug: 'test-tenant',
+            locale: 'zh-CN',
+            timezone: 'Asia/Shanghai',
+          },
+          user: {
+            openId: 'user-1',
+            name: 'admin@test.com',
+            role: 'admin',
+          },
+          csrfToken: 'csrf-token',
+        }}
+      >
+        <div>content</div>
+      </AuthedShell>,
+    )
+
+    expect(screen.getByText('Test Tenant').parentElement).toHaveClass('flex-1')
+    expect(screen.getByText('admin')).toHaveClass('hidden')
+    expect(screen.getByText('admin')).toHaveClass('sm:inline-flex')
+    expect(screen.getByText('admin@test.com')).toHaveClass('sr-only')
+    expect(screen.getByText('admin@test.com')).toHaveClass('sm:not-sr-only')
+    expect(screen.getByRole('button', { name: 'admin@test.com' })).toHaveClass('px-2')
   })
 })

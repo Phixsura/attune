@@ -2,10 +2,11 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { Bot, Loader2, Shield, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
+import { Loading } from '@/components/loading'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,6 +23,7 @@ import {
 import {
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -33,6 +35,7 @@ import { type MCPClient, mcpClientsQuery } from '@/features/mcp-clients/api/list
 import { useRevokeMCPClient } from '@/features/mcp-clients/api/revoke-mcp-client'
 import { useRevokeMCPGrant } from '@/features/mcp-clients/api/revoke-mcp-grant'
 import { useRevokeMCPSession } from '@/features/mcp-clients/api/revoke-mcp-session'
+import { useDocumentTitle } from '@/hooks/use-document-title'
 import type {
   CreateMCPClientRequest,
   MCPClientTool,
@@ -52,6 +55,7 @@ type ToolDraft = {
 
 export function MCPClientsPage() {
   const { t } = useTranslation()
+  useDocumentTitle(t('nav.mcp_clients'))
   const list = useQuery(mcpClientsQuery())
   const create = useCreateMCPClient()
   const revoke = useRevokeMCPClient()
@@ -69,6 +73,7 @@ export function MCPClientsPage() {
   const [clientRateLimitRPM, setClientRateLimitRPM] = useState('')
   const [clientRateLimitBurst, setClientRateLimitBurst] = useState('')
   const [toolDrafts, setToolDrafts] = useState<Record<string, ToolDraft>>({})
+  const revokeFocusRef = useRef<HTMLElement | null>(null)
 
   const detail = useQuery(mcpClientDetailQuery(selectedClientId))
 
@@ -205,7 +210,7 @@ export function MCPClientsPage() {
         <Button onClick={() => setCreateOpen(true)}>{t('mcp_clients.create_button')}</Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <Card className="min-w-0">
           <CardHeader>
             <CardTitle>{t('mcp_clients.title')}</CardTitle>
@@ -215,16 +220,16 @@ export function MCPClientsPage() {
           </CardHeader>
           <CardContent>
             {list.isPending ? (
-              <div className="flex items-center justify-center py-8 text-muted-foreground">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {t('app.loading')}
-              </div>
+              <Loading />
             ) : list.data && list.data.length > 0 ? (
               <ClientTable
                 clients={list.data}
                 selectedClientId={selectedClientId}
                 onSelect={setSelectedClientId}
-                onRevoke={(client) => setRevokeTarget(client)}
+                onRevoke={(client, restoreFocusTo) => {
+                  revokeFocusRef.current = restoreFocusTo
+                  setRevokeTarget(client)
+                }}
                 revokingId={handleRevoke.isPending ? revokeTarget?.id : undefined}
               />
             ) : (
@@ -241,7 +246,7 @@ export function MCPClientsPage() {
           </CardContent>
         </Card>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           {!selectedClient ? (
             <Card className="min-w-0">
               <CardContent className="flex min-h-56 items-center justify-center text-center text-sm text-muted-foreground">
@@ -251,8 +256,7 @@ export function MCPClientsPage() {
           ) : detail.isPending ? (
             <Card className="min-w-0">
               <CardContent className="flex min-h-56 items-center justify-center text-muted-foreground">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {t('app.loading')}
+                <Loading className="py-0" />
               </CardContent>
             </Card>
           ) : detail.data ? (
@@ -340,6 +344,7 @@ export function MCPClientsPage() {
         onCancel={() => setRevokeTarget(null)}
         onConfirm={() => revokeTarget && handleRevoke.mutate(revokeTarget.id)}
         pending={handleRevoke.isPending}
+        restoreFocusRef={revokeFocusRef}
       />
     </div>
   )
@@ -355,13 +360,14 @@ function ClientTable({
   clients: MCPClient[]
   selectedClientId: string | null
   onSelect: (id: string) => void
-  onRevoke: (client: MCPClient) => void
+  onRevoke: (client: MCPClient, restoreFocusTo: HTMLElement) => void
   revokingId: string | undefined
 }) {
   const { t } = useTranslation()
 
   return (
-    <Table>
+    <Table aria-label={t('mcp_clients.table.aria_label')}>
+      <TableCaption className="sr-only">{t('mcp_clients.table.aria_label')}</TableCaption>
       <TableHeader>
         <TableRow>
           <TableHead>{t('mcp_clients.table.name')}</TableHead>
@@ -380,10 +386,22 @@ function ClientTable({
           return (
             <TableRow
               key={client.id}
-              className={`${isActive ? '' : 'opacity-50'} ${isSelected ? 'bg-muted/40' : ''} cursor-pointer`}
-              onClick={() => onSelect(client.id)}
+              data-state={isSelected ? 'selected' : undefined}
+              className={isActive ? '' : 'opacity-50'}
             >
-              <TableCell className="font-medium">{client.name}</TableCell>
+              <TableCell className="font-medium">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="-ml-2 h-auto max-w-full justify-start px-2 py-1 text-left font-medium whitespace-normal"
+                  aria-label={t('mcp_clients.table.select_client', { name: client.name })}
+                  aria-current={isSelected ? 'true' : undefined}
+                  onClick={() => onSelect(client.id)}
+                >
+                  {client.name}
+                </Button>
+              </TableCell>
               <TableCell className="font-mono text-xs">{truncateMiddle(client.id)}</TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-1">
@@ -397,10 +415,10 @@ function ClientTable({
                   ))}
                 </div>
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
+              <TableCell className="text-xs text-zinc-700 dark:text-zinc-300">
                 {formatPolicyMode(client.tool_policy_mode, t)}
               </TableCell>
-              <TableCell className="text-muted-foreground">
+              <TableCell className="text-zinc-700 dark:text-zinc-300">
                 {formatDistanceToNow(new Date(client.created_at), {
                   addSuffix: true,
                   locale: zhCN,
@@ -408,7 +426,9 @@ function ClientTable({
               </TableCell>
               <TableCell>
                 {isActive ? (
-                  <span className="text-green-600">{t('mcp_clients.status.active')}</span>
+                  <span className="text-emerald-700 dark:text-emerald-300">
+                    {t('mcp_clients.status.active')}
+                  </span>
                 ) : (
                   <span className="text-muted-foreground">{t('mcp_clients.status.revoked')}</span>
                 )}
@@ -418,16 +438,13 @@ function ClientTable({
                   <Button
                     variant="ghost"
                     size="sm"
-                    aria-label={t('mcp_clients.revoke_button')}
+                    aria-label={t('mcp_clients.revoke_client_aria', { name: client.name })}
                     title={t('mcp_clients.revoke_button')}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onRevoke(client)
-                    }}
+                    onClick={(event) => onRevoke(client, event.currentTarget)}
                     disabled={revokingId === client.id}
                   >
                     {revokingId === client.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <Trash2 className="h-3.5 w-3.5" />
                     )}
@@ -456,7 +473,11 @@ function ClientSummaryCard({ client }: { client: MCPClient }) {
             </CardTitle>
             <CardDescription className="mt-1 font-mono text-xs">{client.id}</CardDescription>
           </div>
-          <span className={client.revoked_at ? 'text-muted-foreground' : 'text-green-600'}>
+          <span
+            className={
+              client.revoked_at ? 'text-muted-foreground' : 'text-emerald-700 dark:text-emerald-300'
+            }
+          >
             {client.revoked_at ? t('mcp_clients.status.revoked') : t('mcp_clients.status.active')}
           </span>
         </div>
@@ -576,7 +597,7 @@ function GovernanceCard({
         </div>
         <div className="flex justify-end">
           <Button onClick={onSave} disabled={pending || revoked}>
-            {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {pending ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : null}
             {t('mcp_clients.governance.save')}
           </Button>
         </div>
@@ -626,7 +647,8 @@ function ToolPoliciesCard({
             <AlertDescription>{t('mcp_clients.tools.revoked_body')}</AlertDescription>
           </Alert>
         ) : null}
-        <Table>
+        <Table aria-label={t('mcp_clients.tools.table_aria_label')}>
+          <TableCaption className="sr-only">{t('mcp_clients.tools.table_aria_label')}</TableCaption>
           <TableHeader>
             <TableRow>
               <TableHead>{t('mcp_clients.tools.table.tool')}</TableHead>
@@ -661,6 +683,13 @@ function ToolPoliciesCard({
                       <Checkbox
                         checked={checked}
                         disabled={disabled}
+                        aria-label={t('mcp_clients.tools.toggle_label', {
+                          tool: tool.name,
+                          effect:
+                            mode === 'allow_list'
+                              ? t('mcp_clients.tools.toggle_allow')
+                              : t('mcp_clients.tools.toggle_deny'),
+                        })}
                         onCheckedChange={() => onToggle(tool)}
                       />
                       <span className="text-xs text-muted-foreground">
@@ -677,6 +706,7 @@ function ToolPoliciesCard({
                       inputMode="numeric"
                       className="h-8 w-24"
                       disabled={disabled}
+                      aria-label={t('mcp_clients.tools.rpm_label', { tool: tool.name })}
                       placeholder={tool.default_rpm.toString()}
                       value={draft.rateLimitRPM}
                       onChange={(event) => onRPMChange(tool, event.target.value)}
@@ -687,6 +717,7 @@ function ToolPoliciesCard({
                       inputMode="numeric"
                       className="h-8 w-24"
                       disabled={disabled}
+                      aria-label={t('mcp_clients.tools.burst_label', { tool: tool.name })}
                       placeholder={tool.default_burst.toString()}
                       value={draft.rateLimitBurst}
                       onChange={(event) => onBurstChange(tool, event.target.value)}
@@ -699,7 +730,7 @@ function ToolPoliciesCard({
         </Table>
         <div className="flex justify-end">
           <Button onClick={onSave} disabled={pending || revoked}>
-            {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {pending ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : null}
             {t('mcp_clients.tools.save')}
           </Button>
         </div>
@@ -729,7 +760,10 @@ function SessionsCard({
         {sessions.length === 0 ? (
           <div className="text-sm text-muted-foreground">{t('mcp_clients.sessions.empty')}</div>
         ) : (
-          <Table>
+          <Table aria-label={t('mcp_clients.sessions.table_aria_label')}>
+            <TableCaption className="sr-only">
+              {t('mcp_clients.sessions.table_aria_label')}
+            </TableCaption>
             <TableHeader>
               <TableRow>
                 <TableHead>{t('mcp_clients.sessions.table.session')}</TableHead>
@@ -768,7 +802,9 @@ function SessionsCard({
                     </TableCell>
                     <TableCell className="text-xs">
                       {active ? (
-                        <span className="text-green-600">{t('mcp_clients.status.active')}</span>
+                        <span className="text-emerald-700 dark:text-emerald-300">
+                          {t('mcp_clients.status.active')}
+                        </span>
                       ) : (
                         <span className="text-muted-foreground">
                           {session.closed_reason || t('mcp_clients.status.revoked')}
@@ -784,7 +820,7 @@ function SessionsCard({
                           disabled={pendingSessionId === session.id}
                         >
                           {pendingSessionId === session.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
                           ) : (
                             t('mcp_clients.sessions.revoke_button')
                           )}
@@ -823,7 +859,10 @@ function RefreshGrantsCard({
         {grants.length === 0 ? (
           <div className="text-sm text-muted-foreground">{t('mcp_clients.grants.empty')}</div>
         ) : (
-          <Table>
+          <Table aria-label={t('mcp_clients.grants.table_aria_label')}>
+            <TableCaption className="sr-only">
+              {t('mcp_clients.grants.table_aria_label')}
+            </TableCaption>
             <TableHeader>
               <TableRow>
                 <TableHead>{t('mcp_clients.grants.table.grant')}</TableHead>
@@ -868,7 +907,7 @@ function RefreshGrantsCard({
                       disabled={pendingGrantId === grant.id}
                     >
                       {pendingGrantId === grant.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
                       ) : (
                         t('mcp_clients.grants.revoke_button')
                       )}

@@ -101,7 +101,10 @@ export function WorkflowTransitionSelect({
 
           <div className="space-y-3">
             <Select value={toStateId} onValueChange={setToStateId}>
-              <SelectTrigger className="h-10 rounded-lg bg-background text-sm">
+              <SelectTrigger
+                aria-label={t('workflow.transition_next_state')}
+                className="h-10 rounded-lg bg-background text-sm"
+              >
                 <SelectValue placeholder={t('workflow.transition_placeholder')} />
               </SelectTrigger>
               <SelectContent>

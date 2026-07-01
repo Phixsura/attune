@@ -4,7 +4,7 @@ import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 import { ThemeProvider } from 'next-themes'
 import { lazy, Suspense } from 'react'
-import { Toaster } from 'sonner'
+import { Toaster } from '@/components/ui/sonner'
 
 // QueryClient is owned by the root so loaders + components share one cache.
 // Keep the config minimal until we hit a real edge case.

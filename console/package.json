@@ -14,6 +14,11 @@
     "format": "biome format --write src",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e:a11y": "playwright test --config playwright.config.ts",
+    "test:e2e:a11y:headed": "playwright test --config playwright.config.ts --headed",
+    "test:e2e:a11y:supplemental": "ATTUNE_CONSOLE_E2E_SUPPLEMENTAL=1 playwright test --config playwright.config.ts --project=edge-desktop --project=firefox-desktop --project=webkit-desktop",
+    "test:e2e:a11y:supplemental:ci": "ATTUNE_CONSOLE_E2E_SUPPLEMENTAL=1 ATTUNE_CONSOLE_E2E_SUPPLEMENTAL_PROJECTS=firefox,webkit playwright test --config playwright.config.ts --project=firefox-desktop --project=webkit-desktop",
+    "test:e2e:a11y:supplemental:headed": "ATTUNE_CONSOLE_E2E_SUPPLEMENTAL=1 playwright test --config playwright.config.ts --project=edge-desktop --project=firefox-desktop --project=webkit-desktop --headed",
     "gen:proto": "cd .. && make proto",
     "arch": "depcruise --config .dependency-cruiser.cjs src"
   },
@@ -37,6 +42,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.0.0",
     "@tanstack/react-query-devtools": "^5.62.0",
     "@tanstack/react-router-devtools": "^1.166.13",
@@ -49,6 +55,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "@vitest/coverage-v8": "^4.1.8",
+    "axe-core": "^4.12.1",
     "dependency-cruiser": "^17.4.3",
     "jsdom": "^29.1.1",
     "msw": "^2.14.6",

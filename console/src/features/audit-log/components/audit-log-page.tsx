@@ -59,6 +59,9 @@ import {
 } from '@/features/audit-log/api/list-audit-log'
 import { EvidenceExportDialog } from '@/features/audit-log/components/evidence-export-dialog'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
+import { useDocumentTitle } from '@/hooks/use-document-title'
+import { useRestoreFocusOnClose } from '@/hooks/use-restore-focus-on-close'
+import { restoreFocusWhenReady } from '@/lib/focus'
 import { cn } from '@/lib/utils'
 
 type AuditDraftState = {
@@ -147,6 +150,7 @@ const emptyDraftState: AuditDraftState = {
 
 export function AuditLogPage() {
   const { t, i18n } = useTranslation()
+  useDocumentTitle(t('nav.audit_log'))
   const { can } = usePermissions()
   const canView = can('settings:audit_log:view')
   const locale = i18n.language.startsWith('zh') ? zhCN : undefined
@@ -170,6 +174,7 @@ export function AuditLogPage() {
   const [expandedBurstKeys, setExpandedBurstKeys] = useState<Set<string>>(() => new Set())
   const localQueryInputRef = useRef<HTMLInputElement | null>(null)
   const entryFocusButtonRefs = useRef(new Map<string, HTMLButtonElement>())
+  const detailRestoreFocusRef = useRef<HTMLElement | null>(null)
 
   const deferredLocalQuery = useDeferredValue(localQuery.trim().toLowerCase())
   const draftFilters = draftToFilters(draft)
@@ -194,6 +199,7 @@ export function AuditLogPage() {
     visibleItems.find((item) => item.id === inspectedEntryId) ??
     items.find((item) => item.id === inspectedEntryId) ??
     null
+  useRestoreFocusOnClose(Boolean(inspectedEntry), detailRestoreFocusRef)
   const detailItems =
     inspectedEntryId && visibleItems.some((item) => item.id === inspectedEntryId)
       ? visibleItems
@@ -368,7 +374,12 @@ export function AuditLogPage() {
     })
   }
 
-  const handleOpenDetails = (id: string, mode: AuditHistoryMode = 'push') => {
+  const handleOpenDetails = (
+    id: string,
+    mode: AuditHistoryMode = 'push',
+    restoreFocusTo?: HTMLElement,
+  ) => {
+    detailRestoreFocusRef.current = restoreFocusTo ?? entryFocusButtonRefs.current.get(id) ?? null
     setSelectedEntryId(id)
     setInspectedEntryId(id)
     writeAuditLogStateToUrl(
@@ -889,6 +900,7 @@ export function AuditLogPage() {
                   ref={localQueryInputRef}
                   value={localQuery}
                   onChange={(e) => setLocalQuery(e.target.value)}
+                  aria-keyshortcuts="/"
                   className="pl-9 pr-9"
                   placeholder={t('audit_log.local_query_placeholder')}
                 />
@@ -1021,7 +1033,10 @@ export function AuditLogPage() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => handleOpenDetails(selectedEntry.id)}
+                        aria-keyshortcuts="Enter"
+                        onClick={(event) =>
+                          handleOpenDetails(selectedEntry.id, 'push', event.currentTarget)
+                        }
                       >
                         {t('audit_log.open_details')}
                       </Button>
@@ -1038,7 +1053,7 @@ export function AuditLogPage() {
                   expandedBurstKeys={expandedBurstKeys}
                   onFocus={setSelectedEntryId}
                   onInvestigate={handleInvestigate}
-                  onInspect={handleOpenDetails}
+                  onInspect={(id, restoreFocusTo) => handleOpenDetails(id, 'push', restoreFocusTo)}
                   onRegisterFocusButton={handleRegisterEntryFocusButton}
                   onSpotlightSignal={handleSpotlightSignal}
                   onToggleBurstExpansion={toggleBurstExpansion}
@@ -1057,7 +1072,7 @@ export function AuditLogPage() {
                     >
                       {query.isFetchingNextPage ? (
                         <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
                           {t('app.loading')}
                         </>
                       ) : (
@@ -1076,6 +1091,19 @@ export function AuditLogPage() {
         <SheetContent
           side="right"
           className="w-full overflow-y-auto border-l border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.98))] sm:max-w-xl"
+          onOpenAutoFocus={() => {
+            if (detailRestoreFocusRef.current?.isConnected) return
+            const active = document.activeElement
+            detailRestoreFocusRef.current =
+              active instanceof HTMLElement && active !== document.body ? active : null
+          }}
+          onCloseAutoFocus={(event) => {
+            const restoreFocusTo = detailRestoreFocusRef.current
+            if (!restoreFocusTo?.isConnected) return
+            event.preventDefault()
+            restoreFocusWhenReady(restoreFocusTo)
+            detailRestoreFocusRef.current = null
+          }}
         >
           {inspectedEntry ? (
             <AuditDetailsSheet
@@ -1133,7 +1161,7 @@ function AuditLogStream({
   onCopy: (value: string) => void
   onFocus: (id: string) => void
   onInvestigate: (kind: 'action' | 'actorId' | 'targetId', value: string, entryId?: string) => void
-  onInspect: (id: string) => void
+  onInspect: (id: string, restoreFocusTo?: HTMLElement) => void
   onRegisterFocusButton: (id: string, node: HTMLButtonElement | null) => void
   onSpotlightSignal: (query: string) => void
   onToggleBurstExpansion: (burstKey: string) => void
@@ -1266,7 +1294,7 @@ function AuditLogStream({
                               {getActionLabel(item.action, t)}
                             </span>
                             <span
-                              className="shrink-0 text-xs text-muted-foreground tabular-nums"
+                              className="shrink-0 text-xs text-zinc-700 tabular-nums dark:text-zinc-300"
                               title={formatAbsoluteTimestamp(item.createdAt, locale)}
                             >
                               {formatDistanceToNow(new Date(item.createdAt), {
@@ -1275,7 +1303,7 @@ function AuditLogStream({
                               })}
                             </span>
                           </div>
-                          <p className="text-[13px] leading-relaxed text-muted-foreground">
+                          <p className="text-[13px] leading-relaxed text-zinc-700 dark:text-zinc-300">
                             {buildEventDescription(item, t)}
                           </p>
                         </div>
@@ -1304,7 +1332,7 @@ function AuditLogStream({
                               : t('audit_log.actor_unknown')}
                           </AuditToken>
                           {changeSummary ? (
-                            <span className="hidden items-center gap-1.5 group-hover/card:inline-flex">
+                            <span className="hidden items-center gap-1.5 group-hover/card:inline-flex group-focus-within/card:inline-flex">
                               {changeSummary.paths.slice(0, 3).map((path) => (
                                 <SpotlightPathChip
                                   key={path}
@@ -1320,12 +1348,12 @@ function AuditLogStream({
                             </span>
                           ) : null}
                         </div>
-                        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover/card:opacity-100">
+                        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover/card:opacity-100 group-focus-within/card:opacity-100">
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() => onInspect(item.id)}
+                            onClick={(event) => onInspect(item.id, event.currentTarget)}
                           >
                             {t('audit_log.open_details')}
                           </Button>
@@ -1968,7 +1996,7 @@ function CompactBurstEntryRow({
   item: AuditLogEntry
   locale?: Locale
   onFocus: (id: string) => void
-  onInspect: (id: string) => void
+  onInspect: (id: string, restoreFocusTo?: HTMLElement) => void
   onRegisterFocusButton: (id: string, node: HTMLButtonElement | null) => void
   onSpotlightSignal: (query: string) => void
 }) {
@@ -2013,7 +2041,7 @@ function CompactBurstEntryRow({
                 {getActionLabel(item.action, t)}
               </span>
               <span
-                className="shrink-0 text-xs text-muted-foreground tabular-nums"
+                className="shrink-0 text-xs text-zinc-700 tabular-nums dark:text-zinc-300"
                 title={formatAbsoluteTimestamp(item.createdAt, locale)}
               >
                 {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true, locale })}
@@ -2037,8 +2065,8 @@ function CompactBurstEntryRow({
               type="button"
               size="sm"
               variant="ghost"
-              onClick={() => onInspect(item.id)}
-              className="opacity-0 transition-opacity group-hover/burst:opacity-100"
+              onClick={(event) => onInspect(item.id, event.currentTarget)}
+              className="opacity-0 transition-opacity group-hover/burst:opacity-100 group-focus-within/burst:opacity-100"
             >
               {t('audit_log.open_details')}
             </Button>
@@ -2101,7 +2129,7 @@ function AuditToken({
     <span
       title={title}
       className={cn(
-        'inline-flex items-center rounded-full border border-border/70 bg-muted/22 px-3 py-1 font-mono text-[11px] tracking-[0.02em] text-muted-foreground',
+        'inline-flex items-center rounded-full border border-border/70 bg-muted/22 px-3 py-1 font-mono text-[11px] tracking-[0.02em] text-zinc-700 dark:text-zinc-300',
         className,
       )}
     >

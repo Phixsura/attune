@@ -1,6 +1,7 @@
 import { HttpResponse, http } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuditLogPage } from '@/features/audit-log/components/audit-log-page'
+import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 
@@ -214,14 +215,22 @@ describe('AuditLogPage', () => {
       expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
     })
 
-    await user.click(screen.getAllByRole('button', { name: '查看详情' })[0])
+    const openDetailsButton = screen.getAllByRole('button', { name: '查看详情' })[0] as HTMLElement
+    openDetailsButton.focus()
+    await user.keyboard('[Enter]')
 
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByText('请求元数据')).toBeInTheDocument()
     expect(screen.getAllByText('admin@example.com')).not.toHaveLength(0)
     expect(screen.getByText('127.0.0.1')).toBeInTheDocument()
     expect(screen.getByText('playwright')).toBeInTheDocument()
     expect(screen.getAllByText('变更摘要')).not.toHaveLength(0)
     expect(screen.getAllByText('角色')).not.toHaveLength(0)
+    await expectNoA11yViolations(document.body)
+
+    await user.keyboard('[Escape]')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(openDetailsButton).toHaveFocus()
   })
 
   it('preserves the current scope when opening the details drawer', async () => {
@@ -791,7 +800,7 @@ describe('AuditLogPage', () => {
       ),
     )
 
-    renderWithProviders(<AuditLogPage />)
+    const { container } = renderWithProviders(<AuditLogPage />)
 
     await waitFor(() => {
       expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
@@ -803,6 +812,8 @@ describe('AuditLogPage', () => {
       '在已加载记录里继续搜索动作、摘要、操作者、目标或快照内容',
     )
     expect(searchInput).toHaveFocus()
+    expect(searchInput).toHaveAttribute('aria-keyshortcuts', '/')
+    await expectNoA11yViolations(container)
   })
 
   it('opens details drawer with enter key', async () => {

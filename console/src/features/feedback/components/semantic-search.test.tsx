@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { SearchResults } from '@/features/feedback/components/search-results'
 import { SemanticSearchBar } from '@/features/feedback/components/semantic-search-bar'
 import type { SemanticSearchHit } from '@/proto/attune/v1/search'
+import { expectNoA11yViolations } from '@/testing/a11y'
 import { renderWithProviders, screen } from '@/testing/test-utils'
 
 describe('SemanticSearchBar', () => {
@@ -36,10 +37,18 @@ describe('SemanticSearchBar', () => {
     )
     const input = screen.getByDisplayValue('existing')
     expect(input).toBeInTheDocument()
-    // The clear button is rendered when query is non-empty
-    const clearBtn = screen.getByRole('button', { name: '' }) // X icon button
+    const clearBtn = screen.getByRole('button', { name: '清除搜索内容' })
     await user.click(clearBtn)
     expect(onClear).toHaveBeenCalledTimes(1)
+  })
+
+  it('has no automated accessibility violations in the populated state', async () => {
+    const { container } = renderWithProviders(
+      <SemanticSearchBar {...defaultProps} defaultValue="existing" />,
+    )
+
+    expect(screen.getByRole('textbox', { name: '搜索反馈内容' })).toBeInTheDocument()
+    await expectNoA11yViolations(container)
   })
 
   it('disables submit when empty', () => {

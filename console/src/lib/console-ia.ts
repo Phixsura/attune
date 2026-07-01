@@ -159,6 +159,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
   },
   {
     group: 'integrations',
+    icon: Bot,
+    labelKey: 'nav.mcp_clients',
+    path: '/mcp-clients',
+    adminOnly: true,
+  },
+  {
+    group: 'integrations',
     icon: GitBranch,
     labelKey: 'settings.areas.digest.title',
     path: '/integrations/digests',

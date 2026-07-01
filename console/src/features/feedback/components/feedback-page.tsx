@@ -15,7 +15,7 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react'
-import { type ReactNode, useDeferredValue, useMemo, useState } from 'react'
+import { type ReactNode, useDeferredValue, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
@@ -118,6 +118,11 @@ export function FeedbackPage({
   const [queueMode, setQueueMode] = useState<FeedbackQueueMode>(initialQueueMode)
   const qDeferred = useDeferredValue(qInput)
   const [detailId, setDetailId] = useState<string | null>(null)
+  const detailRestoreFocusRef = useRef<HTMLElement | null>(null)
+  const openDetail = (feedbackId: string, restoreFocusTo?: HTMLElement) => {
+    detailRestoreFocusRef.current = restoreFocusTo ?? null
+    setDetailId(feedbackId)
+  }
   const terminalWorkbench = useQuery({
     ...terminalFailureWorkbenchQuery(),
     enabled: showTerminalWorkbench,
@@ -606,7 +611,7 @@ export function FeedbackPage({
                 : t('common.error')
             }
             onRetry={() => void terminalWorkbench.refetch()}
-            onOpenFeedback={(feedbackId) => setDetailId(feedbackId)}
+            onOpenFeedback={openDetail}
           />
         )}
 
@@ -712,7 +717,7 @@ export function FeedbackPage({
                         failedCount={displayedFailedCount}
                         priorityItem={priorityItem}
                         onEnableUrgentScope={() => setUrgentOnly(true)}
-                        onOpenPriority={(id) => setDetailId(id)}
+                        onOpenPriority={(id) => openDetail(id)}
                       />
                     </div>
                     <div className="px-4 py-3 sm:px-5">
@@ -732,7 +737,7 @@ export function FeedbackPage({
                         selectedCount={selected.size}
                         isAllSelected={isAllSelected}
                         onToggleAll={toggleAll}
-                        onOpenPriority={(id) => setDetailId(id)}
+                        onOpenPriority={(id) => openDetail(id)}
                         terminalWorkbenchPriority={terminalWorkbenchPriority}
                         showTerminalWorkbench={showTerminalWorkbench}
                         onClearFilters={clearFilters}
@@ -760,7 +765,7 @@ export function FeedbackPage({
                       allTags={tagList}
                       selected={selected}
                       onToggle={toggle}
-                      onRowClick={setDetailId}
+                      onRowClick={openDetail}
                     />
                   )}
                   {list.hasNextPage && (
@@ -851,6 +856,7 @@ export function FeedbackPage({
         availableTags={tagList}
         workbenchMode={queueMode}
         onOpenChange={(v) => !v && setDetailId(null)}
+        restoreFocusRef={detailRestoreFocusRef}
         renderWorkflowTransition={renderWorkflowTransition}
         renderAuditLog={renderAuditLog}
       />
@@ -945,7 +951,12 @@ function FilterBar({
               value={attrFilters[d.name] || '__all'}
               onValueChange={(v) => onAttrChange(d.name, v)}
             >
-              <SelectTrigger className="h-10 w-full bg-background">
+              <SelectTrigger
+                className="h-10 w-full bg-background"
+                aria-label={t('feedback.filter.all', {
+                  dim: displayOf(d.displayName) || d.name,
+                })}
+              >
                 <SelectValue placeholder={displayOf(d.displayName) || d.name} />
               </SelectTrigger>
               <SelectContent>
@@ -965,7 +976,10 @@ function FilterBar({
             value={tagFilter || '__all'}
             onValueChange={(v) => onTagChange(v === '__all' ? '' : v)}
           >
-            <SelectTrigger className="h-10 w-full bg-background">
+            <SelectTrigger
+              className="h-10 w-full bg-background"
+              aria-label={t('feedback.filter.all_tags')}
+            >
               <SelectValue placeholder={t('feedback.filter.all_tags')} />
             </SelectTrigger>
             <SelectContent>
@@ -987,7 +1001,10 @@ function FilterBar({
             value={workflowFilter || '__all'}
             onValueChange={(v) => onWorkflowChange(v === '__all' ? '' : v)}
           >
-            <SelectTrigger className="h-10 w-full bg-background">
+            <SelectTrigger
+              className="h-10 w-full bg-background"
+              aria-label={t('feedback.filter.all_states')}
+            >
               <SelectValue placeholder={t('feedback.filter.all_states')} />
             </SelectTrigger>
             <SelectContent>
@@ -1010,7 +1027,10 @@ function FilterBar({
           value={enrichmentFilter || '__all'}
           onValueChange={(v) => onEnrichmentChange(v === '__all' ? '' : v)}
         >
-          <SelectTrigger className="h-10 w-full bg-background">
+          <SelectTrigger
+            className="h-10 w-full bg-background"
+            aria-label={t('feedback.filter.enrichment_status')}
+          >
             <SelectValue placeholder={t('feedback.filter.enrichment_status')} />
           </SelectTrigger>
           <SelectContent>
@@ -1081,7 +1101,7 @@ function FeedbackTable({
   allTags: Tag[]
   selected: Set<string>
   onToggle: (id: string) => void
-  onRowClick: (id: string) => void
+  onRowClick: (id: string, restoreFocusTo: HTMLElement) => void
 }) {
   const { t } = useTranslation()
   const displayOf = useDisplayName()
@@ -1121,7 +1141,7 @@ function FeedbackTable({
               <button
                 type="button"
                 className="flex min-h-full min-w-0 flex-col justify-center text-left"
-                onClick={() => onRowClick(f.id)}
+                onClick={(event) => onRowClick(f.id, event.currentTarget)}
               >
                 <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-muted-foreground">
                   <span
@@ -3107,7 +3127,7 @@ function EnrichmentAttemptsBadge({
       className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
         isTerminal
           ? 'bg-destructive/10 text-destructive'
-          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+          : 'bg-amber-50 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
       }`}
       title={titleParts.join('\n')}
     >
@@ -3145,9 +3165,9 @@ function TerminalFailuresSummaryCard({
               <AlertCircle className="size-5" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-base font-semibold text-foreground">
+              <h2 className="text-base font-semibold text-foreground">
                 {t('feedback.terminal_summary.title')}
-              </h3>
+              </h2>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 {t('feedback.terminal_summary.description', { count: terminalCount })}
               </p>

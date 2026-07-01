@@ -9,8 +9,12 @@ import { cn } from '@/lib/utils'
 export function Loading({ className }: { className?: string }) {
   const { t } = useTranslation()
   return (
-    <div className={cn('flex items-center justify-center py-8 text-muted-foreground', className)}>
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn('flex items-center justify-center py-8 text-muted-foreground', className)}
+    >
+      <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
       {t('app.loading')}
     </div>
   )

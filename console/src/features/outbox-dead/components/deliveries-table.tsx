@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import {
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -33,7 +34,8 @@ export function DeliveriesTable({
 }) {
   const { t } = useTranslation()
   return (
-    <Table>
+    <Table aria-label={t('outbox_dead.table.aria_label')}>
+      <TableCaption className="sr-only">{t('outbox_dead.table.aria_label')}</TableCaption>
       <TableHeader>
         <TableRow>
           <TableHead>{t('outbox_dead.table.destination')}</TableHead>
@@ -111,13 +113,15 @@ function DeliveryRow({
           size="sm"
           onClick={onRetry}
           disabled={retrying || delivery.inFlight}
-          aria-label={t('outbox_dead.retry_button')}
+          aria-label={t('outbox_dead.retry_delivery_aria', {
+            target: delivery.destinationTarget || delivery.id,
+          })}
           title={
             delivery.inFlight ? t('outbox_dead.retry_inflight') : t('outbox_dead.retry_button')
           }
         >
           {retrying ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
           ) : (
             <RotateCcw className="h-3.5 w-3.5" />
           )}
@@ -131,8 +135,8 @@ function StatusBadge({ status, inFlight }: { status: string; inFlight: boolean }
   const { t } = useTranslation()
   const tone =
     status === 'dead'
-      ? 'border-destructive/30 bg-destructive/10 text-destructive'
-      : 'border-amber-500/30 bg-amber-500/10 text-amber-600'
+      ? 'border-red-200 bg-red-50 text-red-700'
+      : 'border-amber-300 bg-amber-50 text-amber-800'
   return (
     <div className="flex flex-col gap-1">
       <span

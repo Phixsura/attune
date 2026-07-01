@@ -105,6 +105,7 @@ describe('WorkflowTransitionSelect', () => {
         allowedNext={[progressState]}
       />,
     )
+    expect(screen.getByRole('combobox', { name: '下一状态' })).toBeInTheDocument()
     const transitionBtn = screen.getByRole('button', { name: /流转/ })
     expect(transitionBtn).toBeDisabled()
   })
