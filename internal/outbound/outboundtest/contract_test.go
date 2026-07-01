@@ -21,10 +21,11 @@ func TestConformanceRunnersExerciseGoldenAndResponseProfiles(t *testing.T) {
 	target := stubTarget()
 
 	TestEventChannel(t, EventCase{
-		Channel:      channel,
-		Target:       target,
-		Golden:       filepath.Join(t.TempDir(), "event.json"),
-		Capabilities: stubCapabilities(),
+		Channel:       channel,
+		Target:        target,
+		Golden:        filepath.Join(t.TempDir(), "event.json"),
+		ProviderShape: ProviderShapeRawWebhook,
+		Capabilities:  stubCapabilities(),
 		ResponseCases: []ResponseCase{
 			{Name: "ok", Status: http.StatusOK, WantOK: true},
 			{Name: "retry", Status: http.StatusTooManyRequests},
@@ -33,14 +34,60 @@ func TestConformanceRunnersExerciseGoldenAndResponseProfiles(t *testing.T) {
 	})
 
 	TestDigestChannel(t, DigestCase{
-		Channel:      channel,
-		Target:       target,
-		Golden:       filepath.Join(t.TempDir(), "digest.json"),
-		Capabilities: stubCapabilities(),
+		Channel:       channel,
+		Target:        target,
+		Golden:        filepath.Join(t.TempDir(), "digest.json"),
+		ProviderShape: ProviderShapeRawWebhook,
+		Capabilities:  stubCapabilities(),
 		ResponseCases: []ResponseCase{
 			{Name: "ok", Status: http.StatusNoContent, WantOK: true},
 		},
 	})
+}
+
+func TestValidateRenderCaseRequiresExecutableContractInputs(t *testing.T) {
+	valid := renderCase{
+		Golden:        "testdata/request.json",
+		ProviderShape: ProviderShapeRawWebhook,
+		ResponseCases: []ResponseCase{{Name: "ok", Status: http.StatusOK, WantOK: true}},
+	}
+	if err := validateRenderCase(valid); err != nil {
+		t.Fatalf("valid render case rejected: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		mut  func(renderCase) renderCase
+	}{
+		{
+			name: "golden",
+			mut: func(tc renderCase) renderCase {
+				tc.Golden = ""
+				return tc
+			},
+		},
+		{
+			name: "provider shape",
+			mut: func(tc renderCase) renderCase {
+				tc.ProviderShape = ""
+				return tc
+			},
+		},
+		{
+			name: "response cases",
+			mut: func(tc renderCase) renderCase {
+				tc.ResponseCases = nil
+				return tc
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateRenderCase(tc.mut(valid)); err == nil {
+				t.Fatal("misconfigured render case accepted")
+			}
+		})
+	}
 }
 
 func TestCheckGoldenReadPath(t *testing.T) {
@@ -144,7 +191,7 @@ func (stubChannel) RenderDigest(view any, dst outbound.Target) (outbound.Rendere
 func stubRendered(url string) outbound.Rendered {
 	return outbound.Rendered{
 		Build: func(ctx context.Context) (*http.Request, error) {
-			body := []byte(`{"timestamp":"2026-07-01T00:00:00Z","sign":"sig","allowed_mentions":{"parse":[]}}`)
+			body := []byte(`{"event_type":"feedback.enriched","tenant_id":"tenant-conformance","timestamp":"2026-07-01T00:00:00Z","sign":"sig","allowed_mentions":{"parse":[]}}`)
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 			if err != nil {
 				return nil, err

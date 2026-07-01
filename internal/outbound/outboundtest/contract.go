@@ -129,6 +129,9 @@ type renderCase struct {
 
 func testRendered(t *testing.T, rendered outbound.Rendered, tc renderCase) {
 	t.Helper()
+	if err := validateRenderCase(tc); err != nil {
+		t.Fatal(err)
+	}
 	if rendered.Build == nil {
 		t.Fatal("Rendered.Build must not be nil")
 	}
@@ -157,9 +160,26 @@ func testRendered(t *testing.T, rendered outbound.Rendered, tc renderCase) {
 	assertMentionDefense(t, snap, tc.Capabilities, tc.ForbiddenBody)
 	assertProviderShape(t, req, tc.Target, tc.ProviderShape)
 	checkGolden(t, tc.Golden, snap)
-	if len(tc.ResponseCases) > 0 {
-		TestResponseChecker(t, rendered.Check, tc.ResponseCases)
+	TestResponseChecker(t, rendered.Check, tc.ResponseCases)
+}
+
+func validateRenderCase(tc renderCase) error {
+	if strings.TrimSpace(tc.Golden) == "" {
+		return conformanceConfigError("Golden must be set")
 	}
+	if tc.ProviderShape == "" {
+		return conformanceConfigError("ProviderShape must be set")
+	}
+	if len(tc.ResponseCases) == 0 {
+		return conformanceConfigError("ResponseCases must not be empty")
+	}
+	return nil
+}
+
+type conformanceConfigError string
+
+func (e conformanceConfigError) Error() string {
+	return "outbound conformance misconfigured: " + string(e)
 }
 
 func buildWithCapturedLogs(

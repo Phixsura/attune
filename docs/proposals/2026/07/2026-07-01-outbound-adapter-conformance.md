@@ -437,6 +437,9 @@ The script should:
   adapter provider mocks
 - expose `ProviderScenario.Check` as the single fake-provider assertion entry
   point, so request-check failures are reported after the provider response
+- make the Go conformance runner fail at runtime when `Golden`,
+  `ProviderShape`, or `ResponseCases` is omitted, so direct package tests and
+  the repository lint gate enforce the same contract
 
 Wire the script into `scripts/check.sh` and CI's Go checks. This is the part that
 makes the acceptance criterion "new adapters cannot skip redaction or retry

@@ -107,6 +107,9 @@ under `internal/outbound/adapter/`. The gate requires a golden snapshot,
 must also include a `provider_mock_test.go` that uses `outboundtest.NewProvider`
 with `ProviderScenario.Check` so the rendered request is delivered to a
 provider-shaped local HTTP server, not only inspected as a static request.
+The Go runner also fails at runtime when `Golden`, `ProviderShape`, or
+`ResponseCases` is omitted, so local package tests and the repository lint gate
+enforce the same executable contract.
 
 Current matrix:
 
