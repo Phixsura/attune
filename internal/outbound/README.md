@@ -48,9 +48,12 @@ shared `notify.Transport` owns **shipping** (POST with retry + backoff).
    explicitly classify every HTTP status it can receive.
 9. Add `conformance_test.go` in the adapter package and call
    `outboundtest.TestEventChannel` and/or `outboundtest.TestDigestChannel`.
-10. Add stable request snapshots under `testdata/` and verify them without
+10. Add `provider_mock_test.go` in the adapter package and use
+    `outboundtest.NewProvider` to deliver a real rendered request to a local
+    provider-shaped server.
+11. Add stable request snapshots under `testdata/` and verify them without
     `ATTUNE_UPDATE_GOLDEN=1`.
-11. Run `bash scripts/lint-outbound-conformance.sh` and
+12. Run `bash scripts/lint-outbound-conformance.sh` and
     `go test ./internal/outbound/...`.
 
 ## Architecture
@@ -95,7 +98,10 @@ internal/notify/           shared Transport (POST + retry + backoff)
 Every adapter package must include `conformance_test.go` and call the shared
 `internal/outbound/outboundtest` runner. The script
 `scripts/lint-outbound-conformance.sh` enforces that shape for every package
-under `internal/outbound/adapter/`.
+under `internal/outbound/adapter/`. Each adapter package must also include a
+`provider_mock_test.go` that uses `outboundtest.NewProvider` so the rendered
+request is delivered to a provider-shaped local HTTP server, not only inspected
+as a static request.
 
 Current matrix:
 
@@ -143,3 +149,12 @@ user-controlled mention syntax. Slack escapes mrkdwn control tokens, Discord
 sets `allowed_mentions.parse` to an empty list, Lark escapes `lark_md` tag
 syntax, and GitHub Issue neutralizes user-controlled `@` tokens in issue title
 and body fields.
+
+### Provider retry hints
+
+`notify.Transport` owns retry timing. Adapters still classify provider responses
+as success, retryable, or terminal through `ResponseChecker`; when a retryable
+response also includes a valid `Retry-After` header, the transport uses that
+delay for the next attempt and clamps it to `RetryPolicy.MaxDelay` when a max is
+configured. Terminal responses never sleep or retry, even if the provider sends
+`Retry-After`.

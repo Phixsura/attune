@@ -4,6 +4,7 @@
 package notify
 
 import (
+	"net/http"
 	"testing"
 	"time"
 )
@@ -116,5 +117,41 @@ func TestNewTransport_PreservesValidMaxAttempts(t *testing.T) {
 	}
 	if tr.retry.MaxDelay != time.Minute {
 		t.Fatalf("MaxDelay = %v, want 1m", tr.retry.MaxDelay)
+	}
+}
+
+func TestRetryAfterDelay(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	future := now.Add(30 * time.Second).Format(http.TimeFormat)
+	past := now.Add(-30 * time.Second).Format(http.TimeFormat)
+
+	cases := []struct {
+		name     string
+		value    string
+		maxDelay time.Duration
+		want     time.Duration
+	}{
+		{name: "empty", value: "", want: 0},
+		{name: "seconds", value: "3", want: 3 * time.Second},
+		{name: "seconds whitespace", value: " 2 ", want: 2 * time.Second},
+		{name: "zero seconds", value: "0", want: 0},
+		{name: "negative seconds", value: "-1", want: 0},
+		{name: "invalid", value: "soon", want: 0},
+		{name: "http date", value: future, want: 30 * time.Second},
+		{name: "past http date", value: past, want: 0},
+		{name: "clamped seconds", value: "30", maxDelay: 5 * time.Second, want: 5 * time.Second},
+		{name: "clamped http date", value: future, maxDelay: 5 * time.Second, want: 5 * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := retryAfterDelay(tc.value, now, tc.maxDelay)
+			if got != tc.want {
+				t.Fatalf("retryAfterDelay(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
 	}
 }

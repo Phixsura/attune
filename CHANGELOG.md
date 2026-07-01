@@ -11,9 +11,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 - **Outbound adapter conformance harness (#167).**
   Added a shared `internal/outbound/outboundtest` suite, per-adapter golden
-  request snapshots, and a CI lint gate so outbound adapters must prove
-  response classification, redaction, and mention-safety behavior before they
-  can be added or changed.
+  request snapshots, fake-provider delivery mocks, and a CI lint gate so
+  outbound adapters must prove response classification, redaction,
+  mention-safety, and provider-shaped delivery behavior before they can be
+  added or changed.
 
 - **Terminal failure workbench for the feedback console (#159).**
   - Added a dedicated `/feedback/terminal-failures` console view that opens on terminal rows and surfaces bounded cluster summaries by failure class, routed model/channel, terminal config fingerprint, and age bucket.
@@ -75,7 +76,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - **Outbound adapter delivery safety (#167).**
   Fixed Lark webhook URL logging, GitHub issue request-body logging, GitHub 403
   classification, Lark malformed-provider-body handling, and GitHub/Lark
-  rendering of outbox-shaped envelopes and mention-bearing user text.
+  rendering of outbox-shaped envelopes and mention-bearing user text. Outbound
+  delivery retry timing now honors valid provider `Retry-After` headers on
+  retryable responses while still short-circuiting terminal failures.
 
 - **Console accessibility and keyboard triage for critical workbenches (#171).**
   - Added a dev-only `axe-core` Vitest helper and smoke coverage for selected

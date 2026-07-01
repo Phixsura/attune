@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -46,6 +48,7 @@ func SetEgressPolicy(p nethardening.Policy) { egressPolicy = p }
 type Transport struct {
 	httpClient *http.Client
 	retry      RetryPolicy
+	sleep      sleepFunc
 }
 
 // RetryPolicy describes the back-off schedule. Default: 5 attempts
@@ -87,6 +90,13 @@ type ResponseChecker func(ctx context.Context, status int, body []byte) error
 // stops retrying and returns the error.
 var ErrTerminal = errors.New("terminal failure")
 
+type attemptResult struct {
+	err        error
+	retryAfter time.Duration
+}
+
+type sleepFunc func(context.Context, time.Duration) error
+
 // NewTransport builds a Transport with the supplied retry policy. A
 // nil httpClient falls back to a sensible default (10s per-call timeout).
 func NewTransport(httpClient *http.Client, retry RetryPolicy) *Transport {
@@ -99,7 +109,7 @@ func NewTransport(httpClient *http.Client, retry RetryPolicy) *Transport {
 	if retry.MaxAttempts < 1 {
 		retry.MaxAttempts = 1
 	}
-	return ptrext.Of(Transport{httpClient: httpClient, retry: retry})
+	return ptrext.Of(Transport{httpClient: httpClient, retry: retry, sleep: sleepWithTimer})
 }
 
 // Send executes the build/post/check cycle inside a retry loop. Returns
@@ -113,25 +123,28 @@ func (t *Transport) Send(
 ) error {
 	const where = "notify.Transport.Send"
 	var lastErr error
+	var retryAfter time.Duration
 	for attempt := 1; attempt <= t.retry.MaxAttempts; attempt++ {
 		if attempt > 1 {
 			delay := t.retry.backoff(attempt - 1)
+			if retryAfter > 0 {
+				delay = retryAfter
+			}
 			logext.Infof(ctx, "[%s] retry,dest:%s,attempt:%d,delay:%s,prev_err:%+v",
 				where, label, attempt, delay, lastErr)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(delay):
+			if err := t.sleep(ctx, delay); err != nil {
+				return err
 			}
 		}
-		err := t.attempt(ctx, build, check)
-		if err == nil {
+		result := t.attempt(ctx, build, check)
+		if result.err == nil {
 			return nil
 		}
-		if errors.Is(err, ErrTerminal) {
-			return err
+		if errors.Is(result.err, ErrTerminal) {
+			return result.err
 		}
-		lastErr = err
+		lastErr = result.err
+		retryAfter = result.retryAfter
 	}
 	return fmt.Errorf("transport %s: %d attempts failed: %w",
 		label, t.retry.MaxAttempts, lastErr)
@@ -143,27 +156,31 @@ func (t *Transport) attempt(
 	ctx context.Context,
 	build RequestBuilder,
 	check ResponseChecker,
-) error {
+) attemptResult {
 	req, err := build(ctx)
 	if err != nil {
-		return Classify(fmt.Errorf("build request: %w", err), 0)
+		return attemptResult{err: Classify(fmt.Errorf("build request: %w", err), 0)}
 	}
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		return Classify(fmt.Errorf("http do: %w", err), 0)
+		return attemptResult{err: Classify(fmt.Errorf("http do: %w", err), 0)}
 	}
 	defer resp.Body.Close()
 	const maxResponseBody = 1 << 20 // 1 MiB — defense against oversized upstream responses
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
-		return Classify(fmt.Errorf("read body: %w", err), 0)
+		return attemptResult{err: Classify(fmt.Errorf("read body: %w", err), 0)}
 	}
 	// check owns the success/retry/terminal decision; pair its verdict with the
 	// status code so the dead-queue surface can report a structured failure_kind.
 	if cErr := check(ctx, resp.StatusCode, body); cErr != nil {
-		return Classify(cErr, resp.StatusCode)
+		result := attemptResult{err: Classify(cErr, resp.StatusCode)}
+		if !errors.Is(cErr, ErrTerminal) {
+			result.retryAfter = retryAfterDelay(resp.Header.Get("Retry-After"), time.Now(), t.retry.MaxDelay)
+		}
+		return result
 	}
-	return nil
+	return attemptResult{}
 }
 
 // backoff returns the delay before retry n (1-indexed: n=1 is between
@@ -175,6 +192,49 @@ func (p RetryPolicy) backoff(n int) time.Duration {
 	delay := p.BaseDelay << (n - 1) // BaseDelay * 2^(n-1)
 	if p.MaxDelay > 0 && delay > p.MaxDelay {
 		delay = p.MaxDelay
+	}
+	return delay
+}
+
+func sleepWithTimer(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func retryAfterDelay(value string, now time.Time, maxDelay time.Duration) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return clampRetryAfter(time.Duration(seconds)*time.Second, maxDelay)
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	delay := when.Sub(now)
+	if delay <= 0 {
+		return 0
+	}
+	return clampRetryAfter(delay, maxDelay)
+}
+
+func clampRetryAfter(delay, maxDelay time.Duration) time.Duration {
+	if maxDelay > 0 && delay > maxDelay {
+		return maxDelay
 	}
 	return delay
 }

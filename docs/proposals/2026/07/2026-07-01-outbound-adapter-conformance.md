@@ -52,7 +52,12 @@ with delivery-specific safety checks.
 - Add stable request fixture snapshots where the request body is intentionally
   stable, with dynamic fields normalized before comparison.
 - Add a repository gate that makes it hard to add an adapter without a
-  `conformance_test.go` file using the shared runner.
+  `conformance_test.go` file using the shared runner and a
+  `provider_mock_test.go` file using the fake-provider harness.
+- Add provider-shaped mock delivery tests so adapters prove they can send real
+  rendered requests to a local upstream, not only produce static snapshots.
+- Teach `notify.Transport` to honor valid `Retry-After` headers on retryable
+  provider responses while preserving terminal short-circuit behavior.
 - Document the outbound adapter contract in `internal/outbound/README.md`.
 - Fix adapter behavior that fails the contract, including token-in-path URL logs
   and sensitive request-body logs.
@@ -64,7 +69,7 @@ with delivery-specific safety checks.
 ### Non-goals
 
 - Do not add new outbound channels.
-- Do not change the outbox retry schedule.
+- Do not change the database outbox attempt policy.
 - Do not require live Slack, Discord, Lark, GitHub, or customer webhook
   credentials in CI.
 - Do not add a runtime plugin system. The compile-time blank-import model from
@@ -73,10 +78,6 @@ with delivery-specific safety checks.
   issue. The conformance work defines adapter and delivery-surface redaction.
   Any change to whether the notify-target list API returns full URLs should be a
   deliberate API/product decision.
-- Do not make `Retry-After` parsing part of this issue. The current
-  `ResponseChecker` receives only status and body; header-aware retry timing is a
-  separate transport interface decision.
-
 ## Current code reality
 
 | Area | Verified state | Consequence for #167 |
@@ -87,6 +88,7 @@ with delivery-specific safety checks.
 | Event send path | `sendByDestType` uses `outbound.LookupEvent`, renders once, and translates `outbound.ErrTerminal` to `notify.ErrTerminal` in [`internal/service/outbox/outbox_worker_send.go`](../../../../internal/service/outbox/outbox_worker_send.go). | Contract failures map into existing dead-queue and retry behavior. |
 | Digest send path | The digest sender uses `outbound.LookupDigest` in [`internal/service/digest/sender.go`](../../../../internal/service/digest/sender.go). | Digest-capable adapters need the same request/redaction/golden checks. |
 | Console test-send | `notify.TestSend` is registry-driven and no-retry in [`internal/notify/test_send.go`](../../../../internal/notify/test_send.go). | Adapter conformance protects both background delivery and the Test button. |
+| Provider retry hints | `notify.Transport` sees response headers and owns retry sleeps. | `Retry-After` can be honored centrally without changing the adapter `ResponseChecker` signature. |
 | Existing precedent | `internal/inbound/inboundtest` already provides a shared adapter contract. | Use the same pattern instead of inventing a new test idiom. |
 | Adapter docs | [`internal/outbound/README.md`](../../../../internal/outbound/README.md) documents how to add an adapter, but not conformance or fixtures. | README must become the adapter contract entry point. |
 
@@ -100,8 +102,8 @@ Existing adapter tests are broad but local:
 | Lark | 34 | No |
 | Slack | 42 | No |
 
-There are no outbound `conformance_test.go` files and no outbound adapter
-`testdata` snapshots today.
+At proposal start there were no outbound `conformance_test.go` files and no
+outbound adapter `testdata` snapshots.
 
 ## Acceptance criteria mapping
 
@@ -109,8 +111,10 @@ There are no outbound `conformance_test.go` files and no outbound adapter
 |---|---|---|
 | Existing adapters pass the same safety/error contract. | `internal/outbound/outboundtest` plus adapter-local `conformance_test.go` files for all five adapters. | `go test ./internal/outbound/...` fails when any adapter violates the shared runner. |
 | New adapters cannot skip redaction or retry classification tests. | `scripts/lint-outbound-conformance.sh` requires every adapter package to import and call `outboundtest`. | CI fails before adapter-specific tests can be merged without the shared runner. |
+| New adapters cannot skip provider-shaped delivery tests. | `scripts/lint-outbound-conformance.sh` also requires `provider_mock_test.go` with `outboundtest.NewProvider`. | CI fails when an adapter has only static request snapshots but no fake-provider delivery test. |
 | CI catches rendering drift. | Golden request snapshots normalize dynamic values and fail on unexpected method/header/body changes. | Snapshot diffs fail normal test runs unless intentionally updated. |
 | CI catches response drift. | Shared response profile cases exercise success, retryable, terminal, provider-code, and truncation behavior. | Response case failures show the adapter, profile, status, and expected verdict. |
+| CI catches provider retry-hint drift. | `notify.Transport` tests exercise valid, invalid, date-form, clamped, retryable, and terminal `Retry-After` cases. | Retry timing changes fail focused transport tests before they reach delivery workers. |
 | Docs explain the adapter contract. | `internal/outbound/README.md` gains a conformance checklist and current adapter matrix. | New adapter docs point to the same runner, fixtures, and profile definitions. |
 
 ## Findings to encode in the contract
@@ -126,7 +130,7 @@ There are no outbound `conformance_test.go` files and no outbound adapter
 | GitHub 403 classification has legacy drift. | `outbound.CheckGitHub` treats every 403 as retryable, while the old notify-adapter comment says secondary rate limits should be parsed from the body. | Treat 403 as retryable only when the response body indicates rate limiting; treat ordinary forbidden/bad-token 403 responses as terminal. |
 | Lark 200 with invalid JSON currently succeeds. | `checkLarkResponse` returns nil when JSON unmarshal fails. | Treat malformed or missing Lark provider JSON on HTTP 200 as terminal provider-contract failure unless it explicitly contains `StatusCode:0`. |
 | Some adapters under-read the real outbox envelope shape. | The outbox envelope stores title, urgency, rationale, and attrs under `feedback.enriched`, while TestSend uses a flatter shape. | Canonical conformance fixtures use the outbox shape and adapters must support both outbox and TestSend shapes. |
-| `ResponseChecker` cannot read headers. | The signature is `func(ctx, status, body) error`. | Rate-limit conformance covers status/body classification only. Header-aware retry timing is not part of this issue. |
+| `ResponseChecker` cannot read headers. | The signature is `func(ctx, status, body) error`, while `notify.Transport` sees the full response. | Keep classification in adapters, but let transport apply valid `Retry-After` headers only after the checker reports a retryable response. |
 
 ## Threat model
 
@@ -243,7 +247,7 @@ must not expose a "skip redaction" or "skip retry classification" escape hatch.
 If a provider cannot satisfy a profile, the exception belongs in this proposal
 or a separate proposal, not in an adapter-local test.
 
-### 3. Add adapter-local conformance tests
+### 3. Add adapter-local conformance and provider-mock tests
 
 Each adapter gets a package-local file so it can instantiate package-private
 `channel{}` values without exporting constructors:
@@ -258,6 +262,18 @@ internal/outbound/adapter/slack/conformance_test.go
 
 Each file calls `outboundtest.TestEventChannel` and, where supported,
 `outboundtest.TestDigestChannel`.
+
+Each adapter also gets a package-local `provider_mock_test.go` that uses
+`outboundtest.NewProvider` to receive a real rendered HTTP request and return a
+provider-shaped response:
+
+```text
+internal/outbound/adapter/discord/provider_mock_test.go
+internal/outbound/adapter/generic/provider_mock_test.go
+internal/outbound/adapter/githubissue/provider_mock_test.go
+internal/outbound/adapter/lark/provider_mock_test.go
+internal/outbound/adapter/slack/provider_mock_test.go
+```
 
 Expected capability declarations:
 
@@ -409,9 +425,11 @@ The script should:
 
 - list every `internal/outbound/adapter/*` package with non-test Go files
 - require `conformance_test.go`
+- require `provider_mock_test.go`
 - require an import of `internal/outbound/outboundtest`
 - require at least one `outboundtest.TestEventChannel` or
   `outboundtest.TestDigestChannel` call
+- require `outboundtest.NewProvider` in the provider mock
 
 Wire the script into `scripts/check.sh` and CI's Go checks. This is the part that
 makes the acceptance criterion "new adapters cannot skip redaction or retry
@@ -429,7 +447,8 @@ with:
 - the response-classification profiles
 - the redaction rule for URL-as-credential destinations
 - the mention-safety rule for chat and issue surfaces
-- the CI gate that requires `conformance_test.go`
+- the provider mock requirement
+- the CI gate that requires `conformance_test.go` and `provider_mock_test.go`
 - a current conformance matrix listing each adapter, supported profiles, fixture
   files, and response profile
 
@@ -440,8 +459,9 @@ The README should include a short adapter checklist:
 3. Add the `cmd/attune` blank import.
 4. Add destination type constants, migrations, config, and routing where needed.
 5. Add `conformance_test.go`.
-6. Add request snapshots.
-7. Run `go test ./internal/outbound/...` and the lint script.
+6. Add `provider_mock_test.go`.
+7. Add request snapshots.
+8. Run `go test ./internal/outbound/...` and the lint script.
 
 ## Alternatives considered
 
@@ -466,10 +486,11 @@ not carry test-only manifests just to prove test coverage.
 
 ### Redesign `ResponseChecker` to include headers
 
-Rejected for this issue. Header-aware retry timing may be valuable, especially
-for `Retry-After`, but the issue's acceptance criteria can be satisfied with the
-current status/body checker and existing outbox backoff. A signature change would
-touch transport callers and increase blast radius.
+Rejected. Header-aware retry timing is valuable, especially for `Retry-After`,
+but adapters do not need headers to decide success versus retryable versus
+terminal. The lower-risk design keeps the adapter `ResponseChecker` signature as
+status/body and lets `notify.Transport` apply `Retry-After` only after the
+checker has already returned a retryable verdict.
 
 ### Use live provider contract tests
 
@@ -490,6 +511,9 @@ fixtures and request snapshots.
   runner, not that every possible branch is covered. Mitigation: keep adapter
   local tests for provider-specific edge cases and use coverage as a secondary
   signal.
+- `Retry-After` can ask for delays longer than attune's configured retry cap.
+  Mitigation: clamp provider hints to `RetryPolicy.MaxDelay` when a max is
+  configured, and ignore invalid or past values.
 - Redaction boundaries can be confused with product display boundaries.
   Mitigation: explicitly define this issue's boundary as adapter logs, delivery
   errors, audit snapshots, and operator delivery surfaces. NotifyTarget list API
@@ -500,11 +524,13 @@ fixtures and request snapshots.
 ## Implementation plan
 
 1. Add `internal/outbound/outboundtest` with canonical fixtures, log capture,
-   golden comparison, and response case helpers.
+   golden comparison, fake-provider, and response case helpers.
 2. Add adapter-local `conformance_test.go` files for generic, GitHub Issue,
    Slack, Discord, and Lark.
-3. Add adapter-local `testdata` snapshots for stable event and digest requests.
-4. Fix adapter failures exposed by the suite:
+3. Add adapter-local `provider_mock_test.go` files for generic, GitHub Issue,
+   Slack, Discord, and Lark.
+4. Add adapter-local `testdata` snapshots for stable event and digest requests.
+5. Fix adapter failures exposed by the suite:
    - redact Lark webhook URLs before logging
    - remove or sanitize GitHub issue body logging
    - neutralize GitHub mention tokens in user-controlled issue fields
@@ -513,12 +539,14 @@ fixtures and request snapshots.
    - parse GitHub 403 bodies so only rate-limit 403 responses are retryable
    - make GitHub Issue and Lark read the nested `feedback.enriched` outbox
      shape as well as the flatter TestSend shape
-5. Add `scripts/lint-outbound-conformance.sh` and wire it into `scripts/check.sh`
+6. Make `notify.Transport` honor valid `Retry-After` headers on retryable
+   responses while ignoring them for terminal responses.
+7. Add `scripts/lint-outbound-conformance.sh` and wire it into `scripts/check.sh`
    and CI.
-6. Update `internal/outbound/README.md`.
-7. Add a `CHANGELOG.md` entry under `### Fixed` or `### Changed`, depending on
+8. Update `internal/outbound/README.md`.
+9. Add a `CHANGELOG.md` entry under `### Fixed` or `### Changed`, depending on
    the final behavior changes.
-8. Run the verification matrix and cite the output in the PR.
+10. Run the verification matrix and cite the output in the PR.
 
 ## Verification
 
@@ -535,8 +563,11 @@ make ci-check
 Expected coverage behavior:
 
 - all five adapters have a conformance test
+- all five adapters have a provider mock test using `outboundtest.NewProvider`
 - all event-capable adapters pass response classification cases
 - all digest-capable adapters pass digest rendering and redaction cases
+- retryable provider responses with valid `Retry-After` influence the next
+  transport sleep, invalid hints are ignored, and terminal responses never retry
 - request snapshot drift fails CI unless intentionally updated
 - URL-as-credential tokens do not appear in captured logs or delivery errors
 - GitHub 403 forbidden responses are terminal while GitHub rate-limit 403

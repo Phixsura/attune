@@ -3,6 +3,7 @@
 package outboundtest
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -28,6 +30,12 @@ type ProviderRequest struct {
 	RawQuery string
 	Header   http.Header
 	Body     []byte
+}
+
+// ProviderResult is one delivered adapter request and checked provider response.
+type ProviderResult struct {
+	Status int
+	Body   []byte
 }
 
 // BodyString returns the captured request body as text.
@@ -92,6 +100,43 @@ func (p *FakeProvider) CallCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.requests)
+}
+
+// AssertPostJSON verifies common JSON webhook request invariants.
+func AssertPostJSON(t *testing.T, req ProviderRequest) {
+	t.Helper()
+	if req.Method != http.MethodPost {
+		t.Fatalf("method = %s, want POST", req.Method)
+	}
+	if !strings.HasPrefix(req.Header.Get("Content-Type"), "application/json") {
+		t.Fatalf("Content-Type = %q, want application/json", req.Header.Get("Content-Type"))
+	}
+	if req.Header.Get("User-Agent") == "" {
+		t.Fatal("User-Agent must be set")
+	}
+}
+
+// SendRendered posts the rendered request to its target and runs the adapter's
+// response checker against the provider response.
+func SendRendered(t *testing.T, rendered outbound.Rendered) ProviderResult {
+	t.Helper()
+	req, err := rendered.Build(context.Background())
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post rendered request: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read provider response body: %v", err)
+	}
+	if err := rendered.Check(context.Background(), resp.StatusCode, body); err != nil {
+		t.Fatalf("Check(status=%d, body=%q): %v", resp.StatusCode, string(body), err)
+	}
+	return ProviderResult{Status: resp.StatusCode, Body: body}
 }
 
 func (p *FakeProvider) serveHTTP(w http.ResponseWriter, r *http.Request) {

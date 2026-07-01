@@ -72,6 +72,82 @@ func TestTransport_RetryThenSuccess(t *testing.T) {
 	}
 }
 
+func TestTransport_UsesRetryAfterWhenRetryable(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.Header().Set("Retry-After", "2")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tr := NewTransport(nil, RetryPolicy{
+		MaxAttempts: 2,
+		BaseDelay:   time.Minute,
+		MaxDelay:    1500 * time.Millisecond,
+	})
+	var delays []time.Duration
+	tr.sleep = func(ctx context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	}
+	build := func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, bytes.NewReader([]byte(`{}`)))
+	}
+	check := func(_ context.Context, status int, body []byte) error {
+		if status >= 200 && status < 300 {
+			return nil
+		}
+		return errors.New("retry-me")
+	}
+
+	if err := tr.Send(context.Background(), "retry-after", build, check); err != nil {
+		t.Fatalf("want nil after retry, got %v", err)
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("want 2 attempts, got %d", attempts.Load())
+	}
+	if len(delays) != 1 || delays[0] != 1500*time.Millisecond {
+		t.Fatalf("delays = %v, want [1.5s] from clamped Retry-After", delays)
+	}
+}
+
+func TestTransport_IgnoresRetryAfterOnTerminal(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Retry-After", "2")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	tr := NewTransport(nil, fastRetry(3))
+	tr.sleep = func(ctx context.Context, delay time.Duration) error {
+		t.Fatalf("terminal response must not sleep before retry, got delay %s", delay)
+		return nil
+	}
+	build := func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, bytes.NewReader([]byte(`{}`)))
+	}
+	check := func(_ context.Context, status int, body []byte) error {
+		if status == http.StatusForbidden {
+			return ErrTerminal
+		}
+		return nil
+	}
+
+	err := tr.Send(context.Background(), "terminal-retry-after", build, check)
+	if !errors.Is(err, ErrTerminal) {
+		t.Fatalf("want ErrTerminal, got %v", err)
+	}
+	if attempts.Load() != 1 {
+		t.Fatalf("terminal must stop after 1 attempt, got %d", attempts.Load())
+	}
+}
+
 func TestTransport_TerminalShortCircuits(t *testing.T) {
 	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
