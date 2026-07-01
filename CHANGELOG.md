@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Outbound adapter conformance harness (#167).**
+  Added a shared `internal/outbound/outboundtest` suite, per-adapter golden
+  request snapshots, fake-provider delivery mocks, and a CI lint gate so
+  outbound adapters must prove response classification, redaction,
+  mention-safety, and provider-shaped delivery behavior before they can be
+  added or changed. The harness now also validates provider-specific payload
+  shapes, captures fake-provider assertion failures after the HTTP response,
+  requires adapters to declare golden snapshots, provider shapes, shared
+  response profiles, and async-safe provider checks in both the CI lint gate
+  and the Go conformance runner, removes the older goroutine-local fake-provider
+  assertion entry point, and includes opt-in live smoke tests for raw webhook,
+  Slack, Discord, Lark, and GitHub issue delivery.
+
+- **Outbound delivery observability (#167).**
+  Added low-cardinality transport metrics for provider delivery attempts,
+  end-to-end delivery duration, and honored `Retry-After` responses, with
+  generated Grafana dashboard coverage and metrics reference documentation.
+
 - **Terminal failure workbench for the feedback console (#159).**
   - Added a dedicated `/feedback/terminal-failures` console view that opens on terminal rows and surfaces bounded cluster summaries by failure class, routed model/channel, terminal config fingerprint, and age bucket.
   - The workbench now highlights a global priority cluster, with evidence panels for the first cluster in each dimension so operators can see the strongest signal before drilling into samples.
@@ -65,6 +83,26 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     still injecting the contract headers.
 
 ### Fixed
+
+- **Outbound adapter delivery safety (#167).**
+  Fixed Lark webhook URL logging, GitHub issue request-body logging, GitHub 403
+  classification, Lark malformed-provider-body handling, and GitHub/Lark
+  rendering of outbox-shaped envelopes and mention-bearing user text. Outbound
+  delivery retry timing now honors valid provider `Retry-After` headers on
+  retryable responses while still short-circuiting terminal failures, clamps
+  oversized retry backoff without overflowing, and handles non-positive render
+  truncation limits safely. GitHub issue delivery now sanitizes derived labels
+  before sending them to the provider and no longer relies on a package-global
+  API-base override in provider-mock tests. Lark digest delivery now renders
+  structured cards for JSON-roundtripped digest views, and Lark note elements
+  now use the provider's string `content` shape. Outbox transport labels now
+  carry a bounded destination type so shared delivery metrics can attribute
+  retries and terminal outcomes without high-cardinality labels.
+
+- **Local duplication gate.**
+  Aligned `scripts/check.sh` and the contributor guide with the CI-backed
+  `.jscpd.json` configuration, so local checks use the same threshold and test
+  fixture exclusions as pull requests.
 
 - **Console accessibility and keyboard triage for critical workbenches (#171).**
   - Added a dev-only `axe-core` Vitest helper and smoke coverage for selected

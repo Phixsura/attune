@@ -68,6 +68,7 @@ jobs:
               - 'Dockerfile'
               - 'codecov.yml'
               - 'scripts/lint-integration-layout.sh'
+              - 'scripts/lint-outbound-conformance.sh'
               - '.github/workflows/ci.yml'
             console:
               - 'console/**'
@@ -194,6 +195,7 @@ jobs:
           cache-dependency-path: go.sum # built-in cache, keyed on go.sum
       - run: go vet ./...
       - run: go build ./...
+      - run: bash scripts/lint-outbound-conformance.sh
       - name: Test (race + coverage)
         run: go test -race -covermode=atomic -coverprofile=coverage.txt ./...
       - name: Go coverage summary

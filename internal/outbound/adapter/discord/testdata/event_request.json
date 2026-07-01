@@ -1,0 +1,41 @@
+{
+  "body": {
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "color": 14687834,
+        "description": "ATTUNE_CONFORMANCE_FEEDBACK_MARKER @channel @here @everyone \u003c@U123456\u003e \u003c!here\u003e \u003c!everyone\u003e \u003cat id=all\u003e\u003c/at\u003e @octocat @org/team",
+        "fields": [
+          {
+            "inline": true,
+            "name": "Severity",
+            "value": "major"
+          },
+          {
+            "inline": true,
+            "name": "Category",
+            "value": "checkout"
+          },
+          {
+            "inline": true,
+            "name": "Source",
+            "value": "web"
+          }
+        ],
+        "footer": {
+          "text": "via Attune"
+        },
+        "timestamp": "\u003ctimestamp\u003e",
+        "title": "🚨 [Urgent] Checkout mention safety"
+      }
+    ]
+  },
+  "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "User-Agent": "attune/1.0"
+  },
+  "method": "POST",
+  "url": "https://discord.com"
+}

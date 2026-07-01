@@ -41,6 +41,9 @@ bash scripts/lint-integration-layout.sh
 step "lint-http-response-emission"
 bash scripts/lint-http-response-emission.sh
 
+step "lint-outbound-conformance"
+bash scripts/lint-outbound-conformance.sh
+
 step "go test ./..."
 go test ./...
 
@@ -55,8 +58,8 @@ lizard . -l go -C 10 -T nloc=100 -w || {
 }
 
 if [[ "$skip_jscpd" -eq 0 ]]; then
-  step "jscpd (duplication < 4%, generated proto ignored)"
-  npx -y jscpd . -f go -i '**/*.pb.go' -t 4 --silent
+  step "jscpd (duplication < 5%, test files excluded)"
+  npx -y jscpd . --silent
 fi
 
 printf '\n\033[1;32m✓ all gates green\033[0m\n'

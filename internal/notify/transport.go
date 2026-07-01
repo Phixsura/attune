@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -46,6 +49,7 @@ func SetEgressPolicy(p nethardening.Policy) { egressPolicy = p }
 type Transport struct {
 	httpClient *http.Client
 	retry      RetryPolicy
+	sleep      sleepFunc
 }
 
 // RetryPolicy describes the back-off schedule. Default: 5 attempts
@@ -87,6 +91,16 @@ type ResponseChecker func(ctx context.Context, status int, body []byte) error
 // stops retrying and returns the error.
 var ErrTerminal = errors.New("terminal failure")
 
+const maxDuration = time.Duration(1<<63 - 1)
+
+type attemptResult struct {
+	err        error
+	retryAfter time.Duration
+	status     int
+}
+
+type sleepFunc func(context.Context, time.Duration) error
+
 // NewTransport builds a Transport with the supplied retry policy. A
 // nil httpClient falls back to a sensible default (10s per-call timeout).
 func NewTransport(httpClient *http.Client, retry RetryPolicy) *Transport {
@@ -99,7 +113,7 @@ func NewTransport(httpClient *http.Client, retry RetryPolicy) *Transport {
 	if retry.MaxAttempts < 1 {
 		retry.MaxAttempts = 1
 	}
-	return ptrext.Of(Transport{httpClient: httpClient, retry: retry})
+	return ptrext.Of(Transport{httpClient: httpClient, retry: retry, sleep: sleepWithTimer})
 }
 
 // Send executes the build/post/check cycle inside a retry loop. Returns
@@ -113,26 +127,44 @@ func (t *Transport) Send(
 ) error {
 	const where = "notify.Transport.Send"
 	var lastErr error
+	var retryAfter time.Duration
+	delivery := newDeliveryMetrics(label)
+	sleep := t.sleep
+	if sleep == nil {
+		sleep = sleepWithTimer
+	}
 	for attempt := 1; attempt <= t.retry.MaxAttempts; attempt++ {
 		if attempt > 1 {
 			delay := t.retry.backoff(attempt - 1)
+			if retryAfter > 0 {
+				delay = retryAfter
+			}
 			logext.Infof(ctx, "[%s] retry,dest:%s,attempt:%d,delay:%s,prev_err:%+v",
 				where, label, attempt, delay, lastErr)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(delay):
+			if err := sleep(ctx, delay); err != nil {
+				delivery.finish("canceled")
+				return err
 			}
 		}
-		err := t.attempt(ctx, build, check)
-		if err == nil {
+		result := t.attempt(ctx, build, check)
+		if result.err == nil {
+			delivery.attempt("success", result.status)
+			delivery.finish("success")
 			return nil
 		}
-		if errors.Is(err, ErrTerminal) {
-			return err
+		if errors.Is(result.err, ErrTerminal) {
+			delivery.attempt("terminal", result.status)
+			delivery.finish("terminal")
+			return result.err
 		}
-		lastErr = err
+		delivery.attempt("retryable", result.status)
+		lastErr = result.err
+		retryAfter = result.retryAfter
+		if retryAfter > 0 {
+			delivery.retryAfter()
+		}
 	}
+	delivery.finish("exhausted")
 	return fmt.Errorf("transport %s: %d attempts failed: %w",
 		label, t.retry.MaxAttempts, lastErr)
 }
@@ -143,38 +175,146 @@ func (t *Transport) attempt(
 	ctx context.Context,
 	build RequestBuilder,
 	check ResponseChecker,
-) error {
+) attemptResult {
 	req, err := build(ctx)
 	if err != nil {
-		return Classify(fmt.Errorf("build request: %w", err), 0)
+		return attemptResult{err: Classify(fmt.Errorf("build request: %w", err), 0)}
 	}
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		return Classify(fmt.Errorf("http do: %w", err), 0)
+		return attemptResult{err: Classify(fmt.Errorf("http do: %w", err), 0)}
 	}
 	defer resp.Body.Close()
 	const maxResponseBody = 1 << 20 // 1 MiB — defense against oversized upstream responses
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
-		return Classify(fmt.Errorf("read body: %w", err), 0)
+		return attemptResult{err: Classify(fmt.Errorf("read body: %w", err), resp.StatusCode), status: resp.StatusCode}
 	}
 	// check owns the success/retry/terminal decision; pair its verdict with the
 	// status code so the dead-queue surface can report a structured failure_kind.
 	if cErr := check(ctx, resp.StatusCode, body); cErr != nil {
-		return Classify(cErr, resp.StatusCode)
+		result := attemptResult{err: Classify(cErr, resp.StatusCode), status: resp.StatusCode}
+		if !errors.Is(cErr, ErrTerminal) {
+			result.retryAfter = retryAfterDelay(resp.Header.Get("Retry-After"), time.Now(), t.retry.MaxDelay)
+		}
+		return result
 	}
-	return nil
+	return attemptResult{status: resp.StatusCode}
+}
+
+type deliveryMetrics struct {
+	destinationType string
+	started         time.Time
+}
+
+func newDeliveryMetrics(label string) deliveryMetrics {
+	return deliveryMetrics{
+		destinationType: metricDestination(label),
+		started:         time.Now(),
+	}
+}
+
+func (m deliveryMetrics) attempt(result string, status int) {
+	metrics.OutboundDeliveryAttemptsTotal.
+		WithLabelValues(m.destinationType, result, metricStatus(status)).
+		Inc()
+}
+
+func (m deliveryMetrics) finish(result string) {
+	metrics.OutboundDeliveryDuration.
+		WithLabelValues(m.destinationType, result).
+		Observe(time.Since(m.started).Seconds())
+}
+
+func (m deliveryMetrics) retryAfter() {
+	metrics.OutboundRetryAfterTotal.WithLabelValues(m.destinationType).Inc()
+}
+
+func metricDestination(label string) string {
+	normalized := strings.ReplaceAll(strings.ToLower(label), "_", "-")
+	for _, value := range []string{"raw-webhook", "github-issue", "slack", "discord", "lark"} {
+		if strings.Contains(normalized, value) {
+			return value
+		}
+	}
+	return "other"
+}
+
+func metricStatus(status int) string {
+	if status <= 0 {
+		return "0"
+	}
+	return strconv.Itoa(status)
 }
 
 // backoff returns the delay before retry n (1-indexed: n=1 is between
 // attempt 1 and 2). Doubles each step, capped at MaxDelay.
 func (p RetryPolicy) backoff(n int) time.Duration {
-	if p.BaseDelay <= 0 {
+	if p.BaseDelay <= 0 || n <= 0 {
 		return 0
 	}
-	delay := p.BaseDelay << (n - 1) // BaseDelay * 2^(n-1)
-	if p.MaxDelay > 0 && delay > p.MaxDelay {
-		delay = p.MaxDelay
+	delay := p.BaseDelay
+	if p.MaxDelay > 0 && delay >= p.MaxDelay {
+		return p.MaxDelay
+	}
+	for shifts := n - 1; shifts > 0; shifts-- {
+		if delay > maxDuration/2 {
+			return clampRetryAfter(maxDuration, p.MaxDelay)
+		}
+		delay *= 2
+		if p.MaxDelay > 0 && delay >= p.MaxDelay {
+			return p.MaxDelay
+		}
+	}
+	return delay
+}
+
+func sleepWithTimer(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func retryAfterDelay(value string, now time.Time, maxDelay time.Duration) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		if maxDelay > 0 && seconds > int64(maxDelay/time.Second) {
+			return maxDelay
+		}
+		const maxDurationSeconds = int64(maxDuration / time.Second)
+		if seconds > maxDurationSeconds {
+			return maxDuration
+		}
+		return clampRetryAfter(time.Duration(seconds)*time.Second, maxDelay)
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	delay := when.Sub(now)
+	if delay <= 0 {
+		return 0
+	}
+	return clampRetryAfter(delay, maxDelay)
+}
+
+func clampRetryAfter(delay, maxDelay time.Duration) time.Duration {
+	if maxDelay > 0 && delay > maxDelay {
+		return maxDelay
 	}
 	return delay
 }

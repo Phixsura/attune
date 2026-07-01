@@ -9,7 +9,7 @@ and is opt-in locally because it needs Docker. The live tier is
 |---|---|---|---|
 | **Unit** | ✅ runs on `go test ./...` and in CI | $0 | Pure logic + handler/repo wiring + LLM client wire-shape via `httptest` mocks. |
 | **Integration** | ✅ CI on Go changes; local via `make test-integration` | Docker only | Real PostgreSQL migrations, repos, service/repo transaction paths, and outbox drain smoke tests. |
-| **Live** | ❌ opt-in (`make test-live` + `//go:build live`) | real LLM tokens | One round-trip per backend × {free-form, structured}, 8 tests total. |
+| **Live** | ❌ opt-in (`make test-live` + `//go:build live`) | real API calls | LLM provider round-trips and outbound provider smoke deliveries, all env-gated. |
 
 ## Unit tier
 
@@ -85,8 +85,8 @@ ingest → enrich → outbox queue → outbox drain path.
 
 The live tier is segregated three ways so it cannot accidentally run:
 
-1. **Separate directory** — `test/live/llmclient/` (not next to the
-   unit tests under `internal/infra/llmclient/`).
+1. **Separate directory** — `test/live/llmclient/` and
+   `test/live/outbound/` (not next to unit tests under `internal/`).
 2. **Build tag** — every file in `test/live/...` carries
    `//go:build live`; without the tag, `go test ./...` literally
    compiles to zero test functions in those files.
@@ -94,7 +94,7 @@ The live tier is segregated three ways so it cannot accidentally run:
    that has no `KEY` env var calls `t.Skipf`, so partial runs are
    first-class.
 
-### Env-var matrix (per backend)
+### LLM env-var matrix
 
 | Backend | KEY (required) | BASE (optional) | MODEL (optional, default) |
 |---|---|---|---|
@@ -109,6 +109,23 @@ at `https://api.openai.com` or your vLLM / ollama / oneapi host).
 The three SDK-backed backends inherit the vendor's default host when
 `BASE` is empty (`api.openai.com` / `api.anthropic.com` /
 `generativelanguage.googleapis.com`).
+
+### Outbound env-var matrix
+
+These tests post real provider messages. Use sandbox channels/webhooks and
+repository fixtures; never point them at a customer-facing channel.
+
+| Provider | Required env | Optional env | Behavior |
+|---|---|---|---|
+| `raw-webhook` | `E2E_OUTBOUND_RAW_WEBHOOK_URL` | `E2E_OUTBOUND_RAW_WEBHOOK_SECRET` | POSTs the generic Attune event payload and accepts any adapter-success 2xx response. |
+| `slack` | `E2E_OUTBOUND_SLACK_WEBHOOK_URL` | — | POSTs one Block Kit event message to the webhook's channel. |
+| `discord` | `E2E_OUTBOUND_DISCORD_WEBHOOK_URL` | — | POSTs one embed event message to the webhook's channel. |
+| `lark` | `E2E_OUTBOUND_LARK_WEBHOOK_URL` | `E2E_OUTBOUND_LARK_SECRET` | POSTs one interactive card; when the secret is set, the adapter signs the request. |
+| `github-issue` | `E2E_OUTBOUND_GITHUB_REPO_URL`, `E2E_OUTBOUND_GITHUB_TOKEN`, `E2E_OUTBOUND_GITHUB_CREATE_ISSUE=1` | — | Creates one issue through the adapter, verifies GitHub's response, then closes the issue as completed. |
+
+The GitHub test requires the extra `E2E_OUTBOUND_GITHUB_CREATE_ISSUE=1`
+acknowledgement because it mutates a real repository even though cleanup closes
+the created issue.
 
 ### Recipes
 
@@ -148,9 +165,18 @@ E2E_OPENAI_COMPAT_MODEL=Qwen2.5-7B-Instruct \
 make test-live-list
 ```
 
+**Run only outbound live smoke tests:**
+
+```bash
+E2E_OUTBOUND_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/... \
+  go test -tags=live -count=1 -run '^TestLive_Outbound' ./test/live/outbound
+```
+
 ## Cost guardrails
 
-Live tests are inexpensive by design but not free. Each test:
+Live tests are inexpensive by design but not free.
+
+LLM tests:
 
 - Uses a small, cheap default model (`gpt-4o-mini`,
   `claude-sonnet-4-5`, `gemini-2.0-flash`). Override with the
@@ -165,14 +191,22 @@ A full 8-backend sweep against the named vendor defaults costs roughly
 US$0.01–0.05 at 2026-06 rates. Always re-check before pointing at a
 flagship model.
 
+Outbound tests:
+
+- Send exactly one provider request per configured webhook.
+- Use sandbox content with no customer data and no active mentions.
+- Mutate GitHub only when `E2E_OUTBOUND_GITHUB_CREATE_ISSUE=1` is set, and close
+  the issue during test cleanup.
+- Use a 20s HTTP timeout per provider request.
+
 ## Why not in CI?
 
 Live tests do **not** run in PR or push CI. Industry convergence
 (AWS SDK Go v2, sashabaranov/go-openai, langchaingo) is that paid
-calls only run on a dedicated workflow — never on every contributor's
-push. attune does not yet ship that workflow; when it does it will be
-a `workflow_dispatch`-triggered file under `.github/workflows/`
-referencing the `E2E_*` secrets.
+calls and provider webhooks only run on a dedicated workflow — never on every
+contributor's push. attune does not yet ship that workflow; when it does it will
+be a `workflow_dispatch`-triggered file under `.github/workflows/` referencing
+the `E2E_*` secrets.
 
 If you have a sandbox key and want to add this workflow, open an issue
 referencing this section and the multi-protocol LLM client proposal

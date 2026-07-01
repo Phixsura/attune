@@ -137,6 +137,16 @@ func TestFormatAttrRows(t *testing.T) {
 	}
 }
 
+func TestNeutralizeGitHubMentions(t *testing.T) {
+	t.Parallel()
+
+	input := "hello  @octocat\n<@U123456> and @org/team"
+	want := "hello  @\u200doctocat\n<@\u200dU123456> and @\u200dorg/team"
+	if got := neutralizeGitHubMentions(input); got != want {
+		t.Fatalf("neutralizeGitHubMentions = %q, want %q", got, want)
+	}
+}
+
 func TestBuildLabels(t *testing.T) {
 	t.Parallel()
 
@@ -153,6 +163,7 @@ func TestBuildLabels(t *testing.T) {
 		{"any slice attr", map[string]any{"modules": []any{"auth", "billing"}}, false, []string{"attune/feedback", "attune/modules-auth", "attune/modules-billing"}},
 		{"empty string skipped", map[string]any{"kind": ""}, false, []string{"attune/feedback"}},
 		{"sorted by key", map[string]any{"z": "last", "a": "first"}, false, []string{"attune/feedback", "attune/a-first", "attune/z-last"}},
+		{"duplicates removed", map[string]any{"kind": []any{"Bug", "bug", "bug!"}}, false, []string{"attune/feedback", "attune/kind-bug"}},
 	}
 
 	for _, tt := range tests {
@@ -162,6 +173,37 @@ func TestBuildLabels(t *testing.T) {
 				t.Errorf("buildLabels(%v, %v) = %v, want %v", tt.attrs, tt.urgent, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildLabels_SanitizesProviderLabels(t *testing.T) {
+	t.Parallel()
+
+	got := buildLabels(map[string]any{
+		"Category Name!": " Checkout / Payments @channel Needs Immediate Review With More Than Fifty Characters ",
+		"empty-value":    "!!!",
+		"team":           []string{" Core Platform ", "Core/Platform"},
+	}, false)
+
+	for _, label := range got {
+		if len([]rune(label)) > githubLabelMaxRunes {
+			t.Fatalf("label %q has %d runes, want <= %d", label, len([]rune(label)), githubLabelMaxRunes)
+		}
+		if strings.ContainsAny(label, " @") {
+			t.Fatalf("label %q kept unsafe whitespace or mention characters", label)
+		}
+	}
+	if containsString(got, "attune/empty-value") {
+		t.Fatalf("labels = %v, want punctuation-only value skipped", got)
+	}
+	if !containsString(got, "attune/team-core-platform") {
+		t.Fatalf("labels = %v, want sanitized team label", got)
+	}
+	if countString(got, "attune/team-core-platform") != 1 {
+		t.Fatalf("labels = %v, want duplicate sanitized labels collapsed", got)
+	}
+	if !containsPrefix(got, "attune/category-name-checkout-payments-channel") {
+		t.Fatalf("labels = %v, want sanitized truncated category label", got)
 	}
 }
 
@@ -179,6 +221,7 @@ func TestTruncate(t *testing.T) {
 		{"exact length", "hello", 5, "hello"},
 		{"truncate", "hello world", 5, "hello"},
 		{"zero length", "hello", 0, ""},
+		{"negative length", "hello", -1, ""},
 	}
 
 	for _, tt := range tests {
@@ -189,6 +232,44 @@ func TestTruncate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRenderEvent_UsesPerChannelAPIBase(t *testing.T) {
+	t.Parallel()
+
+	c := ptrext.Of(channel{apiBase: "https://example.test/api/"})
+	rendered, err := c.RenderEvent(ptrext.Of(outbound.Envelope{
+		Feedback: map[string]any{"id": float64(1), "title": "t"},
+	}), outbound.Target{URL: "https://github.com/owner/repo", Secret: "token"})
+	if err != nil {
+		t.Fatalf("RenderEvent: %v", err)
+	}
+	req, err := rendered.Build(context.Background())
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if got := req.URL.String(); got != "https://example.test/api/repos/owner/repo/issues" {
+		t.Fatalf("request URL = %q, want per-channel API base", got)
+	}
+}
+
+func containsPrefix(values []string, prefix string) bool {
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func countString(values []string, want string) int {
+	count := 0
+	for _, value := range values {
+		if value == want {
+			count++
+		}
+	}
+	return count
 }
 
 func TestChannelID(t *testing.T) {

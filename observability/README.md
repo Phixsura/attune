@@ -42,6 +42,9 @@ exposition plus the portable assets in this directory.
 | `attune_enrichment_terminal_failures_total` | counter | `tenant` | feedback rows that exhausted enrichment retries and stopped in `failed` (#64) |
 | `attune_enrichment_terminal_failures_by_reason_total` | counter | `tenant`, `reason_class` | terminal enrichment failures split by stable reason class |
 | `attune_notify_failures_total` | counter | `destination_type`, `reason` | notifier push failures |
+| `attune_outbound_delivery_attempts_total` | counter | `destination_type`, `result`, `status` | outbound provider delivery attempts, including retryable and terminal responses |
+| `attune_outbound_delivery_duration_seconds` | histogram | `destination_type`, `result` | end-to-end outbound provider delivery duration, including retry waits |
+| `attune_outbound_retry_after_total` | counter | `destination_type` | retryable outbound provider responses that supplied `Retry-After` |
 | `attune_outbox_lag_seconds` | gauge | — | age of the oldest pending outbox row (0 = empty) |
 | `attune_outbox_dead_rows` | gauge | — | notify_outbox rows in the terminal `dead` state (dead-letter depth) |
 | `attune_claim_contention_total` | counter | — | enricher `tryClaim` lost to another worker |
@@ -129,6 +132,8 @@ Label values:
 - enrich `result` — `ok` · `llm_err` · `parse_err` · `other_err` · `db_err`.
 - `destination_type` — `raw-webhook` · `slack` · `lark` · `discord` · `github-issue`.
 - `reason` — `transport` · `terminal`.
+- outbound `result` — `success` · `retryable` · `terminal` · `exhausted` · `canceled`.
+- outbound `status` — HTTP status code, or `0` when no response was received.
 - `decision` — `ignore` · `fast` · `full`.
 - guard `stage` — `llm_input` · `llm_output` · `outbound` · `tool_call`.
 - guard `action` — `audit` · `redact` · `hash` · `tokenize` · `block`.

@@ -180,6 +180,8 @@ func TestCounterVecLabels(t *testing.T) {
 	EnrichSuggestedAttrsTotal.WithLabelValues("t", "category")
 	EnrichAttrsRejectedTotal.WithLabelValues("t")
 	NotifyFailuresTotal.WithLabelValues("raw-webhook", "transport")
+	OutboundDeliveryAttemptsTotal.WithLabelValues("slack", "success", "200")
+	OutboundRetryAfterTotal.WithLabelValues("slack")
 	IngestRateLimitTotal.WithLabelValues("t")
 	TriageDecisionsTotal.WithLabelValues("t", "full")
 	GuardActionsTotal.WithLabelValues("t", "enrich", "pii", "email", "redact")
@@ -225,6 +227,7 @@ func TestHistogramVecLabels(t *testing.T) {
 
 	EnrichDuration.WithLabelValues("t", "freeform", "ok").Observe(1.5)
 	EnrichAttrsSizeBytes.WithLabelValues("t").Observe(512)
+	OutboundDeliveryDuration.WithLabelValues("slack", "success").Observe(0.1)
 	EmbedDuration.WithLabelValues("t").Observe(0.3)
 	ReplyDraftDuration.WithLabelValues("t").Observe(2.0)
 	DigestDuration.WithLabelValues("t").Observe(5.0)

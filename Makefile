@@ -66,19 +66,25 @@ observability-load-e2e: ## Send load and verify metrics via Prometheus/Grafana. 
 #
 # `test` is the default unit tier — runs on every contributor's machine
 # and in CI with no external dependencies. `test-live` is opt-in and
-# hits real LLM endpoints; the `live` build tag ensures `go test ./...`
+# hits real external endpoints; the `live` build tag ensures `go test ./...`
 # cannot accidentally enter those files.
 
 test: ## Unit tier — no external services, no API keys needed.
 	go test -short ./...
 
-test-live: ## Live tier — runs test/live/... against real LLM endpoints. See docs/testing.md.
+test-live: ## Live tier — runs test/live/... against real external endpoints. See docs/testing.md.
 	go test -tags=live -count=1 -timeout=10m -run '^TestLive_' ./test/live/...
 
 test-live-list: ## Show which live backends would run given current env.
+	@echo "LLM:"
 	@for v in E2E_OPENAI_COMPAT_KEY E2E_OPENAI_RESPONSES_KEY E2E_ANTHROPIC_KEY E2E_GEMINI_KEY; do \
 		if [ -n "$${!v}" ]; then echo "  ✓ $$v set"; else echo "  ✗ $$v unset (test would skip)"; fi; \
 	done
+	@echo "Outbound:"
+	@for v in E2E_OUTBOUND_RAW_WEBHOOK_URL E2E_OUTBOUND_SLACK_WEBHOOK_URL E2E_OUTBOUND_DISCORD_WEBHOOK_URL E2E_OUTBOUND_LARK_WEBHOOK_URL E2E_OUTBOUND_GITHUB_REPO_URL E2E_OUTBOUND_GITHUB_TOKEN; do \
+		if [ -n "$${!v}" ]; then echo "  ✓ $$v set"; else echo "  ✗ $$v unset (test would skip)"; fi; \
+	done
+	@if [ -n "$$E2E_OUTBOUND_GITHUB_CREATE_ISSUE" ]; then echo "  ✓ E2E_OUTBOUND_GITHUB_CREATE_ISSUE set"; else echo "  ✗ E2E_OUTBOUND_GITHUB_CREATE_ISSUE unset (GitHub issue test would skip)"; fi
 
 # IO integration tier — real Postgres smoke suites under test/integration.
 # Requires Docker locally; CI runs this against a Postgres service container.
@@ -136,6 +142,10 @@ ci-check: ## Run all CI checks locally before push.
 	@echo "▸ scripts/lint-integration-layout.sh"
 	@bash scripts/lint-integration-layout.sh
 	@echo "✓ lint-integration-layout"
+	@echo
+	@echo "▸ scripts/lint-outbound-conformance.sh"
+	@bash scripts/lint-outbound-conformance.sh
+	@echo "✓ lint-outbound-conformance"
 	@echo
 	@echo "▸ jscpd (duplication < 5%, test files excluded)"
 	@npx -y jscpd . --silent

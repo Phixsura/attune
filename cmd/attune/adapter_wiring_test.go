@@ -13,7 +13,6 @@ import (
 
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/outbound"
-	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 )
 
@@ -28,6 +27,7 @@ import (
 // as they would be in the production binary.
 func TestSlackAdapterWiring_E2E(t *testing.T) {
 	t.Parallel()
+	allowLoopbackEgressForTest(t)
 
 	// Verify all expected adapters are registered.
 	t.Run("registry_has_all_adapters", func(t *testing.T) {
@@ -77,8 +77,6 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 			_, _ = w.Write([]byte("ok"))
 		}))
 		t.Cleanup(srv.Close)
-
-		notify.SetEgressPolicy(nethardening.Policy{AllowLoopback: true, AllowPrivate: true})
 
 		target := notifytarget.NotifyTarget{
 			ID:              uuid.New(),
@@ -162,8 +160,6 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		notify.SetEgressPolicy(nethardening.Policy{AllowLoopback: true, AllowPrivate: true})
-
 		target := notifytarget.NotifyTarget{
 			ID:              uuid.New(),
 			TenantID:        "e2e-tenant",
@@ -189,8 +185,6 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 			_, _ = w.Write([]byte("rate limited"))
 		}))
 		t.Cleanup(srv.Close)
-
-		notify.SetEgressPolicy(nethardening.Policy{AllowLoopback: true, AllowPrivate: true})
 
 		target := notifytarget.NotifyTarget{
 			ID:              uuid.New(),
@@ -220,8 +214,6 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		notify.SetEgressPolicy(nethardening.Policy{AllowLoopback: true, AllowPrivate: true})
-
 		target := notifytarget.NotifyTarget{
 			ID:              uuid.New(),
 			TenantID:        "e2e-tenant",
@@ -244,11 +236,9 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"code":0,"msg":"success"}`))
+			_, _ = w.Write([]byte(`{"StatusCode":0,"StatusMessage":"success"}`))
 		}))
 		t.Cleanup(srv.Close)
-
-		notify.SetEgressPolicy(nethardening.Policy{AllowLoopback: true, AllowPrivate: true})
 
 		target := notifytarget.NotifyTarget{
 			ID:              uuid.New(),
@@ -274,8 +264,6 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		}))
 		t.Cleanup(srv.Close)
-
-		notify.SetEgressPolicy(nethardening.Policy{AllowLoopback: true, AllowPrivate: true})
 
 		target := notifytarget.NotifyTarget{
 			ID:              uuid.New(),

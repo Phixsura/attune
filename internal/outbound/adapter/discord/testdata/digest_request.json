@@ -1,0 +1,23 @@
+{
+  "body": {
+    "allowed_mentions": {
+      "parse": []
+    },
+    "embeds": [
+      {
+        "color": 10133670,
+        "description": "**12** feedback (11 enriched, **2 urgent** 🚨)\n\n**Top Themes**\n1. **Checkout friction** — 7\n",
+        "footer": {
+          "text": "via Attune"
+        },
+        "title": "📊 Daily Digest — 2026-07-01"
+      }
+    ]
+  },
+  "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "User-Agent": "attune/1.0"
+  },
+  "method": "POST",
+  "url": "https://discord.com"
+}

@@ -38,6 +38,15 @@ func TestTruncate_ZeroLimit(t *testing.T) {
 	}
 }
 
+func TestTruncate_NegativeLimit(t *testing.T) {
+	t.Parallel()
+
+	got := Truncate("hello", -1)
+	if got != "" {
+		t.Errorf("Truncate('hello', -1) = %q, want ''", got)
+	}
+}
+
 func TestTruncate_LimitOne(t *testing.T) {
 	t.Parallel()
 

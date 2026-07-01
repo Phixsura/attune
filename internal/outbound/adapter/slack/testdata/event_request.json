@@ -1,0 +1,46 @@
+{
+  "body": {
+    "blocks": [
+      {
+        "text": {
+          "emoji": true,
+          "text": ":rotating_light: [Urgent] Checkout mention safety",
+          "type": "plain_text"
+        },
+        "type": "header"
+      },
+      {
+        "text": {
+          "text": "ATTUNE_CONFORMANCE_FEEDBACK_MARKER @channel @here @everyone \u0026lt;@U123456\u0026gt; \u0026lt;!here\u0026gt; \u0026lt;!everyone\u0026gt; \u0026lt;at id=all\u0026gt;\u0026lt;/at\u0026gt; @octocat @org/team",
+          "type": "mrkdwn"
+        },
+        "type": "section"
+      },
+      {
+        "text": {
+          "text": "*Severity:* major  ·  *Category:* checkout",
+          "type": "mrkdwn"
+        },
+        "type": "section"
+      },
+      {
+        "type": "divider"
+      },
+      {
+        "elements": [
+          {
+            "text": "via *Attune* · web · 2026-07-01T00:00:00Z",
+            "type": "mrkdwn"
+          }
+        ],
+        "type": "context"
+      }
+    ]
+  },
+  "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "User-Agent": "attune/1.0"
+  },
+  "method": "POST",
+  "url": "https://hooks.slack.com"
+}

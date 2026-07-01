@@ -1,0 +1,49 @@
+{
+  "body": {
+    "blocks": [
+      {
+        "text": {
+          "emoji": true,
+          "text": ":bar_chart: Daily Digest — 2026-07-01",
+          "type": "plain_text"
+        },
+        "type": "header"
+      },
+      {
+        "text": {
+          "text": "7-day: ▂▃▃▅█\n\n*12* feedback ↑4 (11 enriched, *2 urgent* :rotating_light:)",
+          "type": "mrkdwn"
+        },
+        "type": "section"
+      },
+      {
+        "type": "divider"
+      },
+      {
+        "text": {
+          "text": "*Top Themes*\n1. :new: *Checkout friction* — 7 reports\n    \u003e _ATTUNE_CONFORMANCE_FEEDBACK_MARKER checkout blocked_\n",
+          "type": "mrkdwn"
+        },
+        "type": "section"
+      },
+      {
+        "type": "divider"
+      },
+      {
+        "elements": [
+          {
+            "text": "via *Attune* · 2026-07-01",
+            "type": "mrkdwn"
+          }
+        ],
+        "type": "context"
+      }
+    ]
+  },
+  "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "User-Agent": "attune/1.0"
+  },
+  "method": "POST",
+  "url": "https://hooks.slack.com"
+}

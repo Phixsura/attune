@@ -4,6 +4,7 @@
 package notify
 
 import (
+	"net/http"
 	"testing"
 	"time"
 )
@@ -49,6 +50,15 @@ func TestRetryPolicy_Backoff_ZeroBaseDelay(t *testing.T) {
 	}
 }
 
+func TestRetryPolicy_Backoff_NonPositiveRetryNumber(t *testing.T) {
+	t.Parallel()
+
+	p := RetryPolicy{BaseDelay: time.Second, MaxDelay: time.Minute}
+	if got := p.backoff(0); got != 0 {
+		t.Fatalf("backoff(0) = %v, want 0", got)
+	}
+}
+
 func TestRetryPolicy_Backoff_NegativeBaseDelay(t *testing.T) {
 	t.Parallel()
 
@@ -78,6 +88,24 @@ func TestRetryPolicy_Backoff_BaseEqualMax(t *testing.T) {
 	}
 	if got := p.backoff(2); got != 5*time.Second {
 		t.Errorf("backoff(2) = %v, want 5s (clamped)", got)
+	}
+}
+
+func TestRetryPolicy_Backoff_ClampsBeforeDurationOverflow(t *testing.T) {
+	t.Parallel()
+
+	p := RetryPolicy{BaseDelay: time.Second, MaxDelay: 10 * time.Minute}
+	if got := p.backoff(1000); got != 10*time.Minute {
+		t.Fatalf("backoff(1000) = %v, want 10m clamp", got)
+	}
+}
+
+func TestRetryPolicy_Backoff_SaturatesWithoutMaxDelay(t *testing.T) {
+	t.Parallel()
+
+	p := RetryPolicy{BaseDelay: time.Second}
+	if got := p.backoff(1000); got != maxDuration {
+		t.Fatalf("backoff(1000) = %v, want max duration", got)
 	}
 }
 
@@ -116,5 +144,92 @@ func TestNewTransport_PreservesValidMaxAttempts(t *testing.T) {
 	}
 	if tr.retry.MaxDelay != time.Minute {
 		t.Fatalf("MaxDelay = %v, want 1m", tr.retry.MaxDelay)
+	}
+}
+
+func TestMetricDestination(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		label string
+		want  string
+	}{
+		{label: "outbox-raw-webhook-42", want: "raw-webhook"},
+		{label: "outbox-raw_webhook-42", want: "raw-webhook"},
+		{label: "digest-slack-tenant-a", want: "slack"},
+		{label: "digest-discord-tenant-a", want: "discord"},
+		{label: "digest-lark-tenant-a", want: "lark"},
+		{label: "github-issue-owner/repo", want: "github-issue"},
+		{label: "custom-webhook-42", want: "other"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			t.Parallel()
+			if got := metricDestination(tc.label); got != tc.want {
+				t.Fatalf("metricDestination(%q) = %q, want %q", tc.label, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMetricStatus(t *testing.T) {
+	t.Parallel()
+
+	if got := metricStatus(201); got != "201" {
+		t.Fatalf("metricStatus(201) = %q, want 201", got)
+	}
+	if got := metricStatus(0); got != "0" {
+		t.Fatalf("metricStatus(0) = %q, want 0", got)
+	}
+	if got := metricStatus(-1); got != "0" {
+		t.Fatalf("metricStatus(-1) = %q, want 0", got)
+	}
+}
+
+func TestRetryAfterDelay(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	future := now.Add(30 * time.Second).Format(http.TimeFormat)
+	past := now.Add(-30 * time.Second).Format(http.TimeFormat)
+
+	cases := []struct {
+		name     string
+		value    string
+		maxDelay time.Duration
+		want     time.Duration
+	}{
+		{name: "empty", value: "", want: 0},
+		{name: "seconds", value: "3", want: 3 * time.Second},
+		{name: "seconds whitespace", value: " 2 ", want: 2 * time.Second},
+		{name: "zero seconds", value: "0", want: 0},
+		{name: "negative seconds", value: "-1", want: 0},
+		{name: "invalid", value: "soon", want: 0},
+		{name: "http date", value: future, want: 30 * time.Second},
+		{name: "past http date", value: past, want: 0},
+		{name: "clamped seconds", value: "30", maxDelay: 5 * time.Second, want: 5 * time.Second},
+		{name: "clamped subsecond max", value: "1", maxDelay: 500 * time.Millisecond, want: 500 * time.Millisecond},
+		{
+			name:     "huge seconds clamped before duration overflow",
+			value:    "9223372036854775807",
+			maxDelay: 5 * time.Second,
+			want:     5 * time.Second,
+		},
+		{
+			name:  "huge seconds saturates without max delay",
+			value: "9223372036854775807",
+			want:  maxDuration,
+		},
+		{name: "clamped http date", value: future, maxDelay: 5 * time.Second, want: 5 * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := retryAfterDelay(tc.value, now, tc.maxDelay)
+			if got != tc.want {
+				t.Fatalf("retryAfterDelay(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
 	}
 }

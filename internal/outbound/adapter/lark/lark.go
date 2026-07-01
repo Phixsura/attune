@@ -19,6 +19,7 @@ import (
 	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/outbound/render"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -67,7 +68,7 @@ func (c *channel) render(card larkCard, dst outbound.Target, kind string) (outbo
 			}
 			req.Header.Set("Content-Type", "application/json; charset=utf-8")
 			req.Header.Set("User-Agent", "attune/1.0")
-			logext.Infof(ctx, "[outbound.lark] upstream req,label:%s,url:%s", label, dst.URL)
+			logext.Infof(ctx, "[outbound.lark] upstream req,label:%s,url:%s", label, nethardening.RedactURL(dst.URL))
 			return req, nil
 		},
 		Check: checkLarkResponse(label),
@@ -97,16 +98,23 @@ func checkLarkResponse(label string) outbound.ResponseChecker {
 		}
 
 		var resp struct {
-			StatusCode int    `json:"StatusCode"`
+			StatusCode *int   `json:"StatusCode"`
 			StatusMsg  string `json:"StatusMessage"`
 		}
-		if err := json.Unmarshal(body, &resp); err == nil && resp.StatusCode != 0 {
-			if resp.StatusCode == 9499 {
-				return fmt.Errorf("%s rate limited code=%d", label, resp.StatusCode)
-			}
-			return fmt.Errorf("%w: %s code=%d msg=%s", outbound.ErrTerminal, label, resp.StatusCode, resp.StatusMsg)
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return fmt.Errorf("%w: %s malformed provider body=%s", outbound.ErrTerminal, label, render.Truncate(string(body), 200))
 		}
-		return nil
+		if resp.StatusCode == nil {
+			return fmt.Errorf("%w: %s missing StatusCode msg=%s", outbound.ErrTerminal, label, resp.StatusMsg)
+		}
+		code := ptrext.Indirect(resp.StatusCode)
+		if code == 0 {
+			return nil
+		}
+		if code == 9499 {
+			return fmt.Errorf("%s rate limited code=%d", label, code)
+		}
+		return fmt.Errorf("%w: %s code=%d msg=%s", outbound.ErrTerminal, label, code, resp.StatusMsg)
 	}
 }
 
@@ -134,16 +142,23 @@ type larkText struct {
 
 type larkElement struct {
 	Tag      string        `json:"tag"`
-	Content  *larkText     `json:"content,omitempty"`
+	Content  string        `json:"content,omitempty"`
 	Text     *larkText     `json:"text,omitempty"`
 	Elements []larkElement `json:"elements,omitempty"`
 }
 
 func buildEventCard(env *outbound.Envelope) larkCard {
 	fb := env.Feedback
+	enriched, _ := fb["enriched"].(map[string]any)
 	title, _ := fb["title"].(string)
+	if title == "" && enriched != nil {
+		title, _ = enriched["title"].(string)
+	}
 	content, _ := fb["content"].(string)
 	isUrgent, _ := fb["is_urgent"].(bool)
+	if !isUrgent && enriched != nil {
+		isUrgent, _ = enriched["is_urgent"].(bool)
+	}
 
 	if title == "" {
 		title = "New Feedback"
@@ -161,15 +176,15 @@ func buildEventCard(env *outbound.Envelope) larkCard {
 			Template: template,
 		},
 		Elements: []larkElement{
-			{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: render.Truncate(content, 500)})},
+			{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: render.Truncate(escapeLarkMD(content), 500)})},
 			{Tag: "hr"},
-			{Tag: "note", Elements: []larkElement{{Tag: "plain_text", Content: ptrext.Of(larkText{Tag: "plain_text", Content: fmt.Sprintf("via Attune · %s", env.Timestamp)})}}},
+			{Tag: "note", Elements: []larkElement{{Tag: "plain_text", Content: fmt.Sprintf("via Attune · %s", env.Timestamp)}}},
 		},
 	}
 }
 
 func buildDigestCard(view any) larkCard {
-	dv, ok := view.(digestView)
+	dv, ok := toDigestView(view)
 	if !ok {
 		return larkCard{
 			Header: larkHeader{
@@ -177,7 +192,7 @@ func buildDigestCard(view any) larkCard {
 				Template: "purple",
 			},
 			Elements: []larkElement{
-				{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: render.FallbackJSON(view, 2000)})},
+				{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: escapeLarkMD(render.FallbackJSON(view, 2000))})},
 			},
 		}
 	}
@@ -203,18 +218,18 @@ func buildDigestCard(view any) larkCard {
 	if len(dv.Result.Themes) > 0 {
 		for i, t := range dv.Result.Themes {
 			badge := lifecycleBadge(t.Lifecycle)
-			line := fmt.Sprintf("%d. %s**%s** — %d report", i+1, badge, t.Title, t.Count)
+			line := fmt.Sprintf("%d. %s**%s** — %d report", i+1, badge, escapeLarkMD(t.Title), t.Count)
 			if t.Count != 1 {
 				line += "s"
 			}
 			if len(t.ExampleTitles) > 0 {
-				line += fmt.Sprintf("\n   > \"%s\"", render.Truncate(t.ExampleTitles[0], 60))
+				line += fmt.Sprintf("\n   > \"%s\"", render.Truncate(escapeLarkMD(t.ExampleTitles[0]), 60))
 			}
 			elements = append(elements, larkElement{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: line})})
 		}
 	} else if len(dv.Result.Items) > 0 {
 		for _, it := range dv.Result.Items {
-			line := fmt.Sprintf("• #%d %s", it.ID, render.Truncate(it.Title, 50))
+			line := fmt.Sprintf("• #%d %s", it.ID, render.Truncate(escapeLarkMD(it.Title), 50))
 			elements = append(elements, larkElement{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: line})})
 		}
 	}
@@ -224,7 +239,7 @@ func buildDigestCard(view any) larkCard {
 		Tag: "note",
 		Elements: []larkElement{{
 			Tag:     "plain_text",
-			Content: ptrext.Of(larkText{Tag: "plain_text", Content: fmt.Sprintf("via Attune · %s", dv.RunDate)}),
+			Content: fmt.Sprintf("via Attune · %s", dv.RunDate),
 		}},
 	})
 
@@ -282,6 +297,24 @@ type deltaValue struct {
 	Direction string `json:"direction"`
 }
 
+func toDigestView(view any) (digestView, bool) {
+	if dv, ok := view.(digestView); ok {
+		return dv, true
+	}
+	b, err := json.Marshal(view)
+	if err != nil {
+		return digestView{}, false
+	}
+	var dv digestView
+	if err := json.Unmarshal(b, &dv); err != nil { // ptrext:allow unmarshal-out-param
+		return digestView{}, false
+	}
+	if dv.RunDate == "" && dv.TenantID == "" {
+		return digestView{}, false
+	}
+	return dv, true
+}
+
 func deltaArrow(d deltaValue) string {
 	switch d.Direction {
 	case "up":
@@ -334,4 +367,11 @@ func renderSparkline(counts []int) string {
 		sb.WriteRune(bars[idx])
 	}
 	return sb.String()
+}
+
+func escapeLarkMD(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
 }
