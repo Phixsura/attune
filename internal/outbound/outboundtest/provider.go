@@ -83,6 +83,12 @@ func (p *FakeProvider) URL(pathFragment string) string {
 	return p.server.URL + "/" + pathFragment
 }
 
+// Client returns the provider's HTTP client for tests that need a custom
+// transport instead of http.DefaultClient.
+func (p *FakeProvider) Client() *http.Client {
+	return p.server.Client()
+}
+
 // Requests returns a snapshot of all captured requests.
 func (p *FakeProvider) Requests() []ProviderRequest {
 	p.mu.Lock()

@@ -14,13 +14,10 @@ import (
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/outbound/outboundtest"
-	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func TestProviderMock_GitHubIssue(t *testing.T) {
-	notify.SetEgressPolicy(nethardening.Policy{AllowLoopback: true, AllowPrivate: true})
-
 	cases := []struct {
 		name      string
 		responses []outboundtest.ProviderResponse
@@ -80,7 +77,7 @@ func TestProviderMock_GitHubIssue(t *testing.T) {
 				t.Fatalf("RenderEvent: %v", err)
 			}
 
-			transport := notify.NewTransport(nil, notify.RetryPolicy{MaxAttempts: 2})
+			transport := notify.NewTransport(provider.Client(), notify.RetryPolicy{MaxAttempts: 2})
 			err = transport.Send(
 				t.Context(),
 				"github-issue-provider-mock",

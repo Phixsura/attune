@@ -4,6 +4,7 @@ package outbound
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -53,8 +54,18 @@ func CheckGitHub(label string) ResponseChecker {
 }
 
 func githubRateLimited(body []byte) bool {
-	msg := strings.ToLower(string(body))
+	msg := strings.ToLower(githubResponseMessage(body))
 	return strings.Contains(msg, "rate limit") || strings.Contains(msg, "rate-limit")
+}
+
+func githubResponseMessage(body []byte) string {
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &payload); err == nil && payload.Message != "" {
+		return payload.Message
+	}
+	return string(body)
 }
 
 func truncateBody(body []byte, n int) string {

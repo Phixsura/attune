@@ -219,6 +219,13 @@ func retryAfterDelay(value string, now time.Time, maxDelay time.Duration) time.D
 		if seconds <= 0 {
 			return 0
 		}
+		if maxDelay > 0 && seconds > int64(maxDelay/time.Second) {
+			return maxDelay
+		}
+		const maxDurationSeconds = int64(1<<63-1) / int64(time.Second)
+		if seconds > maxDurationSeconds {
+			return time.Duration(1<<63 - 1)
+		}
 		return clampRetryAfter(time.Duration(seconds)*time.Second, maxDelay)
 	}
 	when, err := http.ParseTime(value)

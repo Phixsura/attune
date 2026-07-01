@@ -87,6 +87,17 @@ func TestCheckGitHub_ErrorMessages(t *testing.T) {
 		}
 	})
 
+	t.Run("403 documentation rate limit URL is not retryable by itself", func(t *testing.T) {
+		t.Parallel()
+		err := check(ctx, 403, []byte(`{"message":"forbidden","documentation_url":"https://docs.github.com/rest/rate-limits"}`))
+		if err == nil {
+			t.Fatal("want error for 403")
+		}
+		if !errors.Is(err, ErrTerminal) {
+			t.Fatalf("403 forbidden should be terminal when only documentation_url mentions rate limits, got %v", err)
+		}
+	})
+
 	t.Run("202 is non-success (not 200/201)", func(t *testing.T) {
 		t.Parallel()
 		err := check(ctx, 202, nil)

@@ -137,6 +137,16 @@ func TestFormatAttrRows(t *testing.T) {
 	}
 }
 
+func TestNeutralizeGitHubMentions(t *testing.T) {
+	t.Parallel()
+
+	input := "hello  @octocat\n<@U123456> and @org/team"
+	want := "hello  @\u200doctocat\n<@\u200dU123456> and @\u200dorg/team"
+	if got := neutralizeGitHubMentions(input); got != want {
+		t.Fatalf("neutralizeGitHubMentions = %q, want %q", got, want)
+	}
+}
+
 func TestBuildLabels(t *testing.T) {
 	t.Parallel()
 

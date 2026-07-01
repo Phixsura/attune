@@ -302,27 +302,15 @@ func truncate(s string, n int) string {
 }
 
 func neutralizeGitHubMentions(s string) string {
-	fields := strings.Fields(s)
-	if len(fields) == 0 {
-		return s
+	var out strings.Builder
+	out.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		out.WriteByte(s[i])
+		if s[i] == '@' && i+1 < len(s) && isMentionNameStart(s[i+1]) {
+			out.WriteString("\u200d")
+		}
 	}
-	out := make([]string, len(fields))
-	for i, field := range fields {
-		out[i] = neutralizeGitHubMentionToken(field)
-	}
-	return strings.Join(out, " ")
-}
-
-func neutralizeGitHubMentionToken(token string) string {
-	at := strings.Index(token, "@")
-	if at < 0 || at == len(token)-1 {
-		return token
-	}
-	next := token[at+1]
-	if isMentionNameStart(next) {
-		return token[:at+1] + "\u200d" + token[at+1:]
-	}
-	return token
+	return out.String()
 }
 
 func isMentionNameStart(ch byte) bool {

@@ -366,12 +366,25 @@ func TestCheckLarkResponse200MissingStatusCode(t *testing.T) {
 	t.Parallel()
 
 	checker := checkLarkResponse("test-label")
-	err := checker(context.Background(), 200, []byte(`{}`))
-	if err == nil {
-		t.Fatal("expected error for 200 with missing StatusCode")
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "empty object", body: `{}`},
+		{name: "null status code", body: `{"StatusCode":null,"StatusMessage":"empty"}`},
+		{name: "unrelated string", body: `{"StatusMessage":"contains StatusCode text"}`},
 	}
-	if !errors.Is(err, outbound.ErrTerminal) {
-		t.Fatalf("expected ErrTerminal, got %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := checker(context.Background(), 200, []byte(tc.body))
+			if err == nil {
+				t.Fatal("expected error for 200 with missing StatusCode")
+			}
+			if !errors.Is(err, outbound.ErrTerminal) {
+				t.Fatalf("expected ErrTerminal, got %v", err)
+			}
+		})
 	}
 }
 

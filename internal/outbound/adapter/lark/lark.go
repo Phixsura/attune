@@ -98,19 +98,23 @@ func checkLarkResponse(label string) outbound.ResponseChecker {
 		}
 
 		var resp struct {
-			StatusCode int    `json:"StatusCode"`
+			StatusCode *int   `json:"StatusCode"`
 			StatusMsg  string `json:"StatusMessage"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
 			return fmt.Errorf("%w: %s malformed provider body=%s", outbound.ErrTerminal, label, render.Truncate(string(body), 200))
 		}
-		if resp.StatusCode == 0 && strings.Contains(string(body), "StatusCode") {
+		if resp.StatusCode == nil {
+			return fmt.Errorf("%w: %s missing StatusCode msg=%s", outbound.ErrTerminal, label, resp.StatusMsg)
+		}
+		code := ptrext.Indirect(resp.StatusCode)
+		if code == 0 {
 			return nil
 		}
-		if resp.StatusCode == 9499 {
-			return fmt.Errorf("%s rate limited code=%d", label, resp.StatusCode)
+		if code == 9499 {
+			return fmt.Errorf("%s rate limited code=%d", label, code)
 		}
-		return fmt.Errorf("%w: %s code=%d msg=%s", outbound.ErrTerminal, label, resp.StatusCode, resp.StatusMsg)
+		return fmt.Errorf("%w: %s code=%d msg=%s", outbound.ErrTerminal, label, code, resp.StatusMsg)
 	}
 }
 

@@ -142,6 +142,18 @@ func TestRetryAfterDelay(t *testing.T) {
 		{name: "http date", value: future, want: 30 * time.Second},
 		{name: "past http date", value: past, want: 0},
 		{name: "clamped seconds", value: "30", maxDelay: 5 * time.Second, want: 5 * time.Second},
+		{name: "clamped subsecond max", value: "1", maxDelay: 500 * time.Millisecond, want: 500 * time.Millisecond},
+		{
+			name:     "huge seconds clamped before duration overflow",
+			value:    "9223372036854775807",
+			maxDelay: 5 * time.Second,
+			want:     5 * time.Second,
+		},
+		{
+			name:  "huge seconds saturates without max delay",
+			value: "9223372036854775807",
+			want:  time.Duration(1<<63 - 1),
+		},
 		{name: "clamped http date", value: future, maxDelay: 5 * time.Second, want: 5 * time.Second},
 	}
 
