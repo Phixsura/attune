@@ -60,8 +60,8 @@ func (c *channel) RenderEvent(env *outbound.Envelope, dst outbound.Target) (outb
 			req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
 			req.Header.Set("Content-Type", "application/json; charset=utf-8")
 			req.Header.Set("User-Agent", "attune/1.0")
-			logext.Infof(ctx, "[outbound.githubissue] upstream req,label:%s,body:%s",
-				label, truncate(string(issueBody), 1024))
+			logext.Infof(ctx, "[outbound.githubissue] upstream req,label:%s,body_bytes:%d",
+				label, len(issueBody))
 			return req, nil
 		},
 		Check: outbound.CheckGitHub(label),
@@ -98,38 +98,22 @@ type ghIssueBody struct {
 	Labels []string `json:"labels,omitempty"`
 }
 
+type issueFeedback struct {
+	Title         string
+	Content       string
+	UserID        string
+	Source        string
+	SourceDisplay string
+	EnrichedAt    string
+	Rationale     string
+	IsUrgent      bool
+	Attrs         map[string]any
+	FeedbackID    float64
+}
+
 func buildIssueBody(env *outbound.Envelope) ([]byte, error) {
-	fb := env.Feedback
-	title, _ := fb["title"].(string)
-	content, _ := fb["content"].(string)
-	userID, _ := fb["user_id"].(string)
-	source, _ := fb["source"].(string)
-	sourceDisplay, _ := fb["source_display"].(string)
-	enrichedAt, _ := fb["enriched_at"].(string)
-	isUrgent, _ := fb["is_urgent"].(bool)
-	rationale, _ := fb["rationale"].(string)
-	attrs, _ := fb["attrs"].(map[string]any)
-	feedbackID, _ := fb["id"].(float64)
-
-	if title == "" {
-		title = "Untitled feedback"
-	}
-	if userID == "" {
-		userID = "(anonymous)"
-	}
-	if rationale == "" {
-		rationale = "-"
-	}
-	if isUrgent {
-		title = "[Urgent] " + title
-	}
-
-	// Prefer the registry-resolved label carried on the envelope; fall back to
-	// the pure shim for old in-flight rows enqueued before source_display.
-	if sourceDisplay == "" {
-		sourceDisplay = domain.SourceDisplayName(source)
-	}
-	sourceLabel := fmt.Sprintf("%s (`%s`)", sourceDisplay, source)
+	feedback := extractIssueFeedback(env.Feedback)
+	sourceLabel := fmt.Sprintf("%s (`%s`)", feedback.SourceDisplay, feedback.Source)
 	body := fmt.Sprintf(
 		"> Forwarded automatically from Attune user feedback.\n\n"+
 			"| Field | Value |\n"+
@@ -141,17 +125,104 @@ func buildIssueBody(env *outbound.Envelope) ([]byte, error) {
 			"| AI rationale | %s |\n\n"+
 			"## Original feedback\n\n%s\n\n"+
 			"---\n*Attune feedback id: `#%.0f` · enriched at %s · trace `%s`*",
-		userID, isUrgent, formatAttrRows(attrs),
-		sourceLabel, rationale,
-		content, feedbackID, enrichedAt, env.Timestamp,
+		feedback.UserID, feedback.IsUrgent, formatAttrRows(feedback.Attrs),
+		sourceLabel, feedback.Rationale,
+		feedback.Content, feedback.FeedbackID, feedback.EnrichedAt, env.Timestamp,
 	)
 
 	out := ghIssueBody{
-		Title:  title,
+		Title:  feedback.Title,
 		Body:   body,
-		Labels: buildLabels(attrs, isUrgent),
+		Labels: buildLabels(feedback.Attrs, feedback.IsUrgent),
 	}
 	return json.Marshal(out)
+}
+
+func extractIssueFeedback(fb map[string]any) issueFeedback {
+	enriched := nestedMap(fb, "enriched")
+	feedback := issueFeedback{
+		Title:         firstString(fb, enriched, "title"),
+		Content:       stringField(fb, "content"),
+		UserID:        stringField(fb, "user_id"),
+		Source:        stringField(fb, "source"),
+		SourceDisplay: stringField(fb, "source_display"),
+		EnrichedAt:    firstString(fb, enriched, "enriched_at"),
+		Rationale:     firstString(fb, enriched, "rationale"),
+		IsUrgent:      firstBool(fb, enriched, "is_urgent"),
+		Attrs:         firstMap(fb, enriched, "attrs"),
+		FeedbackID:    floatField(fb, "id"),
+	}
+	return normalizeIssueFeedback(feedback)
+}
+
+func normalizeIssueFeedback(feedback issueFeedback) issueFeedback {
+	if feedback.Title == "" {
+		feedback.Title = "Untitled feedback"
+	}
+	if feedback.UserID == "" {
+		feedback.UserID = "(anonymous)"
+	}
+	if feedback.Rationale == "" {
+		feedback.Rationale = "-"
+	}
+	if feedback.SourceDisplay == "" {
+		feedback.SourceDisplay = domain.SourceDisplayName(feedback.Source)
+	}
+	feedback = neutralizeIssueFeedback(feedback)
+	if feedback.IsUrgent {
+		feedback.Title = "[Urgent] " + feedback.Title
+	}
+	return feedback
+}
+
+func neutralizeIssueFeedback(feedback issueFeedback) issueFeedback {
+	feedback.Title = neutralizeGitHubMentions(feedback.Title)
+	feedback.Content = neutralizeGitHubMentions(feedback.Content)
+	feedback.UserID = neutralizeGitHubMentions(feedback.UserID)
+	feedback.Source = neutralizeGitHubMentions(feedback.Source)
+	feedback.SourceDisplay = neutralizeGitHubMentions(feedback.SourceDisplay)
+	feedback.Rationale = neutralizeGitHubMentions(feedback.Rationale)
+	return feedback
+}
+
+func firstString(primary, fallback map[string]any, key string) string {
+	value := stringField(primary, key)
+	if value != "" {
+		return value
+	}
+	return stringField(fallback, key)
+}
+
+func firstBool(primary, fallback map[string]any, key string) bool {
+	value, _ := primary[key].(bool)
+	if value {
+		return true
+	}
+	value, _ = fallback[key].(bool)
+	return value
+}
+
+func firstMap(primary, fallback map[string]any, key string) map[string]any {
+	value := nestedMap(primary, key)
+	if value != nil {
+		return value
+	}
+	return nestedMap(fallback, key)
+}
+
+func stringField(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return value
+}
+
+func floatField(values map[string]any, key string) float64 {
+	value, _ := values[key].(float64)
+	return value
+}
+
+func nestedMap(values map[string]any, key string) map[string]any {
+	value, _ := values[key].(map[string]any)
+	return value
 }
 
 func formatAttrRows(attrs map[string]any) string {
@@ -165,7 +236,8 @@ func formatAttrRows(attrs map[string]any) string {
 	sort.Strings(names)
 	var b strings.Builder
 	for _, n := range names {
-		fmt.Fprintf(&b, "| %s | %s |\n", n, formatAttrValue(attrs[n]))
+		fmt.Fprintf(&b, "| %s | %s |\n",
+			neutralizeGitHubMentions(n), neutralizeGitHubMentions(formatAttrValue(attrs[n])))
 	}
 	return b.String()
 }
@@ -227,4 +299,35 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+func neutralizeGitHubMentions(s string) string {
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return s
+	}
+	out := make([]string, len(fields))
+	for i, field := range fields {
+		out[i] = neutralizeGitHubMentionToken(field)
+	}
+	return strings.Join(out, " ")
+}
+
+func neutralizeGitHubMentionToken(token string) string {
+	at := strings.Index(token, "@")
+	if at < 0 || at == len(token)-1 {
+		return token
+	}
+	next := token[at+1]
+	if isMentionNameStart(next) {
+		return token[:at+1] + "\u200d" + token[at+1:]
+	}
+	return token
+}
+
+func isMentionNameStart(ch byte) bool {
+	return (ch >= 'A' && ch <= 'Z') ||
+		(ch >= 'a' && ch <= 'z') ||
+		(ch >= '0' && ch <= '9') ||
+		ch == '_'
 }

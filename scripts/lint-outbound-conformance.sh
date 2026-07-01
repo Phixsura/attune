@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# lint-outbound-conformance — every outbound adapter must call the shared
+# conformance suite so redaction and response-classification checks cannot be
+# skipped by new channels.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+status=0
+
+while IFS= read -r dir; do
+  if ! find "$dir" -maxdepth 1 -name '*.go' ! -name '*_test.go' | grep -q .; then
+    continue
+  fi
+
+  conf="$dir/conformance_test.go"
+  if [[ ! -f "$conf" ]]; then
+    echo "ERROR $dir: missing conformance_test.go" >&2
+    status=1
+    continue
+  fi
+
+  if ! grep -q 'internal/outbound/outboundtest' "$conf"; then
+    echo "ERROR $conf: must import internal/outbound/outboundtest" >&2
+    status=1
+  fi
+
+  if ! grep -Eq 'outboundtest\.Test(Event|Digest)Channel' "$conf"; then
+    echo "ERROR $conf: must call outboundtest.TestEventChannel or TestDigestChannel" >&2
+    status=1
+  fi
+done < <(find internal/outbound/adapter -mindepth 1 -maxdepth 1 -type d | sort)
+
+if [[ "$status" -ne 0 ]]; then
+  exit "$status"
+fi
+
+echo "lint-outbound-conformance: clean"

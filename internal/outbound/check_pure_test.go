@@ -64,7 +64,7 @@ func TestCheckGitHub_ErrorMessages(t *testing.T) {
 
 	t.Run("403 secondary rate limit is retryable", func(t *testing.T) {
 		t.Parallel()
-		err := check(ctx, 403, nil)
+		err := check(ctx, 403, []byte(`{"message":"You have exceeded a secondary rate limit."}`))
 		if err == nil {
 			t.Fatal("want error for 403")
 		}
@@ -73,6 +73,17 @@ func TestCheckGitHub_ErrorMessages(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "rate limit") {
 			t.Errorf("error = %q, want rate limit mention", err.Error())
+		}
+	})
+
+	t.Run("403 bad token is terminal", func(t *testing.T) {
+		t.Parallel()
+		err := check(ctx, 403, []byte(`{"message":"Resource not accessible by personal access token"}`))
+		if err == nil {
+			t.Fatal("want error for 403")
+		}
+		if !errors.Is(err, ErrTerminal) {
+			t.Fatalf("403 bad token should be terminal, got %v", err)
 		}
 	})
 

@@ -244,7 +244,7 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"code":0,"msg":"success"}`))
+			_, _ = w.Write([]byte(`{"StatusCode":0,"StatusMessage":"success"}`))
 		}))
 		t.Cleanup(srv.Close)
 

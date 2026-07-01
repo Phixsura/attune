@@ -1,0 +1,36 @@
+{
+  "body": {
+    "event_type": "feedback.enriched",
+    "feedback": {
+      "content": "ATTUNE_CONFORMANCE_FEEDBACK_MARKER @channel @here @everyone \u003c@U123456\u003e \u003c!here\u003e \u003c!everyone\u003e \u003cat id=all\u003e\u003c/at\u003e @octocat @org/team",
+      "enriched": {
+        "attrs": {
+          "category": "checkout",
+          "severity": "major"
+        },
+        "enriched_at": "2026-07-01T00:00:00Z",
+        "is_urgent": true,
+        "rationale": "Multiple checkout failures mention the same blocked flow.",
+        "title": "Checkout mention safety"
+      },
+      "id": 42,
+      "language": "en",
+      "source": "web",
+      "source_display": "Web",
+      "submitted_at": "2026-07-01T00:00:00Z",
+      "tenant_id": "tenant-conformance",
+      "user_id": "user-conformance"
+    },
+    "tenant_id": "tenant-conformance",
+    "timestamp": "\u003ctimestamp\u003e",
+    "version": "2"
+  },
+  "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "User-Agent": "attune/1.0",
+    "X-Attune-Delivery-Id": "delivery-conformance",
+    "X-Attune-Signature": "\u003csignature\u003e"
+  },
+  "method": "POST",
+  "url": "https://hooks.example.com"
+}

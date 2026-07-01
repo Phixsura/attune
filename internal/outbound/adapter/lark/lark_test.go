@@ -354,10 +354,24 @@ func TestCheckLarkResponse200InvalidJSON(t *testing.T) {
 
 	checker := checkLarkResponse("test-label")
 	err := checker(context.Background(), 200, []byte(`not json`))
-	// Invalid JSON body with status 200 is treated as success
-	// (the unmarshal fails silently, resp.StatusCode stays 0).
-	if err != nil {
-		t.Fatalf("expected nil error for 200 with invalid JSON, got %v", err)
+	if err == nil {
+		t.Fatal("expected error for 200 with invalid JSON")
+	}
+	if !errors.Is(err, outbound.ErrTerminal) {
+		t.Fatalf("expected ErrTerminal, got %v", err)
+	}
+}
+
+func TestCheckLarkResponse200MissingStatusCode(t *testing.T) {
+	t.Parallel()
+
+	checker := checkLarkResponse("test-label")
+	err := checker(context.Background(), 200, []byte(`{}`))
+	if err == nil {
+		t.Fatal("expected error for 200 with missing StatusCode")
+	}
+	if !errors.Is(err, outbound.ErrTerminal) {
+		t.Fatalf("expected ErrTerminal, got %v", err)
 	}
 }
 

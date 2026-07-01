@@ -66,7 +66,7 @@ func TestCheckGitHub(t *testing.T) {
 		{"201 ok (created)", 201, true, false},
 		{"400 terminal", 400, false, true},
 		{"401 terminal", 401, false, true},
-		{"403 retryable (secondary rate limit)", 403, false, false},
+		{"403 terminal unless rate limited", 403, false, true},
 		{"404 terminal", 404, false, true},
 		{"408 retryable", 408, false, false},
 		{"429 retryable", 429, false, false},
@@ -76,7 +76,11 @@ func TestCheckGitHub(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := check(ctx, tt.status, nil)
+			body := []byte("permission denied")
+			if tt.status != 403 {
+				body = nil
+			}
+			err := check(ctx, tt.status, body)
 			if tt.wantNil && err != nil {
 				t.Errorf("status %d: got error %v, want nil", tt.status, err)
 			}
@@ -90,5 +94,16 @@ func TestCheckGitHub(t *testing.T) {
 				t.Errorf("status %d: got ErrTerminal, want retryable", tt.status)
 			}
 		})
+	}
+}
+
+func TestCheckGitHub_403RateLimitRetryable(t *testing.T) {
+	check := CheckGitHub("github")
+	err := check(context.Background(), 403, []byte(`{"message":"secondary rate limit"}`))
+	if err == nil {
+		t.Fatal("want error for 403 rate limit")
+	}
+	if errors.Is(err, ErrTerminal) {
+		t.Fatalf("403 rate limit should be retryable, got terminal: %v", err)
 	}
 }

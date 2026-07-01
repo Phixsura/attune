@@ -41,6 +41,9 @@ bash scripts/lint-integration-layout.sh
 step "lint-http-response-emission"
 bash scripts/lint-http-response-emission.sh
 
+step "lint-outbound-conformance"
+bash scripts/lint-outbound-conformance.sh
+
 step "go test ./..."
 go test ./...
 

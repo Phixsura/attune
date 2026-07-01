@@ -1,0 +1,46 @@
+{
+  "body": {
+    "card": {
+      "elements": [
+        {
+          "tag": "div",
+          "text": {
+            "content": "ATTUNE_CONFORMANCE_FEEDBACK_MARKER @channel @here @everyone \u0026lt;@U123456\u0026gt; \u0026lt;!here\u0026gt; \u0026lt;!everyone\u0026gt; \u0026lt;at id=all\u0026gt;\u0026lt;/at\u0026gt; @octocat @org/team",
+            "tag": "lark_md"
+          }
+        },
+        {
+          "tag": "hr"
+        },
+        {
+          "elements": [
+            {
+              "content": {
+                "content": "via Attune · 2026-07-01T00:00:00Z",
+                "tag": "plain_text"
+              },
+              "tag": "plain_text"
+            }
+          ],
+          "tag": "note"
+        }
+      ],
+      "header": {
+        "template": "red",
+        "title": {
+          "content": "[Urgent] Checkout mention safety",
+          "tag": "plain_text"
+        }
+      }
+    },
+    "msg_type": "interactive",
+    "sign": "\u003csignature\u003e",
+    "timestamp": "\u003ctimestamp\u003e"
+  },
+  "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "User-Agent": "attune/1.0"
+  },
+  "method": "POST",
+  "url": "https://open.feishu.cn"
+}

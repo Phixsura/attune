@@ -1,0 +1,78 @@
+{
+  "body": {
+    "deltas": {
+      "enriched": {
+        "change": 4,
+        "current": 11,
+        "direction": "up",
+        "prior": 7
+      },
+      "feedback": {
+        "change": 4,
+        "current": 12,
+        "direction": "up",
+        "prior": 8
+      },
+      "urgent": {
+        "change": -2,
+        "current": 2,
+        "direction": "down",
+        "prior": 4
+      }
+    },
+    "event_type": "feedback.digest",
+    "idempotency_key": "digest:tenant-conformance:2026-07-01",
+    "items": [
+      {
+        "ID": 42,
+        "Title": "ATTUNE_CONFORMANCE_FEEDBACK_MARKER @channel @here @everyone \u003c@U123456\u003e \u003c!here\u003e \u003c!everyone\u003e \u003cat id=all\u003e\u003c/at\u003e @octocat @org/team",
+        "id": 42,
+        "title": "ATTUNE_CONFORMANCE_FEEDBACK_MARKER @channel @here @everyone \u003c@U123456\u003e \u003c!here\u003e \u003c!everyone\u003e \u003cat id=all\u003e\u003c/at\u003e @octocat @org/team"
+      }
+    ],
+    "markdown": "**Daily Digest — 2026-07-01**\n\n**12** feedback (11 enriched, **2 urgent**)\n\n**Top Themes**\n1. Checkout friction — 7 reports\n",
+    "run_date": "2026-07-01",
+    "sparkline": [
+      3,
+      4,
+      5,
+      8,
+      12
+    ],
+    "tenant_id": "tenant-conformance",
+    "themes": [
+      {
+        "Count": 7,
+        "ExampleTitles": [
+          "ATTUNE_CONFORMANCE_FEEDBACK_MARKER checkout blocked"
+        ],
+        "Lifecycle": "new",
+        "Title": "Checkout friction",
+        "count": 7,
+        "example_titles": [
+          "ATTUNE_CONFORMANCE_FEEDBACK_MARKER checkout blocked"
+        ],
+        "lifecycle": "new",
+        "title": "Checkout friction"
+      }
+    ],
+    "totals": {
+      "enriched": 11,
+      "feedback": 12,
+      "unclustered": 1,
+      "urgent": 2
+    },
+    "version": "1",
+    "window": {
+      "from": "2026-06-30T00:00:00Z",
+      "to": "2026-07-01T00:00:00Z"
+    }
+  },
+  "headers": {
+    "Content-Type": "application/json; charset=utf-8",
+    "User-Agent": "attune/1.0",
+    "X-Attune-Signature": "\u003csignature\u003e"
+  },
+  "method": "POST",
+  "url": "https://hooks.example.com"
+}

@@ -137,6 +137,10 @@ ci-check: ## Run all CI checks locally before push.
 	@bash scripts/lint-integration-layout.sh
 	@echo "✓ lint-integration-layout"
 	@echo
+	@echo "▸ scripts/lint-outbound-conformance.sh"
+	@bash scripts/lint-outbound-conformance.sh
+	@echo "✓ lint-outbound-conformance"
+	@echo
 	@echo "▸ jscpd (duplication < 5%, test files excluded)"
 	@npx -y jscpd . --silent
 	@echo "✓ jscpd"
