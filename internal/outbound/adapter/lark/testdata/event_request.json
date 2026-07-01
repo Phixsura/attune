@@ -15,10 +15,7 @@
         {
           "elements": [
             {
-              "content": {
-                "content": "via Attune · 2026-07-01T00:00:00Z",
-                "tag": "plain_text"
-              },
+              "content": "via Attune · 2026-07-01T00:00:00Z",
               "tag": "plain_text"
             }
           ],

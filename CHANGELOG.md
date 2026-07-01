@@ -80,7 +80,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   delivery retry timing now honors valid provider `Retry-After` headers on
   retryable responses while still short-circuiting terminal failures, clamps
   oversized retry backoff without overflowing, and handles non-positive render
-  truncation limits safely.
+  truncation limits safely. GitHub issue delivery now sanitizes derived labels
+  before sending them to the provider and no longer relies on a package-global
+  API-base override in provider-mock tests. Lark digest delivery now renders
+  structured cards for JSON-roundtripped digest views, and Lark note elements
+  now use the provider's string `content` shape.
 
 - **Local duplication gate.**
   Aligned `scripts/check.sh` and the contributor guide with the CI-backed

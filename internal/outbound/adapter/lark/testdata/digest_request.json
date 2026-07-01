@@ -5,15 +5,37 @@
         {
           "tag": "div",
           "text": {
-            "content": "```\n{\n  \"deltas\": {\n    \"enriched\": {\n      \"change\": 4,\n      \"current\": 11,\n      \"direction\": \"up\",\n      \"prior\": 7\n    },\n    \"feedback\": {\n      \"change\": 4,\n      \"current\": 12,\n      \"direction\": \"up\",\n      \"prior\": 8\n    },\n    \"urgent\": {\n      \"change\": -2,\n      \"current\": 2,\n      \"direction\": \"down\",\n      \"prior\": 4\n    }\n  },\n  \"from\": \"2026-06-30T00:00:00Z\",\n  \"result\": {\n    \"Items\": [\n      {\n        \"ID\": 42,\n        \"Title\": \"ATTUNE_CONFORMANCE_FEEDBACK_MARKER @channel @here @everyone \\u003c@U123456\\u003e \\u003c!here\\u003e \\u003c!everyone\\u003e \\u003cat id=all\\u003e\\u003c/at\\u003e @octocat @org/team\",\n        \"id\": 42,\n        \"title\": \"ATTUNE_CONFORMANCE_FEEDBACK_MARKER @channel @here @everyone \\u003c@U123456\\u003e \\u003c!here\\u003e \\u003c!everyone\\u003e \\u003cat id=all\\u003e\\u003c/at\\u003e @octocat @org/team\"\n      }\n    ],\n    \"Stats\": {\n      \"Enriched\": 11,\n      \"Total\": 12,\n      \"Unclustered\": 1,\n      \"Urgent\": 2,\n      \"enriched\": 11,\n      \"feedback\": 12,\n      \"unclustered\": 1,\n      \"urgent\": 2\n    },\n    \"Themes\": [\n      {\n        \"Count\": 7,\n        \"ExampleTitles\": [\n          \"ATTUNE_CONFORMANCE_FEEDBACK_MARKER checkout blocked\"\n        ],\n        \"Lifecycle\": \"new\",\n        \"Title\": \"Checkout friction\",\n        \"count\": 7,\n        \"example_titles\": [\n          \"ATTUNE_CONFORMANCE_FEEDBACK_MARKER checkout blocked\"\n        ],\n        \"lifecycle\": \"new\",\n        \"title\": \"Checkout friction\"\n      }\n    ]\n  },\n  \"run_date\": \"2026-07-01\",\n  \"sparkline\": [\n    3,\n    4,\n    5,\n    8,\n    12\n  ],\n  \"tenant_id\": \"tenant-conformance\",\n  \"to\": \"2026-07-01T00:00:00Z\"\n}\n```",
+            "content": "📈 ▂▃▃▅█\n\n**12** feedback ↑4 (11 enriched, **2 urgent**)",
             "tag": "lark_md"
           }
+        },
+        {
+          "tag": "hr"
+        },
+        {
+          "tag": "div",
+          "text": {
+            "content": "1. [NEW] **Checkout friction** — 7 reports\n   \u003e \"ATTUNE_CONFORMANCE_FEEDBACK_MARKER checkout blocked\"",
+            "tag": "lark_md"
+          }
+        },
+        {
+          "tag": "hr"
+        },
+        {
+          "elements": [
+            {
+              "content": "via Attune · 2026-07-01",
+              "tag": "plain_text"
+            }
+          ],
+          "tag": "note"
         }
       ],
       "header": {
         "template": "purple",
         "title": {
-          "content": "Daily Feedback Digest",
+          "content": "📊 Daily Digest — 2026-07-01",
           "tag": "plain_text"
         }
       }

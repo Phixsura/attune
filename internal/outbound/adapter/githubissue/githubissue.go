@@ -21,17 +21,20 @@ import (
 
 const channelID = "github-issue"
 
-// githubAPIBaseForTest is github.com's REST API root. var (not const) so
-// unit tests can swap it for httptest.Server's URL.
-var githubAPIBaseForTest = "https://api.github.com"
-
-const githubAPIVersion = "2022-11-28"
+const (
+	githubAPIBaseDefault = "https://api.github.com"
+	githubAPIVersion     = "2022-11-28"
+	githubLabelPrefix    = "attune/"
+	githubLabelMaxRunes  = 50
+)
 
 func init() {
 	outbound.Register(ptrext.Of(channel{}))
 }
 
-type channel struct{}
+type channel struct {
+	apiBase string
+}
 
 func (c *channel) ID() string { return channelID }
 
@@ -46,7 +49,7 @@ func (c *channel) RenderEvent(env *outbound.Envelope, dst outbound.Target) (outb
 		return outbound.Rendered{}, fmt.Errorf("build github issue body: %w", err)
 	}
 
-	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues", githubAPIBaseForTest, owner, repo)
+	apiURL := fmt.Sprintf("%s/repos/%s/%s/issues", c.githubAPIBase(), owner, repo)
 	label := fmt.Sprintf("github-issue-%s/%s", owner, repo)
 
 	return outbound.Rendered{
@@ -66,6 +69,14 @@ func (c *channel) RenderEvent(env *outbound.Envelope, dst outbound.Target) (outb
 		},
 		Check: outbound.CheckGitHub(label),
 	}, nil
+}
+
+func (c *channel) githubAPIBase() string {
+	base := strings.TrimSpace(c.apiBase)
+	if base == "" {
+		base = githubAPIBaseDefault
+	}
+	return strings.TrimRight(base, "/")
 }
 
 func parseGitHubRepoURL(raw string) (owner, repo string, err error) {
@@ -262,9 +273,11 @@ func formatAttrValue(v any) string {
 }
 
 func buildLabels(attrs map[string]any, urgent bool) []string {
-	out := []string{"attune/feedback"}
+	out := []string{}
+	seen := map[string]struct{}{}
+	out = appendGitHubLabel(out, seen, githubLabelPrefix+"feedback")
 	if urgent {
-		out = append(out, "attune/urgent")
+		out = appendGitHubLabel(out, seen, githubLabelPrefix+"urgent")
 	}
 	names := make([]string, 0, len(attrs))
 	for k := range attrs {
@@ -272,29 +285,101 @@ func buildLabels(attrs map[string]any, urgent bool) []string {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		switch v := attrs[n].(type) {
-		case string:
-			if v != "" {
-				out = append(out, fmt.Sprintf("attune/%s-%s", n, v))
-			}
-		case []string:
-			for _, x := range v {
-				if x != "" {
-					out = append(out, fmt.Sprintf("attune/%s-%s", n, x))
-				}
-			}
-		case []any:
-			for _, e := range v {
-				if s, ok := e.(string); ok && s != "" {
-					out = append(out, fmt.Sprintf("attune/%s-%s", n, s))
-				}
-			}
+		for _, value := range labelValues(attrs[n]) {
+			out = appendGitHubLabel(out, seen, buildGitHubLabel(n, value))
 		}
 	}
 	return out
 }
 
+func labelValues(value any) []string {
+	switch v := value.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		return []string{v}
+	case []string:
+		return compactNonEmpty(v)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func buildGitHubLabel(key, value string) string {
+	key = sanitizeGitHubLabelPart(key)
+	value = sanitizeGitHubLabelPart(value)
+	if key == "" || value == "" {
+		return ""
+	}
+	suffix := key + "-" + value
+	maxSuffix := githubLabelMaxRunes - len(githubLabelPrefix)
+	if len(suffix) > maxSuffix {
+		suffix = strings.Trim(truncate(suffix, maxSuffix), "-._")
+	}
+	if suffix == "" {
+		return ""
+	}
+	return githubLabelPrefix + suffix
+}
+
+func sanitizeGitHubLabelPart(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_':
+			b.WriteRune(r)
+			lastDash = false
+		case r == '-':
+			if b.Len() > 0 && !lastDash {
+				b.WriteRune('-')
+				lastDash = true
+			}
+		default:
+			if b.Len() > 0 && !lastDash {
+				b.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-._")
+}
+
+func compactNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func appendGitHubLabel(out []string, seen map[string]struct{}, label string) []string {
+	if label == "" {
+		return out
+	}
+	if _, ok := seen[label]; ok {
+		return out
+	}
+	seen[label] = struct{}{}
+	return append(out, label)
+}
+
 func truncate(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
 	if len(s) <= n {
 		return s
 	}

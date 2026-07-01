@@ -142,7 +142,7 @@ type larkText struct {
 
 type larkElement struct {
 	Tag      string        `json:"tag"`
-	Content  *larkText     `json:"content,omitempty"`
+	Content  string        `json:"content,omitempty"`
 	Text     *larkText     `json:"text,omitempty"`
 	Elements []larkElement `json:"elements,omitempty"`
 }
@@ -178,13 +178,13 @@ func buildEventCard(env *outbound.Envelope) larkCard {
 		Elements: []larkElement{
 			{Tag: "div", Text: ptrext.Of(larkText{Tag: "lark_md", Content: render.Truncate(escapeLarkMD(content), 500)})},
 			{Tag: "hr"},
-			{Tag: "note", Elements: []larkElement{{Tag: "plain_text", Content: ptrext.Of(larkText{Tag: "plain_text", Content: fmt.Sprintf("via Attune · %s", env.Timestamp)})}}},
+			{Tag: "note", Elements: []larkElement{{Tag: "plain_text", Content: fmt.Sprintf("via Attune · %s", env.Timestamp)}}},
 		},
 	}
 }
 
 func buildDigestCard(view any) larkCard {
-	dv, ok := view.(digestView)
+	dv, ok := toDigestView(view)
 	if !ok {
 		return larkCard{
 			Header: larkHeader{
@@ -239,7 +239,7 @@ func buildDigestCard(view any) larkCard {
 		Tag: "note",
 		Elements: []larkElement{{
 			Tag:     "plain_text",
-			Content: ptrext.Of(larkText{Tag: "plain_text", Content: fmt.Sprintf("via Attune · %s", dv.RunDate)}),
+			Content: fmt.Sprintf("via Attune · %s", dv.RunDate),
 		}},
 	})
 
@@ -295,6 +295,24 @@ type deltaValue struct {
 	Prior     int    `json:"prior"`
 	Change    int    `json:"change"`
 	Direction string `json:"direction"`
+}
+
+func toDigestView(view any) (digestView, bool) {
+	if dv, ok := view.(digestView); ok {
+		return dv, true
+	}
+	b, err := json.Marshal(view)
+	if err != nil {
+		return digestView{}, false
+	}
+	var dv digestView
+	if err := json.Unmarshal(b, &dv); err != nil { // ptrext:allow unmarshal-out-param
+		return digestView{}, false
+	}
+	if dv.RunDate == "" && dv.TenantID == "" {
+		return digestView{}, false
+	}
+	return dv, true
 }
 
 func deltaArrow(d deltaValue) string {

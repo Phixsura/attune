@@ -63,10 +63,7 @@ func TestProviderMock_GitHubIssue(t *testing.T) {
 				Responses: tc.responses,
 				Assert:    assertGitHubIssueRequest,
 			})
-			restore := useGitHubAPIBaseForTest(provider.URL(""))
-			t.Cleanup(restore)
-
-			rendered, err := ptrext.Of(channel{}).RenderEvent(outboundtest.CanonicalEvent(), outbound.Target{
+			rendered, err := ptrext.Of(channel{apiBase: provider.URL("")}).RenderEvent(outboundtest.CanonicalEvent(), outbound.Target{
 				ID:              "target-github",
 				TenantID:        "tenant-conformance",
 				URL:             "https://github.com/attune/conformance",
@@ -97,14 +94,6 @@ func TestProviderMock_GitHubIssue(t *testing.T) {
 				t.Fatalf("provider calls = %d, want %d", provider.CallCount(), tc.wantCalls)
 			}
 		})
-	}
-}
-
-func useGitHubAPIBaseForTest(base string) func() {
-	old := githubAPIBaseForTest
-	githubAPIBaseForTest = base
-	return func() {
-		githubAPIBaseForTest = old
 	}
 }
 

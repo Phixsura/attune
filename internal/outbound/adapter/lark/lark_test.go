@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Phixsura/attune/internal/outbound"
@@ -171,6 +172,7 @@ func TestRenderEventCardUrgent(t *testing.T) {
 	if card.Header.Title.Content != "[Urgent] Critical issue" {
 		t.Errorf("urgent card title = %q", card.Header.Title.Content)
 	}
+	assertLarkNoteContentString(t, card)
 }
 
 func TestRenderEventCardDefaults(t *testing.T) {
@@ -191,6 +193,46 @@ func TestRenderEventCardDefaults(t *testing.T) {
 	if card.Header.Title.Content != "New Feedback" {
 		t.Errorf("default card title = %q, want 'New Feedback'", card.Header.Title.Content)
 	}
+	assertLarkNoteContentString(t, card)
+}
+
+func TestBuildDigestCard_JSONRoundTripView(t *testing.T) {
+	t.Parallel()
+
+	card := buildDigestCard(map[string]any{
+		"tenant_id": "tenant-test",
+		"run_date":  "2026-07-01",
+		"result": map[string]any{
+			"Stats": map[string]any{
+				"feedback": float64(9),
+				"enriched": float64(8),
+				"urgent":   float64(2),
+			},
+			"Themes": []any{
+				map[string]any{
+					"title":          "Checkout friction",
+					"count":          float64(4),
+					"example_titles": []any{"Checkout fails"},
+					"lifecycle":      "new",
+				},
+			},
+		},
+		"deltas": map[string]any{
+			"feedback": map[string]any{"direction": "up", "change": float64(3)},
+		},
+		"sparkline": []any{float64(1), float64(3), float64(9)},
+	})
+
+	if card.Header.Title.Content != "📊 Daily Digest — 2026-07-01" {
+		t.Fatalf("digest card title = %q, want structured digest title", card.Header.Title.Content)
+	}
+	if len(card.Elements) < 5 {
+		t.Fatalf("digest card elements = %d, want structured card sections", len(card.Elements))
+	}
+	if card.Elements[0].Text == nil || !strings.Contains(card.Elements[0].Text.Content, "9") {
+		t.Fatalf("digest summary element = %+v, want structured count summary", card.Elements[0])
+	}
+	assertLarkNoteContentString(t, card)
 }
 
 func TestRenderEventWithSecret(t *testing.T) {
@@ -623,3 +665,36 @@ func TestBuildDigestCardThemeCountPlural(t *testing.T) {
 }
 
 // truncate moved to internal/outbound/render and is rune-safe-tested there.
+
+func assertLarkNoteContentString(t *testing.T, card larkCard) {
+	t.Helper()
+	raw, err := json.Marshal(card)
+	if err != nil {
+		t.Fatalf("marshal card: %v", err)
+	}
+	var payload struct {
+		Elements []struct {
+			Tag      string `json:"tag"`
+			Elements []struct {
+				Tag     string `json:"tag"`
+				Content any    `json:"content"`
+			} `json:"elements"`
+		} `json:"elements"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal card: %v", err)
+	}
+	for _, element := range payload.Elements {
+		if element.Tag != "note" {
+			continue
+		}
+		if len(element.Elements) == 0 {
+			t.Fatal("note element must include text children")
+		}
+		if _, ok := element.Elements[0].Content.(string); !ok {
+			t.Fatalf("note content encoded as %T, want string; card=%s", element.Elements[0].Content, raw)
+		}
+		return
+	}
+	t.Fatalf("card has no note element: %s", raw)
+}
