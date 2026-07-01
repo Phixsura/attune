@@ -49,7 +49,6 @@ type ProviderScenario struct {
 	Name      string
 	Responses []ProviderResponse
 	Check     func(req ProviderRequest) error
-	Assert    func(t *testing.T, req ProviderRequest)
 }
 
 // FakeProvider is an httptest-backed upstream that records every request and
@@ -149,14 +148,6 @@ func CheckPostJSON(req ProviderRequest) error {
 	return nil
 }
 
-// AssertPostJSON verifies common JSON webhook request invariants.
-func AssertPostJSON(t *testing.T, req ProviderRequest) {
-	t.Helper()
-	if err := CheckPostJSON(req); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // SendRendered posts the rendered request to its target and runs the adapter's
 // response checker against the provider response.
 func SendRendered(t *testing.T, rendered outbound.Rendered) ProviderResult {
@@ -200,9 +191,6 @@ func (p *FakeProvider) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := p.scenario.Check(req.clone()); err != nil {
 			p.recordFailure("request %d: %v", call, err)
 		}
-	}
-	if p.scenario.Assert != nil {
-		p.scenario.Assert(p.t, req.clone())
 	}
 
 	resp := p.response(call)

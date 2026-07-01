@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   added or changed. The harness now also validates provider-specific payload
   shapes, captures fake-provider assertion failures after the HTTP response,
   requires adapters to declare golden snapshots, provider shapes, shared
-  response profiles, and async-safe provider checks, and includes opt-in live
+  response profiles, and async-safe provider checks, removes the older
+  goroutine-local fake-provider assertion entry point, and includes opt-in live
   smoke tests for raw webhook, Slack, Discord, Lark, and GitHub issue delivery.
 
 - **Outbound delivery observability (#167).**

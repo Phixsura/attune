@@ -435,6 +435,8 @@ The script should:
 - require `outboundtest.NewProvider` in the provider mock
 - require `ProviderScenario.Check` and reject goroutine-local `Assert` usage in
   adapter provider mocks
+- expose `ProviderScenario.Check` as the single fake-provider assertion entry
+  point, so request-check failures are reported after the provider response
 
 Wire the script into `scripts/check.sh` and CI's Go checks. This is the part that
 makes the acceptance criterion "new adapters cannot skip redaction or retry
