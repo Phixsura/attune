@@ -4,6 +4,7 @@ package lark
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -19,11 +20,12 @@ func TestProviderMockEventDelivery(t *testing.T) {
 			Status: http.StatusOK,
 			Body:   `{"StatusCode":0,"StatusMessage":"success"}`,
 		}},
-		Assert: func(t *testing.T, req outboundtest.ProviderRequest) {
-			t.Helper()
-			outboundtest.AssertPostJSON(t, req)
+		Check: func(req outboundtest.ProviderRequest) error {
+			if err := outboundtest.CheckPostJSON(req); err != nil {
+				return err
+			}
 			if req.Path != "/open-apis/bot/v2/hook/"+outboundtest.URLTokenMarker {
-				t.Fatalf("path = %q, want Lark webhook path", req.Path)
+				return fmt.Errorf("path = %q, want Lark webhook path", req.Path)
 			}
 			msg := ptrext.Of(struct {
 				MsgType   string         `json:"msg_type"`
@@ -32,17 +34,18 @@ func TestProviderMockEventDelivery(t *testing.T) {
 				Sign      string         `json:"sign"`
 			}{})
 			if err := json.Unmarshal(req.Body, msg); err != nil {
-				t.Fatalf("unmarshal Lark body: %v\nbody: %s", err, req.BodyString())
+				return fmt.Errorf("unmarshal Lark body: %w\nbody: %s", err, req.BodyString())
 			}
 			if msg.MsgType != "interactive" {
-				t.Fatalf("msg_type = %q, want interactive", msg.MsgType)
+				return fmt.Errorf("msg_type = %q, want interactive", msg.MsgType)
 			}
 			if len(msg.Card) == 0 {
-				t.Fatal("lark card must be present")
+				return fmt.Errorf("lark card must be present")
 			}
 			if msg.Timestamp == "" || msg.Sign == "" {
-				t.Fatal("signed Lark webhook must include timestamp and sign")
+				return fmt.Errorf("signed Lark webhook must include timestamp and sign")
 			}
+			return nil
 		},
 	})
 

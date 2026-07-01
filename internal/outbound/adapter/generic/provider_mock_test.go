@@ -3,6 +3,7 @@
 package generic
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -16,21 +17,23 @@ func TestProviderMockEventDelivery(t *testing.T) {
 	provider := outboundtest.NewProvider(t, outboundtest.ProviderScenario{
 		Name:      "raw-webhook-success",
 		Responses: []outboundtest.ProviderResponse{{Status: http.StatusNoContent}},
-		Assert: func(t *testing.T, req outboundtest.ProviderRequest) {
-			t.Helper()
-			outboundtest.AssertPostJSON(t, req)
+		Check: func(req outboundtest.ProviderRequest) error {
+			if err := outboundtest.CheckPostJSON(req); err != nil {
+				return err
+			}
 			if req.Path != "/webhook/"+outboundtest.URLTokenMarker {
-				t.Fatalf("path = %q, want token-bearing webhook path", req.Path)
+				return fmt.Errorf("path = %q, want token-bearing webhook path", req.Path)
 			}
 			if req.Header.Get("X-Attune-Signature") == "" {
-				t.Fatal("X-Attune-Signature must be set")
+				return fmt.Errorf("X-Attune-Signature must be set")
 			}
 			if req.Header.Get("X-Attune-Delivery-Id") != "delivery-conformance" {
-				t.Fatalf("delivery id = %q, want delivery-conformance", req.Header.Get("X-Attune-Delivery-Id"))
+				return fmt.Errorf("delivery id = %q, want delivery-conformance", req.Header.Get("X-Attune-Delivery-Id"))
 			}
 			if !strings.Contains(req.BodyString(), outboundtest.SensitiveFeedbackMarker) {
-				t.Fatal("raw webhook must preserve the feedback envelope body")
+				return fmt.Errorf("raw webhook must preserve the feedback envelope body")
 			}
+			return nil
 		},
 	})
 

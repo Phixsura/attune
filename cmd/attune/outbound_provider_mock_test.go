@@ -30,7 +30,7 @@ func TestOutboundProviderMocks_TestSendMatrix(t *testing.T) {
 		secret    string
 		signature string
 		response  outboundtest.ProviderResponse
-		assert    func(t *testing.T, req outboundtest.ProviderRequest)
+		check     func(req outboundtest.ProviderRequest) error
 	}{
 		{
 			name:      "raw_webhook_signed_json",
@@ -39,15 +39,17 @@ func TestOutboundProviderMocks_TestSendMatrix(t *testing.T) {
 			secret:    outboundtest.SecretMarker,
 			signature: outbound.SignatureVersionContentHash,
 			response:  outboundtest.ProviderResponse{Status: http.StatusNoContent},
-			assert: func(t *testing.T, req outboundtest.ProviderRequest) {
-				t.Helper()
-				assertPostJSON(t, req)
+			check: func(req outboundtest.ProviderRequest) error {
+				if err := outboundtest.CheckPostJSON(req); err != nil {
+					return err
+				}
 				if req.Header.Get("X-Attune-Signature") == "" {
-					t.Error("X-Attune-Signature must be set")
+					return errors.New("X-Attune-Signature must be set")
 				}
 				if !strings.Contains(req.BodyString(), "Test Notification") {
-					t.Error("raw webhook body should contain the test notification")
+					return errors.New("raw webhook body should contain the test notification")
 				}
+				return nil
 			},
 		},
 		{
@@ -55,19 +57,23 @@ func TestOutboundProviderMocks_TestSendMatrix(t *testing.T) {
 			destType: notifytarget.DestSlack,
 			path:     "/services/T000/B000/" + outboundtest.URLTokenMarker,
 			response: outboundtest.ProviderResponse{Status: http.StatusOK, Body: "ok"},
-			assert: func(t *testing.T, req outboundtest.ProviderRequest) {
-				t.Helper()
-				assertPostJSON(t, req)
+			check: func(req outboundtest.ProviderRequest) error {
+				if err := outboundtest.CheckPostJSON(req); err != nil {
+					return err
+				}
 				msg := ptrext.Of(struct {
 					Blocks []map[string]any `json:"blocks"`
 				}{})
-				decodeProviderJSON(t, req, msg)
+				if err := decodeProviderJSON(req, msg); err != nil {
+					return err
+				}
 				if len(msg.Blocks) < 3 {
-					t.Fatalf("blocks = %d, want at least 3", len(msg.Blocks))
+					return fmt.Errorf("blocks = %d, want at least 3", len(msg.Blocks))
 				}
 				if strings.Contains(req.BodyString(), outboundtest.URLTokenMarker) {
-					t.Error("Slack URL token leaked into request body")
+					return errors.New("Slack URL token leaked into request body")
 				}
+				return nil
 			},
 		},
 		{
@@ -79,25 +85,29 @@ func TestOutboundProviderMocks_TestSendMatrix(t *testing.T) {
 				Status: http.StatusOK,
 				Body:   `{"StatusCode":0,"StatusMessage":"success"}`,
 			},
-			assert: func(t *testing.T, req outboundtest.ProviderRequest) {
-				t.Helper()
-				assertPostJSON(t, req)
+			check: func(req outboundtest.ProviderRequest) error {
+				if err := outboundtest.CheckPostJSON(req); err != nil {
+					return err
+				}
 				msg := ptrext.Of(struct {
 					MsgType   string         `json:"msg_type"`
 					Card      map[string]any `json:"card"`
 					Timestamp string         `json:"timestamp"`
 					Sign      string         `json:"sign"`
 				}{})
-				decodeProviderJSON(t, req, msg)
+				if err := decodeProviderJSON(req, msg); err != nil {
+					return err
+				}
 				if msg.MsgType != "interactive" {
-					t.Fatalf("msg_type = %q, want interactive", msg.MsgType)
+					return fmt.Errorf("msg_type = %q, want interactive", msg.MsgType)
 				}
 				if len(msg.Card) == 0 {
-					t.Fatal("lark card must be present")
+					return errors.New("lark card must be present")
 				}
 				if msg.Timestamp == "" || msg.Sign == "" {
-					t.Fatal("lark signed webhook must include timestamp and sign")
+					return errors.New("lark signed webhook must include timestamp and sign")
 				}
+				return nil
 			},
 		},
 		{
@@ -105,22 +115,26 @@ func TestOutboundProviderMocks_TestSendMatrix(t *testing.T) {
 			destType: notifytarget.DestDiscord,
 			path:     "/api/webhooks/123/" + outboundtest.URLTokenMarker,
 			response: outboundtest.ProviderResponse{Status: http.StatusNoContent},
-			assert: func(t *testing.T, req outboundtest.ProviderRequest) {
-				t.Helper()
-				assertPostJSON(t, req)
+			check: func(req outboundtest.ProviderRequest) error {
+				if err := outboundtest.CheckPostJSON(req); err != nil {
+					return err
+				}
 				msg := ptrext.Of(struct {
 					Embeds          []map[string]any `json:"embeds"`
 					AllowedMentions struct {
 						Parse []string `json:"parse"`
 					} `json:"allowed_mentions"`
 				}{})
-				decodeProviderJSON(t, req, msg)
+				if err := decodeProviderJSON(req, msg); err != nil {
+					return err
+				}
 				if len(msg.Embeds) == 0 {
-					t.Fatal("discord embeds must be present")
+					return errors.New("discord embeds must be present")
 				}
 				if msg.AllowedMentions.Parse == nil || len(msg.AllowedMentions.Parse) != 0 {
-					t.Fatalf("allowed_mentions.parse = %v, want empty list", msg.AllowedMentions.Parse)
+					return fmt.Errorf("allowed_mentions.parse = %v, want empty list", msg.AllowedMentions.Parse)
 				}
+				return nil
 			},
 		},
 	}
@@ -130,7 +144,7 @@ func TestOutboundProviderMocks_TestSendMatrix(t *testing.T) {
 			provider := outboundtest.NewProvider(t, outboundtest.ProviderScenario{
 				Name:      tc.name,
 				Responses: []outboundtest.ProviderResponse{tc.response},
-				Assert:    tc.assert,
+				Check:     tc.check,
 			})
 			target := notifytarget.NotifyTarget{
 				ID:               uuid.New(),
@@ -188,10 +202,7 @@ func TestOutboundProviderMocks_TransportRetryAndTerminal(t *testing.T) {
 			provider := outboundtest.NewProvider(t, outboundtest.ProviderScenario{
 				Name:      tc.name,
 				Responses: tc.responses,
-				Assert: func(t *testing.T, req outboundtest.ProviderRequest) {
-					t.Helper()
-					assertPostJSON(t, req)
-				},
+				Check:     outboundtest.CheckPostJSON,
 			})
 			ch := outbound.LookupEvent(notifytarget.DestRawWebhook)
 			if ch == nil {
@@ -232,24 +243,11 @@ func TestOutboundProviderMocks_TransportRetryAndTerminal(t *testing.T) {
 	}
 }
 
-func assertPostJSON(t *testing.T, req outboundtest.ProviderRequest) {
-	t.Helper()
-	if req.Method != http.MethodPost {
-		t.Fatalf("method = %s, want POST", req.Method)
-	}
-	if !strings.HasPrefix(req.Header.Get("Content-Type"), "application/json") {
-		t.Fatalf("Content-Type = %q, want application/json", req.Header.Get("Content-Type"))
-	}
-	if req.Header.Get("User-Agent") == "" {
-		t.Fatal("User-Agent must be set")
-	}
-}
-
-func decodeProviderJSON(t *testing.T, req outboundtest.ProviderRequest, dst any) {
-	t.Helper()
+func decodeProviderJSON(req outboundtest.ProviderRequest, dst any) error {
 	if err := json.Unmarshal(req.Body, dst); err != nil {
-		t.Fatalf("unmarshal provider request body: %v\nbody: %s", err, req.BodyString())
+		return fmt.Errorf("unmarshal provider request body: %w\nbody: %s", err, req.BodyString())
 	}
+	return nil
 }
 
 func bridgeOutboundCheck(check outbound.ResponseChecker) notify.ResponseChecker {

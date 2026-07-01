@@ -4,6 +4,7 @@ package discord
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -16,11 +17,12 @@ func TestProviderMockEventDelivery(t *testing.T) {
 	provider := outboundtest.NewProvider(t, outboundtest.ProviderScenario{
 		Name:      "discord-success",
 		Responses: []outboundtest.ProviderResponse{{Status: http.StatusNoContent}},
-		Assert: func(t *testing.T, req outboundtest.ProviderRequest) {
-			t.Helper()
-			outboundtest.AssertPostJSON(t, req)
+		Check: func(req outboundtest.ProviderRequest) error {
+			if err := outboundtest.CheckPostJSON(req); err != nil {
+				return err
+			}
 			if req.Path != "/api/webhooks/123/"+outboundtest.URLTokenMarker {
-				t.Fatalf("path = %q, want Discord webhook path", req.Path)
+				return fmt.Errorf("path = %q, want Discord webhook path", req.Path)
 			}
 			msg := ptrext.Of(struct {
 				Embeds          []map[string]any `json:"embeds"`
@@ -29,14 +31,15 @@ func TestProviderMockEventDelivery(t *testing.T) {
 				} `json:"allowed_mentions"`
 			}{})
 			if err := json.Unmarshal(req.Body, msg); err != nil {
-				t.Fatalf("unmarshal Discord body: %v\nbody: %s", err, req.BodyString())
+				return fmt.Errorf("unmarshal Discord body: %w\nbody: %s", err, req.BodyString())
 			}
 			if len(msg.Embeds) == 0 {
-				t.Fatal("discord embeds must be present")
+				return fmt.Errorf("discord embeds must be present")
 			}
 			if msg.AllowedMentions.Parse == nil || len(msg.AllowedMentions.Parse) != 0 {
-				t.Fatalf("allowed_mentions.parse = %v, want empty list", msg.AllowedMentions.Parse)
+				return fmt.Errorf("allowed_mentions.parse = %v, want empty list", msg.AllowedMentions.Parse)
 			}
+			return nil
 		},
 	})
 

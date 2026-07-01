@@ -45,12 +45,14 @@ shared `notify.Transport` owns **shipping** (POST with retry + backoff).
 7. Add a DB migration widening the `destination_type` CHECK constraint on
    `tenant_notify_targets`.
 8. Provide a `ResponseChecker` — there is no default. Each adapter must
-   explicitly classify every HTTP status it can receive.
+   explicitly classify every HTTP status it can receive, then wire the matching
+   `outboundtest` response profile into conformance tests.
 9. Add `conformance_test.go` in the adapter package and call
    `outboundtest.TestEventChannel` and/or `outboundtest.TestDigestChannel`.
 10. Add `provider_mock_test.go` in the adapter package and use
     `outboundtest.NewProvider` to deliver a real rendered request to a local
-    provider-shaped server.
+    provider-shaped server. Use `ProviderScenario.Check` for request assertions
+    so failures are captured and reported after the HTTP response.
 11. Set the appropriate `ProviderShape` in conformance tests so the shared
     runner validates provider-specific payload structure.
 12. Add stable request snapshots under `testdata/` and verify them without
@@ -100,10 +102,11 @@ internal/notify/           shared Transport (POST + retry + backoff)
 Every adapter package must include `conformance_test.go` and call the shared
 `internal/outbound/outboundtest` runner. The script
 `scripts/lint-outbound-conformance.sh` enforces that shape for every package
-under `internal/outbound/adapter/`. Each adapter package must also include a
-`provider_mock_test.go` that uses `outboundtest.NewProvider` so the rendered
-request is delivered to a provider-shaped local HTTP server, not only inspected
-as a static request.
+under `internal/outbound/adapter/`. The gate requires a golden snapshot,
+`ProviderShape`, and `ResponseCases` in conformance tests. Each adapter package
+must also include a `provider_mock_test.go` that uses `outboundtest.NewProvider`
+with `ProviderScenario.Check` so the rendered request is delivered to a
+provider-shaped local HTTP server, not only inspected as a static request.
 
 Current matrix:
 

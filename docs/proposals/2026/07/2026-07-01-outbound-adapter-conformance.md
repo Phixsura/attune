@@ -110,8 +110,8 @@ outbound adapter `testdata` snapshots.
 | #167 acceptance criterion | Proposal mechanism | Verification signal |
 |---|---|---|
 | Existing adapters pass the same safety/error contract. | `internal/outbound/outboundtest` plus adapter-local `conformance_test.go` files for all five adapters. | `go test ./internal/outbound/...` fails when any adapter violates the shared runner. |
-| New adapters cannot skip redaction or retry classification tests. | `scripts/lint-outbound-conformance.sh` requires every adapter package to import and call `outboundtest`. | CI fails before adapter-specific tests can be merged without the shared runner. |
-| New adapters cannot skip provider-shaped delivery tests. | `scripts/lint-outbound-conformance.sh` also requires `provider_mock_test.go` with `outboundtest.NewProvider`. | CI fails when an adapter has only static request snapshots but no fake-provider delivery test. |
+| New adapters cannot skip redaction or retry classification tests. | `scripts/lint-outbound-conformance.sh` requires every adapter package to import and call `outboundtest`, declare `ProviderShape`, declare `ResponseCases`, and keep golden snapshots. | CI fails before adapter-specific tests can be merged without the shared runner and its safety profiles. |
+| New adapters cannot skip provider-shaped delivery tests. | `scripts/lint-outbound-conformance.sh` also requires `provider_mock_test.go` with `outboundtest.NewProvider` and `ProviderScenario.Check`. | CI fails when an adapter has only static request snapshots but no fake-provider delivery test. |
 | CI catches rendering drift. | Golden request snapshots normalize dynamic values and fail on unexpected method/header/body changes. | Snapshot diffs fail normal test runs unless intentionally updated. |
 | CI catches response drift. | Shared response profile cases exercise success, retryable, terminal, provider-code, and truncation behavior. | Response case failures show the adapter, profile, status, and expected verdict. |
 | CI catches provider retry-hint drift. | `notify.Transport` tests exercise valid, invalid, date-form, clamped, retryable, and terminal `Retry-After` cases. | Retry timing changes fail focused transport tests before they reach delivery workers. |
@@ -429,7 +429,12 @@ The script should:
 - require an import of `internal/outbound/outboundtest`
 - require at least one `outboundtest.TestEventChannel` or
   `outboundtest.TestDigestChannel` call
+- require golden request snapshots
+- require an explicit `outboundtest.ProviderShape`
+- require shared `ResponseCases`
 - require `outboundtest.NewProvider` in the provider mock
+- require `ProviderScenario.Check` and reject goroutine-local `Assert` usage in
+  adapter provider mocks
 
 Wire the script into `scripts/check.sh` and CI's Go checks. This is the part that
 makes the acceptance criterion "new adapters cannot skip redaction or retry

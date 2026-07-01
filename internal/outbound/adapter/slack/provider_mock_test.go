@@ -4,6 +4,7 @@ package slack
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -17,24 +18,26 @@ func TestProviderMockEventDelivery(t *testing.T) {
 	provider := outboundtest.NewProvider(t, outboundtest.ProviderScenario{
 		Name:      "slack-success",
 		Responses: []outboundtest.ProviderResponse{{Status: http.StatusOK, Body: "ok"}},
-		Assert: func(t *testing.T, req outboundtest.ProviderRequest) {
-			t.Helper()
-			outboundtest.AssertPostJSON(t, req)
+		Check: func(req outboundtest.ProviderRequest) error {
+			if err := outboundtest.CheckPostJSON(req); err != nil {
+				return err
+			}
 			if req.Path != "/services/T000/B000/"+outboundtest.URLTokenMarker {
-				t.Fatalf("path = %q, want Slack webhook path", req.Path)
+				return fmt.Errorf("path = %q, want Slack webhook path", req.Path)
 			}
 			if strings.Contains(req.BodyString(), outboundtest.URLTokenMarker) {
-				t.Fatal("Slack URL token leaked into request body")
+				return fmt.Errorf("Slack URL token leaked into request body")
 			}
 			msg := ptrext.Of(struct {
 				Blocks []map[string]any `json:"blocks"`
 			}{})
 			if err := json.Unmarshal(req.Body, msg); err != nil {
-				t.Fatalf("unmarshal Slack body: %v\nbody: %s", err, req.BodyString())
+				return fmt.Errorf("unmarshal Slack body: %w\nbody: %s", err, req.BodyString())
 			}
 			if len(msg.Blocks) < 3 {
-				t.Fatalf("blocks = %d, want at least 3", len(msg.Blocks))
+				return fmt.Errorf("blocks = %d, want at least 3", len(msg.Blocks))
 			}
+			return nil
 		},
 	})
 

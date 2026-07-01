@@ -32,6 +32,21 @@ while IFS= read -r dir; do
     status=1
   fi
 
+  if ! grep -q 'Golden:' "$conf"; then
+    echo "ERROR $conf: must declare golden request snapshots" >&2
+    status=1
+  fi
+
+  if ! grep -Eq 'ProviderShape:[[:space:]]*outboundtest\.ProviderShape' "$conf"; then
+    echo "ERROR $conf: must declare an outboundtest.ProviderShape" >&2
+    status=1
+  fi
+
+  if ! grep -q 'ResponseCases:' "$conf"; then
+    echo "ERROR $conf: must declare shared response-classification cases" >&2
+    status=1
+  fi
+
   provider="$dir/provider_mock_test.go"
   if [[ ! -f "$provider" ]]; then
     echo "ERROR $dir: missing provider_mock_test.go" >&2
@@ -46,6 +61,16 @@ while IFS= read -r dir; do
 
   if ! grep -q 'outboundtest\.NewProvider' "$provider"; then
     echo "ERROR $provider: must use outboundtest.NewProvider" >&2
+    status=1
+  fi
+
+  if ! grep -q 'Check:' "$provider"; then
+    echo "ERROR $provider: must use ProviderScenario.Check for request assertions" >&2
+    status=1
+  fi
+
+  if grep -q 'Assert:' "$provider"; then
+    echo "ERROR $provider: use ProviderScenario.Check instead of goroutine-local Assert" >&2
     status=1
   fi
 done < <(find internal/outbound/adapter -mindepth 1 -maxdepth 1 -type d | sort)

@@ -61,7 +61,7 @@ func TestProviderMock_GitHubIssue(t *testing.T) {
 			provider := outboundtest.NewProvider(t, outboundtest.ProviderScenario{
 				Name:      tc.name,
 				Responses: tc.responses,
-				Assert:    assertGitHubIssueRequest,
+				Check:     checkGitHubIssueRequest,
 			})
 			rendered, err := ptrext.Of(channel{apiBase: provider.URL("")}).RenderEvent(outboundtest.CanonicalEvent(), outbound.Target{
 				ID:              "target-github",
@@ -97,22 +97,21 @@ func TestProviderMock_GitHubIssue(t *testing.T) {
 	}
 }
 
-func assertGitHubIssueRequest(t *testing.T, req outboundtest.ProviderRequest) {
-	t.Helper()
+func checkGitHubIssueRequest(req outboundtest.ProviderRequest) error {
 	if req.Method != http.MethodPost {
-		t.Fatalf("method = %s, want POST", req.Method)
+		return fmt.Errorf("method = %s, want POST", req.Method)
 	}
 	if req.Path != "/repos/attune/conformance/issues" {
-		t.Fatalf("path = %q, want /repos/attune/conformance/issues", req.Path)
+		return fmt.Errorf("path = %q, want /repos/attune/conformance/issues", req.Path)
 	}
 	if got := req.Header.Get("Authorization"); got != "Bearer "+outboundtest.SecretMarker {
-		t.Fatalf("Authorization = %q, want bearer token", got)
+		return fmt.Errorf("Authorization = %q, want bearer token", got)
 	}
 	if got := req.Header.Get("X-GitHub-Api-Version"); got != githubAPIVersion {
-		t.Fatalf("X-GitHub-Api-Version = %q, want %q", got, githubAPIVersion)
+		return fmt.Errorf("X-GitHub-Api-Version = %q, want %q", got, githubAPIVersion)
 	}
 	if !strings.HasPrefix(req.Header.Get("Content-Type"), "application/json") {
-		t.Fatalf("Content-Type = %q, want application/json", req.Header.Get("Content-Type"))
+		return fmt.Errorf("Content-Type = %q, want application/json", req.Header.Get("Content-Type"))
 	}
 
 	issue := ptrext.Of(struct {
@@ -121,19 +120,20 @@ func assertGitHubIssueRequest(t *testing.T, req outboundtest.ProviderRequest) {
 		Labels []string `json:"labels"`
 	}{})
 	if err := json.Unmarshal(req.Body, issue); err != nil {
-		t.Fatalf("unmarshal github issue request: %v\nbody: %s", err, req.BodyString())
+		return fmt.Errorf("unmarshal github issue request: %w\nbody: %s", err, req.BodyString())
 	}
 	if issue.Title == "" || issue.Body == "" {
-		t.Fatalf("issue title/body must be populated: %+v", issue)
+		return fmt.Errorf("issue title/body must be populated: %+v", issue)
 	}
 	if !containsString(issue.Labels, "attune/feedback") {
-		t.Fatalf("labels = %v, want attune/feedback", issue.Labels)
+		return fmt.Errorf("labels = %v, want attune/feedback", issue.Labels)
 	}
 	for _, forbidden := range []string{"@octocat", "@org/team", "<@U123456>"} {
 		if strings.Contains(issue.Body, forbidden) {
-			t.Fatalf("issue body leaked active mention token %q", forbidden)
+			return fmt.Errorf("issue body leaked active mention token %q", forbidden)
 		}
 	}
+	return nil
 }
 
 func bridgeGitHubOutboundCheck(check outbound.ResponseChecker) notify.ResponseChecker {
