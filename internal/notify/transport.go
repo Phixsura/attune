@@ -12,6 +12,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -95,6 +96,7 @@ const maxDuration = time.Duration(1<<63 - 1)
 type attemptResult struct {
 	err        error
 	retryAfter time.Duration
+	status     int
 }
 
 type sleepFunc func(context.Context, time.Duration) error
@@ -126,6 +128,7 @@ func (t *Transport) Send(
 	const where = "notify.Transport.Send"
 	var lastErr error
 	var retryAfter time.Duration
+	delivery := newDeliveryMetrics(label)
 	sleep := t.sleep
 	if sleep == nil {
 		sleep = sleepWithTimer
@@ -139,19 +142,29 @@ func (t *Transport) Send(
 			logext.Infof(ctx, "[%s] retry,dest:%s,attempt:%d,delay:%s,prev_err:%+v",
 				where, label, attempt, delay, lastErr)
 			if err := sleep(ctx, delay); err != nil {
+				delivery.finish("canceled")
 				return err
 			}
 		}
 		result := t.attempt(ctx, build, check)
 		if result.err == nil {
+			delivery.attempt("success", result.status)
+			delivery.finish("success")
 			return nil
 		}
 		if errors.Is(result.err, ErrTerminal) {
+			delivery.attempt("terminal", result.status)
+			delivery.finish("terminal")
 			return result.err
 		}
+		delivery.attempt("retryable", result.status)
 		lastErr = result.err
 		retryAfter = result.retryAfter
+		if retryAfter > 0 {
+			delivery.retryAfter()
+		}
 	}
+	delivery.finish("exhausted")
 	return fmt.Errorf("transport %s: %d attempts failed: %w",
 		label, t.retry.MaxAttempts, lastErr)
 }
@@ -175,18 +188,63 @@ func (t *Transport) attempt(
 	const maxResponseBody = 1 << 20 // 1 MiB — defense against oversized upstream responses
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
-		return attemptResult{err: Classify(fmt.Errorf("read body: %w", err), 0)}
+		return attemptResult{err: Classify(fmt.Errorf("read body: %w", err), resp.StatusCode), status: resp.StatusCode}
 	}
 	// check owns the success/retry/terminal decision; pair its verdict with the
 	// status code so the dead-queue surface can report a structured failure_kind.
 	if cErr := check(ctx, resp.StatusCode, body); cErr != nil {
-		result := attemptResult{err: Classify(cErr, resp.StatusCode)}
+		result := attemptResult{err: Classify(cErr, resp.StatusCode), status: resp.StatusCode}
 		if !errors.Is(cErr, ErrTerminal) {
 			result.retryAfter = retryAfterDelay(resp.Header.Get("Retry-After"), time.Now(), t.retry.MaxDelay)
 		}
 		return result
 	}
-	return attemptResult{}
+	return attemptResult{status: resp.StatusCode}
+}
+
+type deliveryMetrics struct {
+	destinationType string
+	started         time.Time
+}
+
+func newDeliveryMetrics(label string) deliveryMetrics {
+	return deliveryMetrics{
+		destinationType: metricDestination(label),
+		started:         time.Now(),
+	}
+}
+
+func (m deliveryMetrics) attempt(result string, status int) {
+	metrics.OutboundDeliveryAttemptsTotal.
+		WithLabelValues(m.destinationType, result, metricStatus(status)).
+		Inc()
+}
+
+func (m deliveryMetrics) finish(result string) {
+	metrics.OutboundDeliveryDuration.
+		WithLabelValues(m.destinationType, result).
+		Observe(time.Since(m.started).Seconds())
+}
+
+func (m deliveryMetrics) retryAfter() {
+	metrics.OutboundRetryAfterTotal.WithLabelValues(m.destinationType).Inc()
+}
+
+func metricDestination(label string) string {
+	normalized := strings.ReplaceAll(strings.ToLower(label), "_", "-")
+	for _, value := range []string{"raw-webhook", "github-issue", "slack", "discord", "lark"} {
+		if strings.Contains(normalized, value) {
+			return value
+		}
+	}
+	return "other"
+}
+
+func metricStatus(status int) string {
+	if status <= 0 {
+		return "0"
+	}
+	return strconv.Itoa(status)
 }
 
 // backoff returns the delay before retry n (1-indexed: n=1 is between

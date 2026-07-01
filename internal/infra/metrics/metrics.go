@@ -158,6 +158,38 @@ var NotifyFailuresTotal = prometheus.NewCounterVec(
 	[]string{"destination_type", "reason"},
 )
 
+// OutboundDeliveryAttemptsTotal counts every provider delivery attempt with
+// bounded result/status labels. destination_type is one of the adapter family
+// names; status is the HTTP status code or "0" when no response was received.
+var OutboundDeliveryAttemptsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_outbound_delivery_attempts_total",
+		Help: "Outbound provider delivery attempts by destination_type, result, and HTTP status.",
+	},
+	[]string{"destination_type", "result", "status"},
+)
+
+// OutboundDeliveryDuration records end-to-end delivery duration for a transport
+// Send call, including retries and retry-after waits.
+var OutboundDeliveryDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_outbound_delivery_duration_seconds",
+		Help:    "End-to-end outbound provider delivery duration, including retries.",
+		Buckets: prometheus.ExponentialBuckets(0.05, 2, 12), // 50ms..102s
+	},
+	[]string{"destination_type", "result"},
+)
+
+// OutboundRetryAfterTotal counts retryable provider responses that supplied a
+// usable Retry-After header.
+var OutboundRetryAfterTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_outbound_retry_after_total",
+		Help: "Retryable outbound provider responses that supplied Retry-After.",
+	},
+	[]string{"destination_type"},
+)
+
 // OutboxLagSeconds gauges the age of the oldest pending outbox row.
 // Refreshed by a 30s ticker (registered in main.go), not on every
 // metric scrape — avoids hammering the DB on every Prometheus poll.
@@ -881,6 +913,9 @@ var allMetrics = []prometheus.Collector{
 	EnrichmentTerminalFailuresTotal,
 	EnrichmentTerminalFailuresByReasonTotal,
 	NotifyFailuresTotal,
+	OutboundDeliveryAttemptsTotal,
+	OutboundDeliveryDuration,
+	OutboundRetryAfterTotal,
 	OutboxLagSeconds,
 	OutboxDeadRows,
 	ClaimContentionTotal,
@@ -969,6 +1004,9 @@ func RegisteredMetricNames() []string {
 		"attune_enrichment_terminal_failures_total",
 		"attune_enrichment_terminal_failures_by_reason_total",
 		"attune_notify_failures_total",
+		"attune_outbound_delivery_attempts_total",
+		"attune_outbound_delivery_duration_seconds",
+		"attune_outbound_retry_after_total",
 		"attune_outbox_lag_seconds",
 		"attune_outbox_dead_rows",
 		"attune_claim_contention_total",

@@ -22,6 +22,7 @@ func TestConformanceEvent(t *testing.T) {
 			SignatureVersion: outbound.SignatureVersionContentHash,
 		},
 		Golden:        "testdata/event_request.json",
+		ProviderShape: outboundtest.ProviderShapeRawWebhook,
 		Capabilities:  outboundtest.Capabilities{PreservesRawCustomerBody: true},
 		ResponseCases: outboundtest.GenericWebhookResponses(),
 	})
@@ -38,6 +39,7 @@ func TestConformanceDigest(t *testing.T) {
 			DestinationType: channelID,
 		},
 		Golden:        "testdata/digest_request.json",
+		ProviderShape: outboundtest.ProviderShapeRawWebhook,
 		Capabilities:  outboundtest.Capabilities{PreservesRawCustomerBody: true},
 		ResponseCases: outboundtest.GenericWebhookResponses(),
 	})

@@ -147,6 +147,45 @@ func TestNewTransport_PreservesValidMaxAttempts(t *testing.T) {
 	}
 }
 
+func TestMetricDestination(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		label string
+		want  string
+	}{
+		{label: "outbox-raw-webhook-42", want: "raw-webhook"},
+		{label: "outbox-raw_webhook-42", want: "raw-webhook"},
+		{label: "digest-slack-tenant-a", want: "slack"},
+		{label: "digest-discord-tenant-a", want: "discord"},
+		{label: "digest-lark-tenant-a", want: "lark"},
+		{label: "github-issue-owner/repo", want: "github-issue"},
+		{label: "custom-webhook-42", want: "other"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			t.Parallel()
+			if got := metricDestination(tc.label); got != tc.want {
+				t.Fatalf("metricDestination(%q) = %q, want %q", tc.label, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMetricStatus(t *testing.T) {
+	t.Parallel()
+
+	if got := metricStatus(201); got != "201" {
+		t.Fatalf("metricStatus(201) = %q, want 201", got)
+	}
+	if got := metricStatus(0); got != "0" {
+		t.Fatalf("metricStatus(0) = %q, want 0", got)
+	}
+	if got := metricStatus(-1); got != "0" {
+		t.Fatalf("metricStatus(-1) = %q, want 0", got)
+	}
+}
+
 func TestRetryAfterDelay(t *testing.T) {
 	t.Parallel()
 

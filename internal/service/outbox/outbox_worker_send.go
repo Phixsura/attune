@@ -50,7 +50,7 @@ func (w *OutboxWorker) sendByDestType(
 		return err
 	}
 
-	label := fmt.Sprintf("outbox-%d", row.ID)
+	label := fmt.Sprintf("outbox-%s-%d", row.DestinationType, row.ID)
 	return w.transport.Send(ctx, label, rendered.Build, wrapCheck(rendered.Check, row))
 }
 

@@ -4,6 +4,7 @@ package outboundtest
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -47,6 +48,7 @@ func (r ProviderRequest) BodyString() string {
 type ProviderScenario struct {
 	Name      string
 	Responses []ProviderResponse
+	Check     func(req ProviderRequest) error
 	Assert    func(t *testing.T, req ProviderRequest)
 }
 
@@ -58,6 +60,7 @@ type FakeProvider struct {
 	scenario ProviderScenario
 	mu       sync.Mutex
 	requests []ProviderRequest
+	failures []string
 }
 
 // NewProvider starts a fake upstream provider for one scenario.
@@ -69,6 +72,9 @@ func NewProvider(t *testing.T, scenario ProviderScenario) *FakeProvider {
 	provider := ptrext.Of(FakeProvider{t: t, scenario: scenario})
 	provider.server = httptest.NewServer(http.HandlerFunc(provider.serveHTTP))
 	t.Cleanup(provider.server.Close)
+	t.Cleanup(func() {
+		provider.AssertNoFailures(t)
+	})
 	return provider
 }
 
@@ -108,17 +114,46 @@ func (p *FakeProvider) CallCount() int {
 	return len(p.requests)
 }
 
+// AssertNoFailures fails the caller if the provider recorded asynchronous
+// assertion failures while serving requests.
+func (p *FakeProvider) AssertNoFailures(t *testing.T) {
+	t.Helper()
+	failures := p.Failures()
+	if len(failures) == 0 {
+		return
+	}
+	t.Fatalf("fake provider assertions failed:\n%s", strings.Join(failures, "\n"))
+}
+
+// Failures returns a snapshot of asynchronous assertion failures.
+func (p *FakeProvider) Failures() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	out := make([]string, len(p.failures))
+	copy(out, p.failures)
+	return out
+}
+
+// CheckPostJSON verifies common JSON webhook request invariants.
+func CheckPostJSON(req ProviderRequest) error {
+	if req.Method != http.MethodPost {
+		return fmt.Errorf("method = %s, want POST", req.Method)
+	}
+	if !strings.HasPrefix(req.Header.Get("Content-Type"), "application/json") {
+		return fmt.Errorf("Content-Type = %q, want application/json", req.Header.Get("Content-Type"))
+	}
+	if req.Header.Get("User-Agent") == "" {
+		return fmt.Errorf("User-Agent must be set")
+	}
+	return nil
+}
+
 // AssertPostJSON verifies common JSON webhook request invariants.
 func AssertPostJSON(t *testing.T, req ProviderRequest) {
 	t.Helper()
-	if req.Method != http.MethodPost {
-		t.Fatalf("method = %s, want POST", req.Method)
-	}
-	if !strings.HasPrefix(req.Header.Get("Content-Type"), "application/json") {
-		t.Fatalf("Content-Type = %q, want application/json", req.Header.Get("Content-Type"))
-	}
-	if req.Header.Get("User-Agent") == "" {
-		t.Fatal("User-Agent must be set")
+	if err := CheckPostJSON(req); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -161,6 +196,11 @@ func (p *FakeProvider) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		Body:     append([]byte(nil), body...),
 	}
 	call := p.record(req)
+	if p.scenario.Check != nil {
+		if err := p.scenario.Check(req.clone()); err != nil {
+			p.recordFailure("request %d: %v", call, err)
+		}
+	}
 	if p.scenario.Assert != nil {
 		p.scenario.Assert(p.t, req.clone())
 	}
@@ -186,6 +226,12 @@ func (p *FakeProvider) record(req ProviderRequest) int {
 	defer p.mu.Unlock()
 	p.requests = append(p.requests, req.clone())
 	return len(p.requests)
+}
+
+func (p *FakeProvider) recordFailure(format string, args ...any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.failures = append(p.failures, fmt.Sprintf(format, args...))
 }
 
 func (p *FakeProvider) response(call int) ProviderResponse {

@@ -862,64 +862,79 @@
           "refId": "A"
         },
         {
+          "expr": "(sum by (destination_type, result, status) (rate(attune_outbound_delivery_attempts_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "attempt / {{destination_type}} / {{result}} / {{status}}",
+          "refId": "B"
+        },
+        {
+          "expr": "(histogram_quantile(0.95, sum by (le, destination_type, result) (rate(attune_outbound_delivery_duration_seconds_bucket[$__rate_interval])))) or vector(0)",
+          "legendFormat": "delivery p95 / {{destination_type}} / {{result}}",
+          "refId": "C"
+        },
+        {
+          "expr": "(sum by (destination_type) (rate(attune_outbound_retry_after_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "retry-after / {{destination_type}}",
+          "refId": "D"
+        },
+        {
           "expr": "(attune_outbox_lag_seconds) or vector(0)",
           "legendFormat": "outbox lag",
-          "refId": "B"
+          "refId": "E"
         },
         {
           "expr": "(rate(attune_claim_contention_total[$__rate_interval])) or vector(0)",
           "legendFormat": "claim contention",
-          "refId": "C"
+          "refId": "F"
         },
         {
           "expr": "(attune_outbox_dead_rows) or vector(0)",
           "legendFormat": "dead deliveries",
-          "refId": "D"
+          "refId": "G"
         },
         {
           "expr": "(sum by (worker) (increase(attune_worker_panics_total[$__range]))) or vector(0)",
           "legendFormat": "worker panics / {{worker}}",
-          "refId": "E"
+          "refId": "H"
         },
         {
           "expr": "(sum by (worker) (attune_worker_in_flight)) or vector(0)",
           "legendFormat": "in-flight / {{worker}}",
-          "refId": "F"
+          "refId": "I"
         },
         {
           "expr": "(sum by (worker, status) (rate(attune_worker_drain_total[$__rate_interval]))) or vector(0)",
           "legendFormat": "drain / {{worker}} / {{status}}",
-          "refId": "G"
+          "refId": "J"
         },
         {
           "expr": "(sum by (worker) (rate(attune_worker_stale_claims_recovered_total[$__rate_interval]))) or vector(0)",
           "legendFormat": "stale recovered / {{worker}}",
-          "refId": "H"
+          "refId": "K"
         },
         {
           "expr": "(sum by (worker, outcome) (rate(attune_worker_heartbeat_total[$__rate_interval]))) or vector(0)",
           "legendFormat": "heartbeat / {{worker}} / {{outcome}}",
-          "refId": "I"
+          "refId": "L"
         },
         {
           "expr": "(sum by (lock, outcome) (rate(attune_advisory_lock_total[$__rate_interval]))) or vector(0)",
           "legendFormat": "advisory lock / {{lock}} / {{outcome}}",
-          "refId": "J"
+          "refId": "M"
         },
         {
           "expr": "(sum by (name, result) (rate(attune_circuit_breaker_results_total[$__rate_interval]))) or vector(0)",
           "legendFormat": "circuit / {{name}} / {{result}}",
-          "refId": "K"
+          "refId": "N"
         },
         {
           "expr": "(sum by (name) (rate(attune_circuit_breaker_rejected_total[$__rate_interval]))) or vector(0)",
           "legendFormat": "circuit rejected / {{name}}",
-          "refId": "L"
+          "refId": "O"
         },
         {
           "expr": "(sum by (name, from, to) (increase(attune_circuit_breaker_transitions_total[$__range]))) or vector(0)",
-          "legendFormat": "circuit state / {{name}} / {{from}}→{{to}}",
-          "refId": "M"
+          "legendFormat": "circuit state / {{name}} / {{from}}-\u003e{{to}}",
+          "refId": "P"
         }
       ],
       "fieldConfig": {

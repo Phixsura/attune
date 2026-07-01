@@ -24,11 +24,11 @@ func TestFakeProviderRecordsRequestsAndRepeatsFinalResponse(t *testing.T) {
 			},
 			{Status: http.StatusNoContent},
 		},
-		Assert: func(t *testing.T, req ProviderRequest) {
-			t.Helper()
+		Check: func(req ProviderRequest) error {
 			if req.Method != http.MethodPost {
-				t.Errorf("method = %s, want POST", req.Method)
+				return errors.New("method must be POST")
 			}
+			return nil
 		},
 	})
 
@@ -78,12 +78,14 @@ func TestFakeProviderURL(t *testing.T) {
 func TestSendRenderedPostsAndChecksResponse(t *testing.T) {
 	provider := NewProvider(t, ProviderScenario{
 		Responses: []ProviderResponse{{Status: http.StatusCreated, Body: `{"ok":true}`}},
-		Assert: func(t *testing.T, req ProviderRequest) {
-			t.Helper()
-			AssertPostJSON(t, req)
-			if req.BodyString() != `{"hello":"world"}` {
-				t.Errorf("body = %q, want rendered JSON", req.BodyString())
+		Check: func(req ProviderRequest) error {
+			if err := CheckPostJSON(req); err != nil {
+				return err
 			}
+			if req.BodyString() != `{"hello":"world"}` {
+				return errors.New("body must match rendered JSON")
+			}
+			return nil
 		},
 	})
 

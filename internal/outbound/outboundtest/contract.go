@@ -20,6 +20,17 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext/logexttest"
 )
 
+// ProviderShape names the provider wire-contract profile an adapter must emit.
+type ProviderShape string
+
+const (
+	ProviderShapeRawWebhook  ProviderShape = "raw-webhook"
+	ProviderShapeSlack       ProviderShape = "slack"
+	ProviderShapeDiscord     ProviderShape = "discord"
+	ProviderShapeLark        ProviderShape = "lark"
+	ProviderShapeGitHubIssue ProviderShape = "github-issue"
+)
+
 // Capabilities declares which conformance profiles apply to an adapter.
 type Capabilities struct {
 	URLIsCredential          bool
@@ -37,6 +48,7 @@ type EventCase struct {
 	Target        outbound.Target
 	Envelope      *outbound.Envelope
 	Golden        string
+	ProviderShape ProviderShape
 	Capabilities  Capabilities
 	ResponseCases []ResponseCase
 	ForbiddenBody []string
@@ -48,6 +60,7 @@ type DigestCase struct {
 	Target        outbound.Target
 	View          any
 	Golden        string
+	ProviderShape ProviderShape
 	Capabilities  Capabilities
 	ResponseCases []ResponseCase
 	ForbiddenBody []string
@@ -72,6 +85,7 @@ func TestEventChannel(t *testing.T, tc EventCase) {
 	testRendered(t, rendered, renderCase{
 		Target:        tc.Target,
 		Golden:        tc.Golden,
+		ProviderShape: tc.ProviderShape,
 		Capabilities:  tc.Capabilities,
 		ResponseCases: tc.ResponseCases,
 		ForbiddenBody: tc.ForbiddenBody,
@@ -97,6 +111,7 @@ func TestDigestChannel(t *testing.T, tc DigestCase) {
 	testRendered(t, rendered, renderCase{
 		Target:        tc.Target,
 		Golden:        tc.Golden,
+		ProviderShape: tc.ProviderShape,
 		Capabilities:  tc.Capabilities,
 		ResponseCases: tc.ResponseCases,
 		ForbiddenBody: tc.ForbiddenBody,
@@ -106,6 +121,7 @@ func TestDigestChannel(t *testing.T, tc DigestCase) {
 type renderCase struct {
 	Target        outbound.Target
 	Golden        string
+	ProviderShape ProviderShape
 	Capabilities  Capabilities
 	ResponseCases []ResponseCase
 	ForbiddenBody []string
@@ -139,6 +155,7 @@ func testRendered(t *testing.T, rendered outbound.Rendered, tc renderCase) {
 	assertNoSensitiveMarkers(t, "snapshot", snap, tc.Target, tc.Capabilities, nil)
 	assertForbiddenBody(t, snap, tc.ForbiddenBody)
 	assertMentionDefense(t, snap, tc.Capabilities, tc.ForbiddenBody)
+	assertProviderShape(t, req, tc.Target, tc.ProviderShape)
 	checkGolden(t, tc.Golden, snap)
 	if len(tc.ResponseCases) > 0 {
 		TestResponseChecker(t, rendered.Check, tc.ResponseCases)
@@ -187,6 +204,169 @@ func snapshotRequest(t *testing.T, req *http.Request) string {
 		t.Fatalf("marshal request snapshot: %v", err)
 	}
 	return string(b) + "\n"
+}
+
+func assertProviderShape(t *testing.T, req *http.Request, target outbound.Target, shape ProviderShape) {
+	t.Helper()
+	if shape == "" {
+		return
+	}
+	body := requestJSONBody(t, req)
+	switch shape {
+	case ProviderShapeRawWebhook:
+		assertRawWebhookShape(t, body)
+	case ProviderShapeSlack:
+		assertSlackShape(t, body)
+	case ProviderShapeDiscord:
+		assertDiscordShape(t, body)
+	case ProviderShapeLark:
+		assertLarkShape(t, body, target)
+	case ProviderShapeGitHubIssue:
+		assertGitHubIssueShape(t, body)
+	default:
+		t.Fatalf("unknown provider shape %q", shape)
+	}
+}
+
+func requestJSONBody(t *testing.T, req *http.Request) map[string]any {
+	t.Helper()
+	rawBody, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read provider body: %v", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(rawBody))
+
+	var body map[string]any
+	if err := json.Unmarshal(rawBody, &body); err != nil { // ptrext:allow unmarshal-out-param
+		t.Fatalf("provider body must be a JSON object: %v\nbody=%s", err, rawBody)
+	}
+	return body
+}
+
+func assertRawWebhookShape(t *testing.T, body map[string]any) {
+	t.Helper()
+	if stringValue(body, "event_type") == "" {
+		t.Fatalf("raw webhook body missing event_type: %#v", body)
+	}
+	if stringValue(body, "tenant_id") == "" {
+		t.Fatalf("raw webhook body missing tenant_id: %#v", body)
+	}
+}
+
+func assertSlackShape(t *testing.T, body map[string]any) {
+	t.Helper()
+	blocks, ok := body["blocks"].([]any)
+	if !ok || len(blocks) == 0 {
+		t.Fatalf("Slack body must include non-empty blocks: %#v", body)
+	}
+	for i, block := range blocks {
+		m, ok := block.(map[string]any)
+		if !ok || stringValue(m, "type") == "" {
+			t.Fatalf("Slack block %d missing type: %#v", i, block)
+		}
+	}
+}
+
+func assertDiscordShape(t *testing.T, body map[string]any) {
+	t.Helper()
+	embeds, ok := body["embeds"].([]any)
+	if !ok || len(embeds) == 0 {
+		t.Fatalf("Discord body must include non-empty embeds: %#v", body)
+	}
+	allowed, ok := body["allowed_mentions"].(map[string]any)
+	if !ok {
+		t.Fatalf("Discord body missing allowed_mentions: %#v", body)
+	}
+	parse, ok := allowed["parse"].([]any)
+	if !ok || len(parse) != 0 {
+		t.Fatalf("Discord allowed_mentions.parse = %#v, want empty array", allowed["parse"])
+	}
+}
+
+func assertLarkShape(t *testing.T, body map[string]any, target outbound.Target) {
+	t.Helper()
+	if got := stringValue(body, "msg_type"); got != "interactive" {
+		t.Fatalf("Lark msg_type = %q, want interactive", got)
+	}
+	if target.Secret != "" {
+		if stringValue(body, "timestamp") == "" || stringValue(body, "sign") == "" {
+			t.Fatalf("signed Lark webhook must include timestamp and sign: %#v", body)
+		}
+	}
+	card, ok := body["card"].(map[string]any)
+	if !ok {
+		t.Fatalf("Lark body missing card: %#v", body)
+	}
+	header, ok := card["header"].(map[string]any)
+	if !ok {
+		t.Fatalf("Lark card missing header: %#v", card)
+	}
+	title, ok := header["title"].(map[string]any)
+	if !ok || stringValue(title, "content") == "" {
+		t.Fatalf("Lark header.title missing text content: %#v", header)
+	}
+	elements, ok := card["elements"].([]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("Lark card must include elements: %#v", card)
+	}
+	assertLarkNoteContentStrings(t, elements)
+}
+
+func assertLarkNoteContentStrings(t *testing.T, elements []any) {
+	t.Helper()
+	for _, element := range elements {
+		m, ok := element.(map[string]any)
+		if !ok {
+			continue
+		}
+		if stringValue(m, "tag") != "note" {
+			continue
+		}
+		children, ok := m["elements"].([]any)
+		if !ok || len(children) == 0 {
+			t.Fatalf("Lark note must include child elements: %#v", m)
+		}
+		for _, child := range children {
+			childMap, ok := child.(map[string]any)
+			if !ok {
+				t.Fatalf("Lark note child must be an object: %#v", child)
+			}
+			if _, ok := childMap["content"].(string); !ok {
+				t.Fatalf("Lark note child content encoded as %T, want string", childMap["content"])
+			}
+		}
+	}
+}
+
+func assertGitHubIssueShape(t *testing.T, body map[string]any) {
+	t.Helper()
+	if stringValue(body, "title") == "" {
+		t.Fatalf("GitHub issue body missing title: %#v", body)
+	}
+	if stringValue(body, "body") == "" {
+		t.Fatalf("GitHub issue body missing body: %#v", body)
+	}
+	labels, ok := body["labels"].([]any)
+	if !ok || len(labels) == 0 {
+		t.Fatalf("GitHub issue body must include labels: %#v", body)
+	}
+	for _, label := range labels {
+		s, ok := label.(string)
+		if !ok || s == "" {
+			t.Fatalf("GitHub issue label must be a non-empty string: %#v", label)
+		}
+		if len([]rune(s)) > 50 {
+			t.Fatalf("GitHub issue label %q exceeds provider limit", s)
+		}
+		if strings.TrimSpace(s) != s || strings.ContainsAny(s, "\n\r\t@") {
+			t.Fatalf("GitHub issue label %q contains unsafe whitespace or mention marker", s)
+		}
+	}
+}
+
+func stringValue(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return value
 }
 
 func normalizeHeader(key, value string) string {

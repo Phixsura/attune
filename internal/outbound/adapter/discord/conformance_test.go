@@ -19,7 +19,8 @@ func TestConformanceEvent(t *testing.T) {
 			URL:             "https://discord.com/api/webhooks/123/" + outboundtest.URLTokenMarker,
 			DestinationType: channelID,
 		},
-		Golden: "testdata/event_request.json",
+		Golden:        "testdata/event_request.json",
+		ProviderShape: outboundtest.ProviderShapeDiscord,
 		Capabilities: outboundtest.Capabilities{
 			URLIsCredential:   true,
 			HasActiveMentions: true,
@@ -38,7 +39,8 @@ func TestConformanceDigest(t *testing.T) {
 			URL:             "https://discord.com/api/webhooks/123/" + outboundtest.URLTokenMarker,
 			DestinationType: channelID,
 		},
-		Golden: "testdata/digest_request.json",
+		Golden:        "testdata/digest_request.json",
+		ProviderShape: outboundtest.ProviderShapeDiscord,
 		Capabilities: outboundtest.Capabilities{
 			URLIsCredential:   true,
 			HasActiveMentions: true,

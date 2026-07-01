@@ -14,7 +14,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   request snapshots, fake-provider delivery mocks, and a CI lint gate so
   outbound adapters must prove response classification, redaction,
   mention-safety, and provider-shaped delivery behavior before they can be
-  added or changed.
+  added or changed. The harness now also validates provider-specific payload
+  shapes, captures fake-provider assertion failures after the HTTP response,
+  and includes opt-in live smoke tests for raw webhook, Slack, Discord, Lark,
+  and GitHub issue delivery.
+
+- **Outbound delivery observability (#167).**
+  Added low-cardinality transport metrics for provider delivery attempts,
+  end-to-end delivery duration, and honored `Retry-After` responses, with
+  generated Grafana dashboard coverage and metrics reference documentation.
 
 - **Terminal failure workbench for the feedback console (#159).**
   - Added a dedicated `/feedback/terminal-failures` console view that opens on terminal rows and surfaces bounded cluster summaries by failure class, routed model/channel, terminal config fingerprint, and age bucket.
@@ -84,7 +92,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   before sending them to the provider and no longer relies on a package-global
   API-base override in provider-mock tests. Lark digest delivery now renders
   structured cards for JSON-roundtripped digest views, and Lark note elements
-  now use the provider's string `content` shape.
+  now use the provider's string `content` shape. Outbox transport labels now
+  carry a bounded destination type so shared delivery metrics can attribute
+  retries and terminal outcomes without high-cardinality labels.
 
 - **Local duplication gate.**
   Aligned `scripts/check.sh` and the contributor guide with the CI-backed

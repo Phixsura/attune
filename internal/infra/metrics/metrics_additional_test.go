@@ -68,6 +68,15 @@ func TestMetricRegistration(t *testing.T) {
 	if NotifyFailuresTotal == nil {
 		t.Error("NotifyFailuresTotal is nil")
 	}
+	if OutboundDeliveryAttemptsTotal == nil {
+		t.Error("OutboundDeliveryAttemptsTotal is nil")
+	}
+	if OutboundDeliveryDuration == nil {
+		t.Error("OutboundDeliveryDuration is nil")
+	}
+	if OutboundRetryAfterTotal == nil {
+		t.Error("OutboundRetryAfterTotal is nil")
+	}
 	if OutboxLagSeconds == nil {
 		t.Error("OutboxLagSeconds is nil")
 	}
@@ -88,6 +97,9 @@ func TestMetricLabels(t *testing.T) {
 	IngestTotal.WithLabelValues("test-tenant", "api", "ok").Inc()
 	EnrichDuration.WithLabelValues("test-tenant", "freeform", "ok").Observe(1.5)
 	NotifyFailuresTotal.WithLabelValues("raw-webhook", "transport").Inc()
+	OutboundDeliveryAttemptsTotal.WithLabelValues("slack", "success", "200").Inc()
+	OutboundDeliveryDuration.WithLabelValues("slack", "success").Observe(0.1)
+	OutboundRetryAfterTotal.WithLabelValues("slack").Inc()
 	LLMCallsTotal.WithLabelValues("test-tenant", "gpt-4", "ok").Inc()
 	LLMTokensTotal.WithLabelValues("test-tenant", "gpt-4", "prompt").Add(100)
 	EnrichmentTerminalFailuresTotal.WithLabelValues("test-tenant").Inc()

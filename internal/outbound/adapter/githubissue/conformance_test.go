@@ -20,7 +20,8 @@ func TestConformanceEvent(t *testing.T) {
 			Secret:          outboundtest.SecretMarker,
 			DestinationType: channelID,
 		},
-		Golden: "testdata/event_request.json",
+		Golden:        "testdata/event_request.json",
+		ProviderShape: outboundtest.ProviderShapeGitHubIssue,
 		Capabilities: outboundtest.Capabilities{
 			RequiresAuthHeader: true,
 			AllowsHTTP201:      true,
