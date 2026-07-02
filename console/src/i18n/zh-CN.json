@@ -112,6 +112,7 @@
     }
   },
   "nav": {
+    "control_tower": "控制塔",
     "feedback": "反馈",
     "terminal_failures": "终态失败工位",
     "clusters": "语义聚类",
@@ -141,11 +142,94 @@
     "toggle_theme": "切换明暗主题",
     "console_overview": "围绕运营、配置与治理建立的统一工作台。",
     "groups": {
+      "overview": "总览",
       "feedback": "反馈工作台",
       "analytics": "分析",
       "configuration": "配置",
       "integrations": "集成",
       "administration": "管理"
+    }
+  },
+  "control_tower": {
+    "title": "控制塔",
+    "subtitle": "把分类质量、搜索可用性和索引覆盖放在同一个运营视图里。",
+    "hero": {
+      "readiness": "状态",
+      "active_risks": "风险",
+      "classification_events": "分类事件",
+      "search_coverage": "搜索覆盖"
+    },
+    "severity": {
+      "alert": "告警",
+      "watch": "关注",
+      "normal": "正常",
+      "insufficient_data": "数据不足"
+    },
+    "lanes": {
+      "classification": {
+        "title": "理解质量",
+        "body": "低置信度和越界值的综合健康度。"
+      },
+      "search": {
+        "title": "检索质量",
+        "body": "零结果和 fallback 共同反映的搜索可用性。"
+      },
+      "index": {
+        "title": "索引覆盖",
+        "body": "可参与语义检索的有效反馈占比。"
+      }
+    },
+    "risks": {
+      "title": "关注队列",
+      "description": "当前窗口内 {{count}} 个需要处理的质量信号。",
+      "open": "查看",
+      "empty_title": "暂无活跃风险",
+      "empty_body": "当前窗口内分类、检索和索引指标都在目标范围内。"
+    },
+    "error": {
+      "title": "质量信号暂不可用",
+      "body": "控制塔无法读取当前窗口的分类或搜索质量数据。"
+    },
+    "risk": {
+      "classification_warnings": {
+        "title": "分类质量出现告警",
+        "body": "优先查看维度漂移、低置信度样本和失败样本，确认是否需要调整分类配置或模型路由。"
+      },
+      "low_confidence": {
+        "title": "低置信度升高",
+        "body": "低置信度会让后续聚类、搜索和流转都更难被信任。"
+      },
+      "off_list": {
+        "title": "出现较多越界值",
+        "body": "越界值通常意味着分类维度、枚举值或提示词边界需要收敛。"
+      },
+      "zero_result": {
+        "title": "搜索零结果偏高",
+        "body": "优先查看零结果 query，补充语料覆盖、同义词或排序证据。"
+      },
+      "fallback": {
+        "title": "语义搜索 fallback 偏高",
+        "body": "fallback 频繁出现时，先确认 embedding 覆盖、模型一致性和向量检索状态。"
+      },
+      "index_coverage": {
+        "title": "索引覆盖不足",
+        "body": "未生成 embedding 的反馈会削弱语义搜索、聚类和相似反馈发现。"
+      },
+      "search_latency": {
+        "title": "搜索延迟偏高",
+        "body": "高延迟会降低操作员在反馈队列里使用语义搜索的意愿。"
+      }
+    },
+    "proof": {
+      "title": "证据轨迹",
+      "description": "当前状态背后的可追溯信号。",
+      "classification": "分类告警",
+      "classification_value": "{{count}} 个活跃信号",
+      "search": "最高零结果 query",
+      "no_zero_query": "暂无零结果 query",
+      "search_engagement": "结果打开率",
+      "ranking": "排序版本",
+      "no_ranking": "暂无排序版本"
     }
   },
   "members": {

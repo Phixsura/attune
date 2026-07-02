@@ -7,6 +7,7 @@ import {
   DatabaseZap,
   GitBranch,
   History,
+  Inbox,
   KeyRound,
   Layers,
   LayoutDashboard,
@@ -39,6 +40,7 @@ export interface ConsoleNavItem extends ConsoleRouteAccess {
 }
 
 export type ConsoleNavGroupId =
+  | 'overview'
   | 'feedback'
   | 'analytics'
   | 'configuration'
@@ -46,6 +48,7 @@ export type ConsoleNavGroupId =
   | 'administration'
 
 export const consoleNavGroupOrder: ConsoleNavGroupId[] = [
+  'overview',
   'feedback',
   'analytics',
   'configuration',
@@ -54,6 +57,7 @@ export const consoleNavGroupOrder: ConsoleNavGroupId[] = [
 ]
 
 export const consoleNavGroupLabelKeys: Record<ConsoleNavGroupId, string> = {
+  overview: 'shell.groups.overview',
   feedback: 'shell.groups.feedback',
   analytics: 'shell.groups.analytics',
   configuration: 'shell.groups.configuration',
@@ -63,8 +67,15 @@ export const consoleNavGroupLabelKeys: Record<ConsoleNavGroupId, string> = {
 
 export const consoleNavItems: ConsoleNavItem[] = [
   {
-    group: 'feedback',
+    group: 'overview',
     icon: LayoutDashboard,
+    labelKey: 'nav.control_tower',
+    path: '/control-tower',
+    permission: 'usage:view',
+  },
+  {
+    group: 'feedback',
+    icon: Inbox,
     labelKey: 'nav.feedback',
     path: '/feedback',
     exact: true,

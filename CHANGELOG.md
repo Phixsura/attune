@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Feedback intelligence control tower (#162).**
+  Added a Console Control Tower landing page that synthesizes classification
+  quality, semantic-search quality, index coverage, top risks, and proof-trail
+  evidence into the authenticated default route.
+
 - **Semantic search operator workflow (#162).**
   Added a feedback workbench search mode switch that lets operators run
   natural-language semantic searches inside the existing queue, reuse supported
