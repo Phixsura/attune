@@ -148,6 +148,51 @@ func TestRunOutbox_UnknownSubcommand_Message(t *testing.T) {
 	require.Contains(t, err.Error(), `unknown outbox subcommand "nope"`)
 }
 
+func TestRunOutboxPrune_BadFlag(t *testing.T) {
+	err := runOutboxPrune([]string{"--bad"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "flag provided but not defined")
+}
+
+// ── runAuth / runBreakglass dispatch ─────────────────────────────────
+
+func TestRunAuth_UsageAndUnknown(t *testing.T) {
+	err := runAuth(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "attune auth breakglass")
+
+	err = runAuth([]string{"nope"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "attune auth breakglass")
+}
+
+func TestRunBreakglass_UsageAndEarlyValidation(t *testing.T) {
+	err := runBreakglass(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "attune auth breakglass <command>")
+
+	err = runBreakglass([]string{"nope"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "attune auth breakglass <command>")
+
+	err = runBreakglassIssue(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--admin is required")
+
+	err = runBreakglassIssue([]string{"--admin", "admin@example.com", "--ttl", "bad"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid TTL")
+
+	err = runBreakglassRevoke(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--id is required")
+}
+
+func TestTruncate(t *testing.T) {
+	require.Equal(t, "short", truncate("short", 10))
+	require.Equal(t, "abcdefg...", truncate("abcdefghijklmnopqrstuvwxyz", 10))
+}
+
 // ── runTenant dispatch ────────────────────────────────────────────────
 
 func TestRunTenantCreate_NoSlug(t *testing.T) {
@@ -158,9 +203,23 @@ func TestRunTenantCreate_NoSlug(t *testing.T) {
 
 // ── runDoctor ─────────────────────────────────────────────────────────
 
+func TestRunDoctor_BadFlag(t *testing.T) {
+	err := runDoctor([]string{"--bad"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "flag provided but not defined")
+}
+
 func TestOpenDoctorPool_NilConfig(t *testing.T) {
 	pool := openDoctorPool(context.Background(), nil)
 	require.Nil(t, pool)
+}
+
+// ── runEval ───────────────────────────────────────────────────────────
+
+func TestRunEval_BadFlag(t *testing.T) {
+	err := runEval([]string{"--bad"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "flag provided but not defined")
 }
 
 // ── channelViews / channelView ────────────────────────────────────────
@@ -432,7 +491,7 @@ func TestSubcommands_AllKeysPresent(t *testing.T) {
 	expected := []string{
 		"server", "doctor", "keys", "tenant", "eval",
 		"outbox", "secrets", "llm", "embed",
-		"migrations", "restore-drill",
+		"migrations", "restore-drill", "demo",
 	}
 	for _, key := range expected {
 		t.Run(key, func(t *testing.T) {
@@ -447,6 +506,7 @@ func TestSubcommands_NoExtraKeys(t *testing.T) {
 		"server": {}, "doctor": {}, "keys": {}, "tenant": {}, "eval": {},
 		"outbox": {}, "secrets": {}, "llm": {}, "embed": {},
 		"migrations": {}, "restore-drill": {}, "audit": {}, "auth": {},
+		"demo": {},
 	}
 	for key := range subcommands {
 		_, ok := expected[key]

@@ -9,6 +9,7 @@ import {
   consoleA11yAuthProviders,
   consoleA11yEnrichConfigResponse,
   consoleA11yFeedbackDetail,
+  consoleA11yFeedbackItems,
   consoleA11yFeedbackList,
   consoleA11yFeedbackStats,
   consoleA11yGdprDelete,
@@ -39,6 +40,7 @@ const apiPrefix = '/fb/v1/console'
 
 export type ApiMockDiagnostics = {
   unhandledRequests: string[]
+  semanticSearchRequests: unknown[]
 }
 
 export type ApiMockFailure =
@@ -60,6 +62,7 @@ export async function installConsoleApiMocks(
 ): Promise<ApiMockDiagnostics> {
   const diagnostics: ApiMockDiagnostics = {
     unhandledRequests: [],
+    semanticSearchRequests: [],
   }
 
   await page.route('**/fb/v1/console/**', async (route) => {
@@ -68,7 +71,7 @@ export async function installConsoleApiMocks(
     const method = request.method()
     const path = url.pathname.slice(apiPrefix.length) || '/'
 
-    if (await handleRoute(route, method, path, url, options)) {
+    if (await handleRoute(route, method, path, url, options, diagnostics)) {
       return
     }
 
@@ -85,6 +88,7 @@ async function handleRoute(
   path: string,
   url: URL,
   options: ApiMockOptions,
+  diagnostics: ApiMockDiagnostics,
 ) {
   if (method === 'GET' && path === '/me') {
     await fulfillJson(route, consoleA11yMe)
@@ -126,6 +130,12 @@ async function handleRoute(
   }
   if (method === 'GET' && path === '/feedback/stats') {
     await fulfillJson(route, consoleA11yFeedbackStats)
+    return true
+  }
+  if (method === 'POST' && path === '/feedback/search') {
+    const body = readJsonBody(route)
+    diagnostics.semanticSearchRequests.push(body)
+    await fulfillJson(route, semanticSearchResponse(body))
     return true
   }
   if (method === 'GET' && path === '/feedback/terminal-failures') {
@@ -315,6 +325,58 @@ async function handleRoute(
   }
 
   return false
+}
+
+function readJsonBody(route: Route) {
+  try {
+    return route.request().postDataJSON()
+  } catch {
+    return null
+  }
+}
+
+function semanticSearchResponse(body: unknown) {
+  const request = body as { q?: string; filter?: { terminalFailedOnly?: boolean } } | null
+  const terminalOnly = request?.filter?.terminalFailedOnly === true
+  const fallback = request?.q?.toLowerCase().includes('fallback') ?? false
+  const feedback = terminalOnly ? consoleA11yFeedbackItems[1] : consoleA11yFeedbackItems[0]
+  return {
+    hits: [
+      {
+        feedback,
+        similarity: fallback ? 0 : 0.91,
+        keywordScore: fallback ? 0.88 : 0.74,
+        matchType: fallback ? 'keyword' : terminalOnly ? 'semantic' : 'hybrid',
+        semanticRank: fallback ? 0 : 1,
+        lexicalRank: fallback ? 1 : terminalOnly ? 0 : 1,
+        fusedScore: fallback ? 0.0049 : 0.0163,
+        evidence: [
+          {
+            field: terminalOnly ? 'title' : 'content',
+            snippet: terminalOnly
+              ? 'Terminal enrichment failure sample with exhausted upstream retries.'
+              : 'Keyboard focus disappears after closing the detail panel.',
+            reason: fallback ? 'lexical_match' : 'semantic_match',
+          },
+        ],
+        rankingSignals: fallback
+          ? ['lexical', 'rrf', 'keyword_fallback']
+          : terminalOnly
+            ? ['semantic', 'rrf']
+            : ['semantic', 'lexical', 'rrf'],
+      },
+    ],
+    embeddingModel: fallback ? '' : 'text-embedding-3-small',
+    totalWithEmbeddings: 2,
+    usedKeywordFallback: fallback,
+    fallbackReason: fallback ? 'embedding_generation_failed' : undefined,
+    rankingVersion: 'rrf.pgfts.v1.k60',
+    coverage: {
+      totalLiveFeedback: 2,
+      totalWithEmbeddings: 2,
+      embeddingModel: fallback ? '' : 'text-embedding-3-small',
+    },
+  }
 }
 
 async function fulfillJson(route: Route, payload: unknown, status = 200) {

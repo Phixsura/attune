@@ -112,6 +112,7 @@
     }
   },
   "nav": {
+    "control_tower": "控制塔",
     "feedback": "反馈",
     "terminal_failures": "终态失败工位",
     "clusters": "语义聚类",
@@ -125,6 +126,7 @@
     "usage": "用量",
     "llm_usage": "LLM 成本",
     "classification_quality": "分类质量",
+    "search_quality": "搜索质量",
     "llm_config": "LLM 配置",
     "members": "成员",
     "outbox_dead": "死信投递",
@@ -140,11 +142,125 @@
     "toggle_theme": "切换明暗主题",
     "console_overview": "围绕运营、配置与治理建立的统一工作台。",
     "groups": {
+      "overview": "总览",
       "feedback": "反馈工作台",
       "analytics": "分析",
       "configuration": "配置",
       "integrations": "集成",
       "administration": "管理"
+    }
+  },
+  "control_tower": {
+    "title": "控制塔",
+    "subtitle": "把分类质量、搜索可用性和索引覆盖放在同一个运营视图里。",
+    "hero": {
+      "readiness": "状态",
+      "active_risks": "风险",
+      "classification_events": "分类事件",
+      "search_coverage": "搜索覆盖"
+    },
+    "severity": {
+      "alert": "告警",
+      "watch": "关注",
+      "normal": "正常",
+      "insufficient_data": "数据不足"
+    },
+    "lanes": {
+      "classification": {
+        "title": "理解质量",
+        "body": "低置信度和越界值的综合健康度。"
+      },
+      "search": {
+        "title": "检索质量",
+        "body": "零结果和 fallback 共同反映的搜索可用性。"
+      },
+      "index": {
+        "title": "索引覆盖",
+        "body": "可参与语义检索的有效反馈占比。"
+      }
+    },
+    "risks": {
+      "title": "关注队列",
+      "description": "当前窗口内 {{count}} 个需要处理的质量信号。",
+      "open": "查看",
+      "empty_title": "暂无活跃风险",
+      "empty_body": "当前窗口内分类、检索和索引指标都在目标范围内。"
+    },
+    "actions": {
+      "title": "行动队列",
+      "description": "当前窗口内 {{count}} 个需要推进、验证或关闭的质量动作。",
+      "start": "开始处理",
+      "verify": "标记已验证",
+      "evidence": "证据",
+      "empty_title": "暂无待处理动作",
+      "empty_body": "当前窗口内分类、检索和索引指标都在目标范围内。",
+      "unavailable": "动作状态暂不可用，仍可查看质量证据。",
+      "status": {
+        "open": "待处理",
+        "acknowledged": "处理中",
+        "resolved": "已验证",
+        "dismissed": "已忽略"
+      },
+      "toast": {
+        "open": "动作已重新打开",
+        "acknowledged": "动作已开始处理",
+        "resolved": "动作已标记为已验证",
+        "dismissed": "动作已忽略"
+      }
+    },
+    "action": {
+      "classification_warnings": "打开分类质量页，检查最高严重度告警与样本，确认是否需要调整维度、提示词或模型路由。",
+      "low_confidence": "抽样低置信度反馈，优先修正提示词边界并用人标样本验证新配置。",
+      "off_list": "查看越界值样本，将真实新值加入 taxonomy，或收紧提示词避免同义词漂移。",
+      "zero_result": "复盘最高零结果 query，把缺失语料、同义词或标题证据补进检索路径。",
+      "fallback": "确认 embedding 覆盖、模型配置和向量检索可用性，再回放高频 query。",
+      "index_coverage": "运行 embedding backfill，优先补齐最新和高影响反馈，再检查索引覆盖率。",
+      "search_latency": "检查搜索计划、索引覆盖和 fallback 路径，必要时缩小窗口或调整排序参数。"
+    },
+    "error": {
+      "title": "质量信号暂不可用",
+      "body": "控制塔无法读取当前窗口的分类或搜索质量数据。"
+    },
+    "risk": {
+      "classification_warnings": {
+        "title": "分类质量出现告警",
+        "body": "优先查看维度漂移、低置信度样本和失败样本，确认是否需要调整分类配置或模型路由。"
+      },
+      "low_confidence": {
+        "title": "低置信度升高",
+        "body": "低置信度会让后续聚类、搜索和流转都更难被信任。"
+      },
+      "off_list": {
+        "title": "出现较多越界值",
+        "body": "越界值通常意味着分类维度、枚举值或提示词边界需要收敛。"
+      },
+      "zero_result": {
+        "title": "搜索零结果偏高",
+        "body": "优先查看零结果 query，补充语料覆盖、同义词或排序证据。"
+      },
+      "fallback": {
+        "title": "语义搜索 fallback 偏高",
+        "body": "fallback 频繁出现时，先确认 embedding 覆盖、模型一致性和向量检索状态。"
+      },
+      "index_coverage": {
+        "title": "索引覆盖不足",
+        "body": "未生成 embedding 的反馈会削弱语义搜索、聚类和相似反馈发现。"
+      },
+      "search_latency": {
+        "title": "搜索延迟偏高",
+        "body": "高延迟会降低操作员在反馈队列里使用语义搜索的意愿。"
+      }
+    },
+    "proof": {
+      "title": "证据轨迹",
+      "description": "当前状态背后的可追溯信号。",
+      "classification": "分类告警",
+      "classification_value": "{{count}} 个活跃信号",
+      "search": "最高零结果 query",
+      "no_zero_query": "暂无零结果 query",
+      "search_engagement": "结果打开率",
+      "ranking": "排序版本",
+      "no_ranking": "暂无排序版本"
     }
   },
   "members": {
@@ -1827,9 +1943,38 @@
       "placeholder": "搜索反馈内容...",
       "input_label": "搜索反馈内容",
       "semantic": "语义搜索",
+      "semantic_submit": "运行语义搜索",
+      "semantic_idle": "输入一句自然语言问题，再运行语义搜索。",
+      "semantic_ready": "语义模式已开启。运行搜索后，结果会成为当前工作面。",
+      "semantic_loading": "正在进行语义搜索...",
+      "semantic_stale": "查询或筛选已变化，请重新运行语义搜索。",
+      "semantic_results": "语义搜索返回 {{count}} 条结果，当前租户有 {{embedded}} 条反馈带向量。",
+      "semantic_coverage": "{{embedded}}/{{total}} 可语义检索",
+      "ranking_version": "排序 {{version}}",
       "clear": "清除搜索内容",
       "no_results": "未找到匹配的反馈",
+      "no_results_title": "未找到语义匹配",
+      "no_results_body": "尝试换一种说法，或移除部分筛选条件后重新运行语义搜索。",
       "keyword_fallback": "使用关键词搜索",
+      "keyword_fallback_title": "语义搜索已降级",
+      "keyword_fallback_body": "当前结果来自关键词匹配。可能是向量未就绪、模型不匹配，或嵌入服务暂时不可用。",
+      "evidence_label": "匹配依据",
+      "rank_title": "{{matchType}}；语义 #{{semanticRank}}；关键词 #{{lexicalRank}}；RRF {{fusedScore}}",
+      "fallback_reason": {
+        "semantic_unavailable": "语义检索不可用",
+        "embedding_check_failed": "向量状态检查失败",
+        "embedding_stats_failed": "向量覆盖率统计失败",
+        "no_embeddings": "当前租户还没有可用向量",
+        "embedding_generation_failed": "查询向量生成失败",
+        "embedding_model_mismatch": "查询向量模型与存量模型不一致",
+        "semantic_search_failed": "向量检索失败",
+        "no_semantic_matches": "未找到语义候选"
+      },
+      "mode_label": "搜索模式",
+      "mode": {
+        "keyword": "关键词",
+        "semantic": "语义"
+      },
       "match_type": {
         "semantic": "语义匹配",
         "keyword": "关键词匹配",
@@ -2507,6 +2652,108 @@
     "empty": {
       "title": "暂无趋势数据",
       "body": "当前时间窗口没有可绘制的分类质量时间桶。"
+    }
+  },
+  "search_quality": {
+    "subtitle": "追踪语义搜索的零结果、fallback、点击、延迟和索引覆盖率。",
+    "period": "{{start}} — {{end}}",
+    "range": {
+      "7d": "7 天",
+      "30d": "30 天",
+      "90d": "90 天"
+    },
+    "bucket": {
+      "day": "按天",
+      "hour": "按小时"
+    },
+    "limit": {
+      "10": "Top 10",
+      "25": "Top 25",
+      "50": "Top 50"
+    },
+    "severity": {
+      "alert": "告警",
+      "watch": "关注",
+      "normal": "正常",
+      "insufficient_data": "数据不足"
+    },
+    "summary": {
+      "queries": "搜索次数",
+      "queries_hint": "当前窗口内成功返回的搜索请求。",
+      "zero_result": "零结果率",
+      "fallback": "Fallback 率",
+      "p95": "P95 延迟"
+    },
+    "trend": {
+      "title": "搜索质量趋势",
+      "legend": "搜索量 / 零结果 / fallback"
+    },
+    "signals": {
+      "ctr": "结果打开率",
+      "ctr_body": "{{count}} 次结果打开事件",
+      "avg_results": "平均结果数",
+      "avg_results_body": "每次搜索返回的平均反馈数。",
+      "severity": "当前等级",
+      "severity_body": "由零结果、fallback、延迟和索引覆盖率共同判断。"
+    },
+    "index": {
+      "title": "索引健康",
+      "description": "反馈语料的 embedding 覆盖和缺口。",
+      "coverage": "覆盖率",
+      "searchable": "可语义搜索",
+      "total": "有效反馈",
+      "missing": "缺失 embedding",
+      "model": "主模型",
+      "no_model": "暂无模型",
+      "oldest_missing": "最早缺失 embedding 的反馈创建于 {{date}}"
+    },
+    "queries": {
+      "title": "高频搜索",
+      "description": "按搜索次数排序的 query 聚合。",
+      "empty_title": "暂无搜索数据",
+      "empty_body": "当前窗口还没有可聚合的搜索请求。",
+      "hash": "hash {{hash}}",
+      "count": "次数",
+      "zero": "零结果",
+      "ctr": "打开率",
+      "p95": "P95"
+    },
+    "zero_queries": {
+      "title": "零结果搜索",
+      "description": "优先补充语料、同义词或分类覆盖的候选 query。"
+    },
+    "fallback": {
+      "title": "Fallback 原因",
+      "description": "语义不可用时退回关键词搜索的原因分布。",
+      "empty_title": "暂无 fallback",
+      "empty_body": "当前窗口内没有语义搜索 fallback。",
+      "reason": {
+        "semantic_unavailable": "语义搜索不可用",
+        "embedding_check_failed": "Embedding 检查失败",
+        "embedding_stats_failed": "Embedding 统计失败",
+        "no_embeddings": "暂无 embedding",
+        "embedding_generation_failed": "查询 embedding 生成失败",
+        "embedding_model_mismatch": "Embedding 模型不匹配",
+        "semantic_search_failed": "向量检索失败",
+        "no_semantic_matches": "无语义候选",
+        "unknown": "未知原因"
+      }
+    },
+    "ranking": {
+      "title": "Ranker 版本",
+      "description": "当前租户可见的搜索排序版本状态。",
+      "traffic": "{{value}}% 流量",
+      "status": {
+        "active": "Active",
+        "canary": "Canary",
+        "shadow": "Shadow",
+        "draft": "Draft",
+        "disabled": "Disabled"
+      }
+    },
+    "empty": {
+      "title": "暂无趋势数据",
+      "body": "当前时间窗口没有可绘制的搜索质量时间桶。"
     }
   },
   "tags": {

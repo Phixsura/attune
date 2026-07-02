@@ -777,7 +777,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "Search",
-      "description": "Search traffic, duration, result count, and embedding cache hits. This panel explains slow search before users report it.",
+      "description": "Search traffic, duration, result count, fallback reasons, embedding coverage, and cache hits. This panel explains degraded search before users report it.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -801,9 +801,19 @@
           "refId": "C"
         },
         {
+          "expr": "(sum by (reason) (rate(attune_search_fallback_reasons_total{tenant=~\"$tenant\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "fallback / {{reason}}",
+          "refId": "D"
+        },
+        {
+          "expr": "(avg by (model) (attune_search_embedding_coverage_ratio{tenant=~\"$tenant\"})) or vector(0)",
+          "legendFormat": "coverage / {{model}}",
+          "refId": "E"
+        },
+        {
           "expr": "(sum by (result) (rate(attune_embedding_cache_hits_total{tenant=~\"$tenant\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "cache / {{result}}",
-          "refId": "D"
+          "refId": "F"
         }
       ],
       "fieldConfig": {

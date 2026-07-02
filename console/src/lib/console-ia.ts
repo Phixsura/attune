@@ -7,12 +7,14 @@ import {
   DatabaseZap,
   GitBranch,
   History,
+  Inbox,
   KeyRound,
   Layers,
   LayoutDashboard,
   Lock,
   Radio,
   Scale,
+  Search,
   Settings2,
   ShieldCheck,
   ShieldEllipsis,
@@ -38,6 +40,7 @@ export interface ConsoleNavItem extends ConsoleRouteAccess {
 }
 
 export type ConsoleNavGroupId =
+  | 'overview'
   | 'feedback'
   | 'analytics'
   | 'configuration'
@@ -45,6 +48,7 @@ export type ConsoleNavGroupId =
   | 'administration'
 
 export const consoleNavGroupOrder: ConsoleNavGroupId[] = [
+  'overview',
   'feedback',
   'analytics',
   'configuration',
@@ -53,6 +57,7 @@ export const consoleNavGroupOrder: ConsoleNavGroupId[] = [
 ]
 
 export const consoleNavGroupLabelKeys: Record<ConsoleNavGroupId, string> = {
+  overview: 'shell.groups.overview',
   feedback: 'shell.groups.feedback',
   analytics: 'shell.groups.analytics',
   configuration: 'shell.groups.configuration',
@@ -62,8 +67,15 @@ export const consoleNavGroupLabelKeys: Record<ConsoleNavGroupId, string> = {
 
 export const consoleNavItems: ConsoleNavItem[] = [
   {
-    group: 'feedback',
+    group: 'overview',
     icon: LayoutDashboard,
+    labelKey: 'nav.control_tower',
+    path: '/control-tower',
+    permission: 'usage:view',
+  },
+  {
+    group: 'feedback',
+    icon: Inbox,
     labelKey: 'nav.feedback',
     path: '/feedback',
     exact: true,
@@ -99,6 +111,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     icon: Activity,
     labelKey: 'nav.classification_quality',
     path: '/analytics/classification-quality',
+    permission: 'usage:view',
+  },
+  {
+    group: 'analytics',
+    icon: Search,
+    labelKey: 'nav.search_quality',
+    path: '/analytics/search-quality',
     permission: 'usage:view',
   },
   {

@@ -34,6 +34,7 @@ import {
   OutboxFailureKind,
   type RetryDeliveryResponse,
 } from '@/proto/attune/v1/outbox'
+import type { GetSearchQualityResponse, SemanticSearchResponse } from '@/proto/attune/v1/search'
 import type { GetMeResponse } from '@/proto/attune/v1/session'
 import type { GetLLMUsageResponse } from '@/proto/attune/v1/usage'
 import type { ListAuditResponse, ListStatesResponse } from '@/proto/attune/v1/workflow'
@@ -302,6 +303,15 @@ export const defaultFeedbackStats: GetFeedbackStatsResponse = {
   dims: [],
   urgentCount: '0',
 }
+export const defaultSemanticSearchResponse: SemanticSearchResponse = {
+  hits: [],
+  embeddingModel: '',
+  totalWithEmbeddings: 0,
+  usedKeywordFallback: false,
+  rankingVersion: 'rrf.pgfts.v1.k60',
+  coverage: undefined,
+  runId: '11111111-2222-3333-4444-555555555555',
+}
 export const defaultLLMUsage: GetLLMUsageResponse = {
   periodStart: '2026-06-01T00:00:00Z',
   periodEnd: '2026-06-10T00:00:00Z',
@@ -337,6 +347,44 @@ export const defaultClassificationQuality: GetClassificationQualityResponse = {
   dimensions: [],
   warnings: [],
   samples: [],
+}
+export const defaultSearchQuality: GetSearchQualityResponse = {
+  generatedAt: '2026-07-02T00:00:00Z',
+  currentFrom: '2026-06-25T00:00:00Z',
+  currentTo: '2026-07-02T00:00:00Z',
+  bucketWidth: 'day',
+  summary: {
+    queryCount: '0',
+    zeroResultCount: '0',
+    zeroResultRate: 0,
+    fallbackCount: '0',
+    fallbackRate: 0,
+    clickCount: '0',
+    clickThroughRate: 0,
+    averageResultCount: 0,
+    p95LatencyMs: '0',
+    worstSeverity: 'normal',
+  },
+  series: [],
+  queries: [],
+  zeroResultQueries: [],
+  fallbackBreakdown: [],
+  indexHealth: {
+    totalLiveFeedback: 0,
+    totalWithEmbeddings: 0,
+    coverageRatio: 1,
+    embeddingModel: '',
+    missingFeedbackCount: '0',
+  },
+  rankingVersions: [
+    {
+      rankingVersion: 'rrf.pgfts.v1.k60',
+      status: 'active',
+      trafficPercent: 100,
+      notes: 'Current production ranker',
+      updatedAt: '',
+    },
+  ],
 }
 
 export const defaultWorkflowStates: ListStatesResponse = { states: [] }
@@ -486,6 +534,9 @@ export const handlers = [
   ),
 
   http.get(`${BASE}/feedback`, () => HttpResponse.json(defaultFeedbackList)),
+  http.post(`${BASE}/feedback/search`, () => HttpResponse.json(defaultSemanticSearchResponse)),
+  http.get(`${BASE}/feedback/search/quality`, () => HttpResponse.json(defaultSearchQuality)),
+  http.post(`${BASE}/feedback/search/events`, () => HttpResponse.json({})),
   http.get(`${BASE}/feedback/stats`, () => HttpResponse.json(defaultFeedbackStats)),
   http.get(`${BASE}/feedback/:id`, ({ params }) =>
     HttpResponse.json({ ...defaultFeedbackDetail, id: params.id }),

@@ -1311,4 +1311,291 @@ describe('_authed.feedback route — user flow smoke', () => {
     })
     expect(screen.queryByText('#103')).toBeNull()
   })
+
+  it('runs semantic search with supported feedback filters and uses the returned working set', async () => {
+    let semanticRequest: unknown
+    const semanticItem = {
+      ...itemFixture,
+      id: '301',
+      content: 'customers cannot finish checkout after choosing invoice billing',
+      enrichedTitle: 'Invoice checkout failure',
+      enrichedDisplayTitle: '发票结账失败',
+      isUrgent: true,
+      tags: [],
+      allowedNextStates: [],
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture], nextCursor: undefined }),
+      ),
+      http.post('/fb/v1/console/feedback/search', async ({ request }) => {
+        semanticRequest = await request.json()
+        return HttpResponse.json({
+          hits: [
+            {
+              feedback: semanticItem,
+              similarity: 0.91,
+              keywordScore: 0.3,
+              matchType: 'hybrid',
+              semanticRank: 1,
+              lexicalRank: 2,
+              fusedScore: 0.0161,
+              evidence: [
+                {
+                  field: 'content',
+                  snippet: 'refund blocker needs support review',
+                  reason: 'lexical_match',
+                },
+              ],
+              rankingSignals: ['semantic', 'lexical', 'rrf'],
+            },
+          ],
+          embeddingModel: 'text-embedding-3-small',
+          totalWithEmbeddings: 12,
+          usedKeywordFallback: false,
+          rankingVersion: 'rrf.pgfts.v1.k60',
+          coverage: {
+            totalLiveFeedback: 18,
+            totalWithEmbeddings: 12,
+            embeddingModel: 'text-embedding-3-small',
+          },
+        })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '仅看紧急' }))
+    await user.click(screen.getAllByRole('combobox')[0])
+    await user.click(screen.getByRole('option', { name: 'P0' }))
+    await user.click(screen.getByRole('button', { name: '语义' }))
+    await user.type(screen.getByRole('searchbox', { name: '搜索反馈内容' }), 'billing checkout')
+    await user.click(screen.getByRole('button', { name: '运行语义搜索' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('发票结账失败')).toBeInTheDocument()
+    })
+
+    const body = semanticRequest as {
+      q?: string
+      limit?: number
+      filter?: { attrs?: Array<{ dim: string; value: string; multi: boolean }>; urgent?: boolean }
+    }
+    expect(body.q).toBe('billing checkout')
+    expect(body.limit).toBe(50)
+    expect(body.filter?.urgent).toBe(true)
+    expect(body.filter?.attrs).toEqual([{ dim: 'severity', value: 'P0', multi: false }])
+    expect(screen.queryByText('Unicode 密码登录失败')).toBeNull()
+    expect(
+      screen.getByText('语义搜索返回 1 条结果，当前租户有 12 条反馈带向量。'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('排序 rrf.pgfts.v1.k60')).toBeInTheDocument()
+    expect(screen.getByText('匹配依据')).toBeInTheDocument()
+    expect(screen.getByText('refund blocker needs support review')).toBeInTheDocument()
+    expect(screen.getByTitle(/混合匹配/)).toHaveTextContent('混合匹配 91%')
+  })
+
+  it('keeps terminal failure scope when running semantic search from the terminal queue', async () => {
+    let semanticRequest: unknown
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        const url = new URL(request.url)
+        const terminalOnly = url.searchParams.get('terminal_failed_only') === 'true'
+        return HttpResponse.json({
+          items: terminalOnly ? [terminalItemFixture] : [itemFixture],
+          nextCursor: undefined,
+        })
+      }),
+      http.post('/fb/v1/console/feedback/search', async ({ request }) => {
+        semanticRequest = await request.json()
+        return HttpResponse.json({
+          hits: [
+            {
+              feedback: { ...terminalItemFixture, tags: [], allowedNextStates: [] },
+              similarity: 0.84,
+              keywordScore: 0.1,
+              matchType: 'semantic',
+              semanticRank: 1,
+              lexicalRank: 0,
+              fusedScore: 0.0115,
+              evidence: [
+                {
+                  field: 'content',
+                  snippet: 'LLM exhausted retries for this feedback',
+                  reason: 'vector_similarity',
+                },
+              ],
+              rankingSignals: ['semantic', 'rrf'],
+            },
+          ],
+          embeddingModel: 'text-embedding-3-small',
+          totalWithEmbeddings: 4,
+          usedKeywordFallback: false,
+          rankingVersion: 'rrf.pgfts.v1.k60',
+          coverage: {
+            totalLiveFeedback: 6,
+            totalWithEmbeddings: 4,
+            embeddingModel: 'text-embedding-3-small',
+          },
+        })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage initialQueueMode="terminal" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('终态失败样本')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '语义' }))
+    await user.type(screen.getByRole('searchbox', { name: '搜索反馈内容' }), 'llm exhausted')
+    await user.click(screen.getByRole('button', { name: '运行语义搜索' }))
+
+    await waitFor(() => {
+      expect(semanticRequest).toBeTruthy()
+    })
+
+    const body = semanticRequest as {
+      q?: string
+      filter?: { enrichmentStatus?: string; terminalFailedOnly?: boolean }
+    }
+    expect(body.q).toBe('llm exhausted')
+    expect(body.filter?.enrichmentStatus).toBe('failed')
+    expect(body.filter?.terminalFailedOnly).toBe(true)
+  })
+
+  it('shows keyword fallback state when semantic search degrades', async () => {
+    const fallbackItem = {
+      ...itemFixture,
+      id: '302',
+      content: 'billing keyword fallback result',
+      enrichedTitle: 'Billing keyword result',
+      enrichedDisplayTitle: '账单关键词结果',
+      isUrgent: false,
+      tags: [],
+      allowedNextStates: [],
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture], nextCursor: undefined }),
+      ),
+      http.post('/fb/v1/console/feedback/search', () =>
+        HttpResponse.json({
+          hits: [
+            {
+              feedback: fallbackItem,
+              similarity: 0,
+              keywordScore: 0.82,
+              matchType: 'keyword',
+              semanticRank: 0,
+              lexicalRank: 1,
+              fusedScore: 0.0049,
+              evidence: [
+                {
+                  field: 'content',
+                  snippet: 'billing keyword fallback result',
+                  reason: 'lexical_match',
+                },
+              ],
+              rankingSignals: ['lexical', 'rrf', 'keyword_fallback'],
+            },
+          ],
+          embeddingModel: '',
+          totalWithEmbeddings: 0,
+          usedKeywordFallback: true,
+          fallbackReason: 'no_embeddings',
+          rankingVersion: 'rrf.pgfts.v1.k60',
+          coverage: {
+            totalLiveFeedback: 2,
+            totalWithEmbeddings: 0,
+            embeddingModel: '',
+          },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '语义' }))
+    await user.type(screen.getByRole('searchbox', { name: '搜索反馈内容' }), 'billing')
+    await user.click(screen.getByRole('button', { name: '运行语义搜索' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('账单关键词结果')).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('语义搜索已降级')).toBeInTheDocument()
+    expect(screen.getByText('使用关键词搜索')).toBeInTheDocument()
+    expect(screen.getByText('排序 rrf.pgfts.v1.k60')).toBeInTheDocument()
+    expect(screen.getAllByText('当前租户还没有可用向量')).toHaveLength(2)
+    expect(screen.getByTitle(/关键词匹配/)).toHaveTextContent('关键词匹配 82%')
+  })
 })

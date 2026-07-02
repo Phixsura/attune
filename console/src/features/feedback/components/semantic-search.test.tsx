@@ -109,6 +109,11 @@ describe('SearchResults', () => {
     similarity,
     keywordScore: 0,
     matchType: matchType ?? '',
+    semanticRank: 1,
+    lexicalRank: 0,
+    fusedScore: 0.01,
+    evidence: [],
+    rankingSignals: [],
   })
 
   it('shows no results message when empty', () => {
@@ -174,6 +179,11 @@ describe('SearchResults', () => {
         similarity: 0.8,
         keywordScore: 0,
         matchType: '',
+        semanticRank: 1,
+        lexicalRank: 0,
+        fusedScore: 0.01,
+        evidence: [],
+        rankingSignals: [],
       },
     ]
     renderWithProviders(<SearchResults results={results} />)

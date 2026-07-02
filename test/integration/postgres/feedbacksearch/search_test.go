@@ -8,7 +8,9 @@ import (
 	"context"
 	"math/rand"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -30,10 +32,10 @@ func setup(t *testing.T) env {
 
 	// Create tenant.
 	var tenantID string
+	slug := "search-test-" + uuid.NewString()
 	err := pool.QueryRow(ctx, `
-		INSERT INTO tenants (slug, name) VALUES ('search-test','Search Test Co')
-		ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
-		RETURNING id`).Scan(&tenantID) // ptrext:allow scan-target
+		INSERT INTO tenants (slug, name) VALUES ($1, $2)
+		RETURNING id`, slug, "Search Test "+slug).Scan(&tenantID) // ptrext:allow scan-target
 	if err != nil {
 		t.Fatalf("insert tenant: %v", err)
 	}
@@ -46,13 +48,32 @@ func setup(t *testing.T) env {
 	}
 }
 
+func (e env) insertTenant(t *testing.T, prefix string) string {
+	t.Helper()
+	slug := prefix + "-" + uuid.NewString()
+	var tenantID string
+	err := e.pool.QueryRow(e.ctx,
+		`INSERT INTO tenants (slug, name) VALUES ($1, $2) RETURNING id`,
+		slug, "Search Test "+slug,
+	).Scan(&tenantID) // ptrext:allow scan-target
+	if err != nil {
+		t.Fatalf("insert tenant: %v", err)
+	}
+	return tenantID
+}
+
 func (e env) insertFeedback(t *testing.T, content, title string) int64 {
+	t.Helper()
+	return e.insertFeedbackForTenant(t, e.tenantID, content, title)
+}
+
+func (e env) insertFeedbackForTenant(t *testing.T, tenantID, content, title string) int64 {
 	t.Helper()
 	var id int64
 	err := e.pool.QueryRow(e.ctx,
 		`INSERT INTO user_feedback (tenant_id, user_id, source, content, enriched_title, enrichment_status)
 		 VALUES ($1, 'u1', 'api', $2, $3, 'done') RETURNING id`,
-		e.tenantID, content, title,
+		tenantID, content, title,
 	).Scan(&id) // ptrext:allow scan-target
 	if err != nil {
 		t.Fatalf("insert feedback: %v", err)
@@ -62,15 +83,50 @@ func (e env) insertFeedback(t *testing.T, content, title string) int64 {
 
 func (e env) insertFeedbackWithEmbedding(t *testing.T, content, title, model string, embedding []float32) int64 {
 	t.Helper()
+	return e.insertFeedbackWithEmbeddingForTenant(t, e.tenantID, content, title, model, embedding)
+}
+
+func (e env) insertFeedbackWithEmbeddingForTenant(
+	t *testing.T,
+	tenantID string,
+	content string,
+	title string,
+	model string,
+	embedding []float32,
+) int64 {
+	t.Helper()
 	var id int64
 	embStr := vecToString(embedding)
 	err := e.pool.QueryRow(e.ctx,
 		`INSERT INTO user_feedback (tenant_id, user_id, source, content, enriched_title, enrichment_status, embedding, embedding_model)
 		 VALUES ($1, 'u1', 'api', $2, $3, 'done', $4::vector, $5) RETURNING id`,
-		e.tenantID, content, title, embStr, model,
+		tenantID, content, title, embStr, model,
 	).Scan(&id) // ptrext:allow scan-target
 	if err != nil {
 		t.Fatalf("insert feedback with embedding: %v", err)
+	}
+	return id
+}
+
+func (e env) insertFeedbackWithStatus(
+	t *testing.T,
+	content string,
+	title string,
+	status string,
+	attempts int,
+	nextRetryAt *time.Time,
+) int64 {
+	t.Helper()
+	var id int64
+	err := e.pool.QueryRow(e.ctx,
+		`INSERT INTO user_feedback (
+			tenant_id, user_id, source, content, enriched_title, enrichment_status,
+			enrichment_attempts, enrichment_next_retry_at
+		) VALUES ($1, 'u1', 'api', $2, $3, $4, $5, $6) RETURNING id`,
+		e.tenantID, content, title, status, attempts, nextRetryAt,
+	).Scan(&id) // ptrext:allow scan-target
+	if err != nil {
+		t.Fatalf("insert feedback with status: %v", err)
 	}
 	return id
 }
@@ -208,6 +264,171 @@ func TestPG_KeywordSearch(t *testing.T) {
 	}
 }
 
+func TestPG_LexicalSearchEvidence(t *testing.T) {
+	e := setup(t)
+
+	id1 := e.insertFeedback(t, "Checkout fails after lexicalneedle invoice payment", "Lexicalneedle Checkout")
+	_ = e.insertFeedback(t, "Dashboard loads slowly", "Performance Issue")
+
+	results, err := e.feedback.LexicalSearch(e.ctx, ptrext.Of(feedback.LexicalSearchParams{
+		TenantID: e.tenantID,
+		Query:    "lexicalneedle",
+		Limit:    10,
+	}))
+	if err != nil {
+		t.Fatalf("LexicalSearch: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1", len(results))
+	}
+	if results[0].Feedback.ID != id1 {
+		t.Errorf("result id = %d, want %d", results[0].Feedback.ID, id1)
+	}
+	if results[0].Rank != 1 {
+		t.Errorf("rank = %d, want 1", results[0].Rank)
+	}
+	if results[0].Score <= 0 {
+		t.Errorf("score = %f, want > 0", results[0].Score)
+	}
+	if len(results[0].Snippets) == 0 {
+		t.Fatal("expected lexical snippets")
+	}
+}
+
+func TestPG_LexicalSearchEscapesLikeWildcards(t *testing.T) {
+	e := setup(t)
+
+	id1 := e.insertFeedback(t, "Export status reached 100%_complete for billing report", "Export Done")
+	_ = e.insertFeedback(t, "Dashboard loads slowly with no wildcard characters", "Performance Issue")
+
+	results, err := e.feedback.LexicalSearch(e.ctx, ptrext.Of(feedback.LexicalSearchParams{
+		TenantID: e.tenantID,
+		Query:    "%_complete",
+		Limit:    10,
+	}))
+	if err != nil {
+		t.Fatalf("LexicalSearch wildcard literal: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1", len(results))
+	}
+	if results[0].Feedback.ID != id1 {
+		t.Errorf("result id = %d, want %d", results[0].Feedback.ID, id1)
+	}
+}
+
+func TestPG_LexicalSearchTreatsStandaloneLikeWildcardsAsLiterals(t *testing.T) {
+	e := setup(t)
+
+	percentID := e.insertFeedback(t, "Literal percent marker % is visible", "Percent Literal")
+	underscoreID := e.insertFeedback(t, "Literal underscore marker _ is visible", "Underscore Literal")
+	_ = e.insertFeedback(t, "Plain searchable marker without wildcard characters", "Plain Literal")
+
+	tests := []struct {
+		name  string
+		query string
+		want  int64
+	}{
+		{name: "percent", query: "%", want: percentID},
+		{name: "underscore", query: "_", want: underscoreID},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			results, err := e.feedback.LexicalSearch(e.ctx, ptrext.Of(feedback.LexicalSearchParams{
+				TenantID: e.tenantID,
+				Query:    tc.query,
+				Limit:    10,
+			}))
+			if err != nil {
+				t.Fatalf("LexicalSearch literal %q: %v", tc.query, err)
+			}
+			if len(results) != 1 {
+				t.Fatalf("results = %d, want 1", len(results))
+			}
+			if results[0].Feedback.ID != tc.want {
+				t.Errorf("result id = %d, want %d", results[0].Feedback.ID, tc.want)
+			}
+		})
+	}
+}
+
+func TestPG_LexicalSearchDoesNotLeakTenantOrDeletedRows(t *testing.T) {
+	e := setup(t)
+
+	otherTenantID := e.insertTenant(t, "search-adversary")
+	token := "tenantleakneedle"
+	otherID := e.insertFeedbackForTenant(t, otherTenantID, "Other tenant "+token, "Other Tenant")
+	deletedID := e.insertFeedback(t, "Deleted feedback "+token, "Deleted Needle")
+	_, err := e.pool.Exec(e.ctx, `UPDATE user_feedback SET deleted_at = NOW() WHERE id = $1`, deletedID)
+	if err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+	_ = e.insertFeedback(t, "Control feedback without adversarial token", "Control")
+
+	results, err := e.feedback.LexicalSearch(e.ctx, ptrext.Of(feedback.LexicalSearchParams{
+		TenantID: e.tenantID,
+		Query:    token,
+		Limit:    10,
+	}))
+	if err != nil {
+		t.Fatalf("LexicalSearch before live row: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results = %d, want 0 before live tenant row", len(results))
+	}
+
+	liveID := e.insertFeedback(t, "Live tenant feedback "+token, "Live Needle")
+	results, err = e.feedback.LexicalSearch(e.ctx, ptrext.Of(feedback.LexicalSearchParams{
+		TenantID: e.tenantID,
+		Query:    token,
+		Limit:    10,
+	}))
+	if err != nil {
+		t.Fatalf("LexicalSearch after live row: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1", len(results))
+	}
+	if got := results[0].Feedback.ID; got != liveID {
+		t.Fatalf("result id = %d, want live id %d", got, liveID)
+	}
+	if results[0].Feedback.ID == otherID || results[0].Feedback.ID == deletedID {
+		t.Fatalf("result leaked other tenant or deleted row: %d", results[0].Feedback.ID)
+	}
+}
+
+func TestPG_LexicalSearchTerminalFailedOnlyFilterIsStrict(t *testing.T) {
+	e := setup(t)
+
+	token := "terminalfilterneedle"
+	terminalID := e.insertFeedbackWithStatus(t, "Terminal failed "+token, "Terminal", "failed", 99, nil)
+	_ = e.insertFeedbackWithStatus(t, "Retrying failed "+token, "Retrying", "failed", 1, nil)
+	nextRetry := time.Now().Add(time.Hour)
+	_ = e.insertFeedbackWithStatus(t, "Scheduled failed "+token, "Scheduled", "failed", 99, ptrext.Of(nextRetry))
+	_ = e.insertFeedbackWithStatus(t, "Done feedback "+token, "Done", "done", 99, nil)
+
+	results, err := e.feedback.LexicalSearch(e.ctx, ptrext.Of(feedback.LexicalSearchParams{
+		TenantID: e.tenantID,
+		Query:    token,
+		Limit:    10,
+		Filter: ptrext.Of(feedback.FeedbackFilter{
+			EnrichmentStatus:   ptrext.Of("failed"),
+			TerminalFailedOnly: ptrext.Of(true),
+		}),
+	}))
+	if err != nil {
+		t.Fatalf("LexicalSearch terminal filter: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1", len(results))
+	}
+	if results[0].Feedback.ID != terminalID {
+		t.Fatalf("result id = %d, want terminal id %d", results[0].Feedback.ID, terminalID)
+	}
+}
+
 // TestPG_KeywordSearchWithFilter tests keyword search with additional filters.
 func TestPG_KeywordSearchWithFilter(t *testing.T) {
 	e := setup(t)
@@ -282,6 +503,34 @@ func TestPG_HasEmbedding(t *testing.T) {
 	}
 	if !has {
 		t.Error("should have embeddings after insert")
+	}
+}
+
+func TestPG_HasEmbeddingExcludesDeleted(t *testing.T) {
+	e := setup(t)
+
+	emb := generateEmbedding(nil, 0)
+	id := e.insertFeedbackWithEmbedding(t, "deleted embedded content", "Deleted", "text-embedding-3-small", emb)
+	_, err := e.pool.Exec(e.ctx, `UPDATE user_feedback SET deleted_at = NOW() WHERE id = $1`, id)
+	if err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+
+	has, err := e.feedback.HasEmbedding(e.ctx, e.tenantID)
+	if err != nil {
+		t.Fatalf("HasEmbedding: %v", err)
+	}
+	if has {
+		t.Error("soft-deleted embeddings should not make semantic search available")
+	}
+
+	_ = e.insertFeedbackWithEmbedding(t, "live embedded content", "Live", "text-embedding-3-small", emb)
+	has, err = e.feedback.HasEmbedding(e.ctx, e.tenantID)
+	if err != nil {
+		t.Fatalf("HasEmbedding after live insert: %v", err)
+	}
+	if !has {
+		t.Error("live embeddings should make semantic search available")
 	}
 }
 
@@ -494,6 +743,40 @@ func TestPG_SemanticSearchWithFilter(t *testing.T) {
 	}
 	if hits[0].Feedback.ID != id2 {
 		t.Errorf("hit id = %d, want %d", hits[0].Feedback.ID, id2)
+	}
+}
+
+func TestPG_SemanticSearchDoesNotLeakTenantOrDeletedRows(t *testing.T) {
+	e := setup(t)
+
+	emb := make([]float32, 256)
+	for i := range emb {
+		emb[i] = 1.0 / 16.0
+	}
+	otherTenantID := e.insertTenant(t, "semantic-adversary")
+	_ = e.insertFeedbackWithEmbeddingForTenant(t, otherTenantID, "Other tenant semantic match", "Other", "test-model", emb)
+	deletedID := e.insertFeedbackWithEmbedding(t, "Deleted semantic match", "Deleted", "test-model", emb)
+	_, err := e.pool.Exec(e.ctx, `UPDATE user_feedback SET deleted_at = NOW() WHERE id = $1`, deletedID)
+	if err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+	liveID := e.insertFeedbackWithEmbedding(t, "Live semantic match", "Live", "test-model", emb)
+
+	hits, err := e.feedback.SemanticSearch(e.ctx, ptrext.Of(feedback.SemanticSearchParams{
+		TenantID:       e.tenantID,
+		Embedding:      emb,
+		EmbeddingModel: "test-model",
+		Limit:          10,
+		MinSimilarity:  0.9,
+	}))
+	if err != nil {
+		t.Fatalf("SemanticSearch leak check: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(hits))
+	}
+	if hits[0].Feedback.ID != liveID {
+		t.Fatalf("hit id = %d, want live id %d", hits[0].Feedback.ID, liveID)
 	}
 }
 

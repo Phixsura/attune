@@ -1,0 +1,25 @@
+{"id":"checkout-invoice-failure","tenant_id":"tenant-a","query":"customers cannot complete checkout after selecting invoice billing","filter":{"attrs":[{"dim":"area","value":"billing"}]},"intent":"incident_triage"}
+{"id":"password-reset-sso-loop","tenant_id":"tenant-a","query":"password reset loops after SSO login","filter":{"attrs":[{"dim":"area","value":"auth"}]},"intent":"support_triage"}
+{"id":"csv-account-report","tenant_id":"tenant-a","query":"account report csv duplicated columns","filter":{"attrs":[{"dim":"area","value":"reporting"}]},"intent":"backlog_review"}
+{"id":"slack-digest-duplicate","tenant_id":"tenant-a","query":"duplicate Slack notifications from digest subscription","filter":{"attrs":[{"dim":"area","value":"notifications"}]},"intent":"support_triage"}
+{"id":"mobile-terminal-scroll","tenant_id":"tenant-a","query":"mobile drawer cannot scroll terminal failure detail","filter":{"attrs":[{"dim":"area","value":"mobile"}]},"intent":"incident_triage"}
+{"id":"webhook-malformed-json-retry","tenant_id":"tenant-a","query":"webhook retries forever after malformed JSON response","filter":{"attrs":[{"dim":"area","value":"integrations"}]},"intent":"incident_triage"}
+{"id":"github-labels-missing","tenant_id":"tenant-a","query":"github issue adapter missing labels with spaces","filter":{"attrs":[{"dim":"area","value":"integrations"}]},"intent":"support_triage"}
+{"id":"prompt-version-failures","tenant_id":"tenant-a","query":"failed enrichment rows for prompt version","filter":{"attrs":[{"dim":"area","value":"enrichment"}]},"intent":"operator_triage"}
+{"id":"terminal-retryable-mixed","tenant_id":"tenant-a","query":"terminal failure queue includes retryable failures","filter":{"attrs":[{"dim":"area","value":"workflow"}]},"intent":"operator_triage"}
+{"id":"gdpr-export-scope","tenant_id":"tenant-a","query":"api key without gdpr export scope sees export screen","filter":{"attrs":[{"dim":"area","value":"security"}]},"intent":"security_review"}
+{"id":"audit-csv-commas","tenant_id":"tenant-a","query":"audit log csv export actor user agent commas","filter":{"attrs":[{"dim":"area","value":"audit"}]},"intent":"backlog_review"}
+{"id":"dimension-duplicate-options","tenant_id":"tenant-a","query":"duplicate dimension option names after language label switch","filter":{"attrs":[{"dim":"area","value":"dimensions"}]},"intent":"support_triage"}
+{"id":"reply-draft-stale-restore","tenant_id":"tenant-a","query":"reply draft uses stale content after restore","filter":{"attrs":[{"dim":"area","value":"reply"}]},"intent":"support_triage"}
+{"id":"inbound-attachment-parentheses","tenant_id":"tenant-a","query":"inbound email attachment filename parentheses ignored","filter":{"attrs":[{"dim":"area","value":"inbound"}]},"intent":"support_triage"}
+{"id":"outbox-latest-retry-error","tenant_id":"tenant-a","query":"outbox dead delivery latest retry error hidden","filter":{"attrs":[{"dim":"area","value":"outbox"}]},"intent":"operator_triage"}
+{"id":"mcp-client-rotation-session-loss","tenant_id":"tenant-a","query":"mcp oauth client rotation invalidates active sessions","filter":{"attrs":[{"dim":"area","value":"mcp"}]},"intent":"security_review"}
+{"id":"exact-feedback-id-ranking","tenant_id":"tenant-a","query":"exact feedback id lookup should outrank similar billing text","filter":{"attrs":[{"dim":"area","value":"search"}]},"intent":"support_triage"}
+{"id":"embedding-coverage-deleted","tenant_id":"tenant-a","query":"embedding coverage counts deleted rows with vectors","filter":{"attrs":[{"dim":"area","value":"search"}]},"intent":"operator_triage"}
+{"id":"enterprise-plan-filter-leak","tenant_id":"tenant-a","query":"customer plan filter ignored in enterprise escalation search","filter":{"attrs":[{"dim":"area","value":"filters"}]},"intent":"security_review"}
+{"id":"digest-theme-mixes-incidents","tenant_id":"tenant-a","query":"semantic digest groups unrelated login invoice incidents","filter":{"attrs":[{"dim":"area","value":"digest"}]},"intent":"backlog_review"}
+{"id":"runtime-webhook-secret-validation","tenant_id":"tenant-a","query":"runtime config saves empty webhook secret without validation","filter":{"attrs":[{"dim":"area","value":"settings"}]},"intent":"security_review"}
+{"id":"batch-tag-deleted-row","tenant_id":"tenant-a","query":"batch tag operation succeeds when selected feedback was deleted","filter":{"attrs":[{"dim":"area","value":"batch"}]},"intent":"operator_triage"}
+{"id":"detail-sheet-focus-restore","tenant_id":"tenant-a","query":"keyboard focus lost after closing feedback detail sheet","filter":{"attrs":[{"dim":"area","value":"accessibility"}]},"intent":"accessibility_review"}
+{"id":"embedding-cost-cache-double-count","tenant_id":"tenant-a","query":"cached embedding requests double counted in cost dashboard","filter":{"attrs":[{"dim":"area","value":"cost"}]},"intent":"cost_review"}
+{"id":"cross-tenant-mcp-isolation","tenant_id":"tenant-a","query":"mcp client secret rotation must not show other tenant","filter":{"attrs":[{"dim":"area","value":"mcp"}]},"intent":"security_review"}

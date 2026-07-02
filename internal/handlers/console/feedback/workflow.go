@@ -174,7 +174,14 @@ func (h *FeedbackHandler) enrichItemsWithWorkflowState(
 	ctx *dispatcher.RequestContext[*session.AuthCtx], where, tenantID string,
 	rows []feedback.ConsoleListRow, items []*attunev1.Feedback,
 ) {
-	if h.workflowStates == nil || len(rows) == 0 {
+	enrichFeedbackItemsWithWorkflowState(ctx, where, tenantID, rows, items, h.workflowStates)
+}
+
+func enrichFeedbackItemsWithWorkflowState(
+	ctx *dispatcher.RequestContext[*session.AuthCtx], where, tenantID string,
+	rows []feedback.ConsoleListRow, items []*attunev1.Feedback, reader workflowStateReader,
+) {
+	if reader == nil || len(rows) == 0 {
 		return
 	}
 	hasAny := false
@@ -188,7 +195,7 @@ func (h *FeedbackHandler) enrichItemsWithWorkflowState(
 		return
 	}
 
-	states, err := h.workflowStates.List(ctx, tenantID, false)
+	states, err := reader.List(ctx, tenantID, false)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] workflow state load failed,tenant_id:%s,err:%+v",
 			where, tenantID, err.Error())
@@ -199,7 +206,7 @@ func (h *FeedbackHandler) enrichItemsWithWorkflowState(
 		stateMap[s.ID] = s
 	}
 
-	transitions, err := h.workflowStates.ListTransitions(ctx, tenantID)
+	transitions, err := reader.ListTransitions(ctx, tenantID)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] workflow transitions load failed,tenant_id:%s,err:%+v",
 			where, tenantID, err.Error())

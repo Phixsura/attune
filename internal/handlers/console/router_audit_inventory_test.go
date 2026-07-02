@@ -174,6 +174,7 @@ func expectedMutatingRouteCoverage() map[string]string {
 		"POST /feedback/transition/batch":                    "exempt: per-feedback workflow audit path, not unified control-plane audit",
 		"POST /feedback/batch":                               "audited: feedback.batch_delete for delete payloads; route is payload-multiplexed and non-delete variants are operational",
 		"POST /feedback/search":                              "exempt: read-only semantic search",
+		"POST /feedback/search/events":                       "exempt: search interaction telemetry, not a control-plane mutation",
 		"POST /feedback/{id}/reply-draft/regenerate":         "exempt: content regeneration, no control-plane state change",
 		"POST /feedback/{id}/tags":                           "exempt: per-feedback tagging flow, not unified control-plane audit",
 		"DELETE /feedback/{id}/tags/{tag_id}":                "exempt: per-feedback tagging flow, not unified control-plane audit",

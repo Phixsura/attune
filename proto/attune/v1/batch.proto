@@ -22,6 +22,10 @@ message FeedbackFilter {
   optional string workflow_state_id = 5;
   // Filter by workflow category (open/resolved).
   optional string workflow_category = 6;
+  // Filter by enrichment status: pending | enriching | done | failed.
+  optional string enrichment_status = 7;
+  // If true, only include terminal enrichment failures.
+  optional bool terminal_failed_only = 8;
 }
 
 // BatchService provides batch operations on feedback rows (#30).

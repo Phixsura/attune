@@ -208,6 +208,7 @@ func TestCounterVecLabels(t *testing.T) {
 	BatchOperationItemsTotal.WithLabelValues("t", "tag", "succeeded")
 	IdempotencyKeyUsage.WithLabelValues("t", "new")
 	SearchQueriesTotal.WithLabelValues("t", "semantic")
+	SearchFallbackReasonsTotal.WithLabelValues("t", "no_embeddings")
 	EmbeddingCacheHits.WithLabelValues("t", "hit")
 	OIDCLoginTotal.WithLabelValues("success")
 	OIDCRoleMappingTotal.WithLabelValues("admin")
@@ -260,6 +261,7 @@ func TestGaugeOperations(t *testing.T) {
 
 	MigrationPending.Set(5)
 	MigrationPending.Set(0)
+	SearchEmbeddingCoverageRatio.WithLabelValues("t", "model").Set(0.75)
 }
 
 func TestGaugeVecOperations(t *testing.T) {

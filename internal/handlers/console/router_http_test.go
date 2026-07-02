@@ -70,6 +70,7 @@ func dispatchRouter() *Router {
 		feedback:           &feedback.FeedbackHandler{},
 		feedbackBatch:      &feedback.BatchHandler{},
 		feedbackSearch:     &feedback.SearchHandler{},
+		qualityActions:     &feedback.QualityActionHandler{},
 		feedbackJob:        &feedbackjob.Handler{},
 		gdpr:               &consolegdpr.Handler{},
 		usage:              &usage.UsageHandler{},
@@ -144,6 +145,8 @@ func TestRouterHTTPDispatch_Session(t *testing.T) {
 		{"POST /me/change-password", http.MethodPost, "/me/change-password", `{}`},
 		{"GET /usage", http.MethodGet, "/usage", ""},
 		{"GET /llm-usage", http.MethodGet, "/llm-usage", ""},
+		{"GET /quality-actions", http.MethodGet, "/quality-actions", ""},
+		{"POST /quality-actions/update", http.MethodPost, "/quality-actions/update", `{}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

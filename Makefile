@@ -8,7 +8,7 @@
 # plugins, so no local protoc-gen-* installs are needed — only network access to
 # the Buf Schema Registry. To change a proto dependency, run `make proto-deps`.
 
-.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e test fast-check adversarial-check test-live test-live-list test-integration runtime-smoke release-smoke ci-check
+.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality test fast-check adversarial-check test-live test-live-list test-integration runtime-smoke release-smoke ci-check
 
 PNPM ?= pnpm
 FUZZTIME ?= 10s
@@ -64,6 +64,9 @@ observability-rules: ## Validate Prometheus scrape config, recording rules, and 
 
 observability-load-e2e: ## Send load and verify metrics via Prometheus/Grafana. Requires API_KEY.
 	bash scripts/observability-load-e2e.sh
+
+search-quality: ## Verify the committed semantic-search relevance baseline.
+	go run ./internal/tools/searchquality
 
 # ── Test tiers (docs/testing.md) ─────────────────────────────────────────
 #
@@ -149,6 +152,10 @@ ci-check: ## Run all CI checks locally before push.
 	@go mod tidy
 	@git diff --exit-code go.mod go.sum
 	@echo "✓ go mod tidy"
+	@echo
+	@echo "▸ search quality baseline"
+	@go run ./internal/tools/searchquality
+	@echo "✓ search quality"
 	@echo
 	@echo "▸ golangci-lint"
 	@golangci-lint run

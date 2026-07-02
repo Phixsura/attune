@@ -13,6 +13,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
+	consolefeedback "github.com/Phixsura/attune/internal/handlers/console/feedback"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
@@ -254,9 +255,7 @@ func buildConsoleRouter(
 	batchSvc := feedbackbatch.New(feedbackRepo, idempotencyRepo, jobRepo, batchRateLimiter, batchConcurrency)
 	batchHandler := console.NewBatchHandler(batchSvc)
 
-	searchHandler := console.NewSearchHandler(semanticsearch.New(feedbackRepo,
-		llmrouter.New(llmconfigrepo.New(pool), secrets),
-		ratelimit.NewMemorySlidingLimiter(), semanticsearch.NewPGCache(pool)))
+	searchHandler := buildSearchHandler(pool, secrets, feedbackRepo, tagAssignmentRepo, wfStateRepo)
 
 	// Job handler uses batch service (implements jobService interface).
 	jobHandler := feedbackjob.NewHandler(batchSvc)
@@ -289,8 +288,25 @@ func buildConsoleRouter(
 		usage, enrichConfig, enrichmentRuntimeHandler, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
 		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
+	router.SetQualityActionHandler(console.NewQualityActionHandler(feedbackRepo))
 	attachOptionalHandlers(router, pool, cfg, auditLogSvc, signer, tenantRepo, adminRepo)
 	return router.Mount(), nil
+}
+
+func buildSearchHandler(
+	pool *pgxpool.Pool,
+	secrets *secretstore.TinkStore,
+	feedbackRepo *feedback.FeedbackRepo,
+	tagAssignmentRepo *feedbacktagassignmentrepo.Repo,
+	wfStateRepo *workflowstaterepo.Repo,
+) *consolefeedback.SearchHandler {
+	searchHandler := console.NewSearchHandler(semanticsearch.New(feedbackRepo,
+		llmrouter.New(llmconfigrepo.New(pool), secrets),
+		ratelimit.NewMemorySlidingLimiter(), semanticsearch.NewPGCache(pool)))
+	searchHandler.SetSearchOperations(feedbackRepo)
+	searchHandler.SetTagAssignments(tagAssignmentRepo)
+	searchHandler.SetWorkflowStates(wfStateRepo)
+	return searchHandler
 }
 
 func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo) {

@@ -25,7 +25,10 @@ export function renderWithProviders(
     })
   return {
     queryClient,
-    user: userEvent.setup(),
+    // Keep component tests deterministic under Vitest's parallel fork pool.
+    // The default per-character async delay can exceed the strict 10s budget
+    // in long user flows when the full suite is CPU-bound.
+    user: userEvent.setup({ delay: null }),
     ...render(ui, {
       wrapper: ({ children }) => (
         <I18nextProvider i18n={i18n}>

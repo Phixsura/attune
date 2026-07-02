@@ -1,0 +1,342 @@
+{
+  "ranking_version": "rrf.pgfts.v1.k60",
+  "k": 10,
+  "query_count": 25,
+  "aggregate": {
+    "recall_at_k": 1,
+    "precision_at_k": 0.10400000000000004,
+    "mrr_at_k": 1,
+    "ndcg_at_k": 1,
+    "zero_result_rate": 0,
+    "must_not_match_count": 0,
+    "filter_leak_count": 0,
+    "tenant_leak_count": 0
+  },
+  "evaluations": [
+    {
+      "query_id": "checkout-invoice-failure",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.2,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "password-reset-sso-loop",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "csv-account-report",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "slack-digest-duplicate",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "mobile-terminal-scroll",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "webhook-malformed-json-retry",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "github-labels-missing",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "prompt-version-failures",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "terminal-retryable-mixed",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "gdpr-export-scope",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "audit-csv-commas",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "dimension-duplicate-options",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "reply-draft-stale-restore",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "inbound-attachment-parentheses",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "outbox-latest-retry-error",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "mcp-client-rotation-session-loss",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "exact-feedback-id-ranking",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "embedding-coverage-deleted",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "enterprise-plan-filter-leak",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "digest-theme-mixes-incidents",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "runtime-webhook-secret-validation",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "batch-tag-deleted-row",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "detail-sheet-focus-restore",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "embedding-cost-cache-double-count",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    },
+    {
+      "query_id": "cross-tenant-mcp-isolation",
+      "metrics": {
+        "recall_at_k": 1,
+        "precision_at_k": 0.1,
+        "mrr_at_k": 1,
+        "ndcg_at_k": 1,
+        "zero_result_rate": 0,
+        "must_not_match_count": 0,
+        "filter_leak_count": 0,
+        "tenant_leak_count": 0
+      }
+    }
+  ]
+}

@@ -228,14 +228,21 @@ func (h *FeedbackHandler) enrichItemsWithTags(
 	ctx *dispatcher.RequestContext[*session.AuthCtx], where, tenantID string,
 	rows []feedback.ConsoleListRow, items []*attunev1.Feedback,
 ) {
-	if h.tagAssignments == nil || len(rows) == 0 {
+	enrichFeedbackItemsWithTags(ctx, where, tenantID, rows, items, h.tagAssignments)
+}
+
+func enrichFeedbackItemsWithTags(
+	ctx *dispatcher.RequestContext[*session.AuthCtx], where, tenantID string,
+	rows []feedback.ConsoleListRow, items []*attunev1.Feedback, reader tagAssignmentReader,
+) {
+	if reader == nil || len(rows) == 0 {
 		return
 	}
 	ids := make([]int64, len(rows))
 	for i, row := range rows {
 		ids[i] = row.ID
 	}
-	tagMap, err := h.tagAssignments.ListByFeedbackBatch(ctx, tenantID, ids)
+	tagMap, err := reader.ListByFeedbackBatch(ctx, tenantID, ids)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] tag batch load failed,tenant_id:%s,err:%+v",
 			where, tenantID, err.Error())

@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// feedback_search.go — semantic and keyword search for user_feedback (#30).
-// Uses pgvector for vector similarity and PostgreSQL ILIKE for keyword fallback.
+// feedback_search.go — semantic and lexical search for user_feedback (#30).
+// Uses pgvector for vector similarity and PostgreSQL full-text search for lexical fallback.
 package feedback
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -44,21 +46,59 @@ type SemanticSearchHit struct {
 	Similarity float64
 }
 
+// SearchSnippet identifies a short matched excerpt in a search result.
+type SearchSnippet struct {
+	Field   string
+	Snippet string
+}
+
+// LexicalSearchParams configures PostgreSQL full-text lexical search.
+type LexicalSearchParams struct {
+	TenantID string
+	Query    string
+	Limit    int
+	Filter   *FeedbackFilter
+}
+
+// LexicalSearchHit is one ranked lexical search result.
+type LexicalSearchHit struct {
+	Feedback *SearchFeedback
+	Rank     int
+	Score    float64
+	Fields   []string
+	Snippets []SearchSnippet
+}
+
 // SearchFeedback is the feedback data returned from search operations.
 // A subset of the full feedback row optimized for search result display.
 type SearchFeedback struct {
-	ID                   int64
-	Content              string
-	Source               string
-	EnrichedTitle        string
-	EnrichedDisplayTitle string
-	EnrichedRationale    string
-	IsUrgent             bool
-	EnrichmentStatus     string
-	CreatedAt            time.Time
-	WorkflowStateID      *string
-	ClusterID            *string
-	ClusterLabel         *string
+	ID                               int64
+	Content                          string
+	Source                           string
+	Type                             string
+	UserID                           string
+	Language                         string
+	PageURL                          string
+	EnrichedTitle                    string
+	EnrichedDisplayTitle             string
+	EnrichedDisplayLocale            string
+	EnrichedAttrs                    []byte
+	EnrichedRationale                string
+	IsUrgent                         bool
+	ClassificationConfidence         *float64
+	EnrichmentStatus                 string
+	CreatedAt                        time.Time
+	WorkflowStateID                  *string
+	ClusterID                        *string
+	ClusterLabel                     *string
+	EnrichmentAttempts               int
+	EnrichmentNextRetryAt            *time.Time
+	TerminalFailureReasonClass       string
+	TerminalFailureModel             string
+	TerminalFailureChannelID         string
+	TerminalFailureChannelName       string
+	TerminalFailureConfigFingerprint string
+	TerminalFailurePromptVersion     string
 }
 
 // normalizeSearchParams returns normalized limit, minSim, efSearch.
@@ -131,18 +171,27 @@ func (r *FeedbackRepo) SemanticSearch(
 	// Build the search query.
 	// Cosine similarity = 1 - cosine_distance, so we filter where 1 - dist > minSim.
 	query := fmt.Sprintf(`
-		SELECT id, content, source,
-			COALESCE(enriched_title, ''),
-			COALESCE(enriched_display_title, ''),
-			COALESCE(enriched_rationale, ''),
-			is_urgent, enrichment_status, created_at,
-			workflow_state_id, cluster_id, cluster_label,
-			1 - (embedding <=> %s::vector) AS similarity
-		FROM user_feedback
-		%s
-		AND 1 - (embedding <=> %s::vector) > %s
-		ORDER BY embedding <=> %s::vector
-		LIMIT %s`,
+			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
+				COALESCE(enriched_title, ''),
+				COALESCE(enriched_display_title, ''),
+				COALESCE(enriched_display_locale, ''),
+				COALESCE(enriched_attrs, '{}'::jsonb),
+				COALESCE(enriched_rationale, ''),
+				is_urgent, classification_confidence, enrichment_status, created_at,
+				workflow_state_id, cluster_id, cluster_label,
+				enrichment_attempts, enrichment_next_retry_at,
+				COALESCE(enrichment_failure_reason_class, ''),
+				COALESCE(enrichment_failure_model, ''),
+				COALESCE(enrichment_failure_channel_id, ''),
+				COALESCE(enrichment_failure_channel_name, ''),
+				COALESCE(enrichment_failure_config_fingerprint, ''),
+				COALESCE(enrichment_failure_prompt_version, ''),
+				1 - (embedding <=> %s::vector) AS similarity
+			FROM user_feedback
+			%s
+			AND 1 - (embedding <=> %s::vector) > %s
+			ORDER BY embedding <=> %s::vector
+			LIMIT %s`,
 		embArg, qb.where, embArg, qb.addArg(minSim), embArg, qb.addArg(limit))
 
 	rows, err := tx.Query(ctx, query, qb.args...)
@@ -154,17 +203,7 @@ func (r *FeedbackRepo) SemanticSearch(
 
 	var hits []SemanticSearchHit
 	for rows.Next() {
-		var (
-			fb  SearchFeedback
-			sim float64
-		)
-		err := rows.Scan(
-			&fb.ID, &fb.Content, &fb.Source,
-			&fb.EnrichedTitle, &fb.EnrichedDisplayTitle, &fb.EnrichedRationale, // ptrext:allow scan-target
-			&fb.IsUrgent, &fb.EnrichmentStatus, &fb.CreatedAt, // ptrext:allow scan-target
-			&fb.WorkflowStateID, &fb.ClusterID, &fb.ClusterLabel, // ptrext:allow scan-target
-			&sim,
-		)
+		fb, sim, err := scanSemanticSearchRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("%s: scan: %w", where, err)
 		}
@@ -193,7 +232,7 @@ type KeywordSearchParams struct {
 }
 
 // KeywordSearch performs text search as fallback when embeddings unavailable.
-// Uses ILIKE on content, enriched_title, and enriched_display_title.
+// It is retained as a compatibility wrapper over LexicalSearch.
 func (r *FeedbackRepo) KeywordSearch(
 	ctx context.Context,
 	params *KeywordSearchParams,
@@ -204,38 +243,94 @@ func (r *FeedbackRepo) KeywordSearch(
 		return nil, fmt.Errorf("%s: query required", where)
 	}
 
-	limit := params.Limit
-	if limit <= 0 {
-		limit = DefaultSearchLimit
-	}
-	if limit > MaxSearchLimit {
-		limit = MaxSearchLimit
+	hits, err := r.LexicalSearch(ctx, ptrext.Of(LexicalSearchParams{
+		TenantID: params.TenantID,
+		Query:    params.Query,
+		Limit:    params.Limit,
+		Filter:   params.Filter,
+	}))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", where, err)
 	}
 
+	results := make([]*SearchFeedback, 0, len(hits))
+	for _, hit := range hits {
+		if hit.Feedback == nil {
+			continue
+		}
+		results = append(results, hit.Feedback)
+	}
+	return results, nil
+}
+
+// LexicalSearch performs full-text search with an ILIKE partial-match fallback.
+func (r *FeedbackRepo) LexicalSearch(
+	ctx context.Context,
+	params *LexicalSearchParams,
+) ([]LexicalSearchHit, error) {
+	const where = "repo.FeedbackRepo.LexicalSearch"
+
+	if params == nil || strings.TrimSpace(params.Query) == "" {
+		return nil, fmt.Errorf("%s: query required", where)
+	}
+
+	limit := normalizeLexicalLimit(params.Limit)
 	qb := newQueryBuilder(params.TenantID)
 
 	if err := r.applyBatchFilters(qb, params.Filter); err != nil {
 		return nil, fmt.Errorf("%s: %w", where, err)
 	}
 
-	// Add text search condition.
-	p := qb.addArg("%" + params.Query + "%")
-	qb.and("(content ILIKE " + p +
-		" OR enriched_title ILIKE " + p +
-		" OR enriched_display_title ILIKE " + p + ")")
+	queryText := strings.TrimSpace(params.Query)
+	queryArg := qb.addArg(queryText)
+	patternArg := qb.addArg(likeContainsPattern(queryText))
+	documentSQL := feedbackSearchDocumentSQL()
+	tsQuerySQL := "plainto_tsquery('simple'::regconfig, " + queryArg + ")"
+	partialMatchSQL := feedbackPartialMatchSQL(patternArg)
+	scoreSQL := fmt.Sprintf(
+		`GREATEST(
+			ts_rank_cd(%s, %s),
+			CASE
+				WHEN enriched_title ILIKE %s ESCAPE '\' OR enriched_display_title ILIKE %s ESCAPE '\' THEN 0.95
+				WHEN content ILIKE %s ESCAPE '\' THEN 0.80
+				WHEN enriched_rationale ILIKE %s ESCAPE '\' THEN 0.65
+				ELSE 0.25
+			END
+		)`,
+		documentSQL,
+		tsQuerySQL,
+		patternArg,
+		patternArg,
+		patternArg,
+		patternArg,
+	)
+	qb.and("(" + documentSQL + " @@ " + tsQuerySQL + " OR " + partialMatchSQL + ")")
 
 	query := `
-		SELECT id, content, source,
-			COALESCE(enriched_title, ''),
-			COALESCE(enriched_display_title, ''),
-			COALESCE(enriched_rationale, ''),
-			is_urgent, enrichment_status, created_at,
-			workflow_state_id, cluster_id, cluster_label
-		FROM user_feedback
-		` + qb.where + `
-		ORDER BY
-			CASE WHEN enriched_title ILIKE ` + p + ` THEN 0 ELSE 1 END,
-			created_at DESC
+			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
+				COALESCE(enriched_title, ''),
+				COALESCE(enriched_display_title, ''),
+				COALESCE(enriched_display_locale, ''),
+				COALESCE(enriched_attrs, '{}'::jsonb),
+				COALESCE(enriched_rationale, ''),
+				is_urgent, classification_confidence, enrichment_status, created_at,
+				workflow_state_id, cluster_id, cluster_label,
+				enrichment_attempts, enrichment_next_retry_at,
+				COALESCE(enrichment_failure_reason_class, ''),
+				COALESCE(enrichment_failure_model, ''),
+				COALESCE(enrichment_failure_channel_id, ''),
+				COALESCE(enrichment_failure_channel_name, ''),
+				COALESCE(enrichment_failure_config_fingerprint, ''),
+				COALESCE(enrichment_failure_prompt_version, ''),
+				` + scoreSQL + ` AS lexical_score
+			FROM user_feedback
+			` + qb.where + `
+			ORDER BY
+				CASE WHEN id::text = ` + queryArg + ` THEN 0 ELSE 1 END,
+				CASE WHEN enriched_title ILIKE ` + patternArg + ` ESCAPE '\' OR enriched_display_title ILIKE ` + patternArg + ` ESCAPE '\' THEN 0 ELSE 1 END,
+				lexical_score DESC,
+				created_at DESC,
+				id DESC
 		LIMIT ` + qb.addArg(limit)
 
 	rows, err := r.pool.Query(ctx, query, qb.args...)
@@ -245,25 +340,291 @@ func (r *FeedbackRepo) KeywordSearch(
 	}
 	defer rows.Close()
 
-	var results []*SearchFeedback
+	var results []LexicalSearchHit
 	for rows.Next() {
-		var fb SearchFeedback
-		err := rows.Scan(
-			&fb.ID, &fb.Content, &fb.Source,
-			&fb.EnrichedTitle, &fb.EnrichedDisplayTitle, &fb.EnrichedRationale, // ptrext:allow scan-target
-			&fb.IsUrgent, &fb.EnrichmentStatus, &fb.CreatedAt, // ptrext:allow scan-target
-			&fb.WorkflowStateID, &fb.ClusterID, &fb.ClusterLabel, // ptrext:allow scan-target
-		)
+		fb, score, err := scanLexicalSearchRow(rows)
 		if err != nil {
 			return nil, fmt.Errorf("%s: scan: %w", where, err)
 		}
-		results = append(results, ptrext.Of(fb))
+		rank := len(results) + 1
+		results = append(results, LexicalSearchHit{
+			Feedback: ptrext.Of(fb),
+			Rank:     rank,
+			Score:    normalizeLexicalScore(score),
+			Fields:   lexicalFields(queryText, fb),
+			Snippets: lexicalSnippets(queryText, fb),
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("%s: rows: %w", where, err)
 	}
 
 	return results, nil
+}
+
+func scanSemanticSearchRow(rows pgx.Rows) (SearchFeedback, float64, error) {
+	var similarity float64
+	fb, err := scanSearchFeedbackRow(rows, &similarity) // ptrext:allow scan-target
+	return fb, similarity, err
+}
+
+func scanLexicalSearchRow(rows pgx.Rows) (SearchFeedback, float64, error) {
+	var score float64
+	fb, err := scanSearchFeedbackRow(rows, &score) // ptrext:allow scan-target
+	return fb, score, err
+}
+
+func scanSearchFeedbackRow(rows pgx.Rows, extraDest ...any) (SearchFeedback, error) {
+	var (
+		fb         SearchFeedback
+		confidence sql.NullFloat64
+		wsID       sql.NullString // ptrext:allow scan-target
+		clusterID  sql.NullString // ptrext:allow scan-target
+		clusterLbl sql.NullString // ptrext:allow scan-target
+		nextRetry  sql.NullTime   // ptrext:allow scan-target
+	)
+	dest := []any{
+		&fb.ID, &fb.Content, &fb.Source, &fb.Type, &fb.UserID, &fb.Language, &fb.PageURL, // ptrext:allow scan-target
+		&fb.EnrichedTitle, &fb.EnrichedDisplayTitle, &fb.EnrichedDisplayLocale, // ptrext:allow scan-target
+		&fb.EnrichedAttrs, &fb.EnrichedRationale, &fb.IsUrgent, &confidence, // ptrext:allow scan-target
+		&fb.EnrichmentStatus, &fb.CreatedAt, // ptrext:allow scan-target
+		&wsID, &clusterID, &clusterLbl, // ptrext:allow scan-target
+		&fb.EnrichmentAttempts, &nextRetry, // ptrext:allow scan-target
+		&fb.TerminalFailureReasonClass,       // ptrext:allow scan-target
+		&fb.TerminalFailureModel,             // ptrext:allow scan-target
+		&fb.TerminalFailureChannelID,         // ptrext:allow scan-target
+		&fb.TerminalFailureChannelName,       // ptrext:allow scan-target
+		&fb.TerminalFailureConfigFingerprint, // ptrext:allow scan-target
+		&fb.TerminalFailurePromptVersion,     // ptrext:allow scan-target
+	}
+	dest = append(dest, extraDest...)
+	if err := rows.Scan(dest...); err != nil {
+		return SearchFeedback{}, err
+	}
+	return hydrateSearchFeedbackNulls(fb, confidence, wsID, clusterID, clusterLbl, nextRetry), nil
+}
+
+func hydrateSearchFeedbackNulls(
+	fb SearchFeedback,
+	confidence sql.NullFloat64,
+	wsID sql.NullString,
+	clusterID sql.NullString,
+	clusterLbl sql.NullString,
+	nextRetry sql.NullTime,
+) SearchFeedback {
+	fb.ClassificationConfidence = nullFloatPtr(confidence)
+	if wsID.Valid {
+		fb.WorkflowStateID = ptrext.Of(wsID.String)
+	}
+	if clusterID.Valid {
+		fb.ClusterID = ptrext.Of(clusterID.String)
+	}
+	if clusterLbl.Valid {
+		fb.ClusterLabel = ptrext.Of(clusterLbl.String)
+	}
+	if nextRetry.Valid {
+		fb.EnrichmentNextRetryAt = ptrext.Of(nextRetry.Time)
+	}
+	return fb
+}
+
+func normalizeLexicalLimit(limit int) int {
+	if limit <= 0 {
+		return DefaultSearchLimit
+	}
+	if limit > MaxSearchLimit {
+		return MaxSearchLimit
+	}
+	return limit
+}
+
+func feedbackSearchDocumentSQL() string {
+	return `to_tsvector(
+		'simple'::regconfig,
+		COALESCE(content, '') || ' ' ||
+		COALESCE(enriched_title, '') || ' ' ||
+		COALESCE(enriched_display_title, '') || ' ' ||
+		COALESCE(enriched_rationale, '') || ' ' ||
+		COALESCE(source, '') || ' ' ||
+		COALESCE(type, '') || ' ' ||
+		COALESCE(user_id, '') || ' ' ||
+		COALESCE(page_url, '')
+	)`
+}
+
+func feedbackPartialMatchSQL(patternArg string) string {
+	like := " ILIKE " + patternArg + " ESCAPE '\\'"
+	return "(content" + like +
+		" OR enriched_title" + like +
+		" OR enriched_display_title" + like +
+		" OR enriched_rationale" + like +
+		" OR source" + like +
+		" OR type" + like +
+		" OR user_id" + like +
+		" OR page_url" + like + ")"
+}
+
+func likeContainsPattern(query string) string {
+	return "%" + escapeLikePattern(query) + "%"
+}
+
+func escapeLikePattern(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		switch r {
+		case '\\', '%', '_':
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func normalizeLexicalScore(score float64) float64 {
+	if score <= 0 {
+		return 0.1
+	}
+	if score > 1 {
+		return 1
+	}
+	return score
+}
+
+func lexicalFields(query string, fb SearchFeedback) []string {
+	fields := make([]string, 0, 3)
+	for _, candidate := range lexicalFieldCandidates(fb) {
+		if candidate.value == "" || !textMatchesQuery(candidate.value, query) {
+			continue
+		}
+		fields = append(fields, candidate.field)
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
+func lexicalSnippets(query string, fb SearchFeedback) []SearchSnippet {
+	snippets := make([]SearchSnippet, 0, 2)
+	for _, candidate := range lexicalFieldCandidates(fb) {
+		if candidate.value == "" || !textMatchesQuery(candidate.value, query) {
+			continue
+		}
+		snippets = append(snippets, SearchSnippet{
+			Field:   candidate.field,
+			Snippet: snippetAroundQuery(candidate.value, query, 160),
+		})
+		if len(snippets) == 2 {
+			break
+		}
+	}
+	if len(snippets) == 0 {
+		snippets = append(snippets, SearchSnippet{
+			Field:   "content",
+			Snippet: truncateRunes(fb.Content, 160),
+		})
+	}
+	return snippets
+}
+
+type lexicalFieldCandidate struct {
+	field string
+	value string
+}
+
+func lexicalFieldCandidates(fb SearchFeedback) []lexicalFieldCandidate {
+	title := fb.EnrichedDisplayTitle
+	if title == "" {
+		title = fb.EnrichedTitle
+	}
+	return []lexicalFieldCandidate{
+		{field: "title", value: title},
+		{field: "content", value: fb.Content},
+		{field: "rationale", value: fb.EnrichedRationale},
+		{field: "source", value: fb.Source},
+		{field: "type", value: fb.Type},
+		{field: "user_id", value: fb.UserID},
+		{field: "page_url", value: fb.PageURL},
+	}
+}
+
+func textMatchesQuery(text, query string) bool {
+	lowerText := strings.ToLower(text)
+	for _, term := range searchTerms(query) {
+		if strings.Contains(lowerText, strings.ToLower(term)) {
+			return true
+		}
+	}
+	return false
+}
+
+func searchTerms(query string) []string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return nil
+	}
+	terms := []string{trimmed}
+	if strings.Contains(trimmed, " ") {
+		for _, term := range strings.Fields(trimmed) {
+			if len([]rune(term)) < 2 {
+				continue
+			}
+			terms = append(terms, term)
+		}
+	}
+	return terms
+}
+
+func snippetAroundQuery(text, query string, maxRunes int) string {
+	terms := searchTerms(query)
+	if len(terms) == 0 {
+		return truncateRunes(text, maxRunes)
+	}
+	lowerText := strings.ToLower(text)
+	for _, term := range terms {
+		idx := strings.Index(lowerText, strings.ToLower(term))
+		if idx < 0 {
+			continue
+		}
+		matchStart := utf8.RuneCountInString(text[:idx])
+		matchRunes := len([]rune(term))
+		runes := []rune(text)
+		contextRunes := (maxRunes - matchRunes) / 2
+		if contextRunes < 12 {
+			contextRunes = 12
+		}
+		start := matchStart - contextRunes
+		if start < 0 {
+			start = 0
+		}
+		end := matchStart + matchRunes + contextRunes
+		if end > len(runes) {
+			end = len(runes)
+		}
+		snippet := string(runes[start:end])
+		if start > 0 {
+			snippet = "..." + snippet
+		}
+		if end < len(runes) {
+			snippet += "..."
+		}
+		return snippet
+	}
+	return truncateRunes(text, maxRunes)
+}
+
+func truncateRunes(text string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	if maxRunes <= 3 {
+		return string(runes[:maxRunes])
+	}
+	return string(runes[:maxRunes-3]) + "..."
 }
 
 // GetFeedbackEmbedding retrieves the embedding for a single feedback item.
@@ -362,7 +723,7 @@ func (r *FeedbackRepo) HasEmbedding(ctx context.Context, tenantID string) (bool,
 		ctx,
 		`SELECT EXISTS(
 			SELECT 1 FROM user_feedback
-			WHERE tenant_id = $1 AND embedding IS NOT NULL
+			WHERE tenant_id = $1 AND embedding IS NOT NULL AND deleted_at IS NULL
 			LIMIT 1
 		)`, tenantID,
 	).Scan(&exists) // ptrext:allow scan-target

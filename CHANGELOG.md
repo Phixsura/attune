@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Feedback intelligence control tower (#162).**
+  Added a Console Control Tower landing page that synthesizes classification
+  quality, semantic-search quality, index coverage, top risks, and proof-trail
+  evidence into the authenticated default route.
+  Added a quality-action ledger with generated proto/OpenAPI/SDK bindings,
+  Console status controls for acknowledging, resolving, or dismissing quality
+  risks, runtime-smoke coverage for the Control Tower path, and
+  `attune demo seed` for a reproducible local workspace with realistic feedback,
+  search telemetry, and action state.
+
+- **Semantic search operator workflow (#162).**
+  Added a feedback workbench search mode switch that lets operators run
+  natural-language semantic searches inside the existing queue, reuse supported
+  filters, view match metadata and keyword-fallback state, and continue opening
+  returned feedback rows from the same operational surface.
+  The search backend now also uses a PostgreSQL full-text lexical scorer,
+  reciprocal rank fusion, ranking-version metadata, coverage metadata, fallback
+  reasons, and response evidence snippets, with matching Console evidence
+  display, OpenAPI/proto/SDK contract updates, a full-text search index, and
+  reusable relevance metric primitives plus validated synthetic golden search
+  fixtures, a deterministic baseline report, a local baseline-check tool wired into
+  developer quality gates with explicit ranking-version drift errors, and
+  Prometheus search health metrics for fallback reasons and embedding coverage.
+  The Console now surfaces the active ranking version in semantic result status
+  so operators can match screenshots and support reports to the ranking contract.
+  Search responses now include a run ID, and the Console records semantic result
+  open events against that run for bounded relevance telemetry.
+  Added search operations storage, quality APIs, and an Analytics search-quality
+  dashboard covering search volume, zero-result rate, fallback rate, click-through
+  rate, p95 latency, top queries, zero-result queries, fallback reasons, index
+  coverage, and ranking-version status.
+  Search requests now trim surrounding
+  whitespace before execution, reject whitespace-only queries consistently, and
+  treat `%` / `_` as literal characters in lexical partial-match fallback.
+  The semantic-search quality baseline now covers 25 synthetic queries, and a
+  dedicated performance harness can run HTTP load checks plus PostgreSQL
+  `EXPLAIN (ANALYZE, BUFFERS)` for lexical search plans.
+
 - **Classification quality dashboard with drift detection (#161).**
   Added the console classification-quality dashboard, bounded sample drilldowns,
   drift-aware aggregate storage, failure-event snapshots, list filters for
@@ -96,6 +134,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     still injecting the contract headers.
 
 ### Fixed
+
+- **Semantic search availability (#162).**
+  Soft-deleted feedback rows with embeddings no longer make a tenant appear
+  semantically searchable when no live embedded feedback remains.
+  Search quality metrics and hybrid ranking now count each relevant feedback ID
+  once per query, so duplicate ranked results cannot inflate recall, NDCG, or
+  fused result scores.
+  Semantic search now rejects overlong queries and unsupported control
+  characters before they reach embedding generation or PostgreSQL full-text
+  search.
 
 - **Outbound adapter delivery safety (#167).**
   Fixed Lark webhook URL logging, GitHub issue request-body logging, GitHub 403

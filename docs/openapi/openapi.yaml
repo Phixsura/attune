@@ -1723,6 +1723,70 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/feedback/search/events:
+        post:
+            tags:
+                - SearchService
+            operationId: SearchService_RecordSearchEvent
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RecordSearchEventRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RecordSearchEventResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/feedback/search/quality:
+        get:
+            tags:
+                - SearchService
+            operationId: SearchService_GetSearchQuality
+            parameters:
+                - name: currentFrom
+                  in: query
+                  description: Inclusive window start in RFC3339 format.
+                  schema:
+                    type: string
+                - name: currentTo
+                  in: query
+                  description: Exclusive window end in RFC3339 format.
+                  schema:
+                    type: string
+                - name: bucketWidth
+                  in: query
+                  description: 'Time bucket width: "hour" or "day".'
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  description: Maximum rows for query/fallback lists.
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetSearchQualityResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/feedback/stats:
         get:
             tags:
@@ -3776,6 +3840,58 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/CreateProjectResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/quality-actions:
+        get:
+            tags:
+                - QualityActionService
+            operationId: QualityActionService_ListQualityActions
+            parameters:
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListQualityActionsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/quality-actions/update:
+        post:
+            tags:
+                - QualityActionService
+            operationId: QualityActionService_UpdateQualityAction
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateQualityActionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateQualityActionResponse'
                 default:
                     description: Default error response
                     content:
@@ -7896,6 +8012,12 @@ components:
                 workflowCategory:
                     type: string
                     description: Filter by workflow category (open/resolved).
+                enrichmentStatus:
+                    type: string
+                    description: 'Filter by enrichment status: pending | enriching | done | failed.'
+                terminalFailedOnly:
+                    type: boolean
+                    description: If true, only include terminal enrichment failures.
             description: |-
                 FeedbackFilter is the shared filter criteria used by list and batch
                  operations. It mirrors the query parameters of ListFeedbackRequest
@@ -8289,6 +8411,42 @@ components:
             properties:
                 schedule:
                     $ref: '#/components/schemas/RotationSchedule'
+        GetSearchQualityResponse:
+            type: object
+            properties:
+                generatedAt:
+                    type: string
+                currentFrom:
+                    type: string
+                currentTo:
+                    type: string
+                bucketWidth:
+                    type: string
+                summary:
+                    $ref: '#/components/schemas/SearchQualitySummary'
+                series:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchQualityTimeBucket'
+                queries:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchQualityQuery'
+                zeroResultQueries:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchQualityQuery'
+                fallbackBreakdown:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchFallbackBreakdown'
+                indexHealth:
+                    $ref: '#/components/schemas/SearchIndexHealth'
+                rankingVersions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchRankingVersion'
+            description: GetSearchQualityResponse summarizes search relevance, reliability, and index health.
         GetTenantAnalyticsResponse:
             type: object
             properties:
@@ -8932,6 +9090,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/Project'
+        ListQualityActionsResponse:
+            type: object
+            properties:
+                actions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/QualityAction'
         ListSIEMIntegrationsResponse:
             type: object
             properties:
@@ -9422,6 +9587,60 @@ components:
                     allOf:
                         - $ref: '#/components/schemas/Dimension'
                     description: The updated dimension with the new taxonomy value.
+        QualityAction:
+            type: object
+            properties:
+                actionId:
+                    type: string
+                actionKey:
+                    type: string
+                signal:
+                    type: string
+                status:
+                    type: string
+                severity:
+                    type: string
+                targetPath:
+                    type: string
+                metricLabel:
+                    type: string
+                metricValue:
+                    type: string
+                recommendationKey:
+                    type: string
+                evidenceJson:
+                    type: string
+                createdAt:
+                    type: string
+                lastSeenAt:
+                    type: string
+                acknowledgedAt:
+                    type: string
+                resolvedAt:
+                    type: string
+                dismissedAt:
+                    type: string
+                updatedAt:
+                    type: string
+                updatedBy:
+                    type: string
+        RecordSearchEventRequest:
+            type: object
+            properties:
+                runId:
+                    type: string
+                feedbackId:
+                    type: string
+                action:
+                    type: string
+                rank:
+                    type: integer
+                    format: int32
+                matchType:
+                    type: string
+        RecordSearchEventResponse:
+            type: object
+            properties: {}
         RegenerateReplyDraftRequest:
             type: object
             properties:
@@ -9759,6 +9978,155 @@ components:
                     type: array
                     items:
                         type: string
+        SearchCoverage:
+            type: object
+            properties:
+                totalLiveFeedback:
+                    type: integer
+                    description: Count of live feedback rows in this tenant.
+                    format: int32
+                totalWithEmbeddings:
+                    type: integer
+                    description: Count of live feedback rows that have embeddings in this tenant.
+                    format: int32
+                embeddingModel:
+                    type: string
+                    description: Embedding model shared by the searchable corpus, when available.
+            description: SearchCoverage describes how much of the live feedback corpus was searchable.
+        SearchEvidence:
+            type: object
+            properties:
+                field:
+                    type: string
+                    description: The source field, for example "content", "title", or "semantic".
+                snippet:
+                    type: string
+                    description: Short snippet. It must not include content the user cannot already view.
+                reason:
+                    type: string
+                    description: Machine-readable reason, for example "lexical_match" or "vector_similarity".
+            description: SearchEvidence is a short, permission-safe explanation for a matched result.
+        SearchFallbackBreakdown:
+            type: object
+            properties:
+                reason:
+                    type: string
+                count:
+                    type: string
+                share:
+                    type: number
+                    format: double
+        SearchIndexHealth:
+            type: object
+            properties:
+                totalLiveFeedback:
+                    type: integer
+                    format: int32
+                totalWithEmbeddings:
+                    type: integer
+                    format: int32
+                coverageRatio:
+                    type: number
+                    format: double
+                embeddingModel:
+                    type: string
+                oldestMissingFeedbackAt:
+                    type: string
+                missingFeedbackCount:
+                    type: string
+        SearchQualityQuery:
+            type: object
+            properties:
+                queryHash:
+                    type: string
+                queryPreview:
+                    type: string
+                queryCount:
+                    type: string
+                zeroResultCount:
+                    type: string
+                zeroResultRate:
+                    type: number
+                    format: double
+                fallbackCount:
+                    type: string
+                clickCount:
+                    type: string
+                clickThroughRate:
+                    type: number
+                    format: double
+                averageResultCount:
+                    type: number
+                    format: double
+                p95LatencyMs:
+                    type: string
+                lastSeenAt:
+                    type: string
+        SearchQualitySummary:
+            type: object
+            properties:
+                queryCount:
+                    type: string
+                zeroResultCount:
+                    type: string
+                zeroResultRate:
+                    type: number
+                    format: double
+                fallbackCount:
+                    type: string
+                fallbackRate:
+                    type: number
+                    format: double
+                clickCount:
+                    type: string
+                clickThroughRate:
+                    type: number
+                    format: double
+                averageResultCount:
+                    type: number
+                    format: double
+                p95LatencyMs:
+                    type: string
+                worstSeverity:
+                    type: string
+        SearchQualityTimeBucket:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                queryCount:
+                    type: string
+                zeroResultCount:
+                    type: string
+                zeroResultRate:
+                    type: number
+                    format: double
+                fallbackCount:
+                    type: string
+                fallbackRate:
+                    type: number
+                    format: double
+                clickCount:
+                    type: string
+                clickThroughRate:
+                    type: number
+                    format: double
+                p95LatencyMs:
+                    type: string
+        SearchRankingVersion:
+            type: object
+            properties:
+                rankingVersion:
+                    type: string
+                status:
+                    type: string
+                trafficPercent:
+                    type: integer
+                    format: int32
+                notes:
+                    type: string
+                updatedAt:
+                    type: string
         SecretManagerConfig:
             type: object
             properties:
@@ -9803,6 +10171,28 @@ components:
                 matchType:
                     type: string
                     description: 'How this result was matched: "semantic", "keyword", or "hybrid".'
+                semanticRank:
+                    type: integer
+                    description: 1-based rank in the semantic candidate list. Zero means not present.
+                    format: int32
+                lexicalRank:
+                    type: integer
+                    description: 1-based rank in the lexical candidate list. Zero means not present.
+                    format: int32
+                fusedScore:
+                    type: number
+                    description: Fused relevance score after combining available candidate lists.
+                    format: float
+                evidence:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchEvidence'
+                    description: Short evidence snippets explaining why this result matched.
+                rankingSignals:
+                    type: array
+                    items:
+                        type: string
+                    description: Bounded ranking signals used for explainability.
             description: SemanticSearchHit is a single search result with ranking metadata.
         SemanticSearchRequest:
             type: object
@@ -9838,7 +10228,7 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/SemanticSearchHit'
-                    description: Ranked results ordered by combined similarity score.
+                    description: Ranked results ordered by fused relevance score.
                 embeddingModel:
                     type: string
                     description: The embedding model used for this search.
@@ -9849,6 +10239,19 @@ components:
                 usedKeywordFallback:
                     type: boolean
                     description: True if semantic search was unavailable and results are keyword-only.
+                fallbackReason:
+                    type: string
+                    description: Machine-readable reason for keyword-only fallback, when used.
+                rankingVersion:
+                    type: string
+                    description: Version of the ranking algorithm and default parameters used.
+                coverage:
+                    allOf:
+                        - $ref: '#/components/schemas/SearchCoverage'
+                    description: Coverage metadata for the searched corpus.
+                runId:
+                    type: string
+                    description: Stable identifier for this search execution, used for result interaction telemetry.
             description: SemanticSearchResponse contains the ranked search results.
         ServiceAccount:
             type: object
@@ -10278,6 +10681,32 @@ components:
             properties:
                 policy:
                     $ref: '#/components/schemas/ApiKeyPolicy'
+        UpdateQualityActionRequest:
+            type: object
+            properties:
+                actionKey:
+                    type: string
+                signal:
+                    type: string
+                status:
+                    type: string
+                severity:
+                    type: string
+                targetPath:
+                    type: string
+                metricLabel:
+                    type: string
+                metricValue:
+                    type: string
+                recommendationKey:
+                    type: string
+                evidenceJson:
+                    type: string
+        UpdateQualityActionResponse:
+            type: object
+            properties:
+                action:
+                    $ref: '#/components/schemas/QualityAction'
         UpdateStateRequest:
             type: object
             properties:
@@ -10569,6 +10998,11 @@ tags:
          contract only exposes visibility + manual re-arm.
     - name: NotifyTargetService
       description: NotifyTargetService manages a tenant's outbound notification destinations.
+    - name: QualityActionService
+      description: |-
+        QualityActionService stores the operator action ledger behind the control
+         tower. Signals still come from the dedicated quality APIs; this service keeps
+         the human workflow state for each recommended action.
     - name: SearchService
       description: |-
         SearchService provides semantic search over feedback (#30).

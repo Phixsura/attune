@@ -354,10 +354,20 @@ describe('ClassificationSettingsPage', () => {
         'attune:draft:classification-settings',
         JSON.stringify({ _v: 1, _ts: Date.now(), data: { prompt: 'Draft', rows: [] } }),
       )
-      seedConfig()
+      let saved = false
+      seedConfig(() => {
+        saved = true
+      })
       const { user } = renderWithProviders(<ClassificationSettingsPage />)
       await screen.findByLabelText('提示词模板')
-      await user.click(screen.getByRole('button', { name: '保存' }))
+      const saveButton = screen.getByRole('button', { name: '保存' })
+      await waitFor(() => {
+        expect(saveButton).toBeEnabled()
+      })
+      await user.click(saveButton)
+      await waitFor(() => {
+        expect(saved).toBe(true)
+      })
       await waitFor(() => {
         expect(localStorage.getItem('attune:draft:classification-settings')).toBeNull()
       })
