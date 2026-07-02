@@ -3,8 +3,8 @@
 #
 # The smoke starts a throwaway pgvector PostgreSQL container, generates a
 # throwaway Tink keyset with the image under test, boots attune, and verifies the
-# HTTP, Console static asset, metrics, migration, and classification-quality
-# schema paths that cheap unit tests cannot exercise.
+# HTTP, Console static asset, metrics, migration, control-tower, and
+# classification-quality schema paths that cheap unit tests cannot exercise.
 
 set -euo pipefail
 
@@ -165,6 +165,11 @@ console_status="$(
     "http://$host:$host_port/console/analytics/classification-quality"
 )"
 assert_equals console_classification_quality_http 200 "$console_status"
+control_tower_status="$(
+  curl -sS -o "$config_dir/control-tower.html" -w '%{http_code}' \
+    "http://$host:$host_port/console/control-tower"
+)"
+assert_equals console_control_tower_http 200 "$control_tower_status"
 
 main_asset_ref="$(grep -o '/console/assets/index-[^" ]*\.js' "$config_dir/console.html" | head -1 || true)"
 css_asset_ref="$(grep -o '/console/assets/index-[^" ]*\.css' "$config_dir/console.html" | head -1 || true)"
@@ -199,14 +204,19 @@ quality_indexes="$(
   docker exec "$postgres" psql -U attune -d attune -tAc \
     "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname LIKE 'idx_quality%'"
 )"
+quality_action_tables="$(
+  docker exec "$postgres" psql -U attune -d attune -tAc \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='feedback_quality_actions'"
+)"
 
 if [[ -z "$pgvector_version" ]]; then
   echo "runtime-smoke: pgvector extension is missing" >&2
   exit 1
 fi
-assert_ge schema_migrations_feedback_max_version 93 "$migration_version"
+assert_ge schema_migrations_feedback_max_version 96 "$migration_version"
 assert_ge classification_quality_tables 4 "$quality_tables"
 assert_ge classification_quality_indexes 5 "$quality_indexes"
+assert_ge feedback_quality_action_tables 1 "$quality_action_tables"
 
 cat <<EOF
 runtime-smoke: ok
@@ -214,6 +224,7 @@ runtime-smoke: ok
   readyz=$ready
   startupz=$startup
   console_classification_quality_http=$console_status
+  console_control_tower_http=$control_tower_status
   console_main_asset_http=$main_asset_status
   console_css_asset_http=$css_asset_status
   metrics_http=$metrics_status
@@ -222,4 +233,5 @@ runtime-smoke: ok
   schema_migrations_feedback_max_version=$migration_version
   classification_quality_tables=$quality_tables
   classification_quality_indexes=$quality_indexes
+  feedback_quality_action_tables=$quality_action_tables
 EOF

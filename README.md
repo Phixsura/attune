@@ -65,6 +65,17 @@ docker compose run --rm attune llm routes upsert \
   --purpose enrich --logical-model enrich-default
 ```
 
+To preview the Console with realistic feedback, search-quality telemetry, and
+quality-action state before wiring real customer traffic, seed the local demo
+workspace after the app has started:
+
+```bash
+docker compose run --rm attune demo seed
+```
+
+Sign in with the configured bootstrap admin and open
+`/console/control-tower` to inspect the operational landing page.
+
 See [`deploy/README.md`](deploy/README.md) for the compose-kit quick-reference,
 the full [private deployment guide](docs/private-deploy.md) for a step-by-step
 walk-through with monitoring, SSL, upgrades, and troubleshooting, or

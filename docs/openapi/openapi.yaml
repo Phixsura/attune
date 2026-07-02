@@ -3846,6 +3846,58 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/quality-actions:
+        get:
+            tags:
+                - QualityActionService
+            operationId: QualityActionService_ListQualityActions
+            parameters:
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListQualityActionsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/quality-actions/update:
+        post:
+            tags:
+                - QualityActionService
+            operationId: QualityActionService_UpdateQualityAction
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateQualityActionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateQualityActionResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/secret-managers:
         get:
             tags:
@@ -9038,6 +9090,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/Project'
+        ListQualityActionsResponse:
+            type: object
+            properties:
+                actions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/QualityAction'
         ListSIEMIntegrationsResponse:
             type: object
             properties:
@@ -9528,6 +9587,43 @@ components:
                     allOf:
                         - $ref: '#/components/schemas/Dimension'
                     description: The updated dimension with the new taxonomy value.
+        QualityAction:
+            type: object
+            properties:
+                actionId:
+                    type: string
+                actionKey:
+                    type: string
+                signal:
+                    type: string
+                status:
+                    type: string
+                severity:
+                    type: string
+                targetPath:
+                    type: string
+                metricLabel:
+                    type: string
+                metricValue:
+                    type: string
+                recommendationKey:
+                    type: string
+                evidenceJson:
+                    type: string
+                createdAt:
+                    type: string
+                lastSeenAt:
+                    type: string
+                acknowledgedAt:
+                    type: string
+                resolvedAt:
+                    type: string
+                dismissedAt:
+                    type: string
+                updatedAt:
+                    type: string
+                updatedBy:
+                    type: string
         RecordSearchEventRequest:
             type: object
             properties:
@@ -10585,6 +10681,32 @@ components:
             properties:
                 policy:
                     $ref: '#/components/schemas/ApiKeyPolicy'
+        UpdateQualityActionRequest:
+            type: object
+            properties:
+                actionKey:
+                    type: string
+                signal:
+                    type: string
+                status:
+                    type: string
+                severity:
+                    type: string
+                targetPath:
+                    type: string
+                metricLabel:
+                    type: string
+                metricValue:
+                    type: string
+                recommendationKey:
+                    type: string
+                evidenceJson:
+                    type: string
+        UpdateQualityActionResponse:
+            type: object
+            properties:
+                action:
+                    $ref: '#/components/schemas/QualityAction'
         UpdateStateRequest:
             type: object
             properties:
@@ -10876,6 +10998,11 @@ tags:
          contract only exposes visibility + manual re-arm.
     - name: NotifyTargetService
       description: NotifyTargetService manages a tenant's outbound notification destinations.
+    - name: QualityActionService
+      description: |-
+        QualityActionService stores the operator action ledger behind the control
+         tower. Signals still come from the dedicated quality APIs; this service keeps
+         the human workflow state for each recommended action.
     - name: SearchService
       description: |-
         SearchService provides semantic search over feedback (#30).

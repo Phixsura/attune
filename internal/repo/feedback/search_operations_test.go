@@ -64,3 +64,41 @@ func TestClampSearchRatio(t *testing.T) {
 	require.InDelta(t, 0.42, clampSearchRatio(0.42), 0.001)
 	require.InDelta(t, 1, clampSearchRatio(1.5), 0.001)
 }
+
+func TestNormalizeQualityActionListOpts(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeQualityActionListOpts(QualityActionListOpts{
+		TenantID: "tenant-1",
+		Status:   "invalid",
+	})
+	require.Equal(t, QualityActionListOpts{
+		TenantID: "tenant-1",
+		Limit:    qualityActionDefaultLimit,
+	}, got)
+
+	got = normalizeQualityActionListOpts(QualityActionListOpts{
+		TenantID: "tenant-1",
+		Status:   QualityActionStatusResolved,
+		Limit:    qualityActionMaxLimit + 1,
+	})
+	require.Equal(t, QualityActionStatusResolved, got.Status)
+	require.Equal(t, qualityActionMaxLimit, got.Limit)
+}
+
+func TestNormalizeQualityActionUpsert(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeQualityActionUpsert(QualityActionUpsert{
+		TenantID:     "tenant-1",
+		ActionKey:    "search.zero_result",
+		Signal:       "zero_result",
+		Status:       "invalid",
+		Severity:     "bad",
+		EvidenceJSON: "",
+	})
+
+	require.Equal(t, QualityActionStatusOpen, got.Status)
+	require.Equal(t, QualityActionSeverityWatch, got.Severity)
+	require.JSONEq(t, `{}`, got.EvidenceJSON)
+}

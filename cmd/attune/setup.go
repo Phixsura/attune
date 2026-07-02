@@ -288,6 +288,7 @@ func buildConsoleRouter(
 		usage, enrichConfig, enrichmentRuntimeHandler, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
 		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
+	router.SetQualityActionHandler(console.NewQualityActionHandler(feedbackRepo))
 	attachOptionalHandlers(router, pool, cfg, auditLogSvc, signer, tenantRepo, adminRepo)
 	return router.Mount(), nil
 }

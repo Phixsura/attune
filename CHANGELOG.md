@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Added a Console Control Tower landing page that synthesizes classification
   quality, semantic-search quality, index coverage, top risks, and proof-trail
   evidence into the authenticated default route.
+  Added a quality-action ledger with generated proto/OpenAPI/SDK bindings,
+  Console status controls for acknowledging, resolving, or dismissing quality
+  risks, runtime-smoke coverage for the Control Tower path, and
+  `attune demo seed` for a reproducible local workspace with realistic feedback,
+  search telemetry, and action state.
 
 - **Semantic search operator workflow (#162).**
   Added a feedback workbench search mode switch that lets operators run

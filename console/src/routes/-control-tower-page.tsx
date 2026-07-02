@@ -5,16 +5,20 @@ import {
   ArrowRight,
   CheckCircle2,
   CircleGauge,
+  ClipboardCheck,
   DatabaseZap,
   Loader2,
   MousePointerClick,
+  Play,
   Radar,
+  RotateCcw,
   Search,
   ShieldCheck,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -23,6 +27,12 @@ import {
   classificationQualityQuery,
   defaultClassificationQualityFilters,
 } from '@/features/classification-quality/api/get-classification-quality'
+import {
+  type QualityAction,
+  type QualityActionStatus,
+  qualityActionsQuery,
+  useUpdateQualityAction,
+} from '@/features/quality-actions/api/quality-actions'
 import {
   defaultSearchQualityFilters,
   type SearchQuality,
@@ -34,8 +44,10 @@ type SignalSeverity = 'alert' | 'watch' | 'normal' | 'insufficient_data'
 
 type ControlTowerRisk = {
   id: string
+  actionKey: string
   titleKey: string
   bodyKey: string
+  recommendationKey: string
   metric: string
   severity: SignalSeverity
   href: '/analytics/classification-quality' | '/analytics/search-quality'
@@ -52,16 +64,18 @@ type ControlTowerLane = {
 export const controlTowerQueries = [
   classificationQualityQuery(defaultClassificationQualityFilters),
   searchQualityQuery(defaultSearchQualityFilters),
+  qualityActionsQuery({ status: 'all', limit: 100 }),
 ] as const
 
 export function ControlTowerPage() {
   const { t } = useTranslation()
   const classification = useQuery(controlTowerQueries[0])
   const search = useQuery(controlTowerQueries[1])
+  const qualityActions = useQuery(controlTowerQueries[2])
 
   const model = useMemo(
-    () => buildControlTowerModel(classification.data, search.data),
-    [classification.data, search.data],
+    () => buildControlTowerModel(classification.data, search.data, qualityActions.data),
+    [classification.data, search.data, qualityActions.data],
   )
   const pending = classification.isPending || search.isPending
   const failed = classification.isError || search.isError
@@ -105,14 +119,45 @@ export function ControlTowerPage() {
       ) : failed ? (
         <ControlTowerError />
       ) : (
-        <ControlTowerBody model={model} />
+        <ControlTowerBody model={model} actionsUnavailable={qualityActions.isError} />
       )}
     </div>
   )
 }
 
-function ControlTowerBody({ model }: { model: ReturnType<typeof buildControlTowerModel> }) {
+function ControlTowerBody({
+  model,
+  actionsUnavailable,
+}: {
+  model: ReturnType<typeof buildControlTowerModel>
+  actionsUnavailable: boolean
+}) {
   const { t } = useTranslation()
+  const updateAction = useUpdateQualityAction()
+
+  const update = (risk: ControlTowerRisk, status: QualityActionStatus) => {
+    updateAction.mutate(
+      {
+        actionKey: risk.actionKey,
+        signal: risk.id,
+        status,
+        severity: risk.severity,
+        targetPath: risk.href,
+        metricLabel: t(risk.titleKey),
+        metricValue: risk.metric,
+        recommendationKey: risk.recommendationKey,
+        evidenceJson: JSON.stringify({
+          metric: risk.metric,
+          targetPath: risk.href,
+        }),
+      },
+      {
+        onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+        onSuccess: () => toast.success(t(`control_tower.actions.toast.${status}`)),
+      },
+    )
+  }
+
   return (
     <div className="space-y-5">
       <div className="grid gap-4 lg:grid-cols-3">
@@ -140,9 +185,9 @@ function ControlTowerBody({ model }: { model: ReturnType<typeof buildControlTowe
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <Card className="rounded-lg border-border/70 shadow-none">
           <CardHeader className="border-b border-border/60 bg-muted/15">
-            <CardTitle>{t('control_tower.risks.title')}</CardTitle>
+            <CardTitle>{t('control_tower.actions.title')}</CardTitle>
             <CardDescription>
-              {t('control_tower.risks.description', { count: model.risks.length })}
+              {t('control_tower.actions.description', { count: model.risks.length })}
             </CardDescription>
           </CardHeader>
           <CardContent className="divide-y divide-border/60 p-0">
@@ -150,9 +195,9 @@ function ControlTowerBody({ model }: { model: ReturnType<typeof buildControlTowe
               <div className="flex items-start gap-3 p-5">
                 <CheckCircle2 className="mt-0.5 size-5 text-emerald-600" />
                 <div>
-                  <div className="font-medium">{t('control_tower.risks.empty_title')}</div>
+                  <div className="font-medium">{t('control_tower.actions.empty_title')}</div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {t('control_tower.risks.empty_body')}
+                    {t('control_tower.actions.empty_body')}
                   </p>
                 </div>
               </div>
@@ -166,15 +211,42 @@ function ControlTowerBody({ model }: { model: ReturnType<typeof buildControlTowe
                       <span className="rounded-full border border-border/70 bg-muted/30 px-2 py-0.5 text-xs text-muted-foreground">
                         {risk.metric}
                       </span>
+                      <ActionStatusBadge status={risk.action?.status} />
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">{t(risk.bodyKey)}</p>
+                    <p className="mt-2 text-sm font-medium">{t(risk.recommendationKey)}</p>
+                    {actionsUnavailable ? (
+                      <p className="mt-2 text-xs text-amber-700">
+                        {t('control_tower.actions.unavailable')}
+                      </p>
+                    ) : null}
                   </div>
-                  <Button asChild variant="outline" size="sm" className="shrink-0">
-                    <Link to={risk.href}>
-                      {t('control_tower.risks.open')}
-                      <ArrowRight className="size-4" />
-                    </Link>
-                  </Button>
+                  <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={updateAction.isPending || risk.action?.status === 'acknowledged'}
+                      onClick={() => update(risk, 'acknowledged')}
+                    >
+                      <Play className="size-4" />
+                      {t('control_tower.actions.start')}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={updateAction.isPending || risk.action?.status === 'resolved'}
+                      onClick={() => update(risk, 'resolved')}
+                    >
+                      <ClipboardCheck className="size-4" />
+                      {t('control_tower.actions.verify')}
+                    </Button>
+                    <Button asChild variant="ghost" size="sm">
+                      <Link to={risk.href}>
+                        {t('control_tower.actions.evidence')}
+                        <ArrowRight className="size-4" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
               ))
             )}
@@ -231,7 +303,11 @@ function ControlTowerError() {
   )
 }
 
-function buildControlTowerModel(classification?: ClassificationQuality, search?: SearchQuality) {
+function buildControlTowerModel(
+  classification?: ClassificationQuality,
+  search?: SearchQuality,
+  qualityActions: QualityAction[] = [],
+) {
   const classificationSummary = classification?.summary
   const searchSummary = search?.summary
   const classificationEvents = toNumber(classificationSummary?.classificationEvents)
@@ -247,61 +323,80 @@ function buildControlTowerModel(classification?: ClassificationQuality, search?:
   const risks = compactRisks([
     classificationWarnings > 0 && {
       id: 'classification-warnings',
+      actionKey: 'control_tower.classification_warnings',
       titleKey: 'control_tower.risk.classification_warnings.title',
       bodyKey: 'control_tower.risk.classification_warnings.body',
+      recommendationKey: 'control_tower.action.classification_warnings',
       metric: String(classificationWarnings),
       severity: normalizeSeverity(classificationSummary?.worstSeverity, 'watch'),
       href: '/analytics/classification-quality',
     },
     lowConfidenceRate >= 0.05 && {
       id: 'low-confidence',
+      actionKey: 'control_tower.low_confidence',
       titleKey: 'control_tower.risk.low_confidence.title',
       bodyKey: 'control_tower.risk.low_confidence.body',
+      recommendationKey: 'control_tower.action.low_confidence',
       metric: formatRate(lowConfidenceRate),
       severity: lowConfidenceRate >= 0.1 ? 'alert' : 'watch',
       href: '/analytics/classification-quality',
     },
     offListRate >= 0.02 && {
       id: 'off-list',
+      actionKey: 'control_tower.off_list',
       titleKey: 'control_tower.risk.off_list.title',
       bodyKey: 'control_tower.risk.off_list.body',
+      recommendationKey: 'control_tower.action.off_list',
       metric: formatRate(offListRate),
       severity: offListRate >= 0.05 ? 'alert' : 'watch',
       href: '/analytics/classification-quality',
     },
     zeroResultRate >= 0.1 && {
       id: 'zero-result',
+      actionKey: 'control_tower.zero_result',
       titleKey: 'control_tower.risk.zero_result.title',
       bodyKey: 'control_tower.risk.zero_result.body',
+      recommendationKey: 'control_tower.action.zero_result',
       metric: formatRate(zeroResultRate),
       severity: zeroResultRate >= 0.2 ? 'alert' : 'watch',
       href: '/analytics/search-quality',
     },
     fallbackRate >= 0.1 && {
       id: 'fallback',
+      actionKey: 'control_tower.fallback',
       titleKey: 'control_tower.risk.fallback.title',
       bodyKey: 'control_tower.risk.fallback.body',
+      recommendationKey: 'control_tower.action.fallback',
       metric: formatRate(fallbackRate),
       severity: fallbackRate >= 0.25 ? 'alert' : 'watch',
       href: '/analytics/search-quality',
     },
     searchCoverage < 0.95 && {
       id: 'index-coverage',
+      actionKey: 'control_tower.index_coverage',
       titleKey: 'control_tower.risk.index_coverage.title',
       bodyKey: 'control_tower.risk.index_coverage.body',
+      recommendationKey: 'control_tower.action.index_coverage',
       metric: formatRate(searchCoverage),
       severity: searchCoverage < 0.8 ? 'alert' : 'watch',
       href: '/analytics/search-quality',
     },
     p95LatencyMs >= 2500 && {
       id: 'search-latency',
+      actionKey: 'control_tower.search_latency',
       titleKey: 'control_tower.risk.search_latency.title',
       bodyKey: 'control_tower.risk.search_latency.body',
+      recommendationKey: 'control_tower.action.search_latency',
       metric: formatLatency(p95LatencyMs),
       severity: p95LatencyMs >= 5000 ? 'alert' : 'watch',
       href: '/analytics/search-quality',
     },
   ]).slice(0, 5)
+  const actionByKey = new Map(qualityActions.map((action) => [action.actionKey, action]))
+  const risksWithActions = risks.map((risk) => ({
+    ...risk,
+    action: actionByKey.get(risk.actionKey),
+  }))
 
   const lanes: ControlTowerLane[] = [
     {
@@ -337,7 +432,7 @@ function buildControlTowerModel(classification?: ClassificationQuality, search?:
       classificationEvents === 0 && searchQueries === 0 ? 'insufficient_data' : 'normal',
     ]),
     rankingVersion: search?.rankingVersions[0]?.rankingVersion ?? '',
-    risks,
+    risks: risksWithActions,
     searchClickThrough,
     searchCoverage,
     topZeroResultQuery: search?.zeroResultQueries[0]?.queryPreview ?? '',
@@ -374,6 +469,31 @@ function SeverityIcon({ severity }: { severity: SignalSeverity }) {
   if (severity === 'alert') return <AlertTriangle className="mt-0.5 size-5 shrink-0 text-red-600" />
   if (severity === 'watch') return <CircleGauge className="mt-0.5 size-5 shrink-0 text-amber-600" />
   return <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-600" />
+}
+
+function ActionStatusBadge({ status }: { status: string | undefined }) {
+  const { t } = useTranslation()
+  const normalized = status || 'open'
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 rounded-sm border px-1.5 py-0.5 text-xs font-medium',
+        normalized === 'open' && 'border-border bg-muted/30 text-muted-foreground',
+        normalized === 'acknowledged' &&
+          'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60',
+        normalized === 'resolved' &&
+          'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60',
+        normalized === 'dismissed' && 'border-border bg-muted/20 text-muted-foreground',
+      )}
+    >
+      {normalized === 'resolved' ? (
+        <CheckCircle2 className="size-3" />
+      ) : (
+        <RotateCcw className="size-3" />
+      )}
+      {t(`control_tower.actions.status.${normalized}`)}
+    </span>
+  )
 }
 
 function ProofRow({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {

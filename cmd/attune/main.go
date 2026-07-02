@@ -59,6 +59,7 @@ var subcommands = map[string]func([]string) error{
 	"embed":   runEmbed,
 	"audit":   runAudit,
 	"auth":    runAuth,
+	"demo":    runDemo,
 }
 
 func main() {
@@ -116,6 +117,7 @@ Usage:
  attune audit generate-signing-key              Generate Ed25519 signing keypair
  attune audit export-public-key --signing-key <hex> Derive public key from signing key
  attune auth breakglass issue|list|revoke       Manage break-glass tokens (#158)
+ attune demo seed [--tenant <slug>]             Seed a demo workspace for the Console control tower
 `)
 }
 

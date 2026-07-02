@@ -102,6 +102,30 @@ const searchFixture = {
   ],
 }
 
+const qualityActionsFixture = {
+  actions: [
+    {
+      actionId: '11111111-1111-1111-1111-111111111111',
+      actionKey: 'control_tower.zero_result',
+      signal: 'zero-result',
+      status: 'acknowledged',
+      severity: 'alert',
+      targetPath: '/analytics/search-quality',
+      metricLabel: '搜索零结果偏高',
+      metricValue: '21%',
+      recommendationKey: 'control_tower.action.zero_result',
+      evidenceJson: '{"metric":"21%"}',
+      createdAt: '2026-07-03T00:00:00Z',
+      lastSeenAt: '2026-07-03T00:00:00Z',
+      acknowledgedAt: '2026-07-03T00:00:00Z',
+      resolvedAt: '',
+      dismissedAt: '',
+      updatedAt: '2026-07-03T00:00:00Z',
+      updatedBy: 'user-1',
+    },
+  ],
+}
+
 interface ThrownRedirect {
   options: { to: string; statusCode?: number }
 }
@@ -118,6 +142,10 @@ describe('_authed.control-tower route', () => {
         seen.add(new URL(request.url).pathname)
         return HttpResponse.json(searchFixture)
       }),
+      http.get('/fb/v1/console/quality-actions', ({ request }) => {
+        seen.add(new URL(request.url).pathname)
+        return HttpResponse.json(qualityActionsFixture)
+      }),
     )
 
     const queryClient = new QueryClient({
@@ -127,9 +155,13 @@ describe('_authed.control-tower route', () => {
       context: { queryClient: QueryClient }
     }) => Promise<unknown>
 
-    await expect(loader({ context: { queryClient } })).resolves.toHaveLength(2)
+    await expect(loader({ context: { queryClient } })).resolves.toHaveLength(3)
     expect(seen).toEqual(
-      new Set(['/fb/v1/console/classification-quality', '/fb/v1/console/feedback/search/quality']),
+      new Set([
+        '/fb/v1/console/classification-quality',
+        '/fb/v1/console/feedback/search/quality',
+        '/fb/v1/console/quality-actions',
+      ]),
     )
   })
 
@@ -153,6 +185,7 @@ describe('_authed.control-tower route', () => {
         HttpResponse.json(classificationFixture),
       ),
       http.get('/fb/v1/console/feedback/search/quality', () => HttpResponse.json(searchFixture)),
+      http.get('/fb/v1/console/quality-actions', () => HttpResponse.json(qualityActionsFixture)),
     )
 
     renderControlTower()
@@ -162,6 +195,7 @@ describe('_authed.control-tower route', () => {
       expect(screen.getByText('低置信度升高')).toBeInTheDocument()
     })
     expect(screen.getByText('搜索零结果偏高')).toBeInTheDocument()
+    expect(screen.getByText('处理中')).toBeInTheDocument()
     expect(screen.getByText('enterprise export webhook')).toBeInTheDocument()
     expect(screen.getByText('rrf.pgfts.v1.k60')).toBeInTheDocument()
   })
@@ -176,6 +210,7 @@ describe('_authed.control-tower route', () => {
         '/fb/v1/console/feedback/search/quality',
         () => new HttpResponse(null, { status: 500 }),
       ),
+      http.get('/fb/v1/console/quality-actions', () => HttpResponse.json({ actions: [] })),
     )
 
     renderControlTower()

@@ -9,5 +9,6 @@ export const Route = createFileRoute('/_authed/control-tower')({
     Promise.all([
       context.queryClient.ensureQueryData(controlTowerQueries[0]),
       context.queryClient.ensureQueryData(controlTowerQueries[1]),
+      context.queryClient.ensureQueryData(controlTowerQueries[2]),
     ]),
 })

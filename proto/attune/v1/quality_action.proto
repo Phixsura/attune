@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+// QualityActionService stores the operator action ledger behind the control
+// tower. Signals still come from the dedicated quality APIs; this service keeps
+// the human workflow state for each recommended action.
+service QualityActionService {
+  rpc ListQualityActions(ListQualityActionsRequest) returns (ListQualityActionsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/quality-actions"};
+  }
+
+  rpc UpdateQualityAction(UpdateQualityActionRequest) returns (UpdateQualityActionResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/quality-actions/update"
+      body: "*"
+    };
+  }
+}
+
+message ListQualityActionsRequest {
+  string status = 1;
+  optional int32 limit = 2;
+}
+
+message ListQualityActionsResponse {
+  repeated QualityAction actions = 1;
+}
+
+message UpdateQualityActionRequest {
+  string action_key = 1;
+  string signal = 2;
+  string status = 3;
+  string severity = 4;
+  string target_path = 5;
+  string metric_label = 6;
+  string metric_value = 7;
+  string recommendation_key = 8;
+  string evidence_json = 9;
+}
+
+message UpdateQualityActionResponse {
+  QualityAction action = 1;
+}
+
+message QualityAction {
+  string action_id = 1;
+  string action_key = 2;
+  string signal = 3;
+  string status = 4;
+  string severity = 5;
+  string target_path = 6;
+  string metric_label = 7;
+  string metric_value = 8;
+  string recommendation_key = 9;
+  string evidence_json = 10;
+  string created_at = 11;
+  string last_seen_at = 12;
+  string acknowledged_at = 13;
+  string resolved_at = 14;
+  string dismissed_at = 15;
+  string updated_at = 16;
+  string updated_by = 17;
+}

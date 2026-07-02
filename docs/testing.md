@@ -12,7 +12,7 @@ that cheap tests cannot see.
 | **L2 contract** | `make proto-lint`, `make proto-breaking`, `make proto` | CI on proto changes | network for Buf remote plugins | Protobuf/OpenAPI/SDK contract shape and generation consistency. |
 | **L3 integration** | `make test-integration` | CI on Go changes; local opt-in | Docker only | Real pgvector PostgreSQL migrations, repos, service/repo transaction paths, restore drills, and queue/outbox smoke tests. |
 | **L4 browser** | `cd console && pnpm test:e2e:a11y` | CI on Console changes | browser install | Critical Console routes in real Chromium with API mocks, accessibility, overflow, console-error, and interaction coverage. |
-| **L5 release runtime** | `make runtime-smoke` | pre-release opt-in | Docker only | Built image boots against throwaway pgvector Postgres; health/readiness, Console assets, metrics, migrations, and classification-quality schema are verified. |
+| **L5 release runtime** | `make runtime-smoke` | pre-release opt-in | Docker only | Built image boots against throwaway pgvector Postgres; health/readiness, Console assets, metrics, migrations, Control Tower routing, and quality schemas are verified. |
 | **L6 live** | `make test-live` | manual only | real API calls | LLM provider round-trips and outbound provider smoke deliveries, all env-gated. |
 
 Use `make release-smoke` before release candidates or large production-facing
@@ -145,11 +145,12 @@ The script:
 - boots attune from the image with a private temporary config;
 - waits for `/readyz`;
 - checks `/healthz`, `/readyz`, and `/startupz`;
-- verifies `/console/analytics/classification-quality` plus referenced JS/CSS
-  assets;
+- verifies `/console/control-tower`,
+  `/console/analytics/classification-quality`, and referenced JS/CSS assets;
 - verifies `/metrics` exposes Go or attune series;
-- checks pgvector is installed, migrations reached at least version 93, and the
-  classification-quality tables and indexes exist.
+- checks pgvector is installed, migrations reached at least version 96, and the
+  classification-quality tables, classification-quality indexes, and
+  feedback-quality action table exist.
 
 You can smoke a prebuilt image without rebuilding:
 

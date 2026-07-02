@@ -80,6 +80,7 @@ var (
 	NewFeedbackHandler           = feedback.NewFeedbackHandler
 	NewBatchHandler              = feedback.NewBatchHandler
 	NewSearchHandler             = feedback.NewSearchHandler
+	NewQualityActionHandler      = feedback.NewQualityActionHandler
 	NewFeedbackJobHandler        = feedbackjob.NewHandler
 	NewGDPRHandler               = consolegdpr.NewHandler
 	NewUsageHandler              = usage.NewUsageHandler
@@ -125,6 +126,8 @@ var (
 //	 POST /feedback/search -> dispatcher.Bind(feedback.SearchHandler.Search)
 //	 GET /feedback/search/quality -> dispatcher.Bind(feedback.SearchHandler.GetSearchQuality)
 //	 POST /feedback/search/events -> dispatcher.Bind(feedback.SearchHandler.RecordSearchEvent)
+//	 GET /quality-actions -> dispatcher.Bind(feedback.QualityActionHandler.ListQualityActions)
+//	 POST /quality-actions/update -> dispatcher.Bind(feedback.QualityActionHandler.UpdateQualityAction)
 //	 GET /feedback/{id} -> dispatcher.Bind(feedback.Handler.Get)
 //	 GET /usage -> dispatcher.Bind(usage.Handler.Get)
 //	 GET /llm-usage -> dispatcher.Bind(usage.Handler.GetLLMUsage)
@@ -163,6 +166,7 @@ type Router struct {
 	feedback           *feedback.FeedbackHandler
 	feedbackBatch      *feedback.BatchHandler
 	feedbackSearch     *feedback.SearchHandler
+	qualityActions     *feedback.QualityActionHandler
 	feedbackJob        *feedbackjob.Handler
 	gdpr               *consolegdpr.Handler
 	usage              *usage.UsageHandler
@@ -379,6 +383,7 @@ func (r *Router) mountSession(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		r.mountQualityActions(u)
 	})
 	r.mountEnrichConfig(m)
 	r.mountEnrichmentRuntime(m)
@@ -390,6 +395,39 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountTags(m)
 	r.mountWorkflow(m)
 	r.mountMembers(m)
+}
+
+func (r *Router) SetQualityActionHandler(h *feedback.QualityActionHandler) {
+	r.qualityActions = h
+}
+
+func (r *Router) mountQualityActions(m chi.Router) {
+	if r.qualityActions == nil {
+		return
+	}
+	m.Get("/quality-actions", dispatcher.Bind(
+		"console.QualityActionHandler.ListQualityActions",
+		dispatcher.Query(
+			func() *attunev1.ListQualityActionsRequest {
+				return ptrext.Of(attunev1.ListQualityActionsRequest{})
+			},
+			feedback.BindListQualityActionsRequest,
+		),
+		r.qualityActions.ListQualityActions,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListQualityActionsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.Post("/quality-actions/update", dispatcher.Bind(
+		"console.QualityActionHandler.UpdateQualityAction",
+		dispatcher.JSON(func() *attunev1.UpdateQualityActionRequest {
+			return ptrext.Of(attunev1.UpdateQualityActionRequest{})
+		}),
+		r.qualityActions.UpdateQualityAction,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateQualityActionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountLLMConfig(m chi.Router) {

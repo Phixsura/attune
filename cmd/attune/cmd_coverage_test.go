@@ -432,7 +432,7 @@ func TestSubcommands_AllKeysPresent(t *testing.T) {
 	expected := []string{
 		"server", "doctor", "keys", "tenant", "eval",
 		"outbox", "secrets", "llm", "embed",
-		"migrations", "restore-drill",
+		"migrations", "restore-drill", "demo",
 	}
 	for _, key := range expected {
 		t.Run(key, func(t *testing.T) {
@@ -447,6 +447,7 @@ func TestSubcommands_NoExtraKeys(t *testing.T) {
 		"server": {}, "doctor": {}, "keys": {}, "tenant": {}, "eval": {},
 		"outbox": {}, "secrets": {}, "llm": {}, "embed": {},
 		"migrations": {}, "restore-drill": {}, "audit": {}, "auth": {},
+		"demo": {},
 	}
 	for key := range subcommands {
 		_, ok := expected[key]

@@ -186,6 +186,37 @@
       "empty_title": "暂无活跃风险",
       "empty_body": "当前窗口内分类、检索和索引指标都在目标范围内。"
     },
+    "actions": {
+      "title": "行动队列",
+      "description": "当前窗口内 {{count}} 个需要推进、验证或关闭的质量动作。",
+      "start": "开始处理",
+      "verify": "标记已验证",
+      "evidence": "证据",
+      "empty_title": "暂无待处理动作",
+      "empty_body": "当前窗口内分类、检索和索引指标都在目标范围内。",
+      "unavailable": "动作状态暂不可用，仍可查看质量证据。",
+      "status": {
+        "open": "待处理",
+        "acknowledged": "处理中",
+        "resolved": "已验证",
+        "dismissed": "已忽略"
+      },
+      "toast": {
+        "open": "动作已重新打开",
+        "acknowledged": "动作已开始处理",
+        "resolved": "动作已标记为已验证",
+        "dismissed": "动作已忽略"
+      }
+    },
+    "action": {
+      "classification_warnings": "打开分类质量页，检查最高严重度告警与样本，确认是否需要调整维度、提示词或模型路由。",
+      "low_confidence": "抽样低置信度反馈，优先修正提示词边界并用人标样本验证新配置。",
+      "off_list": "查看越界值样本，将真实新值加入 taxonomy，或收紧提示词避免同义词漂移。",
+      "zero_result": "复盘最高零结果 query，把缺失语料、同义词或标题证据补进检索路径。",
+      "fallback": "确认 embedding 覆盖、模型配置和向量检索可用性，再回放高频 query。",
+      "index_coverage": "运行 embedding backfill，优先补齐最新和高影响反馈，再检查索引覆盖率。",
+      "search_latency": "检查搜索计划、索引覆盖和 fallback 路径，必要时缩小窗口或调整排序参数。"
+    },
     "error": {
       "title": "质量信号暂不可用",
       "body": "控制塔无法读取当前窗口的分类或搜索质量数据。"
