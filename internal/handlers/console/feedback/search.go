@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
@@ -21,9 +22,16 @@ type searchService interface {
 	Search(ctx context.Context, req *semanticsearch.SearchRequest) (*semanticsearch.SearchResponse, error)
 }
 
+type searchOperations interface {
+	RecordSearchRun(ctx context.Context, row repofeedback.SearchRunInsert) error
+	RecordSearchResultEvent(ctx context.Context, row repofeedback.SearchResultEventInsert) error
+	SearchQualityDashboard(ctx context.Context, opts repofeedback.SearchQualityQueryOpts) (*repofeedback.SearchQualityDashboard, error)
+}
+
 // SearchHandler handles POST /fb/v1/console/feedback/search.
 type SearchHandler struct {
 	service        searchService
+	operations     searchOperations
 	tagAssignments tagAssignmentReader
 	workflowStates workflowStateReader
 }
@@ -38,6 +46,9 @@ func (h *SearchHandler) SetTagAssignments(r tagAssignmentReader) { h.tagAssignme
 
 // SetWorkflowStates wires workflow state hydration for semantic search results.
 func (h *SearchHandler) SetWorkflowStates(r workflowStateReader) { h.workflowStates = r }
+
+// SetSearchOperations wires search quality telemetry and operations endpoints.
+func (h *SearchHandler) SetSearchOperations(r searchOperations) { h.operations = r }
 
 // Search performs semantic search on feedback.
 // Validates input, converts proto to service request, handles errors.
@@ -95,7 +106,10 @@ func (h *SearchHandler) Search(
 	})
 
 	// Call service.
+	runID := newSearchRunID()
+	startedAt := time.Now()
 	resp, err := h.service.Search(ctx, svcReq)
+	latency := time.Since(startedAt)
 	if err != nil {
 		if errors.Is(err, semanticsearch.ErrRateLimited) {
 			logext.Infof(ctx, "[%s] rate limited,tenant_id:%s", where, auth.TenantID)
@@ -138,6 +152,8 @@ func (h *SearchHandler) Search(
 
 	// Convert service response to proto.
 	protoResp := serviceResponseToProto(resp)
+	protoResp.RunId = runID
+	h.recordSearchRun(ctx, auth, req, query, runID, latency, resp)
 	searchRows := searchResponseRows(resp)
 	protoItems := semanticSearchProtoFeedbacks(protoResp)
 	enrichFeedbackItemsWithTags(ctx, where, auth.TenantID, searchRows, protoItems, h.tagAssignments)

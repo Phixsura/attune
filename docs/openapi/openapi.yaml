@@ -1723,6 +1723,70 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/feedback/search/events:
+        post:
+            tags:
+                - SearchService
+            operationId: SearchService_RecordSearchEvent
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RecordSearchEventRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RecordSearchEventResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/feedback/search/quality:
+        get:
+            tags:
+                - SearchService
+            operationId: SearchService_GetSearchQuality
+            parameters:
+                - name: currentFrom
+                  in: query
+                  description: Inclusive window start in RFC3339 format.
+                  schema:
+                    type: string
+                - name: currentTo
+                  in: query
+                  description: Exclusive window end in RFC3339 format.
+                  schema:
+                    type: string
+                - name: bucketWidth
+                  in: query
+                  description: 'Time bucket width: "hour" or "day".'
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  description: Maximum rows for query/fallback lists.
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetSearchQualityResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/feedback/stats:
         get:
             tags:
@@ -8295,6 +8359,42 @@ components:
             properties:
                 schedule:
                     $ref: '#/components/schemas/RotationSchedule'
+        GetSearchQualityResponse:
+            type: object
+            properties:
+                generatedAt:
+                    type: string
+                currentFrom:
+                    type: string
+                currentTo:
+                    type: string
+                bucketWidth:
+                    type: string
+                summary:
+                    $ref: '#/components/schemas/SearchQualitySummary'
+                series:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchQualityTimeBucket'
+                queries:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchQualityQuery'
+                zeroResultQueries:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchQualityQuery'
+                fallbackBreakdown:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchFallbackBreakdown'
+                indexHealth:
+                    $ref: '#/components/schemas/SearchIndexHealth'
+                rankingVersions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchRankingVersion'
+            description: GetSearchQualityResponse summarizes search relevance, reliability, and index health.
         GetTenantAnalyticsResponse:
             type: object
             properties:
@@ -9428,6 +9528,23 @@ components:
                     allOf:
                         - $ref: '#/components/schemas/Dimension'
                     description: The updated dimension with the new taxonomy value.
+        RecordSearchEventRequest:
+            type: object
+            properties:
+                runId:
+                    type: string
+                feedbackId:
+                    type: string
+                action:
+                    type: string
+                rank:
+                    type: integer
+                    format: int32
+                matchType:
+                    type: string
+        RecordSearchEventResponse:
+            type: object
+            properties: {}
         RegenerateReplyDraftRequest:
             type: object
             properties:
@@ -9793,6 +9910,127 @@ components:
                     type: string
                     description: Machine-readable reason, for example "lexical_match" or "vector_similarity".
             description: SearchEvidence is a short, permission-safe explanation for a matched result.
+        SearchFallbackBreakdown:
+            type: object
+            properties:
+                reason:
+                    type: string
+                count:
+                    type: string
+                share:
+                    type: number
+                    format: double
+        SearchIndexHealth:
+            type: object
+            properties:
+                totalLiveFeedback:
+                    type: integer
+                    format: int32
+                totalWithEmbeddings:
+                    type: integer
+                    format: int32
+                coverageRatio:
+                    type: number
+                    format: double
+                embeddingModel:
+                    type: string
+                oldestMissingFeedbackAt:
+                    type: string
+                missingFeedbackCount:
+                    type: string
+        SearchQualityQuery:
+            type: object
+            properties:
+                queryHash:
+                    type: string
+                queryPreview:
+                    type: string
+                queryCount:
+                    type: string
+                zeroResultCount:
+                    type: string
+                zeroResultRate:
+                    type: number
+                    format: double
+                fallbackCount:
+                    type: string
+                clickCount:
+                    type: string
+                clickThroughRate:
+                    type: number
+                    format: double
+                averageResultCount:
+                    type: number
+                    format: double
+                p95LatencyMs:
+                    type: string
+                lastSeenAt:
+                    type: string
+        SearchQualitySummary:
+            type: object
+            properties:
+                queryCount:
+                    type: string
+                zeroResultCount:
+                    type: string
+                zeroResultRate:
+                    type: number
+                    format: double
+                fallbackCount:
+                    type: string
+                fallbackRate:
+                    type: number
+                    format: double
+                clickCount:
+                    type: string
+                clickThroughRate:
+                    type: number
+                    format: double
+                averageResultCount:
+                    type: number
+                    format: double
+                p95LatencyMs:
+                    type: string
+                worstSeverity:
+                    type: string
+        SearchQualityTimeBucket:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                queryCount:
+                    type: string
+                zeroResultCount:
+                    type: string
+                zeroResultRate:
+                    type: number
+                    format: double
+                fallbackCount:
+                    type: string
+                fallbackRate:
+                    type: number
+                    format: double
+                clickCount:
+                    type: string
+                clickThroughRate:
+                    type: number
+                    format: double
+                p95LatencyMs:
+                    type: string
+        SearchRankingVersion:
+            type: object
+            properties:
+                rankingVersion:
+                    type: string
+                status:
+                    type: string
+                trafficPercent:
+                    type: integer
+                    format: int32
+                notes:
+                    type: string
+                updatedAt:
+                    type: string
         SecretManagerConfig:
             type: object
             properties:
@@ -9915,6 +10153,9 @@ components:
                     allOf:
                         - $ref: '#/components/schemas/SearchCoverage'
                     description: Coverage metadata for the searched corpus.
+                runId:
+                    type: string
+                    description: Stable identifier for this search execution, used for result interaction telemetry.
             description: SemanticSearchResponse contains the ranked search results.
         ServiceAccount:
             type: object

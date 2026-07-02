@@ -30,7 +30,8 @@ Before this PR, search behavior was useful but limited:
 This proposal is a platform design spawned by #162's gap analysis. This PR
 implements the quality foundation: relevance metrics primitives, PostgreSQL
 lexical search, reciprocal rank fusion, ranking metadata, evidence snippets,
-coverage metadata, fallback reasons, and Console presentation.
+coverage metadata, fallback reasons, search-run telemetry, result interaction
+events, a search quality operations API, and Console presentation.
 
 This proposal upgrades search from a workflow feature into a measurable
 search-quality and operator-intelligence platform.
@@ -52,6 +53,9 @@ search-quality and operator-intelligence platform.
 - Add customer and account context to ranking, filtering, and triage views.
 - Expose search health: embedding coverage, index freshness, cache hit rate,
   fallback reasons, latency, and cost signals.
+- Expose an operator-facing search quality dashboard with top queries,
+  zero-result queries, fallback distribution, click-through telemetry, p95
+  latency, index health, and ranking-version state.
 - Preserve tenant isolation, existing filters, existing Console workflow, and
   the current `/fb/v1/console/feedback/search` route shape where possible.
 
@@ -81,7 +85,7 @@ This proposal intentionally fixes several risks in the first draft:
 | The design was too large for one PR. | Define quality-foundation scope separately from saved views, customer context, health APIs, and distributed rate limiting. |
 | It reused #162 as though all work belonged in the same issue. | Treat this as the implemented search-quality extension to #162 while keeping broader platform surfaces explicit. |
 | The proto sketch referenced `SearchCoverage` without defining it. | Define `SearchCoverage` and ranking signal fields in the contract sketch. |
-| Saved run storage used a single `BIGINT[]`, which is awkward for TTL, auditing, and large result sets. | Replace it with `semantic_search_run_results` rows capped per run. |
+| Saved run storage used a single `BIGINT[]`, which is awkward for TTL, auditing, and large result sets. | Replace it with `feedback_search_run_results` rows capped per run. |
 | Evidence snippets and evaluation fixtures had weak privacy boundaries. | Add snippet length/redaction rules and fixture anonymization requirements. |
 | PostgreSQL full-text search was described as if it solved all language cases. | Add language constraints, CJK fallback behavior, and scorer replacement criteria. |
 
@@ -96,11 +100,12 @@ This proposal intentionally fixes several risks in the first draft:
 | Evidence and metadata contract | Implemented | Proto, Go handlers, OpenAPI, Console TS types, and Node SDK types now expose fallback reason, ranking version, coverage, per-channel ranks, fused score, evidence, and ranking signals. |
 | Console evidence display | Implemented | The feedback workbench shows coverage, fallback reason, ranking version, match rank tooltips, and compact evidence snippets. |
 | Search health metrics | Implemented | Prometheus now exposes fallback reason counts and embedding coverage ratio alongside existing query count, latency, result count, and cache metrics. |
+| Search operations telemetry and dashboard | Implemented | `feedback_search_runs`, `feedback_search_result_events`, and `feedback_search_ranking_versions` store bounded tenant-scoped query previews, query hashes, run IDs, result counts, fallback reasons, latency, coverage, interaction events, and ranker status. `GetSearchQuality` serves summary/trend/top-query/zero-result/fallback/index-health data; `RecordSearchEvent` records result opens; Console adds `/analytics/search-quality`. |
 | Input hardening and browser workflow gates | Implemented | Search query validation now rejects empty, overlong, and unsupported-control-character input before FTS or embedding work. Playwright covers the terminal semantic-search workflow, fallback state, result evidence, detail opening, document overflow, and axe checks. |
 | Performance harness | Implemented | `scripts/perf-test-search.sh` provides HTTP load timing and optional PostgreSQL `EXPLAIN (ANALYZE, BUFFERS)` for the lexical search plan on real tenant data. |
 | Saved semantic views | Designed | Schema and selector semantics are specified for a dedicated implementation issue. |
 | Customer/account context boosts | Designed | Data model and transparent boost semantics are specified for a dedicated implementation issue. |
-| Search health admin API and distributed limiter | Designed | Metrics, admin API shape, and limiter behavior are specified for dedicated implementation issues. |
+| Distributed limiter and saved-view governance | Designed | Limiter behavior, saved-view permissions, retention controls, and customer/account impact boosts remain dedicated implementation issues. |
 
 ## Industry Baseline
 
@@ -121,12 +126,12 @@ This proposal intentionally fixes several risks in the first draft:
 
 | Layer | Current behavior | Gap |
 |---|---|---|
-| Console | Operators can switch keyword/semantic mode, act on semantic results, and inspect coverage, fallback, ranking version, rank tooltip, and compact evidence context. | No saved semantic views, query history, durable selectors, or account-impact ranking controls. |
-| Handler | Validates trimmed query and limit, maps filters, hydrates tags/workflow, and returns fallback reason, coverage, ranking metadata, and evidence. | No run ID or saved-search selector contract. |
-| Service | Checks embedding availability, caches query embeddings, runs semantic and lexical search, fuses candidates with RRF, and records fallback/coverage metrics. | No distributed limiter or durable search-run persistence. |
-| Repository | pgvector HNSW for semantic search; PostgreSQL full-text lexical search with field-aware literal partial fallback. | Lexical relevance still lacks BM25-grade tuning, typo tolerance, and language-specific tokenization beyond the simple configuration. |
+| Console | Operators can switch keyword/semantic mode, act on semantic results, inspect coverage, fallback, ranking version, rank tooltip, compact evidence context, and review search quality under Analytics. | No saved semantic views, durable selectors, or account-impact ranking controls. |
+| Handler | Validates trimmed query and limit, maps filters, hydrates tags/workflow, returns fallback reason, coverage, ranking metadata, evidence, and a run ID, and serves search-quality operations endpoints. | No saved-search selector contract. |
+| Service | Checks embedding availability, caches query embeddings, runs semantic and lexical search, fuses candidates with RRF, and records fallback/coverage metrics. | No distributed limiter; durable run persistence stays at the Console handler/repository boundary. |
+| Repository | pgvector HNSW for semantic search; PostgreSQL full-text lexical search with field-aware literal partial fallback; search run telemetry and result interaction storage. | Lexical relevance still lacks BM25-grade tuning, typo tolerance, and language-specific tokenization beyond the simple configuration. |
 | Data | Feedback has embeddings, enriched attributes, cluster fields, workflow state, tags. | Customer/account facts and durable search selector state are missing. |
-| Observability | Query count, duration, result count, cache hit/miss. | Missing fallback reason, coverage SLO, index freshness, per-channel rank, quality metrics, and tenant budget. |
+| Observability | Query count, duration, result count, cache hit/miss, fallback reason metrics, coverage metrics, quality dashboard, p95 latency, zero-result rate, click-through telemetry, and ranker version registry. | Missing saved-view governance, tenant search budgets, and account-impact quality slices. |
 
 ## Proposal
 
@@ -381,36 +386,24 @@ CREATE UNIQUE INDEX idx_feedback_search_views_name
     WHERE archived_at IS NULL;
 ```
 
-Add `semantic_search_runs` for audit and batch safety:
+The implemented telemetry layer starts with `feedback_search_runs` and
+`feedback_search_result_events`. A future saved-selector implementation should
+add retained result rows instead of overloading the telemetry events table:
 
 ```sql
-CREATE TABLE semantic_search_runs (
-    id UUID PRIMARY KEY,
-    tenant_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    query TEXT NOT NULL,
-    filter JSONB NOT NULL DEFAULT '{}'::jsonb,
-    ranking_version TEXT NOT NULL,
-    result_count INT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at TIMESTAMPTZ NOT NULL
-);
-
-CREATE TABLE semantic_search_run_results (
-    run_id UUID NOT NULL REFERENCES semantic_search_runs(id) ON DELETE CASCADE,
+CREATE TABLE feedback_search_run_results (
+    run_id UUID NOT NULL,
     tenant_id TEXT NOT NULL,
     feedback_id BIGINT NOT NULL,
     rank INT NOT NULL,
     match_type TEXT NOT NULL,
     fused_score DOUBLE PRECISION NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (run_id, feedback_id)
 );
 
-CREATE INDEX idx_semantic_search_run_results_run_rank
-    ON semantic_search_run_results (run_id, rank);
-
-CREATE INDEX idx_semantic_search_runs_expiry
-    ON semantic_search_runs (expires_at);
+CREATE INDEX idx_feedback_search_run_results_run_rank
+    ON feedback_search_run_results (tenant_id, run_id, rank);
 ```
 
 Batch behavior:
@@ -471,7 +464,34 @@ Contract:
 
 ### 7. Search operations and governance
 
-Expose a search health surface for admins.
+Expose a search health surface for admins and operators.
+
+Implemented storage:
+
+- `feedback_search_runs` stores one row per successful Console search with a
+  UUID run ID, query hash, bounded query preview, filter hash, ranking version,
+  result count, fallback reason, latency, embedding coverage, and actor ID.
+- `feedback_search_result_events` stores bounded result interaction events such
+  as result opens, keyed by tenant and run ID.
+- `feedback_search_ranking_versions` records the tenant-visible ranking version
+  status used by the dashboard and future canary/shadow workflows.
+
+Implemented APIs:
+
+- `SemanticSearch` returns `run_id` so the Console can attribute subsequent
+  result interactions to a specific result set.
+- `GetSearchQuality` returns summary, trend buckets, top queries,
+  zero-result queries, fallback breakdown, index health, and ranking versions.
+- `RecordSearchEvent` records result opens without treating telemetry as a
+  control-plane audit event.
+
+Implemented Console surface:
+
+- `/analytics/search-quality` shows search volume, zero-result rate, fallback
+  rate, p95 latency, click-through rate, average result count, index coverage,
+  fallback reasons, top queries, zero-result queries, and ranker status.
+- The feedback workbench records `open` events when an operator opens a semantic
+  result that has a `run_id`.
 
 Metrics:
 
@@ -492,12 +512,11 @@ Metric constraints:
 
 Admin API:
 
-- embedding coverage by tenant and model;
-- lexical index freshness;
-- query cache hit/miss;
-- fallback reason distribution;
-- saved view count and run count;
-- rate-limit and budget usage.
+- Implemented: embedding coverage, fallback reason distribution, p95 latency,
+  query volume, zero-result rate, click-through rate, top query hashes/previews,
+  and ranking version status.
+- Designed: lexical index freshness, query cache hit/miss by tenant, saved view
+  count, rate-limit state, and search budget usage.
 
 Rate limiting:
 
@@ -514,9 +533,10 @@ Every search response carries a `ranking_version`, for example:
 rrf.pgfts.v1.k60
 ```
 
-The version is stored in `semantic_search_runs` and in quality baselines. This
-lets us compare relevance metrics across ranking changes and explain why a saved
-run produced a specific ordering.
+The version is stored in `feedback_search_runs`, mirrored in
+`feedback_search_ranking_versions`, and checked in quality baselines. This lets
+us compare relevance metrics across ranking changes and explain why a run
+produced a specific ordering.
 
 ## Implementation Plan
 
@@ -527,10 +547,11 @@ run produced a specific ordering.
 | 3 | Replace weighted blending with RRF while preserving the existing request contract. | Implemented |
 | 4 | Add rank, evidence, fallback, coverage, and ranking-version metadata to proto, Go handlers, TS clients, OpenAPI, and Console result rows. | Implemented |
 | 5 | Add golden relevance fixtures and a machine-readable baseline report. | Implemented |
-| 6 | Add `feedback_search_views` and `semantic_search_runs`. | Designed |
-| 7 | Wire saved semantic views into the Console queue deck and batch selector. | Designed |
-| 8 | Add context facts and transparent impact boosts. | Designed |
-| 9 | Add search admin health metrics and PostgreSQL-backed distributed rate limiting. | Designed |
+| 6 | Add search run telemetry, result interaction storage, ranker registry, quality API, and Console search quality page. | Implemented |
+| 7 | Add `feedback_search_views` and durable saved semantic selectors. | Designed |
+| 8 | Wire saved semantic views into the Console queue deck and batch selector. | Designed |
+| 9 | Add context facts and transparent impact boosts. | Designed |
+| 10 | Add PostgreSQL-backed distributed rate limiting, search budgets, and saved-view governance controls. | Designed |
 
 ## Scope Slices
 
@@ -580,7 +601,7 @@ verified independently.
 - `go test -tags=integration ./test/integration/postgres/feedbacksearch`
 - `cd console && pnpm tsc -b --noEmit`
 - `cd console && pnpm biome check`
-- `cd console && pnpm vitest run src/routes/_authed.feedback.test.tsx src/features/feedback/components/semantic-search.test.tsx src/features/feedback/hooks/use-semantic-search.test.tsx`
+- `cd console && pnpm vitest run src/routes/_authed.feedback.test.tsx src/routes/_authed.search-quality.test.tsx src/features/feedback/components/semantic-search.test.tsx src/features/feedback/hooks/use-semantic-search.test.tsx`
 - `cd console && pnpm exec vite build`
 - `buf lint`
 - `make proto` when the remote Buf generator host is available
@@ -594,7 +615,7 @@ verified independently.
 ## Open Questions
 
 - Should saved semantic views be personal first, tenant-shared first, or both?
-- What is the initial retention policy for `semantic_search_runs` in private
+- What is the initial retention policy for `feedback_search_runs` in private
   deployments with stricter audit requirements?
 - Which customer/account context source should become the first supported
   importer?

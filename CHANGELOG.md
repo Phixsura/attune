@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Prometheus search health metrics for fallback reasons and embedding coverage.
   The Console now surfaces the active ranking version in semantic result status
   so operators can match screenshots and support reports to the ranking contract.
+  Search responses now include a run ID, and the Console records semantic result
+  open events against that run for bounded relevance telemetry.
+  Added search operations storage, quality APIs, and an Analytics search-quality
+  dashboard covering search volume, zero-result rate, fallback rate, click-through
+  rate, p95 latency, top queries, zero-result queries, fallback reasons, index
+  coverage, and ranking-version status.
   Search requests now trim surrounding
   whitespace before execution, reject whitespace-only queries consistently, and
   treat `%` / `_` as literal characters in lexical partial-match fallback.

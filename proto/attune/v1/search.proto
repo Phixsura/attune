@@ -16,6 +16,17 @@ service SearchService {
       body: "*"
     };
   }
+
+  rpc GetSearchQuality(GetSearchQualityRequest) returns (GetSearchQualityResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/search/quality"};
+  }
+
+  rpc RecordSearchEvent(RecordSearchEventRequest) returns (RecordSearchEventResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/search/events"
+      body: "*"
+    };
+  }
 }
 
 // SemanticSearchRequest is the query envelope for semantic search.
@@ -61,6 +72,9 @@ message SemanticSearchResponse {
 
   // Coverage metadata for the searched corpus.
   optional SearchCoverage coverage = 7;
+
+  // Stable identifier for this search execution, used for result interaction telemetry.
+  string run_id = 8;
 }
 
 // SemanticSearchHit is a single search result with ranking metadata.
@@ -116,3 +130,105 @@ message SearchCoverage {
   // Embedding model shared by the searchable corpus, when available.
   string embedding_model = 3;
 }
+
+// GetSearchQualityRequest selects the search relevance operations window.
+message GetSearchQualityRequest {
+  // Inclusive window start in RFC3339 format.
+  string current_from = 1;
+
+  // Exclusive window end in RFC3339 format.
+  string current_to = 2;
+
+  // Time bucket width: "hour" or "day".
+  string bucket_width = 3;
+
+  // Maximum rows for query/fallback lists.
+  optional int32 limit = 4;
+}
+
+// GetSearchQualityResponse summarizes search relevance, reliability, and index health.
+message GetSearchQualityResponse {
+  string generated_at = 1;
+  string current_from = 2;
+  string current_to = 3;
+  string bucket_width = 4;
+  SearchQualitySummary summary = 5;
+  repeated SearchQualityTimeBucket series = 6;
+  repeated SearchQualityQuery queries = 7;
+  repeated SearchQualityQuery zero_result_queries = 8;
+  repeated SearchFallbackBreakdown fallback_breakdown = 9;
+  SearchIndexHealth index_health = 10;
+  repeated SearchRankingVersion ranking_versions = 11;
+}
+
+message SearchQualitySummary {
+  int64 query_count = 1;
+  int64 zero_result_count = 2;
+  double zero_result_rate = 3;
+  int64 fallback_count = 4;
+  double fallback_rate = 5;
+  int64 click_count = 6;
+  double click_through_rate = 7;
+  double average_result_count = 8;
+  int64 p95_latency_ms = 9;
+  string worst_severity = 10;
+}
+
+message SearchQualityTimeBucket {
+  string bucket = 1;
+  int64 query_count = 2;
+  int64 zero_result_count = 3;
+  double zero_result_rate = 4;
+  int64 fallback_count = 5;
+  double fallback_rate = 6;
+  int64 click_count = 7;
+  double click_through_rate = 8;
+  int64 p95_latency_ms = 9;
+}
+
+message SearchQualityQuery {
+  string query_hash = 1;
+  string query_preview = 2;
+  int64 query_count = 3;
+  int64 zero_result_count = 4;
+  double zero_result_rate = 5;
+  int64 fallback_count = 6;
+  int64 click_count = 7;
+  double click_through_rate = 8;
+  double average_result_count = 9;
+  int64 p95_latency_ms = 10;
+  string last_seen_at = 11;
+}
+
+message SearchFallbackBreakdown {
+  string reason = 1;
+  int64 count = 2;
+  double share = 3;
+}
+
+message SearchIndexHealth {
+  int32 total_live_feedback = 1;
+  int32 total_with_embeddings = 2;
+  double coverage_ratio = 3;
+  string embedding_model = 4;
+  optional string oldest_missing_feedback_at = 5;
+  int64 missing_feedback_count = 6;
+}
+
+message SearchRankingVersion {
+  string ranking_version = 1;
+  string status = 2;
+  int32 traffic_percent = 3;
+  string notes = 4;
+  string updated_at = 5;
+}
+
+message RecordSearchEventRequest {
+  string run_id = 1;
+  int64 feedback_id = 2;
+  string action = 3;
+  int32 rank = 4;
+  string match_type = 5;
+}
+
+message RecordSearchEventResponse {}

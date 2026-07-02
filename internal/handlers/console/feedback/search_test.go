@@ -346,6 +346,34 @@ func (r *testSearchTagReader) ListByFeedbackBatch(_ context.Context, _ string, _
 	return r.byFeedback, nil
 }
 
+type fakeSearchOperations struct {
+	run           *repofeedback.SearchRunInsert
+	event         *repofeedback.SearchResultEventInsert
+	dashboard     *repofeedback.SearchQualityDashboard
+	dashboardOpts *repofeedback.SearchQualityQueryOpts
+	runErr        error
+	eventErr      error
+	dashboardErr  error
+}
+
+func (f *fakeSearchOperations) RecordSearchRun(_ context.Context, row repofeedback.SearchRunInsert) error {
+	f.run = ptrext.Of(row)
+	return f.runErr
+}
+
+func (f *fakeSearchOperations) RecordSearchResultEvent(_ context.Context, row repofeedback.SearchResultEventInsert) error {
+	f.event = ptrext.Of(row)
+	return f.eventErr
+}
+
+func (f *fakeSearchOperations) SearchQualityDashboard(
+	_ context.Context,
+	opts repofeedback.SearchQualityQueryOpts,
+) (*repofeedback.SearchQualityDashboard, error) {
+	f.dashboardOpts = ptrext.Of(opts)
+	return f.dashboard, f.dashboardErr
+}
+
 func bindSearchHandler(h *SearchHandler) http.HandlerFunc {
 	return dispatcher.Bind(
 		"console.SearchHandler.Search",
@@ -361,6 +389,35 @@ func bindSearchHandler(h *SearchHandler) http.HandlerFunc {
 
 func newSearchHandler(svc searchService) http.HandlerFunc {
 	return bindSearchHandler(&SearchHandler{service: svc})
+}
+
+func bindSearchQualityHandler(h *SearchHandler) http.HandlerFunc {
+	return dispatcher.Bind(
+		"console.SearchHandler.GetSearchQuality",
+		dispatcher.Query(
+			func() *attunev1.GetSearchQualityRequest {
+				return ptrext.Of(attunev1.GetSearchQualityRequest{})
+			},
+			BindSearchQualityRequest,
+		),
+		h.GetSearchQuality,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetSearchQualityRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+}
+
+func bindSearchEventHandler(h *SearchHandler) http.HandlerFunc {
+	return dispatcher.Bind(
+		"console.SearchHandler.RecordSearchEvent",
+		dispatcher.JSON(func() *attunev1.RecordSearchEventRequest {
+			return ptrext.Of(attunev1.RecordSearchEventRequest{})
+		}),
+		h.RecordSearchEvent,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RecordSearchEventRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
 }
 
 func TestSearchHandler_Search(t *testing.T) {
@@ -721,4 +778,155 @@ func TestSearchHandler_Search(t *testing.T) {
 		require.True(t, ok)
 		assert.Empty(t, hits)
 	})
+}
+
+func TestSearchHandler_SearchRecordsRunTelemetry(t *testing.T) {
+	t.Parallel()
+	ops := &fakeSearchOperations{}
+	handler := &SearchHandler{
+		service: &fakeSearchService{
+			resp: &semanticsearch.SearchResponse{
+				Hits: []*semanticsearch.SearchHit{
+					{
+						Feedback: ptrext.Of(repofeedback.SearchFeedback{
+							ID:               10,
+							Content:          "login fails",
+							Source:           "api",
+							EnrichmentStatus: "done",
+							CreatedAt:        time.Now(),
+						}),
+						MatchType: "hybrid",
+					},
+				},
+				EmbeddingModel:      "text-embedding-3-small",
+				TotalWithEmbeddings: 8,
+				RankingVersion:      semanticsearch.RankingVersion,
+				Coverage: &semanticsearch.SearchCoverage{
+					TotalLiveFeedback:   10,
+					TotalWithEmbeddings: 8,
+					EmbeddingModel:      "text-embedding-3-small",
+				},
+			},
+		},
+	}
+	handler.SetSearchOperations(ops)
+
+	w := httptest.NewRecorder()
+	bindSearchHandler(handler)(w, dispatchtest.Request(
+		http.MethodPost,
+		"/feedback/search",
+		`{"q":"  Login fails  ","filter":{"urgent":true}}`,
+	))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body, err := dispatchtest.DecodeJSON(w.Body)
+	require.NoError(t, err)
+	runID, ok := body["runId"].(string)
+	require.True(t, ok)
+	_, err = uuid.Parse(runID)
+	require.NoError(t, err)
+
+	require.NotNil(t, ops.run)
+	assert.Equal(t, runID, ops.run.RunID)
+	assert.Equal(t, "tenant-1", ops.run.TenantID)
+	assert.Equal(t, "Login fails", ops.run.QueryPreview)
+	assert.Len(t, ops.run.QueryHash, 64)
+	assert.Len(t, ops.run.FilterHash, 64)
+	assert.Equal(t, 1, ops.run.ResultCount)
+	assert.Equal(t, 10, ops.run.TotalLiveFeedback)
+	assert.Equal(t, 8, ops.run.TotalWithEmbeddings)
+	assert.InDelta(t, 0.8, ops.run.CoverageRatio, 0.001)
+	assert.Equal(t, semanticsearch.RankingVersion, ops.run.RankingVersion)
+}
+
+func TestSearchHandler_GetSearchQuality(t *testing.T) {
+	t.Parallel()
+	ops := &fakeSearchOperations{
+		dashboard: &repofeedback.SearchQualityDashboard{
+			Summary: repofeedback.SearchQualitySummary{
+				QueryCount:         10,
+				ZeroResultCount:    2,
+				FallbackCount:      1,
+				ClickCount:         6,
+				ClickedRunCount:    4,
+				AverageResultCount: 7.5,
+				P95LatencyMS:       500,
+			},
+			Queries: []repofeedback.SearchQualityQueryAggregate{
+				{
+					QueryHash:          strings.Repeat("a", 64),
+					QueryPreview:       "login failure",
+					QueryCount:         4,
+					ClickedRunCount:    2,
+					AverageResultCount: 8,
+					P95LatencyMS:       300,
+					LastSeenAt:         time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC),
+				},
+			},
+			FallbackBreakdown: []repofeedback.SearchFallbackAggregate{
+				{Reason: "no_embeddings", Count: 1, Share: 1},
+			},
+			IndexHealth: repofeedback.SearchIndexHealth{
+				TotalLiveFeedback:   100,
+				TotalWithEmbeddings: 90,
+				EmbeddingModel:      "text-embedding-3-small",
+			},
+		},
+	}
+	handler := &SearchHandler{}
+	handler.SetSearchOperations(ops)
+
+	w := httptest.NewRecorder()
+	bindSearchQualityHandler(handler)(w, dispatchtest.Request(
+		http.MethodGet,
+		"/feedback/search/quality?current_from=2026-06-25T00:00:00Z&current_to=2026-07-02T00:00:00Z&bucket_width=day&limit=5",
+		"",
+	))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body, err := dispatchtest.DecodeJSON(w.Body)
+	require.NoError(t, err)
+	summary := body["summary"].(map[string]any)
+	assert.Equal(t, "10", summary["queryCount"])
+	assert.InDelta(t, 0.2, summary["zeroResultRate"], 0.001)
+	assert.Equal(t, "alert", summary["worstSeverity"])
+	queries := body["queries"].([]any)
+	require.Len(t, queries, 1)
+	assert.Equal(t, "login failure", queries[0].(map[string]any)["queryPreview"])
+	require.NotNil(t, ops.dashboardOpts)
+	assert.Equal(t, 5, ops.dashboardOpts.Limit)
+	assert.Equal(t, "tenant-1", ops.dashboardOpts.TenantID)
+}
+
+func TestSearchHandler_RecordSearchEvent(t *testing.T) {
+	t.Parallel()
+	runID := uuid.NewString()
+	ops := &fakeSearchOperations{}
+	handler := &SearchHandler{}
+	handler.SetSearchOperations(ops)
+	httpHandler := bindSearchEventHandler(handler)
+
+	w := httptest.NewRecorder()
+	httpHandler(w, dispatchtest.Request(
+		http.MethodPost,
+		"/feedback/search/events",
+		`{"run_id":"`+runID+`","feedback_id":77,"action":"open","rank":2,"match_type":"hybrid"}`,
+	))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotNil(t, ops.event)
+	assert.Equal(t, runID, ops.event.RunID)
+	assert.Equal(t, int64(77), ops.event.FeedbackID)
+	assert.Equal(t, "open", ops.event.Action)
+	assert.Equal(t, 2, ops.event.Rank)
+	assert.Equal(t, "hybrid", ops.event.MatchType)
+	assert.Equal(t, "tenant-1", ops.event.TenantID)
+
+	w = httptest.NewRecorder()
+	httpHandler(w, dispatchtest.Request(
+		http.MethodPost,
+		"/feedback/search/events",
+		`{"run_id":"`+runID+`","feedback_id":77,"action":"delete","rank":2}`,
+	))
+	require.Equal(t, http.StatusBadRequest, w.Code)
 }

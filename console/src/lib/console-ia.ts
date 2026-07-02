@@ -13,6 +13,7 @@ import {
   Lock,
   Radio,
   Scale,
+  Search,
   Settings2,
   ShieldCheck,
   ShieldEllipsis,
@@ -99,6 +100,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     icon: Activity,
     labelKey: 'nav.classification_quality',
     path: '/analytics/classification-quality',
+    permission: 'usage:view',
+  },
+  {
+    group: 'analytics',
+    icon: Search,
+    labelKey: 'nav.search_quality',
+    path: '/analytics/search-quality',
     permission: 'usage:view',
   },
   {

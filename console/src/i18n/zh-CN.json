@@ -125,6 +125,7 @@
     "usage": "用量",
     "llm_usage": "LLM 成本",
     "classification_quality": "分类质量",
+    "search_quality": "搜索质量",
     "llm_config": "LLM 配置",
     "members": "成员",
     "outbox_dead": "死信投递",
@@ -2536,6 +2537,108 @@
     "empty": {
       "title": "暂无趋势数据",
       "body": "当前时间窗口没有可绘制的分类质量时间桶。"
+    }
+  },
+  "search_quality": {
+    "subtitle": "追踪语义搜索的零结果、fallback、点击、延迟和索引覆盖率。",
+    "period": "{{start}} — {{end}}",
+    "range": {
+      "7d": "7 天",
+      "30d": "30 天",
+      "90d": "90 天"
+    },
+    "bucket": {
+      "day": "按天",
+      "hour": "按小时"
+    },
+    "limit": {
+      "10": "Top 10",
+      "25": "Top 25",
+      "50": "Top 50"
+    },
+    "severity": {
+      "alert": "告警",
+      "watch": "关注",
+      "normal": "正常",
+      "insufficient_data": "数据不足"
+    },
+    "summary": {
+      "queries": "搜索次数",
+      "queries_hint": "当前窗口内成功返回的搜索请求。",
+      "zero_result": "零结果率",
+      "fallback": "Fallback 率",
+      "p95": "P95 延迟"
+    },
+    "trend": {
+      "title": "搜索质量趋势",
+      "legend": "搜索量 / 零结果 / fallback"
+    },
+    "signals": {
+      "ctr": "结果打开率",
+      "ctr_body": "{{count}} 次结果打开事件",
+      "avg_results": "平均结果数",
+      "avg_results_body": "每次搜索返回的平均反馈数。",
+      "severity": "当前等级",
+      "severity_body": "由零结果、fallback、延迟和索引覆盖率共同判断。"
+    },
+    "index": {
+      "title": "索引健康",
+      "description": "反馈语料的 embedding 覆盖和缺口。",
+      "coverage": "覆盖率",
+      "searchable": "可语义搜索",
+      "total": "有效反馈",
+      "missing": "缺失 embedding",
+      "model": "主模型",
+      "no_model": "暂无模型",
+      "oldest_missing": "最早缺失 embedding 的反馈创建于 {{date}}"
+    },
+    "queries": {
+      "title": "高频搜索",
+      "description": "按搜索次数排序的 query 聚合。",
+      "empty_title": "暂无搜索数据",
+      "empty_body": "当前窗口还没有可聚合的搜索请求。",
+      "hash": "hash {{hash}}",
+      "count": "次数",
+      "zero": "零结果",
+      "ctr": "打开率",
+      "p95": "P95"
+    },
+    "zero_queries": {
+      "title": "零结果搜索",
+      "description": "优先补充语料、同义词或分类覆盖的候选 query。"
+    },
+    "fallback": {
+      "title": "Fallback 原因",
+      "description": "语义不可用时退回关键词搜索的原因分布。",
+      "empty_title": "暂无 fallback",
+      "empty_body": "当前窗口内没有语义搜索 fallback。",
+      "reason": {
+        "semantic_unavailable": "语义搜索不可用",
+        "embedding_check_failed": "Embedding 检查失败",
+        "embedding_stats_failed": "Embedding 统计失败",
+        "no_embeddings": "暂无 embedding",
+        "embedding_generation_failed": "查询 embedding 生成失败",
+        "embedding_model_mismatch": "Embedding 模型不匹配",
+        "semantic_search_failed": "向量检索失败",
+        "no_semantic_matches": "无语义候选",
+        "unknown": "未知原因"
+      }
+    },
+    "ranking": {
+      "title": "Ranker 版本",
+      "description": "当前租户可见的搜索排序版本状态。",
+      "traffic": "{{value}}% 流量",
+      "status": {
+        "active": "Active",
+        "canary": "Canary",
+        "shadow": "Shadow",
+        "draft": "Draft",
+        "disabled": "Disabled"
+      }
+    },
+    "empty": {
+      "title": "暂无趋势数据",
+      "body": "当前时间窗口没有可绘制的搜索质量时间桶。"
     }
   },
   "tags": {

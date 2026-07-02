@@ -123,6 +123,8 @@ var (
 //	 GET /feedback/terminal-failures -> dispatcher.Bind(feedback.Handler.GetTerminalFailureWorkbench)
 //	 GET /feedback/stats -> dispatcher.Bind(feedback.Handler.Stats)
 //	 POST /feedback/search -> dispatcher.Bind(feedback.SearchHandler.Search)
+//	 GET /feedback/search/quality -> dispatcher.Bind(feedback.SearchHandler.GetSearchQuality)
+//	 POST /feedback/search/events -> dispatcher.Bind(feedback.SearchHandler.RecordSearchEvent)
 //	 GET /feedback/{id} -> dispatcher.Bind(feedback.Handler.Get)
 //	 GET /usage -> dispatcher.Bind(usage.Handler.Get)
 //	 GET /llm-usage -> dispatcher.Bind(usage.Handler.GetLLMUsage)
@@ -1630,6 +1632,19 @@ func (r *Router) mountFeedbackBatchRoutes(f chi.Router) {
 		))
 	}
 	if r.feedbackSearch != nil {
+		f.Get("/search/quality", dispatcher.Bind(
+			"console.SearchHandler.GetSearchQuality",
+			dispatcher.Query(
+				func() *attunev1.GetSearchQualityRequest {
+					return ptrext.Of(attunev1.GetSearchQualityRequest{})
+				},
+				feedback.BindSearchQualityRequest,
+			),
+			r.feedbackSearch.GetSearchQuality,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetSearchQualityRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 		f.Post("/search", dispatcher.Bind(
 			"console.SearchHandler.Search",
 			dispatcher.JSON(func() *attunev1.SemanticSearchRequest {
@@ -1637,6 +1652,16 @@ func (r *Router) mountFeedbackBatchRoutes(f chi.Router) {
 			}),
 			r.feedbackSearch.Search,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SemanticSearchRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		f.Post("/search/events", dispatcher.Bind(
+			"console.SearchHandler.RecordSearchEvent",
+			dispatcher.JSON(func() *attunev1.RecordSearchEventRequest {
+				return ptrext.Of(attunev1.RecordSearchEventRequest{})
+			}),
+			r.feedbackSearch.RecordSearchEvent,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RecordSearchEventRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))

@@ -51,7 +51,11 @@ export interface SemanticSearchResponse {
   /** Version of the ranking algorithm and default parameters used. */
   rankingVersion: string;
   /** Coverage metadata for the searched corpus. */
-  coverage?: SearchCoverage | undefined;
+  coverage?:
+    | SearchCoverage
+    | undefined;
+  /** Stable identifier for this search execution, used for result interaction telemetry. */
+  runId: string;
 }
 
 /** SemanticSearchHit is a single search result with ranking metadata. */
@@ -98,10 +102,112 @@ export interface SearchCoverage {
   embeddingModel: string;
 }
 
+/** GetSearchQualityRequest selects the search relevance operations window. */
+export interface GetSearchQualityRequest {
+  /** Inclusive window start in RFC3339 format. */
+  currentFrom: string;
+  /** Exclusive window end in RFC3339 format. */
+  currentTo: string;
+  /** Time bucket width: "hour" or "day". */
+  bucketWidth: string;
+  /** Maximum rows for query/fallback lists. */
+  limit?: number | undefined;
+}
+
+/** GetSearchQualityResponse summarizes search relevance, reliability, and index health. */
+export interface GetSearchQualityResponse {
+  generatedAt: string;
+  currentFrom: string;
+  currentTo: string;
+  bucketWidth: string;
+  summary?: SearchQualitySummary | undefined;
+  series: SearchQualityTimeBucket[];
+  queries: SearchQualityQuery[];
+  zeroResultQueries: SearchQualityQuery[];
+  fallbackBreakdown: SearchFallbackBreakdown[];
+  indexHealth?: SearchIndexHealth | undefined;
+  rankingVersions: SearchRankingVersion[];
+}
+
+export interface SearchQualitySummary {
+  queryCount: string;
+  zeroResultCount: string;
+  zeroResultRate: number;
+  fallbackCount: string;
+  fallbackRate: number;
+  clickCount: string;
+  clickThroughRate: number;
+  averageResultCount: number;
+  p95LatencyMs: string;
+  worstSeverity: string;
+}
+
+export interface SearchQualityTimeBucket {
+  bucket: string;
+  queryCount: string;
+  zeroResultCount: string;
+  zeroResultRate: number;
+  fallbackCount: string;
+  fallbackRate: number;
+  clickCount: string;
+  clickThroughRate: number;
+  p95LatencyMs: string;
+}
+
+export interface SearchQualityQuery {
+  queryHash: string;
+  queryPreview: string;
+  queryCount: string;
+  zeroResultCount: string;
+  zeroResultRate: number;
+  fallbackCount: string;
+  clickCount: string;
+  clickThroughRate: number;
+  averageResultCount: number;
+  p95LatencyMs: string;
+  lastSeenAt: string;
+}
+
+export interface SearchFallbackBreakdown {
+  reason: string;
+  count: string;
+  share: number;
+}
+
+export interface SearchIndexHealth {
+  totalLiveFeedback: number;
+  totalWithEmbeddings: number;
+  coverageRatio: number;
+  embeddingModel: string;
+  oldestMissingFeedbackAt?: string | undefined;
+  missingFeedbackCount: string;
+}
+
+export interface SearchRankingVersion {
+  rankingVersion: string;
+  status: string;
+  trafficPercent: number;
+  notes: string;
+  updatedAt: string;
+}
+
+export interface RecordSearchEventRequest {
+  runId: string;
+  feedbackId: string;
+  action: string;
+  rank: number;
+  matchType: string;
+}
+
+export interface RecordSearchEventResponse {
+}
+
 /**
  * SearchService provides semantic search over feedback (#30).
  * Uses pgvector embeddings when available, falls back to keyword search.
  */
 export interface SearchService {
   SemanticSearch(request: SemanticSearchRequest): Promise<SemanticSearchResponse>;
+  GetSearchQuality(request: GetSearchQualityRequest): Promise<GetSearchQualityResponse>;
+  RecordSearchEvent(request: RecordSearchEventRequest): Promise<RecordSearchEventResponse>;
 }

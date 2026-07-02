@@ -63,7 +63,10 @@ import { RetryEnrichmentDialog } from '@/features/feedback/components/retry-enri
 import { SelectionActionBar } from '@/features/feedback/components/selection-action-bar'
 import { TerminalFailureWorkbenchPanel } from '@/features/feedback/components/terminal-failure-workbench'
 import { useRowSelection } from '@/features/feedback/hooks/use-row-selection'
-import { useSemanticSearch } from '@/features/feedback/hooks/use-semantic-search'
+import {
+  useRecordSearchEvent,
+  useSemanticSearch,
+} from '@/features/feedback/hooks/use-semantic-search'
 import {
   isTerminalFailure,
   MAX_ENRICHMENT_ATTEMPTS,
@@ -89,6 +92,7 @@ type FeedbackQueueMode = 'all' | 'urgent' | 'active' | 'failed' | 'terminal' | '
 type FeedbackSearchMode = 'keyword' | 'semantic'
 
 interface SearchHitMeta {
+  rank: number
   similarity: number
   keywordScore: number
   matchType: string
@@ -165,10 +169,10 @@ export function FeedbackPage({
   const qDeferred = useDeferredValue(qInput)
   const [detailId, setDetailId] = useState<string | null>(null)
   const detailRestoreFocusRef = useRef<HTMLElement | null>(null)
-  const openDetail = (feedbackId: string, restoreFocusTo?: HTMLElement) => {
+  const openDetail = useCallback((feedbackId: string, restoreFocusTo?: HTMLElement) => {
     detailRestoreFocusRef.current = restoreFocusTo ?? null
     setDetailId(feedbackId)
-  }
+  }, [])
   useEffect(() => {
     if (syncedQualityFilterKeyRef.current === initialQualityFilterKey) return
     syncedQualityFilterKeyRef.current = initialQualityFilterKey
@@ -266,6 +270,7 @@ export function FeedbackPage({
 
   const list = useInfiniteQuery(feedbackListInfiniteQuery(filters))
   const semanticSearch = useSemanticSearch()
+  const recordSearchEvent = useRecordSearchEvent()
   const listItems = list.data?.pages.flatMap((p) => p.items) ?? []
   const isSemanticResponseCurrent =
     searchMode === 'semantic' &&
@@ -285,9 +290,10 @@ export function FeedbackPage({
   const searchMetaById = useMemo(() => {
     const meta = new Map<string, SearchHitMeta>()
     if (!isSemanticResponseCurrent || !semanticResponse) return meta
-    for (const hit of semanticResponse.hits) {
-      if (!hit.feedback?.id) continue
+    semanticResponse.hits.forEach((hit, index) => {
+      if (!hit.feedback?.id) return
       meta.set(String(hit.feedback.id), {
+        rank: index + 1,
         similarity: hit.similarity,
         keywordScore: hit.keywordScore,
         matchType: hit.matchType,
@@ -297,9 +303,33 @@ export function FeedbackPage({
         evidence: hit.evidence ?? [],
         rankingSignals: hit.rankingSignals ?? [],
       })
-    }
+    })
     return meta
   }, [isSemanticResponseCurrent, semanticResponse])
+  const handleOpenFeedbackDetail = useCallback(
+    (feedbackId: string, restoreFocusTo?: HTMLElement) => {
+      if (isSemanticResponseCurrent && semanticResponse?.runId) {
+        const meta = searchMetaById.get(feedbackId)
+        if (meta) {
+          recordSearchEvent.mutate({
+            runId: semanticResponse.runId,
+            feedbackId,
+            action: 'open',
+            rank: meta.rank,
+            matchType: meta.matchType,
+          })
+        }
+      }
+      openDetail(feedbackId, restoreFocusTo)
+    },
+    [
+      isSemanticResponseCurrent,
+      openDetail,
+      recordSearchEvent,
+      searchMetaById,
+      semanticResponse?.runId,
+    ],
+  )
   const items = isSemanticResponseCurrent ? semanticItems : listItems
   const stats = useQuery(feedbackStatsQuery())
   const activeFilterCount =
@@ -851,7 +881,7 @@ export function FeedbackPage({
                 : t('common.error')
             }
             onRetry={() => void terminalWorkbench.refetch()}
-            onOpenFeedback={openDetail}
+            onOpenFeedback={handleOpenFeedbackDetail}
           />
         )}
 
@@ -971,7 +1001,7 @@ export function FeedbackPage({
                         failedCount={displayedFailedCount}
                         priorityItem={priorityItem}
                         onEnableUrgentScope={() => setUrgentOnly(true)}
-                        onOpenPriority={(id) => openDetail(id)}
+                        onOpenPriority={(id) => handleOpenFeedbackDetail(id)}
                       />
                     </div>
                     <div className="px-4 py-3 sm:px-5">
@@ -991,7 +1021,7 @@ export function FeedbackPage({
                         selectedCount={selected.size}
                         isAllSelected={isAllSelected}
                         onToggleAll={toggleAll}
-                        onOpenPriority={(id) => openDetail(id)}
+                        onOpenPriority={(id) => handleOpenFeedbackDetail(id)}
                         terminalWorkbenchPriority={terminalWorkbenchPriority}
                         showTerminalWorkbench={showTerminalWorkbench}
                         onClearFilters={clearFilters}
@@ -1020,7 +1050,7 @@ export function FeedbackPage({
                       searchMetaById={isSemanticResponseCurrent ? searchMetaById : undefined}
                       selected={selected}
                       onToggle={toggle}
-                      onRowClick={openDetail}
+                      onRowClick={handleOpenFeedbackDetail}
                     />
                   )}
                   {!isSemanticResponseCurrent && list.hasNextPage && (

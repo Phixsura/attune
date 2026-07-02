@@ -1,4 +1,4 @@
--- Migration 093: add a full-text index for feedback lexical search quality.
+-- Migration 094: add a full-text index for feedback lexical search quality.
 
 CREATE INDEX IF NOT EXISTS idx_user_feedback_search_document_simple
     ON user_feedback
