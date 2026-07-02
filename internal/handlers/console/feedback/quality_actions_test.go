@@ -124,6 +124,12 @@ func TestQualityActionHandlerListFailures(t *testing.T) {
 			want:    http.StatusBadRequest,
 		},
 		{
+			name:    "non integer limit",
+			handler: NewQualityActionHandler(&fakeQualityActionStore{}),
+			url:     "/quality-actions?limit=nope",
+			want:    http.StatusBadRequest,
+		},
+		{
 			name:    "store error",
 			handler: NewQualityActionHandler(&fakeQualityActionStore{listErr: errors.New("db down")}),
 			url:     "/quality-actions?status=all",
