@@ -52,6 +52,15 @@ type demoSeedResult struct {
 	QualityActions int
 }
 
+type demoSearchRecorder interface {
+	RecordSearchRun(context.Context, feedbackrepo.SearchRunInsert) error
+	RecordSearchResultEvent(context.Context, feedbackrepo.SearchResultEventInsert) error
+}
+
+type demoQualityActionUpdater interface {
+	UpsertQualityActionStatus(context.Context, feedbackrepo.QualityActionUpsert) (*feedbackrepo.QualityAction, error)
+}
+
 func runDemo(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: attune demo seed [--tenant <slug>] [--name <name>]")
@@ -303,7 +312,7 @@ func insertDemoSemanticRun(ctx context.Context, pool *pgxpool.Pool, tenantID str
 	return nil
 }
 
-func seedDemoSearchTelemetry(ctx context.Context, repo *feedbackrepo.FeedbackRepo, tenantID string, feedbackIDs []int64) error {
+func seedDemoSearchTelemetry(ctx context.Context, repo demoSearchRecorder, tenantID string, feedbackIDs []int64) error {
 	for i := 0; i < 12; i++ {
 		runID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("attune-demo-search-%02d", i))).String()
 		resultCount := 6
@@ -347,7 +356,7 @@ func seedDemoSearchTelemetry(ctx context.Context, repo *feedbackrepo.FeedbackRep
 	return nil
 }
 
-func seedDemoQualityActions(ctx context.Context, repo *feedbackrepo.FeedbackRepo, tenantID string) error {
+func seedDemoQualityActions(ctx context.Context, repo demoQualityActionUpdater, tenantID string) error {
 	_, err := repo.UpsertQualityActionStatus(ctx, feedbackrepo.QualityActionUpsert{
 		TenantID:          tenantID,
 		ActionKey:         "control_tower.zero_result",
