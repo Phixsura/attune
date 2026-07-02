@@ -7,6 +7,13 @@ console/node_modules
 console/dist
 console/coverage
 console/*.tsbuildinfo
+console/pnpm-workspace.yaml
+sdk/node/node_modules
+sdk/node/dist
+sdk/node/coverage
+sdk/node/*.tsbuildinfo
+/attune
+/*.test
 docs
 *.md
 LICENSE

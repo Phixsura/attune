@@ -52,6 +52,7 @@ export function TopBar({ me }: TopBarProps) {
           <NavLink to="/feedback">{t('nav.feedback')}</NavLink>
           <NavLink to="/usage">{t('nav.usage')}</NavLink>
           <NavLink to="/llm-usage">{t('nav.llm_usage')}</NavLink>
+          <NavLink to="/classification-quality">{t('nav.classification_quality')}</NavLink>
           {can('nav:llm_config') && <NavLink to="/llm-config">{t('nav.llm_config')}</NavLink>}
           {can('nav:settings') && <NavLink to="/settings">{t('nav.settings')}</NavLink>}
           {isAdmin && <NavLink to="/outbox-dead">{t('nav.outbox_dead')}</NavLink>}

@@ -182,6 +182,12 @@ func TestCounterVecLabels(t *testing.T) {
 	NotifyFailuresTotal.WithLabelValues("raw-webhook", "transport")
 	OutboundDeliveryAttemptsTotal.WithLabelValues("slack", "success", "200")
 	OutboundRetryAfterTotal.WithLabelValues("slack")
+	ClassificationQualityDriftScore.WithLabelValues("t", "severity")
+	ClassificationQualityLowConfidenceRatio.WithLabelValues("t")
+	ClassificationQualityOffListRatio.WithLabelValues("t")
+	ClassificationQualityParseFailureRatio.WithLabelValues("t")
+	ClassificationQualityTerminalFailureRatio.WithLabelValues("t")
+	ClassificationQualityWarningActive.WithLabelValues("t", "dimension_distribution_drift", "watch")
 	IngestRateLimitTotal.WithLabelValues("t")
 	TriageDecisionsTotal.WithLabelValues("t", "full")
 	GuardActionsTotal.WithLabelValues("t", "enrich", "pii", "email", "redact")
@@ -261,6 +267,12 @@ func TestGaugeVecOperations(t *testing.T) {
 
 	EmbedQueueDepth.WithLabelValues("t").Set(5)
 	ReplyDraftQueueDepth.WithLabelValues("t").Set(3)
+	ClassificationQualityDriftScore.WithLabelValues("t", "severity").Set(0.2)
+	ClassificationQualityLowConfidenceRatio.WithLabelValues("t").Set(0.1)
+	ClassificationQualityOffListRatio.WithLabelValues("t").Set(0.05)
+	ClassificationQualityParseFailureRatio.WithLabelValues("t").Set(0.02)
+	ClassificationQualityTerminalFailureRatio.WithLabelValues("t").Set(0.01)
+	ClassificationQualityWarningActive.WithLabelValues("t", "dimension_distribution_drift", "alert").Set(1)
 	WorkerInFlight.WithLabelValues("enricher").Set(2)
 }
 

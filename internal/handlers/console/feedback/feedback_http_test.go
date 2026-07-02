@@ -38,6 +38,16 @@ type fakeFeedbackRepo struct {
 	workbenchTenant string
 	workbenchFrom   time.Time
 	workbenchTo     time.Time
+
+	qualityRefreshOpts feedbackrepo.ClassificationQualityRefreshOpts
+	qualityAggregate   feedbackrepo.ClassificationQualitySignalAggregate
+	qualityValues      []feedbackrepo.ClassificationQualityValueAggregate
+	qualitySeries      []feedbackrepo.ClassificationQualitySeriesBucket
+	qualitySamples     []feedbackrepo.ClassificationQualitySample
+	qualityTenant      string
+	qualitySampleIDs   []int64
+	qualityAggOpts     []feedbackrepo.ClassificationQualityQueryOpts
+	qualitySeriesOpts  *feedbackrepo.ClassificationQualityQueryOpts
 }
 
 func (f *fakeFeedbackRepo) ListForConsole(
@@ -79,6 +89,36 @@ func (f *fakeFeedbackRepo) TerminalFailureWorkbench(
 	f.workbenchFrom = from
 	f.workbenchTo = to
 	return f.workbench, f.workbenchErr
+}
+
+func (f *fakeFeedbackRepo) RefreshClassificationQuality(
+	_ context.Context, opts feedbackrepo.ClassificationQualityRefreshOpts,
+) error {
+	f.qualityRefreshOpts = opts
+	return nil
+}
+
+func (f *fakeFeedbackRepo) ClassificationQualityAggregates(
+	_ context.Context, opts feedbackrepo.ClassificationQualityQueryOpts,
+) (feedbackrepo.ClassificationQualitySignalAggregate, []feedbackrepo.ClassificationQualityValueAggregate, error) {
+	f.qualityTenant = opts.TenantID
+	f.qualityAggOpts = append(f.qualityAggOpts, opts)
+	return f.qualityAggregate, f.qualityValues, nil
+}
+
+func (f *fakeFeedbackRepo) ClassificationQualitySeries(
+	_ context.Context, opts feedbackrepo.ClassificationQualityQueryOpts,
+) ([]feedbackrepo.ClassificationQualitySeriesBucket, error) {
+	f.qualitySeriesOpts = &opts
+	return f.qualitySeries, nil
+}
+
+func (f *fakeFeedbackRepo) ClassificationQualitySamples(
+	_ context.Context, tenantID string, ids []int64,
+) ([]feedbackrepo.ClassificationQualitySample, error) {
+	f.qualityTenant = tenantID
+	f.qualitySampleIDs = append([]int64(nil), ids...)
+	return f.qualitySamples, nil
 }
 
 func (f *fakeFeedbackRepo) RetryEnrichment(

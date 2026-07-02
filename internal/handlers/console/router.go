@@ -332,6 +332,32 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountFeedback(m)
 	m.Group(func(u chi.Router) {
 		u.Use(r.requireViewer) // Usage stats visible to all roles
+		u.Get("/classification-quality", dispatcher.Bind(
+			"console.FeedbackHandler.GetClassificationQuality",
+			dispatcher.Query(
+				func() *attunev1.GetClassificationQualityRequest {
+					return ptrext.Of(attunev1.GetClassificationQualityRequest{})
+				},
+				feedback.BindClassificationQualityRequest,
+			),
+			r.feedback.GetClassificationQuality,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetClassificationQualityRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		u.Get("/classification-quality/samples", dispatcher.Bind(
+			"console.FeedbackHandler.GetClassificationQualitySamples",
+			dispatcher.Query(
+				func() *attunev1.GetClassificationQualitySamplesRequest {
+					return ptrext.Of(attunev1.GetClassificationQualitySamplesRequest{})
+				},
+				feedback.BindClassificationQualitySamplesRequest,
+			),
+			r.feedback.GetClassificationQualitySamples,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetClassificationQualitySamplesRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 		u.Get("/usage", dispatcher.Bind(
 			"console.UsageHandler.Get",
 			dispatcher.Empty(func() *attunev1.GetUsageRequest { return ptrext.Of(attunev1.GetUsageRequest{}) }),

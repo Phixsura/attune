@@ -27,6 +27,13 @@ export interface FeedbackListFilters {
   enrichmentStatus?: string
   // If true, only return terminal failures (failed + attempts >= 5 + no next_retry)
   terminalFailedOnly?: boolean
+  ids?: string[]
+  confidenceLte?: number
+  createdFrom?: string
+  createdTo?: string
+  enrichedFrom?: string
+  enrichedTo?: string
+  qualitySignal?: string
 }
 
 // Infinite query for cursor pagination. Each `attrs` entry becomes a
@@ -46,6 +53,13 @@ export const feedbackListInfiniteQuery = (filters: FeedbackListFilters) =>
       if (filters.urgent != null) params.set('urgent', String(filters.urgent))
       if (filters.enrichmentStatus) params.set('enrichment_status', filters.enrichmentStatus)
       if (filters.terminalFailedOnly) params.set('terminal_failed_only', 'true')
+      if (filters.ids && filters.ids.length > 0) params.set('ids', filters.ids.join(','))
+      if (filters.confidenceLte != null) params.set('confidence_lte', String(filters.confidenceLte))
+      if (filters.createdFrom) params.set('created_from', filters.createdFrom)
+      if (filters.createdTo) params.set('created_to', filters.createdTo)
+      if (filters.enrichedFrom) params.set('enriched_from', filters.enrichedFrom)
+      if (filters.enrichedTo) params.set('enriched_to', filters.enrichedTo)
+      if (filters.qualitySignal) params.set('quality_signal', filters.qualitySignal)
       if (pageParam) params.set('cursor', pageParam)
       const qs = params.toString()
       const url = `/fb/v1/console/feedback${qs ? `?${qs}` : ''}`

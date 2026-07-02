@@ -243,6 +243,13 @@ message ListFeedbackRequest {
   // If true, only return rows where enrichment_status='failed' AND
   // enrichment_attempts >= maxEnrichmentAttempts AND enrichment_next_retry_at IS NULL.
   optional bool terminal_failed_only = 10;
+  repeated int64 ids = 11;
+  optional double confidence_lte = 12;
+  optional string created_from = 13;
+  optional string created_to = 14;
+  optional string enriched_from = 15;
+  optional string enriched_to = 16;
+  optional string quality_signal = 17;
 }
 
 message ListFeedbackResponse {

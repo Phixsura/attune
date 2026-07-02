@@ -72,6 +72,27 @@ describe('feedbackListInfiniteQuery URL builder', () => {
     expect(new URL(captured.url ?? '').searchParams.get('urgent')).toBe('true')
   })
 
+  it('classification quality drilldown filters map to backend params', async () => {
+    const captured: { url?: string } = {}
+    captureRequestURL(captured)
+    await makeQc().fetchInfiniteQuery(
+      feedbackListInfiniteQuery({
+        attrs: [],
+        ids: ['101', '102'],
+        confidenceLte: 0.6,
+        createdFrom: '2026-07-01T00:00:00Z',
+        createdTo: '2026-07-02T00:00:00Z',
+        qualitySignal: 'low_confidence',
+      }),
+    )
+    const url = new URL(captured.url ?? '')
+    expect(url.searchParams.get('ids')).toBe('101,102')
+    expect(url.searchParams.get('confidence_lte')).toBe('0.6')
+    expect(url.searchParams.get('created_from')).toBe('2026-07-01T00:00:00Z')
+    expect(url.searchParams.get('created_to')).toBe('2026-07-02T00:00:00Z')
+    expect(url.searchParams.get('quality_signal')).toBe('low_confidence')
+  })
+
   it('getNextPageParam returns nextCursor; null ends pagination', () => {
     const options = feedbackListInfiniteQuery({ attrs: [] })
     const fn = options.getNextPageParam as (page: { nextCursor?: string | null }) => string | null

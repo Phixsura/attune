@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import type { FeedbackListFilters } from '@/features/feedback/api/list-feedback-infinite'
 import { FeedbackPage } from '@/features/feedback/components/feedback-page'
 import { enrichConfigQuery } from '@/features/settings/api/get-enrich-config'
 import { tagsQuery } from '@/features/tags/api/list-tags'
@@ -12,11 +13,22 @@ import { useDocumentTitle } from '@/hooks/use-document-title'
 type FeedbackRoutePageProps = {
   initialQueueMode?: 'all' | 'urgent' | 'active' | 'failed' | 'terminal' | 'ready'
   showTerminalWorkbench?: boolean
+  initialQualityFilters?: Pick<
+    FeedbackListFilters,
+    | 'ids'
+    | 'confidenceLte'
+    | 'createdFrom'
+    | 'createdTo'
+    | 'enrichedFrom'
+    | 'enrichedTo'
+    | 'qualitySignal'
+  >
 }
 
 export function FeedbackRoutePage({
   initialQueueMode = 'all',
   showTerminalWorkbench = false,
+  initialQualityFilters,
 }: FeedbackRoutePageProps = {}) {
   const { t } = useTranslation()
   useDocumentTitle(t(initialQueueMode === 'terminal' ? 'nav.terminal_failures' : 'nav.feedback'))
@@ -32,6 +44,7 @@ export function FeedbackRoutePage({
       stateList={allStates.data ?? []}
       batchTransition={batchTransition}
       initialQueueMode={initialQueueMode}
+      initialQualityFilters={initialQualityFilters}
       showTerminalWorkbench={showTerminalWorkbench}
       renderWorkflowTransition={(data) => (
         <WorkflowTransitionSelect

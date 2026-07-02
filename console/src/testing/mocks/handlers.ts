@@ -1,5 +1,6 @@
 import { HttpResponse, http } from 'msw'
 import type { ApiKey, CreateApiKeyResponse, ListApiKeysResponse } from '@/proto/attune/v1/api_key'
+import type { GetClassificationQualityResponse } from '@/proto/attune/v1/classification_quality'
 import type { DigestSubscription } from '@/proto/attune/v1/digest_subscription'
 import type {
   EnrichConfig,
@@ -312,6 +313,31 @@ export const defaultLLMUsage: GetLLMUsageResponse = {
   calls: '0',
   errors: '0',
 }
+export const defaultClassificationQuality: GetClassificationQualityResponse = {
+  generatedAt: '2026-07-02T00:00:00Z',
+  dataThrough: '2026-07-02T00:00:00Z',
+  rollupLagSeconds: '0',
+  currentFrom: '2026-06-25T00:00:00Z',
+  currentTo: '2026-07-02T00:00:00Z',
+  baselineFrom: '2026-05-28T00:00:00Z',
+  baselineTo: '2026-06-25T00:00:00Z',
+  bucketWidth: 'day',
+  summary: {
+    classificationEvents: '0',
+    failedAttempts: '0',
+    averageConfidence: 0,
+    lowConfidenceRate: 0,
+    offListRate: 0,
+    unknownDimensionRate: 0,
+    parseFailureRate: 0,
+    terminalFailureRate: 0,
+    worstSeverity: 'normal',
+  },
+  series: [],
+  dimensions: [],
+  warnings: [],
+  samples: [],
+}
 
 export const defaultWorkflowStates: ListStatesResponse = { states: [] }
 export const defaultWorkflowAudit: ListAuditResponse = { entries: [] }
@@ -467,4 +493,5 @@ export const handlers = [
   http.get(`${BASE}/workflow/states`, () => HttpResponse.json(defaultWorkflowStates)),
   http.get(`${BASE}/feedback/:id/audit`, () => HttpResponse.json(defaultWorkflowAudit)),
   http.get(`${BASE}/llm-usage`, () => HttpResponse.json(defaultLLMUsage)),
+  http.get(`${BASE}/classification-quality`, () => HttpResponse.json(defaultClassificationQuality)),
 ]
