@@ -2,6 +2,7 @@ package feedback
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
@@ -44,6 +45,13 @@ func TestKeywordSearchParams_ZeroValue(t *testing.T) {
 	}
 }
 
+func TestLexicalSearchParams_ZeroValue(t *testing.T) {
+	p := LexicalSearchParams{}
+	if p.Query != "" {
+		t.Error("zero value Query should be empty")
+	}
+}
+
 func TestSemanticSearchHit_Structure(t *testing.T) {
 	fb := ptrext.Of(SearchFeedback{
 		ID:      123,
@@ -58,6 +66,35 @@ func TestSemanticSearchHit_Structure(t *testing.T) {
 	}
 	if hit.Similarity != 0.95 {
 		t.Errorf("Similarity = %f, want 0.95", hit.Similarity)
+	}
+}
+
+func TestLexicalSearchHit_Structure(t *testing.T) {
+	fb := ptrext.Of(SearchFeedback{
+		ID:      123,
+		Content: "checkout invoice failed",
+	})
+	hit := LexicalSearchHit{
+		Feedback: fb,
+		Rank:     2,
+		Score:    0.72,
+		Fields:   []string{"content"},
+		Snippets: []SearchSnippet{{Field: "content", Snippet: "invoice failed"}},
+	}
+	if hit.Feedback.ID != 123 {
+		t.Errorf("Feedback.ID = %d, want 123", hit.Feedback.ID)
+	}
+	if hit.Rank != 2 {
+		t.Errorf("Rank = %d, want 2", hit.Rank)
+	}
+	if hit.Score != 0.72 {
+		t.Errorf("Score = %f, want 0.72", hit.Score)
+	}
+	if len(hit.Fields) != 1 || hit.Fields[0] != "content" {
+		t.Errorf("Fields = %v, want [content]", hit.Fields)
+	}
+	if len(hit.Snippets) != 1 || hit.Snippets[0].Snippet != "invoice failed" {
+		t.Errorf("Snippets = %v, want invoice failed", hit.Snippets)
 	}
 }
 
@@ -87,6 +124,60 @@ func TestSearchFeedback_Fields(t *testing.T) {
 	if ptrext.Indirect(fb.ClusterID) != clusterID {
 		t.Error("ClusterID mismatch")
 	}
+}
+
+func TestLexicalSnippets_TitleAndContent(t *testing.T) {
+	fb := SearchFeedback{
+		Content:              "checkout invoices fail after a plan upgrade",
+		EnrichedDisplayTitle: "Invoice checkout failure",
+	}
+	snippets := lexicalSnippets("invoice checkout", fb)
+	if len(snippets) != 2 {
+		t.Fatalf("snippets = %d, want 2", len(snippets))
+	}
+	if snippets[0].Field != "title" {
+		t.Errorf("first snippet field = %s, want title", snippets[0].Field)
+	}
+	if snippets[1].Field != "content" {
+		t.Errorf("second snippet field = %s, want content", snippets[1].Field)
+	}
+}
+
+func TestLexicalFields_MatchesTerms(t *testing.T) {
+	fb := SearchFeedback{
+		Content:   "password reset loops after SSO login",
+		PageURL:   "https://example.test/settings/security",
+		UserID:    "customer-7",
+		Source:    "widget",
+		Type:      "bug",
+		Language:  "en",
+		IsUrgent:  true,
+		CreatedAt: mustParseTime(t, "2026-07-02T00:00:00Z"),
+	}
+	fields := lexicalFields("SSO security", fb)
+	if len(fields) != 2 {
+		t.Fatalf("fields = %v, want two matches", fields)
+	}
+	if fields[0] != "content" || fields[1] != "page_url" {
+		t.Errorf("fields = %v, want [content page_url]", fields)
+	}
+}
+
+func TestLikeContainsPattern_EscapesWildcards(t *testing.T) {
+	got := likeContainsPattern(`100%_done\ok`)
+	want := `%100\%\_done\\ok%`
+	if got != want {
+		t.Errorf("likeContainsPattern = %q, want %q", got, want)
+	}
+}
+
+func mustParseTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatalf("parse time: %v", err)
+	}
+	return parsed
 }
 
 func TestVecToString_Empty(t *testing.T) {

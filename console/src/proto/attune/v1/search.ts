@@ -36,7 +36,7 @@ export interface SemanticSearchRequest {
 
 /** SemanticSearchResponse contains the ranked search results. */
 export interface SemanticSearchResponse {
-  /** Ranked results ordered by combined similarity score. */
+  /** Ranked results ordered by fused relevance score. */
   hits: SemanticSearchHit[];
   /** The embedding model used for this search. */
   embeddingModel: string;
@@ -44,6 +44,14 @@ export interface SemanticSearchResponse {
   totalWithEmbeddings: number;
   /** True if semantic search was unavailable and results are keyword-only. */
   usedKeywordFallback: boolean;
+  /** Machine-readable reason for keyword-only fallback, when used. */
+  fallbackReason?:
+    | string
+    | undefined;
+  /** Version of the ranking algorithm and default parameters used. */
+  rankingVersion: string;
+  /** Coverage metadata for the searched corpus. */
+  coverage?: SearchCoverage | undefined;
 }
 
 /** SemanticSearchHit is a single search result with ranking metadata. */
@@ -58,6 +66,36 @@ export interface SemanticSearchHit {
   keywordScore: number;
   /** How this result was matched: "semantic", "keyword", or "hybrid". */
   matchType: string;
+  /** 1-based rank in the semantic candidate list. Zero means not present. */
+  semanticRank: number;
+  /** 1-based rank in the lexical candidate list. Zero means not present. */
+  lexicalRank: number;
+  /** Fused relevance score after combining available candidate lists. */
+  fusedScore: number;
+  /** Short evidence snippets explaining why this result matched. */
+  evidence: SearchEvidence[];
+  /** Bounded ranking signals used for explainability. */
+  rankingSignals: string[];
+}
+
+/** SearchEvidence is a short, permission-safe explanation for a matched result. */
+export interface SearchEvidence {
+  /** The source field, for example "content", "title", or "semantic". */
+  field: string;
+  /** Short snippet. It must not include content the user cannot already view. */
+  snippet: string;
+  /** Machine-readable reason, for example "lexical_match" or "vector_similarity". */
+  reason: string;
+}
+
+/** SearchCoverage describes how much of the live feedback corpus was searchable. */
+export interface SearchCoverage {
+  /** Count of live feedback rows in this tenant. */
+  totalLiveFeedback: number;
+  /** Count of live feedback rows that have embeddings in this tenant. */
+  totalWithEmbeddings: number;
+  /** Embedding model shared by the searchable corpus, when available. */
+  embeddingModel: string;
 }
 
 /**

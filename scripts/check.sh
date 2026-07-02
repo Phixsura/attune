@@ -47,6 +47,9 @@ bash scripts/lint-outbound-conformance.sh
 step "go test ./..."
 go test ./...
 
+step "search quality baseline"
+bash scripts/check-search-quality.sh
+
 step "lizard (yellow >10; CI red >15; NLOC ≤ 100)"
 # 律 2 黄区警告 10-15；红区 > 15. Threshold 10 surfaces yellow so red
 # rises clearly. -w prints only warnings.

@@ -1,6 +1,7 @@
 package feedback
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,12 @@ func TestFeedbackFilter_Defaults(t *testing.T) {
 	}
 	if f.Urgent != nil {
 		t.Error("Urgent should default to nil")
+	}
+	if f.EnrichmentStatus != nil {
+		t.Error("EnrichmentStatus should default to nil")
+	}
+	if f.TerminalFailedOnly != nil {
+		t.Error("TerminalFailedOnly should default to nil")
 	}
 }
 
@@ -105,5 +112,42 @@ func TestBatchTagUpdate_WithTags(t *testing.T) {
 	}
 	if len(u.RemoveTags) != 1 {
 		t.Errorf("RemoveTags len = %d, want 1", len(u.RemoveTags))
+	}
+}
+
+func TestApplyBatchFilters_EnrichmentStatusAndTerminalFailure(t *testing.T) {
+	qb := newQueryBuilder("tenant-1")
+	repo := ptrext.Of(FeedbackRepo{})
+	err := repo.applyBatchFilters(qb, ptrext.Of(FeedbackFilter{
+		EnrichmentStatus:   ptrext.Of("failed"),
+		TerminalFailedOnly: ptrext.Of(true),
+	}))
+	if err != nil {
+		t.Fatalf("applyBatchFilters returned error: %v", err)
+	}
+
+	if !strings.Contains(qb.where, "deleted_at IS NULL") {
+		t.Fatalf("where missing deleted filter: %s", qb.where)
+	}
+	if !strings.Contains(qb.where, "enrichment_status = $2") {
+		t.Fatalf("where missing enrichment status arg filter: %s", qb.where)
+	}
+	if !strings.Contains(qb.where, "enrichment_status = 'failed'") {
+		t.Fatalf("where missing terminal failed status guard: %s", qb.where)
+	}
+	if !strings.Contains(qb.where, "enrichment_attempts >= $3") {
+		t.Fatalf("where missing terminal attempt guard: %s", qb.where)
+	}
+	if !strings.Contains(qb.where, "enrichment_next_retry_at IS NULL") {
+		t.Fatalf("where missing terminal retry guard: %s", qb.where)
+	}
+	if got, want := len(qb.args), 3; got != want {
+		t.Fatalf("args len = %d, want %d", got, want)
+	}
+	if got, want := qb.args[1], "failed"; got != want {
+		t.Fatalf("status arg = %v, want %v", got, want)
+	}
+	if got, want := qb.args[2], maxEnrichmentAttempts; got != want {
+		t.Fatalf("attempt arg = %v, want %v", got, want)
 	}
 }

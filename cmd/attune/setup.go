@@ -257,6 +257,8 @@ func buildConsoleRouter(
 	searchHandler := console.NewSearchHandler(semanticsearch.New(feedbackRepo,
 		llmrouter.New(llmconfigrepo.New(pool), secrets),
 		ratelimit.NewMemorySlidingLimiter(), semanticsearch.NewPGCache(pool)))
+	searchHandler.SetTagAssignments(tagAssignmentRepo)
+	searchHandler.SetWorkflowStates(wfStateRepo)
 
 	// Job handler uses batch service (implements jobService interface).
 	jobHandler := feedbackjob.NewHandler(batchSvc)

@@ -230,11 +230,13 @@ func operationsDashboard() dashboard {
 		seriesDesc(18, "Idempotency", "Idempotency key usage by outcome. Duplicate or rejected outcomes explain client retry behavior under load.", []target{
 			targetExpr("A", `sum by (outcome) (rate(attune_idempotency_key_usage_total{tenant=~"$tenant"}[$__rate_interval]))`, "{{outcome}}"),
 		}, "reqps", gp(0, 34, 12, 8)),
-		seriesDesc(19, "Search", "Search traffic, duration, result count, and embedding cache hits. This panel explains slow search before users report it.", []target{
+		seriesDesc(19, "Search", "Search traffic, duration, result count, fallback reasons, embedding coverage, and cache hits. This panel explains degraded search before users report it.", []target{
 			targetExpr("A", `sum by (type) (rate(attune_search_queries_total{tenant=~"$tenant"}[$__rate_interval]))`, "queries / {{type}}"),
 			targetExpr("B", `histogram_quantile(0.95, sum by (le, type) (rate(attune_search_query_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "duration / {{type}}"),
 			targetExpr("C", `histogram_quantile(0.95, sum by (le) (rate(attune_search_results_count_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "results p95"),
-			targetExpr("D", `sum by (result) (rate(attune_embedding_cache_hits_total{tenant=~"$tenant"}[$__rate_interval]))`, "cache / {{result}}"),
+			targetExpr("D", `sum by (reason) (rate(attune_search_fallback_reasons_total{tenant=~"$tenant"}[$__rate_interval]))`, "fallback / {{reason}}"),
+			targetExpr("E", `avg by (model) (attune_search_embedding_coverage_ratio{tenant=~"$tenant"})`, "coverage / {{model}}"),
+			targetExpr("F", `sum by (result) (rate(attune_embedding_cache_hits_total{tenant=~"$tenant"}[$__rate_interval]))`, "cache / {{result}}"),
 		}, "short", gp(12, 34, 12, 8)),
 		rowPanel(20, "Delivery and contention", 42),
 		seriesDesc(21, "Delivery and contention", "Delivery failures, outbox lag, claim contention, and worker health. This is the final split between destination failure and worker capacity.", []target{

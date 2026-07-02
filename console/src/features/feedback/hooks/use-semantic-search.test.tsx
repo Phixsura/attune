@@ -24,12 +24,38 @@ describe('useSemanticSearch', () => {
       http.post('/fb/v1/console/feedback/search', () =>
         HttpResponse.json({
           hits: [
-            { feedback: { id: 'fb-1' }, combinedScore: 0.95 },
-            { feedback: { id: 'fb-2' }, combinedScore: 0.82 },
+            {
+              feedback: { id: 'fb-1' },
+              similarity: 0.95,
+              keywordScore: 0.4,
+              matchType: 'hybrid',
+              semanticRank: 1,
+              lexicalRank: 2,
+              fusedScore: 0.017,
+              evidence: [],
+              rankingSignals: ['semantic', 'lexical', 'rrf'],
+            },
+            {
+              feedback: { id: 'fb-2' },
+              similarity: 0.82,
+              keywordScore: 0,
+              matchType: 'semantic',
+              semanticRank: 2,
+              lexicalRank: 0,
+              fusedScore: 0.011,
+              evidence: [],
+              rankingSignals: ['semantic', 'rrf'],
+            },
           ],
           embeddingModel: 'text-embedding-3-small',
           totalWithEmbeddings: 100,
           usedKeywordFallback: false,
+          rankingVersion: 'rrf.pgfts.v1.k60',
+          coverage: {
+            totalLiveFeedback: 120,
+            totalWithEmbeddings: 100,
+            embeddingModel: 'text-embedding-3-small',
+          },
         }),
       ),
     )

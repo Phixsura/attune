@@ -38,6 +38,11 @@ const zh = {
   revokeKeyDialog: '\u64a4\u9500\u8fd9\u628a\u0020\u006b\u0065\u0079\uff1f',
   revokeSession: '\u7ec8\u6b62',
   saveToolPolicies: '\u4fdd\u5b58\u5de5\u5177\u7b56\u7565',
+  searchFeedback: '\u641c\u7d22\u53cd\u9988\u5185\u5bb9',
+  semanticFallbackTitle: '\u8bed\u4e49\u641c\u7d22\u5df2\u964d\u7ea7',
+  semanticSearch: '\u8bed\u4e49',
+  runSemanticSearch: '\u8fd0\u884c\u8bed\u4e49\u641c\u7d22',
+  evidenceLabel: '\u5339\u914d\u4f9d\u636e',
   showScopes: '\u67e5\u770b\u751f\u6548\u6743\u9650',
   submitApiKey: '\u65b0\u5efa',
   secretDialog: '\u4f60\u7684\u65b0\u0020\u006b\u0065\u0079',
@@ -369,6 +374,66 @@ test.describe('Console accessibility browser gate', () => {
       await expectNoDocumentOverflow(page)
     }
 
+    await expectNoAxeViolations(page)
+    expect(apiMocks.unhandledRequests).toEqual([])
+    await expectNoConsoleDiagnostics(diagnostics)
+  })
+
+  test('semantic feedback search keeps terminal scope and opens returned details', async ({
+    page,
+  }) => {
+    const diagnostics = collectConsoleDiagnostics(page)
+    const apiMocks = await installConsoleApiMocks(page)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await gotoConsoleRoute(page, '/feedback/terminal-failures')
+
+    await page.getByRole('button', { name: zh.semanticSearch, exact: true }).click()
+    await page.getByRole('searchbox', { name: zh.searchFeedback }).fill('terminal upstream retries')
+    await page.getByRole('button', { name: zh.runSemanticSearch }).click()
+
+    await expect(page.getByText('rrf.pgfts.v1.k60')).toBeVisible()
+    await expect(page.getByText(zh.evidenceLabel)).toBeVisible()
+    await expect(page.getByRole('button', { name: /#feedback-201/ }).first()).toBeVisible()
+
+    const request = apiMocks.semanticSearchRequests.at(-1) as {
+      q?: string
+      limit?: number
+      filter?: { enrichmentStatus?: string; terminalFailedOnly?: boolean }
+    }
+    expect(request.q).toBe('terminal upstream retries')
+    expect(request.limit).toBe(50)
+    expect(request.filter?.enrichmentStatus).toBe('failed')
+    expect(request.filter?.terminalFailedOnly).toBe(true)
+
+    await page
+      .getByRole('button', { name: /#feedback-201/ })
+      .first()
+      .click()
+    await expect(page.getByRole('dialog')).toContainText('Terminal enrichment failure')
+    await expectNoDocumentOverflow(page)
+    await expectNoAxeViolations(page)
+    expect(apiMocks.unhandledRequests).toEqual([])
+    await expectNoConsoleDiagnostics(diagnostics)
+  })
+
+  test('semantic feedback search fallback state stays visible and contained', async ({ page }) => {
+    const diagnostics = collectConsoleDiagnostics(page)
+    const apiMocks = await installConsoleApiMocks(page)
+
+    await page.setViewportSize({ width: 1365, height: 768 })
+    await gotoConsoleRoute(page, '/feedback')
+
+    await page.getByRole('button', { name: zh.semanticSearch, exact: true }).click()
+    await page.getByRole('searchbox', { name: zh.searchFeedback }).fill('fallback coverage check')
+    await page.getByRole('button', { name: zh.runSemanticSearch }).click()
+
+    await expect(page.getByText(zh.semanticFallbackTitle)).toBeVisible()
+    await expect(page.getByText(zh.evidenceLabel)).toBeVisible()
+    const request = apiMocks.semanticSearchRequests.at(-1) as { q?: string; limit?: number }
+    expect(request.q).toBe('fallback coverage check')
+    expect(request.limit).toBe(50)
+    await expectNoDocumentOverflow(page)
     await expectNoAxeViolations(page)
     expect(apiMocks.unhandledRequests).toEqual([])
     await expectNoConsoleDiagnostics(diagnostics)

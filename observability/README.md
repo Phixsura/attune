@@ -81,6 +81,8 @@ exposition plus the portable assets in this directory.
 | `attune_search_queries_total` | counter | `tenant`, `type` | search queries by type (#30) |
 | `attune_search_query_duration_seconds` | histogram | `tenant`, `type` | search query latency by type (#30) |
 | `attune_search_results_count` | histogram | `tenant` | number of search results returned (#30) |
+| `attune_search_fallback_reasons_total` | counter | `tenant`, `reason` | degraded search paths by stable fallback reason (#162) |
+| `attune_search_embedding_coverage_ratio` | gauge | `tenant`, `model` | share of live feedback rows with embeddings for search (#162) |
 | `attune_embedding_cache_hits_total` | counter | `tenant`, `result` | embedding cache hits vs misses (#30) |
 | `attune_oidc_login_total` | counter | `result` | OIDC login attempts by result (#40) |
 | `attune_oidc_login_duration_seconds` | histogram | — | end-to-end OIDC login latency (#40) |
@@ -155,6 +157,11 @@ Label values:
   `nonce_mismatch` · `claims_invalid` · `group_denied` · `user_sync_failed` · `session_failed`.
 - OIDC `role` — `admin` · `member` or custom roles from `role_mapping` config.
 - search `type` — `semantic` · `keyword_fallback` · `hybrid`.
+- search fallback `reason` — `semantic_unavailable` · `embedding_check_failed` ·
+  `embedding_stats_failed` · `no_embeddings` · `embedding_generation_failed` ·
+  `embedding_model_mismatch` · `semantic_search_failed` · `no_semantic_matches`.
+- search embedding `model` — configured embedding model id; empty coverage is
+  reported as `none`.
 - embedding cache `result` — `hit` · `miss`.
 - inbound `channel` — bounded adapter channel names such as `email` or `webhook`.
 - inbound `source_slug` — operator-defined source slug from `inbound_sources`.

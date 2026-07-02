@@ -41,7 +41,7 @@ message SemanticSearchRequest {
 
 // SemanticSearchResponse contains the ranked search results.
 message SemanticSearchResponse {
-  // Ranked results ordered by combined similarity score.
+  // Ranked results ordered by fused relevance score.
   repeated SemanticSearchHit hits = 1;
 
   // The embedding model used for this search.
@@ -52,6 +52,15 @@ message SemanticSearchResponse {
 
   // True if semantic search was unavailable and results are keyword-only.
   bool used_keyword_fallback = 4;
+
+  // Machine-readable reason for keyword-only fallback, when used.
+  optional string fallback_reason = 5;
+
+  // Version of the ranking algorithm and default parameters used.
+  string ranking_version = 6;
+
+  // Coverage metadata for the searched corpus.
+  optional SearchCoverage coverage = 7;
 }
 
 // SemanticSearchHit is a single search result with ranking metadata.
@@ -67,4 +76,43 @@ message SemanticSearchHit {
 
   // How this result was matched: "semantic", "keyword", or "hybrid".
   string match_type = 4;
+
+  // 1-based rank in the semantic candidate list. Zero means not present.
+  int32 semantic_rank = 5;
+
+  // 1-based rank in the lexical candidate list. Zero means not present.
+  int32 lexical_rank = 6;
+
+  // Fused relevance score after combining available candidate lists.
+  float fused_score = 7;
+
+  // Short evidence snippets explaining why this result matched.
+  repeated SearchEvidence evidence = 8;
+
+  // Bounded ranking signals used for explainability.
+  repeated string ranking_signals = 9;
+}
+
+// SearchEvidence is a short, permission-safe explanation for a matched result.
+message SearchEvidence {
+  // The source field, for example "content", "title", or "semantic".
+  string field = 1;
+
+  // Short snippet. It must not include content the user cannot already view.
+  string snippet = 2;
+
+  // Machine-readable reason, for example "lexical_match" or "vector_similarity".
+  string reason = 3;
+}
+
+// SearchCoverage describes how much of the live feedback corpus was searchable.
+message SearchCoverage {
+  // Count of live feedback rows in this tenant.
+  int32 total_live_feedback = 1;
+
+  // Count of live feedback rows that have embeddings in this tenant.
+  int32 total_with_embeddings = 2;
+
+  // Embedding model shared by the searchable corpus, when available.
+  string embedding_model = 3;
 }

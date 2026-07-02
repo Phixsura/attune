@@ -7603,6 +7603,12 @@ components:
                 workflowCategory:
                     type: string
                     description: Filter by workflow category (open/resolved).
+                enrichmentStatus:
+                    type: string
+                    description: 'Filter by enrichment status: pending | enriching | done | failed.'
+                terminalFailedOnly:
+                    type: boolean
+                    description: If true, only include terminal enrichment failures.
             description: |-
                 FeedbackFilter is the shared filter criteria used by list and batch
                  operations. It mirrors the query parameters of ListFeedbackRequest
@@ -9422,6 +9428,34 @@ components:
                     type: array
                     items:
                         type: string
+        SearchCoverage:
+            type: object
+            properties:
+                totalLiveFeedback:
+                    type: integer
+                    description: Count of live feedback rows in this tenant.
+                    format: int32
+                totalWithEmbeddings:
+                    type: integer
+                    description: Count of live feedback rows that have embeddings in this tenant.
+                    format: int32
+                embeddingModel:
+                    type: string
+                    description: Embedding model shared by the searchable corpus, when available.
+            description: SearchCoverage describes how much of the live feedback corpus was searchable.
+        SearchEvidence:
+            type: object
+            properties:
+                field:
+                    type: string
+                    description: The source field, for example "content", "title", or "semantic".
+                snippet:
+                    type: string
+                    description: Short snippet. It must not include content the user cannot already view.
+                reason:
+                    type: string
+                    description: Machine-readable reason, for example "lexical_match" or "vector_similarity".
+            description: SearchEvidence is a short, permission-safe explanation for a matched result.
         SecretManagerConfig:
             type: object
             properties:
@@ -9466,6 +9500,28 @@ components:
                 matchType:
                     type: string
                     description: 'How this result was matched: "semantic", "keyword", or "hybrid".'
+                semanticRank:
+                    type: integer
+                    description: 1-based rank in the semantic candidate list. Zero means not present.
+                    format: int32
+                lexicalRank:
+                    type: integer
+                    description: 1-based rank in the lexical candidate list. Zero means not present.
+                    format: int32
+                fusedScore:
+                    type: number
+                    description: Fused relevance score after combining available candidate lists.
+                    format: float
+                evidence:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SearchEvidence'
+                    description: Short evidence snippets explaining why this result matched.
+                rankingSignals:
+                    type: array
+                    items:
+                        type: string
+                    description: Bounded ranking signals used for explainability.
             description: SemanticSearchHit is a single search result with ranking metadata.
         SemanticSearchRequest:
             type: object
@@ -9501,7 +9557,7 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/SemanticSearchHit'
-                    description: Ranked results ordered by combined similarity score.
+                    description: Ranked results ordered by fused relevance score.
                 embeddingModel:
                     type: string
                     description: The embedding model used for this search.
@@ -9512,6 +9568,16 @@ components:
                 usedKeywordFallback:
                     type: boolean
                     description: True if semantic search was unavailable and results are keyword-only.
+                fallbackReason:
+                    type: string
+                    description: Machine-readable reason for keyword-only fallback, when used.
+                rankingVersion:
+                    type: string
+                    description: Version of the ranking algorithm and default parameters used.
+                coverage:
+                    allOf:
+                        - $ref: '#/components/schemas/SearchCoverage'
+                    description: Coverage metadata for the searched corpus.
             description: SemanticSearchResponse contains the ranked search results.
         ServiceAccount:
             type: object

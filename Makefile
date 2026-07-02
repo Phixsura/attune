@@ -8,7 +8,7 @@
 # plugins, so no local protoc-gen-* installs are needed — only network access to
 # the Buf Schema Registry. To change a proto dependency, run `make proto-deps`.
 
-.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e test test-live test-live-list ci-check
+.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality test test-live test-live-list ci-check
 
 help: ## List targets.
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -62,6 +62,9 @@ observability-rules: ## Validate Prometheus scrape config, recording rules, and 
 observability-load-e2e: ## Send load and verify metrics via Prometheus/Grafana. Requires API_KEY.
 	bash scripts/observability-load-e2e.sh
 
+search-quality: ## Verify the committed semantic-search relevance baseline.
+	go run ./internal/tools/searchquality
+
 # ── Test tiers (docs/testing.md) ─────────────────────────────────────────
 #
 # `test` is the default unit tier — runs on every contributor's machine
@@ -114,6 +117,10 @@ ci-check: ## Run all CI checks locally before push.
 	@echo "▸ go test (unit)"
 	@go test -race -short ./...
 	@echo "✓ go test"
+	@echo
+	@echo "▸ search quality baseline"
+	@go run ./internal/tools/searchquality
+	@echo "✓ search quality"
 	@echo
 	@echo "▸ golangci-lint"
 	@golangci-lint run

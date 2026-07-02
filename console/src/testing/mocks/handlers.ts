@@ -33,6 +33,7 @@ import {
   OutboxFailureKind,
   type RetryDeliveryResponse,
 } from '@/proto/attune/v1/outbox'
+import type { SemanticSearchResponse } from '@/proto/attune/v1/search'
 import type { GetMeResponse } from '@/proto/attune/v1/session'
 import type { GetLLMUsageResponse } from '@/proto/attune/v1/usage'
 import type { ListAuditResponse, ListStatesResponse } from '@/proto/attune/v1/workflow'
@@ -301,6 +302,14 @@ export const defaultFeedbackStats: GetFeedbackStatsResponse = {
   dims: [],
   urgentCount: '0',
 }
+export const defaultSemanticSearchResponse: SemanticSearchResponse = {
+  hits: [],
+  embeddingModel: '',
+  totalWithEmbeddings: 0,
+  usedKeywordFallback: false,
+  rankingVersion: 'rrf.pgfts.v1.k60',
+  coverage: undefined,
+}
 export const defaultLLMUsage: GetLLMUsageResponse = {
   periodStart: '2026-06-01T00:00:00Z',
   periodEnd: '2026-06-10T00:00:00Z',
@@ -460,6 +469,7 @@ export const handlers = [
   ),
 
   http.get(`${BASE}/feedback`, () => HttpResponse.json(defaultFeedbackList)),
+  http.post(`${BASE}/feedback/search`, () => HttpResponse.json(defaultSemanticSearchResponse)),
   http.get(`${BASE}/feedback/stats`, () => HttpResponse.json(defaultFeedbackStats)),
   http.get(`${BASE}/feedback/:id`, ({ params }) =>
     HttpResponse.json({ ...defaultFeedbackDetail, id: params.id }),

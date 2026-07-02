@@ -5,6 +5,7 @@ import { zhCN } from 'date-fns/locale'
 import {
   AlertCircle,
   ArrowRight,
+  ChevronDown,
   Clock3,
   Inbox,
   Loader2,
@@ -15,7 +16,7 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react'
-import { type ReactNode, useDeferredValue, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useDeferredValue, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
@@ -54,6 +55,7 @@ import { RetryEnrichmentDialog } from '@/features/feedback/components/retry-enri
 import { SelectionActionBar } from '@/features/feedback/components/selection-action-bar'
 import { TerminalFailureWorkbenchPanel } from '@/features/feedback/components/terminal-failure-workbench'
 import { useRowSelection } from '@/features/feedback/hooks/use-row-selection'
+import { useSemanticSearch } from '@/features/feedback/hooks/use-semantic-search'
 import {
   isTerminalFailure,
   MAX_ENRICHMENT_ATTEMPTS,
@@ -64,12 +66,30 @@ import {
 } from '@/features/feedback/lib/terminal-failure-workbench'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { useDisplayName } from '@/lib/i18n-resolve'
+import type { FeedbackFilter } from '@/proto/attune/v1/batch'
 import type { Dimension } from '@/proto/attune/v1/common'
+import type {
+  SearchEvidence,
+  SemanticSearchHit,
+  SemanticSearchResponse,
+} from '@/proto/attune/v1/search'
 import type { Tag } from '@/proto/attune/v1/tag'
 import type { WorkflowState } from '@/proto/attune/v1/workflow'
 
 type FeedbackSortMode = 'newest' | 'urgent' | 'active'
 type FeedbackQueueMode = 'all' | 'urgent' | 'active' | 'failed' | 'terminal' | 'ready'
+type FeedbackSearchMode = 'keyword' | 'semantic'
+
+interface SearchHitMeta {
+  similarity: number
+  keywordScore: number
+  matchType: string
+  semanticRank: number
+  lexicalRank: number
+  fusedScore: number
+  evidence: SearchEvidence[]
+  rankingSignals: string[]
+}
 
 type BatchTransitionFeedbackMutation = {
   mutate: (
@@ -114,6 +134,10 @@ export function FeedbackPage({
   const [enrichmentFilter, setEnrichmentFilter] = useState<string>('')
   const [urgentOnly, setUrgentOnly] = useState(false)
   const [qInput, setQInput] = useState('')
+  const [searchMode, setSearchMode] = useState<FeedbackSearchMode>('keyword')
+  const [semanticResponse, setSemanticResponse] = useState<SemanticSearchResponse | null>(null)
+  const [semanticQuery, setSemanticQuery] = useState('')
+  const [semanticFilterKey, setSemanticFilterKey] = useState('')
   const [sortMode, setSortMode] = useState<FeedbackSortMode>('newest')
   const [queueMode, setQueueMode] = useState<FeedbackQueueMode>(initialQueueMode)
   const qDeferred = useDeferredValue(qInput)
@@ -163,7 +187,7 @@ export function FeedbackPage({
     return selectTerminalFailurePriority(sections)
   }, [canViewLLMConfig, canViewRuntimeConfig, showTerminalWorkbench, terminalWorkbench.data, t])
 
-  const filters: FeedbackListFilters = useMemo(() => {
+  const scopeFilters: FeedbackListFilters = useMemo(() => {
     const attrs: AttrFilterEntry[] = Object.entries(attrFilters)
       .filter(([, v]) => v && v !== '__all')
       .map(([dim, value]) => ({ dim, value }))
@@ -173,17 +197,68 @@ export function FeedbackPage({
       (queueMode === 'failed' || queueMode === 'terminal' ? 'failed' : undefined)
     return {
       attrs,
-      q: qDeferred.trim(),
       urgent: urgentOnly ? true : undefined,
       tag: tagFilter || undefined,
       workflowState: workflowFilter || undefined,
       enrichmentStatus: effectiveEnrichmentStatus || undefined,
       terminalFailedOnly: queueMode === 'terminal' ? true : undefined,
     }
-  }, [attrFilters, qDeferred, tagFilter, urgentOnly, workflowFilter, enrichmentFilter, queueMode])
+  }, [attrFilters, tagFilter, urgentOnly, workflowFilter, enrichmentFilter, queueMode])
+
+  const filters: FeedbackListFilters = useMemo(
+    () => ({
+      ...scopeFilters,
+      q: searchMode === 'keyword' ? qDeferred.trim() : undefined,
+    }),
+    [qDeferred, scopeFilters, searchMode],
+  )
+
+  const semanticFilter = useMemo(
+    () => buildSemanticFilter(scopeFilters, dims),
+    [dims, scopeFilters],
+  )
+  const currentSemanticFilterKey = useMemo(
+    () => semanticFilterCacheKey(semanticFilter),
+    [semanticFilter],
+  )
 
   const list = useInfiniteQuery(feedbackListInfiniteQuery(filters))
-  const items = list.data?.pages.flatMap((p) => p.items) ?? []
+  const semanticSearch = useSemanticSearch()
+  const listItems = list.data?.pages.flatMap((p) => p.items) ?? []
+  const isSemanticResponseCurrent =
+    searchMode === 'semantic' &&
+    semanticResponse != null &&
+    semanticQuery === qInput.trim() &&
+    semanticFilterKey === currentSemanticFilterKey
+  const semanticItems = useMemo(
+    () =>
+      isSemanticResponseCurrent
+        ? semanticResponse.hits.flatMap((hit) => {
+            const row = semanticHitToFeedback(hit)
+            return row ? [row] : []
+          })
+        : [],
+    [isSemanticResponseCurrent, semanticResponse],
+  )
+  const searchMetaById = useMemo(() => {
+    const meta = new Map<string, SearchHitMeta>()
+    if (!isSemanticResponseCurrent || !semanticResponse) return meta
+    for (const hit of semanticResponse.hits) {
+      if (!hit.feedback?.id) continue
+      meta.set(String(hit.feedback.id), {
+        similarity: hit.similarity,
+        keywordScore: hit.keywordScore,
+        matchType: hit.matchType,
+        semanticRank: hit.semanticRank,
+        lexicalRank: hit.lexicalRank,
+        fusedScore: hit.fusedScore,
+        evidence: hit.evidence ?? [],
+        rankingSignals: hit.rankingSignals ?? [],
+      })
+    }
+    return meta
+  }, [isSemanticResponseCurrent, semanticResponse])
+  const items = isSemanticResponseCurrent ? semanticItems : listItems
   const stats = useQuery(feedbackStatsQuery())
   const activeFilterCount =
     Object.values(attrFilters).filter((value) => value && value !== '__all').length +
@@ -240,6 +315,52 @@ export function FeedbackPage({
   const [retryDialogOpen, setRetryDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
+  const handleSearchModeChange = useCallback(
+    (mode: FeedbackSearchMode) => {
+      if (mode === searchMode) return
+      setSearchMode(mode)
+      setSemanticResponse(null)
+      setSemanticQuery('')
+      setSemanticFilterKey('')
+      semanticSearch.reset()
+    },
+    [searchMode, semanticSearch],
+  )
+
+  const handleQueryChange = useCallback(
+    (value: string) => {
+      setQInput(value)
+      if (searchMode === 'semantic') {
+        semanticSearch.reset()
+      }
+    },
+    [searchMode, semanticSearch],
+  )
+
+  const handleSemanticSearch = useCallback(() => {
+    const query = qInput.trim()
+    if (!query) return
+    semanticSearch.mutate(
+      {
+        q: query,
+        limit: 50,
+        filter: semanticFilter,
+      },
+      {
+        onSuccess: (response) => {
+          setSemanticResponse(response)
+          setSemanticQuery(query)
+          setSemanticFilterKey(currentSemanticFilterKey)
+        },
+        onError: () => {
+          setSemanticResponse(null)
+          setSemanticQuery('')
+          setSemanticFilterKey('')
+        },
+      },
+    )
+  }, [currentSemanticFilterKey, qInput, semanticFilter, semanticSearch])
+
   const selectedTerminalFailures = useMemo(() => {
     return items.filter((i) => selected.has(i.id) && isTerminalFailure(i))
   }, [items, selected])
@@ -248,7 +369,7 @@ export function FeedbackPage({
     const selectedItems = items.filter((i) => selected.has(i.id))
     const tagMap = new Map<string, Tag>()
     for (const item of selectedItems) {
-      for (const tag of item.tags) {
+      for (const tag of item.tags ?? []) {
         if (!tagMap.has(tag.id)) tagMap.set(tag.id, tag)
       }
     }
@@ -320,7 +441,17 @@ export function FeedbackPage({
         label: t('feedback.focus_items.search'),
         value: qInput.trim(),
         tone: 'active',
-        onRemove: () => setQInput(''),
+        onRemove: () => handleQueryChange(''),
+      })
+    }
+
+    if (searchMode === 'semantic') {
+      chips.push({
+        key: 'search-mode',
+        label: t('feedback.search.mode_label'),
+        value: t('feedback.search.mode.semantic'),
+        tone: 'active',
+        onRemove: () => handleSearchModeChange('keyword'),
       })
     }
 
@@ -350,9 +481,12 @@ export function FeedbackPage({
     dims,
     displayOf,
     enrichmentFilter,
+    handleQueryChange,
+    handleSearchModeChange,
     initialQueueMode,
     queueMode,
     qInput,
+    searchMode,
     sortMode,
     tagFilter,
     tagList,
@@ -462,6 +596,11 @@ export function FeedbackPage({
     setUrgentOnly(false)
     setQueueMode(initialQueueMode)
     setQInput('')
+    setSearchMode('keyword')
+    setSemanticResponse(null)
+    setSemanticQuery('')
+    setSemanticFilterKey('')
+    semanticSearch.reset()
   }
 
   return (
@@ -565,14 +704,34 @@ export function FeedbackPage({
                 workflowStates={stateList}
                 urgentOnly={urgentOnly}
                 q={qInput}
+                searchMode={searchMode}
+                semanticIsLoading={semanticSearch.isPending}
                 onAttrChange={(dim, value) => setAttrFilters((m) => ({ ...m, [dim]: value }))}
                 onTagChange={setTagFilter}
                 onWorkflowChange={setWorkflowFilter}
                 onEnrichmentChange={setEnrichmentFilter}
                 onUrgentToggle={() => setUrgentOnly((value) => !value)}
-                onQ={setQInput}
+                onQ={handleQueryChange}
+                onSearchModeChange={handleSearchModeChange}
+                onSemanticSearch={handleSemanticSearch}
               />
             </div>
+            {searchMode === 'semantic' && (
+              <SemanticSearchStatus
+                response={isSemanticResponseCurrent ? semanticResponse : null}
+                query={qInput.trim()}
+                isStale={semanticResponse != null && !isSemanticResponseCurrent}
+                isLoading={semanticSearch.isPending}
+                errorMessage={
+                  semanticSearch.isError
+                    ? semanticSearch.error instanceof Error
+                      ? semanticSearch.error.message
+                      : t('common.error')
+                    : ''
+                }
+                onSearch={handleSemanticSearch}
+              />
+            )}
             <div className="flex min-h-9 flex-wrap items-center gap-2">
               {activeFilterChips.map((chip) => (
                 <ActiveChip
@@ -680,9 +839,20 @@ export function FeedbackPage({
             </div>
           </CardHeader>
           <CardContent className="bg-background px-0">
-            {list.isPending ? (
+            {semanticSearch.isPending ? (
               <Loading />
-            ) : list.isError ? (
+            ) : searchMode === 'semantic' && semanticSearch.isError ? (
+              <QueueErrorState
+                message={
+                  semanticSearch.error instanceof Error
+                    ? semanticSearch.error.message
+                    : t('common.error')
+                }
+                onRetry={handleSemanticSearch}
+              />
+            ) : !isSemanticResponseCurrent && list.isPending ? (
+              <Loading />
+            ) : !isSemanticResponseCurrent && list.isError ? (
               <QueueErrorState
                 message={list.error instanceof Error ? list.error.message : t('common.error')}
                 onRetry={() => void list.refetch()}
@@ -709,6 +879,9 @@ export function FeedbackPage({
                       </div>
                     )}
                     <div className="border-b border-border/50 px-4 py-3.5 sm:px-5">
+                      {isSemanticResponseCurrent && semanticResponse?.usedKeywordFallback ? (
+                        <SemanticFallbackBanner reason={semanticResponse.fallbackReason} />
+                      ) : null}
                       <QueueLaneBanner
                         queueMode={queueMode}
                         urgentOnly={urgentOnly}
@@ -763,12 +936,13 @@ export function FeedbackPage({
                       items={displayedItems}
                       dims={dims}
                       allTags={tagList}
+                      searchMetaById={isSemanticResponseCurrent ? searchMetaById : undefined}
                       selected={selected}
                       onToggle={toggle}
                       onRowClick={openDetail}
                     />
                   )}
-                  {list.hasNextPage && (
+                  {!isSemanticResponseCurrent && list.hasNextPage && (
                     <div className="border-t border-border/50 px-4 py-4 sm:px-5">
                       <div className="flex justify-center">
                         <Button
@@ -801,6 +975,8 @@ export function FeedbackPage({
                   oldestVisibleAt={oldestVisibleAt}
                 />
               </div>
+            ) : isSemanticResponseCurrent ? (
+              <SemanticSearchEmptyState onSearch={handleSemanticSearch} onReset={clearFilters} />
             ) : hasActiveFilters ? (
               <FeedbackFilteredEmptyState onReset={clearFilters} />
             ) : (
@@ -826,9 +1002,7 @@ export function FeedbackPage({
         <details className="group rounded-[0.95rem] border border-border/45 bg-muted/6">
           <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium text-foreground">
             <span>{t('feedback.stats.title')}</span>
-            <span className="text-xs text-muted-foreground transition-transform group-open:rotate-180">
-              v
-            </span>
+            <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
           </summary>
           <div className="border-t border-border/45 px-4 py-4">
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
@@ -890,12 +1064,16 @@ function FilterBar({
   workflowStates,
   urgentOnly,
   q,
+  searchMode,
+  semanticIsLoading,
   onAttrChange,
   onTagChange,
   onWorkflowChange,
   onEnrichmentChange,
   onUrgentToggle,
   onQ,
+  onSearchModeChange,
+  onSemanticSearch,
 }: {
   dims: Dimension[]
   attrFilters: Record<string, string>
@@ -906,12 +1084,16 @@ function FilterBar({
   workflowStates: WorkflowState[]
   urgentOnly: boolean
   q: string
+  searchMode: FeedbackSearchMode
+  semanticIsLoading: boolean
   onAttrChange: (dim: string, value: string) => void
   onTagChange: (tagId: string) => void
   onWorkflowChange: (stateId: string) => void
   onEnrichmentChange: (status: string) => void
   onUrgentToggle: () => void
   onQ: (v: string) => void
+  onSearchModeChange: (mode: FeedbackSearchMode) => void
+  onSemanticSearch: () => void
 }) {
   const { t } = useTranslation()
   const displayOf = useDisplayName()
@@ -920,16 +1102,62 @@ function FilterBar({
 
   return (
     <div className="space-y-2.5">
-      <div className="relative">
-        <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          type="search"
-          placeholder={t('feedback.filter.search_placeholder')}
-          value={q}
-          onChange={(e) => onQ(e.target.value)}
-          className="h-10 bg-background pl-9"
-        />
-      </div>
+      <form
+        className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto_auto]"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (searchMode === 'semantic') onSemanticSearch()
+        }}
+      >
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            placeholder={t('feedback.filter.search_placeholder')}
+            value={q}
+            onChange={(e) => onQ(e.target.value)}
+            className="h-10 bg-background pl-9"
+            aria-label={t('feedback.search.input_label')}
+          />
+        </div>
+        <fieldset
+          className="grid grid-cols-2 rounded-lg border border-border/60 bg-background/90 p-1"
+          aria-label={t('feedback.search.mode_label')}
+        >
+          <Button
+            type="button"
+            variant={searchMode === 'keyword' ? 'secondary' : 'ghost'}
+            className="h-8 px-3 text-xs"
+            aria-pressed={searchMode === 'keyword'}
+            onClick={() => onSearchModeChange('keyword')}
+          >
+            <Search className="h-3.5 w-3.5" />
+            {t('feedback.search.mode.keyword')}
+          </Button>
+          <Button
+            type="button"
+            variant={searchMode === 'semantic' ? 'secondary' : 'ghost'}
+            className="h-8 px-3 text-xs"
+            aria-pressed={searchMode === 'semantic'}
+            onClick={() => onSearchModeChange('semantic')}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {t('feedback.search.mode.semantic')}
+          </Button>
+        </fieldset>
+        <Button
+          type="submit"
+          className="h-10"
+          disabled={searchMode !== 'semantic' || semanticIsLoading || !q.trim()}
+        >
+          {semanticIsLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Sparkles className="h-4 w-4" />
+          )}
+          {t('feedback.search.semantic_submit')}
+        </Button>
+      </form>
       <div className="flex flex-wrap items-center gap-2">
         <QuickScopeButton
           active={!urgentOnly}
@@ -1066,6 +1294,166 @@ function FilterBar({
   )
 }
 
+function SemanticSearchStatus({
+  response,
+  query,
+  isStale,
+  isLoading,
+  errorMessage,
+  onSearch,
+}: {
+  response: SemanticSearchResponse | null
+  query: string
+  isStale: boolean
+  isLoading: boolean
+  errorMessage: string
+  onSearch: () => void
+}) {
+  const { t } = useTranslation()
+
+  if (!query) {
+    return (
+      <div className="rounded-[0.9rem] border border-dashed border-border/60 bg-muted/[0.05] px-3.5 py-3 text-sm text-muted-foreground">
+        {t('feedback.search.semantic_idle')}
+      </div>
+    )
+  }
+
+  if (errorMessage) {
+    return (
+      <div className="flex flex-col gap-2 rounded-[0.9rem] border border-destructive/25 bg-destructive/[0.04] px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span className="truncate">{errorMessage}</span>
+        </div>
+        <Button type="button" size="sm" variant="outline" onClick={onSearch} disabled={isLoading}>
+          {t('common.retry')}
+        </Button>
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="inline-flex items-center gap-2 rounded-[0.9rem] border border-border/60 bg-background/86 px-3.5 py-3 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        {t('feedback.search.semantic_loading')}
+      </div>
+    )
+  }
+
+  if (isStale) {
+    return (
+      <div className="flex flex-col gap-2 rounded-[0.9rem] border border-amber-200/75 bg-amber-50/55 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm text-amber-900">{t('feedback.search.semantic_stale')}</div>
+        <Button type="button" size="sm" variant="outline" onClick={onSearch}>
+          <Sparkles className="h-3.5 w-3.5" />
+          {t('feedback.search.semantic_submit')}
+        </Button>
+      </div>
+    )
+  }
+
+  if (!response) {
+    return (
+      <div className="rounded-[0.9rem] border border-dashed border-border/60 bg-muted/[0.05] px-3.5 py-3 text-sm text-muted-foreground">
+        {t('feedback.search.semantic_ready')}
+      </div>
+    )
+  }
+
+  const embedded = response.coverage?.totalWithEmbeddings ?? response.totalWithEmbeddings
+  const totalLive = response.coverage?.totalLiveFeedback ?? 0
+  const fallbackReason = response.fallbackReason
+    ? t(`feedback.search.fallback_reason.${response.fallbackReason}`, {
+        defaultValue: response.fallbackReason,
+      })
+    : ''
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-[0.9rem] border border-sky-200/70 bg-sky-50/50 px-3.5 py-3 text-sm text-sky-950">
+      <Sparkles className="h-4 w-4" />
+      <span>
+        {t('feedback.search.semantic_results', {
+          count: response.hits.length,
+          embedded,
+        })}
+      </span>
+      {totalLive > 0 ? (
+        <StatusPill
+          tone="muted"
+          label={t('feedback.search.semantic_coverage', { embedded, total: totalLive })}
+        />
+      ) : null}
+      {response.usedKeywordFallback ? (
+        <StatusPill tone="muted" label={t('feedback.search.keyword_fallback')} />
+      ) : response.embeddingModel ? (
+        <StatusPill tone="muted" label={response.embeddingModel} />
+      ) : null}
+      {response.rankingVersion ? (
+        <StatusPill
+          tone="muted"
+          label={t('feedback.search.ranking_version', { version: response.rankingVersion })}
+        />
+      ) : null}
+      {fallbackReason ? <StatusPill tone="muted" label={fallbackReason} /> : null}
+    </div>
+  )
+}
+
+function SemanticFallbackBanner({ reason }: { reason?: string }) {
+  const { t } = useTranslation()
+  const reasonLabel = reason
+    ? t(`feedback.search.fallback_reason.${reason}`, { defaultValue: reason })
+    : ''
+  return (
+    <div className="mb-3 rounded-[1rem] border border-amber-200/75 bg-amber-50/60 px-4 py-3 text-sm text-amber-950">
+      <div className="flex items-start gap-2">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div>
+          <div className="font-medium">{t('feedback.search.keyword_fallback_title')}</div>
+          <p className="mt-1 text-xs leading-5 text-amber-900">
+            {t('feedback.search.keyword_fallback_body')}
+          </p>
+          {reasonLabel ? (
+            <div className="mt-2 text-[11px] font-medium text-amber-950">{reasonLabel}</div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SemanticSearchEmptyState({
+  onSearch,
+  onReset,
+}: {
+  onSearch: () => void
+  onReset: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="px-5 py-12 text-center">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-border/60 bg-muted/20">
+        <Sparkles className="h-5 w-5 text-muted-foreground" />
+      </div>
+      <h3 className="mt-4 text-base font-semibold">{t('feedback.search.no_results_title')}</h3>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+        {t('feedback.search.no_results_body')}
+      </p>
+      <div className="mt-4 flex flex-wrap justify-center gap-2">
+        <Button type="button" variant="outline" onClick={onSearch}>
+          <Sparkles className="h-4 w-4" />
+          {t('feedback.search.semantic_submit')}
+        </Button>
+        <Button type="button" variant="ghost" onClick={onReset}>
+          {t('feedback.clear_filters')}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function QuickScopeButton({
   active,
   onClick,
@@ -1088,10 +1476,52 @@ function QuickScopeButton({
   )
 }
 
+function SearchMatchBadge({ meta }: { meta: SearchHitMeta }) {
+  const { t } = useTranslation()
+  const score = meta.matchType === 'keyword' ? meta.keywordScore : meta.similarity
+  const percentage = Math.max(0, Math.min(100, Math.round(score * 100)))
+  const matchType =
+    meta.matchType === 'keyword' || meta.matchType === 'hybrid' || meta.matchType === 'semantic'
+      ? meta.matchType
+      : 'semantic'
+  const title = t('feedback.search.rank_title', {
+    matchType: t(`feedback.search.match_type.${matchType}`),
+    semanticRank: meta.semanticRank || '-',
+    lexicalRank: meta.lexicalRank || '-',
+    fusedScore: meta.fusedScore.toFixed(4),
+  })
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border border-sky-200/75 bg-sky-50/70 px-1.5 py-0.5 font-medium text-sky-700"
+      title={title}
+    >
+      <Sparkles className="h-3 w-3" />
+      {t(`feedback.search.match_type.${matchType}`)} {percentage}%
+    </span>
+  )
+}
+
+function SearchEvidenceLine({ meta }: { meta: SearchHitMeta }) {
+  const { t } = useTranslation()
+  const evidence = meta.evidence.find((item) => item.snippet)
+  if (!evidence) {
+    return null
+  }
+  return (
+    <div className="mt-2 flex min-w-0 items-start gap-1.5 rounded-lg border border-sky-100 bg-sky-50/45 px-2 py-1.5 text-[11.5px] leading-5 text-sky-900">
+      <Sparkles className="mt-0.5 h-3 w-3 shrink-0" />
+      <span className="shrink-0 font-medium">{t('feedback.search.evidence_label')}</span>
+      <span className="min-w-0 line-clamp-2 text-sky-900/85">{evidence.snippet}</span>
+    </div>
+  )
+}
+
 function FeedbackTable({
   items,
   dims,
   allTags,
+  searchMetaById,
   selected,
   onToggle,
   onRowClick,
@@ -1099,6 +1529,7 @@ function FeedbackTable({
   items: Feedback[]
   dims: Dimension[]
   allTags: Tag[]
+  searchMetaById?: Map<string, SearchHitMeta>
   selected: Set<string>
   onToggle: (id: string) => void
   onRowClick: (id: string, restoreFocusTo: HTMLElement) => void
@@ -1118,6 +1549,8 @@ function FeedbackTable({
         {items.map((f) => {
           const title = f.enrichedDisplayTitle || f.enrichedTitle || `#${f.id}`
           const isSelected = selected.has(f.id)
+          const rowTags = f.tags ?? []
+          const searchMeta = searchMetaById?.get(f.id)
           const workflowCategory = f.workflowState?.category ?? ''
           const filledDims = dims.filter((d) => {
             const value = (f.enrichedAttrs as Record<string, unknown> | undefined)?.[d.name]
@@ -1150,6 +1583,7 @@ function FeedbackTable({
                     {labelForFeedbackRow(f.isUrgent, workflowCategory, terminal, t)}
                   </span>
                   <span>#{f.id}</span>
+                  {searchMeta ? <SearchMatchBadge meta={searchMeta} /> : null}
                   <span className="text-muted-foreground/50">/</span>
                   <span>
                     {formatDistanceToNow(new Date(f.createdAt), { addSuffix: true, locale: zhCN })}
@@ -1166,6 +1600,7 @@ function FeedbackTable({
                     <div className="mt-1.5 line-clamp-2 max-w-3xl text-[13px] leading-[1.4rem] text-muted-foreground">
                       {f.content}
                     </div>
+                    {searchMeta ? <SearchEvidenceLine meta={searchMeta} /> : null}
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
@@ -1174,10 +1609,10 @@ function FeedbackTable({
                   {filledDims.length === 0 ? (
                     <StatusMetaChip value={t('feedback.row.unclassified_short')} />
                   ) : null}
-                  {f.tags.slice(0, 3).map((tag) => (
+                  {rowTags.slice(0, 3).map((tag) => (
                     <TagBadgeTooltip key={tag.id} tag={tagLookup.get(tag.id) ?? tag} />
                   ))}
-                  {f.tags.length > 3 ? <StatusMetaChip value={`+${f.tags.length - 3}`} /> : null}
+                  {rowTags.length > 3 ? <StatusMetaChip value={`+${rowTags.length - 3}`} /> : null}
                 </div>
               </button>
               <aside className="min-w-0 border-t border-border/45 pt-3 lg:border-t-0 lg:border-l lg:pl-3.5 lg:pt-0">
@@ -3072,6 +3507,63 @@ function filterFeedbackItemsByQueueMode(items: Feedback[], mode: FeedbackQueueMo
     return items.filter(isFeedbackReadyForTriage)
   }
   return items
+}
+
+function buildSemanticFilter(
+  filters: FeedbackListFilters,
+  dims: Dimension[],
+): FeedbackFilter | undefined {
+  const dimKinds = new Map(dims.map((dim) => [dim.name, dim.kind]))
+  const attrs = filters.attrs.map((attr) => ({
+    dim: attr.dim,
+    value: attr.value,
+    multi: dimKinds.get(attr.dim) === 'multi',
+  }))
+
+  const filter: FeedbackFilter = {
+    attrs,
+    urgent: filters.urgent,
+    tagId: filters.tag || undefined,
+    workflowStateId: filters.workflowState || undefined,
+    enrichmentStatus: filters.enrichmentStatus || undefined,
+    terminalFailedOnly: filters.terminalFailedOnly,
+  }
+
+  if (
+    attrs.length === 0 &&
+    filter.urgent == null &&
+    !filter.tagId &&
+    !filter.workflowStateId &&
+    !filter.enrichmentStatus &&
+    filter.terminalFailedOnly == null
+  ) {
+    return undefined
+  }
+  return filter
+}
+
+function semanticFilterCacheKey(filter: FeedbackFilter | undefined) {
+  return JSON.stringify(filter ?? {})
+}
+
+function semanticHitToFeedback(hit: SemanticSearchHit): Feedback | null {
+  const feedback = hit.feedback
+  if (!feedback?.id) return null
+  return {
+    ...feedback,
+    id: String(feedback.id),
+    content: feedback.content ?? '',
+    source: feedback.source ?? '',
+    type: feedback.type ?? '',
+    userId: feedback.userId ?? '',
+    pageUrl: feedback.pageUrl ?? '',
+    enrichedAttrs: feedback.enrichedAttrs ?? {},
+    isUrgent: Boolean(feedback.isUrgent),
+    enrichmentStatus: feedback.enrichmentStatus ?? '',
+    createdAt: feedback.createdAt ?? '',
+    tags: feedback.tags ?? [],
+    allowedNextStates: feedback.allowedNextStates ?? [],
+  }
 }
 
 function compareFeedbackByMode(a: Feedback, b: Feedback, mode: FeedbackSortMode) {

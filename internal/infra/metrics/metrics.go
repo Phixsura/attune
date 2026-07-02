@@ -557,6 +557,29 @@ var SearchResultsCount = prometheus.NewHistogramVec(
 	[]string{"tenant"},
 )
 
+// SearchFallbackReasonsTotal counts degraded search paths by stable reason.
+// reason ∈ {semantic_unavailable, embedding_check_failed,
+// embedding_stats_failed, no_embeddings, embedding_generation_failed,
+// embedding_model_mismatch, semantic_search_failed, no_semantic_matches}.
+var SearchFallbackReasonsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_search_fallback_reasons_total",
+		Help: "Search requests that used a degraded path, split by fallback reason.",
+	},
+	[]string{"tenant", "reason"},
+)
+
+// SearchEmbeddingCoverageRatio tracks the share of live feedback rows with
+// embeddings for the model used by search. Operators alert on sustained low
+// coverage before semantic search silently becomes keyword-only.
+var SearchEmbeddingCoverageRatio = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_search_embedding_coverage_ratio",
+		Help: "Share of live feedback rows that have embeddings for search.",
+	},
+	[]string{"tenant", "model"},
+)
+
 // EmbeddingCacheHits counts embedding cache hits and misses.
 // result ∈ {hit, miss}.
 var EmbeddingCacheHits = prometheus.NewCounterVec(
@@ -952,6 +975,8 @@ var allMetrics = []prometheus.Collector{
 	SearchQueriesTotal,
 	SearchQueryDuration,
 	SearchResultsCount,
+	SearchFallbackReasonsTotal,
+	SearchEmbeddingCoverageRatio,
 	EmbeddingCacheHits,
 	OIDCLoginTotal,
 	OIDCLoginDuration,
@@ -1043,6 +1068,8 @@ func RegisteredMetricNames() []string {
 		"attune_search_queries_total",
 		"attune_search_query_duration_seconds",
 		"attune_search_results_count",
+		"attune_search_fallback_reasons_total",
+		"attune_search_embedding_coverage_ratio",
 		"attune_embedding_cache_hits_total",
 		"attune_oidc_login_total",
 		"attune_oidc_login_duration_seconds",

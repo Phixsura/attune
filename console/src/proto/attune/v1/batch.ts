@@ -34,7 +34,15 @@ export interface FeedbackFilter {
     | string
     | undefined;
   /** Filter by workflow category (open/resolved). */
-  workflowCategory?: string | undefined;
+  workflowCategory?:
+    | string
+    | undefined;
+  /** Filter by enrichment status: pending | enriching | done | failed. */
+  enrichmentStatus?:
+    | string
+    | undefined;
+  /** If true, only include terminal enrichment failures. */
+  terminalFailedOnly?: boolean | undefined;
 }
 
 /**

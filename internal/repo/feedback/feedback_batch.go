@@ -568,15 +568,17 @@ func (r *FeedbackRepo) processHardDelete(
 // FeedbackFilter defines criteria for filtering feedback items.
 // Used by CountByFilter and ListIDsByFilter for query-based batch operations.
 type FeedbackFilter struct {
-	Attrs            []AttrFilter // per-dim JSONB containment filters
-	Urgent           *bool        // nil = no filter
-	Q                string       // ILIKE on content/titles
-	TagIDs           []string     // require all these tag UUIDs
-	WorkflowStateIDs []string     // any of these workflow state UUIDs
-	WorkflowCategory *string      // "open"/"active"/"closed"
-	IncludeDeleted   bool         // include soft-deleted items (default false)
-	CreatedAfter     *time.Time   // created_at >= this
-	CreatedBefore    *time.Time   // created_at < this
+	Attrs              []AttrFilter // per-dim JSONB containment filters
+	Urgent             *bool        // nil = no filter
+	Q                  string       // ILIKE on content/titles
+	TagIDs             []string     // require all these tag UUIDs
+	WorkflowStateIDs   []string     // any of these workflow state UUIDs
+	WorkflowCategory   *string      // "open"/"active"/"closed"
+	EnrichmentStatus   *string      // "pending" | "enriching" | "done" | "failed"
+	TerminalFailedOnly *bool        // true = failed AND attempts >= maxEnrichmentAttempts AND no next_retry_at
+	IncludeDeleted     bool         // include soft-deleted items (default false)
+	CreatedAfter       *time.Time   // created_at >= this
+	CreatedBefore      *time.Time   // created_at < this
 }
 
 // CountByFilter returns count of feedback matching the filter.
@@ -646,64 +648,83 @@ func (r *FeedbackRepo) ListIDsByFilter(
 }
 
 func (r *FeedbackRepo) applyBatchFilters(qb *queryBuilder, filter *FeedbackFilter) error {
-	// Include/exclude deleted items.
 	if filter == nil || !filter.IncludeDeleted {
 		qb.and("deleted_at IS NULL")
 	}
-
 	if filter == nil {
 		return nil
 	}
 
-	// Attribute containment filters.
-	for _, f := range filter.Attrs {
-		if f.Dim == "" || f.Value == "" {
+	if err := applyFeedbackAttrFilters(qb, filter.Attrs); err != nil {
+		return err
+	}
+	applyFeedbackSimpleFilters(qb, filter)
+	applyFeedbackTagFilters(qb, filter.TagIDs)
+	applyFeedbackWorkflowFilters(qb, filter)
+	applyFeedbackEnrichmentFilters(qb, filter)
+	applyFeedbackTimeFilters(qb, filter)
+	return nil
+}
+
+func applyFeedbackAttrFilters(qb *queryBuilder, attrs []AttrFilter) error {
+	for _, attr := range attrs {
+		if attr.Dim == "" || attr.Value == "" {
 			continue
 		}
-		clause, err := containmentClause(f)
+		clause, err := containmentClause(attr)
 		if err != nil {
 			return err
 		}
 		qb.and("enriched_attrs @> " + qb.addArg(clause) + "::jsonb")
 	}
+	return nil
+}
 
-	// Urgency filter.
+func applyFeedbackSimpleFilters(qb *queryBuilder, filter *FeedbackFilter) {
 	if filter.Urgent != nil {
 		qb.and("is_urgent = " + qb.addArg(ptrext.Indirect(filter.Urgent)))
 	}
-
-	// Text search.
 	if filter.Q != "" {
 		p := qb.addArg("%" + filter.Q + "%")
 		qb.and("(content ILIKE " + p +
 			" OR enriched_title ILIKE " + p +
 			" OR enriched_display_title ILIKE " + p + ")")
 	}
+}
 
-	// Tag filters - require all specified tags.
-	for _, tagID := range filter.TagIDs {
+func applyFeedbackTagFilters(qb *queryBuilder, tagIDs []string) {
+	for _, tagID := range tagIDs {
 		qb.and("EXISTS (SELECT 1 FROM feedback_tag_assignments fta WHERE fta.feedback_id = id AND fta.tag_id = " + qb.addArg(tagID) + "::uuid)")
 	}
+}
 
-	// Workflow state filters.
+func applyFeedbackWorkflowFilters(qb *queryBuilder, filter *FeedbackFilter) {
 	if len(filter.WorkflowStateIDs) > 0 {
 		qb.and("workflow_state_id = ANY(" + qb.addArg(filter.WorkflowStateIDs) + "::uuid[])")
 	}
-
-	// Workflow category filter.
 	if filter.WorkflowCategory != nil {
 		qb.and("workflow_state_id IN (SELECT id FROM tenant_workflow_states WHERE tenant_id = $1 AND category = " + qb.addArg(ptrext.Indirect(filter.WorkflowCategory)) + ")")
 	}
+}
 
-	// Time range filters.
+func applyFeedbackEnrichmentFilters(qb *queryBuilder, filter *FeedbackFilter) {
+	if filter.EnrichmentStatus != nil {
+		qb.and("enrichment_status = " + qb.addArg(ptrext.Indirect(filter.EnrichmentStatus)))
+	}
+	if filter.TerminalFailedOnly != nil && ptrext.Indirect(filter.TerminalFailedOnly) {
+		qb.and("enrichment_status = 'failed'")
+		qb.and("enrichment_attempts >= " + qb.addArg(maxEnrichmentAttempts))
+		qb.and("enrichment_next_retry_at IS NULL")
+	}
+}
+
+func applyFeedbackTimeFilters(qb *queryBuilder, filter *FeedbackFilter) {
 	if filter.CreatedAfter != nil {
 		qb.and("created_at >= " + qb.addArg(ptrext.Indirect(filter.CreatedAfter)))
 	}
 	if filter.CreatedBefore != nil {
 		qb.and("created_at < " + qb.addArg(ptrext.Indirect(filter.CreatedBefore)))
 	}
-
-	return nil
 }
 
 // RestoreSoftDeleted restores soft-deleted feedback items.
