@@ -41,6 +41,12 @@ exposition plus the portable assets in this directory.
 | `attune_enrich_sweep_submitted_total` | counter | — | pending DB rows successfully resubmitted by the enrich sweeper |
 | `attune_enrichment_terminal_failures_total` | counter | `tenant` | feedback rows that exhausted enrichment retries and stopped in `failed` (#64) |
 | `attune_enrichment_terminal_failures_by_reason_total` | counter | `tenant`, `reason_class` | terminal enrichment failures split by stable reason class |
+| `attune_classification_quality_drift_score` | gauge | `tenant`, `dimension` | latest classification value-distribution drift score by dimension |
+| `attune_classification_quality_low_confidence_ratio` | gauge | `tenant` | latest share of classification events below the dashboard confidence threshold |
+| `attune_classification_quality_off_list_ratio` | gauge | `tenant` | latest share of classification events with off-list value suggestions |
+| `attune_classification_quality_parse_failure_ratio` | gauge | `tenant` | latest share of classification attempts that failed while parsing provider output |
+| `attune_classification_quality_terminal_failure_ratio` | gauge | `tenant` | latest share of classification attempts that reached terminal enrichment failure |
+| `attune_classification_quality_warning_active` | gauge | `tenant`, `reason`, `severity` | active classification-quality dashboard warnings by reason and severity |
 | `attune_notify_failures_total` | counter | `destination_type`, `reason` | notifier push failures |
 | `attune_outbound_delivery_attempts_total` | counter | `destination_type`, `result`, `status` | outbound provider delivery attempts, including retryable and terminal responses |
 | `attune_outbound_delivery_duration_seconds` | histogram | `destination_type`, `result` | end-to-end outbound provider delivery duration, including retry waits |

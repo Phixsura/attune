@@ -91,7 +91,7 @@ This proposal intentionally fixes several risks in the first draft:
 |---|---|---|
 | Relevance quality fixtures and baseline | Implemented | `internal/service/semanticsearch/searchquality` computes recall, precision, MRR, NDCG, zero-result rate, tenant leaks, filter leaks, and must-not-match counts; `testdata/search` commits synthetic JSONL fixtures, fixture reference validation, and a deterministic baseline report. The CLI fails explicitly when the current ranking version, top-k, or query count drifts from the committed baseline. |
 | PostgreSQL lexical scorer | Implemented | `FeedbackRepo.LexicalSearch` uses `to_tsvector('simple')`, `plainto_tsquery`, field-aware partial fallback, snippets, ranks, and scores. Partial fallback escapes SQL `LIKE` wildcards so user text remains literal. |
-| Lexical index | Implemented | Migration `093_feedback_search_quality.sql` adds the matching GIN expression index for live feedback rows. |
+| Lexical index | Implemented | Migration `094_feedback_search_quality.sql` adds the matching GIN expression index for live feedback rows. |
 | RRF hybrid ranking | Implemented | Semantic and lexical candidates are collected independently, deduplicated, and fused with `rrf_k = 60`. |
 | Evidence and metadata contract | Implemented | Proto, Go handlers, OpenAPI, Console TS types, and Node SDK types now expose fallback reason, ranking version, coverage, per-channel ranks, fused score, evidence, and ranking signals. |
 | Console evidence display | Implemented | The feedback workbench shows coverage, fallback reason, ranking version, match rank tooltips, and compact evidence snippets. |

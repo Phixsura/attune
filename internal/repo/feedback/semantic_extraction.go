@@ -28,6 +28,11 @@ type SemanticExtractionRun struct {
 	PromptVersion   string
 	PromptVersionID string
 	Model           string
+	Source          string
+	LogicalModel    string
+	ProviderModel   string
+	ChannelID       string
+	ChannelName     string
 	GuardSummary    map[string]any
 	Attrs           map[string]any
 	Confidence      map[string]any
@@ -70,14 +75,15 @@ func (r *FeedbackRepo) InsertSemanticExtractionRunTx(
 		INSERT INTO semantic_extraction_runs
 		 (tenant_id, subject_type, subject_id, domain_pack, schema_version,
 		  prompt_version, prompt_version_id, model, guard_summary, attrs, confidence, rationale,
-		  dropped_attrs)
+		  dropped_attrs, source, logical_model, provider_model, channel_id, channel_name)
 		VALUES
 		 ($1, $2, $3, $4, $5, $6, NULLIF($7, '')::uuid, $8, $9::jsonb, $10::jsonb, $11::jsonb,
-		  $12::jsonb, $13::jsonb)
+		  $12::jsonb, $13::jsonb, $14, $15, $16, $17, $18)
 		RETURNING id`,
 		run.TenantID, run.SubjectType, run.SubjectID, run.DomainPack,
 		run.SchemaVersion, run.PromptVersion, run.PromptVersionID, run.Model, guardJSON, attrsJSON,
-		confidenceJSON, rationaleJSON, droppedJSON,
+		confidenceJSON, rationaleJSON, droppedJSON, run.Source, run.LogicalModel, run.ProviderModel,
+		run.ChannelID, run.ChannelName,
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert semantic extraction run: %w", err)

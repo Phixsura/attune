@@ -1035,6 +1035,104 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/classification-quality:
+        get:
+            tags:
+                - ClassificationQualityService
+            operationId: ClassificationQualityService_GetClassificationQuality
+            parameters:
+                - name: currentFrom
+                  in: query
+                  schema:
+                    type: string
+                - name: currentTo
+                  in: query
+                  schema:
+                    type: string
+                - name: baselineFrom
+                  in: query
+                  schema:
+                    type: string
+                - name: baselineTo
+                  in: query
+                  schema:
+                    type: string
+                - name: bucketWidth
+                  in: query
+                  schema:
+                    type: string
+                - name: source
+                  in: query
+                  schema:
+                    type: string
+                - name: logicalModel
+                  in: query
+                  schema:
+                    type: string
+                - name: providerModel
+                  in: query
+                  schema:
+                    type: string
+                - name: channelId
+                  in: query
+                  schema:
+                    type: string
+                - name: dimensionName
+                  in: query
+                  schema:
+                    type: string
+                - name: severity
+                  in: query
+                  schema:
+                    type: string
+                - name: lowConfidenceThreshold
+                  in: query
+                  schema:
+                    type: number
+                    format: double
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetClassificationQualityResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/classification-quality/samples:
+        get:
+            tags:
+                - ClassificationQualityService
+            operationId: ClassificationQualityService_GetClassificationQualitySamples
+            parameters:
+                - name: ids
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetClassificationQualitySamplesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/clusters:
         get:
             tags:
@@ -1509,6 +1607,37 @@ paths:
                      enrichment_attempts >= maxEnrichmentAttempts AND enrichment_next_retry_at IS NULL.
                   schema:
                     type: boolean
+                - name: ids
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+                - name: confidenceLte
+                  in: query
+                  schema:
+                    type: number
+                    format: double
+                - name: createdFrom
+                  in: query
+                  schema:
+                    type: string
+                - name: createdTo
+                  in: query
+                  schema:
+                    type: string
+                - name: enrichedFrom
+                  in: query
+                  schema:
+                    type: string
+                - name: enrichedTo
+                  in: query
+                  schema:
+                    type: string
+                - name: qualitySignal
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -6316,6 +6445,170 @@ components:
             description: |-
                 ChangePasswordResponse is empty on success (200). Errors travel through
                  the standard {code, message, requestId} envelope.
+        ClassificationDimensionDrift:
+            type: object
+            properties:
+                dimensionName:
+                    type: string
+                severity:
+                    type: string
+                status:
+                    type: string
+                currentCount:
+                    type: string
+                baselineCount:
+                    type: string
+                jsDistance:
+                    type: number
+                    format: double
+                psi:
+                    type: number
+                    format: double
+                lowConfidenceRate:
+                    type: number
+                    format: double
+                offListRate:
+                    type: number
+                    format: double
+                unknownDimensionRate:
+                    type: number
+                    format: double
+                values:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ClassificationValueDrift'
+                sampleFeedbackIds:
+                    type: array
+                    items:
+                        type: string
+        ClassificationQualitySample:
+            type: object
+            properties:
+                id:
+                    type: string
+                createdAt:
+                    type: string
+                enrichedAt:
+                    type: string
+                source:
+                    type: string
+                title:
+                    type: string
+                displayTitle:
+                    type: string
+                enrichmentStatus:
+                    type: string
+                classificationConfidence:
+                    type: number
+                    format: double
+                signalReason:
+                    type: string
+        ClassificationQualitySummary:
+            type: object
+            properties:
+                classificationEvents:
+                    type: string
+                failedAttempts:
+                    type: string
+                averageConfidence:
+                    type: number
+                    format: double
+                lowConfidenceRate:
+                    type: number
+                    format: double
+                offListRate:
+                    type: number
+                    format: double
+                unknownDimensionRate:
+                    type: number
+                    format: double
+                parseFailureRate:
+                    type: number
+                    format: double
+                terminalFailureRate:
+                    type: number
+                    format: double
+                worstSeverity:
+                    type: string
+        ClassificationQualityTimeBucket:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                classificationEvents:
+                    type: string
+                failedAttempts:
+                    type: string
+                averageConfidence:
+                    type: number
+                    format: double
+                lowConfidenceRate:
+                    type: number
+                    format: double
+                offListRate:
+                    type: number
+                    format: double
+                unknownDimensionRate:
+                    type: number
+                    format: double
+                parseFailureRate:
+                    type: number
+                    format: double
+                terminalFailureRate:
+                    type: number
+                    format: double
+        ClassificationQualityWarning:
+            type: object
+            properties:
+                reason:
+                    type: string
+                severity:
+                    type: string
+                dimensionName:
+                    type: string
+                valueDisplay:
+                    type: string
+                value:
+                    type: number
+                    format: double
+                threshold:
+                    type: number
+                    format: double
+                message:
+                    type: string
+                sampleFeedbackIds:
+                    type: array
+                    items:
+                        type: string
+        ClassificationValueDrift:
+            type: object
+            properties:
+                valueHash:
+                    type: string
+                valueDisplay:
+                    type: string
+                valueStatus:
+                    type: string
+                currentCount:
+                    type: string
+                baselineCount:
+                    type: string
+                currentShare:
+                    type: number
+                    format: double
+                baselineShare:
+                    type: number
+                    format: double
+                shareDeltaPp:
+                    type: number
+                    format: double
+                contribution:
+                    type: number
+                    format: double
+                sampleFeedbackIds:
+                    type: array
+                    items:
+                        type: string
         ClusterMember:
             type: object
             properties:
@@ -7813,6 +8106,50 @@ components:
                 retryAfterSeconds:
                     type: integer
                     format: int32
+        GetClassificationQualityResponse:
+            type: object
+            properties:
+                generatedAt:
+                    type: string
+                dataThrough:
+                    type: string
+                rollupLagSeconds:
+                    type: string
+                currentFrom:
+                    type: string
+                currentTo:
+                    type: string
+                baselineFrom:
+                    type: string
+                baselineTo:
+                    type: string
+                bucketWidth:
+                    type: string
+                summary:
+                    $ref: '#/components/schemas/ClassificationQualitySummary'
+                series:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ClassificationQualityTimeBucket'
+                dimensions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ClassificationDimensionDrift'
+                warnings:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ClassificationQualityWarning'
+                samples:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ClassificationQualitySample'
+        GetClassificationQualitySamplesResponse:
+            type: object
+            properties:
+                samples:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ClassificationQualitySample'
         GetClusterMembersResponse:
             type: object
             properties:
@@ -10242,6 +10579,10 @@ tags:
       description: |-
         BatchService provides batch operations on feedback rows (#30).
          Operations can target rows by explicit IDs or by filter query.
+    - name: ClassificationQualityService
+      description: |-
+        ClassificationQualityService serves the console classification quality
+         dashboard and its bounded sample drill-downs.
     - name: ClustersService
       description: ClustersService provides semantic cluster views for the console (#25).
     - name: DigestSubscriptionService

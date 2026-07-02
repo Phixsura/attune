@@ -226,6 +226,13 @@ export interface ListFeedbackRequest {
    * enrichment_attempts >= maxEnrichmentAttempts AND enrichment_next_retry_at IS NULL.
    */
   terminalFailedOnly?: boolean | undefined;
+  ids: string[];
+  confidenceLte?: number | undefined;
+  createdFrom?: string | undefined;
+  createdTo?: string | undefined;
+  enrichedFrom?: string | undefined;
+  enrichedTo?: string | undefined;
+  qualitySignal?: string | undefined;
 }
 
 export interface ListFeedbackResponse {

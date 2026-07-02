@@ -8,7 +8,10 @@
 # plugins, so no local protoc-gen-* installs are needed — only network access to
 # the Buf Schema Registry. To change a proto dependency, run `make proto-deps`.
 
-.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality test test-live test-live-list ci-check
+.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality test fast-check adversarial-check test-live test-live-list test-integration runtime-smoke release-smoke ci-check
+
+PNPM ?= pnpm
+FUZZTIME ?= 10s
 
 help: ## List targets.
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -75,6 +78,16 @@ search-quality: ## Verify the committed semantic-search relevance baseline.
 test: ## Unit tier — no external services, no API keys needed.
 	go test -short ./...
 
+fast-check: ## Fast local unit/type/browser-contract sweep.
+	go test -short ./...
+	cd console && $(PNPM) --ignore-workspace tsc -b --noEmit
+	cd console && $(PNPM) --ignore-workspace vitest run
+
+adversarial-check: ## Bug-hunting tier — focused adversarial tests plus short Go fuzz runs.
+	go test -count=1 ./internal/repo/feedback ./internal/handlers/console/feedback
+	go test ./internal/repo/feedback -run '^$$' -fuzz=FuzzNormalizeQualityValue -fuzztime=$(FUZZTIME)
+	go test ./internal/repo/feedback -run '^$$' -fuzz=FuzzQualityAccumulatorMalformedPayloads -fuzztime=$(FUZZTIME)
+
 test-live: ## Live tier — runs test/live/... against real external endpoints. See docs/testing.md.
 	go test -tags=live -count=1 -timeout=10m -run '^TestLive_' ./test/live/...
 
@@ -95,6 +108,23 @@ test-live-list: ## Show which live backends would run given current env.
 
 test-integration: ## IO tier — real Postgres. Needs Docker or ATTUNE_TEST_DATABASE_URL + PostgreSQL 17 client tools (pg_dump/psql/pg_basebackup/pg_verifybackup) for the restore-drill tests.
 	go test -tags=integration -count=1 -p 1 -timeout=10m ./test/integration/postgres/...
+
+runtime-smoke: ## Build the production image and boot it against throwaway pgvector Postgres.
+	docker build -t attune:runtime-smoke .
+	ATTUNE_RUNTIME_SMOKE_IMAGE=attune:runtime-smoke bash scripts/runtime-smoke.sh
+
+release-smoke: ## Heavy pre-release sweep: CI checks, contracts, integration, deploy, observability, image runtime.
+	$(MAKE) ci-check
+	$(MAKE) test-integration
+	$(MAKE) proto-lint
+	$(MAKE) proto-breaking
+	$(MAKE) observability-dashboards
+	$(MAKE) observability-rules
+	docker compose -f deploy/docker-compose.yml config -q
+	docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.obs.yml config -q
+	docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.oidc-test.yml config -q
+	git diff --check
+	$(MAKE) runtime-smoke
 
 # ── CI pre-flight (docs/ci-troubleshooting.md) ───────────────────────────
 #
@@ -117,6 +147,11 @@ ci-check: ## Run all CI checks locally before push.
 	@echo "▸ go test (unit)"
 	@go test -race -short ./...
 	@echo "✓ go test"
+	@echo
+	@echo "▸ go.mod / go.sum tidy"
+	@go mod tidy
+	@git diff --exit-code go.mod go.sum
+	@echo "✓ go mod tidy"
 	@echo
 	@echo "▸ search quality baseline"
 	@go run ./internal/tools/searchquality
@@ -159,16 +194,24 @@ ci-check: ## Run all CI checks locally before push.
 	@echo "✓ jscpd"
 	@echo
 	@echo "▸ console: pnpm tsc"
-	@cd console && pnpm tsc -b --noEmit
+	@cd console && $(PNPM) --ignore-workspace tsc -b --noEmit
 	@echo "✓ console tsc"
 	@echo
 	@echo "▸ console: biome check"
-	@cd console && pnpm biome check
+	@cd console && $(PNPM) --ignore-workspace biome check
 	@echo "✓ console biome"
 	@echo
+	@echo "▸ console: vite build"
+	@cd console && $(PNPM) --ignore-workspace exec vite build
+	@echo "✓ console vite build"
+	@echo
 	@echo "▸ console: vitest"
-	@cd console && pnpm vitest run
+	@cd console && $(PNPM) --ignore-workspace vitest run
 	@echo "✓ console vitest"
+	@echo
+	@echo "▸ console: dependency-cruiser"
+	@cd console && $(PNPM) --ignore-workspace arch
+	@echo "✓ console arch"
 	@echo
 	@echo "▸ trufflehog (if installed)"
 	@command -v trufflehog >/dev/null 2>&1 && trufflehog git file://. --only-verified --fail || echo "⚠ trufflehog not installed, skipping"

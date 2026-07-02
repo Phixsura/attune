@@ -124,6 +124,7 @@
     "settings": "设置",
     "usage": "用量",
     "llm_usage": "LLM 成本",
+    "classification_quality": "分类质量",
     "llm_config": "LLM 配置",
     "members": "成员",
     "outbox_dead": "死信投递",
@@ -1810,6 +1811,17 @@
     },
     "filter_title": "筛选视角",
     "filter_description": "按维度、标签、工作流状态和关键词快速收拢当前反馈面。",
+    "quality_filters": {
+      "ids": "质量样本",
+      "ids_value": "{{count}} 条反馈",
+      "signal": "质量信号",
+      "confidence": "置信度",
+      "confidence_lte": "≤ {{value}}%",
+      "low_confidence": "低置信度",
+      "off_list": "越界值",
+      "parse_failure": "解析失败",
+      "terminal_failure": "终态失败"
+    },
     "clear_filters": "清空筛选",
     "search": {
       "placeholder": "搜索反馈内容...",
@@ -2438,6 +2450,93 @@
     },
     "empty_title": "还没有 LLM 调用",
     "empty_body": "反馈进入 AI 分类后，这里会按模型和时间显示 token 与成本。"
+  },
+  "classification_quality": {
+    "subtitle": "按当前窗口和基线窗口对比分类分布、低置信度、越界值与失败率。",
+    "period": "{{start}} — {{end}}",
+    "open_feedback": "查看反馈",
+    "range": {
+      "7d": "7 天",
+      "30d": "30 天",
+      "90d": "90 天"
+    },
+    "bucket": {
+      "day": "按天",
+      "hour": "按小时"
+    },
+    "severity": {
+      "all": "全部级别",
+      "alert": "告警",
+      "watch": "关注",
+      "normal": "正常",
+      "insufficient_data": "数据不足"
+    },
+    "filters": {
+      "dimension": "维度",
+      "source": "来源",
+      "logical_model": "逻辑模型",
+      "provider_model": "提供商模型",
+      "channel_id": "通道 ID",
+      "clear": "清除高级筛选"
+    },
+    "summary": {
+      "events": "分类事件",
+      "events_hint": "当前窗口内成功写入分类结果的反馈量。",
+      "low_confidence": "低置信度",
+      "off_list": "越界值",
+      "warnings": "告警"
+    },
+    "trend": {
+      "title": "质量率趋势"
+    },
+    "legend": {
+      "low_confidence": "低置信度",
+      "off_list": "越界值",
+      "parse_failure": "解析失败",
+      "terminal_failure": "终态失败"
+    },
+    "warnings": {
+      "title": "当前告警",
+      "count": "{{count}} 个活跃信号",
+      "global": "全局",
+      "empty_title": "暂无告警",
+      "empty_body": "当前窗口内没有质量信号超过阈值。"
+    },
+    "warning_reason": {
+      "dimension_distribution_drift": "维度分布漂移",
+      "low_confidence_rate_spike": "低置信度升高",
+      "off_list_rate_spike": "越界值升高",
+      "parse_failure_rate_spike": "解析失败升高",
+      "terminal_failure_rate_spike": "终态失败升高"
+    },
+    "dimensions": {
+      "title": "维度漂移",
+      "count": "{{count}} 个维度",
+      "empty_title": "暂无维度漂移",
+      "empty_body": "当前筛选条件下没有维度达到展示阈值。",
+      "volume": "当前 {{current}} / 基线 {{baseline}}",
+      "js": "JS 距离",
+      "psi": "PSI {{value}}",
+      "low_confidence": "低置信度",
+      "off_list": "越界值 {{value}}"
+    },
+    "value_status": {
+      "configured": "配置内",
+      "off_list": "越界",
+      "unknown_dimension": "未知维度"
+    },
+    "samples": {
+      "title": "样本反馈",
+      "count": "{{count}} 条可追溯样本",
+      "confidence": "置信度",
+      "status": "状态",
+      "empty_title": "暂无样本",
+      "empty_body": "当前告警和漂移没有返回样本反馈。"
+    },
+    "empty": {
+      "title": "暂无趋势数据",
+      "body": "当前时间窗口没有可绘制的分类质量时间桶。"
+    }
   },
   "tags": {
     "title": "标签管理",

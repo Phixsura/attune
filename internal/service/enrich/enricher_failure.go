@@ -12,6 +12,8 @@ func (e *Enricher) failureSnapshot(cfg ClassifyConfig, route llmclient.RouteMeta
 	snapshot := feedback.EnrichmentFailureSnapshot{
 		ReasonClass:       failureReasonClass(err),
 		Model:             strings.TrimSpace(route.ProviderModel),
+		LogicalModel:      strings.TrimSpace(route.LogicalModel),
+		ProviderModel:     strings.TrimSpace(route.ProviderModel),
 		ChannelID:         strings.TrimSpace(route.ChannelID),
 		ChannelName:       strings.TrimSpace(route.ChannelName),
 		ConfigFingerprint: terminalFailureConfigFingerprint(policy),

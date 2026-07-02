@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+// ClassificationQualityService serves the console classification quality
+// dashboard and its bounded sample drill-downs.
+service ClassificationQualityService {
+  rpc GetClassificationQuality(GetClassificationQualityRequest) returns (GetClassificationQualityResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/classification-quality"};
+  }
+
+  rpc GetClassificationQualitySamples(GetClassificationQualitySamplesRequest) returns (GetClassificationQualitySamplesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/classification-quality/samples"};
+  }
+}
+
+message GetClassificationQualityRequest {
+  string current_from = 1;
+  string current_to = 2;
+  string baseline_from = 3;
+  string baseline_to = 4;
+  string bucket_width = 5;  // hour | day
+  string source = 6;
+  string logical_model = 7;
+  string provider_model = 8;
+  string channel_id = 9;
+  string dimension_name = 10;
+  string severity = 11;
+  double low_confidence_threshold = 12;
+  int32 limit = 13;
+}
+
+message GetClassificationQualitySamplesRequest {
+  repeated int64 ids = 1;
+}
+
+message GetClassificationQualityResponse {
+  string generated_at = 1;
+  string data_through = 2;
+  int64 rollup_lag_seconds = 3;
+  string current_from = 4;
+  string current_to = 5;
+  string baseline_from = 6;
+  string baseline_to = 7;
+  string bucket_width = 8;
+  ClassificationQualitySummary summary = 9;
+  repeated ClassificationQualityTimeBucket series = 10;
+  repeated ClassificationDimensionDrift dimensions = 11;
+  repeated ClassificationQualityWarning warnings = 12;
+  repeated ClassificationQualitySample samples = 13;
+}
+
+message GetClassificationQualitySamplesResponse {
+  repeated ClassificationQualitySample samples = 1;
+}
+
+message ClassificationQualitySummary {
+  int64 classification_events = 1;
+  int64 failed_attempts = 2;
+  double average_confidence = 3;
+  double low_confidence_rate = 4;
+  double off_list_rate = 5;
+  double unknown_dimension_rate = 6;
+  double parse_failure_rate = 7;
+  double terminal_failure_rate = 8;
+  string worst_severity = 9;
+}
+
+message ClassificationQualityTimeBucket {
+  string bucket = 1;
+  int64 classification_events = 2;
+  int64 failed_attempts = 3;
+  double average_confidence = 4;
+  double low_confidence_rate = 5;
+  double off_list_rate = 6;
+  double unknown_dimension_rate = 7;
+  double parse_failure_rate = 8;
+  double terminal_failure_rate = 9;
+}
+
+message ClassificationDimensionDrift {
+  string dimension_name = 1;
+  string severity = 2;
+  string status = 3;
+  int64 current_count = 4;
+  int64 baseline_count = 5;
+  double js_distance = 6;
+  double psi = 7;
+  double low_confidence_rate = 8;
+  double off_list_rate = 9;
+  double unknown_dimension_rate = 10;
+  repeated ClassificationValueDrift values = 11;
+  repeated int64 sample_feedback_ids = 12;
+}
+
+message ClassificationValueDrift {
+  string value_hash = 1;
+  string value_display = 2;
+  string value_status = 3;
+  int64 current_count = 4;
+  int64 baseline_count = 5;
+  double current_share = 6;
+  double baseline_share = 7;
+  double share_delta_pp = 8;
+  double contribution = 9;
+  repeated int64 sample_feedback_ids = 10;
+}
+
+message ClassificationQualityWarning {
+  string reason = 1;
+  string severity = 2;
+  string dimension_name = 3;
+  string value_display = 4;
+  double value = 5;
+  double threshold = 6;
+  string message = 7;
+  repeated int64 sample_feedback_ids = 8;
+}
+
+message ClassificationQualitySample {
+  int64 id = 1;
+  string created_at = 2;
+  optional string enriched_at = 3;
+  string source = 4;
+  string title = 5;
+  optional string display_title = 6;
+  string enrichment_status = 7;
+  optional double classification_confidence = 8;
+  string signal_reason = 9;
+}

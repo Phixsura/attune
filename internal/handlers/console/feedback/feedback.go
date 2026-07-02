@@ -102,6 +102,10 @@ type feedbackRepo interface {
 	UrgentCount(ctx context.Context, tenantID string, from, to time.Time) (int64, error)
 	TopValuesByDim(ctx context.Context, tenantID, dim string, multi bool, from, to time.Time, limit int) ([]feedback.ValueCount, error)
 	TerminalFailureWorkbench(ctx context.Context, tenantID string, from, to time.Time) (*feedback.TerminalFailureWorkbench, error)
+	RefreshClassificationQuality(ctx context.Context, opts feedback.ClassificationQualityRefreshOpts) error
+	ClassificationQualityAggregates(ctx context.Context, opts feedback.ClassificationQualityQueryOpts) (feedback.ClassificationQualitySignalAggregate, []feedback.ClassificationQualityValueAggregate, error)
+	ClassificationQualitySeries(ctx context.Context, opts feedback.ClassificationQualityQueryOpts) ([]feedback.ClassificationQualitySeriesBucket, error)
+	ClassificationQualitySamples(ctx context.Context, tenantID string, ids []int64) ([]feedback.ClassificationQualitySample, error)
 	RetryEnrichment(ctx context.Context, tenantID string, id int64) (*feedback.RetryResult, error)
 }
 

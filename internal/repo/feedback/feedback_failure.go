@@ -6,6 +6,8 @@ package feedback
 type EnrichmentFailureSnapshot struct {
 	ReasonClass       string
 	Model             string
+	LogicalModel      string
+	ProviderModel     string
 	ChannelID         string
 	ChannelName       string
 	ConfigFingerprint string

@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import {
+  Activity,
   BarChart3,
   Bell,
   Bot,
@@ -91,6 +92,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     icon: Bot,
     labelKey: 'nav.llm_usage',
     path: '/analytics/llm-usage',
+    permission: 'usage:view',
+  },
+  {
+    group: 'analytics',
+    icon: Activity,
+    labelKey: 'nav.classification_quality',
+    path: '/analytics/classification-quality',
     permission: 'usage:view',
   },
   {

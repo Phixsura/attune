@@ -458,10 +458,10 @@ Common causes:
 Recovery: stale claim recovery rate returns to near-zero for 1 hour. Address the
 underlying cause (memory limits, panic bugs, network stability).
 
-## AttuneEnrichmentLatencyHigh
+## AttuneGlobalEnrichmentLatencyHigh
 
-Impact: enrichment is taking longer than expected, which delays feedback processing
-and may cause visible delays in the user-facing workflow.
+Impact: global enrichment latency is taking longer than expected, which delays
+feedback processing and may cause visible delays in the user-facing workflow.
 
 Confirm:
 

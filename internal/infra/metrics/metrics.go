@@ -147,6 +147,67 @@ var EnrichmentTerminalFailuresByReasonTotal = prometheus.NewCounterVec(
 	[]string{"tenant", "reason_class"},
 )
 
+// ClassificationQualityDriftScore gauges the latest dashboard drift score by
+// dimension. Values are Jensen-Shannon distance in the same range returned by
+// the console classification-quality endpoint.
+var ClassificationQualityDriftScore = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_classification_quality_drift_score",
+		Help: "Latest classification quality drift score by tenant and dimension.",
+	},
+	[]string{"tenant", "dimension"},
+)
+
+// ClassificationQualityLowConfidenceRatio gauges the latest share of
+// classification events at or below the configured low-confidence threshold.
+var ClassificationQualityLowConfidenceRatio = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_classification_quality_low_confidence_ratio",
+		Help: "Latest classification events at or below the low-confidence threshold.",
+	},
+	[]string{"tenant"},
+)
+
+// ClassificationQualityOffListRatio gauges the latest share of classification
+// events with at least one off-list value suggestion.
+var ClassificationQualityOffListRatio = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_classification_quality_off_list_ratio",
+		Help: "Latest classification events with off-list value suggestions.",
+	},
+	[]string{"tenant"},
+)
+
+// ClassificationQualityParseFailureRatio gauges the latest share of
+// classification attempts that failed while parsing provider output.
+var ClassificationQualityParseFailureRatio = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_classification_quality_parse_failure_ratio",
+		Help: "Latest classification attempts that failed while parsing provider output.",
+	},
+	[]string{"tenant"},
+)
+
+// ClassificationQualityTerminalFailureRatio gauges the latest share of
+// classification attempts that reached terminal enrichment failure.
+var ClassificationQualityTerminalFailureRatio = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_classification_quality_terminal_failure_ratio",
+		Help: "Latest classification attempts that reached terminal enrichment failure.",
+	},
+	[]string{"tenant"},
+)
+
+// ClassificationQualityWarningActive marks warning reasons currently active in
+// the console classification-quality response. severity is watch or alert.
+var ClassificationQualityWarningActive = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_classification_quality_warning_active",
+		Help: "Active classification quality dashboard warnings.",
+	},
+	[]string{"tenant", "reason", "severity"},
+)
+
 // NotifyFailuresTotal increments on every notifier push that didn't
 // return nil. destination_type ∈ {raw-webhook, slack, lark, discord,
 // github-issue}; reason is the error class (transport | terminal).
@@ -935,6 +996,12 @@ var allMetrics = []prometheus.Collector{
 	EnrichSweepSubmittedTotal,
 	EnrichmentTerminalFailuresTotal,
 	EnrichmentTerminalFailuresByReasonTotal,
+	ClassificationQualityDriftScore,
+	ClassificationQualityLowConfidenceRatio,
+	ClassificationQualityOffListRatio,
+	ClassificationQualityParseFailureRatio,
+	ClassificationQualityTerminalFailureRatio,
+	ClassificationQualityWarningActive,
 	NotifyFailuresTotal,
 	OutboundDeliveryAttemptsTotal,
 	OutboundDeliveryDuration,
@@ -1028,6 +1095,12 @@ func RegisteredMetricNames() []string {
 		"attune_enrich_sweep_submitted_total",
 		"attune_enrichment_terminal_failures_total",
 		"attune_enrichment_terminal_failures_by_reason_total",
+		"attune_classification_quality_drift_score",
+		"attune_classification_quality_low_confidence_ratio",
+		"attune_classification_quality_off_list_ratio",
+		"attune_classification_quality_parse_failure_ratio",
+		"attune_classification_quality_terminal_failure_ratio",
+		"attune_classification_quality_warning_active",
 		"attune_notify_failures_total",
 		"attune_outbound_delivery_attempts_total",
 		"attune_outbound_delivery_duration_seconds",
