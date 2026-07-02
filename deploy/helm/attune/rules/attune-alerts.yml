@@ -311,7 +311,7 @@ groups:
 
   - name: attune.alerts.performance
     rules:
-      - alert: AttuneEnrichmentLatencyHigh
+      - alert: AttuneGlobalEnrichmentLatencyHigh
         expr: histogram_quantile(0.95, sum by (le) (rate(attune_enrich_duration_seconds_bucket[5m]))) > 30
         for: 10m
         labels:
@@ -322,7 +322,7 @@ groups:
           description: "Enrichment p95 latency is {{ $value | humanizeDuration }}. Check AI pipeline health and LLM provider latency."
           dashboard: "Attune AI Pipeline"
           dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline"
-          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneenrichmentlatencyhigh"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneglobalenrichmentlatencyhigh"
           action: "Split by tenant and model. Check LLM provider status and queue depth. Consider scaling workers if queue is backing up."
 
       - alert: AttuneSearchLatencyHigh

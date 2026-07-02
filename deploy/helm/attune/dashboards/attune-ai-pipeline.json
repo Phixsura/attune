@@ -944,6 +944,121 @@
         },
         "orientation": "horizontal"
       }
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "Classification quality",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Classification quality rates",
+      "description": "Latest dashboard quality ratios for confidence, off-list suggestions, parse failures, terminal failures, and active warnings.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 71
+      },
+      "targets": [
+        {
+          "expr": "(attune_classification_quality_low_confidence_ratio{tenant=~\"$tenant\"}) or vector(0)",
+          "legendFormat": "low confidence",
+          "refId": "A"
+        },
+        {
+          "expr": "(attune_classification_quality_off_list_ratio{tenant=~\"$tenant\"}) or vector(0)",
+          "legendFormat": "off-list",
+          "refId": "B"
+        },
+        {
+          "expr": "(attune_classification_quality_parse_failure_ratio{tenant=~\"$tenant\"}) or vector(0)",
+          "legendFormat": "parse failure",
+          "refId": "C"
+        },
+        {
+          "expr": "(attune_classification_quality_terminal_failure_ratio{tenant=~\"$tenant\"}) or vector(0)",
+          "legendFormat": "terminal failure",
+          "refId": "D"
+        },
+        {
+          "expr": "(sum by (reason, severity) (attune_classification_quality_warning_active{tenant=~\"$tenant\"})) or vector(0)",
+          "legendFormat": "warning / {{reason}} / {{severity}}",
+          "refId": "E"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "percentunit"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "barchart",
+      "title": "Classification drift by dimension",
+      "description": "Latest Jensen-Shannon drift score emitted by the classification quality dashboard for each configured dimension.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 71
+      },
+      "targets": [
+        {
+          "expr": "attune_classification_quality_drift_score{tenant=~\"$tenant\"}",
+          "legendFormat": "{{dimension}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal"
+      }
     }
   ]
 }

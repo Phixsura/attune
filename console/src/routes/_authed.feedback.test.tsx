@@ -1,6 +1,7 @@
 import { HttpResponse, http } from 'msw'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import { Route as FeedbackIndexRoute } from '@/routes/_authed.feedback.index'
 import { FeedbackRoutePage } from '@/routes/-feedback-route-page'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
@@ -124,6 +125,24 @@ const terminalDetailFixture = {
 }
 
 describe('_authed.feedback route — user flow smoke', () => {
+  it('preserves numeric drilldown search params parsed by the router', () => {
+    const validateSearch = FeedbackIndexRoute.options.validateSearch as (
+      search: Record<string, unknown>,
+    ) => { ids?: string | number; confidence_lte?: string | number; quality_signal?: string }
+
+    expect(
+      validateSearch({
+        ids: 101,
+        confidence_lte: 0.55,
+        quality_signal: 'low_confidence',
+      }),
+    ).toEqual({
+      ids: 101,
+      confidence_lte: 0.55,
+      quality_signal: 'low_confidence',
+    })
+  })
+
   it('renders title + table row from the list query, opens sheet with detail on row click', async () => {
     server.use(
       http.get('/fb/v1/console/enrich-config', () =>
@@ -188,6 +207,54 @@ describe('_authed.feedback route — user flow smoke', () => {
     })
     expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
   }, 20_000) // Route-level smoke composes lazy routes, queries, and sheet rendering.
+
+  it('updates quality drilldown filters when the same route receives new search-derived props', async () => {
+    const seen: URL[] = []
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        seen.push(new URL(request.url))
+        return HttpResponse.json({ items: [itemFixture], nextCursor: undefined })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { rerender } = renderWithProviders(
+      <FeedbackRoutePage
+        initialQualityFilters={{ ids: ['101'], qualitySignal: 'low_confidence' }}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(seen.some((url) => url.searchParams.get('ids') === '101')).toBe(true)
+    })
+    rerender(
+      <FeedbackRoutePage
+        initialQualityFilters={{ ids: ['202'], qualitySignal: 'parse_failure' }}
+      />,
+    )
+    await waitFor(() => {
+      expect(seen.some((url) => url.searchParams.get('ids') === '202')).toBe(true)
+    })
+    expect(seen[seen.length - 1]?.searchParams.get('quality_signal')).toBe('parse_failure')
+  }, 20_000)
 
   it('queue rail primary action opens the current highest-priority feedback', async () => {
     server.use(

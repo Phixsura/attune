@@ -15,7 +15,7 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react'
-import { type ReactNode, useDeferredValue, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
@@ -90,6 +90,16 @@ interface FeedbackPageProps {
   renderAuditLog?: (data: FeedbackDetail) => ReactNode
   initialQueueMode?: FeedbackQueueMode
   showTerminalWorkbench?: boolean
+  initialQualityFilters?: Pick<
+    FeedbackListFilters,
+    | 'ids'
+    | 'confidenceLte'
+    | 'createdFrom'
+    | 'createdTo'
+    | 'enrichedFrom'
+    | 'enrichedTo'
+    | 'qualitySignal'
+  >
 }
 
 export function FeedbackPage({
@@ -101,12 +111,15 @@ export function FeedbackPage({
   renderAuditLog,
   initialQueueMode = 'all',
   showTerminalWorkbench = false,
+  initialQualityFilters,
 }: FeedbackPageProps) {
   const { t } = useTranslation()
   const displayOf = useDisplayName()
   const { can } = usePermissions()
   const canViewLLMConfig = can('llm_config:view')
   const canViewRuntimeConfig = can('settings:enrichment_runtime:view')
+  const initialQualityFilterKey = qualityFilterSyncKey(initialQualityFilters)
+  const syncedQualityFilterKeyRef = useRef(initialQualityFilterKey)
 
   const [attrFilters, setAttrFilters] = useState<Record<string, string>>({})
   const [tagFilter, setTagFilter] = useState<string>('')
@@ -116,6 +129,7 @@ export function FeedbackPage({
   const [qInput, setQInput] = useState('')
   const [sortMode, setSortMode] = useState<FeedbackSortMode>('newest')
   const [queueMode, setQueueMode] = useState<FeedbackQueueMode>(initialQueueMode)
+  const [qualityFilters, setQualityFilters] = useState(initialQualityFilters ?? {})
   const qDeferred = useDeferredValue(qInput)
   const [detailId, setDetailId] = useState<string | null>(null)
   const detailRestoreFocusRef = useRef<HTMLElement | null>(null)
@@ -123,6 +137,11 @@ export function FeedbackPage({
     detailRestoreFocusRef.current = restoreFocusTo ?? null
     setDetailId(feedbackId)
   }
+  useEffect(() => {
+    if (syncedQualityFilterKeyRef.current === initialQualityFilterKey) return
+    syncedQualityFilterKeyRef.current = initialQualityFilterKey
+    setQualityFilters(initialQualityFilters ?? {})
+  }, [initialQualityFilterKey, initialQualityFilters])
   const terminalWorkbench = useQuery({
     ...terminalFailureWorkbenchQuery(),
     enabled: showTerminalWorkbench,
@@ -179,8 +198,24 @@ export function FeedbackPage({
       workflowState: workflowFilter || undefined,
       enrichmentStatus: effectiveEnrichmentStatus || undefined,
       terminalFailedOnly: queueMode === 'terminal' ? true : undefined,
+      ids: qualityFilters.ids,
+      confidenceLte: qualityFilters.confidenceLte,
+      createdFrom: qualityFilters.createdFrom,
+      createdTo: qualityFilters.createdTo,
+      enrichedFrom: qualityFilters.enrichedFrom,
+      enrichedTo: qualityFilters.enrichedTo,
+      qualitySignal: qualityFilters.qualitySignal,
     }
-  }, [attrFilters, qDeferred, tagFilter, urgentOnly, workflowFilter, enrichmentFilter, queueMode])
+  }, [
+    attrFilters,
+    qDeferred,
+    tagFilter,
+    urgentOnly,
+    workflowFilter,
+    enrichmentFilter,
+    queueMode,
+    qualityFilters,
+  ])
 
   const list = useInfiniteQuery(feedbackListInfiniteQuery(filters))
   const items = list.data?.pages.flatMap((p) => p.items) ?? []
@@ -190,6 +225,11 @@ export function FeedbackPage({
     (tagFilter ? 1 : 0) +
     (workflowFilter ? 1 : 0) +
     (enrichmentFilter ? 1 : 0) +
+    (qualityFilters.ids?.length ? 1 : 0) +
+    (qualityFilters.confidenceLte != null ? 1 : 0) +
+    (qualityFilters.createdFrom || qualityFilters.createdTo ? 1 : 0) +
+    (qualityFilters.enrichedFrom || qualityFilters.enrichedTo ? 1 : 0) +
+    (qualityFilters.qualitySignal ? 1 : 0) +
     (urgentOnly ? 1 : 0) +
     (queueMode !== initialQueueMode ? 1 : 0) +
     (qInput.trim() ? 1 : 0)
@@ -304,6 +344,38 @@ export function FeedbackPage({
       })
     }
 
+    if (qualityFilters.ids?.length) {
+      chips.push({
+        key: 'quality-ids',
+        label: t('feedback.quality_filters.ids'),
+        value: t('feedback.quality_filters.ids_value', { count: qualityFilters.ids.length }),
+        tone: 'active',
+        onRemove: () => setQualityFilters((old) => ({ ...old, ids: undefined })),
+      })
+    }
+
+    if (qualityFilters.qualitySignal) {
+      chips.push({
+        key: 'quality-signal',
+        label: t('feedback.quality_filters.signal'),
+        value: qualitySignalLabel(qualityFilters.qualitySignal, t),
+        tone: 'active',
+        onRemove: () => setQualityFilters((old) => ({ ...old, qualitySignal: undefined })),
+      })
+    }
+
+    if (qualityFilters.confidenceLte != null) {
+      chips.push({
+        key: 'quality-confidence',
+        label: t('feedback.quality_filters.confidence'),
+        value: t('feedback.quality_filters.confidence_lte', {
+          value: Math.round(qualityFilters.confidenceLte * 100),
+        }),
+        tone: 'active',
+        onRemove: () => setQualityFilters((old) => ({ ...old, confidenceLte: undefined })),
+      })
+    }
+
     if (urgentOnly) {
       chips.push({
         key: 'urgent',
@@ -351,6 +423,7 @@ export function FeedbackPage({
     displayOf,
     enrichmentFilter,
     initialQueueMode,
+    qualityFilters,
     queueMode,
     qInput,
     sortMode,
@@ -459,6 +532,7 @@ export function FeedbackPage({
     setTagFilter('')
     setWorkflowFilter('')
     setEnrichmentFilter('')
+    setQualityFilters({})
     setUrgentOnly(false)
     setQueueMode(initialQueueMode)
     setQInput('')
@@ -878,6 +952,19 @@ export function FeedbackPage({
       />
     </div>
   )
+}
+
+function qualityFilterSyncKey(filters: FeedbackPageProps['initialQualityFilters']) {
+  if (!filters) return ''
+  return [
+    filters.ids?.join(',') ?? '',
+    filters.confidenceLte ?? '',
+    filters.createdFrom ?? '',
+    filters.createdTo ?? '',
+    filters.enrichedFrom ?? '',
+    filters.enrichedTo ?? '',
+    filters.qualitySignal ?? '',
+  ].join('\x1f')
 }
 
 function FilterBar({
@@ -2916,6 +3003,14 @@ function enrichmentStatusLabel(status: string, t: (key: string) => string) {
   if (status === 'done') return t('feedback.status.done')
   if (status === 'failed') return t('feedback.status.failed')
   return status
+}
+
+function qualitySignalLabel(signal: string, t: (key: string) => string) {
+  if (signal === 'low_confidence') return t('feedback.quality_filters.low_confidence')
+  if (signal === 'off_list') return t('feedback.quality_filters.off_list')
+  if (signal === 'parse_failure') return t('feedback.quality_filters.parse_failure')
+  if (signal === 'terminal_failure') return t('feedback.quality_filters.terminal_failure')
+  return signal
 }
 
 function queuePrimaryActionLabel(

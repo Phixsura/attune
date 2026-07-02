@@ -43,6 +43,13 @@ type ConsoleListOpts struct {
 	WorkflowCategory   *string // "open"/"active"/"closed"; nil = no filter
 	EnrichmentStatus   *string // "pending" | "enriching" | "done" | "failed"; nil = no filter
 	TerminalFailedOnly *bool   // true = failed AND attempts >= maxEnrichmentAttempts AND next_retry_at IS NULL
+	IDs                []int64
+	ConfidenceLTE      *float64
+	CreatedFrom        *time.Time
+	CreatedTo          *time.Time
+	EnrichedFrom       *time.Time
+	EnrichedTo         *time.Time
+	QualitySignal      *string
 }
 
 // ConsoleListRow is the projection sent to the console list view.
@@ -92,8 +99,20 @@ func (qb *queryBuilder) addArg(v any) string {
 func (qb *queryBuilder) and(clause string) { qb.where += " AND " + clause }
 
 func (qb *queryBuilder) applyFilters(opts ConsoleListOpts) error {
+	if err := qb.applyIdentityFilters(opts); err != nil {
+		return err
+	}
+	qb.applyStateFilters(opts)
+	qb.applyQualityFilters(opts)
+	return nil
+}
+
+func (qb *queryBuilder) applyIdentityFilters(opts ConsoleListOpts) error {
 	if opts.Cursor > 0 {
 		qb.and("id < " + qb.addArg(opts.Cursor))
+	}
+	if len(opts.IDs) > 0 {
+		qb.and("id = ANY(" + qb.addArg(uniquePositiveIDs(opts.IDs, 50)) + ")")
 	}
 	for _, f := range opts.Attrs {
 		if f.Dim == "" || f.Value == "" {
@@ -105,6 +124,10 @@ func (qb *queryBuilder) applyFilters(opts ConsoleListOpts) error {
 		}
 		qb.and("enriched_attrs @> " + qb.addArg(clause) + "::jsonb")
 	}
+	return nil
+}
+
+func (qb *queryBuilder) applyStateFilters(opts ConsoleListOpts) {
 	if opts.Urgent != nil {
 		qb.and("is_urgent = " + qb.addArg(ptrext.Indirect(opts.Urgent)))
 	}
@@ -127,11 +150,53 @@ func (qb *queryBuilder) applyFilters(opts ConsoleListOpts) error {
 		qb.and("enrichment_status = " + qb.addArg(ptrext.Indirect(opts.EnrichmentStatus)))
 	}
 	if opts.TerminalFailedOnly != nil && ptrext.Indirect(opts.TerminalFailedOnly) {
-		qb.and("enrichment_status = 'failed'")
-		qb.and("enrichment_attempts >= " + qb.addArg(maxEnrichmentAttempts))
-		qb.and("enrichment_next_retry_at IS NULL")
+		qb.andTerminalFailure()
 	}
-	return nil
+}
+
+func (qb *queryBuilder) applyQualityFilters(opts ConsoleListOpts) {
+	if opts.ConfidenceLTE != nil {
+		qb.and("classification_confidence IS NOT NULL")
+		qb.and("classification_confidence <= " + qb.addArg(ptrext.Indirect(opts.ConfidenceLTE)))
+	}
+	if opts.CreatedFrom != nil {
+		qb.and("created_at >= " + qb.addArg(ptrext.Indirect(opts.CreatedFrom)))
+	}
+	if opts.CreatedTo != nil {
+		qb.and("created_at < " + qb.addArg(ptrext.Indirect(opts.CreatedTo)))
+	}
+	if opts.EnrichedFrom != nil {
+		qb.and("enriched_at >= " + qb.addArg(ptrext.Indirect(opts.EnrichedFrom)))
+	}
+	if opts.EnrichedTo != nil {
+		qb.and("enriched_at < " + qb.addArg(ptrext.Indirect(opts.EnrichedTo)))
+	}
+	if opts.QualitySignal != nil {
+		qb.applyQualitySignal(ptrext.Indirect(opts.QualitySignal), opts)
+	}
+}
+
+func (qb *queryBuilder) applyQualitySignal(signal string, opts ConsoleListOpts) {
+	switch signal {
+	case "low_confidence":
+		if opts.ConfidenceLTE == nil {
+			qb.and("classification_confidence IS NOT NULL")
+			qb.and("classification_confidence <= " + qb.addArg(0.60))
+		}
+	case "terminal_failure":
+		qb.andTerminalFailure()
+	case "off_list", "parse_failure":
+		// These signals live in quality facts; dashboard links should pass ids.
+		if len(opts.IDs) == 0 {
+			qb.and("FALSE")
+		}
+	}
+}
+
+func (qb *queryBuilder) andTerminalFailure() {
+	qb.and("enrichment_status = 'failed'")
+	qb.and("enrichment_attempts >= " + qb.addArg(maxEnrichmentAttempts))
+	qb.and("enrichment_next_retry_at IS NULL")
 }
 
 // ListForConsole returns one page newest-first, scoped to tenant. Uses

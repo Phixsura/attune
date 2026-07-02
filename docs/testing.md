@@ -1,26 +1,60 @@
 # Testing
 
-attune has three test tiers. Per-CLAUDE.md §1, every PR must pass the
-unit tier. The PostgreSQL integration tier runs in CI for Go changes
-and is opt-in locally because it needs Docker. The live tier is
-**opt-in only** and runs against paid external APIs.
+attune follows a test pyramid with extra gates for contracts, observability, and
+release packaging. Most confidence should come from fast unit and integration
+tests; browser and runtime tests are fewer, but they cover the production seams
+that cheap tests cannot see.
 
-| Tier | Default? | Cost | What it covers |
-|---|---|---|---|
-| **Unit** | ✅ runs on `go test ./...` and in CI | $0 | Pure logic + handler/repo wiring + LLM client wire-shape via `httptest` mocks. |
-| **Integration** | ✅ CI on Go changes; local via `make test-integration` | Docker only | Real PostgreSQL migrations, repos, service/repo transaction paths, and outbox drain smoke tests. |
-| **Live** | ❌ opt-in (`make test-live` + `//go:build live`) | real API calls | LLM provider round-trips and outbound provider smoke deliveries, all env-gated. |
+| Tier | Command | Default? | Cost | What it covers |
+|---|---|---|---|---|
+| **L0 fast local** | `make fast-check` | local opt-in | $0 | Fast Go unit sweep plus Console typecheck and Vitest. |
+| **L1 CI preflight** | `make ci-check` | PR / before push | $0 | Go race unit tests, lint, complexity, duplication, Console type/build/test/arch checks, and local secret scan when installed. |
+| **L2 contract** | `make proto-lint`, `make proto-breaking`, `make proto` | CI on proto changes | network for Buf remote plugins | Protobuf/OpenAPI/SDK contract shape and generation consistency. |
+| **L3 integration** | `make test-integration` | CI on Go changes; local opt-in | Docker only | Real pgvector PostgreSQL migrations, repos, service/repo transaction paths, restore drills, and queue/outbox smoke tests. |
+| **L4 browser** | `cd console && pnpm test:e2e:a11y` | CI on Console changes | browser install | Critical Console routes in real Chromium with API mocks, accessibility, overflow, console-error, and interaction coverage. |
+| **L5 release runtime** | `make runtime-smoke` | pre-release opt-in | Docker only | Built image boots against throwaway pgvector Postgres; health/readiness, Console assets, metrics, migrations, and classification-quality schema are verified. |
+| **L6 live** | `make test-live` | manual only | real API calls | LLM provider round-trips and outbound provider smoke deliveries, all env-gated. |
 
-## Unit tier
+Use `make release-smoke` before release candidates or large production-facing
+changes. It runs `ci-check`, PostgreSQL integration, proto lint/breaking checks,
+observability rule/dashboard validation, Compose parsing, whitespace checks, and
+the runtime image smoke.
+
+## Unit and fast local tier
 
 Default behaviour. Nothing to set up.
 
 ```bash
-go test ./...                # full unit sweep
-go test -short ./...         # CI default — same as above today, reserved
-                             # for any future long-running unit tests
-./scripts/check.sh           # build + vet + test + lizard + jscpd
+go test ./...          # full Go unit sweep
+go test -short ./...   # CI default for the unit tier
+make fast-check        # Go unit + Console typecheck + Console Vitest
+make ci-check          # full local PR preflight
 ```
+
+`make ci-check` mirrors the repository quality gate and also tolerates a local
+`console/pnpm-workspace.yaml` file by invoking Console commands with
+`pnpm --ignore-workspace`.
+
+## Adversarial and property tier — `make adversarial-check`
+
+Use this tier when changing parser, query binding, aggregation, audit payload,
+or normalization code. It combines focused adversarial unit tests with short
+Go fuzz runs:
+
+```bash
+make adversarial-check
+FUZZTIME=30s make adversarial-check
+```
+
+The current suite targets classification-quality aggregation and checks that
+malformed JSON, duplicate values, illegal dimension names, non-positive
+diagnostic counts, non-finite thresholds, non-positive sample IDs, long Unicode
+values, and invalid UTF-8 cannot produce panics, negative counters, unbounded
+sample lists, or invalid display strings. Seed cases still run during ordinary
+`go test`; the make target adds time-boxed mutation. The PostgreSQL integration
+suite also scans persisted quality buckets for impossible count relationships,
+oversized or non-positive sample IDs, and value-display bound violations after
+real refreshes.
 
 ## Integration tier — `make test-integration`
 
@@ -38,16 +72,17 @@ make test-integration
 Requirements:
 
 - Docker daemon running locally.
-- By default, local runs start `postgres:18` with testcontainers-go,
-  matching the CI service-container image.
+- By default, local runs start `pgvector/pgvector:pg17` with
+  testcontainers-go, matching the CI service-container image and the private
+  deploy Compose stack.
 - To reuse an already-running Postgres instance, set
   `ATTUNE_TEST_DATABASE_URL`; the harness connects to that admin
   database, creates a temporary database per test, runs migrations
   there, and drops it during cleanup.
 
 CI uses the second path: `.github/workflows/ci.yml` runs an
-`integration-postgres` job with a GitHub Actions `postgres:18` service
-container and exports `ATTUNE_TEST_DATABASE_URL` for
+`integration-postgres` job with a GitHub Actions `pgvector/pgvector:pg17`
+service container and exports `ATTUNE_TEST_DATABASE_URL` for
 `make test-integration`.
 
 `make test-integration` runs packages with `-p 1`. That keeps local
@@ -80,6 +115,48 @@ branches that require a real `pgxpool`, DB-managed LLM channel/ability/route
 CRUD with encrypted write-only credentials, shared Tink key registry startup
 checks, enrichment retry/backoff state, and the
 ingest → enrich → outbox queue → outbox drain path.
+
+## Browser tier — Console Playwright
+
+The browser tier is intentionally small and focused on user-visible Console
+contracts. It uses Playwright against the built Vite preview server, with
+deterministic API route mocks:
+
+```bash
+cd console
+pnpm test:e2e:a11y
+```
+
+Guidelines:
+
+- Prefer role, label, text, and explicit test-id locators over CSS structure.
+- Use Playwright web-first assertions such as `toBeVisible` and `toHaveURL`.
+- Keep API calls mocked unless the test is explicitly a runtime smoke.
+- Add browser coverage only for workflows that cannot be trusted to lower-level
+  tests, or for regressions found in a real browser.
+
+## Release runtime smoke — `make runtime-smoke`
+
+`make runtime-smoke` builds the production Docker image and runs
+`scripts/runtime-smoke.sh` against a throwaway pgvector PostgreSQL container.
+The script:
+
+- generates a throwaway Tink keyset using the image under test;
+- boots attune from the image with a private temporary config;
+- waits for `/readyz`;
+- checks `/healthz`, `/readyz`, and `/startupz`;
+- verifies `/console/analytics/classification-quality` plus referenced JS/CSS
+  assets;
+- verifies `/metrics` exposes Go or attune series;
+- checks pgvector is installed, migrations reached at least version 93, and the
+  classification-quality tables and indexes exist.
+
+You can smoke a prebuilt image without rebuilding:
+
+```bash
+ATTUNE_RUNTIME_SMOKE_IMAGE=ghcr.io/phixsura/attune:tag \
+  bash scripts/runtime-smoke.sh
+```
 
 ## Live tier — `make test-live`
 

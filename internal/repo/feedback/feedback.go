@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -506,65 +507,7 @@ func (r *FeedbackRepo) MarkFailedWithOwner(ctx context.Context, id int64, owner,
 	if len(snapshots) > 0 {
 		snapshot = snapshots[0]
 	}
-	var sql string
-	var args []any
-	if owner == "" {
-		sql = `UPDATE user_feedback
-		    SET enrichment_status = 'failed',
-		        enrichment_error = $1,
-		        enrichment_attempts = enrichment_attempts + 1,
-		        enrichment_next_retry_at = CASE
-		          WHEN enrichment_attempts + 1 >= $3 THEN NULL
-		          ELSE NOW() + make_interval(secs => LEAST(
-		            $4 * CAST(POWER(2, LEAST(enrichment_attempts, 10)) AS INTEGER),
-		            $5
-		          ))
-		        END,
-		        enrichment_failure_reason_class = NULLIF($6, ''),
-		        enrichment_failure_model = NULLIF($7, ''),
-		        enrichment_failure_channel_id = NULLIF($8, ''),
-		        enrichment_failure_channel_name = NULLIF($9, ''),
-		        enrichment_failure_config_fingerprint = NULLIF($10, ''),
-		        enrichment_failure_prompt_version = NULLIF($11, ''),
-		        enrichment_claimed_at = NULL,
-		        enrichment_claimed_by = NULL
-		  WHERE id = $2
-		  RETURNING enrichment_attempts >= $3, tenant_id`
-		args = []any{
-			pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
-			int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()),
-			snapshot.ReasonClass, snapshot.Model, snapshot.ChannelID,
-			snapshot.ChannelName, snapshot.ConfigFingerprint, snapshot.PromptVersion,
-		}
-	} else {
-		sql = `UPDATE user_feedback
-		    SET enrichment_status = 'failed',
-		        enrichment_error = $1,
-		        enrichment_attempts = enrichment_attempts + 1,
-		        enrichment_next_retry_at = CASE
-		          WHEN enrichment_attempts + 1 >= $3 THEN NULL
-		          ELSE NOW() + make_interval(secs => LEAST(
-		            $4 * CAST(POWER(2, LEAST(enrichment_attempts, 10)) AS INTEGER),
-		            $5
-		          ))
-		        END,
-		        enrichment_failure_reason_class = NULLIF($7, ''),
-		        enrichment_failure_model = NULLIF($8, ''),
-		        enrichment_failure_channel_id = NULLIF($9, ''),
-		        enrichment_failure_channel_name = NULLIF($10, ''),
-		        enrichment_failure_config_fingerprint = NULLIF($11, ''),
-		        enrichment_failure_prompt_version = NULLIF($12, ''),
-		        enrichment_claimed_at = NULL,
-		        enrichment_claimed_by = NULL
-		  WHERE id = $2 AND enrichment_claimed_by = $6
-		  RETURNING enrichment_attempts >= $3, tenant_id`
-		args = []any{
-			pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
-			int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()), owner,
-			snapshot.ReasonClass, snapshot.Model, snapshot.ChannelID,
-			snapshot.ChannelName, snapshot.ConfigFingerprint, snapshot.PromptVersion,
-		}
-	}
+	sql, args := markFailedQuery(id, owner, errMsg, snapshot)
 	if err := r.pool.QueryRow(ctx, sql, args...).Scan(&terminal, &tenant); err != nil {
 		// Row gone (concurrent erase / terminal transition) is benign — don't
 		// log it as an error; only real DB failures are error-worthy.
@@ -574,6 +517,120 @@ func (r *FeedbackRepo) MarkFailedWithOwner(ctx context.Context, id int64, owner,
 		return false, ""
 	}
 	return terminal, tenant
+}
+
+func markFailedQuery(id int64, owner, errMsg string, snapshot EnrichmentFailureSnapshot) (string, []any) {
+	if owner == "" {
+		return markFailedWithoutOwnerQuery(id, errMsg, snapshot)
+	}
+	return markFailedWithOwnerQuery(id, owner, errMsg, snapshot)
+}
+
+func markFailedWithoutOwnerQuery(id int64, errMsg string, snapshot EnrichmentFailureSnapshot) (string, []any) {
+	return `WITH updated AS (
+	    UPDATE user_feedback
+	    SET enrichment_status = 'failed',
+	        enrichment_error = $1,
+	        enrichment_attempts = enrichment_attempts + 1,
+	        enrichment_next_retry_at = CASE
+	          WHEN enrichment_attempts + 1 >= $3 THEN NULL
+	          ELSE NOW() + make_interval(secs => LEAST(
+	            $4 * CAST(POWER(2, LEAST(enrichment_attempts, 10)) AS INTEGER),
+	            $5
+	          ))
+	        END,
+	        enrichment_failure_reason_class = NULLIF($6, ''),
+	        enrichment_failure_model = NULLIF($7, ''),
+	        enrichment_failure_channel_id = NULLIF($8, ''),
+	        enrichment_failure_channel_name = NULLIF($9, ''),
+	        enrichment_failure_config_fingerprint = NULLIF($10, ''),
+	        enrichment_failure_prompt_version = NULLIF($11, ''),
+	        enrichment_claimed_at = NULL,
+	        enrichment_claimed_by = NULL
+	    WHERE id = $2
+	    RETURNING id, tenant_id, source, enrichment_attempts,
+	              enrichment_attempts >= $3 AS terminal
+	),
+	inserted AS (
+	    INSERT INTO classification_quality_failure_events
+	     (tenant_id, feedback_id, event_kind, reason_class, logical_model,
+	      provider_model, channel_id, channel_name, source, attempts, terminal)
+	    SELECT tenant_id, id, 'attempt_failed', $6,
+	           COALESCE(NULLIF($12, ''), NULLIF($7, ''), ''),
+	           COALESCE(NULLIF($13, ''), NULLIF($7, ''), ''),
+	           COALESCE(NULLIF($8, ''), ''),
+	           COALESCE(NULLIF($9, ''), ''),
+	           COALESCE(NULLIF(source, ''), ''),
+	           enrichment_attempts,
+	           terminal
+	      FROM updated
+	    RETURNING terminal, tenant_id
+	)
+	SELECT terminal, tenant_id FROM inserted`, []any{
+			pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
+			int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()),
+			normalizeRepoFailureReasonClass(snapshot.ReasonClass), snapshot.Model, snapshot.ChannelID,
+			snapshot.ChannelName, snapshot.ConfigFingerprint, snapshot.PromptVersion,
+			snapshot.LogicalModel, snapshot.ProviderModel,
+		}
+}
+
+func markFailedWithOwnerQuery(id int64, owner, errMsg string, snapshot EnrichmentFailureSnapshot) (string, []any) {
+	return `WITH updated AS (
+	    UPDATE user_feedback
+	    SET enrichment_status = 'failed',
+	        enrichment_error = $1,
+	        enrichment_attempts = enrichment_attempts + 1,
+	        enrichment_next_retry_at = CASE
+	          WHEN enrichment_attempts + 1 >= $3 THEN NULL
+	          ELSE NOW() + make_interval(secs => LEAST(
+	            $4 * CAST(POWER(2, LEAST(enrichment_attempts, 10)) AS INTEGER),
+	            $5
+	          ))
+	        END,
+	        enrichment_failure_reason_class = NULLIF($7, ''),
+	        enrichment_failure_model = NULLIF($8, ''),
+	        enrichment_failure_channel_id = NULLIF($9, ''),
+	        enrichment_failure_channel_name = NULLIF($10, ''),
+	        enrichment_failure_config_fingerprint = NULLIF($11, ''),
+	        enrichment_failure_prompt_version = NULLIF($12, ''),
+	        enrichment_claimed_at = NULL,
+	        enrichment_claimed_by = NULL
+	    WHERE id = $2 AND enrichment_claimed_by = $6
+	    RETURNING id, tenant_id, source, enrichment_attempts,
+	              enrichment_attempts >= $3 AS terminal
+	),
+	inserted AS (
+	    INSERT INTO classification_quality_failure_events
+	     (tenant_id, feedback_id, event_kind, reason_class, logical_model,
+	      provider_model, channel_id, channel_name, source, attempts, terminal)
+	    SELECT tenant_id, id, 'attempt_failed', $7,
+	           COALESCE(NULLIF($13, ''), NULLIF($8, ''), ''),
+	           COALESCE(NULLIF($14, ''), NULLIF($8, ''), ''),
+	           COALESCE(NULLIF($9, ''), ''),
+	           COALESCE(NULLIF($10, ''), ''),
+	           COALESCE(NULLIF(source, ''), ''),
+	           enrichment_attempts,
+	           terminal
+	      FROM updated
+	    RETURNING terminal, tenant_id
+	)
+	SELECT terminal, tenant_id FROM inserted`, []any{
+			pgxutil.Truncate(errMsg, 1000), id, maxEnrichmentAttempts,
+			int(initialEnrichmentBackoff.Seconds()), int(maxEnrichmentBackoff.Seconds()), owner,
+			normalizeRepoFailureReasonClass(snapshot.ReasonClass), snapshot.Model, snapshot.ChannelID,
+			snapshot.ChannelName, snapshot.ConfigFingerprint, snapshot.PromptVersion,
+			snapshot.LogicalModel, snapshot.ProviderModel,
+		}
+}
+
+func normalizeRepoFailureReasonClass(class string) string {
+	switch strings.TrimSpace(class) {
+	case "llm_err", "parse_err", "other_err":
+		return strings.TrimSpace(class)
+	default:
+		return "other_err"
+	}
 }
 
 // ListPending returns up to n ids that need enrichment, ordered by

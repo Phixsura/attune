@@ -114,6 +114,8 @@ var expectedOtherRoutes = []string{
 	"POST /feedback/{id}/retry-enrichment",
 	"GET /usage",
 	"GET /llm-usage",
+	"GET /classification-quality",
+	"GET /classification-quality/samples",
 	"GET /enrich-config/",
 	"PUT /enrich-config/",
 	"GET /enrich-config/versions",

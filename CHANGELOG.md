@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Classification quality dashboard with drift detection (#161).**
+  Added the console classification-quality dashboard, bounded sample drilldowns,
+  drift-aware aggregate storage, failure-event snapshots, list filters for
+  quality signals, generated proto/OpenAPI/SDK bindings, and Prometheus/Grafana
+  coverage for low confidence, off-list values, parse failures, terminal
+  failures, active warnings, and per-dimension drift.
+
+- **Layered test command topology.**
+  Added `make fast-check`, `make adversarial-check`, `make runtime-smoke`, and
+  `make release-smoke`, plus a reusable Docker runtime smoke script that boots
+  the built image against throwaway pgvector PostgreSQL and verifies health,
+  Console assets, metrics, migrations, and classification-quality schema.
+
 - **Outbound adapter conformance harness (#167).**
   Added a shared `internal/outbound/outboundtest` suite, per-adapter golden
   request snapshots, fake-provider delivery mocks, and a CI lint gate so
@@ -103,6 +116,31 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Aligned `scripts/check.sh` and the contributor guide with the CI-backed
   `.jscpd.json` configuration, so local checks use the same threshold and test
   fixture exclusions as pull requests.
+
+- **Prometheus alert naming.**
+  Renamed the global enrichment latency alert to
+  `AttuneGlobalEnrichmentLatencyHigh`, so it no longer collides with the
+  tenant-scoped `AttuneEnrichmentLatencyHigh` alert in Prometheus rule checks.
+
+- **Private deploy Compose database image.**
+  Switched the embedded Compose PostgreSQL service to `pgvector/pgvector:pg17`,
+  matching the migration requirement for the `vector` extension.
+
+- **Docker build context hygiene.**
+  Ignored local Console workspace files, generated test binaries, and Node SDK
+  install artifacts so ordinary Docker builds stay reproducible from a dirty
+  developer checkout.
+
+- **Classification quality adversarial input guards (#161).**
+  Rejected non-finite low-confidence thresholds and non-positive sample IDs,
+  ignored non-positive diagnostic counts during aggregate refresh, and added
+  adversarial/property coverage for malformed classification-quality payloads,
+  bounded samples, and UTF-8-safe value displays. Duplicate values from one
+  classification event no longer double-count value-level confidence, and empty
+  quality sample arrays now persist as PostgreSQL empty arrays instead of NULL.
+  PostgreSQL integration coverage now also scans persisted quality buckets for
+  impossible count relationships, oversized sample arrays, invalid sample IDs,
+  and overlong value displays.
 
 - **Console accessibility and keyboard triage for critical workbenches (#171).**
   - Added a dev-only `axe-core` Vitest helper and smoke coverage for selected
@@ -467,8 +505,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - Token bucket limiter cleanup goroutine to prevent unbounded memory growth
   - LLM response body size limits (10 MiB for chat, 50 MiB for embeddings)
   - Benchmark tests for rate limiters
-  - New Prometheus alerts: `AttuneEnrichmentLatencyHigh`, `AttuneSearchLatencyHigh`,
-    `AttuneCircuitBreakerOpen`, `AttuneEmbeddingQueueDepthHigh`
+  - New Prometheus alerts: `AttuneGlobalEnrichmentLatencyHigh`,
+    `AttuneSearchLatencyHigh`, `AttuneCircuitBreakerOpen`,
+    `AttuneEmbeddingQueueDepthHigh`
   - `safegoroutine` package for panic-safe goroutine launching with automatic
     recovery and metrics
   - Worker config validation ensuring heartbeat_interval < stale_duration

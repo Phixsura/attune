@@ -185,6 +185,17 @@ func aiPipelineDashboard() dashboard {
 		barDesc(20, "Terminal failures by reason", "Terminal enrichment failures split by stable reason class. Use this with the workbench to decide whether the issue is provider, parser, or something else.", []target{
 			targetExprSparse("A", `sum by (reason_class) (increase(attune_enrichment_terminal_failures_by_reason_total{tenant=~"$tenant"}[$__range]))`, "{{reason_class}}"),
 		}, "short", gp(0, 56, 24, 8)),
+		rowPanel(21, "Classification quality", 64),
+		seriesDesc(22, "Classification quality rates", "Latest dashboard quality ratios for confidence, off-list suggestions, parse failures, terminal failures, and active warnings.", []target{
+			targetExpr("A", `attune_classification_quality_low_confidence_ratio{tenant=~"$tenant"}`, "low confidence"),
+			targetExpr("B", `attune_classification_quality_off_list_ratio{tenant=~"$tenant"}`, "off-list"),
+			targetExpr("C", `attune_classification_quality_parse_failure_ratio{tenant=~"$tenant"}`, "parse failure"),
+			targetExpr("D", `attune_classification_quality_terminal_failure_ratio{tenant=~"$tenant"}`, "terminal failure"),
+			targetExpr("E", `sum by (reason, severity) (attune_classification_quality_warning_active{tenant=~"$tenant"})`, "warning / {{reason}} / {{severity}}"),
+		}, "percentunit", gp(0, 65, 12, 8)),
+		barDesc(23, "Classification drift by dimension", "Latest Jensen-Shannon drift score emitted by the classification quality dashboard for each configured dimension.", []target{
+			targetExprSparse("A", `attune_classification_quality_drift_score{tenant=~"$tenant"}`, "{{dimension}}"),
+		}, "short", gp(12, 65, 12, 8)),
 	}
 	d.Panels = layoutSixCardDashboard(d.Panels, 8, 6)
 	return d
