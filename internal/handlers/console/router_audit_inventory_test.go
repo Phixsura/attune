@@ -116,6 +116,15 @@ var auditEmittedActions = []string{
 	"mcp_refresh_grant.revoke",
 	"mcp_session.revoke",
 	"retry_enrichment",
+	"reply_draft.generate",
+	"reply_draft.edit",
+	"reply_draft.approve",
+	"reply_draft.reject",
+	"reply_draft.send.request",
+	"reply_draft.send.success",
+	"reply_draft.send.failure",
+	"reply_send_hook.upsert",
+	"reply_send_hook.disable",
 }
 
 // TestAuditedRouteActionsAreRegistered asserts every emitted audit action is
@@ -133,7 +142,7 @@ func TestAuditedRouteActionsAreRegistered(t *testing.T) {
 }
 
 func expectedMutatingRouteCoverage() map[string]string {
-	return map[string]string{
+	coverage := map[string]string{
 		"POST /install/login":                                "exempt: login flow creates a session but is not a tenant-scoped unified audit event",
 		"POST /logout":                                       "exempt: logout tears down a session only",
 		"POST /me/change-password":                           "exempt: self-service auth flow outside the tenant-scoped unified audit stream",
@@ -175,7 +184,6 @@ func expectedMutatingRouteCoverage() map[string]string {
 		"POST /feedback/batch":                               "audited: feedback.batch_delete for delete payloads; route is payload-multiplexed and non-delete variants are operational",
 		"POST /feedback/search":                              "exempt: read-only semantic search",
 		"POST /feedback/search/events":                       "exempt: search interaction telemetry, not a control-plane mutation",
-		"POST /feedback/{id}/reply-draft/regenerate":         "exempt: content regeneration, no control-plane state change",
 		"POST /feedback/{id}/tags":                           "exempt: per-feedback tagging flow, not unified control-plane audit",
 		"DELETE /feedback/{id}/tags/{tag_id}":                "exempt: per-feedback tagging flow, not unified control-plane audit",
 		"POST /feedback/{id}/transition":                     "exempt: per-feedback workflow audit path, not unified control-plane audit",
@@ -227,5 +235,23 @@ func expectedMutatingRouteCoverage() map[string]string {
 		"PUT /mcp/clients/{id}/tool-policies":                "audited: mcp_client.tool_policy_update",
 		"DELETE /mcp/clients/{id}/grants/{grant_id}":         "audited: mcp_refresh_grant.revoke",
 		"DELETE /mcp/clients/{id}/sessions/{session_id}":     "audited: mcp_session.revoke",
+	}
+	for route, decision := range replyDraftMutatingRouteCoverage() {
+		coverage[route] = decision
+	}
+	return coverage
+}
+
+func replyDraftMutatingRouteCoverage() map[string]string {
+	return map[string]string{
+		"POST /feedback/{id}/reply-draft/regenerate":      "audited: reply_draft.generate when workflow persistence is configured",
+		"POST /feedback/{id}/reply-draft/edit":            "audited: reply_draft.edit",
+		"POST /feedback/{id}/reply-draft/approve":         "audited: reply_draft.approve",
+		"POST /feedback/{id}/reply-draft/reject":          "audited: reply_draft.reject",
+		"POST /feedback/{id}/reply-draft/send":            "audited: reply_draft.send.request and reply_draft.send.success or reply_draft.send.failure",
+		"PUT /reply-send-hook":                            "audited: reply_send_hook.upsert",
+		"POST /reply-send-hook/test":                      "audited: reply_send_hook.test",
+		"POST /reply-send-hook/deliveries/{id}/redeliver": "audited: reply_send_hook.redeliver",
+		"DELETE /reply-send-hook":                         "audited: reply_send_hook.disable",
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 )
 
 // regenerateCooldown is the minimum gap between manual reply-draft regenerations
@@ -62,6 +63,14 @@ func (h *FeedbackHandler) Regenerate(
 		logext.Warnf(ctx, "[%s] reject: not enriched,tenant_id:%s,id:%d,status:%s", where, auth.TenantID, id, status)
 		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusConflict, attunev1.ErrorCode_CONFLICT, "feedback is not enriched yet")
 	}
+	sendPending, err := h.replyDraftSendPending(ctx, where, auth.TenantID, id)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusBadGateway, attunev1.ErrorCode_BAD_GATEWAY, "reply-draft workflow failed")
+	}
+	if sendPending {
+		logext.Warnf(ctx, "[%s] reject: send pending,tenant_id:%s,id:%d", where, auth.TenantID, id)
+		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusConflict, attunev1.ErrorCode_REQUEST_IN_PROGRESS, "reply send is already in progress")
+	}
 	// Per-row cooldown: the async/auto path is cost-gated at enrich time (opt-in
 	// + confidence); this is the matching backstop on the synchronous operator
 	// endpoint so a loop of POSTs against one row can't drive unbounded LLM
@@ -77,8 +86,40 @@ func (h *FeedbackHandler) Regenerate(
 		return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusBadGateway, attunev1.ErrorCode_BAD_GATEWAY, "failed to regenerate reply draft")
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,id:%d", where, auth.TenantID, id)
-	return dispatcher.OK(ptrext.Of(attunev1.RegenerateReplyDraftResponse{
+	return h.replyDraftRegenerateResponse(ctx, where, auth.TenantID, id, draft, generatedAt)
+}
+
+func (h *FeedbackHandler) replyDraftRegenerateResponse(
+	ctx *dispatcher.RequestContext[*session.AuthCtx], where string, tenantID string, id int64, draft string, generatedAt time.Time,
+) (dispatcher.Result[*attunev1.RegenerateReplyDraftResponse], error) {
+	resp := ptrext.Of(attunev1.RegenerateReplyDraftResponse{
 		ReplyDraft:            draft,
 		ReplyDraftGeneratedAt: generatedAt.UTC().Format(time.RFC3339),
-	}))
+	})
+	if h.replyWorkflow != nil {
+		if snap, err := h.replyWorkflow.Snapshot(ctx, tenantID, id); err == nil {
+			resp.Workflow = replyDraftWorkflowToProto(snap)
+			if err := h.recordReplyDraftAudit(ctx, "reply_draft.generate", id, "Generated reply draft", nil, auditWorkflowSnapshot(snap)); err != nil {
+				return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to record audit event")
+			}
+		} else {
+			logext.Errorf(ctx, "[%s] workflow snapshot failed,tenant_id:%s,id:%d,err:%+v", where, tenantID, id, err.Error())
+			return dispatcher.Fail[*attunev1.RegenerateReplyDraftResponse](http.StatusBadGateway, attunev1.ErrorCode_BAD_GATEWAY, "reply-draft workflow failed")
+		}
+	}
+	return dispatcher.OK(resp)
+}
+
+func (h *FeedbackHandler) replyDraftSendPending(
+	ctx *dispatcher.RequestContext[*session.AuthCtx], where string, tenantID string, id int64,
+) (bool, error) {
+	if h.replyWorkflow == nil {
+		return false, nil
+	}
+	snap, err := h.replyWorkflow.Snapshot(ctx, tenantID, id)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] workflow snapshot failed,tenant_id:%s,id:%d,err:%+v", where, tenantID, id, err.Error())
+		return false, err
+	}
+	return snap.Draft != nil && snap.Draft.Status == replydraftrepo.StatusSendPending, nil
 }

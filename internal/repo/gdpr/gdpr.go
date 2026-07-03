@@ -28,22 +28,30 @@ func New(pool *pgxpool.Pool) *Repo {
 }
 
 type Counts struct {
-	FeedbackCount      int
-	TagAssignmentCount int
-	FeedbackAuditCount int
-	LLMAuditCount      int
-	OutboxCount        int
+	FeedbackCount             int
+	TagAssignmentCount        int
+	FeedbackAuditCount        int
+	LLMAuditCount             int
+	OutboxCount               int
+	ReplyDraftCount           int
+	ReplyDraftRevisionCount   int
+	ReplyDraftEventCount      int
+	ReplyDeliveryAttemptCount int
 }
 
 type ExportData struct {
-	SubjectKey        string
-	SubjectDisplay    string
-	GeneratedAt       time.Time
-	FeedbackRows      []json.RawMessage
-	FeedbackTagRows   []json.RawMessage
-	FeedbackAuditRows []json.RawMessage
-	LLMAuditRows      []json.RawMessage
-	Counts            Counts
+	SubjectKey               string
+	SubjectDisplay           string
+	GeneratedAt              time.Time
+	FeedbackRows             []json.RawMessage
+	FeedbackTagRows          []json.RawMessage
+	FeedbackAuditRows        []json.RawMessage
+	LLMAuditRows             []json.RawMessage
+	ReplyDraftRows           []json.RawMessage
+	ReplyDraftRevisionRows   []json.RawMessage
+	ReplyDraftEventRows      []json.RawMessage
+	ReplyDeliveryAttemptRows []json.RawMessage
+	Counts                   Counts
 }
 
 type DeleteResult struct {
@@ -59,7 +67,82 @@ func (r *Repo) Export(ctx context.Context, tenantID, subjectKey string) (*Export
 	if err != nil {
 		return nil, err
 	}
+	rows, err := r.exportSubjectRows(ctx, tenantID, subjectKey)
+	if err != nil {
+		return nil, err
+	}
 
+	return ptrext.Of(ExportData{
+		SubjectKey:               subjectKey,
+		SubjectDisplay:           info.subjectDisplay,
+		GeneratedAt:              time.Now().UTC(),
+		FeedbackRows:             rows.feedback,
+		FeedbackTagRows:          rows.tags,
+		FeedbackAuditRows:        rows.feedbackAudit,
+		LLMAuditRows:             rows.llmAudit,
+		ReplyDraftRows:           rows.replyDrafts,
+		ReplyDraftRevisionRows:   rows.replyDraftRevisions,
+		ReplyDraftEventRows:      rows.replyDraftEvents,
+		ReplyDeliveryAttemptRows: rows.replyDeliveryAttempts,
+		Counts:                   rows.counts(),
+	}), nil
+}
+
+type subjectExportRows struct {
+	feedback              []json.RawMessage
+	tags                  []json.RawMessage
+	feedbackAudit         []json.RawMessage
+	llmAudit              []json.RawMessage
+	replyDrafts           []json.RawMessage
+	replyDraftRevisions   []json.RawMessage
+	replyDraftEvents      []json.RawMessage
+	replyDeliveryAttempts []json.RawMessage
+}
+
+func (rows subjectExportRows) counts() Counts {
+	return Counts{
+		FeedbackCount:             len(rows.feedback),
+		TagAssignmentCount:        len(rows.tags),
+		FeedbackAuditCount:        len(rows.feedbackAudit),
+		LLMAuditCount:             len(rows.llmAudit),
+		ReplyDraftCount:           len(rows.replyDrafts),
+		ReplyDraftRevisionCount:   len(rows.replyDraftRevisions),
+		ReplyDraftEventCount:      len(rows.replyDraftEvents),
+		ReplyDeliveryAttemptCount: len(rows.replyDeliveryAttempts),
+	}
+}
+
+func (r *Repo) exportSubjectRows(ctx context.Context, tenantID, subjectKey string) (subjectExportRows, error) {
+	var rows subjectExportRows
+	var err error
+	if rows.feedback, err = r.exportFeedbackRows(ctx, tenantID, subjectKey); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.tags, err = r.exportFeedbackTagRows(ctx, tenantID, subjectKey); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.feedbackAudit, err = r.exportFeedbackAuditRows(ctx, tenantID, subjectKey); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.llmAudit, err = r.exportLLMAuditRows(ctx, tenantID, subjectKey); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.replyDrafts, err = r.exportReplyDraftRows(ctx, tenantID, subjectKey); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.replyDraftRevisions, err = r.exportReplyDraftRevisionRows(ctx, tenantID, subjectKey); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.replyDraftEvents, err = r.exportReplyDraftEventRows(ctx, tenantID, subjectKey); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.replyDeliveryAttempts, err = r.exportReplyDeliveryAttemptRows(ctx, tenantID, subjectKey); err != nil {
+		return subjectExportRows{}, err
+	}
+	return rows, nil
+}
+
+func (r *Repo) exportFeedbackRows(ctx context.Context, tenantID, subjectKey string) ([]json.RawMessage, error) {
 	subjectFilter := subjectMatchClause(2)
 	feedbackRows, err := r.queryJSONLines(ctx, `
 		SELECT row_to_json(t)
@@ -79,7 +162,11 @@ func (r *Repo) Export(ctx context.Context, tenantID, subjectKey string) (*Export
 	if err != nil {
 		return nil, fmt.Errorf("query feedback export rows: %w", err)
 	}
+	return feedbackRows, nil
+}
 
+func (r *Repo) exportFeedbackTagRows(ctx context.Context, tenantID, subjectKey string) ([]json.RawMessage, error) {
+	subjectFilter := subjectMatchClause(2)
 	tagRows, err := r.queryJSONLines(ctx, `
 		SELECT row_to_json(t)
 		FROM (
@@ -95,7 +182,11 @@ func (r *Repo) Export(ctx context.Context, tenantID, subjectKey string) (*Export
 	if err != nil {
 		return nil, fmt.Errorf("query feedback tag export rows: %w", err)
 	}
+	return tagRows, nil
+}
 
+func (r *Repo) exportFeedbackAuditRows(ctx context.Context, tenantID, subjectKey string) ([]json.RawMessage, error) {
+	subjectFilter := subjectMatchClause(2)
 	feedbackAuditRows, err := r.queryJSONLines(ctx, `
 		SELECT row_to_json(t)
 		FROM (
@@ -109,7 +200,11 @@ func (r *Repo) Export(ctx context.Context, tenantID, subjectKey string) (*Export
 	if err != nil {
 		return nil, fmt.Errorf("query feedback audit export rows: %w", err)
 	}
+	return feedbackAuditRows, nil
+}
 
+func (r *Repo) exportLLMAuditRows(ctx context.Context, tenantID, subjectKey string) ([]json.RawMessage, error) {
+	subjectFilter := subjectMatchClause(2)
 	llmAuditRows, err := r.queryJSONLines(ctx, `
 		SELECT row_to_json(t)
 		FROM (
@@ -124,22 +219,91 @@ func (r *Repo) Export(ctx context.Context, tenantID, subjectKey string) (*Export
 	if err != nil {
 		return nil, fmt.Errorf("query llm audit export rows: %w", err)
 	}
+	return llmAuditRows, nil
+}
 
-	return ptrext.Of(ExportData{
-		SubjectKey:        subjectKey,
-		SubjectDisplay:    info.subjectDisplay,
-		GeneratedAt:       time.Now().UTC(),
-		FeedbackRows:      feedbackRows,
-		FeedbackTagRows:   tagRows,
-		FeedbackAuditRows: feedbackAuditRows,
-		LLMAuditRows:      llmAuditRows,
-		Counts: Counts{
-			FeedbackCount:      len(feedbackRows),
-			TagAssignmentCount: len(tagRows),
-			FeedbackAuditCount: len(feedbackAuditRows),
-			LLMAuditCount:      len(llmAuditRows),
-		},
-	}), nil
+func (r *Repo) exportReplyDraftRows(ctx context.Context, tenantID, subjectKey string) ([]json.RawMessage, error) {
+	subjectFilter := subjectMatchClause(2)
+	rows, err := r.queryJSONLines(ctx, `
+		SELECT row_to_json(t)
+		FROM (
+			SELECT d.id, d.tenant_id, d.feedback_id, d.cycle_no, d.status,
+			       d.active_revision_id, d.approved_revision_id, d.sent_revision_id,
+			       d.approved_hook_id, d.approved_hook_fingerprint, d.sent_hook_id,
+			       d.source_fingerprint, d.source_meta, d.last_blocker,
+			       d.external_delivery_status, d.external_message_id,
+			       d.generated_at, d.generated_by, d.edited_at, d.edited_by,
+			       d.approved_at, d.approved_by, d.rejected_at, d.rejected_by,
+			       d.sent_at, d.sent_by, d.revision, d.created_at, d.updated_at
+			FROM reply_drafts d
+			JOIN user_feedback uf ON uf.id = d.feedback_id
+			WHERE uf.tenant_id = $1 AND `+subjectFilter+`
+			ORDER BY d.feedback_id, d.cycle_no, d.id
+		) t`, tenantID, subjectKey)
+	if err != nil {
+		return nil, fmt.Errorf("query reply draft export rows: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) exportReplyDraftRevisionRows(ctx context.Context, tenantID, subjectKey string) ([]json.RawMessage, error) {
+	subjectFilter := subjectMatchClause(2)
+	rows, err := r.queryJSONLines(ctx, `
+		SELECT row_to_json(t)
+		FROM (
+			SELECT rr.id, rr.draft_id, rr.tenant_id, rr.feedback_id, rr.cycle_no,
+			       rr.revision_no, rr.origin, rr.content, encode(rr.content_sha256, 'hex') AS content_sha256,
+			       rr.source_fingerprint, rr.created_by, rr.created_at
+			FROM reply_draft_revisions rr
+			JOIN user_feedback uf ON uf.id = rr.feedback_id
+			WHERE uf.tenant_id = $1 AND `+subjectFilter+`
+			ORDER BY rr.feedback_id, rr.cycle_no, rr.revision_no, rr.id
+		) t`, tenantID, subjectKey)
+	if err != nil {
+		return nil, fmt.Errorf("query reply draft revision export rows: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) exportReplyDraftEventRows(ctx context.Context, tenantID, subjectKey string) ([]json.RawMessage, error) {
+	subjectFilter := subjectMatchClause(2)
+	rows, err := r.queryJSONLines(ctx, `
+		SELECT row_to_json(t)
+		FROM (
+			SELECT e.id, e.draft_id, e.tenant_id, e.feedback_id, e.revision_id,
+			       e.hook_id, e.event_type, e.actor_type, e.actor_id, e.blocker,
+			       e.metadata, e.created_at
+			FROM reply_draft_events e
+			JOIN user_feedback uf ON uf.id = e.feedback_id
+			WHERE uf.tenant_id = $1 AND `+subjectFilter+`
+			ORDER BY e.feedback_id, e.created_at, e.id
+		) t`, tenantID, subjectKey)
+	if err != nil {
+		return nil, fmt.Errorf("query reply draft event export rows: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) exportReplyDeliveryAttemptRows(ctx context.Context, tenantID, subjectKey string) ([]json.RawMessage, error) {
+	subjectFilter := subjectMatchClause(2)
+	rows, err := r.queryJSONLines(ctx, `
+		SELECT row_to_json(t)
+		FROM (
+			SELECT a.id, a.tenant_id, a.draft_id, a.feedback_id, a.hook_id,
+			       a.revision_id, a.event_type, a.idempotency_key, a.status,
+			       a.http_status, a.attempts, a.max_attempts, a.next_retry_at,
+			       a.request_fingerprint, a.external_message_id, a.error,
+			       a.response_meta, a.requested_by_type, a.requested_by,
+			       a.requested_at, a.completed_at, a.created_at, a.updated_at
+			FROM reply_delivery_attempts a
+			JOIN user_feedback uf ON uf.id = a.feedback_id
+			WHERE uf.tenant_id = $1 AND `+subjectFilter+`
+			ORDER BY a.feedback_id, a.created_at, a.id
+		) t`, tenantID, subjectKey)
+	if err != nil {
+		return nil, fmt.Errorf("query reply delivery attempt export rows: %w", err)
+	}
+	return rows, nil
 }
 
 func (r *Repo) Delete(ctx context.Context, tenantID, subjectKey string) (*DeleteResult, error) {
@@ -217,13 +381,29 @@ func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, feedba
 			(SELECT COUNT(*) FROM feedback_tag_assignments WHERE feedback_id = ANY($1)),
 			(SELECT COUNT(*) FROM feedback_audit_log WHERE feedback_id = ANY($1)),
 			(SELECT COUNT(*) FROM llm_audit WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM notify_outbox WHERE feedback_id = ANY($1))`,
+			(SELECT COUNT(*) FROM notify_outbox WHERE feedback_id = ANY($1)),
+			(SELECT COUNT(*) FROM reply_drafts WHERE feedback_id = ANY($1)),
+			(SELECT COUNT(*) FROM reply_draft_revisions WHERE feedback_id = ANY($1)),
+			(SELECT COUNT(*) FROM reply_draft_events WHERE feedback_id = ANY($1)),
+			(SELECT COUNT(*) FROM reply_delivery_attempts WHERE feedback_id = ANY($1))`,
 		feedbackIDs,
-	).Scan(&counts.TagAssignmentCount, &counts.FeedbackAuditCount, &counts.LLMAuditCount, &counts.OutboxCount); err != nil {
+	).Scan(
+		&counts.TagAssignmentCount,
+		&counts.FeedbackAuditCount,
+		&counts.LLMAuditCount,
+		&counts.OutboxCount,
+		&counts.ReplyDraftCount,
+		&counts.ReplyDraftRevisionCount,
+		&counts.ReplyDraftEventCount,
+		&counts.ReplyDeliveryAttemptCount,
+	); err != nil {
 		return Counts{}, fmt.Errorf("count subject-linked rows: %w", err)
 	}
 	counts.FeedbackCount = len(feedbackIDs)
 
+	if _, err := tx.Exec(ctx, `DELETE FROM reply_delivery_attempts WHERE feedback_id = ANY($1)`, feedbackIDs); err != nil {
+		return Counts{}, fmt.Errorf("delete reply_delivery_attempts rows: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM llm_audit WHERE feedback_id = ANY($1)`, feedbackIDs); err != nil {
 		return Counts{}, fmt.Errorf("delete llm_audit rows: %w", err)
 	}

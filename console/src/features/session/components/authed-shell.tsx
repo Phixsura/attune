@@ -260,7 +260,7 @@ export function AuthedShell({ me, children }: AuthedShellProps) {
           </div>
         </aside>
 
-        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 pb-10">
+        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 bg-background pb-10">
           <div className="mx-auto max-w-[1440px]">{children}</div>
         </main>
       </div>

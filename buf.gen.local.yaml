@@ -1,0 +1,37 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/Phixsura/attune/internal/proto
+    - file_option: go_package
+      module: buf.build/gnostic/gnostic
+      value: github.com/google/gnostic-models/openapiv3
+  disable:
+    - module: buf.build/googleapis/googleapis
+plugins:
+  - local: protoc-gen-go
+    out: internal/proto
+    opt: paths=source_relative
+    strategy: all
+  - local: ["npx", "-y", "ts-proto@2.6.1", "protoc-gen-ts_proto"]
+    out: console/src/proto
+    opt:
+      - onlyTypes=true
+      - forceLong=string
+      - useOptionals=messages
+      - stringEnums=true
+    strategy: all
+  - local: ["npx", "-y", "ts-proto@2.6.1", "protoc-gen-ts_proto"]
+    out: sdk/node/src/proto
+    opt:
+      - onlyTypes=true
+      - forceLong=string
+      - useOptionals=messages
+      - stringEnums=true
+    strategy: all
+  - local: protoc-gen-openapi
+    out: docs/openapi
+    opt:
+      - enum_type=string
+    strategy: all

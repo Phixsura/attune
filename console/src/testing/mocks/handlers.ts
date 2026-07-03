@@ -12,6 +12,10 @@ import type {
   FeedbackDetail,
   GetFeedbackStatsResponse,
   ListFeedbackResponse,
+  ListReplySendHookDeliveriesResponse,
+  ReplySendHook,
+  ReplySendHookDelivery,
+  ReplySendHookHealth,
 } from '@/proto/attune/v1/ingest'
 import type {
   ListLLMChannelAbilitiesResponse,
@@ -131,6 +135,69 @@ const sampleDelivery = {
 }
 const defaultRetryDeliveryResponse: RetryDeliveryResponse = {
   delivery: { ...sampleDelivery, status: 'pending', attempts: 0 },
+}
+
+// Reply send hook -----------------------------------------------------------
+const defaultReplySendHook: ReplySendHook = {
+  id: 'reply-hook-default',
+  name: 'Support reply bridge',
+  enabled: true,
+  urlHost: 'hooks.example.com',
+  urlFingerprint: 'sha256:mock-reply-hook',
+  createdBy: 'u-1',
+  updatedBy: 'u-1',
+  createdAt: '2026-06-24T09:00:00Z',
+  updatedAt: '2026-06-24T09:00:00Z',
+}
+
+const defaultReplySendHookDelivery: ReplySendHookDelivery = {
+  id: 'reply-delivery-default',
+  hookId: defaultReplySendHook.id,
+  hookHost: defaultReplySendHook.urlHost,
+  hookFingerprint: defaultReplySendHook.urlFingerprint,
+  eventType: 'reply.test',
+  status: 'failed',
+  idempotencyKey: 'reply_test_default',
+  httpStatus: 500,
+  attempts: 1,
+  maxAttempts: 8,
+  error: 'receiver returned 500',
+  requestedByType: 'admin',
+  requestedBy: 'u-1',
+  requestedAt: '2026-06-24T09:05:00Z',
+  createdAt: '2026-06-24T09:05:00Z',
+  updatedAt: '2026-06-24T09:05:00Z',
+  retryable: true,
+}
+
+const defaultReplySendHookDeliveries: ListReplySendHookDeliveriesResponse = {
+  items: [defaultReplySendHookDelivery],
+}
+
+const defaultReplySendHookHealth: ReplySendHookHealth = {
+  accepted: '0',
+  dead: '0',
+  failed: '1',
+  latestDelivery: defaultReplySendHookDelivery,
+  latestProblem: defaultReplySendHookDelivery,
+  pending: '0',
+  retryable: '1',
+  total: '1',
+}
+
+function acceptedReplySendHookDelivery(
+  delivery: ReplySendHookDelivery = defaultReplySendHookDelivery,
+): ReplySendHookDelivery {
+  return {
+    ...delivery,
+    status: 'accepted',
+    httpStatus: 204,
+    attempts: delivery.attempts + 1,
+    error: undefined,
+    completedAt: '2026-06-24T09:06:00Z',
+    updatedAt: '2026-06-24T09:06:00Z',
+    retryable: false,
+  }
 }
 
 // LLM config ---------------------------------------------------------------
@@ -434,6 +501,27 @@ export const handlers = [
   http.get(`${BASE}/outbox/deliveries`, () => HttpResponse.json(defaultDeliveriesList)),
   http.post(`${BASE}/outbox/:id/retry`, () =>
     HttpResponse.json(defaultRetryDeliveryResponse, { status: 202 }),
+  ),
+
+  http.get(`${BASE}/reply-send-hook`, () => HttpResponse.json(defaultReplySendHook)),
+  http.put(`${BASE}/reply-send-hook`, () => HttpResponse.json(defaultReplySendHook)),
+  http.delete(`${BASE}/reply-send-hook`, () =>
+    HttpResponse.json({ ...defaultReplySendHook, enabled: false }),
+  ),
+  http.get(`${BASE}/reply-send-hook/deliveries`, () =>
+    HttpResponse.json(defaultReplySendHookDeliveries),
+  ),
+  http.get(`${BASE}/reply-send-hook/health`, () => HttpResponse.json(defaultReplySendHookHealth)),
+  http.post(`${BASE}/reply-send-hook/test`, () =>
+    HttpResponse.json(acceptedReplySendHookDelivery()),
+  ),
+  http.post(`${BASE}/reply-send-hook/deliveries/:id/redeliver`, ({ params }) =>
+    HttpResponse.json(
+      acceptedReplySendHookDelivery({
+        ...defaultReplySendHookDelivery,
+        id: String(params.id),
+      }),
+    ),
   ),
 
   http.get(`${BASE}/llm/channels`, () => HttpResponse.json(defaultLLMChannelsList)),

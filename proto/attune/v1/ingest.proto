@@ -79,10 +79,88 @@ service FeedbackService {
   rpc GetTerminalFailureWorkbench(GetTerminalFailureWorkbenchRequest) returns (GetTerminalFailureWorkbenchResponse) {
     option (google.api.http) = {get: "/fb/v1/console/feedback/terminal-failures"};
   }
-  // POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; session auth)
+  // POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; member session auth)
   rpc RegenerateReplyDraft(RegenerateReplyDraftRequest) returns (RegenerateReplyDraftResponse) {
     option (google.api.http) = {
       post: "/fb/v1/console/feedback/{id}/reply-draft/regenerate"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/feedback/{id}/reply-draft/edit (console; member session auth)
+  rpc UpdateReplyDraft(UpdateReplyDraftRequest) returns (ReplyDraftWorkflowResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/{id}/reply-draft/edit"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/feedback/{id}/reply-draft/approve (console; member session auth)
+  rpc ApproveReplyDraft(ApproveReplyDraftRequest) returns (ReplyDraftWorkflowResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/{id}/reply-draft/approve"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/feedback/{id}/reply-draft/reject (console; member session auth)
+  rpc RejectReplyDraft(RejectReplyDraftRequest) returns (ReplyDraftWorkflowResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/{id}/reply-draft/reject"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/feedback/{id}/reply-draft/send (console; member session auth)
+  rpc SendReplyDraft(SendReplyDraftRequest) returns (SendReplyDraftResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/{id}/reply-draft/send"
+      body: "*"
+    };
+    option (gnostic.openapi.v3.operation) = {
+      parameters: [
+        {
+          parameter: {
+            name: "Idempotency-Key"
+            in: "header"
+            description: "Required dedup token (8-128 chars, [A-Za-z0-9_-]) for safe reply-send retries. The JSON idempotencyKey field is accepted for generated clients that cannot set headers."
+            required: true
+            schema: {schema: {type: "string"}}
+          }
+        }
+      ]
+    };
+  }
+  // GET /fb/v1/console/reply-send-hook (console; admin session auth)
+  rpc GetReplySendHook(GetReplySendHookRequest) returns (ReplySendHook) {
+    option (google.api.http) = {get: "/fb/v1/console/reply-send-hook"};
+  }
+  // PUT /fb/v1/console/reply-send-hook (console; admin session auth)
+  rpc UpsertReplySendHook(UpsertReplySendHookRequest) returns (ReplySendHook) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/reply-send-hook"
+      body: "*"
+    };
+  }
+  // DELETE /fb/v1/console/reply-send-hook (console; admin session auth)
+  rpc DisableReplySendHook(DisableReplySendHookRequest) returns (ReplySendHook) {
+    option (google.api.http) = {delete: "/fb/v1/console/reply-send-hook"};
+  }
+  // GET /fb/v1/console/reply-send-hook/health (console; admin session auth)
+  rpc GetReplySendHookHealth(GetReplySendHookHealthRequest) returns (ReplySendHookHealth) {
+    option (google.api.http) = {get: "/fb/v1/console/reply-send-hook/health"};
+  }
+  // GET /fb/v1/console/reply-send-hook/deliveries (console; admin session auth)
+  rpc ListReplySendHookDeliveries(ListReplySendHookDeliveriesRequest) returns (ListReplySendHookDeliveriesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/reply-send-hook/deliveries"};
+  }
+  // POST /fb/v1/console/reply-send-hook/test (console; admin session auth)
+  rpc TestReplySendHook(TestReplySendHookRequest) returns (ReplySendHookDelivery) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/reply-send-hook/test"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/reply-send-hook/deliveries/{id}/redeliver (console; admin session auth)
+  rpc RedeliverReplySendHookDelivery(RedeliverReplySendHookDeliveryRequest) returns (ReplySendHookDelivery) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/reply-send-hook/deliveries/{id}/redeliver"
       body: "*"
     };
   }
@@ -209,6 +287,7 @@ message FeedbackDetail {
   optional string enrichment_failure_channel_name = 33;
   optional string enrichment_failure_config_fingerprint = 34;
   optional string enrichment_failure_prompt_version = 35;
+  optional ReplyDraftWorkflow reply_draft_workflow = 36;
 }
 
 message Attachment {
@@ -269,6 +348,173 @@ message RegenerateReplyDraftRequest {
 message RegenerateReplyDraftResponse {
   string reply_draft = 1;
   string reply_draft_generated_at = 2;  // RFC3339
+  optional ReplyDraftWorkflow workflow = 3;
+}
+
+message ReplyDraftWorkflow {
+  string draft_id = 1;
+  int64 feedback_id = 2;
+  int32 cycle_no = 3;
+  string status = 4;
+  optional string active_revision_id = 5;
+  optional string approved_revision_id = 6;
+  optional string sent_revision_id = 7;
+  string active_text = 8;
+  repeated ReplyDraftRevision revisions = 9;
+  repeated ReplyDraftEvent events = 10;
+  repeated string allowed_actions = 11;
+  repeated string blockers = 12;
+  bool hook_configured = 13;
+  optional string generated_at = 14;
+  optional string generated_by = 15;
+  optional string edited_at = 16;
+  optional string edited_by = 17;
+  optional string approved_at = 18;
+  optional string approved_by = 19;
+  optional string rejected_at = 20;
+  optional string rejected_by = 21;
+  optional string sent_at = 22;
+  optional string sent_by = 23;
+  optional string external_delivery_status = 24;
+  optional string external_message_id = 25;
+  int64 revision = 26;
+  string updated_at = 27;
+}
+
+message ReplyDraftRevision {
+  string id = 1;
+  string draft_id = 2;
+  int32 cycle_no = 3;
+  int32 revision_no = 4;
+  string origin = 5;
+  string content = 6;
+  string created_by = 7;
+  string created_at = 8;
+  google.protobuf.Struct metadata = 9;
+}
+
+message ReplyDraftEvent {
+  string id = 1;
+  string draft_id = 2;
+  optional string revision_id = 3;
+  optional string hook_id = 4;
+  string event_type = 5;
+  string actor_type = 6;
+  string actor_id = 7;
+  optional string blocker = 8;
+  google.protobuf.Struct metadata = 9;
+  string created_at = 10;
+}
+
+message UpdateReplyDraftRequest {
+  int64 id = 1;  // path param
+  string content = 2;
+  int64 expected_revision = 3;
+}
+
+message ApproveReplyDraftRequest {
+  int64 id = 1;  // path param
+  int64 expected_revision = 2;
+}
+
+message RejectReplyDraftRequest {
+  int64 id = 1;  // path param
+  int64 expected_revision = 2;
+}
+
+message SendReplyDraftRequest {
+  int64 id = 1;  // path param
+  optional string idempotency_key = 2;
+  int64 expected_revision = 3;
+}
+
+message ReplyDraftWorkflowResponse {
+  ReplyDraftWorkflow workflow = 1;
+}
+
+message SendReplyDraftResponse {
+  ReplyDraftWorkflow workflow = 1;
+  bool from_cache = 2;
+}
+
+message GetReplySendHookRequest {}
+
+message UpsertReplySendHookRequest {
+  string url = 1;
+  optional string secret = 2;
+  optional string name = 3;
+  optional bool enabled = 4;
+}
+
+message DisableReplySendHookRequest {}
+
+message GetReplySendHookHealthRequest {}
+
+message ListReplySendHookDeliveriesRequest {
+  optional int32 limit = 1;
+}
+
+message TestReplySendHookRequest {
+  optional string idempotency_key = 1;
+}
+
+message RedeliverReplySendHookDeliveryRequest {
+  string id = 1;  // path param
+}
+
+message ReplySendHook {
+  string id = 1;
+  string name = 2;
+  bool enabled = 3;
+  string url_host = 4;
+  string url_fingerprint = 5;
+  optional string secret_once = 6;
+  optional string created_by = 7;
+  optional string updated_by = 8;
+  optional string disabled_at = 9;
+  string created_at = 10;
+  string updated_at = 11;
+}
+
+message ReplySendHookDelivery {
+  string id = 1;
+  string hook_id = 2;
+  string hook_host = 3;
+  string hook_fingerprint = 4;
+  string event_type = 5;
+  string status = 6;
+  optional int64 feedback_id = 7;
+  optional string draft_id = 8;
+  optional string revision_id = 9;
+  string idempotency_key = 10;
+  int32 http_status = 11;
+  int32 attempts = 12;
+  int32 max_attempts = 13;
+  optional string next_retry_at = 14;
+  optional string external_message_id = 15;
+  optional string error = 16;
+  string requested_by_type = 17;
+  string requested_by = 18;
+  string requested_at = 19;
+  optional string completed_at = 20;
+  string created_at = 21;
+  string updated_at = 22;
+  bool retryable = 23;
+}
+
+message ListReplySendHookDeliveriesResponse {
+  repeated ReplySendHookDelivery items = 1;
+}
+
+message ReplySendHookHealth {
+  int64 total = 1;
+  int64 accepted = 2;
+  int64 failed = 3;
+  int64 dead = 4;
+  int64 pending = 5;
+  int64 retryable = 6;
+  optional ReplySendHookDelivery latest_delivery = 7;
+  optional ReplySendHookDelivery latest_problem = 8;
 }
 
 // RetryEnrichmentRequest resets a terminal-failed row for re-enrichment (#81).

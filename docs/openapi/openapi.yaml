@@ -1996,11 +1996,73 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/feedback/{id}/reply-draft/approve:
+        post:
+            tags:
+                - FeedbackService
+            description: POST /fb/v1/console/feedback/{id}/reply-draft/approve (console; member session auth)
+            operationId: FeedbackService_ApproveReplyDraft
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ApproveReplyDraftRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplyDraftWorkflowResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/feedback/{id}/reply-draft/edit:
+        post:
+            tags:
+                - FeedbackService
+            description: POST /fb/v1/console/feedback/{id}/reply-draft/edit (console; member session auth)
+            operationId: FeedbackService_UpdateReplyDraft
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateReplyDraftRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplyDraftWorkflowResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/feedback/{id}/reply-draft/regenerate:
         post:
             tags:
                 - FeedbackService
-            description: POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; session auth)
+            description: POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; member session auth)
             operationId: FeedbackService_RegenerateReplyDraft
             parameters:
                 - name: id
@@ -2021,6 +2083,74 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/RegenerateReplyDraftResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/feedback/{id}/reply-draft/reject:
+        post:
+            tags:
+                - FeedbackService
+            description: POST /fb/v1/console/feedback/{id}/reply-draft/reject (console; member session auth)
+            operationId: FeedbackService_RejectReplyDraft
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RejectReplyDraftRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplyDraftWorkflowResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/feedback/{id}/reply-draft/send:
+        post:
+            tags:
+                - FeedbackService
+            description: POST /fb/v1/console/feedback/{id}/reply-draft/send (console; member session auth)
+            operationId: FeedbackService_SendReplyDraft
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: Idempotency-Key
+                  in: header
+                  description: Required dedup token (8-128 chars, [A-Za-z0-9_-]) for safe reply-send retries. The JSON idempotencyKey field is accepted for generated clients that cannot set headers.
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SendReplyDraftRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SendReplyDraftResponse'
                 default:
                     description: Default error response
                     content:
@@ -3892,6 +4022,167 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/UpdateQualityActionResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/reply-send-hook:
+        get:
+            tags:
+                - FeedbackService
+            description: GET /fb/v1/console/reply-send-hook (console; admin session auth)
+            operationId: FeedbackService_GetReplySendHook
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplySendHook'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        put:
+            tags:
+                - FeedbackService
+            description: PUT /fb/v1/console/reply-send-hook (console; admin session auth)
+            operationId: FeedbackService_UpsertReplySendHook
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpsertReplySendHookRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplySendHook'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        delete:
+            tags:
+                - FeedbackService
+            description: DELETE /fb/v1/console/reply-send-hook (console; admin session auth)
+            operationId: FeedbackService_DisableReplySendHook
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplySendHook'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/reply-send-hook/deliveries:
+        get:
+            tags:
+                - FeedbackService
+            description: GET /fb/v1/console/reply-send-hook/deliveries (console; admin session auth)
+            operationId: FeedbackService_ListReplySendHookDeliveries
+            parameters:
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListReplySendHookDeliveriesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/reply-send-hook/deliveries/{id}/redeliver:
+        post:
+            tags:
+                - FeedbackService
+            description: POST /fb/v1/console/reply-send-hook/deliveries/{id}/redeliver (console; admin session auth)
+            operationId: FeedbackService_RedeliverReplySendHookDelivery
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RedeliverReplySendHookDeliveryRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplySendHookDelivery'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/reply-send-hook/health:
+        get:
+            tags:
+                - FeedbackService
+            description: GET /fb/v1/console/reply-send-hook/health (console; admin session auth)
+            operationId: FeedbackService_GetReplySendHookHealth
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplySendHookHealth'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/reply-send-hook/test:
+        post:
+            tags:
+                - FeedbackService
+            description: POST /fb/v1/console/reply-send-hook/test (console; admin session auth)
+            operationId: FeedbackService_TestReplySendHook
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TestReplySendHookRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplySendHookDelivery'
                 default:
                     description: Default error response
                     content:
@@ -6221,6 +6512,13 @@ components:
                 expiresAt:
                     type: string
             description: Approval workflows
+        ApproveReplyDraftRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                expectedRevision:
+                    type: string
         ArchiveStateResponse:
             type: object
             properties: {}
@@ -7988,6 +8286,8 @@ components:
                     type: string
                 enrichmentFailurePromptVersion:
                     type: string
+                replyDraftWorkflow:
+                    $ref: '#/components/schemas/ReplyDraftWorkflow'
             description: 'FeedbackDetail is the single-row view: the list fields plus extras (flat).'
         FeedbackFilter:
             type: object
@@ -9097,6 +9397,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/QualityAction'
+        ListReplySendHookDeliveriesResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ReplySendHookDelivery'
         ListSIEMIntegrationsResponse:
             type: object
             properties:
@@ -9641,6 +9948,11 @@ components:
         RecordSearchEventResponse:
             type: object
             properties: {}
+        RedeliverReplySendHookDeliveryRequest:
+            type: object
+            properties:
+                id:
+                    type: string
         RegenerateReplyDraftRequest:
             type: object
             properties:
@@ -9653,6 +9965,15 @@ components:
                 replyDraft:
                     type: string
                 replyDraftGeneratedAt:
+                    type: string
+                workflow:
+                    $ref: '#/components/schemas/ReplyDraftWorkflow'
+        RejectReplyDraftRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                expectedRevision:
                     type: string
         RemoveFeedbackTagResponse:
             type: object
@@ -9714,6 +10035,219 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/WorkflowTransition'
+        ReplyDraftEvent:
+            type: object
+            properties:
+                id:
+                    type: string
+                draftId:
+                    type: string
+                revisionId:
+                    type: string
+                hookId:
+                    type: string
+                eventType:
+                    type: string
+                actorType:
+                    type: string
+                actorId:
+                    type: string
+                blocker:
+                    type: string
+                metadata:
+                    type: object
+                createdAt:
+                    type: string
+        ReplyDraftRevision:
+            type: object
+            properties:
+                id:
+                    type: string
+                draftId:
+                    type: string
+                cycleNo:
+                    type: integer
+                    format: int32
+                revisionNo:
+                    type: integer
+                    format: int32
+                origin:
+                    type: string
+                content:
+                    type: string
+                createdBy:
+                    type: string
+                createdAt:
+                    type: string
+                metadata:
+                    type: object
+        ReplyDraftWorkflow:
+            type: object
+            properties:
+                draftId:
+                    type: string
+                feedbackId:
+                    type: string
+                cycleNo:
+                    type: integer
+                    format: int32
+                status:
+                    type: string
+                activeRevisionId:
+                    type: string
+                approvedRevisionId:
+                    type: string
+                sentRevisionId:
+                    type: string
+                activeText:
+                    type: string
+                revisions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ReplyDraftRevision'
+                events:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ReplyDraftEvent'
+                allowedActions:
+                    type: array
+                    items:
+                        type: string
+                blockers:
+                    type: array
+                    items:
+                        type: string
+                hookConfigured:
+                    type: boolean
+                generatedAt:
+                    type: string
+                generatedBy:
+                    type: string
+                editedAt:
+                    type: string
+                editedBy:
+                    type: string
+                approvedAt:
+                    type: string
+                approvedBy:
+                    type: string
+                rejectedAt:
+                    type: string
+                rejectedBy:
+                    type: string
+                sentAt:
+                    type: string
+                sentBy:
+                    type: string
+                externalDeliveryStatus:
+                    type: string
+                externalMessageId:
+                    type: string
+                revision:
+                    type: string
+                updatedAt:
+                    type: string
+        ReplyDraftWorkflowResponse:
+            type: object
+            properties:
+                workflow:
+                    $ref: '#/components/schemas/ReplyDraftWorkflow'
+        ReplySendHook:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                enabled:
+                    type: boolean
+                urlHost:
+                    type: string
+                urlFingerprint:
+                    type: string
+                secretOnce:
+                    type: string
+                createdBy:
+                    type: string
+                updatedBy:
+                    type: string
+                disabledAt:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        ReplySendHookDelivery:
+            type: object
+            properties:
+                id:
+                    type: string
+                hookId:
+                    type: string
+                hookHost:
+                    type: string
+                hookFingerprint:
+                    type: string
+                eventType:
+                    type: string
+                status:
+                    type: string
+                feedbackId:
+                    type: string
+                draftId:
+                    type: string
+                revisionId:
+                    type: string
+                idempotencyKey:
+                    type: string
+                httpStatus:
+                    type: integer
+                    format: int32
+                attempts:
+                    type: integer
+                    format: int32
+                maxAttempts:
+                    type: integer
+                    format: int32
+                nextRetryAt:
+                    type: string
+                externalMessageId:
+                    type: string
+                error:
+                    type: string
+                requestedByType:
+                    type: string
+                requestedBy:
+                    type: string
+                requestedAt:
+                    type: string
+                completedAt:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                retryable:
+                    type: boolean
+        ReplySendHookHealth:
+            type: object
+            properties:
+                total:
+                    type: string
+                accepted:
+                    type: string
+                failed:
+                    type: string
+                dead:
+                    type: string
+                pending:
+                    type: string
+                retryable:
+                    type: string
+                latestDelivery:
+                    $ref: '#/components/schemas/ReplySendHookDelivery'
+                latestProblem:
+                    $ref: '#/components/schemas/ReplySendHookDelivery'
         ResetEnrichmentRuntimeRequest:
             type: object
             properties:
@@ -10253,6 +10787,22 @@ components:
                     type: string
                     description: Stable identifier for this search execution, used for result interaction telemetry.
             description: SemanticSearchResponse contains the ranked search results.
+        SendReplyDraftRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                idempotencyKey:
+                    type: string
+                expectedRevision:
+                    type: string
+        SendReplyDraftResponse:
+            type: object
+            properties:
+                workflow:
+                    $ref: '#/components/schemas/ReplyDraftWorkflow'
+                fromCache:
+                    type: boolean
         ServiceAccount:
             type: object
             properties:
@@ -10516,6 +11066,11 @@ components:
                     format: int32
                 latencyMs:
                     type: string
+        TestReplySendHookRequest:
+            type: object
+            properties:
+                idempotencyKey:
+                    type: string
         TransitionFeedbackRequest:
             type: object
             properties:
@@ -10707,6 +11262,15 @@ components:
             properties:
                 action:
                     $ref: '#/components/schemas/QualityAction'
+        UpdateReplyDraftRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                content:
+                    type: string
+                expectedRevision:
+                    type: string
         UpdateStateRequest:
             type: object
             properties:
@@ -10800,6 +11364,17 @@ components:
                 purpose:
                     type: string
                 logicalModel:
+                    type: string
+                enabled:
+                    type: boolean
+        UpsertReplySendHookRequest:
+            type: object
+            properties:
+                url:
+                    type: string
+                secret:
+                    type: string
+                name:
                     type: string
                 enabled:
                     type: boolean

@@ -225,9 +225,23 @@ func (r *Repo) CreateDeleteRequest(
 		SELECT
 			(SELECT COUNT(*) FROM feedback_tag_assignments WHERE feedback_id = ANY($1)),
 			(SELECT COUNT(*) FROM feedback_audit_log WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM llm_audit WHERE feedback_id = ANY($1))`,
+			(SELECT COUNT(*) FROM llm_audit WHERE feedback_id = ANY($1)),
+			(SELECT COUNT(*) FROM notify_outbox WHERE feedback_id = ANY($1)),
+			(SELECT COUNT(*) FROM reply_drafts WHERE feedback_id = ANY($1)),
+			(SELECT COUNT(*) FROM reply_draft_revisions WHERE feedback_id = ANY($1)),
+			(SELECT COUNT(*) FROM reply_draft_events WHERE feedback_id = ANY($1)),
+			(SELECT COUNT(*) FROM reply_delivery_attempts WHERE feedback_id = ANY($1))`,
 		info.feedbackIDs,
-	).Scan(&counts.TagAssignmentCount, &counts.FeedbackAuditCount, &counts.LLMAuditCount); err != nil {
+	).Scan(
+		&counts.TagAssignmentCount,
+		&counts.FeedbackAuditCount,
+		&counts.LLMAuditCount,
+		&counts.OutboxCount,
+		&counts.ReplyDraftCount,
+		&counts.ReplyDraftRevisionCount,
+		&counts.ReplyDraftEventCount,
+		&counts.ReplyDeliveryAttemptCount,
+	); err != nil {
 		return nil, fmt.Errorf("count subject-linked rows: %w", err)
 	}
 	counts.FeedbackCount = len(info.feedbackIDs)

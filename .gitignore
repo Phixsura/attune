@@ -27,14 +27,17 @@
 /console/dist/
 /console/.vite/
 /console/coverage/
+/console/playwright-report/
+/console/test-results/
 
 # Logs
 *.log
 
 # Claude Code / agent local state (per-clone, not project state)
+.cache/
 .agents/
 .claude/
 skills-lock.json
 deploy/docker-compose.override.yml
-lint-rawptr
+/lint-rawptr
 .superpowers/

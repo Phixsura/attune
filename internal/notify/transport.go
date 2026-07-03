@@ -182,7 +182,7 @@ func (t *Transport) attempt(
 	}
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		return attemptResult{err: Classify(fmt.Errorf("http do: %w", err), 0)}
+		return attemptResult{err: Classify(redactRequestError("http do", err, req), 0)}
 	}
 	defer resp.Body.Close()
 	const maxResponseBody = 1 << 20 // 1 MiB — defense against oversized upstream responses
@@ -200,6 +200,23 @@ func (t *Transport) attempt(
 		return result
 	}
 	return attemptResult{status: resp.StatusCode}
+}
+
+type redactedRequestError struct {
+	message string
+	err     error
+}
+
+func (e redactedRequestError) Error() string { return e.message }
+
+func (e redactedRequestError) Unwrap() error { return e.err }
+
+func redactRequestError(prefix string, err error, req *http.Request) error {
+	msg := err.Error()
+	if req != nil && req.URL != nil {
+		msg = nethardening.RedactURLIn(msg, req.URL.String())
+	}
+	return redactedRequestError{message: prefix + ": " + msg, err: err}
 }
 
 type deliveryMetrics struct {
@@ -232,7 +249,7 @@ func (m deliveryMetrics) retryAfter() {
 
 func metricDestination(label string) string {
 	normalized := strings.ReplaceAll(strings.ToLower(label), "_", "-")
-	for _, value := range []string{"raw-webhook", "github-issue", "slack", "discord", "lark"} {
+	for _, value := range []string{"raw-webhook", "reply-send-hook", "github-issue", "slack", "discord", "lark"} {
 		if strings.Contains(normalized, value) {
 			return value
 		}

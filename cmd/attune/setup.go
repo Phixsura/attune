@@ -82,8 +82,8 @@ import (
 // tenant_notify_targets. Slug is resolved against the tenants table;
 // unknown slugs abort startup so misconfigurations don't ship silently.
 //
-// : this is the only writer to tenant_notify_targets. a follow-up
-// adds a console UI but the same upsert semantics still apply.
+// This remains the startup config writer for tenant_notify_targets; Console
+// integrations use their own handlers and repository paths.
 func syncCustomWebhooks(
 	ctx context.Context,
 	dests []config.CustomWebhookDest,
@@ -214,7 +214,9 @@ func buildConsoleRouter(
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
 	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
-	feedback.SetDrafter(replydraftsvc.NewReplyDrafter(replydraftrepo.NewDraftTaskRepo(pool), llm))
+	replyDraftRepo := replydraftrepo.NewDraftTaskRepo(pool)
+	feedback.SetDrafter(replydraftsvc.NewReplyDrafter(replyDraftRepo, llm))
+	feedback.SetReplyDraftWorkflow(replydraftsvc.NewWorkflow(replyDraftRepo, secrets, nil))
 	// Per-tenant backstop on the synchronous Regenerate endpoint: generous
 	// enough never to bother a human triaging (60/min, burst 20), tight enough
 	// to bound a scripted loop's LLM spend on top of the per-row cooldown.

@@ -15,10 +15,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
@@ -336,6 +338,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountSSOCutover(m)
 	r.mountDigestSubscription(m)
 	r.mountFeedback(m)
+	r.mountReplySendHook(m)
 	m.Group(func(u chi.Router) {
 		u.Use(r.requireViewer) // Usage stats visible to all roles
 		u.Get("/classification-quality", dispatcher.Bind(
@@ -549,6 +552,20 @@ func (r *Router) requireViewer(next http.Handler) http.Handler {
 			return
 		}
 		// Legacy fallback: all authenticated users pass (viewer is baseline)
+		next.ServeHTTP(w, req)
+	})
+}
+
+func (r *Router) requireMember(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if r.useRBACForRequest(req) {
+			r.rbac.RequireMember()(next).ServeHTTP(w, req)
+			return
+		}
+		if r.admins != nil {
+			r.requireAdminLegacy(next).ServeHTTP(w, req)
+			return
+		}
 		next.ServeHTTP(w, req)
 	})
 }
@@ -1583,19 +1600,7 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		f.Post("/{id}/reply-draft/regenerate", dispatcher.Bind(
-			"console.FeedbackHandler.Regenerate",
-			dispatcher.Path(
-				func() *attunev1.RegenerateReplyDraftRequest { return ptrext.Of(attunev1.RegenerateReplyDraftRequest{}) },
-				dispatcher.ParamInt64("id", func(req *attunev1.RegenerateReplyDraftRequest, id int64) {
-					req.Id = id
-				}, "id must be an integer"),
-			),
-			r.feedback.Regenerate,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RegenerateReplyDraftRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
+		r.mountFeedbackReplyDraftRoutes(f)
 		f.Post("/{id}/retry-enrichment", dispatcher.Bind(
 			"console.FeedbackHandler.RetryEnrichment",
 			dispatcher.Path(
@@ -1654,6 +1659,192 @@ func (r *Router) mountFeedback(m chi.Router) {
 			}),
 		))
 	})
+}
+
+func (r *Router) mountFeedbackReplyDraftRoutes(f chi.Router) {
+	f.With(r.requireMember).Post("/{id}/reply-draft/regenerate", dispatcher.Bind(
+		"console.FeedbackHandler.Regenerate",
+		dispatcher.Path(
+			func() *attunev1.RegenerateReplyDraftRequest { return ptrext.Of(attunev1.RegenerateReplyDraftRequest{}) },
+			dispatcher.ParamInt64("id", func(req *attunev1.RegenerateReplyDraftRequest, id int64) {
+				req.Id = id
+			}, "id must be an integer"),
+		),
+		r.feedback.Regenerate,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RegenerateReplyDraftRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireMember).Post("/{id}/reply-draft/edit", dispatcher.Bind(
+		"console.FeedbackHandler.UpdateReplyDraft",
+		dispatcher.Combine(
+			func() *attunev1.UpdateReplyDraftRequest {
+				return ptrext.Of(attunev1.UpdateReplyDraftRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateReplyDraftRequest],
+			dispatcher.ParamInt64("id", func(req *attunev1.UpdateReplyDraftRequest, id int64) {
+				req.Id = id
+			}, "id must be an integer"),
+		),
+		r.feedback.UpdateReplyDraft,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateReplyDraftRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireMember).Post("/{id}/reply-draft/approve", dispatcher.Bind(
+		"console.FeedbackHandler.ApproveReplyDraft",
+		dispatcher.Combine(
+			func() *attunev1.ApproveReplyDraftRequest {
+				return ptrext.Of(attunev1.ApproveReplyDraftRequest{})
+			},
+			optionalJSONBody[*attunev1.ApproveReplyDraftRequest], // ptrext:allow proto request type parameter
+			dispatcher.ParamInt64("id", func(req *attunev1.ApproveReplyDraftRequest, id int64) {
+				req.Id = id
+			}, "id must be an integer"),
+		),
+		r.feedback.ApproveReplyDraft,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ApproveReplyDraftRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireMember).Post("/{id}/reply-draft/reject", dispatcher.Bind(
+		"console.FeedbackHandler.RejectReplyDraft",
+		dispatcher.Combine(
+			func() *attunev1.RejectReplyDraftRequest {
+				return ptrext.Of(attunev1.RejectReplyDraftRequest{})
+			},
+			optionalJSONBody[*attunev1.RejectReplyDraftRequest], // ptrext:allow proto request type parameter
+			dispatcher.ParamInt64("id", func(req *attunev1.RejectReplyDraftRequest, id int64) {
+				req.Id = id
+			}, "id must be an integer"),
+		),
+		r.feedback.RejectReplyDraft,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RejectReplyDraftRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireMember).Post("/{id}/reply-draft/send", dispatcher.Bind(
+		"console.FeedbackHandler.SendReplyDraft",
+		dispatcher.Combine(
+			func() *attunev1.SendReplyDraftRequest {
+				return ptrext.Of(attunev1.SendReplyDraftRequest{})
+			},
+			optionalJSONBody[*attunev1.SendReplyDraftRequest], // ptrext:allow proto request type parameter
+			dispatcher.ParamInt64("id", func(req *attunev1.SendReplyDraftRequest, id int64) {
+				req.Id = id
+			}, "id must be an integer"),
+		),
+		r.feedback.SendReplyDraft,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SendReplyDraftRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountReplySendHook(m chi.Router) {
+	if r.feedback == nil {
+		return
+	}
+	m.With(r.requireAdminStrict).Get("/reply-send-hook", dispatcher.Bind(
+		"console.FeedbackHandler.GetReplySendHook",
+		dispatcher.Empty(func() *attunev1.GetReplySendHookRequest {
+			return ptrext.Of(attunev1.GetReplySendHookRequest{})
+		}),
+		r.feedback.GetReplySendHook,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetReplySendHookRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.With(r.requireAdminStrict).Put("/reply-send-hook", dispatcher.Bind(
+		"console.FeedbackHandler.UpsertReplySendHook",
+		dispatcher.JSON(func() *attunev1.UpsertReplySendHookRequest {
+			return ptrext.Of(attunev1.UpsertReplySendHookRequest{})
+		}),
+		r.feedback.UpsertReplySendHook,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpsertReplySendHookRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.With(r.requireAdminStrict).Get("/reply-send-hook/health", dispatcher.Bind(
+		"console.FeedbackHandler.GetReplySendHookHealth",
+		dispatcher.Empty(func() *attunev1.GetReplySendHookHealthRequest {
+			return ptrext.Of(attunev1.GetReplySendHookHealthRequest{})
+		}),
+		r.feedback.GetReplySendHookHealth,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetReplySendHookHealthRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.With(r.requireAdminStrict).Get("/reply-send-hook/deliveries", dispatcher.Bind(
+		"console.FeedbackHandler.ListReplySendHookDeliveries",
+		dispatcher.Query(
+			func() *attunev1.ListReplySendHookDeliveriesRequest {
+				return ptrext.Of(attunev1.ListReplySendHookDeliveriesRequest{})
+			},
+			func(r *http.Request, req *attunev1.ListReplySendHookDeliveriesRequest) error {
+				if lim := r.URL.Query().Get("limit"); lim != "" {
+					parsed, err := strconv.ParseInt(lim, 10, 32)
+					if err != nil {
+						return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "limit must be an integer")
+					}
+					req.Limit = ptrext.Of(int32(parsed))
+				}
+				return nil
+			},
+		),
+		r.feedback.ListReplySendHookDeliveries,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListReplySendHookDeliveriesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.With(r.requireAdminStrict).Post("/reply-send-hook/test", dispatcher.Bind(
+		"console.FeedbackHandler.TestReplySendHook",
+		dispatcher.JSON(func() *attunev1.TestReplySendHookRequest {
+			return ptrext.Of(attunev1.TestReplySendHookRequest{})
+		}),
+		r.feedback.TestReplySendHook,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TestReplySendHookRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.With(r.requireAdminStrict).Post("/reply-send-hook/deliveries/{id}/redeliver", dispatcher.Bind(
+		"console.FeedbackHandler.RedeliverReplySendHookDelivery",
+		dispatcher.Path(
+			func() *attunev1.RedeliverReplySendHookDeliveryRequest {
+				return ptrext.Of(attunev1.RedeliverReplySendHookDeliveryRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.RedeliverReplySendHookDeliveryRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.feedback.RedeliverReplySendHookDelivery,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RedeliverReplySendHookDeliveryRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.With(r.requireAdminStrict).Delete("/reply-send-hook", dispatcher.Bind(
+		"console.FeedbackHandler.DisableReplySendHook",
+		dispatcher.Empty(func() *attunev1.DisableReplySendHookRequest {
+			return ptrext.Of(attunev1.DisableReplySendHookRequest{})
+		}),
+		r.feedback.DisableReplySendHook,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DisableReplySendHookRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func optionalJSONBody[Req proto.Message](r *http.Request, req Req) error {
+	if r.Body == nil || r.ContentLength == 0 {
+		return nil
+	}
+	if err := dispatcher.JSONBody[Req](r, req); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *Router) mountFeedbackBatchRoutes(f chi.Router) {

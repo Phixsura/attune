@@ -4,9 +4,10 @@
 # the Go (internal/proto/), TS (console/src/proto/) and OpenAPI (docs/openapi/)
 # artifacts. Generated files are committed; CI's proto-sync job fails on drift.
 #
-# Requires `buf` (https://buf.build/docs/installation). Codegen uses buf *remote*
-# plugins, so no local protoc-gen-* installs are needed — only network access to
-# the Buf Schema Registry. To change a proto dependency, run `make proto-deps`.
+# Requires `buf` (https://buf.build/docs/installation). Codegen first uses buf
+# remote plugins; when the Buf Schema Registry is unavailable, `make proto`
+# falls back to fixed-version local plugins. To change a proto dependency, run
+# `make proto-deps`.
 
 .PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality test fast-check adversarial-check test-live test-live-list test-integration runtime-smoke release-smoke ci-check
 
@@ -17,24 +18,13 @@ help: ## List targets.
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
 
 proto: ## Regenerate Go + TS + OpenAPI from proto/, then lint.
-	buf generate
-	go run ./internal/tools/openapipatch
-	$(MAKE) proto-sdk-go
-	buf lint
+	bash scripts/proto-generate.sh
 
 # Second Go target for the published SDK (#36): a different go_package_prefix
 # than internal/proto, so it needs its own template. Scoped to the public SDK
 # surface (ingest + selected management APIs) to keep the SDK module focused.
 proto-sdk-go: ## Regenerate the Go SDK's proto types (sdk/go/internal).
-	buf generate --template buf.gen.sdk-go.yaml \
-		--path proto/attune/v1/ingest.proto \
-		--path proto/attune/v1/audit.proto \
-		--path proto/attune/v1/gdpr.proto \
-		--path proto/attune/v1/outbox.proto \
-		--path proto/attune/v1/mcp_client.proto \
-		--path proto/attune/v1/tag.proto \
-		--path proto/attune/v1/workflow.proto \
-		--path proto/attune/v1/common.proto
+	bash scripts/proto-generate.sh sdk-go
 
 proto-lint: ## Lint the proto definitions only.
 	buf lint

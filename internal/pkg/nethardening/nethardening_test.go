@@ -98,6 +98,31 @@ func TestValidateURL(t *testing.T) {
 	}
 }
 
+func TestIsLoopbackHost(t *testing.T) {
+	tests := []struct {
+		name string
+		host string
+		want bool
+	}{
+		{"localhost", "localhost", true},
+		{"localhost uppercase", "LOCALHOST", true},
+		{"ipv4 loopback", "127.0.0.1", true},
+		{"ipv4 loopback range", "127.4.5.6", true},
+		{"ipv6 loopback", "::1", true},
+		{"bracketed ipv6 loopback", "[::1]", true},
+		{"localhost lookalike", "localhost.example.com", false},
+		{"private ipv4", "192.168.1.10", false},
+		{"public host", "example.com", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsLoopbackHost(tt.host); got != tt.want {
+				t.Fatalf("IsLoopbackHost(%q) = %v, want %v", tt.host, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestNewHTTPTransportDisablesProxy locks the SSRF-critical invariant that the
 // guarded transport does NOT honor HTTP(S)_PROXY — a proxy would make the dialer
 // connect to the proxy IP, hiding the real destination from the dial-time guard.

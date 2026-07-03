@@ -27,6 +27,7 @@ function apiError(status: number, code: string, message: string, requestId?: str
 interface FetchOpts {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
+  headers?: Record<string, string>
   signal?: AbortSignal
 }
 
@@ -42,6 +43,7 @@ export async function api<T>(path: string, opts: FetchOpts = {}): Promise<T> {
   const method = opts.method ?? 'GET'
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    ...(opts.headers ?? {}),
   }
   let body: BodyInit | undefined
   if (opts.body !== undefined) {

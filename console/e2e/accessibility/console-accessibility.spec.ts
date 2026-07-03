@@ -4,6 +4,7 @@ import {
   expectNoAxeViolations,
   expectNoConsoleDiagnostics,
   expectNoDocumentOverflow,
+  expectOpaqueBackground,
   gotoConsoleRoute,
 } from './helpers'
 import { installConsoleApiMocks } from './route-mocks'
@@ -57,6 +58,50 @@ const zh = {
   viewDetails: '\u67e5\u770b\u8be6\u60c5',
   denyTool: '\u963b\u6b62\u5de5\u5177',
   exportZip: '\u5bfc\u51fa\u0020\u005a\u0049\u0050',
+  replyDraft: '\u56de\u590d\u8349\u7a3f',
+  replyDraftAi: '\u0041\u0049\u0020\u5efa\u8bae',
+  replyDraftHuman: '\u4eba\u5de5\u7f16\u8f91',
+  replyDraftSentText: '\u5df2\u53d1\u9001\u6587\u672c',
+  replyDraftEdited: '\u5df2\u7f16\u8f91',
+  replyDraftApprovedStatus: '\u5df2\u6279\u51c6',
+  replyDraftSentStatus: '\u5df2\u53d1\u9001',
+  replyDraftEdit: '\u7f16\u8f91',
+  replyDraftSave: '\u4fdd\u5b58',
+  replyDraftSaved: '\u8349\u7a3f\u5df2\u4fdd\u5b58',
+  replyDraftApprove: '\u6279\u51c6',
+  replyDraftApproved: '\u8349\u7a3f\u5df2\u6279\u51c6',
+  replyDraftSend: '\u53d1\u9001',
+  replyDraftSent: '\u56de\u590d\u5df2\u53d1\u9001',
+  replyDraftHistory: '\u7f16\u8f91\u5386\u53f2',
+  replyDraftPreflight: '\u786e\u8ba4\u53d1\u9001\u56de\u590d',
+  replyDraftConfirmSend: '\u786e\u8ba4\u53d1\u9001',
+  replyDraftEvidence: '\u8bc1\u636e',
+  replyDraftFinalText: '\u6700\u7ec8\u53d1\u9001\u6587\u672c',
+  replyDraftDiff: '\u53d8\u66f4\u5bf9\u6bd4',
+  replySendHook: '\u56de\u590d\u53d1\u9001\u0020\u0048\u006f\u006f\u006b',
+  replySendHookSaved:
+    '\u56de\u590d\u53d1\u9001\u0020\u0048\u006f\u006f\u006b\u0020\u5df2\u4fdd\u5b58',
+  replySendHookDisabled:
+    '\u56de\u590d\u53d1\u9001\u0020\u0048\u006f\u006f\u006b\u0020\u5df2\u505c\u7528',
+  replySendHookDisable: '\u505c\u7528\u0020\u0048\u006f\u006f\u006b',
+  replySendHookDisableConfirm: '\u786e\u8ba4\u505c\u7528',
+  replySendHookDisableDialog:
+    '\u505c\u7528\u56de\u590d\u53d1\u9001\u0020\u0048\u006f\u006f\u006b\uff1f',
+  replySendHookName: '\u540d\u79f0',
+  replySendHookContract: '\u6295\u9012\u5951\u7ea6',
+  replySendHookDelivery: '\u6700\u8fd1\u6295\u9012',
+  replySendHookHealthAttention: '\u6700\u8fd1\u6295\u9012\u9700\u8981\u5904\u7406',
+  replySendHookSecurity: '\u5b89\u5168\u68c0\u67e5',
+  replySendHookTest: '\u6d4b\u8bd5\u0020\u0048\u006f\u006f\u006b',
+  replySendHookTestAccepted:
+    '\u6d4b\u8bd5\u6295\u9012\u5df2\u88ab\u0020\u0048\u006f\u006f\u006b\u0020\u63a5\u6536',
+  replySendHookRedeliver: '\u91cd\u653e\u6295\u9012',
+  replySendHookRedelivered: '\u6295\u9012\u5df2\u91cd\u653e\u5e76\u88ab\u63a5\u6536',
+  replySendHookPayloadLabel:
+    '\u56de\u590d\u53d1\u9001\u0020\u0048\u006f\u006f\u006b\u0020\u793a\u4f8b\u0020\u0070\u0061\u0079\u006c\u006f\u0061\u0064',
+  replySendHookOneTimeSecret: '\u4e00\u6b21\u6027\u0020\u0073\u0065\u0063\u0072\u0065\u0074',
+  replySendHookURLHttpsError: '回复发送 Hook 只接受 HTTPS URL；本地测试可使用 loopback HTTP。',
+  webhookUrl: '\u0057\u0065\u0062\u0068\u006f\u006f\u006b\u0020\u0055\u0052\u004c',
 }
 
 const apiKeyCreateFailure = 'Create key failed for accessibility gate'
@@ -74,6 +119,11 @@ const routes = [
   { path: '/feedback', title: zh.feedback, heading: zh.feedback },
   { path: '/feedback/terminal-failures', title: zh.terminalFailures, heading: zh.feedback },
   { path: '/integrations/api-keys', title: zh.apiKeys, heading: zh.apiKeys },
+  {
+    path: '/integrations/reply-send-hook',
+    title: zh.replySendHook,
+    heading: zh.replySendHook,
+  },
   { path: '/mcp-clients', title: zh.mcpClients, heading: zh.mcpClients },
   { path: '/administration/gdpr', title: zh.gdpr, heading: zh.gdpr },
   { path: '/administration/dead-deliveries', title: zh.outboxDead, heading: zh.outboxDead },
@@ -334,6 +384,159 @@ test.describe('Console accessibility browser gate', () => {
     expect(await feedbackOpeners.count()).toBeGreaterThan(0)
     await cycleSheet(page, feedbackOpeners.nth(0), sheetCycles)
 
+    expect(apiMocks.unhandledRequests).toEqual([])
+    await expectNoConsoleDiagnostics(diagnostics)
+  })
+
+  test('reply draft review workflow edits, approves, and sends a guarded revision', async ({
+    page,
+  }) => {
+    const diagnostics = collectConsoleDiagnostics(page)
+    const apiMocks = await installConsoleApiMocks(page)
+
+    await page.setViewportSize({ width: 1365, height: 768 })
+    await gotoConsoleRoute(page, '/feedback')
+    await page
+      .getByRole('button', { name: /#feedback-101/ })
+      .first()
+      .click()
+
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: zh.replyDraft })).toBeVisible()
+    await expect(dialog.getByText(zh.replyDraftAi)).toBeVisible()
+    const evidencePanel = page.getByTestId('reply-draft-evidence-panel')
+    await expect(evidencePanel).toBeVisible()
+    await expect(evidencePanel.getByText(zh.replyDraftEvidence, { exact: true })).toBeVisible()
+    await expectOpaqueBackground(page, '[data-slot="sheet-content"]', 'feedback detail sheet')
+    await expectOpaqueBackground(page, '[data-testid="reply-draft-surface"]', 'reply draft surface')
+
+    await dialog.getByRole('button', { name: zh.replyDraftEdit }).click()
+    const editedReply = 'Human edited reply from the browser gate before approval.'
+    await dialog.locator('textarea').first().fill(editedReply)
+    await dialog.getByRole('button', { name: zh.replyDraftSave }).click()
+    await expectToastStatus(page, zh.replyDraftSaved)
+    await expect(dialog.getByText(zh.replyDraftEdited)).toBeVisible()
+    await expect(dialog.getByText(zh.replyDraftHuman)).toBeVisible()
+    await expect(dialog.getByText(editedReply).first()).toBeVisible()
+
+    await dialog.getByRole('button', { name: zh.replyDraftApprove }).click()
+    await expectToastStatus(page, zh.replyDraftApproved)
+    await expect(dialog.getByText(zh.replyDraftApprovedStatus, { exact: true })).toBeVisible()
+
+    await dialog.getByRole('button', { name: zh.replyDraftSend }).click()
+    const preflight = page.getByRole('dialog', { name: zh.replyDraftPreflight })
+    await expect(preflight).toBeVisible()
+    await expect(preflight.getByText(zh.replyDraftFinalText)).toBeVisible()
+    await expect(preflight.getByText(editedReply)).toBeVisible()
+    await preflight.getByRole('button', { name: zh.replyDraftConfirmSend }).click()
+    await expectToastStatus(page, zh.replyDraftSent)
+    await expect(dialog.getByText(zh.replyDraftSentStatus, { exact: true }).first()).toBeVisible()
+    await expect(dialog.getByText(zh.replyDraftSentText)).toBeVisible()
+    await expect(dialog.getByText(zh.replyDraftHistory)).toBeVisible()
+    await expect(dialog.getByText(zh.replyDraftDiff)).toBeVisible()
+
+    expect(apiMocks.replyDraftRequests).toEqual([
+      expect.objectContaining({
+        method: 'POST',
+        path: '/feedback/feedback-101/reply-draft/edit',
+        body: { content: editedReply, expectedRevision: '1' },
+      }),
+      expect.objectContaining({
+        method: 'POST',
+        path: '/feedback/feedback-101/reply-draft/approve',
+        body: { expectedRevision: '2' },
+      }),
+      expect.objectContaining({
+        method: 'POST',
+        path: '/feedback/feedback-101/reply-draft/send',
+        body: { expectedRevision: '3' },
+        idempotencyKey: expect.stringMatching(/.+/),
+      }),
+    ])
+    await expectNoDocumentOverflow(page)
+    await expectNoAxeViolations(page)
+    expect(apiMocks.unhandledRequests).toEqual([])
+    await expectNoConsoleDiagnostics(diagnostics)
+  })
+
+  test('reply send hook page saves and disables the controlled send endpoint', async ({ page }) => {
+    const diagnostics = collectConsoleDiagnostics(page)
+    const apiMocks = await installConsoleApiMocks(page)
+
+    await page.setViewportSize({ width: 1365, height: 768 })
+    await gotoConsoleRoute(page, '/integrations/reply-send-hook')
+
+    await expectOpaqueBackground(page, 'body', 'document body')
+    await expectOpaqueBackground(page, '#root', 'app root')
+    await expectOpaqueBackground(page, 'main', 'console main')
+    await expect(page.getByRole('heading', { level: 1, name: zh.replySendHook })).toBeVisible()
+    await expect(page.getByText('hooks.example.com').first()).toBeVisible()
+    await expect(page.getByTestId('reply-send-hook-health')).toBeVisible()
+    await expect(page.getByText(zh.replySendHookHealthAttention)).toBeVisible()
+    await expect(page.getByTestId('reply-send-hook-contract')).toBeVisible()
+    await expect(page.getByText(zh.replySendHookContract)).toBeVisible()
+    await expect(page.getByTestId('reply-send-hook-deliveries')).toBeVisible()
+    await expect(page.getByText(zh.replySendHookDelivery).first()).toBeVisible()
+    await expect(
+      page.getByTestId('reply-send-hook-deliveries').getByText('receiver returned 500'),
+    ).toBeVisible()
+    await expect(page.getByText('X-Attune-Signature')).toBeVisible()
+    await expect(page.getByText('X-Attune-Timestamp')).toBeVisible()
+    await expect(page.getByLabel(zh.replySendHookPayloadLabel)).toHaveValue(
+      /"event_type": "reply\.send"/,
+    )
+    await expect(page.getByText(zh.replySendHookSecurity)).toBeVisible()
+    await page.getByRole('button', { name: zh.replySendHookTest }).first().click()
+    await expectToastStatus(page, zh.replySendHookTestAccepted)
+    await page.getByRole('button', { name: new RegExp(zh.replySendHookRedeliver) }).click()
+    await expectToastStatus(page, zh.replySendHookRedelivered)
+    await page.getByLabel(zh.replySendHookName).fill('Browser reply bridge')
+    await page.getByLabel(zh.webhookUrl).fill('http://support.example.com/attune/replies')
+    await expect(page.getByText(zh.replySendHookURLHttpsError)).toBeVisible()
+    await expect(page.getByRole('button', { name: zh.replyDraftSave })).toBeDisabled()
+    await page.getByLabel(zh.webhookUrl).fill('http://127.0.0.1:4174/attune/replies')
+    await expect(page.getByText(zh.replySendHookURLHttpsError)).toBeHidden()
+    await expect(page.getByRole('button', { name: zh.replyDraftSave })).toBeEnabled()
+    await page.getByLabel(zh.webhookUrl).fill('https://support.example.com/attune/replies')
+    await page.getByRole('button', { name: zh.replyDraftSave }).click()
+    await expectToastStatus(page, zh.replySendHookSaved)
+    await expect(page.getByText(zh.replySendHookOneTimeSecret, { exact: true })).toBeVisible()
+    await expect(page.getByText('generated_reply_secret_a11y_123456')).toBeVisible()
+
+    await page.getByRole('button', { name: zh.replySendHookDisable }).click()
+    await expect(
+      page.getByRole('alertdialog', { name: zh.replySendHookDisableDialog }),
+    ).toBeVisible()
+    await page.getByRole('button', { name: zh.replySendHookDisableConfirm }).click()
+    await expectToastStatus(page, zh.replySendHookDisabled)
+    await expect(page.getByText(zh.replySendHookDisabled)).toBeVisible()
+
+    expect(apiMocks.replySendHookRequests).toEqual([
+      expect.objectContaining({
+        method: 'POST',
+        path: '/reply-send-hook/test',
+      }),
+      expect.objectContaining({
+        method: 'POST',
+        path: '/reply-send-hook/deliveries/reply-delivery-a11y-failed/redeliver',
+      }),
+      expect.objectContaining({
+        method: 'PUT',
+        path: '/reply-send-hook',
+        body: {
+          enabled: true,
+          name: 'Browser reply bridge',
+          url: 'https://support.example.com/attune/replies',
+        },
+      }),
+      expect.objectContaining({
+        method: 'DELETE',
+        path: '/reply-send-hook',
+        body: null,
+      }),
+    ])
+    await expectNoDocumentOverflow(page)
+    await expectNoAxeViolations(page)
     expect(apiMocks.unhandledRequests).toEqual([])
     await expectNoConsoleDiagnostics(diagnostics)
   })

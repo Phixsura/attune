@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
@@ -95,7 +96,7 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 	if err != nil {
 		return errors.New("url must be https://... or a loopback http://127.0.0.1")
 	}
-	loopbackHTTP := u.Scheme == "http" && isLoopback(u.Hostname())
+	loopbackHTTP := u.Scheme == "http" && nethardening.IsLoopbackHost(u.Hostname())
 	if u.Scheme != "https" && !loopbackHTTP {
 		return errors.New("url must be https://... or a loopback http://127.0.0.1")
 	}
@@ -116,10 +117,6 @@ func validateNotifyCreate(req *createNotifyRequest) error {
 		return errors.New("timeout_seconds must be between 1 and 60")
 	}
 	return nil
-}
-
-func isLoopback(host string) bool {
-	return host == "127.0.0.1" || host == "localhost" || host == "[::1]"
 }
 
 func (h *NotifyTargetsHandler) recordAudit(

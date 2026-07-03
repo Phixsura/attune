@@ -14,8 +14,10 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	"github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
+	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
+	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
 	"github.com/Phixsura/attune/internal/service/workflow"
 )
 
@@ -55,6 +57,7 @@ type FeedbackHandler struct {
 	regenLimiter   *ratelimit.Limiter // optional per-tenant rate limit on Regenerate; nil disables
 	tagAssignments tagAssignmentReader
 	workflow       workflowTransitioner
+	replyWorkflow  replyDraftWorkflow
 	auditReader    auditReader
 	workflowStates workflowStateReader
 	audit          auditRecorder // optional writer for retry-enrichment audit trail
@@ -70,8 +73,26 @@ type Drafter interface {
 	Generate(ctx context.Context, feedbackID int64, tenantID string) (string, time.Time, error)
 }
 
+type replyDraftWorkflow interface {
+	Snapshot(ctx context.Context, tenantID string, feedbackID int64) (replydraftsvc.Snapshot, error)
+	Edit(ctx context.Context, tenantID string, feedbackID int64, content string, expectedRevision int64, actor replydraftrepo.Actor) (replydraftsvc.Snapshot, error)
+	Approve(ctx context.Context, tenantID string, feedbackID int64, expectedRevision int64, actor replydraftrepo.Actor) (replydraftsvc.Snapshot, error)
+	Reject(ctx context.Context, tenantID string, feedbackID int64, expectedRevision int64, actor replydraftrepo.Actor) (replydraftsvc.Snapshot, error)
+	Send(ctx context.Context, tenantID string, feedbackID int64, idempotencyKey string, expectedRevision int64, actor replydraftrepo.Actor) (replydraftsvc.SendResult, error)
+	UpsertHook(ctx context.Context, tenantID string, name string, rawURL string, rawSecret string, enabled bool, actorID string) (replydraftsvc.HookConfig, error)
+	GetHook(ctx context.Context, tenantID string) (replydraftsvc.HookConfig, error)
+	DisableHook(ctx context.Context, tenantID, actorID string) (replydraftsvc.HookConfig, error)
+	ListDeliveries(ctx context.Context, tenantID string, limit int) ([]replydraftrepo.DeliveryAttempt, error)
+	DeliveryHealth(ctx context.Context, tenantID string) (replydraftrepo.DeliveryHealth, error)
+	TestHook(ctx context.Context, tenantID string, idempotencyKey string, actor replydraftrepo.Actor) (replydraftsvc.HookTestResult, error)
+	Redeliver(ctx context.Context, tenantID string, attemptID string, actor replydraftrepo.Actor) (replydraftrepo.DeliveryAttempt, error)
+}
+
 // SetDrafter wires the reply-draft generator used by Regenerate.
 func (h *FeedbackHandler) SetDrafter(d Drafter) { h.drafter = d }
+
+// SetReplyDraftWorkflow wires the review/edit/approve/send workflow.
+func (h *FeedbackHandler) SetReplyDraftWorkflow(w replyDraftWorkflow) { h.replyWorkflow = w }
 
 // SetRegenLimiter wires the per-tenant token-bucket that backstops the
 // synchronous Regenerate endpoint: the per-row cooldown caps one row, this caps

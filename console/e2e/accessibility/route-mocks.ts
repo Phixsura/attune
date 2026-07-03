@@ -1,4 +1,11 @@
 import type { Page, Route } from '@playwright/test'
+import type {
+  FeedbackDetail,
+  ReplyDraftWorkflow,
+  ReplySendHook,
+  ReplySendHookDelivery,
+  ReplySendHookHealth,
+} from '../../src/proto/attune/v1/ingest'
 import {
   consoleA11yApiKeyPresets,
   consoleA11yApiKeyScopes,
@@ -27,6 +34,9 @@ import {
   consoleA11yMe,
   consoleA11yOutboxDeliveries,
   consoleA11yOutboxRetry,
+  consoleA11yReplyDraftWorkflow,
+  consoleA11yReplySendHook,
+  consoleA11yReplySendHookDeliveries,
   consoleA11yRetryEnrichmentResponse,
   consoleA11yTagsResponse,
   consoleA11yTerminalFeedbackDetail,
@@ -39,6 +49,17 @@ import {
 const apiPrefix = '/fb/v1/console'
 
 export type ApiMockDiagnostics = {
+  replyDraftRequests: Array<{
+    body: unknown
+    idempotencyKey?: string
+    method: string
+    path: string
+  }>
+  replySendHookRequests: Array<{
+    body: unknown
+    method: string
+    path: string
+  }>
   unhandledRequests: string[]
   semanticSearchRequests: unknown[]
 }
@@ -61,8 +82,15 @@ export async function installConsoleApiMocks(
   options: ApiMockOptions = {},
 ): Promise<ApiMockDiagnostics> {
   const diagnostics: ApiMockDiagnostics = {
+    replyDraftRequests: [],
+    replySendHookRequests: [],
     unhandledRequests: [],
     semanticSearchRequests: [],
+  }
+  const state: ApiMockState = {
+    replyDraftWorkflow: clone(consoleA11yReplyDraftWorkflow),
+    replySendHook: clone(consoleA11yReplySendHook),
+    replySendHookDeliveries: clone(consoleA11yReplySendHookDeliveries),
   }
 
   await page.route('**/fb/v1/console/**', async (route) => {
@@ -71,7 +99,7 @@ export async function installConsoleApiMocks(
     const method = request.method()
     const path = url.pathname.slice(apiPrefix.length) || '/'
 
-    if (await handleRoute(route, method, path, url, options, diagnostics)) {
+    if (await handleRoute(route, method, path, url, options, diagnostics, state)) {
       return
     }
 
@@ -89,6 +117,7 @@ async function handleRoute(
   url: URL,
   options: ApiMockOptions,
   diagnostics: ApiMockDiagnostics,
+  state: ApiMockState,
 ) {
   if (method === 'GET' && path === '/me') {
     await fulfillJson(route, consoleA11yMe)
@@ -158,8 +187,45 @@ async function handleRoute(
     const detail =
       path === '/feedback/feedback-201'
         ? consoleA11yTerminalFeedbackDetail
-        : consoleA11yFeedbackDetail
+        : feedbackDetailWithReplyDraft(state.replyDraftWorkflow)
     await fulfillJson(route, detail)
+    return true
+  }
+  if (method === 'POST' && path.match(/^\/feedback\/[^/]+\/reply-draft\/edit$/)) {
+    const body = readJsonBody(route)
+    diagnostics.replyDraftRequests.push({ method, path, body })
+    const content =
+      typeof (body as { content?: unknown } | null)?.content === 'string'
+        ? (body as { content: string }).content
+        : state.replyDraftWorkflow.activeText
+    state.replyDraftWorkflow = editReplyDraftWorkflow(state.replyDraftWorkflow, content)
+    await fulfillJson(route, { workflow: state.replyDraftWorkflow })
+    return true
+  }
+  if (method === 'POST' && path.match(/^\/feedback\/[^/]+\/reply-draft\/approve$/)) {
+    const body = readJsonBody(route)
+    diagnostics.replyDraftRequests.push({ method, path, body })
+    state.replyDraftWorkflow = advanceReplyDraftWorkflow(state.replyDraftWorkflow, 'approved')
+    await fulfillJson(route, { workflow: state.replyDraftWorkflow })
+    return true
+  }
+  if (method === 'POST' && path.match(/^\/feedback\/[^/]+\/reply-draft\/reject$/)) {
+    const body = readJsonBody(route)
+    diagnostics.replyDraftRequests.push({ method, path, body })
+    state.replyDraftWorkflow = advanceReplyDraftWorkflow(state.replyDraftWorkflow, 'rejected')
+    await fulfillJson(route, { workflow: state.replyDraftWorkflow })
+    return true
+  }
+  if (method === 'POST' && path.match(/^\/feedback\/[^/]+\/reply-draft\/send$/)) {
+    const body = readJsonBody(route)
+    diagnostics.replyDraftRequests.push({
+      method,
+      path,
+      body,
+      idempotencyKey: route.request().headers()['idempotency-key'],
+    })
+    state.replyDraftWorkflow = advanceReplyDraftWorkflow(state.replyDraftWorkflow, 'sent')
+    await fulfillJson(route, { workflow: state.replyDraftWorkflow, fromCache: false })
     return true
   }
 
@@ -311,6 +377,95 @@ async function handleRoute(
     return true
   }
 
+  if (method === 'GET' && path === '/reply-send-hook') {
+    await fulfillJson(route, state.replySendHook)
+    return true
+  }
+  if (method === 'GET' && path === '/reply-send-hook/health') {
+    await fulfillJson(route, replySendHookHealth(state.replySendHookDeliveries))
+    return true
+  }
+  if (method === 'GET' && path === '/reply-send-hook/deliveries') {
+    await fulfillJson(route, { items: state.replySendHookDeliveries })
+    return true
+  }
+  if (method === 'POST' && path === '/reply-send-hook/test') {
+    const body = readJsonBody(route)
+    diagnostics.replySendHookRequests.push({ method, path, body })
+    const attempt = replySendHookDelivery({
+      id: `reply-delivery-test-${state.replySendHookDeliveries.length + 1}`,
+      status: 'accepted',
+      httpStatus: 204,
+      attempts: 1,
+      error: undefined,
+      retryable: false,
+    })
+    state.replySendHookDeliveries = [attempt, ...state.replySendHookDeliveries]
+    await fulfillJson(route, attempt)
+    return true
+  }
+  if (method === 'POST' && path.match(/^\/reply-send-hook\/deliveries\/[^/]+\/redeliver$/)) {
+    const body = readJsonBody(route)
+    diagnostics.replySendHookRequests.push({ method, path, body })
+    const id = path.split('/')[3]
+    const existing =
+      state.replySendHookDeliveries.find((delivery) => delivery.id === id) ??
+      replySendHookDelivery({ id })
+    const updated = {
+      ...existing,
+      status: 'accepted',
+      httpStatus: 204,
+      attempts: existing.attempts + 1,
+      error: undefined,
+      retryable: false,
+      requestedAt: '2026-06-24T09:14:00Z',
+      updatedAt: '2026-06-24T09:14:00Z',
+    }
+    state.replySendHookDeliveries = [
+      updated,
+      ...state.replySendHookDeliveries.filter((delivery) => delivery.id !== id),
+    ]
+    await fulfillJson(route, updated)
+    return true
+  }
+  if (method === 'PUT' && path === '/reply-send-hook') {
+    const body = readJsonBody(route)
+    diagnostics.replySendHookRequests.push({ method, path, body })
+    const request = body as {
+      enabled?: boolean
+      name?: string
+      secret?: string
+      url?: string
+    } | null
+    const urlHost = request?.url ? new URL(request.url).hostname : state.replySendHook.urlHost
+    state.replySendHook = {
+      ...state.replySendHook,
+      enabled: request?.enabled ?? true,
+      name: request?.name || 'Support reply bridge',
+      urlHost,
+      urlFingerprint: 'sha256:replyhookupdateda11yf1ngerprint000000000000',
+      updatedBy: 'user-a11y',
+      updatedAt: '2026-06-24T09:12:00Z',
+    }
+    await fulfillJson(route, {
+      ...state.replySendHook,
+      secretOnce: request?.secret ? undefined : 'generated_reply_secret_a11y_123456',
+    })
+    return true
+  }
+  if (method === 'DELETE' && path === '/reply-send-hook') {
+    diagnostics.replySendHookRequests.push({ method, path, body: null })
+    state.replySendHook = {
+      ...state.replySendHook,
+      enabled: false,
+      disabledAt: '2026-06-24T09:13:00Z',
+      updatedBy: 'user-a11y',
+      updatedAt: '2026-06-24T09:13:00Z',
+    }
+    await fulfillJson(route, state.replySendHook)
+    return true
+  }
+
   if (method === 'GET' && path === '/outbox/deliveries') {
     await fulfillJson(route, consoleA11yOutboxDeliveries)
     return true
@@ -325,6 +480,149 @@ async function handleRoute(
   }
 
   return false
+}
+
+type ApiMockState = {
+  replyDraftWorkflow: ReplyDraftWorkflow
+  replySendHook: ReplySendHook
+  replySendHookDeliveries: ReplySendHookDelivery[]
+}
+
+function feedbackDetailWithReplyDraft(workflow: ReplyDraftWorkflow): FeedbackDetail {
+  return {
+    ...consoleA11yFeedbackDetail,
+    replyDraft: workflow.activeText,
+    replyDraftGeneratedAt: workflow.generatedAt ?? consoleA11yFeedbackDetail.replyDraftGeneratedAt,
+    replyDraftWorkflow: workflow,
+  }
+}
+
+function editReplyDraftWorkflow(workflow: ReplyDraftWorkflow, content: string): ReplyDraftWorkflow {
+  const revisionNo = nextRevisionNo(workflow)
+  const revision = {
+    id: `rev-human-${revisionNo}`,
+    draftId: workflow.draftId,
+    cycleNo: workflow.cycleNo,
+    revisionNo,
+    origin: 'human',
+    content,
+    createdBy: 'user-a11y',
+    createdAt: '2026-06-24T09:10:00Z',
+  }
+  return {
+    ...workflow,
+    status: 'edited',
+    activeRevisionId: revision.id,
+    activeText: content,
+    revisions: [revision, ...workflow.revisions],
+    allowedActions: ['edit', 'approve', 'reject', 'regenerate'],
+    editedAt: revision.createdAt,
+    editedBy: 'user-a11y',
+    revision: incrementRevision(workflow.revision),
+    updatedAt: revision.createdAt,
+  }
+}
+
+function advanceReplyDraftWorkflow(
+  workflow: ReplyDraftWorkflow,
+  status: 'approved' | 'rejected' | 'sent',
+): ReplyDraftWorkflow {
+  const at =
+    status === 'approved'
+      ? '2026-06-24T09:11:00Z'
+      : status === 'sent'
+        ? '2026-06-24T09:12:00Z'
+        : '2026-06-24T09:13:00Z'
+  const activeRevisionId = workflow.activeRevisionId ?? workflow.revisions[0]?.id
+  if (status === 'approved') {
+    return {
+      ...workflow,
+      status,
+      approvedRevisionId: activeRevisionId,
+      allowedActions: ['edit', 'send', 'reject', 'regenerate'],
+      approvedAt: at,
+      approvedBy: 'user-a11y',
+      revision: incrementRevision(workflow.revision),
+      updatedAt: at,
+    }
+  }
+  if (status === 'sent') {
+    return {
+      ...workflow,
+      status,
+      sentRevisionId: activeRevisionId,
+      allowedActions: [],
+      sentAt: at,
+      sentBy: 'user-a11y',
+      externalDeliveryStatus: 'delivered',
+      externalMessageId: 'browser-a11y-message',
+      revision: incrementRevision(workflow.revision),
+      updatedAt: at,
+    }
+  }
+  return {
+    ...workflow,
+    status,
+    allowedActions: ['regenerate'],
+    rejectedAt: at,
+    rejectedBy: 'user-a11y',
+    revision: incrementRevision(workflow.revision),
+    updatedAt: at,
+  }
+}
+
+function nextRevisionNo(workflow: ReplyDraftWorkflow) {
+  return Math.max(0, ...workflow.revisions.map((revision) => revision.revisionNo)) + 1
+}
+
+function incrementRevision(revision: string) {
+  const parsed = Number(revision)
+  return Number.isFinite(parsed) ? String(parsed + 1) : revision
+}
+
+function replySendHookDelivery(
+  override: Partial<ReplySendHookDelivery> = {},
+): ReplySendHookDelivery {
+  return {
+    id: 'reply-delivery-a11y',
+    hookId: 'reply-hook-a11y',
+    hookHost: 'hooks.example.com',
+    hookFingerprint: 'sha256:2e8bb7f6b3c0a11y9d84e5c24219f4266fded6c4',
+    eventType: 'reply.test',
+    status: 'failed',
+    idempotencyKey: 'reply_test_a11y',
+    httpStatus: 500,
+    attempts: 1,
+    maxAttempts: 8,
+    error: 'receiver returned 500',
+    requestedByType: 'admin',
+    requestedBy: 'user-a11y',
+    requestedAt: '2026-06-24T09:05:00Z',
+    createdAt: '2026-06-24T09:05:00Z',
+    updatedAt: '2026-06-24T09:05:00Z',
+    retryable: true,
+    ...override,
+  }
+}
+
+function replySendHookHealth(deliveries: ReplySendHookDelivery[]): ReplySendHookHealth {
+  const latestProblem = deliveries.find(
+    (delivery) => delivery.status === 'failed' || delivery.status === 'dead',
+  )
+  return {
+    accepted: String(deliveries.filter((delivery) => delivery.status === 'accepted').length),
+    dead: String(deliveries.filter((delivery) => delivery.status === 'dead').length),
+    failed: String(deliveries.filter((delivery) => delivery.status === 'failed').length),
+    latestDelivery: deliveries[0],
+    latestProblem,
+    pending: String(deliveries.filter((delivery) => delivery.status === 'pending').length),
+    retryable: String(deliveries.filter((delivery) => delivery.retryable).length),
+    total: String(deliveries.length),
+  }
+}
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
 }
 
 function readJsonBody(route: Route) {

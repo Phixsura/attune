@@ -139,6 +139,35 @@ func TestRegenerate_GenerateError(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, w.Code)
 }
 
+func TestRegenerate_AuditFailureReturnsInternalError(t *testing.T) {
+	drafter := okDrafter("fresh draft")
+	h := &FeedbackHandler{
+		drafter:       drafter,
+		replyWorkflow: &fakeReplyWorkflow{snap: testReplySnapshot("suggested")},
+		audit:         &fakeAuditRecorder{err: errors.New("audit sink down")},
+	}
+
+	w := httptest.NewRecorder()
+	regenerateHandler(h)(w, regenRequest())
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.True(t, drafter.called)
+}
+
+func TestRegenerate_FailsClosedWhenWorkflowSnapshotFails(t *testing.T) {
+	drafter := okDrafter("should not be generated")
+	h := &FeedbackHandler{
+		drafter:       drafter,
+		replyWorkflow: &fakeReplyWorkflow{err: errors.New("workflow read failed")},
+	}
+
+	w := httptest.NewRecorder()
+	regenerateHandler(h)(w, regenRequest())
+
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.False(t, drafter.called)
+}
+
 func TestRegenerate_Cooldown(t *testing.T) {
 	recent := time.Now().Add(-2 * time.Second) // within the 10s cooldown
 	drafter := okDrafter("should not be generated")
