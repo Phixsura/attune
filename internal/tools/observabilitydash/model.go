@@ -232,6 +232,15 @@ func shiftPanels(dy int, panels ...panel) []panel {
 	return shifted
 }
 
+func shiftPanelIDs(delta int, panels ...panel) []panel {
+	shifted := make([]panel, 0, len(panels))
+	for _, p := range panels {
+		p.ID += delta
+		shifted = append(shifted, p)
+	}
+	return shifted
+}
+
 type threshold struct {
 	Color string
 	Value *float64

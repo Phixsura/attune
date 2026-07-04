@@ -1,0 +1,1361 @@
+apiVersion: "openslo/v1"
+kind: "DataSource"
+metadata:
+  name: "attune-prometheus"
+  displayName: "Attune Prometheus"
+spec:
+  description: "Prometheus metrics source for the generated Attune OpenSLO bundle."
+  type: "Prometheus"
+---
+apiVersion: "openslo/v1"
+kind: "Service"
+metadata:
+  name: "attune"
+  displayName: "Attune"
+spec:
+  description: "Service-owned SLOs and burn-rate policies generated from the reliability catalog."
+---
+apiVersion: "openslo/v1"
+kind: "AlertNotificationTarget"
+metadata:
+  name: "attune-alertmanager"
+  displayName: "Attune Alertmanager"
+spec:
+  description: "Alertmanager sink for generated Attune SLO burn-rate policies."
+  target: "alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "SLO"
+metadata:
+  name: "attune-ingest-service"
+  displayName: "Ingest burn x"
+  annotations:
+    attune.io/catalog-key: "ingest_service"
+    attune.io/owner: "Ingest"
+    attune.io/escalation: "Ingest on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "ingest_service"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:ingest_service_failure_ratio"
+    attune.io/trend-legend-base: "ingest"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Maintenance windows only"
+    attune.io/budget-exception-note: "Use only for approved deploy or maintenance windows; validation failures and rate-limit pressure stay in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep validation failures diagnostic and fold rate-limit pressure into the service-owned failure ratio."
+    attune.io/tenant-rank-legend-base: "ingest"
+spec:
+  description: "Fast burn multiplier for ingest internal errors and rate-limit pressure. 1x means the budget is being consumed at the planned rate; 14.4x is the classic 30d fast-burn page threshold."
+  service: "attune"
+  indicator:
+    metadata:
+      name: "attune-ingest-service-sli"
+      displayName: "Ingest burn x SLI"
+    spec:
+      ratioMetric:
+        counter: false
+        rawType: "failure"
+        raw:
+          metricSource:
+            metricSourceRef: "attune-prometheus"
+            type: "Prometheus"
+            spec:
+              query: "attune:ingest_service_failure_ratio:ratio5m"
+  timeWindow:
+    - duration: "30d"
+      isRolling: true
+  budgetingMethod: "RatioTimeslices"
+  objectives:
+    - displayName: "Ingest burn x objective"
+      target: 0.999
+  alertPolicies:
+    - alertPolicyRef: "attune-ingest-service-fast-burn-policy"
+    - alertPolicyRef: "attune-ingest-service-slow-burn-policy"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-ingest-service-fast-burn"
+  displayName: "Ingest burn x fast burn"
+  annotations:
+    attune.io/catalog-key: "ingest_service"
+    attune.io/owner: "Ingest"
+    attune.io/escalation: "Ingest on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "ingest_service"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:ingest_service_failure_ratio"
+    attune.io/trend-legend-base: "ingest"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Maintenance windows only"
+    attune.io/budget-exception-note: "Use only for approved deploy or maintenance windows; validation failures and rate-limit pressure stay in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep validation failures diagnostic and fold rate-limit pressure into the service-owned failure ratio."
+    attune.io/tenant-rank-legend-base: "ingest"
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneIngestServiceFastBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact?var-tenant={{ $labels.tenant }}"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestservicefastburn"
+    attune.io/action: "Inspect ingest internal errors and rate-limit pressure by tenant and source/result, then confirm whether the root cause is a code regression, hot tenant, bad client payloads, or an upstream dependency failure."
+    attune.io/traffic-guard: "sum by (tenant) (attune:ingest_requests:rate5m)\n  + (\n    attune:ingest_rate_limit:rate5m\n    or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)\n  ) > 0.01"
+    attune.io/promql: "(\n  (attune:ingest_service_failure_ratio:ratio5m) / 0.001 > 14.4\n)\nand\n(\n  (attune:ingest_service_failure_ratio:ratio1h) / 0.001 > 14.4\n)\nand\n(\n  sum by (tenant) (attune:ingest_requests:rate5m)\n  + (\n    attune:ingest_rate_limit:rate5m\n    or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)\n  ) > 0.01\n)"
+spec:
+  description: "Ingest burn x exceeds the 14.4x fast-burn threshold over 5m and 1h windows."
+  severity: "page"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 14.4
+    lookbackWindow: "5m"
+    alertAfter: "2m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-ingest-service-fast-burn-policy"
+  displayName: "Ingest burn x fast burn policy"
+  annotations:
+    attune.io/catalog-key: "ingest_service"
+    attune.io/owner: "Ingest"
+    attune.io/escalation: "Ingest on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "ingest_service"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:ingest_service_failure_ratio"
+    attune.io/trend-legend-base: "ingest"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Maintenance windows only"
+    attune.io/budget-exception-note: "Use only for approved deploy or maintenance windows; validation failures and rate-limit pressure stay in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep validation failures diagnostic and fold rate-limit pressure into the service-owned failure ratio."
+    attune.io/tenant-rank-legend-base: "ingest"
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneIngestServiceFastBurn"
+    attune.io/condition-name: "attune-ingest-service-fast-burn"
+spec:
+  description: "Fast-burn alert policy for Ingest burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-ingest-service-fast-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-ingest-service-slow-burn"
+  displayName: "Ingest burn x slow burn"
+  annotations:
+    attune.io/catalog-key: "ingest_service"
+    attune.io/owner: "Ingest"
+    attune.io/escalation: "Ingest on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "ingest_service"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:ingest_service_failure_ratio"
+    attune.io/trend-legend-base: "ingest"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Maintenance windows only"
+    attune.io/budget-exception-note: "Use only for approved deploy or maintenance windows; validation failures and rate-limit pressure stay in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep validation failures diagnostic and fold rate-limit pressure into the service-owned failure ratio."
+    attune.io/tenant-rank-legend-base: "ingest"
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneIngestServiceSlowBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact?var-tenant={{ $labels.tenant }}"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestserviceslowburn"
+    attune.io/action: "Check whether the ingest regression is sustained, compare against recent deploys, and verify whether rate-limit pressure, validation noise, or a hot tenant is masking a real backend failure."
+    attune.io/traffic-guard: "sum by (tenant) (attune:ingest_requests:rate5m)\n  + (\n    attune:ingest_rate_limit:rate5m\n    or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)\n  ) > 0.01"
+    attune.io/promql: "(\n  (attune:ingest_service_failure_ratio:ratio30m) / 0.001 > 6\n)\nand\n(\n  (attune:ingest_service_failure_ratio:ratio6h) / 0.001 > 6\n)\nand\n(\n  sum by (tenant) (attune:ingest_requests:rate5m)\n  + (\n    attune:ingest_rate_limit:rate5m\n    or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)\n  ) > 0.01\n)"
+spec:
+  description: "Ingest burn x exceeds the 6x slow-burn threshold over 30m and 6h windows."
+  severity: "warning"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 6
+    lookbackWindow: "30m"
+    alertAfter: "5m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-ingest-service-slow-burn-policy"
+  displayName: "Ingest burn x slow burn policy"
+  annotations:
+    attune.io/catalog-key: "ingest_service"
+    attune.io/owner: "Ingest"
+    attune.io/escalation: "Ingest on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "ingest_service"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:ingest_service_failure_ratio"
+    attune.io/trend-legend-base: "ingest"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Maintenance windows only"
+    attune.io/budget-exception-note: "Use only for approved deploy or maintenance windows; validation failures and rate-limit pressure stay in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep validation failures diagnostic and fold rate-limit pressure into the service-owned failure ratio."
+    attune.io/tenant-rank-legend-base: "ingest"
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneIngestServiceSlowBurn"
+    attune.io/condition-name: "attune-ingest-service-slow-burn"
+spec:
+  description: "Slow-burn alert policy for Ingest burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-ingest-service-slow-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "SLO"
+metadata:
+  name: "attune-enrichment-latency"
+  displayName: "Enrich burn x"
+  annotations:
+    attune.io/catalog-key: "enrichment_latency"
+    attune.io/owner: "AI Pipeline"
+    attune.io/escalation: "AI Pipeline on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "enrichment_latency"
+    attune.io/burn-kind: "success"
+    attune.io/recorded-ratio-base: "attune:enrich_success_under_5s"
+    attune.io/trend-legend-base: "enrich"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "No standing exclusions"
+    attune.io/budget-exception-note: "Transient provider slowness stays in burn; use a time-boxed exception only for planned model or provider migrations."
+    attune.io/policy-summary: "Start at 95.0% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Measure end-to-end completion within 5s so the SLI matches the user-visible latency experience."
+    attune.io/tenant-rank-legend-base: "enrich"
+spec:
+  description: "Fast burn multiplier for enrichment attempts that miss the 5s success target. This is the main user-facing latency SLO."
+  service: "attune"
+  indicator:
+    metadata:
+      name: "attune-enrichment-latency-sli"
+      displayName: "Enrich burn x SLI"
+    spec:
+      ratioMetric:
+        counter: false
+        rawType: "success"
+        raw:
+          metricSource:
+            metricSourceRef: "attune-prometheus"
+            type: "Prometheus"
+            spec:
+              query: "attune:enrich_success_under_5s:ratio5m"
+  timeWindow:
+    - duration: "30d"
+      isRolling: true
+  budgetingMethod: "RatioTimeslices"
+  objectives:
+    - displayName: "Enrich burn x objective"
+      target: 0.95
+  alertPolicies:
+    - alertPolicyRef: "attune-enrichment-latency-fast-burn-policy"
+    - alertPolicyRef: "attune-enrichment-latency-slow-burn-policy"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-enrichment-latency-fast-burn"
+  displayName: "Enrich burn x fast burn"
+  annotations:
+    attune.io/catalog-key: "enrichment_latency"
+    attune.io/owner: "AI Pipeline"
+    attune.io/escalation: "AI Pipeline on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "enrichment_latency"
+    attune.io/burn-kind: "success"
+    attune.io/recorded-ratio-base: "attune:enrich_success_under_5s"
+    attune.io/trend-legend-base: "enrich"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "No standing exclusions"
+    attune.io/budget-exception-note: "Transient provider slowness stays in burn; use a time-boxed exception only for planned model or provider migrations."
+    attune.io/policy-summary: "Start at 95.0% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Measure end-to-end completion within 5s so the SLI matches the user-visible latency experience."
+    attune.io/tenant-rank-legend-base: "enrich"
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneEnrichmentFastBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact?var-tenant={{ $labels.tenant }}"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneenrichmentfastburn"
+    attune.io/action: "Split enrichment latency by dims_mode and result, then confirm whether the issue is provider latency, queue pressure, or a parser / prompt regression."
+    attune.io/traffic-guard: "sum by (tenant) (rate(attune_enrich_duration_seconds_count[5m])) > 0.01"
+    attune.io/promql: "(\n  (1 - attune:enrich_success_under_5s:ratio5m) / 0.05 > 14.4\n)\nand\n(\n  (1 - attune:enrich_success_under_5s:ratio1h) / 0.05 > 14.4\n)\nand\n(\n  sum by (tenant) (rate(attune_enrich_duration_seconds_count[5m])) > 0.01\n)"
+spec:
+  description: "Enrich burn x exceeds the 14.4x fast-burn threshold over 5m and 1h windows."
+  severity: "page"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 14.4
+    lookbackWindow: "5m"
+    alertAfter: "2m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-enrichment-latency-fast-burn-policy"
+  displayName: "Enrich burn x fast burn policy"
+  annotations:
+    attune.io/catalog-key: "enrichment_latency"
+    attune.io/owner: "AI Pipeline"
+    attune.io/escalation: "AI Pipeline on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "enrichment_latency"
+    attune.io/burn-kind: "success"
+    attune.io/recorded-ratio-base: "attune:enrich_success_under_5s"
+    attune.io/trend-legend-base: "enrich"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "No standing exclusions"
+    attune.io/budget-exception-note: "Transient provider slowness stays in burn; use a time-boxed exception only for planned model or provider migrations."
+    attune.io/policy-summary: "Start at 95.0% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Measure end-to-end completion within 5s so the SLI matches the user-visible latency experience."
+    attune.io/tenant-rank-legend-base: "enrich"
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneEnrichmentFastBurn"
+    attune.io/condition-name: "attune-enrichment-latency-fast-burn"
+spec:
+  description: "Fast-burn alert policy for Enrich burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-enrichment-latency-fast-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-enrichment-latency-slow-burn"
+  displayName: "Enrich burn x slow burn"
+  annotations:
+    attune.io/catalog-key: "enrichment_latency"
+    attune.io/owner: "AI Pipeline"
+    attune.io/escalation: "AI Pipeline on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "enrichment_latency"
+    attune.io/burn-kind: "success"
+    attune.io/recorded-ratio-base: "attune:enrich_success_under_5s"
+    attune.io/trend-legend-base: "enrich"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "No standing exclusions"
+    attune.io/budget-exception-note: "Transient provider slowness stays in burn; use a time-boxed exception only for planned model or provider migrations."
+    attune.io/policy-summary: "Start at 95.0% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Measure end-to-end completion within 5s so the SLI matches the user-visible latency experience."
+    attune.io/tenant-rank-legend-base: "enrich"
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneEnrichmentSlowBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact?var-tenant={{ $labels.tenant }}"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneenrichmentslowburn"
+    attune.io/action: "Compare with AI queue depth and provider errors. If latency is elevated but failures are not, the system may be saturating rather than failing."
+    attune.io/traffic-guard: "sum by (tenant) (rate(attune_enrich_duration_seconds_count[5m])) > 0.01"
+    attune.io/promql: "(\n  (1 - attune:enrich_success_under_5s:ratio30m) / 0.05 > 6\n)\nand\n(\n  (1 - attune:enrich_success_under_5s:ratio6h) / 0.05 > 6\n)\nand\n(\n  sum by (tenant) (rate(attune_enrich_duration_seconds_count[5m])) > 0.01\n)"
+spec:
+  description: "Enrich burn x exceeds the 6x slow-burn threshold over 30m and 6h windows."
+  severity: "warning"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 6
+    lookbackWindow: "30m"
+    alertAfter: "5m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-enrichment-latency-slow-burn-policy"
+  displayName: "Enrich burn x slow burn policy"
+  annotations:
+    attune.io/catalog-key: "enrichment_latency"
+    attune.io/owner: "AI Pipeline"
+    attune.io/escalation: "AI Pipeline on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "enrichment_latency"
+    attune.io/burn-kind: "success"
+    attune.io/recorded-ratio-base: "attune:enrich_success_under_5s"
+    attune.io/trend-legend-base: "enrich"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "No standing exclusions"
+    attune.io/budget-exception-note: "Transient provider slowness stays in burn; use a time-boxed exception only for planned model or provider migrations."
+    attune.io/policy-summary: "Start at 95.0% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Measure end-to-end completion within 5s so the SLI matches the user-visible latency experience."
+    attune.io/tenant-rank-legend-base: "enrich"
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneEnrichmentSlowBurn"
+    attune.io/condition-name: "attune-enrichment-latency-slow-burn"
+spec:
+  description: "Slow-burn alert policy for Enrich burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-enrichment-latency-slow-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "SLO"
+metadata:
+  name: "attune-outbox-delivery"
+  displayName: "Outbox burn x"
+  annotations:
+    attune.io/catalog-key: "outbox_delivery"
+    attune.io/owner: "Delivery"
+    attune.io/escalation: "Delivery on-call"
+    attune.io/scope: "destination_type"
+    attune.io/alert-label: "outbox_delivery"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:outbox_delivery_failure_ratio"
+    attune.io/trend-legend-base: "outbox"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Destination-maintenance only"
+    attune.io/budget-exception-note: "Only exclude destination-side maintenance with owner approval; worker lag and dead rows stay in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Pair the failure ratio with lag and dead rows to distinguish destination rejection from worker pressure."
+spec:
+  description: "Fast burn multiplier for terminal delivery failures. Pair this with outbox lag to tell destination rejection from worker pressure."
+  service: "attune"
+  indicator:
+    metadata:
+      name: "attune-outbox-delivery-sli"
+      displayName: "Outbox burn x SLI"
+    spec:
+      ratioMetric:
+        counter: false
+        rawType: "failure"
+        raw:
+          metricSource:
+            metricSourceRef: "attune-prometheus"
+            type: "Prometheus"
+            spec:
+              query: "attune:outbox_delivery_failure_ratio:ratio5m"
+  timeWindow:
+    - duration: "30d"
+      isRolling: true
+  budgetingMethod: "RatioTimeslices"
+  objectives:
+    - displayName: "Outbox burn x objective"
+      target: 0.999
+  alertPolicies:
+    - alertPolicyRef: "attune-outbox-delivery-fast-burn-policy"
+    - alertPolicyRef: "attune-outbox-delivery-slow-burn-policy"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-outbox-delivery-fast-burn"
+  displayName: "Outbox burn x fast burn"
+  annotations:
+    attune.io/catalog-key: "outbox_delivery"
+    attune.io/owner: "Delivery"
+    attune.io/escalation: "Delivery on-call"
+    attune.io/scope: "destination_type"
+    attune.io/alert-label: "outbox_delivery"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:outbox_delivery_failure_ratio"
+    attune.io/trend-legend-base: "outbox"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Destination-maintenance only"
+    attune.io/budget-exception-note: "Only exclude destination-side maintenance with owner approval; worker lag and dead rows stay in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Pair the failure ratio with lag and dead rows to distinguish destination rejection from worker pressure."
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneOutboxDeliveryFastBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact?var-destination_type={{ $labels.destination_type }}"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxdeliveryfastburn"
+    attune.io/action: "Inspect terminal delivery failures, then compare outbox lag and notify failures to decide whether the destination or worker capacity is the limiting factor."
+    attune.io/traffic-guard: "sum by (destination_type) (rate(attune_outbound_delivery_attempts_total[5m])) > 0.01"
+    attune.io/promql: "(\n  (attune:outbox_delivery_failure_ratio:ratio5m) / 0.001 > 14.4\n)\nand\n(\n  (attune:outbox_delivery_failure_ratio:ratio1h) / 0.001 > 14.4\n)\nand\n(\n  sum by (destination_type) (rate(attune_outbound_delivery_attempts_total[5m])) > 0.01\n)"
+spec:
+  description: "Outbox burn x exceeds the 14.4x fast-burn threshold over 5m and 1h windows."
+  severity: "page"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 14.4
+    lookbackWindow: "5m"
+    alertAfter: "2m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-outbox-delivery-fast-burn-policy"
+  displayName: "Outbox burn x fast burn policy"
+  annotations:
+    attune.io/catalog-key: "outbox_delivery"
+    attune.io/owner: "Delivery"
+    attune.io/escalation: "Delivery on-call"
+    attune.io/scope: "destination_type"
+    attune.io/alert-label: "outbox_delivery"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:outbox_delivery_failure_ratio"
+    attune.io/trend-legend-base: "outbox"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Destination-maintenance only"
+    attune.io/budget-exception-note: "Only exclude destination-side maintenance with owner approval; worker lag and dead rows stay in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Pair the failure ratio with lag and dead rows to distinguish destination rejection from worker pressure."
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneOutboxDeliveryFastBurn"
+    attune.io/condition-name: "attune-outbox-delivery-fast-burn"
+spec:
+  description: "Fast-burn alert policy for Outbox burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-outbox-delivery-fast-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-outbox-delivery-slow-burn"
+  displayName: "Outbox burn x slow burn"
+  annotations:
+    attune.io/catalog-key: "outbox_delivery"
+    attune.io/owner: "Delivery"
+    attune.io/escalation: "Delivery on-call"
+    attune.io/scope: "destination_type"
+    attune.io/alert-label: "outbox_delivery"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:outbox_delivery_failure_ratio"
+    attune.io/trend-legend-base: "outbox"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Destination-maintenance only"
+    attune.io/budget-exception-note: "Only exclude destination-side maintenance with owner approval; worker lag and dead rows stay in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Pair the failure ratio with lag and dead rows to distinguish destination rejection from worker pressure."
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneOutboxDeliverySlowBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact?var-destination_type={{ $labels.destination_type }}"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxdeliveryslowburn"
+    attune.io/action: "Check provider rejection patterns, retry pressure, and whether the worker pool is keeping up with the queue."
+    attune.io/traffic-guard: "sum by (destination_type) (rate(attune_outbound_delivery_attempts_total[5m])) > 0.01"
+    attune.io/promql: "(\n  (attune:outbox_delivery_failure_ratio:ratio30m) / 0.001 > 6\n)\nand\n(\n  (attune:outbox_delivery_failure_ratio:ratio6h) / 0.001 > 6\n)\nand\n(\n  sum by (destination_type) (rate(attune_outbound_delivery_attempts_total[5m])) > 0.01\n)"
+spec:
+  description: "Outbox burn x exceeds the 6x slow-burn threshold over 30m and 6h windows."
+  severity: "warning"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 6
+    lookbackWindow: "30m"
+    alertAfter: "5m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-outbox-delivery-slow-burn-policy"
+  displayName: "Outbox burn x slow burn policy"
+  annotations:
+    attune.io/catalog-key: "outbox_delivery"
+    attune.io/owner: "Delivery"
+    attune.io/escalation: "Delivery on-call"
+    attune.io/scope: "destination_type"
+    attune.io/alert-label: "outbox_delivery"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:outbox_delivery_failure_ratio"
+    attune.io/trend-legend-base: "outbox"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Destination-maintenance only"
+    attune.io/budget-exception-note: "Only exclude destination-side maintenance with owner approval; worker lag and dead rows stay in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Pair the failure ratio with lag and dead rows to distinguish destination rejection from worker pressure."
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneOutboxDeliverySlowBurn"
+    attune.io/condition-name: "attune-outbox-delivery-slow-burn"
+spec:
+  description: "Slow-burn alert policy for Outbox burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-outbox-delivery-slow-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "SLO"
+metadata:
+  name: "attune-oidc-login"
+  displayName: "OIDC burn x"
+  annotations:
+    attune.io/catalog-key: "oidc_login"
+    attune.io/owner: "Auth"
+    attune.io/escalation: "Auth on-call"
+    attune.io/scope: "global"
+    attune.io/alert-label: "oidc_login"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:oidc_login_failure_ratio"
+    attune.io/trend-legend-base: "oidc"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "IdP-maintenance only"
+    attune.io/budget-exception-note: "Controlled IdP changes may be excluded when they are approved and time-boxed; implementation regressions remain in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Treat failed sign-ins as a service-owned reliability signal while keeping IdP outages visible."
+spec:
+  description: "Fast burn multiplier for failed sign-in attempts. This is a service-owned authentication reliability signal."
+  service: "attune"
+  indicator:
+    metadata:
+      name: "attune-oidc-login-sli"
+      displayName: "OIDC burn x SLI"
+    spec:
+      ratioMetric:
+        counter: false
+        rawType: "failure"
+        raw:
+          metricSource:
+            metricSourceRef: "attune-prometheus"
+            type: "Prometheus"
+            spec:
+              query: "attune:oidc_login_failure_ratio:ratio5m"
+  timeWindow:
+    - duration: "30d"
+      isRolling: true
+  budgetingMethod: "RatioTimeslices"
+  objectives:
+    - displayName: "OIDC burn x objective"
+      target: 0.999
+  alertPolicies:
+    - alertPolicyRef: "attune-oidc-login-fast-burn-policy"
+    - alertPolicyRef: "attune-oidc-login-slow-burn-policy"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-oidc-login-fast-burn"
+  displayName: "OIDC burn x fast burn"
+  annotations:
+    attune.io/catalog-key: "oidc_login"
+    attune.io/owner: "Auth"
+    attune.io/escalation: "Auth on-call"
+    attune.io/scope: "global"
+    attune.io/alert-label: "oidc_login"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:oidc_login_failure_ratio"
+    attune.io/trend-legend-base: "oidc"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "IdP-maintenance only"
+    attune.io/budget-exception-note: "Controlled IdP changes may be excluded when they are approved and time-boxed; implementation regressions remain in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Treat failed sign-ins as a service-owned reliability signal while keeping IdP outages visible."
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneOIDCLoginFastBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoidcloginfastburn"
+    attune.io/action: "Check the failing login outcomes, IdP status, callback errors, and recent auth or cookie changes before changing SSO configuration."
+    attune.io/traffic-guard: "sum(rate(attune_oidc_login_total[5m])) > 0.01"
+    attune.io/promql: "(\n  (attune:oidc_login_failure_ratio:ratio5m) / 0.001 > 14.4\n)\nand\n(\n  (attune:oidc_login_failure_ratio:ratio1h) / 0.001 > 14.4\n)\nand\n(\n  sum(rate(attune_oidc_login_total[5m])) > 0.01\n)"
+spec:
+  description: "OIDC burn x exceeds the 14.4x fast-burn threshold over 5m and 1h windows."
+  severity: "page"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 14.4
+    lookbackWindow: "5m"
+    alertAfter: "2m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-oidc-login-fast-burn-policy"
+  displayName: "OIDC burn x fast burn policy"
+  annotations:
+    attune.io/catalog-key: "oidc_login"
+    attune.io/owner: "Auth"
+    attune.io/escalation: "Auth on-call"
+    attune.io/scope: "global"
+    attune.io/alert-label: "oidc_login"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:oidc_login_failure_ratio"
+    attune.io/trend-legend-base: "oidc"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "IdP-maintenance only"
+    attune.io/budget-exception-note: "Controlled IdP changes may be excluded when they are approved and time-boxed; implementation regressions remain in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Treat failed sign-ins as a service-owned reliability signal while keeping IdP outages visible."
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneOIDCLoginFastBurn"
+    attune.io/condition-name: "attune-oidc-login-fast-burn"
+spec:
+  description: "Fast-burn alert policy for OIDC burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-oidc-login-fast-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-oidc-login-slow-burn"
+  displayName: "OIDC burn x slow burn"
+  annotations:
+    attune.io/catalog-key: "oidc_login"
+    attune.io/owner: "Auth"
+    attune.io/escalation: "Auth on-call"
+    attune.io/scope: "global"
+    attune.io/alert-label: "oidc_login"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:oidc_login_failure_ratio"
+    attune.io/trend-legend-base: "oidc"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "IdP-maintenance only"
+    attune.io/budget-exception-note: "Controlled IdP changes may be excluded when they are approved and time-boxed; implementation regressions remain in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Treat failed sign-ins as a service-owned reliability signal while keeping IdP outages visible."
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneOIDCLoginSlowBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoidcloginslowburn"
+    attune.io/action: "Compare against IdP health, login callback errors, and recent auth configuration changes. If the failure set is mixed, split by result before changing any global setting."
+    attune.io/traffic-guard: "sum(rate(attune_oidc_login_total[5m])) > 0.01"
+    attune.io/promql: "(\n  (attune:oidc_login_failure_ratio:ratio30m) / 0.001 > 6\n)\nand\n(\n  (attune:oidc_login_failure_ratio:ratio6h) / 0.001 > 6\n)\nand\n(\n  sum(rate(attune_oidc_login_total[5m])) > 0.01\n)"
+spec:
+  description: "OIDC burn x exceeds the 6x slow-burn threshold over 30m and 6h windows."
+  severity: "warning"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 6
+    lookbackWindow: "30m"
+    alertAfter: "5m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-oidc-login-slow-burn-policy"
+  displayName: "OIDC burn x slow burn policy"
+  annotations:
+    attune.io/catalog-key: "oidc_login"
+    attune.io/owner: "Auth"
+    attune.io/escalation: "Auth on-call"
+    attune.io/scope: "global"
+    attune.io/alert-label: "oidc_login"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:oidc_login_failure_ratio"
+    attune.io/trend-legend-base: "oidc"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "IdP-maintenance only"
+    attune.io/budget-exception-note: "Controlled IdP changes may be excluded when they are approved and time-boxed; implementation regressions remain in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Treat failed sign-ins as a service-owned reliability signal while keeping IdP outages visible."
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneOIDCLoginSlowBurn"
+    attune.io/condition-name: "attune-oidc-login-slow-burn"
+spec:
+  description: "Slow-burn alert policy for OIDC burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-oidc-login-slow-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "SLO"
+metadata:
+  name: "attune-apikey-access"
+  displayName: "API key burn x"
+  annotations:
+    attune.io/catalog-key: "apikey_access"
+    attune.io/owner: "Security"
+    attune.io/escalation: "Security on-call"
+    attune.io/scope: "global"
+    attune.io/alert-label: "apikey_access"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:apikey_access_denial_ratio"
+    attune.io/trend-legend-base: "apikey"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "No standing exclusions"
+    attune.io/budget-exception-note: "Policy-driven denials are diagnostic signals, not error-budget events, so do not file budget exceptions for them."
+    attune.io/policy-summary: "Start at 95.0% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep API-key access denials separate from role-based authorization denials so governance changes stay explainable."
+spec:
+  description: "Fast burn multiplier for access denials on active API keys. Keep this separate from authz denials so policy-driven rejections stay explainable."
+  service: "attune"
+  indicator:
+    metadata:
+      name: "attune-apikey-access-sli"
+      displayName: "API key burn x SLI"
+    spec:
+      ratioMetric:
+        counter: false
+        rawType: "failure"
+        raw:
+          metricSource:
+            metricSourceRef: "attune-prometheus"
+            type: "Prometheus"
+            spec:
+              query: "attune:apikey_access_denial_ratio:ratio5m"
+  timeWindow:
+    - duration: "30d"
+      isRolling: true
+  budgetingMethod: "RatioTimeslices"
+  objectives:
+    - displayName: "API key burn x objective"
+      target: 0.95
+  alertPolicies:
+    - alertPolicyRef: "attune-apikey-access-fast-burn-policy"
+    - alertPolicyRef: "attune-apikey-access-slow-burn-policy"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-apikey-access-fast-burn"
+  displayName: "API key burn x fast burn"
+  annotations:
+    attune.io/catalog-key: "apikey_access"
+    attune.io/owner: "Security"
+    attune.io/escalation: "Security on-call"
+    attune.io/scope: "global"
+    attune.io/alert-label: "apikey_access"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:apikey_access_denial_ratio"
+    attune.io/trend-legend-base: "apikey"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "No standing exclusions"
+    attune.io/budget-exception-note: "Policy-driven denials are diagnostic signals, not error-budget events, so do not file budget exceptions for them."
+    attune.io/policy-summary: "Start at 95.0% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep API-key access denials separate from role-based authorization denials so governance changes stay explainable."
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneAPIKeyAccessFastBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneapikeyaccessfastburn"
+    attune.io/action: "Check whether keys are expiring together, a hot key is being throttled, or an allowlist change is rejecting traffic; then split Security & Compliance by denial class."
+    attune.io/traffic-guard: "sum(rate(attune_apikey_usage_total[5m]))\n  + sum(rate(attune_apikey_expired_total[5m]))\n  + sum(rate(attune_apikey_ip_denied_total[5m]))\n  + sum(rate(attune_apikey_rate_limited_total[5m])) > 0.01"
+    attune.io/promql: "(\n  (attune:apikey_access_denial_ratio:ratio5m) / 0.05 > 14.4\n)\nand\n(\n  (attune:apikey_access_denial_ratio:ratio1h) / 0.05 > 14.4\n)\nand\n(\n  sum(rate(attune_apikey_usage_total[5m]))\n  + sum(rate(attune_apikey_expired_total[5m]))\n  + sum(rate(attune_apikey_ip_denied_total[5m]))\n  + sum(rate(attune_apikey_rate_limited_total[5m])) > 0.01\n)"
+spec:
+  description: "API key burn x exceeds the 14.4x fast-burn threshold over 5m and 1h windows."
+  severity: "page"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 14.4
+    lookbackWindow: "5m"
+    alertAfter: "2m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-apikey-access-fast-burn-policy"
+  displayName: "API key burn x fast burn policy"
+  annotations:
+    attune.io/catalog-key: "apikey_access"
+    attune.io/owner: "Security"
+    attune.io/escalation: "Security on-call"
+    attune.io/scope: "global"
+    attune.io/alert-label: "apikey_access"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:apikey_access_denial_ratio"
+    attune.io/trend-legend-base: "apikey"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "No standing exclusions"
+    attune.io/budget-exception-note: "Policy-driven denials are diagnostic signals, not error-budget events, so do not file budget exceptions for them."
+    attune.io/policy-summary: "Start at 95.0% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep API-key access denials separate from role-based authorization denials so governance changes stay explainable."
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneAPIKeyAccessFastBurn"
+    attune.io/condition-name: "attune-apikey-access-fast-burn"
+spec:
+  description: "Fast-burn alert policy for API key burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-apikey-access-fast-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-apikey-access-slow-burn"
+  displayName: "API key burn x slow burn"
+  annotations:
+    attune.io/catalog-key: "apikey_access"
+    attune.io/owner: "Security"
+    attune.io/escalation: "Security on-call"
+    attune.io/scope: "global"
+    attune.io/alert-label: "apikey_access"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:apikey_access_denial_ratio"
+    attune.io/trend-legend-base: "apikey"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "No standing exclusions"
+    attune.io/budget-exception-note: "Policy-driven denials are diagnostic signals, not error-budget events, so do not file budget exceptions for them."
+    attune.io/policy-summary: "Start at 95.0% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep API-key access denials separate from role-based authorization denials so governance changes stay explainable."
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneAPIKeyAccessSlowBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneapikeyaccessslowburn"
+    attune.io/action: "Split expiration, IP-denied, and rate-limited requests, then confirm whether this is a rollout issue, hot key, or client misuse pattern."
+    attune.io/traffic-guard: "sum(rate(attune_apikey_usage_total[5m]))\n  + sum(rate(attune_apikey_expired_total[5m]))\n  + sum(rate(attune_apikey_ip_denied_total[5m]))\n  + sum(rate(attune_apikey_rate_limited_total[5m])) > 0.01"
+    attune.io/promql: "(\n  (attune:apikey_access_denial_ratio:ratio30m) / 0.05 > 6\n)\nand\n(\n  (attune:apikey_access_denial_ratio:ratio6h) / 0.05 > 6\n)\nand\n(\n  sum(rate(attune_apikey_usage_total[5m]))\n  + sum(rate(attune_apikey_expired_total[5m]))\n  + sum(rate(attune_apikey_ip_denied_total[5m]))\n  + sum(rate(attune_apikey_rate_limited_total[5m])) > 0.01\n)"
+spec:
+  description: "API key burn x exceeds the 6x slow-burn threshold over 30m and 6h windows."
+  severity: "warning"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 6
+    lookbackWindow: "30m"
+    alertAfter: "5m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-apikey-access-slow-burn-policy"
+  displayName: "API key burn x slow burn policy"
+  annotations:
+    attune.io/catalog-key: "apikey_access"
+    attune.io/owner: "Security"
+    attune.io/escalation: "Security on-call"
+    attune.io/scope: "global"
+    attune.io/alert-label: "apikey_access"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:apikey_access_denial_ratio"
+    attune.io/trend-legend-base: "apikey"
+    attune.io/include-in-tenant-rank: "false"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "No standing exclusions"
+    attune.io/budget-exception-note: "Policy-driven denials are diagnostic signals, not error-budget events, so do not file budget exceptions for them."
+    attune.io/policy-summary: "Start at 95.0% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep API-key access denials separate from role-based authorization denials so governance changes stay explainable."
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneAPIKeyAccessSlowBurn"
+    attune.io/condition-name: "attune-apikey-access-slow-burn"
+spec:
+  description: "Slow-burn alert policy for API key burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-apikey-access-slow-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "SLO"
+metadata:
+  name: "attune-mcp-tool"
+  displayName: "MCP burn x"
+  annotations:
+    attune.io/catalog-key: "mcp_tool"
+    attune.io/owner: "MCP"
+    attune.io/escalation: "MCP on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "mcp_tool"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:mcp_tool_error_ratio"
+    attune.io/trend-legend-base: "mcp"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Tool-migration only"
+    attune.io/budget-exception-note: "Use a time-boxed exclusion only when a tool or adapter is being intentionally rotated; policy denials remain in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Use tool mix and latency alongside burn rate to tell policy pressure from tool regressions."
+    attune.io/tenant-rank-legend-base: "mcp"
+spec:
+  description: "Fast burn multiplier for MCP tool-call failures. Use this with tool mix and latency to separate tool regressions from policy pressure."
+  service: "attune"
+  indicator:
+    metadata:
+      name: "attune-mcp-tool-sli"
+      displayName: "MCP burn x SLI"
+    spec:
+      ratioMetric:
+        counter: false
+        rawType: "failure"
+        raw:
+          metricSource:
+            metricSourceRef: "attune-prometheus"
+            type: "Prometheus"
+            spec:
+              query: "attune:mcp_tool_error_ratio:ratio5m"
+  timeWindow:
+    - duration: "30d"
+      isRolling: true
+  budgetingMethod: "RatioTimeslices"
+  objectives:
+    - displayName: "MCP burn x objective"
+      target: 0.999
+  alertPolicies:
+    - alertPolicyRef: "attune-mcp-tool-fast-burn-policy"
+    - alertPolicyRef: "attune-mcp-tool-slow-burn-policy"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-mcp-tool-fast-burn"
+  displayName: "MCP burn x fast burn"
+  annotations:
+    attune.io/catalog-key: "mcp_tool"
+    attune.io/owner: "MCP"
+    attune.io/escalation: "MCP on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "mcp_tool"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:mcp_tool_error_ratio"
+    attune.io/trend-legend-base: "mcp"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Tool-migration only"
+    attune.io/budget-exception-note: "Use a time-boxed exclusion only when a tool or adapter is being intentionally rotated; policy denials remain in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Use tool mix and latency alongside burn rate to tell policy pressure from tool regressions."
+    attune.io/tenant-rank-legend-base: "mcp"
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneMCPToolFastBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact?var-tenant={{ $labels.tenant }}&var-tool={{ $labels.tool }}"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunemcptoolfastburn"
+    attune.io/action: "Check whether the tool itself is failing, the adapter returned bad input, or the MCP policy layer is blocking allowed calls."
+    attune.io/traffic-guard: "sum by (tenant, tool) (rate(attune_mcp_tool_calls_total[5m])) > 0.01"
+    attune.io/promql: "(\n  (attune:mcp_tool_error_ratio:ratio5m) / 0.001 > 14.4\n)\nand\n(\n  (attune:mcp_tool_error_ratio:ratio1h) / 0.001 > 14.4\n)\nand\n(\n  sum by (tenant, tool) (rate(attune_mcp_tool_calls_total[5m])) > 0.01\n)"
+spec:
+  description: "MCP burn x exceeds the 14.4x fast-burn threshold over 5m and 1h windows."
+  severity: "page"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 14.4
+    lookbackWindow: "5m"
+    alertAfter: "2m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-mcp-tool-fast-burn-policy"
+  displayName: "MCP burn x fast burn policy"
+  annotations:
+    attune.io/catalog-key: "mcp_tool"
+    attune.io/owner: "MCP"
+    attune.io/escalation: "MCP on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "mcp_tool"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:mcp_tool_error_ratio"
+    attune.io/trend-legend-base: "mcp"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Tool-migration only"
+    attune.io/budget-exception-note: "Use a time-boxed exclusion only when a tool or adapter is being intentionally rotated; policy denials remain in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Use tool mix and latency alongside burn rate to tell policy pressure from tool regressions."
+    attune.io/tenant-rank-legend-base: "mcp"
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneMCPToolFastBurn"
+    attune.io/condition-name: "attune-mcp-tool-fast-burn"
+spec:
+  description: "Fast-burn alert policy for MCP burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-mcp-tool-fast-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-mcp-tool-slow-burn"
+  displayName: "MCP burn x slow burn"
+  annotations:
+    attune.io/catalog-key: "mcp_tool"
+    attune.io/owner: "MCP"
+    attune.io/escalation: "MCP on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "mcp_tool"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:mcp_tool_error_ratio"
+    attune.io/trend-legend-base: "mcp"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Tool-migration only"
+    attune.io/budget-exception-note: "Use a time-boxed exclusion only when a tool or adapter is being intentionally rotated; policy denials remain in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Use tool mix and latency alongside burn rate to tell policy pressure from tool regressions."
+    attune.io/tenant-rank-legend-base: "mcp"
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneMCPToolSlowBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact?var-tenant={{ $labels.tenant }}&var-tool={{ $labels.tool }}"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunemcptoolslowburn"
+    attune.io/action: "Split the tool mix by result, then confirm whether the issue is a tool regression, policy denial, or an upstream dependency failure."
+    attune.io/traffic-guard: "sum by (tenant, tool) (rate(attune_mcp_tool_calls_total[5m])) > 0.01"
+    attune.io/promql: "(\n  (attune:mcp_tool_error_ratio:ratio30m) / 0.001 > 6\n)\nand\n(\n  (attune:mcp_tool_error_ratio:ratio6h) / 0.001 > 6\n)\nand\n(\n  sum by (tenant, tool) (rate(attune_mcp_tool_calls_total[5m])) > 0.01\n)"
+spec:
+  description: "MCP burn x exceeds the 6x slow-burn threshold over 30m and 6h windows."
+  severity: "warning"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 6
+    lookbackWindow: "30m"
+    alertAfter: "5m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-mcp-tool-slow-burn-policy"
+  displayName: "MCP burn x slow burn policy"
+  annotations:
+    attune.io/catalog-key: "mcp_tool"
+    attune.io/owner: "MCP"
+    attune.io/escalation: "MCP on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "mcp_tool"
+    attune.io/burn-kind: "error"
+    attune.io/recorded-ratio-base: "attune:mcp_tool_error_ratio"
+    attune.io/trend-legend-base: "mcp"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Tool-migration only"
+    attune.io/budget-exception-note: "Use a time-boxed exclusion only when a tool or adapter is being intentionally rotated; policy denials remain in burn."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Use tool mix and latency alongside burn rate to tell policy pressure from tool regressions."
+    attune.io/tenant-rank-legend-base: "mcp"
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneMCPToolSlowBurn"
+    attune.io/condition-name: "attune-mcp-tool-slow-burn"
+spec:
+  description: "Slow-burn alert policy for MCP burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-mcp-tool-slow-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "SLO"
+metadata:
+  name: "attune-gdpr-job"
+  displayName: "GDPR burn x"
+  annotations:
+    attune.io/catalog-key: "gdpr_job"
+    attune.io/owner: "Compliance"
+    attune.io/escalation: "Compliance on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "gdpr_job"
+    attune.io/burn-kind: "success"
+    attune.io/recorded-ratio-base: "attune:gdpr_job_completion_ratio"
+    attune.io/trend-legend-base: "gdpr"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Denominator already excludes cancellations"
+    attune.io/budget-exception-note: "Cancelled and revoked jobs are already excluded from the burn denominator; file a budget exception only if the legal workflow changes."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep cancelled and revoked jobs out of the completion denominator so the burn reflects active requests."
+    attune.io/tenant-rank-legend-base: "gdpr"
+spec:
+  description: "Fast burn multiplier for GDPR jobs that miss completion. Cancelled and revoked jobs are excluded from the denominator so the lens stays operational."
+  service: "attune"
+  indicator:
+    metadata:
+      name: "attune-gdpr-job-sli"
+      displayName: "GDPR burn x SLI"
+    spec:
+      ratioMetric:
+        counter: false
+        rawType: "success"
+        raw:
+          metricSource:
+            metricSourceRef: "attune-prometheus"
+            type: "Prometheus"
+            spec:
+              query: "attune:gdpr_job_completion_ratio:ratio5m"
+  timeWindow:
+    - duration: "30d"
+      isRolling: true
+  budgetingMethod: "RatioTimeslices"
+  objectives:
+    - displayName: "GDPR burn x objective"
+      target: 0.999
+  alertPolicies:
+    - alertPolicyRef: "attune-gdpr-job-fast-burn-policy"
+    - alertPolicyRef: "attune-gdpr-job-slow-burn-policy"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-gdpr-job-fast-burn"
+  displayName: "GDPR burn x fast burn"
+  annotations:
+    attune.io/catalog-key: "gdpr_job"
+    attune.io/owner: "Compliance"
+    attune.io/escalation: "Compliance on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "gdpr_job"
+    attune.io/burn-kind: "success"
+    attune.io/recorded-ratio-base: "attune:gdpr_job_completion_ratio"
+    attune.io/trend-legend-base: "gdpr"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Denominator already excludes cancellations"
+    attune.io/budget-exception-note: "Cancelled and revoked jobs are already excluded from the burn denominator; file a budget exception only if the legal workflow changes."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep cancelled and revoked jobs out of the completion denominator so the burn reflects active requests."
+    attune.io/tenant-rank-legend-base: "gdpr"
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneGDPRJobFastBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact?var-tenant={{ $labels.tenant }}&var-request_type={{ $labels.request_type }}"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunegdprjobfastburn"
+    attune.io/action: "Check whether the queue is stalled, the worker is failing, or the storage path is rejecting completion."
+    attune.io/traffic-guard: "sum by (tenant, request_type) (rate(attune_gdpr_job_total{result=\"started\"}[5m])) > 0.01"
+    attune.io/promql: "(\n  (1 - attune:gdpr_job_completion_ratio:ratio5m) / 0.001 > 14.4\n)\nand\n(\n  (1 - attune:gdpr_job_completion_ratio:ratio1h) / 0.001 > 14.4\n)\nand\n(\n  sum by (tenant, request_type) (rate(attune_gdpr_job_total{result=\"started\"}[5m])) > 0.01\n)"
+spec:
+  description: "GDPR burn x exceeds the 14.4x fast-burn threshold over 5m and 1h windows."
+  severity: "page"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 14.4
+    lookbackWindow: "5m"
+    alertAfter: "2m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-gdpr-job-fast-burn-policy"
+  displayName: "GDPR burn x fast burn policy"
+  annotations:
+    attune.io/catalog-key: "gdpr_job"
+    attune.io/owner: "Compliance"
+    attune.io/escalation: "Compliance on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "gdpr_job"
+    attune.io/burn-kind: "success"
+    attune.io/recorded-ratio-base: "attune:gdpr_job_completion_ratio"
+    attune.io/trend-legend-base: "gdpr"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Denominator already excludes cancellations"
+    attune.io/budget-exception-note: "Cancelled and revoked jobs are already excluded from the burn denominator; file a budget exception only if the legal workflow changes."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep cancelled and revoked jobs out of the completion denominator so the burn reflects active requests."
+    attune.io/tenant-rank-legend-base: "gdpr"
+    attune.io/burn-phase: "fast"
+    attune.io/alert-name: "AttuneGDPRJobFastBurn"
+    attune.io/condition-name: "attune-gdpr-job-fast-burn"
+spec:
+  description: "Fast-burn alert policy for GDPR burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-gdpr-job-fast-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"
+---
+apiVersion: "openslo/v1"
+kind: "AlertCondition"
+metadata:
+  name: "attune-gdpr-job-slow-burn"
+  displayName: "GDPR burn x slow burn"
+  annotations:
+    attune.io/catalog-key: "gdpr_job"
+    attune.io/owner: "Compliance"
+    attune.io/escalation: "Compliance on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "gdpr_job"
+    attune.io/burn-kind: "success"
+    attune.io/recorded-ratio-base: "attune:gdpr_job_completion_ratio"
+    attune.io/trend-legend-base: "gdpr"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Denominator already excludes cancellations"
+    attune.io/budget-exception-note: "Cancelled and revoked jobs are already excluded from the burn denominator; file a budget exception only if the legal workflow changes."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep cancelled and revoked jobs out of the completion denominator so the burn reflects active requests."
+    attune.io/tenant-rank-legend-base: "gdpr"
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneGDPRJobSlowBurn"
+    attune.io/dashboard-url: "/d/attune-tenant-impact/attune-tenant-impact?var-tenant={{ $labels.tenant }}&var-request_type={{ $labels.request_type }}"
+    attune.io/runbook-url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunegdprjobslowburn"
+    attune.io/action: "Compare started vs completed jobs, inspect the worker queue, and verify whether cancellations or revocations are masking a backlog."
+    attune.io/traffic-guard: "sum by (tenant, request_type) (rate(attune_gdpr_job_total{result=\"started\"}[5m])) > 0.01"
+    attune.io/promql: "(\n  (1 - attune:gdpr_job_completion_ratio:ratio30m) / 0.001 > 6\n)\nand\n(\n  (1 - attune:gdpr_job_completion_ratio:ratio6h) / 0.001 > 6\n)\nand\n(\n  sum by (tenant, request_type) (rate(attune_gdpr_job_total{result=\"started\"}[5m])) > 0.01\n)"
+spec:
+  description: "GDPR burn x exceeds the 6x slow-burn threshold over 30m and 6h windows."
+  severity: "warning"
+  condition:
+    kind: "burnrate"
+    op: "gt"
+    threshold: 6
+    lookbackWindow: "30m"
+    alertAfter: "5m"
+---
+apiVersion: "openslo/v1"
+kind: "AlertPolicy"
+metadata:
+  name: "attune-gdpr-job-slow-burn-policy"
+  displayName: "GDPR burn x slow burn policy"
+  annotations:
+    attune.io/catalog-key: "gdpr_job"
+    attune.io/owner: "Compliance"
+    attune.io/escalation: "Compliance on-call"
+    attune.io/scope: "tenant"
+    attune.io/alert-label: "gdpr_job"
+    attune.io/burn-kind: "success"
+    attune.io/recorded-ratio-base: "attune:gdpr_job_completion_ratio"
+    attune.io/trend-legend-base: "gdpr"
+    attune.io/include-in-tenant-rank: "true"
+    attune.io/dashboard-title: "Attune Tenant Impact"
+    attune.io/budget-exception-policy: "Denominator already excludes cancellations"
+    attune.io/budget-exception-note: "Cancelled and revoked jobs are already excluded from the burn denominator; file a budget exception only if the legal workflow changes."
+    attune.io/policy-summary: "Start at 99.9% objective; page at 14.4x on 5m and 1h; warn at 6x on 30m and 6h; keep traffic floor > 0.01."
+    attune.io/policy-note: "Keep cancelled and revoked jobs out of the completion denominator so the burn reflects active requests."
+    attune.io/tenant-rank-legend-base: "gdpr"
+    attune.io/burn-phase: "slow"
+    attune.io/alert-name: "AttuneGDPRJobSlowBurn"
+    attune.io/condition-name: "attune-gdpr-job-slow-burn"
+spec:
+  description: "Slow-burn alert policy for GDPR burn x."
+  alertWhenNoData: false
+  alertWhenResolved: false
+  alertWhenBreaching: true
+  conditions:
+    - conditionRef: "attune-gdpr-job-slow-burn"
+  notificationTargets:
+    - targetRef: "attune-alertmanager"

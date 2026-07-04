@@ -198,12 +198,12 @@ attune:ingest_service_failure_ratio:ratio5m / 0.001
 attune:ingest_service_failure_ratio:ratio1h / 0.001
 ```
 
-Inspect `Attune Tenant Impact > Burn trend` and `Tenant burn ranking`.
-If one tenant dominates, inspect `Tenant intake and attribution` for the source,
-result, and rate-limit split. If the tenant is being throttled heavily, confirm
-whether it is legitimately bursting or misconfigured before changing any global
-limit. If the failure is broad, compare against recent deploys and dependency
-errors.
+Inspect `Attune Tenant Impact > Burn trend`, `Burn history`, and `Tenant burn
+ranking`. If one tenant dominates, inspect `Tenant intake and attribution` for
+the source, result, and rate-limit split. If the tenant is being throttled
+heavily, confirm whether it is legitimately bursting or misconfigured before
+changing any global limit. If the failure is broad, compare against recent
+deploys and dependency errors.
 
 Recovery: both burn-rate windows are below 14.4x and remain there for at least
 10 minutes.
@@ -242,10 +242,11 @@ Confirm:
 (1 - attune:enrich_success_under_5s:ratio1h) / 0.05
 ```
 
-Inspect `Attune Tenant Impact > Burn trend`, `Enrichment and auth pressure`,
-and `Attune AI Pipeline > Enrich duration`. Split the latency by `dims_mode`
-and result, then determine whether the issue is provider latency, queue
-pressure, or a parser / prompt regression.
+Inspect `Attune Tenant Impact > Burn trend`, `Burn history`, `Dependency
+triage`, `Enrichment and auth pressure`, and `Attune AI Pipeline > Enrich
+duration`. Split the latency by `dims_mode` and result, then determine whether
+the issue is provider latency, queue pressure, or a parser / prompt
+regression.
 
 Recovery: both burn-rate windows are below 14.4x and the 5s success ratio is
 recovering.

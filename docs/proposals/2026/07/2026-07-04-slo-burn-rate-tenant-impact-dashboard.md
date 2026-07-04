@@ -75,14 +75,27 @@ For Attune, that means:
 | Console | The existing Control Tower is feedback-quality focused, not reliability focused. | Implement a small reliability summary surface, but keep Grafana as the primary deep-dive view. |
 | SLO tracker | `internal/pkg/slo/slo.go` is an in-memory tracker, not the production observability source of truth. | Do not wire alerts or dashboards to it. |
 | MCP / GDPR telemetry | `attune_mcp_*` and `attune_gdpr_*` families are exported now. | Keep the new telemetry and burn-rate slices as the SLO source of truth. |
+| OpenSLO portability | The shared reliability catalog now exports to `observability/openslo/attune-slo.yaml` and round-trips in tests. | Keep the portable bundle generated from the catalog so vendor-neutral SLO tooling stays in sync. |
+| Historical / dependency triage | Burn-history, remaining-budget, replay-report, and dependency panels are now present on the tenant-impact surface. | Keep the historical burn view, remaining-budget view, replay comparison worksheet, and dependency-health triage panel generated from the same source data. |
+| Routing metadata | Owner, escalation path, and runbook links were fragmented across rule annotations and console cards. | Generate owner / escalation annotations from the catalog and surface the same routing metadata in Grafana and Console. |
+| Policy guidance | There was no generated starting-point policy surface for new SLOs. | Generate policy-summary annotations, a policy reference report, and Console policy cards with explicit budget-exception stance from the same catalog. |
 
 ## Proposal
 
-This patch lands the executable observability slice: burn-rate recording rules,
-MWMB alerts, the generated tenant-impact dashboard, exact 5s enrichment
-bucketing, the Console reliability summary, and the rule / dashboard drift
-tests. MCP / GDPR metric additions and burn-rate slices are included in this
-patch, and API key access-denial telemetry is now recorded and alertable.
+This patch lands the executable observability slice: burn-rate recording rules
+and MWMB alerts in a generated `attune-slo.yml`, the generated tenant-impact
+dashboard, exact 5s enrichment bucketing, the Console reliability summary,
+the portable OpenSLO bundle, the replay comparison worksheet, and the
+rule / dashboard drift tests. MCP / GDPR metric additions and burn-rate slices
+are included in this patch, and API key access-denial telemetry is now
+recorded and alertable. The same catalog now also drives a generated policy
+reference report plus policy cards in Console so the recommended starting
+objective, burn windows, low-traffic guardrails, and budget-exception stance
+stay visible beside the live SLO surface. The Console reliability page also
+offers a tenant-prefilled replay worksheet download, a replay workspace card
+with live markdown preview and copy action, and a direct OpenSLO bundle link
+so operators can move from triage into backfill or portability checks without
+leaving the page.
 
 ### 1. SLO Taxonomy
 
@@ -355,11 +368,15 @@ operator tool.
 
 1. Add or confirm the minimal missing metrics for MCP and GDPR, plus any
    denominator counters needed for auth/API-key reliability.
-2. Add burn-rate recording rules in `observability/rules/attune-recording.yml`.
-3. Add MWMB alerts and runbook annotations in `observability/rules/attune-alerts.yml`.
+2. Add burn-rate recording rules and MWMB alerts in a generated
+   `observability/rules/attune-slo.yml`, and copy the same file into the Helm
+   chart.
+3. Keep the dedicated SLO file catalog-driven from `internal/tools/observabilitydash`
+   so the observability and Helm copies stay aligned.
 4. Add the reliability dashboard family to `internal/tools/observabilitydash`.
 5. Add the Console reliability summary backed by the same recorded ratios. The
-   Console slice and MCP / GDPR telemetry are implemented in this patch.
+   Console slice, MCP / GDPR telemetry, policy-exception stance, and replay
+   comparison worksheet are implemented in this patch.
 6. Extend dashboard and rule drift tests so the new SLO surface stays synchronized.
 
 ## Verification

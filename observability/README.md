@@ -17,7 +17,11 @@ exposition plus the portable assets in this directory.
     they render against whatever default Prometheus-compatible datasource you
     provision (our bundled Prometheus, your VictoriaMetrics, …).
   - `rules/*.yml` — Prometheus recording and alert rules for Attune SLI, latency,
-    backlog, provider, inbound, and security signals.
+    backlog, provider, inbound, security, and SLO burn-rate signals.
+  - `openslo/*.yaml` — portable OpenSLO bundles exported from the same reliability
+    catalog, so the SLO model can round-trip into vendor-neutral tooling.
+  - `reports/*.md` — replay comparison worksheets and policy-reference report
+    templates generated from the same reliability catalog and routing metadata.
   - `targets.yaml` — a `file_sd_configs` target list for an **external**
     Prometheus/VictoriaMetrics reading `127.0.0.1:8090` (the standalone-host case).
 - **Reference runtime** — `../deploy/docker-compose.obs.yml` bundles Prometheus +
@@ -200,7 +204,8 @@ Dashboards:
 
 - `Attune Overview` — landing page for traffic, latency, rate limits, triage,
   backlog, delivery, and top-level risk signals.
-- `Attune Tenant Impact` — burn-rate overview, impacted-tenant ranking, and
+- `Attune Tenant Impact` — burn-rate overview, burn history, remaining-budget
+  view, dependency triage, routing metadata, impacted-tenant ranking, and
   ingest/enrichment/outbox/auth/API-key/MCP/GDPR drilldowns for SLO pages.
 - `Attune Inbound` — channel/source volume, latency, source state, and poll lag.
 - `Attune AI Pipeline` — enrichment, triage, guardrails, embedding, reply draft,
@@ -243,9 +248,12 @@ Then drill down:
   and provider errors.
 
 If a burn-rate alert fires, open `Attune Tenant Impact` first. It centers the
-service-owned SLOs, then ranks tenant and destination pressure so you can tell
-whether the issue is a backend regression, a destination outage, or a noisy
-tenant.
+service-owned SLOs, then shows live burn, burn history, remaining budget,
+tenant ranking, dependency triage, routing metadata, the replay comparison
+worksheet, and the policy reference so you can tell whether the issue is a
+backend regression, a dependency outage, a noisy tenant, or a route that needs
+to page a different owner. The same surface now also points at the budget-
+exception stance so approved exclusions stay explicit.
 
 Regenerate dashboards with:
 
@@ -265,19 +273,21 @@ Files:
 
 - `attune-recording.yml` — precomputes operational SLI series such as ingest
   validation error ratio, inbound availability/freshness, inbound p95, enrichment
-  p95, outbox lag, LLM provider error ratio, notification failures, combined
-  AI queue depth, and SLO burn-rate ratios for ingest, enrichment, outbox, OIDC,
-  API-key access, MCP, and GDPR.
+  p95, outbox lag, LLM provider error ratio, notification failures, and combined
+  AI queue depth.
+- `attune-slo.yml` — dedicated SLO burn-rate recording rules and MWMB alerts for
+  ingest, enrichment, outbox delivery, OIDC login, API-key access, MCP, and
+  GDPR, generated from the shared catalog and mirrored into Helm. This is the
+  executable patch for the tenant-impact surface.
 - `attune-alerts.yml` — alert rules aligned with the dashboard lenses:
   validation errors, sustained rate limiting, inbound availability/latency/stale
   sources, enrichment latency, AI queue backlog, LLM provider errors, outbox lag,
-  notification failures, authorization denials, API-key access burn-rate,
-  suspicious missing audit writes, and MWMB burn-rate alerts for the
-  service-owned SLOs.
-- `runbooks.md` — alert response guides. Every first-party alert annotation
-  includes `dashboard`, `dashboard_url`, `runbook_url`, and `action` so
-  Alertmanager and the Prometheus UI can point operators to the right view and
-  first diagnostic step.
+  notification failures, authorization denials, and suspicious missing audit
+  writes.
+- `runbooks.md` — alert response guides. The SLO burn-rate alert annotations
+  include `owner`, `escalation`, `dashboard`, `dashboard_url`, `runbook_url`,
+  and `action` so Alertmanager and the Prometheus UI can point operators to the
+  right view, owning area, and first diagnostic step.
 
 The Docker Compose observability overlay loads these rules automatically through
 `deploy/prometheus.yml`. For Kubernetes, enable the optional Prometheus Operator
@@ -302,6 +312,8 @@ Alert annotations are part of the observability contract. Keep them actionable:
 - `dashboard` / `dashboard_url` — the Grafana entry point with scoped variables
   when available.
 - `runbook_url` — the matching section in `observability/runbooks.md`.
+- `owner` / `escalation` — the owning area and the first escalation path on the
+  SLO burn-rate alerts.
 - `action` — the first response step, written as an operator action rather than a
   generic explanation.
 

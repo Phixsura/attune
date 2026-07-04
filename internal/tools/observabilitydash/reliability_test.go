@@ -1,10 +1,42 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+type sloRuleFile struct {
+	Groups []struct {
+		Name  string `yaml:"name"`
+		Rules []struct {
+			Record      string            `yaml:"record"`
+			Alert       string            `yaml:"alert"`
+			Labels      map[string]string `yaml:"labels"`
+			Annotations map[string]string `yaml:"annotations"`
+		} `yaml:"rules"`
+	} `yaml:"groups"`
+}
+
+func readSloRuleFile(t *testing.T) sloRuleFile {
+	t.Helper()
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "observability", "rules", "attune-slo.yml"))
+	if err != nil {
+		t.Fatalf("read slo rules: %v", err)
+	}
+
+	var spec sloRuleFile
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	return spec
+}
 
 func TestTenantImpactDashboardKeepsReliabilityFlow(t *testing.T) {
 	t.Parallel()
@@ -44,11 +76,19 @@ func TestTenantImpactDashboardKeepsReliabilityFlow(t *testing.T) {
 		"Tenant impact lens",
 		"Burn overview",
 		"Burn trend",
+		"Historical reporting",
+		"Burn history",
+		"Remaining budget",
 		"Tenant impact",
 		"Tenant burn ranking",
 		"Deep dive",
 		"MCP",
 		"GDPR",
+		"Dependency triage",
+		"Dependency health",
+		"Routing metadata",
+		"Replay / backfill",
+		"Replay report",
 	}
 	panelTitles := make(map[string]struct{}, len(dash.Panels))
 	for _, p := range dash.Panels {
@@ -61,30 +101,174 @@ func TestTenantImpactDashboardKeepsReliabilityFlow(t *testing.T) {
 	}
 }
 
-func TestTenantImpactDashboardUsesTenantBurnRanking(t *testing.T) {
+func TestReliabilityCatalogCoversAlertableSLOs(t *testing.T) {
 	t.Parallel()
 
-	p := panelByTitle(t, tenantImpactDashboard().Panels, "Tenant burn ranking")
-	if len(p.Targets) == 0 {
-		t.Fatal("tenant burn ranking panel has no targets")
+	catalog := reliabilityCatalog()
+	if got, want := len(catalog), len(reliabilityCatalogExpectations); got != want {
+		t.Fatalf("catalog length = %d, want %d", got, want)
+	}
+	for i, raw := range catalog {
+		assertReliabilityCatalogEntry(t, i, raw, reliabilityCatalogExpectations[i])
+	}
+}
+
+func TestReliabilityBurnPanelsAreCatalogDriven(t *testing.T) {
+	t.Parallel()
+
+	catalog := reliabilityCatalog()
+	assertReliabilityBurnOverviewPanels(t, catalog)
+	assertReliabilityBurnTrendPanel(t, catalog)
+	assertReliabilityTenantBurnRankingPanel(t, catalog)
+	assertReliabilityBurnHistoryPanel(t, catalog)
+	assertReliabilityRemainingBudgetPanel(t, catalog)
+	assertReliabilityDependencyHealthPanel(t)
+	assertReliabilityRoutingMetadataPanel(t)
+	assertReliabilityReplayReportPanel(t)
+	assertReliabilityPolicyGuidePanel(t)
+}
+
+func TestReplayReportTemplateMatchesCatalog(t *testing.T) {
+	t.Parallel()
+
+	rendered, err := renderReplayReportTemplate(reliabilityCatalog())
+	if err != nil {
+		t.Fatalf("renderReplayReportTemplate: %v", err)
+	}
+	committed := readFile(t, filepath.Join("..", "..", "..", "observability", "reports", "attune-slo-replay-template.md"))
+	if !bytes.Equal(rendered, committed) {
+		t.Fatalf("observability/reports/attune-slo-replay-template.md is stale; run go run ./internal/tools/observabilitydash")
 	}
 
-	exprs := make([]string, 0, len(p.Targets))
-	for _, target := range p.Targets {
-		exprs = append(exprs, target.Expr)
-	}
-	expr := strings.Join(exprs, "\n")
-	wantSnippets := []string{
-		`topk(10,`,
-		`attune:ingest_service_failure_ratio:ratio5m`,
-		`attune:enrich_success_under_5s:ratio5m`,
-		`attune_mcp_tool_calls_total{result=~"client_error|internal_error"}`,
-		`attune_gdpr_job_total{result="completed"}`,
-	}
-	for _, snippet := range wantSnippets {
-		if !strings.Contains(expr, snippet) {
-			t.Fatalf("tenant burn ranking expr %q is missing %q", expr, snippet)
+	body := string(rendered)
+	for _, snippet := range []string{
+		"# Attune SLO Replay / Backfill Report Template",
+		"`{{ incident_window }}`",
+		"| SLO | Owner | Escalation | Scope | Objective | Replay lens | Budget exception | Runbook |",
+		"| SLO | Current policy | Replay lens | Budget exception | Historical observation | Verdict | Runbook |",
+		"tenant / source / result",
+		"destination_type / reason",
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("replay report template is missing %q", snippet)
 		}
+	}
+}
+
+func TestReplayWorksheetTSMatchesCommittedOutput(t *testing.T) {
+	t.Parallel()
+
+	generated, err := renderReplayWorksheetTS()
+	if err != nil {
+		t.Fatalf("renderReplayWorksheetTS: %v", err)
+	}
+
+	committed, err := os.ReadFile(filepath.Join("..", "..", "..", replayWorksheetTSPath))
+	if err != nil {
+		t.Fatalf("read replay worksheet ts: %v", err)
+	}
+	if !bytes.Equal(bytes.TrimSpace(committed), bytes.TrimSpace(generated)) {
+		t.Fatalf("%s is stale; run go run ./internal/tools/observabilitydash", replayWorksheetTSPath)
+	}
+
+	body := string(generated)
+	for _, snippet := range []string{
+		"export const replayWorksheetDownloadName",
+		"function buildReplayWorksheetMarkdown",
+		"function replayComparisonPlaceholder",
+		"function replayWorksheetDownloadHref",
+		"Comparison matrix",
+		"SLO catalog reference",
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("replay worksheet ts is missing %q", snippet)
+		}
+	}
+}
+
+func TestReliabilityCatalogMatchesAlertRules(t *testing.T) {
+	t.Parallel()
+
+	assertReliabilityAlertRulesMatchCatalog(t, readSloRuleFile(t))
+}
+
+func TestReliabilityCatalogMatchesRecordingRules(t *testing.T) {
+	t.Parallel()
+
+	spec := readSloRuleFile(t)
+
+	records := map[string]struct{}{}
+	for _, group := range spec.Groups {
+		if group.Name != "attune.recording.slo" {
+			continue
+		}
+		for _, rule := range group.Rules {
+			if rule.Record == "" {
+				continue
+			}
+			records[rule.Record] = struct{}{}
+		}
+	}
+
+	want := map[string]struct{}{}
+	for _, slo := range reliabilityCatalog() {
+		for _, window := range []string{"ratio5m", "ratio1h", "ratio30m", "ratio6h"} {
+			want[reliabilityRecordedRatioMetric(slo.RecordedRatioBase, window)] = struct{}{}
+		}
+	}
+
+	if got, wantLen := len(records), len(want); got != wantLen {
+		t.Fatalf("recording rule count = %d, want %d", got, wantLen)
+	}
+	for name := range want {
+		if _, ok := records[name]; !ok {
+			t.Fatalf("recording rules missing %q", name)
+		}
+	}
+	for name := range records {
+		if _, ok := want[name]; !ok {
+			t.Fatalf("recording rules have unexpected %q", name)
+		}
+	}
+}
+
+func TestReliabilitySloRulesAreGenerated(t *testing.T) {
+	t.Parallel()
+
+	generated, err := renderReliabilitySloRules(reliabilityCatalog())
+	if err != nil {
+		t.Fatalf("renderReliabilitySloRules: %v", err)
+	}
+
+	for _, path := range []string{
+		filepath.Join("..", "..", "..", "observability", "rules", "attune-slo.yml"),
+		filepath.Join("..", "..", "..", "deploy", "helm", "attune", "rules", "attune-slo.yml"),
+	} {
+		committed, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if !bytes.Equal(committed, generated) {
+			t.Fatalf("%s is stale; run go run ./internal/tools/observabilitydash", path)
+		}
+	}
+}
+
+func TestReliabilityCatalogMatchesGeneratedTS(t *testing.T) {
+	t.Parallel()
+
+	generated, err := renderReliabilityCatalogTS(reliabilityCatalog())
+	if err != nil {
+		t.Fatalf("renderReliabilityCatalogTS: %v", err)
+	}
+
+	committed, err := os.ReadFile(filepath.Join("..", "..", "..", reliabilityCatalogTSPath))
+	if err != nil {
+		t.Fatalf("read catalog ts: %v", err)
+	}
+
+	if !bytes.Equal(bytes.TrimSpace(committed), bytes.TrimSpace(generated)) {
+		t.Fatalf("%s is stale; run go run ./internal/tools/observabilitydash", reliabilityCatalogTSPath)
 	}
 }
 
@@ -97,14 +281,13 @@ func TestTenantImpactDashboardUsesSafeGdprCompletionExpression(t *testing.T) {
 	}
 
 	expr := p.Targets[0].Expr
-	wantSnippets := []string{
+	for _, snippet := range []string{
 		`attune_gdpr_job_total{tenant=~"$tenant",result="completed"}`,
 		`attune_gdpr_job_total{tenant=~"$tenant",result="started"}`,
 		`attune_gdpr_job_total{tenant=~"$tenant",result="cancelled"}`,
 		`attune_gdpr_job_total{tenant=~"$tenant",result="revoked"}`,
 		`or on(tenant, request_type)`,
-	}
-	for _, snippet := range wantSnippets {
+	} {
 		if !strings.Contains(expr, snippet) {
 			t.Fatalf("GDPR completion expr %q is missing %q", expr, snippet)
 		}

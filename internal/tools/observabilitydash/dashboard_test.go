@@ -92,34 +92,41 @@ func TestHelmRulesMatchObservabilityRules(t *testing.T) {
 
 func TestAlertRulesHaveActionableAnnotations(t *testing.T) {
 	root := repoRoot(t)
-	body := readFile(t, filepath.Join(root, "observability", "rules", "attune-alerts.yml"))
-	var spec ruleFile
-	if err := yaml.Unmarshal(body, &spec); err != nil {
-		t.Fatal(err)
-	}
 	runbook := strings.ToLower(string(readFile(t, filepath.Join(root, "observability", "runbooks.md"))))
 	required := []string{"summary", "description", "dashboard", "dashboard_url", "runbook_url", "action"}
 	count := 0
-	for _, group := range spec.Groups {
-		for _, rule := range group.Rules {
-			if rule.Alert == "" {
-				continue
-			}
-			count++
-			for _, key := range required {
-				if strings.TrimSpace(rule.Annotations[key]) == "" {
-					t.Fatalf("%s is missing annotation %q", rule.Alert, key)
+	rulePaths, err := filepath.Glob(filepath.Join(root, "observability", "rules", "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range rulePaths {
+		body := readFile(t, path)
+		var spec ruleFile
+		if err := yaml.Unmarshal(body, &spec); err != nil {
+			t.Fatal(err)
+		}
+		filename := filepath.Base(path)
+		for _, group := range spec.Groups {
+			for _, rule := range group.Rules {
+				if rule.Alert == "" {
+					continue
 				}
-			}
-			if !strings.HasPrefix(rule.Annotations["dashboard_url"], "/d/attune-") {
-				t.Fatalf("%s dashboard_url %q should point to an Attune Grafana dashboard", rule.Alert, rule.Annotations["dashboard_url"])
-			}
-			anchor := "#" + strings.ToLower(rule.Alert)
-			if !strings.Contains(rule.Annotations["runbook_url"], anchor) {
-				t.Fatalf("%s runbook_url %q should include anchor %s", rule.Alert, rule.Annotations["runbook_url"], anchor)
-			}
-			if !strings.Contains(runbook, "## "+strings.ToLower(rule.Alert)) {
-				t.Fatalf("%s is missing from observability/runbooks.md", rule.Alert)
+				count++
+				for _, key := range required {
+					if strings.TrimSpace(rule.Annotations[key]) == "" {
+						t.Fatalf("%s: %s is missing annotation %q", filename, rule.Alert, key)
+					}
+				}
+				if !strings.HasPrefix(rule.Annotations["dashboard_url"], "/d/attune-") {
+					t.Fatalf("%s: %s dashboard_url %q should point to an Attune Grafana dashboard", filename, rule.Alert, rule.Annotations["dashboard_url"])
+				}
+				anchor := "#" + strings.ToLower(rule.Alert)
+				if !strings.Contains(rule.Annotations["runbook_url"], anchor) {
+					t.Fatalf("%s: %s runbook_url %q should include anchor %s", filename, rule.Alert, rule.Annotations["runbook_url"], anchor)
+				}
+				if !strings.Contains(runbook, "## "+strings.ToLower(rule.Alert)) {
+					t.Fatalf("%s: %s is missing from observability/runbooks.md", filename, rule.Alert)
+				}
 			}
 		}
 	}

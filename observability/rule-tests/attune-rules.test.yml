@@ -1,5 +1,6 @@
 rule_files:
   - /etc/prometheus/rules/attune-recording.yml
+  - /etc/prometheus/rules/attune-slo.yml
   - /etc/prometheus/rules/attune-alerts.yml
 
 evaluation_interval: 30s

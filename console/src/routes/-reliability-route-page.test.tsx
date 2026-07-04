@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-router'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
+import { reliabilityCatalog } from '@/features/reliability/reliability-catalog'
 import { ReliabilityRoutePage } from '@/routes/-reliability-route-page'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
@@ -204,9 +205,11 @@ describe('ReliabilityRoutePage', () => {
     })
 
     expect(screen.getByText('可靠性总览')).toBeInTheDocument()
+    expect(screen.getByText('SLO 目录')).toBeInTheDocument()
     expect(screen.getByText('打开 tenant impact dashboard')).toBeInTheDocument()
     expect(screen.getByText('运行快照')).toBeInTheDocument()
     expect(screen.getByText('快速入口')).toBeInTheDocument()
+    expect(screen.getAllByText('预算例外')).toHaveLength(reliabilityCatalog.length)
     expect(screen.getByText('1 个活跃 · 1 个非活跃，共 2 个。')).toBeInTheDocument()
     expect(
       screen.getByText(/1 个排队 · 2 个处理中 · 1 个已就绪导出 · 1 个待执行删除。/),
@@ -218,6 +221,24 @@ describe('ReliabilityRoutePage', () => {
       'href',
       '/d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-1',
     )
+    expect(screen.getByRole('link', { name: /^策略参考/ })).toHaveAttribute(
+      'href',
+      'https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-policy-reference.md',
+    )
+    expect(screen.getByRole('link', { name: /^回放报告/ })).toHaveAttribute(
+      'href',
+      'https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-replay-template.md',
+    )
+    expect(screen.getByRole('link', { name: /^OpenSLO 导出/ })).toHaveAttribute(
+      'href',
+      'https://github.com/Phixsura/attune/blob/main/observability/openslo/attune-slo.yaml',
+    )
+    const replayDownloadLink = screen.getByRole('link', { name: /^下载 replay 工作表/ })
+    expect(replayDownloadLink).toHaveAttribute('download', 'attune-slo-replay-template.md')
+    const replayDownloadHref = replayDownloadLink.getAttribute('href')
+    expect(replayDownloadHref).toContain('data:text/markdown;charset=utf-8,')
+    expect(decodeURIComponent(replayDownloadHref?.split(',', 2)[1] ?? '')).toContain('Tenant One')
+    expect(screen.getByText('Replay 工作区')).toBeInTheDocument()
 
     await expectNoA11yViolations(container)
   })
