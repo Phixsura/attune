@@ -185,6 +185,282 @@ the sweeper retries the affected rows.
 Recovery: no new terminal failures for 15 minutes and re-enqueued rows reach
 `done`.
 
+## AttuneIngestServiceFastBurn
+
+Impact: ingest is consuming service error budget rapidly. Users may see backend
+errors or missing feedback when the service cannot accept or process requests
+reliably.
+
+Confirm:
+
+```promql
+attune:ingest_service_failure_ratio:ratio5m / 0.001
+attune:ingest_service_failure_ratio:ratio1h / 0.001
+```
+
+Inspect `Attune Tenant Impact > Burn trend` and `Tenant burn ranking`.
+If one tenant dominates, inspect `Tenant intake and attribution` for the source
+and result split. If the failure is broad, compare against recent deploys and
+dependency errors before changing any global limit.
+
+Recovery: both burn-rate windows are below 14.4x and remain there for at least
+10 minutes.
+
+## AttuneIngestServiceSlowBurn
+
+Impact: ingest is consuming service error budget steadily. This usually means a
+sustained backend regression, repeated client misuse, or a capacity issue that
+has not yet become a hard outage.
+
+Confirm:
+
+```promql
+attune:ingest_service_failure_ratio:ratio30m / 0.001
+attune:ingest_service_failure_ratio:ratio6h / 0.001
+```
+
+Inspect the same Tenant Impact panels as the fast-burn alert, then compare the
+current failure rate with recent release changes. Use the slower windows to
+separate a noisy spike from a sustained regression.
+
+Recovery: both burn-rate windows are below 6x and the trend is flattening or
+falling.
+
+## AttuneEnrichmentFastBurn
+
+Impact: enrichment latency is consuming the 5-second latency budget rapidly.
+Feedback may still complete, but the AI pipeline is falling behind and user
+latency is rising.
+
+Confirm:
+
+```promql
+(1 - attune:enrich_success_under_5s:ratio5m) / 0.05
+(1 - attune:enrich_success_under_5s:ratio1h) / 0.05
+```
+
+Inspect `Attune Tenant Impact > Burn trend`, `Enrichment and auth pressure`,
+and `Attune AI Pipeline > Enrich duration`. Split the latency by `dims_mode`
+and result, then determine whether the issue is provider latency, queue
+pressure, or a parser / prompt regression.
+
+Recovery: both burn-rate windows are below 14.4x and the 5s success ratio is
+recovering.
+
+## AttuneEnrichmentSlowBurn
+
+Impact: enrichment is steadily consuming latency budget. This usually means the
+system is saturated or a downstream provider is trending worse, even if the
+service is not failing outright.
+
+Confirm:
+
+```promql
+(1 - attune:enrich_success_under_5s:ratio30m) / 0.05
+(1 - attune:enrich_success_under_5s:ratio6h) / 0.05
+```
+
+Compare the burn trend with AI queue depth and provider error signals. If the
+burn stays elevated while failures remain low, the issue is likely sustained
+latency or queue pressure rather than a hard outage.
+
+Recovery: both burn-rate windows are below 6x for at least one full slower
+window.
+
+## AttuneOutboxDeliveryFastBurn
+
+Impact: delivery to one or more destination types is failing rapidly. Users may
+miss outbound notifications or see them arrive late.
+
+Confirm:
+
+```promql
+attune:outbox_delivery_failure_ratio:ratio5m / 0.001
+attune:outbox_delivery_failure_ratio:ratio1h / 0.001
+```
+
+Inspect `Attune Tenant Impact > Delivery pressure`. Compare terminal delivery
+failures with `attune_outbox_lag_seconds` and `attune_notify_failures_total` to
+decide whether the worker pool is behind or the destination is rejecting.
+
+Recovery: both burn-rate windows are below 14.4x and outbox lag stops growing.
+
+## AttuneOutboxDeliverySlowBurn
+
+Impact: outbound delivery is steadily consuming error budget. This is often a
+destination-side health or retry pressure issue that will become visible to
+users if it continues.
+
+Confirm:
+
+```promql
+attune:outbox_delivery_failure_ratio:ratio30m / 0.001
+attune:outbox_delivery_failure_ratio:ratio6h / 0.001
+```
+
+Open the same delivery panel, then group by `destination_type` and
+`reason`. Separate destination rejection from worker saturation before replaying
+failed deliveries.
+
+Recovery: both burn-rate windows are below 6x and outbox lag is stable or
+falling.
+
+## AttuneOIDCLoginFastBurn
+
+Impact: sign-in is consuming error budget rapidly. Admins may be unable to
+access the Console or complete auth flows.
+
+Confirm:
+
+```promql
+attune:oidc_login_failure_ratio:ratio5m / 0.001
+attune:oidc_login_failure_ratio:ratio1h / 0.001
+```
+
+Inspect `Attune Tenant Impact > Auth pressure`, then compare login outcomes
+with recent IdP status, callback errors, and auth or cookie changes. If the
+failures are mixed, split by result before changing configuration.
+
+Recovery: both burn-rate windows are below 14.4x and successful sign-ins have
+resumed.
+
+## AttuneOIDCLoginSlowBurn
+
+Impact: OIDC sign-in is steadily consuming budget. This often points to a
+sustained IdP regression or a local auth configuration drift that has not yet
+fully broken access.
+
+Confirm:
+
+```promql
+attune:oidc_login_failure_ratio:ratio30m / 0.001
+attune:oidc_login_failure_ratio:ratio6h / 0.001
+```
+
+Compare the slower burn with IdP health and the recent auth change history. Do
+not change SSO settings until you know whether the failure is on the provider
+side or in Attune.
+
+Recovery: both burn-rate windows are below 6x and the login failure trend is
+moving down.
+
+## AttuneAPIKeyAccessFastBurn
+
+Impact: API key access is failing rapidly. Users may be blocked by key
+expiration, IP allowlists, or per-key throttling.
+
+Confirm:
+
+```promql
+attune:apikey_access_denial_ratio:ratio5m / 0.05
+attune:apikey_access_denial_ratio:ratio1h / 0.05
+```
+
+Inspect `Attune Tenant Impact > Deep dive`, then compare `API key denial %`
+with `Attune Security & Compliance > API key access denials` and `API key
+usage`. If the security page shows scope denials as well, treat that as a
+separate authorization issue instead of an access failure.
+
+Recovery: both burn-rate windows are below 14.4x and access-denial rate is back
+below the budget target.
+
+## AttuneAPIKeyAccessSlowBurn
+
+Impact: API key access is steadily consuming budget. This usually means a
+systemic expiry, allowlist, or rate-limit issue rather than a single malformed
+request.
+
+Confirm:
+
+```promql
+attune:apikey_access_denial_ratio:ratio30m / 0.05
+attune:apikey_access_denial_ratio:ratio6h / 0.05
+```
+
+Inspect the same dashboard panels as the fast-burn alert, then split the
+Security & Compliance page by denial class. Separate expiration, IP rejection,
+and rate limiting before changing key policy or rotating credentials.
+
+Recovery: both burn-rate windows are below 6x and the denial trend is falling.
+
+## AttuneMCPToolFastBurn
+
+Impact: an MCP tool is failing quickly. Users may see tool-call errors, bad
+request handling, or a downstream adapter/service outage.
+
+Confirm:
+
+```promql
+attune:mcp_tool_error_ratio:ratio5m
+attune:mcp_tool_error_ratio:ratio1h
+```
+
+Inspect `Attune Tenant Impact > MCP`, then split `MCP tool mix` by `tool` and
+`result`. If `client_error` dominates, validate the tool input contract and the
+JSON-RPC method mapping first. If `internal_error` dominates, inspect the
+adapter, downstream service, and recent deploys before changing policy.
+
+Recovery: both burn-rate windows are below 14.4x for 10 minutes and the error
+mix returns to normal.
+
+## AttuneMCPToolSlowBurn
+
+Impact: an MCP tool is steadily consuming budget. This usually means a tool
+contract drift, repeated bad input, or a slow downstream dependency.
+
+Confirm:
+
+```promql
+attune:mcp_tool_error_ratio:ratio30m
+attune:mcp_tool_error_ratio:ratio6h
+```
+
+Use the same MCP panels, then compare `MCP latency by tool` with the error mix.
+If latency rises without a matching error spike, look for a slow adapter or
+backend. If errors rise with flat latency, inspect the policy layer and
+call-shape drift.
+
+Recovery: both burn-rate windows are below 6x and the tool mix is stable.
+
+## AttuneGDPRJobFastBurn
+
+Impact: GDPR export or delete jobs are not completing quickly. Customer data
+requests may pile up, and operators may need to watch for backlog growth.
+
+Confirm:
+
+```promql
+1 - attune:gdpr_job_completion_ratio:ratio5m
+1 - attune:gdpr_job_completion_ratio:ratio1h
+```
+
+Inspect `Attune Tenant Impact > GDPR`, then compare `GDPR state mix`,
+`GDPR latency by request`, and `GDPR backlog`. If `failed` dominates, inspect
+worker logs and storage errors. If `started` dominates, the queue is backing up
+or workers are not keeping up.
+
+Recovery: both burn-rate windows are below 14.4x and the backlog delta is
+flattening or falling.
+
+## AttuneGDPRJobSlowBurn
+
+Impact: GDPR job completion is steadily consuming budget. This usually means
+worker throughput is lagging or the storage path is trending worse.
+
+Confirm:
+
+```promql
+1 - attune:gdpr_job_completion_ratio:ratio30m
+1 - attune:gdpr_job_completion_ratio:ratio6h
+```
+
+Use the same GDPR panels, then compare the request mix with latency. If
+`cancelled` or `revoked` grows, confirm whether the work was intentionally
+stopped or whether an operator is masking a backlog.
+
+Recovery: both burn-rate windows are below 6x and the backlog trend is stable
+or falling.
+
 ## AttuneWorkerPanics
 
 Impact: a supervised background worker (outbox, enrichment, embedding,

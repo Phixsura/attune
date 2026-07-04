@@ -100,6 +100,10 @@ exposition plus the portable assets in this directory.
 | `attune_apikey_ip_denied_total` | counter | — | API key requests denied due to IP not in allowlist |
 | `attune_apikey_rate_limited_total` | counter | `tenant` | requests rejected (429) by the per-key rate limiter (key's `rate_limit_rpm`) (#41) |
 | `attune_apikey_usage_total` | counter | `tenant`, `key_prefix` | Successful API key authentications by key prefix |
+| `attune_mcp_tool_calls_total` | counter | `tenant`, `tool`, `result` | MCP tool-call outcomes by tenant, tool, and result |
+| `attune_mcp_tool_latency_seconds` | histogram | `tenant`, `tool` | MCP tool-call latency by tenant and tool |
+| `attune_gdpr_job_total` | counter | `tenant`, `request_type`, `result` | GDPR job lifecycle events by tenant, request type, and result |
+| `attune_gdpr_job_duration_seconds` | histogram | `tenant`, `request_type` | GDPR job duration by tenant and request type |
 | `attune_audit_rows_written_total` | counter | `action` | immutable audit-log rows written by action (#39) |
 | `attune_audit_rows_pruned_total` | counter | — | immutable audit-log rows pruned by retention policy (#39) |
 | `attune_audit_prune_duration_seconds` | histogram | — | audit-log retention prune latency (#39) |
@@ -142,6 +146,10 @@ Label values:
 - `reason` — `transport` · `terminal`.
 - outbound `result` — `success` · `retryable` · `terminal` · `exhausted` · `canceled`.
 - outbound `status` — HTTP status code, or `0` when no response was received.
+- mcp `result` — `ok` · `client_error` · `denied` · `rate_limited` · `internal_error`.
+- mcp `tool` — bounded tool names from the MCP dispatcher; uncategorized JSON-RPC requests use `unknown`.
+- gdpr `request_type` — `export` · `delete`.
+- gdpr `result` — `started` · `completed` · `failed` · `cancelled` · `revoked`.
 - `decision` — `ignore` · `fast` · `full`.
 - guard `stage` — `llm_input` · `llm_output` · `outbound` · `tool_call`.
 - guard `action` — `audit` · `redact` · `hash` · `tokenize` · `block`.
@@ -192,6 +200,8 @@ Dashboards:
 
 - `Attune Overview` — landing page for traffic, latency, rate limits, triage,
   backlog, delivery, and top-level risk signals.
+- `Attune Tenant Impact` — burn-rate overview, impacted-tenant ranking, and
+  ingest/enrichment/outbox/auth/API-key/MCP/GDPR drilldowns for SLO pages.
 - `Attune Inbound` — channel/source volume, latency, source state, and poll lag.
 - `Attune AI Pipeline` — enrichment, triage, guardrails, embedding, reply draft,
   and digest health.
@@ -232,6 +242,11 @@ Then drill down:
 - Cost up: open `Attune LLM Cost`; compare calls, model mix, token direction,
   and provider errors.
 
+If a burn-rate alert fires, open `Attune Tenant Impact` first. It centers the
+service-owned SLOs, then ranks tenant and destination pressure so you can tell
+whether the issue is a backend regression, a destination outage, or a noisy
+tenant.
+
 Regenerate dashboards with:
 
 ```bash
@@ -250,13 +265,15 @@ Files:
 
 - `attune-recording.yml` — precomputes operational SLI series such as ingest
   validation error ratio, inbound availability/freshness, inbound p95, enrichment
-  p95, outbox lag, LLM provider error ratio, notification failures, and combined
-  AI queue depth.
+  p95, outbox lag, LLM provider error ratio, notification failures, combined
+  AI queue depth, and SLO burn-rate ratios for ingest, enrichment, outbox, OIDC,
+  API-key access, MCP, and GDPR.
 - `attune-alerts.yml` — alert rules aligned with the dashboard lenses:
   validation errors, sustained rate limiting, inbound availability/latency/stale
   sources, enrichment latency, AI queue backlog, LLM provider errors, outbox lag,
-  notification failures, authorization denials, and suspicious missing audit
-  writes.
+  notification failures, authorization denials, API-key access burn-rate,
+  suspicious missing audit writes, and MWMB burn-rate alerts for the
+  service-owned SLOs.
 - `runbooks.md` — alert response guides. Every first-party alert annotation
   includes `dashboard`, `dashboard_url`, `runbook_url`, and `action` so
   Alertmanager and the Prometheus UI can point operators to the right view and

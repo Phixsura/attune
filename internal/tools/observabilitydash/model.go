@@ -303,6 +303,14 @@ func greenWarnRed(warn, crit float64) []threshold {
 	}
 }
 
+func redWarnGreen(warn, good float64) []threshold {
+	return []threshold{
+		{Color: "red"},
+		{Color: "orange", Value: fp(warn)},
+		{Color: "green", Value: fp(good)},
+	}
+}
+
 func greenRed(crit float64) []threshold {
 	return []threshold{
 		{Color: "green"},

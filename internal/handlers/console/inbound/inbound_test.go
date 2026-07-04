@@ -63,8 +63,8 @@ func (f *fakeSourceRepo) UpdateState(_ context.Context, _ string, _ inbound.Sour
 
 // newTestHandler — wires a Handler against fakes. Delete uses h.pool
 // directly (real pgx); tests that exercise Delete pass nil pool +
-// expect 500 "pool not configured" or are deferred to the integration
-// suite (review O10, #66).
+// expect 500 "pool not configured", while integration coverage exercises
+// the real pgx path (review O10, #66).
 func newTestHandler(repo *fakeSourceRepo, _ *struct{}) *Handler {
 	return ptrext.Of(Handler{
 		sources:    repo,

@@ -193,8 +193,14 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 
 func (h *Handler) governanceMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedAt := time.Now()
 		req, body, ok := decodeJSONRPCRequest(r)
 		if !ok {
+			claims := server.ClaimsFromContext(r.Context())
+			if claims != nil && h.evaluator != nil {
+				h.forwardWithBodyRecorded(next, w, r, body, claims.TenantID, "unknown", startedAt)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -207,13 +213,14 @@ func (h *Handler) governanceMiddleware(next http.Handler) http.Handler {
 
 		tool, found := tools.LookupTool(req.Method)
 		if !found {
-			h.forwardWithBody(next, w, r, body)
+			h.forwardWithBodyRecorded(next, w, r, body, claims.TenantID, "unknown", startedAt)
 			return
 		}
 
 		decision, err := h.evaluator.Evaluate(r.Context(), claims, tool)
 		if err != nil {
 			logext.Errorf(r.Context(), "[mcp.governanceMiddleware] policy evaluate failed,client_id:%s,tool:%s,err:%v", claims.ClientID, req.Method, err)
+			recordMCPToolCall(claims.TenantID, tool.Name, mcpToolResultInternalErr, startedAt, true)
 			writeJSONRPCError(w, http.StatusInternalServerError, jsonrpc.CodeInternalError, req.ID, "internal error")
 			return
 		}
@@ -222,18 +229,21 @@ func (h *Handler) governanceMiddleware(next http.Handler) http.Handler {
 		userAgent := r.UserAgent()
 
 		if h.handleDeniedDecision(r.Context(), w, req.ID, claims, tool, decision, ip, userAgent) {
+			recordMCPToolCall(claims.TenantID, tool.Name, mcpToolResultDenied, startedAt, false)
 			return
 		}
 
 		if h.enforceClientRateLimit(r.Context(), w, req.ID, claims, decision, ip, userAgent) {
+			recordMCPToolCall(claims.TenantID, tool.Name, mcpToolResultRateLimited, startedAt, false)
 			return
 		}
 
 		if h.enforceToolRateLimit(r.Context(), w, req.ID, claims, decision, ip, userAgent) {
+			recordMCPToolCall(claims.TenantID, tool.Name, mcpToolResultRateLimited, startedAt, false)
 			return
 		}
 
-		h.forwardWithBody(next, w, r, body)
+		h.forwardWithBodyRecorded(next, w, r, body, claims.TenantID, tool.Name, startedAt)
 		h.recordActivity(r.Context(), claims.SessionID, tool.Name, policy.DecisionAllowed, ip, userAgent)
 	})
 }
@@ -241,6 +251,13 @@ func (h *Handler) governanceMiddleware(next http.Handler) http.Handler {
 func (h *Handler) forwardWithBody(next http.Handler, w http.ResponseWriter, r *http.Request, body []byte) {
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	next.ServeHTTP(w, r)
+}
+
+func (h *Handler) forwardWithBodyRecorded(next http.Handler, w http.ResponseWriter, r *http.Request, body []byte, tenantID, toolName string, startedAt time.Time) {
+	recorder := ptrext.Of(responseRecorder{ResponseWriter: w})
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	next.ServeHTTP(recorder, r)
+	recordMCPToolCall(tenantID, toolName, classifyMCPResult(recorder.Status()), startedAt, true)
 }
 
 func (h *Handler) handleDeniedDecision(

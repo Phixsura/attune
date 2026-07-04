@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Tenant impact SLO surface for reliability burn-rate operations.**
+  Added the new `Attune Tenant Impact` dashboard, including impacted-tenant
+  burn ranking, a Console reliability summary page, burn-rate recording rules
+  and MWMB alerts for ingest, enrichment, outbox delivery, OIDC login, API key
+  access denials, MCP tool calls, and GDPR job completion, plus an exact 5s
+  enrichment bucket so the latency SLO is measured directly instead of
+  approximated. The GDPR completion ratio now excludes cancelled and revoked
+  jobs from the denominator so the burn-rate view stays aligned with the
+  dashboard completion lens. The tenant-impact generator now also exposes MCP
+  and GDPR drilldowns with tool and request-type label filters, and API key
+  usage is now recorded so the existing access-denial telemetry and security
+  panels have a real success denominator.
+
 - **Reply draft review and controlled-send workflow (#164).**
   Added persisted reply-draft cycles, revision history, workflow events,
   Console edit/approve/reject/send actions, admin-only encrypted reply-send

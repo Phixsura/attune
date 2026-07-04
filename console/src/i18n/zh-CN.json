@@ -133,7 +133,20 @@
     "outbox_dead": "死信投递",
     "mcp_clients": "MCP 客户端",
     "system_readiness": "系统就绪",
+    "reliability": "可靠性总览",
     "security": "安全设置"
+  },
+  "reliability": {
+    "title": "可靠性总览",
+    "subtitle": "把系统就绪、认证模式、API key、MCP 客户端、GDPR 压力和死信投递放在同一页。当前 tenant：{{tenant}}。",
+    "hints": {
+      "system_readiness": "{{passed}} 个通过 · {{warn}} 个告警 · {{fail}} 个失败 · 用时 {{elapsed}}。",
+      "api_keys": "{{active}} 个活跃 · {{inactive}} 个非活跃，共 {{total}} 个。",
+      "mcp_clients": "{{active}} 个活跃 · {{revoked}} 个已撤销，共 {{total}} 个。",
+      "gdpr": "{{queued}} 个排队 · {{active}} 个处理中 · {{ready}} 个已就绪导出 · {{scheduled}} 个待执行删除。",
+      "gdpr_expiry": "下一次导出过期：{{value}}。",
+      "dead_deliveries": "{{retryable}} 个可重试 · {{inflight}} 个处理中。"
+    }
   },
   "shell": {
     "primary_nav": "主导航",

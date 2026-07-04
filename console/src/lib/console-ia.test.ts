@@ -43,6 +43,25 @@ describe('console IA', () => {
     expect(canAccessConsoleItem('viewer', item)).toBe(true)
   })
 
+  it('exposes the reliability summary as an admin-only administration destination', () => {
+    const item = consoleNavItems.find(
+      (candidate) => candidate.path === '/administration/reliability',
+    )
+
+    expect(item).toBeDefined()
+    if (!item) {
+      throw new Error('reliability nav item missing')
+    }
+    expect(item).toMatchObject({
+      group: 'administration',
+      labelKey: 'nav.reliability',
+      path: '/administration/reliability',
+    })
+    expect(canAccessConsoleItem('admin', item)).toBe(true)
+    expect(canAccessConsoleItem('member', item)).toBe(false)
+    expect(canAccessConsoleItem('viewer', item)).toBe(false)
+  })
+
   it('derives visible items from the same access rules used by routes', () => {
     const memberItems = getConsoleItemsForRole('member')
     const viewerItems = getConsoleItemsForRole('viewer')

@@ -24,6 +24,10 @@ import (
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
+// apiKeyUsagePrefixLen matches the short human-readable prefix we mint for
+// externally visible API keys ("fbk_live_abc").
+const apiKeyUsagePrefixLen = len(domain.APIKeyPrefix) + 3
+
 // Verifier is the dependency middleware needs from the service layer.
 // Implemented by *service.APIKeys; declared here as an interface so
 // infra/apikey doesn't depend on internal/service (one-way arrows).
@@ -128,6 +132,7 @@ func MiddlewareWithProxies(v Verifier, trustedProxyHops int) func(http.Handler) 
 				Scopes:       scopes,
 				RateLimitRPM: rpm,
 			}))
+			metrics.APIKeyUsageTotal.WithLabelValues(tid, apiKeyUsagePrefix(raw)).Inc()
 			next.ServeHTTP(w, r.WithContext(newCtx))
 		})
 	}
@@ -207,6 +212,13 @@ func RequireScope(required domain.Scope) func(http.Handler) http.Handler {
 // scopes list do not silently gain new privileges.
 func RequireExplicitScope(required domain.Scope) func(http.Handler) http.Handler {
 	return requireScope(required, true)
+}
+
+func apiKeyUsagePrefix(raw string) string {
+	if len(raw) <= apiKeyUsagePrefixLen {
+		return raw
+	}
+	return raw[:apiKeyUsagePrefixLen]
 }
 
 func requireScope(required domain.Scope, explicitOnly bool) func(http.Handler) http.Handler {

@@ -120,11 +120,11 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 	}
 
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d,deduped:%t", where, tenantID, id, deduped)
-	// A deduped replay already enqueued enrichment on its first insert — don't
+	// A replay that already enqueued enrichment on its first insert should not
 	// submit twice.
 	if !deduped && i.submitter != nil {
 		if err := i.submitter.Submit(ctx, enrich.Job{ID: id, TraceID: trace.FromContext(ctx)}); err != nil {
-			logext.Warnf(ctx, "[%s] enrich submit deferred,feedback_id:%d,inbound_trace_id:%s,err:%+v",
+			logext.Warnf(ctx, "[%s] enrich submit failed,feedback_id:%d,inbound_trace_id:%s,err:%+v",
 				where, id, trace.FromContext(ctx), err.Error())
 		}
 	}

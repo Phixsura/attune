@@ -3,6 +3,7 @@ package main
 func allDashboards() []dashboard {
 	return []dashboard{
 		overviewDashboard(),
+		tenantImpactDashboard(),
 		inboundDashboard(),
 		aiPipelineDashboard(),
 		operationsDashboard(),

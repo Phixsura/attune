@@ -13,11 +13,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/mcp"
+	infraMetrics "github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/mcp/jsonrpc"
 	"github.com/Phixsura/attune/internal/mcp/oauth"
 	mcppolicy "github.com/Phixsura/attune/internal/mcp/policy"
@@ -160,8 +162,12 @@ func newTestToken(t *testing.T, h *mcp.Handler) string {
 }
 
 func newTestTokenWithScopes(t *testing.T, h *mcp.Handler, scopes []string) string {
+	return newTestTokenForTenant(t, h, "tenant-123", scopes)
+}
+
+func newTestTokenForTenant(t *testing.T, h *mcp.Handler, tenant string, scopes []string) string {
 	t.Helper()
-	claims := oauth.AccessTokenClaims{TenantID: "tenant-123", ClientID: uuid.New(), SessionID: uuid.New(), Scopes: scopes}
+	claims := oauth.AccessTokenClaims{TenantID: tenant, ClientID: uuid.New(), SessionID: uuid.New(), Scopes: scopes}
 	token, err := h.Signer().Sign(claims, time.Hour)
 	require.NoError(t, err)
 	return token
@@ -248,12 +254,30 @@ func TestHandler_AuthenticatedRequest(t *testing.T) {
 	assert.Nil(t, resp.Error)
 }
 
+func TestHandler_AuthenticatedRequestRecordsMetrics(t *testing.T) {
+	h := newTestHandler()
+	router := h.Routes()
+	tenant := "tenant-metrics-" + uuid.NewString()
+	token := newTestTokenForTenant(t, h, tenant, []string{"mcp:read"})
+
+	body := `{"jsonrpc":"2.0","method":"list_feedback","id":"1"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.InDelta(t, 1, testutil.ToFloat64(infraMetrics.MCPToolCallsTotal.WithLabelValues(tenant, "list_feedback", "ok")), 0.0001)
+}
+
 func TestHandler_AuthenticatedRequestDeniedByAllowList(t *testing.T) {
 	h := newTestHandler(testHandlerOptions{
 		toolPolicyMode: domain.MCPToolPolicyModeAllowList,
 	})
 	router := h.Routes()
-	token := newTestToken(t, h)
+	tenant := "tenant-denied-" + uuid.NewString()
+	token := newTestTokenForTenant(t, h, tenant, []string{"mcp:read"})
 
 	body := `{"jsonrpc":"2.0","method":"list_feedback","id":"1"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1", bytes.NewBufferString(body))
@@ -267,6 +291,23 @@ func TestHandler_AuthenticatedRequestDeniedByAllowList(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.NotNil(t, resp.Error)
 	assert.Equal(t, "tool not allowed for client", resp.Error.Message)
+	assert.InDelta(t, 1, testutil.ToFloat64(infraMetrics.MCPToolCallsTotal.WithLabelValues(tenant, "list_feedback", "denied")), 0.0001)
+}
+
+func TestHandler_UnknownMethodRecordsClientErrorMetrics(t *testing.T) {
+	h := newTestHandler()
+	router := h.Routes()
+	tenant := "tenant-unknown-" + uuid.NewString()
+	token := newTestTokenForTenant(t, h, tenant, []string{"mcp:read"})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1", bytes.NewBufferString(`{"jsonrpc":"2.0","method":"no_such_tool","id":"1"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.InDelta(t, 1, testutil.ToFloat64(infraMetrics.MCPToolCallsTotal.WithLabelValues(tenant, "unknown", "client_error")), 0.0001)
 }
 
 func TestHandler_OAuthEndpoints(t *testing.T) {
