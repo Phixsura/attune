@@ -49,34 +49,94 @@ groups:
       - record: attune:ingest_service_failure_ratio:ratio5m
         expr: |
           (
-            sum by (tenant) (rate(attune_ingest_total{result="internal_err"}[5m]))
+            (
+              sum by (tenant) (rate(attune_ingest_total{result="internal_err"}[5m]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            )
+            +
+            (
+              sum by (tenant) (rate(attune_ingest_rate_limit_total[5m]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            )
           )
           /
-          clamp_min(sum by (tenant) (rate(attune_ingest_total[5m])), 1e-9)
+          clamp_min(
+            sum by (tenant) (rate(attune_ingest_total[5m]))
+            + (
+              sum by (tenant) (rate(attune_ingest_rate_limit_total[5m]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            ),
+            1e-9
+          )
 
       - record: attune:ingest_service_failure_ratio:ratio1h
         expr: |
           (
-            sum by (tenant) (rate(attune_ingest_total{result="internal_err"}[1h]))
+            (
+              sum by (tenant) (rate(attune_ingest_total{result="internal_err"}[1h]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            )
+            +
+            (
+              sum by (tenant) (rate(attune_ingest_rate_limit_total[1h]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            )
           )
           /
-          clamp_min(sum by (tenant) (rate(attune_ingest_total[1h])), 1e-9)
+          clamp_min(
+            sum by (tenant) (rate(attune_ingest_total[1h]))
+            + (
+              sum by (tenant) (rate(attune_ingest_rate_limit_total[1h]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            ),
+            1e-9
+          )
 
       - record: attune:ingest_service_failure_ratio:ratio30m
         expr: |
           (
-            sum by (tenant) (rate(attune_ingest_total{result="internal_err"}[30m]))
+            (
+              sum by (tenant) (rate(attune_ingest_total{result="internal_err"}[30m]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            )
+            +
+            (
+              sum by (tenant) (rate(attune_ingest_rate_limit_total[30m]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            )
           )
           /
-          clamp_min(sum by (tenant) (rate(attune_ingest_total[30m])), 1e-9)
+          clamp_min(
+            sum by (tenant) (rate(attune_ingest_total[30m]))
+            + (
+              sum by (tenant) (rate(attune_ingest_rate_limit_total[30m]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            ),
+            1e-9
+          )
 
       - record: attune:ingest_service_failure_ratio:ratio6h
         expr: |
           (
-            sum by (tenant) (rate(attune_ingest_total{result="internal_err"}[6h]))
+            (
+              sum by (tenant) (rate(attune_ingest_total{result="internal_err"}[6h]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            )
+            +
+            (
+              sum by (tenant) (rate(attune_ingest_rate_limit_total[6h]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            )
           )
           /
-          clamp_min(sum by (tenant) (rate(attune_ingest_total[6h])), 1e-9)
+          clamp_min(
+            sum by (tenant) (rate(attune_ingest_total[6h]))
+            + (
+              sum by (tenant) (rate(attune_ingest_rate_limit_total[6h]))
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            ),
+            1e-9
+          )
 
       - record: attune:enrich_success_under_5s:ratio5m
         expr: |

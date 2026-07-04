@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   dashboard completion lens. The tenant-impact generator now also exposes MCP
   and GDPR drilldowns with tool and request-type label filters, and API key
   usage is now recorded so the existing access-denial telemetry and security
-  panels have a real success denominator.
+  panels have a real success denominator. Ingest burn-rate now counts
+  rate-limit pressure alongside internal failures, and the page-worthy burn
+  alerts carry minimum-volume guards to avoid tiny-tenant noise.
 
 - **Reply draft review and controlled-send workflow (#164).**
   Added persisted reply-draft cycles, revision history, workflow events,

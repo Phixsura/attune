@@ -196,6 +196,14 @@ groups:
           (
             attune:ingest_service_failure_ratio:ratio1h / 0.001 > 14.4
           )
+          and
+          (
+            sum by (tenant) (attune:ingest_requests:rate5m)
+            + (
+              attune:ingest_rate_limit:rate5m
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            ) > 0.01
+          )
         for: 2m
         labels:
           severity: critical
@@ -207,7 +215,7 @@ groups:
           dashboard: "Attune Tenant Impact"
           dashboard_url: "/d/attune-tenant-impact/attune-tenant-impact?var-tenant={{ $labels.tenant }}"
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestservicefastburn"
-          action: "Inspect ingest internal errors by tenant and source/result, then confirm whether the root cause is a code regression, bad client payloads, or an upstream dependency failure."
+          action: "Inspect ingest internal errors and rate-limit pressure by tenant and source/result, then confirm whether the root cause is a code regression, hot tenant, bad client payloads, or an upstream dependency failure."
 
       - alert: AttuneIngestServiceSlowBurn
         expr: |
@@ -217,6 +225,14 @@ groups:
           and
           (
             attune:ingest_service_failure_ratio:ratio6h / 0.001 > 6
+          )
+          and
+          (
+            sum by (tenant) (attune:ingest_requests:rate5m)
+            + (
+              attune:ingest_rate_limit:rate5m
+              or on(tenant) (sum by (tenant) (attune:ingest_requests:rate5m) * 0)
+            ) > 0.01
           )
         for: 5m
         labels:
@@ -229,7 +245,7 @@ groups:
           dashboard: "Attune Tenant Impact"
           dashboard_url: "/d/attune-tenant-impact/attune-tenant-impact?var-tenant={{ $labels.tenant }}"
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestserviceslowburn"
-          action: "Check whether the ingest regression is sustained, compare against recent deploys, and verify if rate-limit pressure or validation noise is masking a real backend failure."
+          action: "Check whether the ingest regression is sustained, compare against recent deploys, and verify whether rate-limit pressure, validation noise, or a hot tenant is masking a real backend failure."
 
       - alert: AttuneEnrichmentFastBurn
         expr: |
@@ -239,6 +255,10 @@ groups:
           and
           (
             (1 - attune:enrich_success_under_5s:ratio1h) / 0.05 > 14.4
+          )
+          and
+          (
+            sum by (tenant) (rate(attune_enrich_duration_seconds_count[5m])) > 0.01
           )
         for: 2m
         labels:
@@ -262,6 +282,10 @@ groups:
           (
             (1 - attune:enrich_success_under_5s:ratio6h) / 0.05 > 6
           )
+          and
+          (
+            sum by (tenant) (rate(attune_enrich_duration_seconds_count[5m])) > 0.01
+          )
         for: 5m
         labels:
           severity: warning
@@ -283,6 +307,10 @@ groups:
           and
           (
             attune:outbox_delivery_failure_ratio:ratio1h / 0.001 > 14.4
+          )
+          and
+          (
+            sum by (destination_type) (rate(attune_outbound_delivery_attempts_total[5m])) > 0.01
           )
         for: 2m
         labels:
@@ -306,6 +334,10 @@ groups:
           (
             attune:outbox_delivery_failure_ratio:ratio6h / 0.001 > 6
           )
+          and
+          (
+            sum by (destination_type) (rate(attune_outbound_delivery_attempts_total[5m])) > 0.01
+          )
         for: 5m
         labels:
           severity: warning
@@ -327,6 +359,10 @@ groups:
           and
           (
             attune:oidc_login_failure_ratio:ratio1h / 0.001 > 14.4
+          )
+          and
+          (
+            sum(rate(attune_oidc_login_total[5m])) > 0.01
           )
         for: 2m
         labels:
@@ -350,6 +386,10 @@ groups:
           (
             attune:oidc_login_failure_ratio:ratio6h / 0.001 > 6
           )
+          and
+          (
+            sum(rate(attune_oidc_login_total[5m])) > 0.01
+          )
         for: 5m
         labels:
           severity: warning
@@ -371,6 +411,13 @@ groups:
           and
           (
             attune:apikey_access_denial_ratio:ratio1h / 0.05 > 14.4
+          )
+          and
+          (
+            sum(rate(attune_apikey_usage_total[5m]))
+            + sum(rate(attune_apikey_expired_total[5m]))
+            + sum(rate(attune_apikey_ip_denied_total[5m]))
+            + sum(rate(attune_apikey_rate_limited_total[5m])) > 0.01
           )
         for: 2m
         labels:
@@ -394,6 +441,13 @@ groups:
           (
             attune:apikey_access_denial_ratio:ratio6h / 0.05 > 6
           )
+          and
+          (
+            sum(rate(attune_apikey_usage_total[5m]))
+            + sum(rate(attune_apikey_expired_total[5m]))
+            + sum(rate(attune_apikey_ip_denied_total[5m]))
+            + sum(rate(attune_apikey_rate_limited_total[5m])) > 0.01
+          )
         for: 5m
         labels:
           severity: warning
@@ -415,6 +469,10 @@ groups:
           and
           (
             attune:mcp_tool_error_ratio:ratio1h / 0.001 > 14.4
+          )
+          and
+          (
+            sum by (tenant, tool) (rate(attune_mcp_tool_calls_total[5m])) > 0.01
           )
         for: 2m
         labels:
@@ -438,6 +496,10 @@ groups:
           (
             attune:mcp_tool_error_ratio:ratio6h / 0.001 > 6
           )
+          and
+          (
+            sum by (tenant, tool) (rate(attune_mcp_tool_calls_total[5m])) > 0.01
+          )
         for: 5m
         labels:
           severity: warning
@@ -460,6 +522,10 @@ groups:
           (
             (1 - attune:gdpr_job_completion_ratio:ratio1h) / 0.001 > 14.4
           )
+          and
+          (
+            sum by (tenant, request_type) (rate(attune_gdpr_job_total{result="started"}[5m])) > 0.01
+          )
         for: 2m
         labels:
           severity: critical
@@ -481,6 +547,10 @@ groups:
           and
           (
             (1 - attune:gdpr_job_completion_ratio:ratio6h) / 0.001 > 6
+          )
+          and
+          (
+            sum by (tenant, request_type) (rate(attune_gdpr_job_total{result="started"}[5m])) > 0.01
           )
         for: 5m
         labels:

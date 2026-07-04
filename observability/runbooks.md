@@ -199,9 +199,11 @@ attune:ingest_service_failure_ratio:ratio1h / 0.001
 ```
 
 Inspect `Attune Tenant Impact > Burn trend` and `Tenant burn ranking`.
-If one tenant dominates, inspect `Tenant intake and attribution` for the source
-and result split. If the failure is broad, compare against recent deploys and
-dependency errors before changing any global limit.
+If one tenant dominates, inspect `Tenant intake and attribution` for the source,
+result, and rate-limit split. If the tenant is being throttled heavily, confirm
+whether it is legitimately bursting or misconfigured before changing any global
+limit. If the failure is broad, compare against recent deploys and dependency
+errors.
 
 Recovery: both burn-rate windows are below 14.4x and remain there for at least
 10 minutes.
@@ -221,7 +223,8 @@ attune:ingest_service_failure_ratio:ratio6h / 0.001
 
 Inspect the same Tenant Impact panels as the fast-burn alert, then compare the
 current failure rate with recent release changes. Use the slower windows to
-separate a noisy spike from a sustained regression.
+separate a noisy spike from a sustained regression, and confirm whether
+rate-limit pressure or validation noise is masking a real backend failure.
 
 Recovery: both burn-rate windows are below 6x and the trend is flattening or
 falling.
