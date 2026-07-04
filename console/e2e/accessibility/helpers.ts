@@ -99,6 +99,15 @@ export async function expectNoDocumentOverflow(page: Page) {
   expect(result.overflow, JSON.stringify(result.offenders, null, 2)).toBeLessThanOrEqual(1)
 }
 
+export async function expectOpaqueBackground(page: Page, selector: string, label: string) {
+  const color = await page
+    .locator(selector)
+    .evaluate((element) => window.getComputedStyle(element).backgroundColor)
+  const alpha = cssColorAlpha(color)
+
+  expect(alpha, `${label} background must be opaque; got ${color}`).toBe(1)
+}
+
 export async function expectNoAxeViolations(page: Page) {
   await page.addScriptTag({ content: axeSource })
   const results = await page.evaluate<AxeResults>(async () => {
@@ -120,6 +129,25 @@ export async function expectNoAxeViolations(page: Page) {
   const blockingViolations = results.violations.filter((violation) => violation.impact !== 'minor')
 
   expect(formatAxeViolations(blockingViolations)).toEqual([])
+}
+
+function cssColorAlpha(value: string) {
+  if (value === 'transparent') return 0
+  const commaParts = value
+    .match(/rgba?\(([^)]+)\)/)?.[1]
+    .split(',')
+    .map((part) => part.trim())
+  if (commaParts && commaParts.length === 4) return normalizedAlpha(commaParts[3])
+
+  const slashAlpha = value.match(/\/\s*([0-9.]+%?)/)?.[1]
+  if (slashAlpha) return normalizedAlpha(slashAlpha)
+
+  return 1
+}
+
+function normalizedAlpha(value: string) {
+  if (value.endsWith('%')) return Number(value.slice(0, -1)) / 100
+  return Number(value)
 }
 
 function formatAxeViolations(violations: AxeViolation[]) {

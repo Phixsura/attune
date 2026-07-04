@@ -9,6 +9,76 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Reply draft review and controlled-send workflow (#164).**
+  Added persisted reply-draft cycles, revision history, workflow events,
+  Console edit/approve/reject/send actions, admin-only encrypted reply-send
+  hook configuration, idempotent reviewed-reply webhook delivery, generated
+  proto/OpenAPI/SDK contract updates, source-freshness and approved-hook
+  freshness guards, send-pending duplicate-delivery locking, retryable
+  send-failure state, and audit coverage for generate, edit, approve, reject,
+  send, and hook configuration actions.
+  Added a dedicated Console reply workspace with an opaque composer surface,
+  preflight checklist, evidence panel, revision timeline, AI-versus-human diff
+  summary, and two-step send confirmation that shows the exact final text before
+  delivery. Added a reply-send-hook delivery contract panel with signed-header,
+  timestamp, idempotency, sample-payload, and security-check guidance; admin
+  test delivery, diagnostic recent delivery log with delivery IDs, full
+  idempotency keys, hook fingerprints, and retry timing, failed-delivery
+  redelivery controls, a structured reply-send-hook health API and summary for accepted,
+  failed, retryable, and dead deliveries, versioned reply-hook signatures, strict
+  idempotency conflict detection, loopback HTTP hook endpoints for local
+  receiver testing while keeping production hooks on HTTPS, state-marking error
+  propagation for failed sends, external message ID capture from accepted hook
+  responses, redacted transport errors so credential-bearing hook paths and
+  query strings never reach delivery logs, retry-backed webhook sends,
+  policy-aware SSRF validation at hook save time, and an automatic
+  reply-delivery retry worker that drains due `reply.send` attempts with indexed
+  due-retry and stale-pending recovery scans; plus dedicated outbound metrics
+  for reply-send hooks, hook updates that preserve the existing secret unless a
+  replacement secret is provided, disabled hook visibility after page reload,
+  secret preservation across temporary hook disable/re-enable, full
+  feedback cache invalidation for reply workflow mutations, immediate
+  reply-send-hook cache updates from successful configure/disable responses, and
+  reply-send delivery-log and health refresh after send attempts, hook
+  observability refresh after configure/disable, and latest-workflow handling
+  for back-to-back Console reply actions. Reply-send-hook delivery logging now
+  reports the final attempt's HTTP status instead of carrying a previous retry
+  response status into a later network failure, and inactive hooks no longer
+  expose active-only Console actions. Reply-send idempotency fingerprints now
+  bind the hook destination fingerprint as well as the approved revision, and
+  reply-send-hook test events now enforce tenant-scoped idempotency keys:
+  accepted test replays return the cached attempt, pending test replays report
+  in-progress, and failed or dead test attempts reuse the same delivery attempt
+  for explicit redelivery. Reusing a test idempotency key after the hook
+  destination fingerprint changes now returns an idempotency conflict instead
+  of replaying an old test result. Failed hook test deliveries no longer enter
+  the background retry worker, while failed `reply.send` deliveries still use
+  scheduled retry. Late delivery completions now only mutate still-pending
+  attempts for the same approved revision and hook, so accepted sends cannot be
+  downgraded by delayed failures and old successes cannot overwrite edited
+  drafts. Editing after a failed send also clears stale external delivery
+  markers. Hook names are normalized and validated before storage, and malformed
+  delivery-log `limit` query parameters now return a precise bad-request error
+  instead of the generic JSON decode message.
+  Reply workflow mutations and send-hook actions now fail closed when their
+  global audit record cannot be written, revision responses include structured
+  source metadata, and Console hides regenerate controls whenever the backend
+  omits `regenerate` from allowed actions.
+  Console labels failed/dead hook attempts as manually redeliverable instead of
+  implying dead attempts will be automatically retried.
+  Reply approval now requires an active send hook so the reviewed destination is
+  captured at approval time, approve events record the captured hook, pending
+  sends cannot be rejected over an in-flight attempt, manual regeneration fails
+  closed when workflow state cannot be checked, and failed-delivery redelivery
+  rechecks source and hook freshness before retrying.
+  Extended GDPR export/delete coverage to include reply draft workflows,
+  revisions, events, and reply delivery attempts. Added Console
+  browser E2E coverage for the review/edit/approve/send path,
+  opaque-background guard, and admin reply-send-hook configuration, test, and
+  redelivery path. Proto code generation now falls back to fixed-version local
+  plugins when Buf remote plugins are unavailable, keeping `make proto` and the
+  proto-sync gate reproducible during Buf service outages.
+
 - **Feedback intelligence control tower (#162).**
   Added a Console Control Tower landing page that synthesizes classification
   quality, semantic-search quality, index coverage, top risks, and proof-trail
@@ -134,6 +204,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     still injecting the contract headers.
 
 ### Fixed
+
+- Darkened the Console destructive action color token so destructive buttons
+  meet browser-verified WCAG contrast thresholds.
+- Made the Console feedback detail sheet and reply-draft surface opaque so the
+  underlying feedback queue cannot bleed through reviewed-reply content.
 
 - **Semantic search availability (#162).**
   Soft-deleted feedback rows with embeddings no longer make a tenant appear

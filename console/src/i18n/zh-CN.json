@@ -118,6 +118,7 @@
     "clusters": "语义聚类",
     "tags": "标签",
     "notify_targets": "通知目标",
+    "reply_send_hook": "回复发送 Hook",
     "inbound_sources": "入站源",
     "guard_policies": "防护策略",
     "api_keys": "API key",
@@ -1747,6 +1748,162 @@
     "empty_title": "还没有通知目标",
     "empty_body": "加一个自定义 webhook，反馈来了就推送过去。"
   },
+  "reply_send_hook": {
+    "subtitle": "控制已批准回复从 Attune 发往外部客服系统的唯一出口。",
+    "summary": {
+      "status": "状态",
+      "host": "目标主机",
+      "fingerprint": "URL 指纹",
+      "latest_delivery": "最近投递",
+      "none": "未配置"
+    },
+    "status": {
+      "active": "启用",
+      "inactive": "停用",
+      "missing": "未配置"
+    },
+    "current": {
+      "title": "当前 Hook",
+      "description": "只展示非敏感标识；完整 URL 和 secret 永不回显。",
+      "name": "名称",
+      "host": "目标主机",
+      "fingerprint": "URL 指纹",
+      "state": "状态"
+    },
+    "health": {
+      "title": "投递健康",
+      "loading_title": "正在读取投递健康",
+      "loading_body": "正在汇总最近 25 次测试和真实回复投递。",
+      "empty_title": "还没有投递健康信号",
+      "empty_body": "保存并测试 Hook 后，这里会显示最近窗口的接收、失败、可重放和死信数量。",
+      "ok_title": "最近投递正常",
+      "ok_body": "最近窗口没有失败或死信投递。",
+      "attention_title": "最近投递需要处理",
+      "latest_ok": "最近事件 {{event}} 在 {{time}} 完成。",
+      "latest_problem": "最近异常 {{event}} · {{status}} · {{message}}",
+      "accepted": "已接收",
+      "failed": "失败",
+      "retryable": "可重放",
+      "dead": "死信"
+    },
+    "empty": {
+      "title": "还没有回复发送 Hook",
+      "body": "配置后，成员批准的回复才能通过受控 webhook 发送。"
+    },
+    "form": {
+      "title": "配置 Hook",
+      "replace_title": "替换 Hook",
+      "description": "保存会加密 URL 和 secret；首次配置留空会生成一次性 secret，替换已有 Hook 时留空会保留当前 secret。",
+      "name": "名称",
+      "url": "Webhook URL",
+      "url_help": "生产端点必须是 HTTPS；开启 loopback egress 的本地部署可用 localhost 或 127.0.0.1 的 HTTP。",
+      "url_error_invalid": "请输入完整 URL，例如 https://hooks.example.com/attune/replies。",
+      "url_error_https": "回复发送 Hook 只接受 HTTPS URL；本地测试可使用 loopback HTTP。",
+      "url_error_credentials": "URL 不能包含 user:pass 这类凭据。",
+      "secret": "签名 secret",
+      "secret_help": "至少 16 个字符。首次配置留空会生成并只显示一次；替换已有 Hook 时留空会保留当前 secret。",
+      "secret_error_min_length": "secret 至少需要 16 个字符；也可以留空让服务端生成或保留当前 secret。",
+      "validation_failed": "请先修正 Hook 配置。",
+      "enabled": "保存后立即启用"
+    },
+    "secret_once": {
+      "title": "一次性 secret",
+      "body": "关闭或刷新后不会再次显示。"
+    },
+    "contract": {
+      "title": "投递契约",
+      "description": "接收端只需要实现一个幂等 POST，并校验 Attune 签名；生产端点使用 HTTPS。",
+      "post": {
+        "title": "POST JSON",
+        "body": "Attune 发送已批准的回复快照，接收端返回任意 2xx 即视为已接收。"
+      },
+      "signed": {
+        "title": "HMAC 签名",
+        "body": "请求体会用当前 secret 签名，接收端应先验签再入队或写入工单。"
+      },
+      "idempotent": {
+        "title": "幂等投递",
+        "body": "Delivery ID 与 Idempotency Key 会随请求发送，接收端可用它们去重。"
+      },
+      "headers": "请求 header",
+      "payload": "示例 payload",
+      "payload_label": "回复发送 Hook 示例 payload",
+      "copy_payload": "复制 payload",
+      "sample_copied": "示例 payload 已复制",
+      "sample_copy_failed": "复制失败",
+      "header_timestamp": "RFC3339 时间戳；接收端应限制验签时间窗口。",
+      "header_signature": "v1 HMAC-SHA256 签名，基于 timestamp + \".\" + 原始 JSON 请求体和 hook secret。",
+      "header_delivery_id": "单次 Attune 投递尝试 ID，可用于日志追踪。",
+      "header_idempotency": "发送请求的幂等键；重复请求必须产生同一外部动作。"
+    },
+    "test": {
+      "action": "测试 Hook"
+    },
+    "delivery": {
+      "title": "最近投递",
+      "description": "测试事件和真实回复投递共用同一份可观测日志。",
+      "empty": "还没有投递记录。保存并测试 Hook 后会出现在这里。",
+      "col_event": "事件",
+      "col_status": "状态",
+      "col_http": "HTTP",
+      "col_attempts": "尝试",
+      "col_time": "时间",
+      "col_error": "响应",
+      "next_retry_inline": "下次 {{time}}",
+      "redeliver_aria": "重放投递 {{id}}",
+      "detail": {
+        "delivery_id": "投递 ID",
+        "idempotency_key": "幂等键",
+        "hook": "目标 Hook",
+        "requested_at": "请求时间",
+        "completed_at": "完成时间",
+        "next_retry_at": "下次重试"
+      },
+      "status": {
+        "none": "暂无",
+        "pending": "投递中",
+        "accepted": "已接收",
+        "failed": "失败",
+        "dead": "死信"
+      }
+    },
+    "security": {
+      "title": "安全检查",
+      "description": "这些约束让回复发送路径和通知投递、AI 生成路径保持隔离。",
+      "https": {
+        "title": "HTTPS 优先，无 URL 凭据",
+        "body": "服务端拒绝非 HTTPS 地址；仅开启 loopback egress 的本地部署可用 localhost、127.0.0.1 和 ::1 做 HTTP 测试。"
+      },
+      "secret": {
+        "title": "secret 加密保存",
+        "body": "secret 至少 16 个字符；首次配置留空时由服务端生成并只显示一次，替换已有 Hook 时留空会保留当前 secret。"
+      },
+      "fingerprint": {
+        "title": "批准后锁定目标",
+        "body": "回复批准时会捕获 Hook 指纹；发送前目标变化会阻断发送并要求复核。"
+      },
+      "audit": {
+        "title": "审计不保存正文",
+        "body": "生成、编辑、批准、发送请求和发送结果都会审计，但审计日志不写完整回复正文。"
+      }
+    },
+    "disable": "停用 Hook",
+    "disable_dialog": {
+      "title": "停用回复发送 Hook？",
+      "body": "停用后，已批准回复将无法继续发送到 {{host}}。已有草稿会保留，但发送前必须重新配置 Hook。",
+      "confirm": "确认停用"
+    },
+    "toast": {
+      "saved": "回复发送 Hook 已保存",
+      "disabled": "回复发送 Hook 已停用",
+      "test_accepted": "测试投递已被 Hook 接收",
+      "test_failed": "测试投递失败，请查看最近投递",
+      "redelivered": "投递已重放并被接收",
+      "redeliver_failed": "重放仍失败，请查看最近投递",
+      "copied": "secret 已复制",
+      "copy_failed": "复制失败"
+    }
+  },
   "outbox_dead": {
     "subtitle": "投递队列里进入死信或失败状态的反馈推送，可逐条手动重试。",
     "summary": {
@@ -2138,6 +2295,9 @@
       "pending_classification_body": "当前可先用原文和来源做初步判断；等富化完成后，这里会补齐标题、维度和置信度。",
       "enrichedAt": "富化于",
       "reply_draft": "回复草稿",
+      "reply_draft_workspace": "回复工作台",
+      "reply_draft_composer": "发送前草稿",
+      "reply_draft_composer_hint": "先复核证据、版本和目标，再批准或发送。",
       "reply_draft_copy": "复制",
       "reply_draft_copied_short": "已复制",
       "reply_draft_regenerate": "重新生成",
@@ -2149,6 +2309,62 @@
       "reply_draft_generated_at": "生成于 {{ago}}",
       "reply_draft_failed": "重新生成失败",
       "reply_draft_cooldown": "操作过于频繁，请稍候再试",
+      "reply_draft_status_suggested": "AI 建议",
+      "reply_draft_status_edited": "已编辑",
+      "reply_draft_status_approved": "已批准",
+      "reply_draft_status_send_pending": "发送中",
+      "reply_draft_status_send_failed": "发送失败",
+      "reply_draft_status_rejected": "已拒绝",
+      "reply_draft_status_sent": "已发送",
+      "reply_draft_status_stale": "需复核",
+      "reply_draft_edit": "编辑",
+      "reply_draft_save": "保存",
+      "reply_draft_cancel": "取消",
+      "reply_draft_saved": "草稿已保存",
+      "reply_draft_save_failed": "保存失败",
+      "reply_draft_approve": "批准",
+      "reply_draft_approved": "草稿已批准",
+      "reply_draft_approve_failed": "批准失败",
+      "reply_draft_reject": "拒绝",
+      "reply_draft_rejected": "草稿已拒绝",
+      "reply_draft_reject_failed": "拒绝失败",
+      "reply_draft_send": "发送",
+      "reply_draft_sent": "回复已发送",
+      "reply_draft_send_failed": "发送失败",
+      "reply_draft_send_blocked": "当前草稿暂不可发送",
+      "reply_draft_blocker_reply_send_hook_missing": "未配置发送 Hook",
+      "reply_draft_blocker_send_in_progress": "回复正在发送中",
+      "reply_draft_blocker_send_failed": "上次发送失败，请重试或编辑后再发送",
+      "reply_draft_blocker_send_hook_changed": "发送 Hook 已变化，请重新复核",
+      "reply_draft_blocker_stale_source": "来源内容已变化",
+      "reply_draft_blocker_source_changed": "来源内容已变化",
+      "reply_draft_layer_ai": "AI 建议",
+      "reply_draft_layer_human": "人工编辑",
+      "reply_draft_layer_sent": "已发送文本",
+      "reply_draft_diff": "变更对比",
+      "reply_draft_diff_changed": "人工版本相比 AI 建议{{direction}} {{count}} 个字符。",
+      "reply_draft_diff_unchanged": "人工版本与 AI 建议一致。",
+      "reply_draft_diff_longer": "增加",
+      "reply_draft_diff_shorter": "减少",
+      "reply_draft_preflight": "发送检查",
+      "reply_draft_preflight_title": "确认发送回复",
+      "reply_draft_preflight_body": "发送前请确认最终文本、来源和已批准版本。确认后 Attune 会调用已配置的回复发送 Hook。",
+      "reply_draft_preflight_approved": "已批准当前回复版本",
+      "reply_draft_preflight_hook": "回复发送 Hook 可用",
+      "reply_draft_preflight_fresh": "来源与 Hook 未过期",
+      "reply_draft_preflight_revision": "版本号匹配当前工作台",
+      "reply_draft_preflight_snapshot": "发送快照",
+      "reply_draft_preflight_revision_id": "版本",
+      "reply_draft_preflight_actor": "批准人",
+      "reply_draft_preflight_final_text": "最终发送文本",
+      "reply_draft_confirm_send": "确认发送",
+      "reply_draft_evidence": "证据",
+      "reply_draft_evidence_raw": "原始反馈",
+      "reply_draft_evidence_rationale": "AI 解读依据",
+      "reply_draft_history": "编辑历史",
+      "reply_draft_origin_ai": "AI",
+      "reply_draft_origin_human": "人工",
+      "reply_draft_origin_system": "系统",
       "workbench_title": "当前工作面建议",
       "workbench_mode": "当前工作面：{{mode}}",
       "workbench_urgent_title": "优先确认影响面和升级路径",

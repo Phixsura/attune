@@ -20,6 +20,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
@@ -309,8 +310,7 @@ func validateRedirectURIs(uris []string) error {
 }
 
 func isLoopbackURI(u *url.URL) bool {
-	host := strings.ToLower(u.Hostname())
-	return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
+	return nethardening.IsLoopbackHost(u.Hostname())
 }
 
 // ValidationError represents a validation failure.

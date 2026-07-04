@@ -28,9 +28,15 @@ type fakeBatchService struct {
 
 type fakeAuditRecorder struct {
 	events []auditlogsvc.Event
+	err    error
+	failAt int
 }
 
 func (f *fakeAuditRecorder) Record(_ context.Context, event auditlogsvc.Event) error {
+	callNo := len(f.events) + 1
+	if f.err != nil && (f.failAt == 0 || f.failAt == callNo) {
+		return f.err
+	}
 	f.events = append(f.events, event)
 	return nil
 }

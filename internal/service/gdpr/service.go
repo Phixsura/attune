@@ -116,11 +116,8 @@ func (s *Service) Export(ctx context.Context, tenantID, rawSubjectKey string, ac
 		return nil, fmt.Errorf("build export zip: %w", err)
 	}
 	if err := s.record(ctx, tenantID, subjectKey, actor, "gdpr.export", "Exported GDPR bundle for subject", nil, map[string]any{
-		"subject_hash":         subjectkey.Hash(tenantID, subjectKey),
-		"feedback_count":       data.Counts.FeedbackCount,
-		"tag_assignment_count": data.Counts.TagAssignmentCount,
-		"feedback_audit_count": data.Counts.FeedbackAuditCount,
-		"llm_audit_count":      data.Counts.LLMAuditCount,
+		"subject_hash": subjectkey.Hash(tenantID, subjectKey),
+		"counts":       auditCounts(data.Counts),
 	}); err != nil {
 		return nil, err
 	}
@@ -154,13 +151,10 @@ func (s *Service) Delete(ctx context.Context, tenantID, rawSubjectKey string, ac
 		return nil, translateRepoError(err)
 	}
 	if err := s.record(ctx, tenantID, subjectKey, actor, "gdpr.delete.requested", "Scheduled GDPR subject delete", nil, map[string]any{
-		"request_id":           result.RequestID,
-		"subject_hash":         subjectHash,
-		"feedback_count":       result.Counts.FeedbackCount,
-		"tag_assignment_count": result.Counts.TagAssignmentCount,
-		"feedback_audit_count": result.Counts.FeedbackAuditCount,
-		"llm_audit_count":      result.Counts.LLMAuditCount,
-		"execute_after":        executeAfter.Format(time.RFC3339),
+		"request_id":    result.RequestID,
+		"subject_hash":  subjectHash,
+		"counts":        auditCounts(result.Counts),
+		"execute_after": executeAfter.Format(time.RFC3339),
 	}); err != nil {
 		return nil, err
 	}
@@ -189,18 +183,11 @@ func (s *Service) CancelDeleteRequest(ctx context.Context, tenantID, requestID s
 
 func (s *Service) RecordDeleteCompletion(ctx context.Context, tenantID, subjectKey string, actor auditlogsvc.Actor, result *gdprrepo.DeleteResult) error {
 	subjectHash := subjectkey.Hash(tenantID, subjectKey)
-	return s.record(ctx, tenantID, subjectKey, actor, "gdpr.delete", "Deleted GDPR subject data", map[string]any{
-		"feedback_count":       result.Counts.FeedbackCount,
-		"tag_assignment_count": result.Counts.TagAssignmentCount,
-		"feedback_audit_count": result.Counts.FeedbackAuditCount,
-		"llm_audit_count":      result.Counts.LLMAuditCount,
-	}, map[string]any{
-		"subject_hash":         subjectHash,
-		"feedback_count":       result.Counts.FeedbackCount,
-		"tag_assignment_count": result.Counts.TagAssignmentCount,
-		"feedback_audit_count": result.Counts.FeedbackAuditCount,
-		"llm_audit_count":      result.Counts.LLMAuditCount,
-	})
+	counts := auditCounts(result.Counts)
+	return s.record(ctx, tenantID, subjectKey, actor, "gdpr.delete", "Deleted GDPR subject data",
+		map[string]any{"counts": counts},
+		map[string]any{"subject_hash": subjectHash, "counts": counts},
+	)
 }
 
 var ErrInvalidSubjectKey = errors.New("subject_key is required")
@@ -330,10 +317,14 @@ func buildZIP(tenantID string, data *gdprrepo.ExportData) ([]byte, error) {
 		"generated_at":    data.GeneratedAt.UTC().Format(time.RFC3339),
 		"schema_version":  "gdpr-export-v1",
 		"counts": map[string]int{
-			"feedback":           data.Counts.FeedbackCount,
-			"feedback_tags":      data.Counts.TagAssignmentCount,
-			"feedback_audit_log": data.Counts.FeedbackAuditCount,
-			"llm_audit":          data.Counts.LLMAuditCount,
+			"feedback":                data.Counts.FeedbackCount,
+			"feedback_tags":           data.Counts.TagAssignmentCount,
+			"feedback_audit_log":      data.Counts.FeedbackAuditCount,
+			"llm_audit":               data.Counts.LLMAuditCount,
+			"reply_drafts":            data.Counts.ReplyDraftCount,
+			"reply_draft_revisions":   data.Counts.ReplyDraftRevisionCount,
+			"reply_draft_events":      data.Counts.ReplyDraftEventCount,
+			"reply_delivery_attempts": data.Counts.ReplyDeliveryAttemptCount,
 		},
 	}
 	if err := writeJSONFile(zw, "manifest.json", manifest); err != nil {
@@ -351,10 +342,36 @@ func buildZIP(tenantID string, data *gdprrepo.ExportData) ([]byte, error) {
 	if err := writeJSONLinesFile(zw, "llm_audit.jsonl", data.LLMAuditRows); err != nil {
 		return nil, err
 	}
+	if err := writeJSONLinesFile(zw, "reply_drafts.jsonl", data.ReplyDraftRows); err != nil {
+		return nil, err
+	}
+	if err := writeJSONLinesFile(zw, "reply_draft_revisions.jsonl", data.ReplyDraftRevisionRows); err != nil {
+		return nil, err
+	}
+	if err := writeJSONLinesFile(zw, "reply_draft_events.jsonl", data.ReplyDraftEventRows); err != nil {
+		return nil, err
+	}
+	if err := writeJSONLinesFile(zw, "reply_delivery_attempts.jsonl", data.ReplyDeliveryAttemptRows); err != nil {
+		return nil, err
+	}
 	if err := zw.Close(); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func auditCounts(counts gdprrepo.Counts) map[string]int {
+	return map[string]int{
+		"feedback":                counts.FeedbackCount,
+		"feedback_tags":           counts.TagAssignmentCount,
+		"feedback_audit_log":      counts.FeedbackAuditCount,
+		"llm_audit":               counts.LLMAuditCount,
+		"notify_outbox":           counts.OutboxCount,
+		"reply_drafts":            counts.ReplyDraftCount,
+		"reply_draft_revisions":   counts.ReplyDraftRevisionCount,
+		"reply_draft_events":      counts.ReplyDraftEventCount,
+		"reply_delivery_attempts": counts.ReplyDeliveryAttemptCount,
+	}
 }
 
 func writeJSONFile(zw *zip.Writer, name string, value any) error {

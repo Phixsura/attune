@@ -15,6 +15,7 @@ import {
   Radio,
   Scale,
   Search,
+  Send,
   Settings2,
   ShieldCheck,
   ShieldEllipsis,
@@ -175,6 +176,14 @@ export const consoleNavItems: ConsoleNavItem[] = [
     path: '/integrations/notify-targets',
     permission: 'settings:notify_targets:view',
     settingsAliases: ['notify-targets', 'notify_targets'],
+  },
+  {
+    group: 'integrations',
+    icon: Send,
+    labelKey: 'nav.reply_send_hook',
+    path: '/integrations/reply-send-hook',
+    adminOnly: true,
+    settingsAliases: ['reply-send-hook', 'reply_send_hook'],
   },
   {
     group: 'integrations',

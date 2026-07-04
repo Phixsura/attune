@@ -7,7 +7,7 @@ import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet
 import type { Dimension } from '@/proto/attune/v1/common'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
@@ -413,6 +413,516 @@ describe('FeedbackDetailSheet', () => {
     expect(screen.getByText('回复草稿')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /复制/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /重新生成/ })).toBeInTheDocument()
+  })
+
+  it('shows workflow status, controlled-send actions, and revision history', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-workflow', {
+            replyDraft: 'legacy projection',
+            replyDraftWorkflow: {
+              draftId: 'draft-1',
+              feedbackId: 'f-workflow',
+              cycleNo: 1,
+              status: 'approved',
+              activeRevisionId: 'rev-2',
+              approvedRevisionId: 'rev-2',
+              activeText: 'Human edited reply',
+              allowedActions: ['edit', 'send', 'reject', 'regenerate'],
+              blockers: [],
+              hookConfigured: true,
+              revision: '3',
+              updatedAt: '2026-07-03T10:00:00Z',
+              revisions: [
+                {
+                  id: 'rev-2',
+                  draftId: 'draft-1',
+                  cycleNo: 1,
+                  revisionNo: 2,
+                  origin: 'human',
+                  content: 'Human edited reply',
+                  createdBy: 'member-1',
+                  createdAt: '2026-07-03T10:00:00Z',
+                },
+                {
+                  id: 'rev-1',
+                  draftId: 'draft-1',
+                  cycleNo: 1,
+                  revisionNo: 1,
+                  origin: 'ai',
+                  content: 'AI suggested reply',
+                  createdBy: 'assistant',
+                  createdAt: '2026-07-03T09:55:00Z',
+                },
+              ],
+              events: [],
+            },
+          }),
+        ),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-workflow" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    await waitFor(() =>
+      expect(screen.getAllByText('Human edited reply').length).toBeGreaterThanOrEqual(1),
+    )
+    expect(screen.getByText('已批准')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /编辑/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /发送/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /拒绝/ })).toBeInTheDocument()
+    expect(screen.getByText('AI 建议')).toBeInTheDocument()
+    expect(screen.getByText('人工编辑')).toBeInTheDocument()
+    expect(screen.getByText('编辑历史')).toBeInTheDocument()
+    expect(screen.getByText('发送检查')).toBeInTheDocument()
+    expect(screen.getByText('证据')).toBeInTheDocument()
+    expect(screen.getByText('变更对比')).toBeInTheDocument()
+    expect(screen.getByText(/人工\s+v2/)).toBeInTheDocument()
+    expect(screen.getByText(/AI\s+v1/)).toBeInTheDocument()
+    expect(screen.getAllByText('AI suggested reply').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('opens a send preflight before posting the approved reply', async () => {
+    let requestBody: Record<string, unknown> | null = null
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-preflight', {
+            source: 'web',
+            userId: 'user-42',
+            replyDraft: 'legacy projection',
+            replyDraftWorkflow: {
+              draftId: 'draft-1',
+              feedbackId: 'f-preflight',
+              cycleNo: 1,
+              status: 'approved',
+              activeRevisionId: 'rev-2',
+              approvedRevisionId: 'rev-2',
+              activeText: 'Human edited reply ready to send',
+              allowedActions: ['edit', 'send', 'reject', 'regenerate'],
+              blockers: [],
+              hookConfigured: true,
+              approvedBy: 'member-1',
+              revision: '7',
+              updatedAt: '2026-07-03T10:00:00Z',
+              revisions: [
+                {
+                  id: 'rev-2',
+                  draftId: 'draft-1',
+                  cycleNo: 1,
+                  revisionNo: 2,
+                  origin: 'human',
+                  content: 'Human edited reply ready to send',
+                  createdBy: 'member-1',
+                  createdAt: '2026-07-03T10:00:00Z',
+                },
+                {
+                  id: 'rev-1',
+                  draftId: 'draft-1',
+                  cycleNo: 1,
+                  revisionNo: 1,
+                  origin: 'ai',
+                  content: 'AI suggested reply',
+                  createdBy: 'assistant',
+                  createdAt: '2026-07-03T09:55:00Z',
+                },
+              ],
+              events: [],
+            },
+          }),
+        ),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/send', async ({ request }) => {
+        requestBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          workflow: {
+            draftId: 'draft-1',
+            feedbackId: 'f-preflight',
+            cycleNo: 1,
+            status: 'sent',
+            activeRevisionId: 'rev-2',
+            approvedRevisionId: 'rev-2',
+            sentRevisionId: 'rev-2',
+            activeText: 'Human edited reply ready to send',
+            allowedActions: [],
+            blockers: [],
+            hookConfigured: true,
+            sentAt: '2026-07-03T10:05:00Z',
+            sentBy: 'member-1',
+            revision: '8',
+            updatedAt: '2026-07-03T10:05:00Z',
+            revisions: [],
+            events: [],
+          },
+          fromCache: false,
+        })
+      }),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-preflight"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(requestBody).toBeNull()
+    const preflight = await screen.findByRole('dialog', { name: '确认发送回复' })
+    expect(screen.getByText('最终发送文本')).toBeInTheDocument()
+    expect(within(preflight).getByText('Human edited reply ready to send')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /确认发送/ }))
+
+    await waitFor(() => expect(requestBody).toMatchObject({ expectedRevision: '7' }))
+  })
+
+  it('labels sent text separately from the AI suggestion and human edit', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-sent', {
+            replyDraft: 'legacy projection',
+            replyDraftWorkflow: {
+              draftId: 'draft-1',
+              feedbackId: 'f-sent',
+              cycleNo: 1,
+              status: 'sent',
+              activeRevisionId: 'rev-2',
+              approvedRevisionId: 'rev-2',
+              sentRevisionId: 'rev-2',
+              activeText: 'Human edited reply',
+              allowedActions: ['regenerate'],
+              blockers: [],
+              hookConfigured: true,
+              revision: '4',
+              updatedAt: '2026-07-03T10:05:00Z',
+              revisions: [
+                {
+                  id: 'rev-2',
+                  draftId: 'draft-1',
+                  cycleNo: 1,
+                  revisionNo: 2,
+                  origin: 'human',
+                  content: 'Human edited reply',
+                  createdBy: 'member-1',
+                  createdAt: '2026-07-03T10:00:00Z',
+                },
+                {
+                  id: 'rev-1',
+                  draftId: 'draft-1',
+                  cycleNo: 1,
+                  revisionNo: 1,
+                  origin: 'ai',
+                  content: 'AI suggested reply',
+                  createdBy: 'assistant',
+                  createdAt: '2026-07-03T09:55:00Z',
+                },
+              ],
+              events: [],
+            },
+          }),
+        ),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-sent" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    await waitFor(() => expect(screen.getByText('已发送文本')).toBeInTheDocument())
+    expect(screen.getByText('AI 建议')).toBeInTheDocument()
+    expect(screen.getByText('人工编辑')).toBeInTheDocument()
+    expect(screen.getAllByText('已发送').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows send failure as a retryable workflow blocker', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-send-failed', {
+            replyDraft: 'legacy projection',
+            replyDraftWorkflow: {
+              draftId: 'draft-1',
+              feedbackId: 'f-send-failed',
+              cycleNo: 1,
+              status: 'send_failed',
+              activeRevisionId: 'rev-2',
+              approvedRevisionId: 'rev-2',
+              activeText: 'Human edited reply',
+              allowedActions: ['edit', 'send', 'reject', 'regenerate'],
+              blockers: ['send_failed'],
+              hookConfigured: true,
+              externalDeliveryStatus: 'failed',
+              revision: '5',
+              updatedAt: '2026-07-03T10:07:00Z',
+              revisions: [
+                {
+                  id: 'rev-2',
+                  draftId: 'draft-1',
+                  cycleNo: 1,
+                  revisionNo: 2,
+                  origin: 'human',
+                  content: 'Human edited reply',
+                  createdBy: 'member-1',
+                  createdAt: '2026-07-03T10:00:00Z',
+                },
+                {
+                  id: 'rev-1',
+                  draftId: 'draft-1',
+                  cycleNo: 1,
+                  revisionNo: 1,
+                  origin: 'ai',
+                  content: 'AI suggested reply',
+                  createdBy: 'assistant',
+                  createdAt: '2026-07-03T09:55:00Z',
+                },
+              ],
+              events: [],
+            },
+          }),
+        ),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-send-failed"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('发送失败').length).toBeGreaterThanOrEqual(1))
+    expect(screen.getByText('上次发送失败，请重试或编辑后再发送')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /发送/ })).toBeInTheDocument()
+  })
+
+  it('shows send pending as a locked workflow state', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-send-pending', {
+            replyDraftWorkflow: {
+              draftId: 'draft-1',
+              feedbackId: 'f-send-pending',
+              cycleNo: 1,
+              status: 'send_pending',
+              activeRevisionId: 'rev-2',
+              approvedRevisionId: 'rev-2',
+              activeText: 'Human edited reply',
+              allowedActions: [],
+              blockers: ['send_in_progress'],
+              hookConfigured: true,
+              revision: '6',
+              updatedAt: '2026-07-03T10:08:00Z',
+              revisions: [
+                {
+                  id: 'rev-2',
+                  draftId: 'draft-1',
+                  cycleNo: 1,
+                  revisionNo: 2,
+                  origin: 'human',
+                  content: 'Human edited reply',
+                  createdBy: 'member-1',
+                  createdAt: '2026-07-03T10:00:00Z',
+                },
+              ],
+              events: [],
+            },
+          }),
+        ),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-send-pending"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByText('发送中')).toBeInTheDocument())
+    expect(screen.getByText('回复正在发送中')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /发送/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /重新生成|生成草稿/ })).toBeNull()
+  })
+
+  it('sends the current workflow revision when saving a human edit', async () => {
+    let requestBody: Record<string, unknown> | null = null
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-edit-revision', {
+            replyDraftWorkflow: {
+              draftId: 'draft-1',
+              feedbackId: 'f-edit-revision',
+              cycleNo: 1,
+              status: 'edited',
+              activeRevisionId: 'rev-2',
+              activeText: 'Human edited reply',
+              allowedActions: ['edit', 'approve', 'reject', 'regenerate'],
+              blockers: [],
+              hookConfigured: true,
+              revision: '11',
+              updatedAt: '2026-07-03T10:00:00Z',
+              revisions: [
+                {
+                  id: 'rev-2',
+                  draftId: 'draft-1',
+                  cycleNo: 1,
+                  revisionNo: 2,
+                  origin: 'human',
+                  content: 'Human edited reply',
+                  createdBy: 'member-1',
+                  createdAt: '2026-07-03T10:00:00Z',
+                },
+              ],
+              events: [],
+            },
+          }),
+        ),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/edit', async ({ request }) => {
+        requestBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ workflow: { revision: '12' } })
+      }),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-edit-revision"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /编辑/ })).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: /编辑/ }))
+    const editor = screen.getByRole('textbox')
+    await userEvent.clear(editor)
+    await userEvent.type(editor, 'Updated human edit')
+    await userEvent.click(screen.getByRole('button', { name: /保存/ }))
+
+    await waitFor(() =>
+      expect(requestBody).toMatchObject({
+        content: 'Updated human edit',
+        expectedRevision: '11',
+      }),
+    )
+  })
+
+  it('uses the latest successful workflow when actions happen back to back', async () => {
+    let editBody: Record<string, unknown> | null = null
+    const baseWorkflow = {
+      draftId: 'draft-1',
+      feedbackId: 'f-back-to-back',
+      cycleNo: 1,
+      activeRevisionId: 'rev-1',
+      activeText: 'AI suggested reply',
+      blockers: [],
+      hookConfigured: true,
+      revisions: [
+        {
+          id: 'rev-1',
+          draftId: 'draft-1',
+          cycleNo: 1,
+          revisionNo: 1,
+          origin: 'ai',
+          content: 'AI suggested reply',
+          createdBy: 'assistant',
+          createdAt: '2026-07-03T09:55:00Z',
+        },
+      ],
+      events: [],
+    }
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-back-to-back', {
+            replyDraftWorkflow: {
+              ...baseWorkflow,
+              status: 'suggested',
+              allowedActions: ['edit', 'approve', 'reject', 'regenerate'],
+              revision: '1',
+              updatedAt: '2026-07-03T10:00:00Z',
+            },
+          }),
+        ),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/approve', () =>
+        HttpResponse.json({
+          workflow: {
+            ...baseWorkflow,
+            status: 'approved',
+            approvedRevisionId: 'rev-1',
+            allowedActions: ['edit', 'send', 'reject', 'regenerate'],
+            revision: '2',
+            updatedAt: '2026-07-03T10:01:00Z',
+          },
+        }),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/edit', async ({ request }) => {
+        editBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          workflow: {
+            ...baseWorkflow,
+            status: 'edited',
+            activeRevisionId: 'rev-2',
+            activeText: 'Second edit after approval',
+            allowedActions: ['edit', 'approve', 'reject', 'regenerate'],
+            revision: '3',
+            updatedAt: '2026-07-03T10:02:00Z',
+            revisions: [
+              {
+                id: 'rev-2',
+                draftId: 'draft-1',
+                cycleNo: 1,
+                revisionNo: 2,
+                origin: 'human',
+                content: 'Second edit after approval',
+                createdBy: 'member-1',
+                createdAt: '2026-07-03T10:02:00Z',
+              },
+              ...baseWorkflow.revisions,
+            ],
+            events: [],
+          },
+        })
+      }),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-back-to-back"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /批准/ })).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: /批准/ }))
+    await waitFor(() => expect(screen.getAllByText('已批准').length).toBeGreaterThanOrEqual(1))
+    await userEvent.click(screen.getByRole('button', { name: /编辑/ }))
+    const editor = screen.getByRole('textbox')
+    await userEvent.clear(editor)
+    await userEvent.type(editor, 'Second edit after approval')
+    await userEvent.click(screen.getByRole('button', { name: /保存/ }))
+
+    await waitFor(() =>
+      expect(editBody).toMatchObject({
+        content: 'Second edit after approval',
+        expectedRevision: '2',
+      }),
+    )
+    expect(
+      (await screen.findAllByText('Second edit after approval')).length,
+    ).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('已编辑').length).toBeGreaterThanOrEqual(1)
   })
 
   it('regenerate updates the draft via the invalidated detail refetch', async () => {

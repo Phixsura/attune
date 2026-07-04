@@ -41,13 +41,16 @@ func TestPG_GDPRExportDeleteLifecycle(t *testing.T) {
 	tagID := createTagAndAssign(t, ctx, pool, tenantID, feedbackID1)
 	writeFeedbackAudit(t, ctx, pool, tenantID, feedbackID1)
 	writeLLMAudit(t, ctx, pool, tenantID, feedbackID2)
+	replyIDs := insertReplyDraftWorkflow(t, ctx, pool, tenantID, feedbackID1)
 
 	bundle, err := svc.Export(ctx, tenantID, subjectKey, actor())
 	if err != nil {
 		t.Fatalf("Export: %v", err)
 	}
 	if bundle.Counts.FeedbackCount != 2 || bundle.Counts.TagAssignmentCount != 1 ||
-		bundle.Counts.FeedbackAuditCount != 1 || bundle.Counts.LLMAuditCount != 1 {
+		bundle.Counts.FeedbackAuditCount != 1 || bundle.Counts.LLMAuditCount != 1 ||
+		bundle.Counts.ReplyDraftCount != 1 || bundle.Counts.ReplyDraftRevisionCount != 1 ||
+		bundle.Counts.ReplyDraftEventCount != 1 || bundle.Counts.ReplyDeliveryAttemptCount != 1 {
 		t.Fatalf("unexpected export counts: %+v", bundle.Counts)
 	}
 	files := unzipFiles(t, bundle.Data)
@@ -56,6 +59,10 @@ func TestPG_GDPRExportDeleteLifecycle(t *testing.T) {
 	assertJSONLCount(t, files["feedback_tags.jsonl"], 1)
 	assertJSONLCount(t, files["feedback_audit_log.jsonl"], 1)
 	assertJSONLCount(t, files["llm_audit.jsonl"], 1)
+	assertJSONLCount(t, files["reply_drafts.jsonl"], 1)
+	assertJSONLCount(t, files["reply_draft_revisions.jsonl"], 1)
+	assertJSONLCount(t, files["reply_draft_events.jsonl"], 1)
+	assertJSONLCount(t, files["reply_delivery_attempts.jsonl"], 1)
 	assertFeedbackRowsIncludeOnlySubject(t, files["feedback.jsonl"], subjectKey, []int64{feedbackID1, feedbackID2})
 	assertTagRow(t, files["feedback_tags.jsonl"], feedbackID1, tagID)
 	assertAuditLogActionCount(t, ctx, pool, tenantID, "gdpr.export", 1)
@@ -72,6 +79,10 @@ func TestPG_GDPRExportDeleteLifecycle(t *testing.T) {
 	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM feedback_tag_assignments WHERE feedback_id = $1`, 0, feedbackID1)
 	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM feedback_audit_log WHERE feedback_id = $1`, 0, feedbackID1)
 	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM llm_audit WHERE feedback_id = $1`, 0, feedbackID2)
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM reply_delivery_attempts WHERE id = $1`, 0, replyIDs.attemptID)
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM reply_draft_events WHERE id = $1`, 0, replyIDs.eventID)
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM reply_draft_revisions WHERE id = $1`, 0, replyIDs.revisionID)
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM reply_drafts WHERE id = $1`, 0, replyIDs.draftID)
 	assertAuditLogActionCount(t, ctx, pool, tenantID, "gdpr.delete", 1)
 }
 
@@ -364,6 +375,89 @@ func writeLLMAudit(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenant
 	if err != nil {
 		t.Fatalf("write llm audit: %v", err)
 	}
+}
+
+type replyDraftWorkflowIDs struct {
+	draftID    uuid.UUID
+	revisionID uuid.UUID
+	eventID    uuid.UUID
+	attemptID  uuid.UUID
+}
+
+func insertReplyDraftWorkflow(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	tenantID string,
+	feedbackID int64,
+) replyDraftWorkflowIDs {
+	t.Helper()
+	hookID := uuid.New()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO reply_send_hooks (
+			id, tenant_id, name, url_ciphertext, url_key_id, url_fingerprint,
+			url_host, secret_ciphertext, secret_key_id, created_by, updated_by
+		) VALUES ($1, $2, 'GDPR reply hook', $3, 'test-key', 'sha256:gdpr-hook',
+			'hooks.example.com', $4, 'test-key', 'admin-1', 'admin-1')`,
+		hookID, tenantID, []byte("https://hooks.example.com/reply"), []byte("secret"),
+	); err != nil {
+		t.Fatalf("insert reply send hook: %v", err)
+	}
+
+	ids := replyDraftWorkflowIDs{
+		draftID:    uuid.New(),
+		revisionID: uuid.New(),
+		eventID:    uuid.New(),
+		attemptID:  uuid.New(),
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO reply_drafts (
+			id, tenant_id, feedback_id, cycle_no, status, active_revision_id,
+			approved_revision_id, approved_hook_id, approved_hook_fingerprint,
+			source_fingerprint, source_meta, generated_at, generated_by,
+			approved_at, approved_by, revision
+		) VALUES ($1, $2, $3, 1, 'approved', $4, $4, $5, 'sha256:gdpr-hook',
+			'source-fingerprint', '{"source":"gdpr-test"}'::jsonb,
+			NOW(), 'system', NOW(), 'admin-1', 3)`,
+		ids.draftID, tenantID, feedbackID, ids.revisionID, hookID,
+	); err != nil {
+		t.Fatalf("insert reply draft: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO reply_draft_revisions (
+			id, draft_id, tenant_id, feedback_id, cycle_no, revision_no,
+			origin, content, content_sha256, source_fingerprint, created_by
+		) VALUES ($1, $2, $3, $4, 1, 1, 'human', 'Reviewed subject reply',
+			decode('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'hex'),
+			'source-fingerprint', 'admin-1')`,
+		ids.revisionID, ids.draftID, tenantID, feedbackID,
+	); err != nil {
+		t.Fatalf("insert reply draft revision: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO reply_draft_events (
+			id, draft_id, tenant_id, feedback_id, revision_id, hook_id,
+			event_type, actor_type, actor_id, metadata
+		) VALUES ($1, $2, $3, $4, $5, $6, 'approve', 'admin', 'admin-1',
+			'{"reason":"gdpr integration"}'::jsonb)`,
+		ids.eventID, ids.draftID, tenantID, feedbackID, ids.revisionID, hookID,
+	); err != nil {
+		t.Fatalf("insert reply draft event: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO reply_delivery_attempts (
+			id, tenant_id, draft_id, feedback_id, hook_id, revision_id,
+			event_type, idempotency_key, status, http_status, attempts,
+			request_fingerprint, response_meta, requested_by_type, requested_by,
+			completed_at
+		) VALUES ($1, $2, $3, $4, $5, $6, 'reply.send', 'reply_send_gdpr_1',
+			'accepted', 202, 1, 'delivery-fingerprint', '{"accepted":true}'::jsonb,
+			'admin', 'admin-1', NOW())`,
+		ids.attemptID, tenantID, ids.draftID, feedbackID, hookID, ids.revisionID,
+	); err != nil {
+		t.Fatalf("insert reply delivery attempt: %v", err)
+	}
+	return ids
 }
 
 func unzipFiles(t *testing.T, data []byte) map[string][]byte {

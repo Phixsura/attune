@@ -160,6 +160,7 @@ func TestMetricDestination(t *testing.T) {
 		{label: "digest-discord-tenant-a", want: "discord"},
 		{label: "digest-lark-tenant-a", want: "lark"},
 		{label: "github-issue-owner/repo", want: "github-issue"},
+		{label: "reply-send-hook", want: "reply-send-hook"},
 		{label: "custom-webhook-42", want: "other"},
 	}
 	for _, tc := range cases {

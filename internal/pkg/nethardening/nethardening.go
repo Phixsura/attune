@@ -194,13 +194,25 @@ func (p Policy) ValidateURL(raw string) error {
 	if ip := net.ParseIP(host); ip != nil {
 		return p.CheckIP(ip)
 	}
-	if host == "localhost" && !p.AllowLoopback {
+	if IsLoopbackHost(host) && !p.AllowLoopback {
 		return ptrext.Of(BlockedError{Host: host, Reason: "loopback (set security.allow_loopback_egress for dev)"})
 	}
 	if isInternalDomain(host) || isDNSRebindingService(host) {
 		return ptrext.Of(BlockedError{Host: host, Reason: "internal / DNS-rebinding domain"})
 	}
 	return nil
+}
+
+// IsLoopbackHost reports whether host is a local loopback name or IP literal.
+// It is intentionally narrow: localhost and IP loopback ranges are local-dev
+// exemptions, while lookalike DNS names such as localhost.example.com are not.
+func IsLoopbackHost(host string) bool {
+	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+	if normalized == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(normalized)
+	return ip != nil && ip.IsLoopback()
 }
 
 // RedactURL returns scheme://host for safe logging. Customer webhook URLs

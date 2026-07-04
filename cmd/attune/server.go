@@ -115,6 +115,7 @@ func runServer() error {
 	egress := cfg.EgressPolicy()
 	notify.SetEgressPolicy(egress)
 	llmclient.SetEgressPolicy(egress)
+	replydraftsvc.SetEgressPolicy(egress)
 	// Trusted-proxy hop count for client-IP resolution outside the API-key
 	// middleware (audit actor IP, etc.).
 	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)
@@ -190,7 +191,7 @@ func runServer() error {
 		runMCPPruner(ctx, pool, mcpPruneInterval, mcpSessionIdleLimit)
 	})
 
-	batchJobWorker := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, cfg.ConsoleBaseURL, cfg.GDPRExportTTL, cfg.AuditEvidenceExportTTL, cfg.AuditEvidenceSigningKey)
+	batchJobWorker := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, secrets, cfg.ConsoleBaseURL, cfg.GDPRExportTTL, cfg.AuditEvidenceExportTTL, cfg.AuditEvidenceSigningKey)
 	defer batchJobWorker.Stop()
 
 	ingestHandler := handlers.NewIngestHandler(runtimeDeps.ingestor, runtimeDeps.sources)
@@ -592,11 +593,19 @@ func startEmbeddingWorker(ctx context.Context, pool *pgxpool.Pool, enricher *enr
 // startReplyDraftWorker wires the reply-draft outbox + worker. llm is the
 // audit-wrapping client so each draft call lands in llm_audit
 // (purpose='reply_draft').
-func startReplyDraftWorker(ctx context.Context, pool *pgxpool.Pool, enricher *enrich.Enricher, llm llmclient.LLMClient) {
+func startReplyDraftWorker(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	enricher *enrich.Enricher,
+	llm llmclient.LLMClient,
+	secrets *secretstore.TinkStore,
+) {
 	repo := replydraftrepo.NewDraftTaskRepo(pool)
 	enricher.SetDraftTask(repo)
 	worker := replydraftsvc.NewWorker(repo, llm)
 	safego(ctx, "reply_draft", func() { worker.Run(ctx) })
+	deliveryWorker := replydraftsvc.NewDeliveryWorker(replydraftsvc.NewWorkflow(repo, secrets, nil))
+	safego(ctx, "reply_delivery", func() { deliveryWorker.Run(ctx) })
 	safego(ctx, "reply_draft_queue_refresher", func() {
 		runQueueDepthRefresher(ctx, "reply_draft", repo.QueueDepthByTenant, func(d map[string]int64) {
 			metrics.RefreshQueueDepth(metrics.ReplyDraftQueueDepth, d)
@@ -613,13 +622,14 @@ func startBackgroundWorkers(
 	rawLLM *llmrouter.Router,
 	llm llmclient.LLMClient,
 	feedbackRepo *feedback.FeedbackRepo,
+	secrets *secretstore.TinkStore,
 	consoleBaseURL string,
 	gdprExportTTL time.Duration,
 	auditEvidenceExportTTL time.Duration,
 	auditEvidenceSigningKey []byte,
 ) *batchjob.Worker {
 	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
-	startReplyDraftWorker(ctx, pool, enricher, llm)
+	startReplyDraftWorker(ctx, pool, enricher, llm, secrets)
 	startDigestWorker(ctx, pool, llm, consoleBaseURL)
 	startGDPRExportWorker(ctx, pool, gdprExportTTL)
 	startAuditEvidenceWorker(ctx, pool, auditEvidenceExportTTL, auditEvidenceSigningKey)

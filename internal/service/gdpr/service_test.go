@@ -72,11 +72,15 @@ func TestExportBuildsZipAndAudits(t *testing.T) {
 		t.Fatalf("zip.NewReader err = %v", err)
 	}
 	wantFiles := map[string]bool{
-		"manifest.json":            false,
-		"feedback.jsonl":           false,
-		"feedback_tags.jsonl":      false,
-		"feedback_audit_log.jsonl": false,
-		"llm_audit.jsonl":          false,
+		"manifest.json":                 false,
+		"feedback.jsonl":                false,
+		"feedback_tags.jsonl":           false,
+		"feedback_audit_log.jsonl":      false,
+		"llm_audit.jsonl":               false,
+		"reply_drafts.jsonl":            false,
+		"reply_draft_revisions.jsonl":   false,
+		"reply_draft_events.jsonl":      false,
+		"reply_delivery_attempts.jsonl": false,
 	}
 	for _, f := range zr.File {
 		if _, ok := wantFiles[f.Name]; ok {

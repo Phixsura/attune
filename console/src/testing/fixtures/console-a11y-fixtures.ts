@@ -38,6 +38,9 @@ import type {
   GetFeedbackStatsResponse,
   GetTerminalFailureWorkbenchResponse,
   ListFeedbackResponse,
+  ReplyDraftWorkflow,
+  ReplySendHook,
+  ReplySendHookDelivery,
   RetryEnrichmentResponse,
 } from '../../proto/attune/v1/ingest'
 import {
@@ -230,6 +233,37 @@ export const consoleA11yTerminalFeedbackList: ListFeedbackResponse = {
   items: [consoleA11yFeedbackItems[1]],
 }
 
+export const consoleA11yReplyDraftWorkflow: ReplyDraftWorkflow = {
+  draftId: 'draft-a11y',
+  feedbackId: 'feedback-101',
+  cycleNo: 1,
+  status: 'suggested',
+  activeRevisionId: 'rev-ai-1',
+  activeText:
+    'Thanks for reporting the focus loss after closing the detail panel. We are investigating the focus restoration path.',
+  revisions: [
+    {
+      id: 'rev-ai-1',
+      draftId: 'draft-a11y',
+      cycleNo: 1,
+      revisionNo: 1,
+      origin: 'ai',
+      content:
+        'Thanks for reporting the focus loss after closing the detail panel. We are investigating the focus restoration path.',
+      createdBy: 'llm',
+      createdAt: '2026-06-24T09:02:00Z',
+    },
+  ],
+  events: [],
+  allowedActions: ['edit', 'approve', 'reject', 'regenerate'],
+  blockers: [],
+  hookConfigured: true,
+  generatedAt: '2026-06-24T09:02:00Z',
+  generatedBy: 'llm',
+  revision: '1',
+  updatedAt: '2026-06-24T09:02:00Z',
+}
+
 export const consoleA11yFeedbackDetail: FeedbackDetail = {
   ...consoleA11yFeedbackItems[0],
   attachments: [],
@@ -238,7 +272,10 @@ export const consoleA11yFeedbackDetail: FeedbackDetail = {
   enrichedRationale: 'The report describes a focus-management regression.',
   enrichedDisplayRationale: 'The report describes a focus-management regression.',
   sourceMeta: { browser: 'Chromium' },
-  replyDraftEnabled: false,
+  replyDraft: consoleA11yReplyDraftWorkflow.activeText,
+  replyDraftGeneratedAt: '2026-06-24T09:02:00Z',
+  replyDraftEnabled: true,
+  replyDraftWorkflow: consoleA11yReplyDraftWorkflow,
 }
 
 export const consoleA11yTerminalFeedbackDetail: FeedbackDetail = {
@@ -403,6 +440,40 @@ export const consoleA11yAuditEvidenceReady: GetAuditEvidenceExportResponse = {
   archiveFilename: 'audit-evidence-a11y.zip',
   retryAfterSeconds: 1,
 }
+
+export const consoleA11yReplySendHook: ReplySendHook = {
+  id: 'reply-hook-a11y',
+  name: 'Support reply bridge',
+  enabled: true,
+  urlHost: 'hooks.example.com',
+  urlFingerprint: 'sha256:2e8bb7f6b3c0a11y9d84e5c24219f4266fded6c4',
+  createdBy: 'user-a11y',
+  updatedBy: 'user-a11y',
+  createdAt: '2026-06-24T09:00:00Z',
+  updatedAt: '2026-06-24T09:00:00Z',
+}
+
+export const consoleA11yReplySendHookDeliveries: ReplySendHookDelivery[] = [
+  {
+    id: 'reply-delivery-a11y-failed',
+    hookId: 'reply-hook-a11y',
+    hookHost: 'hooks.example.com',
+    hookFingerprint: 'sha256:2e8bb7f6b3c0a11y9d84e5c24219f4266fded6c4',
+    eventType: 'reply.test',
+    status: 'failed',
+    idempotencyKey: 'reply_test_a11y_failed',
+    httpStatus: 500,
+    attempts: 1,
+    maxAttempts: 8,
+    error: 'receiver returned 500',
+    requestedByType: 'admin',
+    requestedBy: 'user-a11y',
+    requestedAt: '2026-06-24T09:05:00Z',
+    createdAt: '2026-06-24T09:05:00Z',
+    updatedAt: '2026-06-24T09:05:00Z',
+    retryable: true,
+  },
+]
 
 export const consoleA11yMcpClient: MCPClient = {
   id: 'client-a11y',

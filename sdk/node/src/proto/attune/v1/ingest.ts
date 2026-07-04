@@ -178,6 +178,7 @@ export interface FeedbackDetail {
   enrichmentFailureChannelName?: string | undefined;
   enrichmentFailureConfigFingerprint?: string | undefined;
   enrichmentFailurePromptVersion?: string | undefined;
+  replyDraftWorkflow?: ReplyDraftWorkflow | undefined;
 }
 
 export interface Attachment {
@@ -256,6 +257,181 @@ export interface RegenerateReplyDraftResponse {
   replyDraft: string;
   /** RFC3339 */
   replyDraftGeneratedAt: string;
+  workflow?: ReplyDraftWorkflow | undefined;
+}
+
+export interface ReplyDraftWorkflow {
+  draftId: string;
+  feedbackId: string;
+  cycleNo: number;
+  status: string;
+  activeRevisionId?: string | undefined;
+  approvedRevisionId?: string | undefined;
+  sentRevisionId?: string | undefined;
+  activeText: string;
+  revisions: ReplyDraftRevision[];
+  events: ReplyDraftEvent[];
+  allowedActions: string[];
+  blockers: string[];
+  hookConfigured: boolean;
+  generatedAt?: string | undefined;
+  generatedBy?: string | undefined;
+  editedAt?: string | undefined;
+  editedBy?: string | undefined;
+  approvedAt?: string | undefined;
+  approvedBy?: string | undefined;
+  rejectedAt?: string | undefined;
+  rejectedBy?: string | undefined;
+  sentAt?: string | undefined;
+  sentBy?: string | undefined;
+  externalDeliveryStatus?: string | undefined;
+  externalMessageId?: string | undefined;
+  revision: string;
+  updatedAt: string;
+}
+
+export interface ReplyDraftRevision {
+  id: string;
+  draftId: string;
+  cycleNo: number;
+  revisionNo: number;
+  origin: string;
+  content: string;
+  createdBy: string;
+  createdAt: string;
+  metadata?: { [key: string]: any } | undefined;
+}
+
+export interface ReplyDraftEvent {
+  id: string;
+  draftId: string;
+  revisionId?: string | undefined;
+  hookId?: string | undefined;
+  eventType: string;
+  actorType: string;
+  actorId: string;
+  blocker?: string | undefined;
+  metadata?: { [key: string]: any } | undefined;
+  createdAt: string;
+}
+
+export interface UpdateReplyDraftRequest {
+  /** path param */
+  id: string;
+  content: string;
+  expectedRevision: string;
+}
+
+export interface ApproveReplyDraftRequest {
+  /** path param */
+  id: string;
+  expectedRevision: string;
+}
+
+export interface RejectReplyDraftRequest {
+  /** path param */
+  id: string;
+  expectedRevision: string;
+}
+
+export interface SendReplyDraftRequest {
+  /** path param */
+  id: string;
+  idempotencyKey?: string | undefined;
+  expectedRevision: string;
+}
+
+export interface ReplyDraftWorkflowResponse {
+  workflow?: ReplyDraftWorkflow | undefined;
+}
+
+export interface SendReplyDraftResponse {
+  workflow?: ReplyDraftWorkflow | undefined;
+  fromCache: boolean;
+}
+
+export interface GetReplySendHookRequest {
+}
+
+export interface UpsertReplySendHookRequest {
+  url: string;
+  secret?: string | undefined;
+  name?: string | undefined;
+  enabled?: boolean | undefined;
+}
+
+export interface DisableReplySendHookRequest {
+}
+
+export interface GetReplySendHookHealthRequest {
+}
+
+export interface ListReplySendHookDeliveriesRequest {
+  limit?: number | undefined;
+}
+
+export interface TestReplySendHookRequest {
+  idempotencyKey?: string | undefined;
+}
+
+export interface RedeliverReplySendHookDeliveryRequest {
+  /** path param */
+  id: string;
+}
+
+export interface ReplySendHook {
+  id: string;
+  name: string;
+  enabled: boolean;
+  urlHost: string;
+  urlFingerprint: string;
+  secretOnce?: string | undefined;
+  createdBy?: string | undefined;
+  updatedBy?: string | undefined;
+  disabledAt?: string | undefined;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReplySendHookDelivery {
+  id: string;
+  hookId: string;
+  hookHost: string;
+  hookFingerprint: string;
+  eventType: string;
+  status: string;
+  feedbackId?: string | undefined;
+  draftId?: string | undefined;
+  revisionId?: string | undefined;
+  idempotencyKey: string;
+  httpStatus: number;
+  attempts: number;
+  maxAttempts: number;
+  nextRetryAt?: string | undefined;
+  externalMessageId?: string | undefined;
+  error?: string | undefined;
+  requestedByType: string;
+  requestedBy: string;
+  requestedAt: string;
+  completedAt?: string | undefined;
+  createdAt: string;
+  updatedAt: string;
+  retryable: boolean;
+}
+
+export interface ListReplySendHookDeliveriesResponse {
+  items: ReplySendHookDelivery[];
+}
+
+export interface ReplySendHookHealth {
+  total: string;
+  accepted: string;
+  failed: string;
+  dead: string;
+  pending: string;
+  retryable: string;
+  latestDelivery?: ReplySendHookDelivery | undefined;
+  latestProblem?: ReplySendHookDelivery | undefined;
 }
 
 /** RetryEnrichmentRequest resets a terminal-failed row for re-enrichment (#81). */
@@ -352,8 +528,32 @@ export interface FeedbackService {
   GetTerminalFailureWorkbench(
     request: GetTerminalFailureWorkbenchRequest,
   ): Promise<GetTerminalFailureWorkbenchResponse>;
-  /** POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; session auth) */
+  /** POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; member session auth) */
   RegenerateReplyDraft(request: RegenerateReplyDraftRequest): Promise<RegenerateReplyDraftResponse>;
+  /** POST /fb/v1/console/feedback/{id}/reply-draft/edit (console; member session auth) */
+  UpdateReplyDraft(request: UpdateReplyDraftRequest): Promise<ReplyDraftWorkflowResponse>;
+  /** POST /fb/v1/console/feedback/{id}/reply-draft/approve (console; member session auth) */
+  ApproveReplyDraft(request: ApproveReplyDraftRequest): Promise<ReplyDraftWorkflowResponse>;
+  /** POST /fb/v1/console/feedback/{id}/reply-draft/reject (console; member session auth) */
+  RejectReplyDraft(request: RejectReplyDraftRequest): Promise<ReplyDraftWorkflowResponse>;
+  /** POST /fb/v1/console/feedback/{id}/reply-draft/send (console; member session auth) */
+  SendReplyDraft(request: SendReplyDraftRequest): Promise<SendReplyDraftResponse>;
+  /** GET /fb/v1/console/reply-send-hook (console; admin session auth) */
+  GetReplySendHook(request: GetReplySendHookRequest): Promise<ReplySendHook>;
+  /** PUT /fb/v1/console/reply-send-hook (console; admin session auth) */
+  UpsertReplySendHook(request: UpsertReplySendHookRequest): Promise<ReplySendHook>;
+  /** DELETE /fb/v1/console/reply-send-hook (console; admin session auth) */
+  DisableReplySendHook(request: DisableReplySendHookRequest): Promise<ReplySendHook>;
+  /** GET /fb/v1/console/reply-send-hook/health (console; admin session auth) */
+  GetReplySendHookHealth(request: GetReplySendHookHealthRequest): Promise<ReplySendHookHealth>;
+  /** GET /fb/v1/console/reply-send-hook/deliveries (console; admin session auth) */
+  ListReplySendHookDeliveries(
+    request: ListReplySendHookDeliveriesRequest,
+  ): Promise<ListReplySendHookDeliveriesResponse>;
+  /** POST /fb/v1/console/reply-send-hook/test (console; admin session auth) */
+  TestReplySendHook(request: TestReplySendHookRequest): Promise<ReplySendHookDelivery>;
+  /** POST /fb/v1/console/reply-send-hook/deliveries/{id}/redeliver (console; admin session auth) */
+  RedeliverReplySendHookDelivery(request: RedeliverReplySendHookDeliveryRequest): Promise<ReplySendHookDelivery>;
   /**
    * POST /fb/v1/console/feedback/{id}/retry-enrichment (console; session auth)
    * Resets a terminal-failed row so it can be re-enriched.

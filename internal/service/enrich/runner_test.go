@@ -18,11 +18,39 @@ import (
 func TestMemoryQueueSubmitReturnsFullWithoutBlocking(t *testing.T) {
 	t.Parallel()
 	q := NewMemoryQueue(1)
+	defer drainQueue(t, q)
+
 	if err := q.Submit(context.Background(), Job{ID: 1}); err != nil {
 		t.Fatalf("first submit err = %v", err)
 	}
-	if err := q.Submit(context.Background(), Job{ID: 2}); !errors.Is(err, ErrQueueFull) {
-		t.Fatalf("second submit err = %v, want ErrQueueFull", err)
+	waitForQueueDepth(t, q, 0)
+
+	if err := q.Submit(context.Background(), Job{ID: 2}); err != nil {
+		t.Fatalf("second submit err = %v", err)
+	}
+	if err := q.Submit(context.Background(), Job{ID: 3}); !errors.Is(err, ErrQueueFull) {
+		t.Fatalf("third submit err = %v, want ErrQueueFull", err)
+	}
+}
+
+func waitForQueueDepth(t *testing.T, q *MemoryQueue, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if q.Len() == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("queue depth = %d, want %d", q.Len(), want)
+}
+
+func drainQueue(t *testing.T, q *MemoryQueue) {
+	t.Helper()
+	if err := q.Close(); err != nil {
+		t.Fatalf("close queue: %v", err)
+	}
+	for range q.Consume() {
 	}
 }
 

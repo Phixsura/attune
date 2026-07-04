@@ -168,15 +168,8 @@ func (r *DraftTaskRepo) LoadForDraft(ctx context.Context, feedbackID int64, tena
 // DB-stamped generation time. Returns ErrNotFound when the row is not owned by
 // the tenant, so a missing tenant scope can never write another tenant's row.
 func (r *DraftTaskRepo) UpdateReplyDraft(ctx context.Context, feedbackID int64, tenantID, draft string) (time.Time, error) {
-	var generatedAt time.Time
-	err := r.pool.QueryRow(ctx, `
-		UPDATE user_feedback
-		SET reply_draft = $3, reply_draft_generated_at = NOW()
-		WHERE id = $1 AND tenant_id = $2
-		RETURNING reply_draft_generated_at`,
-		feedbackID, tenantID, draft,
-	).Scan(&generatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	generatedAt, err := r.StoreGeneratedDraft(ctx, feedbackID, tenantID, draft, "system-reply-drafter")
+	if errors.Is(err, ErrDraftNotFound) || errors.Is(err, ErrNotFound) {
 		return time.Time{}, ErrNotFound
 	}
 	if err != nil {

@@ -8,6 +8,7 @@ import { Route as GDPRRoute } from '@/routes/_authed.administration.gdpr'
 import { Route as ConfigurationRoute } from '@/routes/_authed.configuration'
 import { Route as IntegrationsRoute } from '@/routes/_authed.integrations'
 import { Route as ApiKeysRoute } from '@/routes/_authed.integrations.api-keys'
+import { Route as ReplySendHookRoute } from '@/routes/_authed.integrations.reply-send-hook'
 import { Route as SettingsRoute } from '@/routes/_authed.settings'
 import { server } from '@/testing/mocks/server'
 
@@ -77,6 +78,16 @@ describe('route access guards', () => {
 
     mockMe('admin')
     expect(await callBeforeLoad(DeadDeliveriesRoute.options.beforeLoad)).toBeNull()
+  })
+
+  it('keeps reply send hook configuration admin-only', async () => {
+    mockMe('member')
+    const thrown = await callBeforeLoad(ReplySendHookRoute.options.beforeLoad)
+    expect(isRedirect(thrown)).toBe(true)
+    expect((thrown as ThrownRedirect).options.to).toBe('/feedback')
+
+    mockMe('admin')
+    expect(await callBeforeLoad(ReplySendHookRoute.options.beforeLoad)).toBeNull()
   })
 
   it('maps legacy settings deep links to the first section a member can still access', async () => {

@@ -357,6 +357,43 @@ func TestTransport_Attempt_DoError(t *testing.T) {
 	}
 }
 
+func TestTransport_Attempt_DoErrorRedactsRequestURL(t *testing.T) {
+	t.Parallel()
+
+	targetURL := "https://hooks.example.test/services/token-123?secret=abc"
+	doErr := errors.New(`Post "` + targetURL + `": dial tcp: connection refused`)
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			return nil, doErr
+		}),
+	}
+	tr := NewTransport(httpClient, NoRetry())
+
+	err := tr.Send(context.Background(), "do-fail", func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, targetURL, strings.NewReader(`{}`))
+	}, func(_ context.Context, _ int, _ []byte) error {
+		t.Fatal("check should not be called when Do fails")
+		return nil
+	})
+
+	if err == nil {
+		t.Fatal("expected error when Do fails, got nil")
+	}
+	if strings.Contains(err.Error(), "token-123") || strings.Contains(err.Error(), "secret=abc") {
+		t.Fatalf("error leaked credential-bearing URL: %q", err.Error())
+	}
+	formatted := fmt.Sprintf("%+v", err)
+	if strings.Contains(formatted, "token-123") || strings.Contains(formatted, "secret=abc") {
+		t.Fatalf("formatted error leaked credential-bearing URL: %q", formatted)
+	}
+	if !strings.Contains(err.Error(), "https://hooks.example.test") {
+		t.Fatalf("error should retain redacted host context: %q", err.Error())
+	}
+	if !errors.Is(err, doErr) {
+		t.Fatalf("error should preserve original error chain, got %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // buildTestEnvelope — field validation
 // ---------------------------------------------------------------------------
