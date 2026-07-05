@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { Route as AdministrationRoute } from '@/routes/_authed.administration'
 import { Route as DeadDeliveriesRoute } from '@/routes/_authed.administration.dead-deliveries'
 import { Route as GDPRRoute } from '@/routes/_authed.administration.gdpr'
+import { Route as ReliabilityRoute } from '@/routes/_authed.administration.reliability'
 import { Route as ConfigurationRoute } from '@/routes/_authed.configuration'
 import { Route as IntegrationsRoute } from '@/routes/_authed.integrations'
 import { Route as ApiKeysRoute } from '@/routes/_authed.integrations.api-keys'
@@ -78,6 +79,16 @@ describe('route access guards', () => {
 
     mockMe('admin')
     expect(await callBeforeLoad(DeadDeliveriesRoute.options.beforeLoad)).toBeNull()
+  })
+
+  it('keeps the reliability summary admin-only', async () => {
+    mockMe('member')
+    const thrown = await callBeforeLoad(ReliabilityRoute.options.beforeLoad)
+    expect(isRedirect(thrown)).toBe(true)
+    expect((thrown as ThrownRedirect).options.to).toBe('/feedback')
+
+    mockMe('admin')
+    expect(await callBeforeLoad(ReliabilityRoute.options.beforeLoad)).toBeNull()
   })
 
   it('keeps reply send hook configuration admin-only', async () => {

@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Tenant impact SLO surface for reliability burn-rate operations.**
+  Added the new `Attune Tenant Impact` dashboard, including impacted-tenant
+  burn ranking, a Console reliability summary page, burn-rate recording rules
+  and MWMB alerts for ingest, enrichment, outbox delivery, OIDC login, API key
+  access denials, MCP tool calls, and GDPR job completion, plus an exact 5s
+  enrichment bucket so the latency SLO is measured directly instead of
+  approximated. The GDPR completion ratio now excludes cancelled and revoked
+  jobs from the denominator so the burn-rate view stays aligned with the
+  dashboard completion lens. The tenant-impact generator now also exposes MCP
+  and GDPR drilldowns with tool and request-type label filters, and API key
+  usage is now recorded so the existing access-denial telemetry and security
+  panels have a real success denominator. The burn overview and burn trend are
+  now driven from a typed SLO catalog so the page-worthy SLO set, ranking
+  panel, and alert metadata stay aligned in one place. Ingest burn-rate now
+  counts rate-limit pressure alongside internal failures, and the page-worthy
+  burn alerts carry minimum-volume guards to avoid tiny-tenant noise. The SLO
+  recording and alert rules now live in a dedicated `attune-slo.yml` file,
+  generated from the shared catalog so the tenant-impact patch stays executable
+  and easy to audit alongside the dashboard generator. The same catalog now
+  also exports a portable OpenSLO bundle at `observability/openslo/attune-slo.yaml`,
+  with import / round-trip tests so the SLO definition can move cleanly into
+  vendor-neutral tooling. The tenant-impact dashboard also now includes burn
+  history, remaining-budget, dependency triage, and routing metadata sections
+  so sustained regressions, budget runway, upstream drivers, and the right
+  escalation path are easier to spot without leaving the reliability surface.
+  The generator also now writes a replay / backfill report template at
+  `observability/reports/attune-slo-replay-template.md`, and Console links to
+  the same worksheet so historical incident reviews stay tied to the current
+  policy and runbook metadata. The replay worksheet now includes a generated
+  comparison matrix so historical outage review can be checked against the
+  current policy row by row. It also writes a policy reference report and
+  Console policy cards so the recommended starting objective, burn windows,
+  low-traffic guardrails, budget-exception stance, and exception notes are
+  visible beside the live SLO surface. The portable OpenSLO export now carries
+  matching budget-exception annotations so the policy surface stays explicit
+  across vendor-neutral tooling too. The Console reliability page now also
+  offers a tenant-prefilled replay worksheet download, a replay workspace
+  card with live markdown preview and copy action, and a direct OpenSLO
+  bundle link, so operators can export the working set without leaving the
+  page.
+
 - **Reply draft review and controlled-send workflow (#164).**
   Added persisted reply-draft cycles, revision history, workflow events,
   Console edit/approve/reject/send actions, admin-only encrypted reply-send

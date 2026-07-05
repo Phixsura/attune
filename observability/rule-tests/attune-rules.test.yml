@@ -1,5 +1,6 @@
 rule_files:
   - /etc/prometheus/rules/attune-recording.yml
+  - /etc/prometheus/rules/attune-slo.yml
   - /etc/prometheus/rules/attune-alerts.yml
 
 evaluation_interval: 30s
@@ -56,6 +57,40 @@ tests:
               summary: Attune ingest is rate limiting sustained traffic
 
       - eval_time: 20m
+        alertname: AttuneIngestServiceFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneIngestServiceFastBurn
+              service: attune
+              severity: critical
+              slo: ingest_service
+              tenant: tenant-a
+            exp_annotations:
+              action: Inspect ingest internal errors and rate-limit pressure by tenant and source/result, then confirm whether the root cause is a code regression, hot tenant, bad client payloads, or an upstream dependency failure.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a
+              description: Tenant tenant-a is above the 14.4x fast-burn threshold on both 5m and 1h windows. Open Attune Tenant Impact > Burn trend.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestservicefastburn
+              summary: Attune ingest service is burning error budget quickly
+
+      - eval_time: 20m
+        alertname: AttuneIngestServiceSlowBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneIngestServiceSlowBurn
+              service: attune
+              severity: warning
+              slo: ingest_service
+              tenant: tenant-a
+            exp_annotations:
+              action: Check whether the ingest regression is sustained, compare against recent deploys, and verify whether rate-limit pressure, validation noise, or a hot tenant is masking a real backend failure.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a
+              description: Tenant tenant-a is above the 6x slow-burn threshold on both 30m and 6h windows. Open Attune Tenant Impact > Burn trend.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestserviceslowburn
+              summary: Attune ingest service is consuming budget too fast
+
+      - eval_time: 20m
         alertname: AttuneLLMProviderErrors
         exp_alerts:
           - exp_labels:
@@ -101,6 +136,344 @@ tests:
               description: 3 outbox delivery(s) are in the terminal 'dead' state. A webhook may be deleted/misconfigured (e.g. a removed Discord/Slack channel webhook).
               runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxdeadrowshigh
               summary: Attune has deliveries stuck in the dead queue
+
+  - interval: 30s
+    input_series:
+      - series: 'attune_ingest_total{tenant="tenant-a",source="api",result="ok"}'
+        values: '0+98x40'
+      - series: 'attune_ingest_total{tenant="tenant-a",source="api",result="internal_err"}'
+        values: '0+2x40'
+      - series: 'attune_enrich_duration_seconds_bucket{tenant="tenant-a",dims_mode="freeform",result="ok",le="5"}'
+        values: '0+20x40'
+      - series: 'attune_enrich_duration_seconds_count{tenant="tenant-a",dims_mode="freeform",result="ok"}'
+        values: '0+100x40'
+      - series: 'attune_outbound_delivery_attempts_total{destination_type="slack",result="terminal",status="500"}'
+        values: '0+3x40'
+      - series: 'attune_outbound_delivery_attempts_total{destination_type="slack",result="success",status="200"}'
+        values: '0+97x40'
+      - series: 'attune_mcp_tool_calls_total{tenant="tenant-a",tool="list_feedback",result="ok"}'
+        values: '0+97x40'
+      - series: 'attune_mcp_tool_calls_total{tenant="tenant-a",tool="list_feedback",result="internal_error"}'
+        values: '0+3x40'
+      - series: 'attune_gdpr_job_total{tenant="tenant-a",request_type="export",result="started"}'
+        values: '0+100x40'
+      - series: 'attune_gdpr_job_total{tenant="tenant-a",request_type="export",result="completed"}'
+        values: '0+97x40'
+      - series: 'attune_gdpr_job_total{tenant="tenant-a",request_type="export",result="failed"}'
+        values: '0+3x40'
+      - series: 'attune_oidc_login_total{result="success"}'
+        values: '0+97x40'
+      - series: 'attune_oidc_login_total{result="idp_error"}'
+        values: '0+3x40'
+      - series: 'attune_apikey_usage_total{tenant="tenant-a",key_prefix="fbk_live_abc"}'
+        values: '0+10x40'
+      - series: 'attune_apikey_expired_total'
+        values: '0+10x40'
+      - series: 'attune_apikey_ip_denied_total'
+        values: '0+10x40'
+      - series: 'attune_apikey_rate_limited_total{tenant="tenant-a"}'
+        values: '0+10x40'
+
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AttuneIngestServiceFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneIngestServiceFastBurn
+              service: attune
+              severity: critical
+              slo: ingest_service
+              tenant: tenant-a
+            exp_annotations:
+              action: Inspect ingest internal errors and rate-limit pressure by tenant and source/result, then confirm whether the root cause is a code regression, hot tenant, bad client payloads, or an upstream dependency failure.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a
+              description: Tenant tenant-a is above the 14.4x fast-burn threshold on both 5m and 1h windows. Open Attune Tenant Impact > Burn trend.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestservicefastburn
+              summary: Attune ingest service is burning error budget quickly
+
+      - eval_time: 20m
+        alertname: AttuneIngestServiceSlowBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneIngestServiceSlowBurn
+              service: attune
+              severity: warning
+              slo: ingest_service
+              tenant: tenant-a
+            exp_annotations:
+              action: Check whether the ingest regression is sustained, compare against recent deploys, and verify whether rate-limit pressure, validation noise, or a hot tenant is masking a real backend failure.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a
+              description: Tenant tenant-a is above the 6x slow-burn threshold on both 30m and 6h windows. Open Attune Tenant Impact > Burn trend.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestserviceslowburn
+              summary: Attune ingest service is consuming budget too fast
+
+      - eval_time: 20m
+        alertname: AttuneEnrichmentFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneEnrichmentFastBurn
+              service: attune
+              severity: critical
+              slo: enrichment_latency
+              tenant: tenant-a
+            exp_annotations:
+              action: Split enrichment latency by dims_mode and result, then confirm whether the issue is provider latency, queue pressure, or a parser / prompt regression.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a
+              description: Tenant tenant-a is above the 14.4x fast-burn threshold on both 5m and 1h windows for the 5s enrichment latency SLO. Open Attune Tenant Impact > Burn trend.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneenrichmentfastburn
+              summary: Attune enrichment latency is burning error budget quickly
+
+      - eval_time: 20m
+        alertname: AttuneEnrichmentSlowBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneEnrichmentSlowBurn
+              service: attune
+              severity: warning
+              slo: enrichment_latency
+              tenant: tenant-a
+            exp_annotations:
+              action: Compare with AI queue depth and provider errors. If latency is elevated but failures are not, the system may be saturating rather than failing.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a
+              description: Tenant tenant-a is above the 6x slow-burn threshold on both 30m and 6h windows for the 5s enrichment latency SLO. Open Attune Tenant Impact > Burn trend.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneenrichmentslowburn
+              summary: Attune enrichment latency is consuming budget too fast
+
+      - eval_time: 20m
+        alertname: AttuneOutboxDeliveryFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneOutboxDeliveryFastBurn
+              destination_type: slack
+              service: attune
+              severity: critical
+              slo: outbox_delivery
+            exp_annotations:
+              action: Inspect terminal delivery failures, then compare outbox lag and notify failures to decide whether the destination or worker capacity is the limiting factor.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-destination_type=slack
+              description: Destination type slack is above the 14.4x fast-burn threshold on both 5m and 1h windows. Open Attune Tenant Impact > Delivery pressure.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxdeliveryfastburn
+              summary: Attune outbox delivery is burning error budget quickly
+
+      - eval_time: 20m
+        alertname: AttuneOutboxDeliverySlowBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneOutboxDeliverySlowBurn
+              destination_type: slack
+              service: attune
+              severity: warning
+              slo: outbox_delivery
+            exp_annotations:
+              action: Check provider rejection patterns, retry pressure, and whether the worker pool is keeping up with the queue.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-destination_type=slack
+              description: Destination type slack is above the 6x slow-burn threshold on both 30m and 6h windows. Open Attune Tenant Impact > Delivery pressure.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxdeliveryslowburn
+              summary: Attune outbox delivery is consuming budget too fast
+
+      - eval_time: 20m
+        alertname: AttuneOIDCLoginFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneOIDCLoginFastBurn
+              service: attune
+              severity: critical
+              slo: oidc_login
+            exp_annotations:
+              action: Check the failing login outcomes, IdP status, callback errors, and recent auth or cookie changes before changing SSO configuration.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact
+              description: OIDC login failures are above the 14.4x fast-burn threshold on both 5m and 1h windows. Open Attune Tenant Impact > Auth pressure.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoidcloginfastburn
+              summary: Attune OIDC login is burning error budget quickly
+
+      - eval_time: 20m
+        alertname: AttuneOIDCLoginSlowBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneOIDCLoginSlowBurn
+              service: attune
+              severity: warning
+              slo: oidc_login
+            exp_annotations:
+              action: Compare against IdP health, login callback errors, and recent auth configuration changes. If the failure set is mixed, split by result before changing any global setting.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact
+              description: OIDC login failures are above the 6x slow-burn threshold on both 30m and 6h windows. Open Attune Tenant Impact > Auth pressure.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoidcloginslowburn
+              summary: Attune OIDC login is consuming budget too fast
+
+      - eval_time: 20m
+        alertname: AttuneAPIKeyAccessFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneAPIKeyAccessFastBurn
+              service: attune
+              severity: critical
+              slo: apikey_access
+            exp_annotations:
+              action: Check whether keys are expiring together, a hot key is being throttled, or an allowlist change is rejecting traffic; then split Security & Compliance by denial class.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact
+              description: API key access denials are above the 14.4x fast-burn threshold on both 5m and 1h windows. Open Attune Tenant Impact > Deep dive.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneapikeyaccessfastburn
+              summary: Attune API key access is burning error budget quickly
+
+      - eval_time: 20m
+        alertname: AttuneAPIKeyAccessSlowBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneAPIKeyAccessSlowBurn
+              service: attune
+              severity: warning
+              slo: apikey_access
+            exp_annotations:
+              action: Split expiration, IP-denied, and rate-limited requests, then confirm whether this is a rollout issue, hot key, or client misuse pattern.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact
+              description: API key access denials are above the 6x slow-burn threshold on both 30m and 6h windows. Open Attune Tenant Impact > Deep dive.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneapikeyaccessslowburn
+              summary: Attune API key access is consuming budget too fast
+
+      - eval_time: 20m
+        alertname: AttuneMCPToolFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneMCPToolFastBurn
+              service: attune
+              severity: critical
+              slo: mcp_tool
+              tenant: tenant-a
+              tool: list_feedback
+            exp_annotations:
+              action: Check whether the tool itself is failing, the adapter returned bad input, or the MCP policy layer is blocking allowed calls.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a&var-tool=list_feedback
+              description: Tenant tenant-a tool list_feedback is above the 14.4x fast-burn threshold on both 5m and 1h windows. Open Attune Tenant Impact > MCP.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunemcptoolfastburn
+              summary: Attune MCP tool reliability is burning error budget quickly
+
+      - eval_time: 20m
+        alertname: AttuneMCPToolSlowBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneMCPToolSlowBurn
+              service: attune
+              severity: warning
+              slo: mcp_tool
+              tenant: tenant-a
+              tool: list_feedback
+            exp_annotations:
+              action: Split the tool mix by result, then confirm whether the issue is a tool regression, policy denial, or an upstream dependency failure.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a&var-tool=list_feedback
+              description: Tenant tenant-a tool list_feedback is above the 6x slow-burn threshold on both 30m and 6h windows. Open Attune Tenant Impact > MCP.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunemcptoolslowburn
+              summary: Attune MCP tool reliability is consuming budget too fast
+
+      - eval_time: 20m
+        alertname: AttuneGDPRJobFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneGDPRJobFastBurn
+              request_type: export
+              service: attune
+              severity: critical
+              slo: gdpr_job
+              tenant: tenant-a
+            exp_annotations:
+              action: Check whether the queue is stalled, the worker is failing, or the storage path is rejecting completion.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a&var-request_type=export
+              description: Tenant tenant-a request type export is above the 14.4x fast-burn threshold on both 5m and 1h windows. Open Attune Tenant Impact > GDPR.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunegdprjobfastburn
+              summary: Attune GDPR job completion is burning error budget quickly
+
+      - eval_time: 20m
+        alertname: AttuneGDPRJobSlowBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneGDPRJobSlowBurn
+              request_type: export
+              service: attune
+              severity: warning
+              slo: gdpr_job
+              tenant: tenant-a
+            exp_annotations:
+              action: Compare started vs completed jobs, inspect the worker queue, and verify whether cancellations or revocations are masking a backlog.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a&var-request_type=export
+              description: Tenant tenant-a request type export is above the 6x slow-burn threshold on both 30m and 6h windows. Open Attune Tenant Impact > GDPR.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunegdprjobslowburn
+              summary: Attune GDPR job completion is consuming budget too fast
+
+  - interval: 30s
+    input_series:
+      - series: 'attune_gdpr_job_total{tenant="tenant-a",request_type="export",result="started"}'
+        values: '0+100x40'
+      - series: 'attune_gdpr_job_total{tenant="tenant-a",request_type="export",result="completed"}'
+        values: '0+95x40'
+      - series: 'attune_gdpr_job_total{tenant="tenant-a",request_type="export",result="cancelled"}'
+        values: '0+5x40'
+
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AttuneGDPRJobFastBurn
+        exp_alerts: []
+
+      - eval_time: 20m
+        alertname: AttuneGDPRJobSlowBurn
+        exp_alerts: []
+
+  # No cancellation or revocation series: the safe denominator must still
+  # resolve to the started jobs so the burn alerts still fire.
+  - interval: 30s
+    input_series:
+      - series: 'attune_gdpr_job_total{tenant="tenant-a",request_type="export",result="started"}'
+        values: '0+100x40'
+      - series: 'attune_gdpr_job_total{tenant="tenant-a",request_type="export",result="completed"}'
+        values: '0+95x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AttuneGDPRJobFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneGDPRJobFastBurn
+              request_type: export
+              service: attune
+              severity: critical
+              slo: gdpr_job
+              tenant: tenant-a
+            exp_annotations:
+              action: Check whether the queue is stalled, the worker is failing, or the storage path is rejecting completion.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a&var-request_type=export
+              description: Tenant tenant-a request type export is above the 14.4x fast-burn threshold on both 5m and 1h windows. Open Attune Tenant Impact > GDPR.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunegdprjobfastburn
+              summary: Attune GDPR job completion is burning error budget quickly
+      - eval_time: 20m
+        alertname: AttuneGDPRJobSlowBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneGDPRJobSlowBurn
+              request_type: export
+              service: attune
+              severity: warning
+              slo: gdpr_job
+              tenant: tenant-a
+            exp_annotations:
+              action: Compare started vs completed jobs, inspect the worker queue, and verify whether cancellations or revocations are masking a backlog.
+              dashboard: Attune Tenant Impact
+              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a&var-request_type=export
+              description: Tenant tenant-a request type export is above the 6x slow-burn threshold on both 30m and 6h windows. Open Attune Tenant Impact > GDPR.
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunegdprjobslowburn
+              summary: Attune GDPR job completion is consuming budget too fast
 
   # Restore-drill staleness — the only alert that makes a lapsed drill visible.
   # 5m series interval keeps the gauge fresh (under the lookback) so `for: 1h`

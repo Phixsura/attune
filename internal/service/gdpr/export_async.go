@@ -59,12 +59,16 @@ func (s *Service) StartExport(ctx context.Context, tenantID, rawSubjectKey strin
 	if subjectKey == "" {
 		return nil, ErrInvalidSubjectKey
 	}
+	startedAt := time.Now()
+	recordGDPRJobStart(tenantID, gdprRequestTypeExport)
 	store, ok := s.repo.(exportJobStore)
 	if !ok {
+		recordGDPRJobTerminal(tenantID, gdprRequestTypeExport, gdprJobResultFailed, startedAt)
 		return nil, fmt.Errorf("gdpr export job store is not configured")
 	}
 	job, err := store.CreateExportJob(ctx, tenantID, subjectKey, subjectkey.Hash(tenantID, subjectKey), actor.Type, actor.ID)
 	if err != nil {
+		recordGDPRJobTerminal(tenantID, gdprRequestTypeExport, gdprJobResultFailed, startedAt)
 		return nil, err
 	}
 	return ptrext.Of(attunev1.ExportGdprSubjectResponse{
@@ -128,6 +132,7 @@ func (s *Service) RevokeExport(ctx context.Context, tenantID, jobID string, acto
 			return nil, err
 		}
 	}
+	recordGDPRJobTerminal(tenantID, gdprRequestTypeExport, gdprJobResultRevoked, job.CreatedAt)
 	if s.audit != nil {
 		if err := s.audit.Record(ctx, auditlogsvc.Event{
 			TenantID:   tenantID,
@@ -256,11 +261,13 @@ func (w *Worker) processNextExport(ctx context.Context) error {
 			return nil
 		}
 		_, _ = w.jobStore.FailExportJobWithOwner(ctx, job.ID, w.owner, err.Error())
+		recordGDPRJobTerminal(job.TenantID, gdprRequestTypeExport, gdprJobResultFailed, job.CreatedAt)
 		return err
 	}
 	archive, err := buildZIP(job.TenantID, data)
 	if err != nil {
 		_, _ = w.jobStore.FailExportJobWithOwner(ctx, job.ID, w.owner, err.Error())
+		recordGDPRJobTerminal(job.TenantID, gdprRequestTypeExport, gdprJobResultFailed, job.CreatedAt)
 		return err
 	}
 	if n, err := w.jobStore.CompleteExportJobWithOwner(
@@ -273,11 +280,13 @@ func (w *Worker) processNextExport(ctx context.Context) error {
 		data.Counts,
 		time.Now().UTC().Add(w.exportTTL),
 	); err != nil {
+		recordGDPRJobTerminal(job.TenantID, gdprRequestTypeExport, gdprJobResultFailed, job.CreatedAt)
 		return err
 	} else if n == 0 {
 		logext.Warnf(ctx, "[gdpr.Worker.processNextExport] job re-claimed by another worker,job_id:%s", job.ID)
 		return nil
 	}
+	recordGDPRJobTerminal(job.TenantID, gdprRequestTypeExport, gdprJobResultCompleted, job.CreatedAt)
 	if w.audit != nil {
 		if err := w.audit.Record(ctx, auditlogsvc.Event{
 			TenantID:   job.TenantID,
@@ -311,11 +320,14 @@ func (w *Worker) processNextDelete(ctx context.Context) error {
 	result, err := w.deleteExecutor.ExecuteDeleteRequest(ctx, req.ID)
 	if err != nil {
 		_ = w.deleteStore.FailDeleteRequest(ctx, req.ID, err.Error())
+		recordGDPRJobTerminal(req.TenantID, gdprRequestTypeDelete, gdprJobResultFailed, req.CreatedAt)
 		return err
 	}
 	if err := w.deleteStore.CompleteDeleteRequest(ctx, req.ID, result.Counts); err != nil {
+		recordGDPRJobTerminal(req.TenantID, gdprRequestTypeDelete, gdprJobResultFailed, req.CreatedAt)
 		return err
 	}
+	recordGDPRJobTerminal(req.TenantID, gdprRequestTypeDelete, gdprJobResultCompleted, req.CreatedAt)
 	if w.audit != nil {
 		if err := w.audit.Record(ctx, auditlogsvc.Event{
 			TenantID:   req.TenantID,

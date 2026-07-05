@@ -11,8 +11,10 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/Phixsura/attune/internal/domain"
+	infraMetrics "github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -245,6 +247,36 @@ func TestMiddleware_HappyPath_NextCalled(t *testing.T) {
 	defer resp.Body.Close()
 	if !called {
 		t.Error("next handler must be called on success")
+	}
+}
+
+func TestMiddleware_HappyPath_RecordsUsageMetric(t *testing.T) {
+	tenantID := "tenant-metrics"
+	keyPrefix := "fbk_live_123"
+	rawKey := keyPrefix + "4567890abcdef"
+	want := uuid.New()
+
+	mw := Middleware(stubVerifier{tid: tenantID, kid: want})
+
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(wrap(mw(final)))
+	defer srv.Close()
+
+	before := testutil.ToFloat64(infraMetrics.APIKeyUsageTotal.WithLabelValues(tenantID, keyPrefix))
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/feedback/ingest", nil)
+	req.Header.Set("X-API-Key", rawKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	after := testutil.ToFloat64(infraMetrics.APIKeyUsageTotal.WithLabelValues(tenantID, keyPrefix))
+	if after != before+1 {
+		t.Fatalf("APIKeyUsageTotal = %v, want %v", after, before+1)
 	}
 }
 

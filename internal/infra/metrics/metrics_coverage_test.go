@@ -216,6 +216,8 @@ func TestCounterVecLabels(t *testing.T) {
 	APIKeyScopeDeniedTotal.WithLabelValues("ingest:write")
 	APIKeyRateLimitedTotal.WithLabelValues("t")
 	APIKeyUsageTotal.WithLabelValues("t", "atk_abc")
+	MCPToolCallsTotal.WithLabelValues("t", "list_feedback", "ok")
+	GDPRJobTotal.WithLabelValues("t", "export", "started")
 	AuditRowsWrittenTotal.WithLabelValues("api_key.create")
 	WorkerPanics.WithLabelValues("enricher")
 	WorkerDrainTotal.WithLabelValues("enricher", "clean")
@@ -300,4 +302,6 @@ func TestStandaloneHistograms(t *testing.T) {
 	OIDCLoginDuration.Observe(0.5)
 	OIDCTokenExchangeDuration.Observe(0.3)
 	AuditPruneDurationSeconds.Observe(1.0)
+	MCPToolLatency.WithLabelValues("t", "list_feedback").Observe(0.25)
+	GDPRJobDuration.WithLabelValues("t", "export").Observe(1.0)
 }

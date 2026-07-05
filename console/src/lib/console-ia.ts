@@ -12,6 +12,7 @@ import {
   Layers,
   LayoutDashboard,
   Lock,
+  Radar,
   Radio,
   Scale,
   Search,
@@ -252,6 +253,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     icon: Stethoscope,
     labelKey: 'nav.system_readiness',
     path: '/administration/system-readiness',
+    adminOnly: true,
+  },
+  {
+    group: 'administration',
+    icon: Radar,
+    labelKey: 'nav.reliability',
+    path: '/administration/reliability',
     adminOnly: true,
   },
   {

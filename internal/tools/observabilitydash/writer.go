@@ -44,6 +44,24 @@ func writeAll() error {
 			return err
 		}
 	}
+	if err := writeReliabilityCatalog(); err != nil {
+		return err
+	}
+	if err := writeReliabilitySloRules(); err != nil {
+		return err
+	}
+	if err := writeOpenSLOBundle(); err != nil {
+		return err
+	}
+	if err := writeReplayReportTemplate(); err != nil {
+		return err
+	}
+	if err := writeReplayWorksheetTS(); err != nil {
+		return err
+	}
+	if err := writePolicyReferenceReport(); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -82,10 +82,8 @@ describe('MembersPage', () => {
     setupMembersResponse(mockMembers)
     renderWithProviders(<MembersPage />)
 
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: '团队成员' })).toBeInTheDocument()
-      expect(screen.getByText('admin@example.com')).toBeInTheDocument()
-    })
+    expect(screen.getByRole('heading', { level: 1, name: '团队成员' })).toBeInTheDocument()
+    await screen.findByText('admin@example.com', undefined, { timeout: 3000 })
     expect(screen.getByText('member@example.com')).toBeInTheDocument()
     expect(screen.getByText('pending@example.com')).toBeInTheDocument()
   })

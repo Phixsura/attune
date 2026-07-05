@@ -51,7 +51,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import { cutoverToSSO, fallbackToHybrid, getAuthMode } from '../api/auth-mode'
+import { authModeQuery, cutoverToSSO, fallbackToHybrid } from '../api/auth-mode'
 import {
   type BreakGlassToken,
   issueBreakGlassToken,
@@ -152,10 +152,7 @@ export function SecurityPage() {
     }
   } | null>(null)
 
-  const { data: authMode } = useQuery({
-    queryKey: ['auth-mode'],
-    queryFn: getAuthMode,
-  })
+  const { data: authMode } = useQuery(authModeQuery())
 
   const { data: tokens, isLoading: tokensLoading } = useQuery({
     queryKey: ['breakglass-tokens'],

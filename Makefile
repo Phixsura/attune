@@ -11,7 +11,7 @@
 
 .PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality test fast-check adversarial-check test-live test-live-list test-integration runtime-smoke release-smoke ci-check
 
-PNPM ?= pnpm
+PNPM ?= corepack pnpm
 FUZZTIME ?= 10s
 
 help: ## List targets.

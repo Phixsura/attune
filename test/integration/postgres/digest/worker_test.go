@@ -288,10 +288,10 @@ func TestDigestWorker_InvalidTimezoneSkips(t *testing.T) {
 	require.True(t, nextRunAt(t, ctx, pool, tenantID).After(now), "cursor advanced to stop hot-looping")
 }
 
-// TestDigestWorker_DefersOnEmbeddingBacklog proves the digest defers while the
+// TestDigestWorker_HoldsOnEmbeddingBacklog proves the digest holds while the
 // embedding queue is backlogged (so themes aren't computed on half-clustered
 // data) within the grace window, then proceeds once grace is exhausted.
-func TestDigestWorker_DefersOnEmbeddingBacklog(t *testing.T) {
+func TestDigestWorker_HoldsOnEmbeddingBacklog(t *testing.T) {
 	ctx := context.Background()
 	pool := testdb.NewPool(t)
 	defer pool.Close()
@@ -314,9 +314,9 @@ func TestDigestWorker_DefersOnEmbeddingBacklog(t *testing.T) {
 	require.NoError(t, err)
 	w := buildWorker(pool, subs, `{"themes":[]}`)
 
-	// Within the grace window → defer: no run, cursor unchanged.
+	// Within the grace window → hold: no run, cursor unchanged.
 	w.ProcessOnce(ctx, now)
-	require.Equal(t, 0, runCount(t, ctx, pool, tenantID), "deferred while backlogged within grace")
+	require.Equal(t, 0, runCount(t, ctx, pool, tenantID), "held while backlogged within grace")
 	require.Equal(t, int32(0), spy.count.Load())
 
 	// Past the 2h grace window → proceed despite the still-pending backlog.

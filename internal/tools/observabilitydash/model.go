@@ -232,6 +232,15 @@ func shiftPanels(dy int, panels ...panel) []panel {
 	return shifted
 }
 
+func shiftPanelIDs(delta int, panels ...panel) []panel {
+	shifted := make([]panel, 0, len(panels))
+	for _, p := range panels {
+		p.ID += delta
+		shifted = append(shifted, p)
+	}
+	return shifted
+}
+
 type threshold struct {
 	Color string
 	Value *float64
@@ -300,6 +309,14 @@ func greenWarnRed(warn, crit float64) []threshold {
 		{Color: "green"},
 		{Color: "orange", Value: fp(warn)},
 		{Color: "red", Value: fp(crit)},
+	}
+}
+
+func redWarnGreen(warn, good float64) []threshold {
+	return []threshold{
+		{Color: "red"},
+		{Color: "orange", Value: fp(warn)},
+		{Color: "green", Value: fp(good)},
 	}
 }
 

@@ -7,6 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	infraMetrics "github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/pkg/subjectkey"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -199,6 +203,24 @@ func TestStartExportCreatesQueuedJob(t *testing.T) {
 	}
 }
 
+func TestStartExportRecordsStartedMetric(t *testing.T) {
+	tenant := "tenant-metrics-" + uuid.NewString()
+	store := ptrext.Of(exportJobStoreStub{
+		createJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:     "job-123",
+			Status: gdprrepo.ExportJobQueued,
+		}),
+	})
+	svc := New(store, nil)
+
+	if _, err := svc.StartExport(context.Background(), tenant, "alice@example.com", auditlogsvc.Actor{Type: "admin", ID: "admin-1"}); err != nil {
+		t.Fatalf("StartExport err = %v", err)
+	}
+	if got := testutil.ToFloat64(infraMetrics.GDPRJobTotal.WithLabelValues(tenant, "export", "started")); got != 1 {
+		t.Fatalf("started metric = %v, want 1", got)
+	}
+}
+
 func TestGetExportJobMapsNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -348,6 +370,37 @@ func TestWorkerProcessNextExportCompletesAndAudits(t *testing.T) {
 	}
 	if audit.events[0].Actor.Type != "admin" {
 		t.Fatalf("audit actor type = %q", audit.events[0].Actor.Type)
+	}
+}
+
+func TestWorkerProcessNextExportRecordsCompletionMetric(t *testing.T) {
+	tenant := "tenant-worker-" + uuid.NewString()
+	store := ptrext.Of(exportJobStoreStub{
+		claimJob: ptrext.Of(gdprrepo.ExportJob{
+			ID:          "job-123",
+			TenantID:    tenant,
+			SubjectKey:  "alice@example.com",
+			SubjectHash: "hash-123",
+			CreatedBy:   "admin-1",
+			CreatedAt:   time.Now().Add(-10 * time.Minute),
+		}),
+	})
+	repo := ptrext.Of(exportRepoStub{
+		exportData: ptrext.Of(gdprrepo.ExportData{
+			SubjectKey:     "alice@example.com",
+			SubjectDisplay: "Alice",
+			GeneratedAt:    time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC),
+			FeedbackRows:   []json.RawMessage{json.RawMessage(`{"id":1}`)},
+			Counts:         gdprrepo.Counts{FeedbackCount: 1},
+		}),
+	})
+	worker := NewWorker(repo, store, nil, WithWorkerExportTTL(2*time.Hour))
+
+	if err := worker.processNextExport(context.Background()); err != nil {
+		t.Fatalf("processNextExport err = %v", err)
+	}
+	if got := testutil.ToFloat64(infraMetrics.GDPRJobTotal.WithLabelValues(tenant, "export", "completed")); got != 1 {
+		t.Fatalf("completed metric = %v, want 1", got)
 	}
 }
 

@@ -31,13 +31,13 @@ var IngestTotal = prometheus.NewCounterVec(
 // EnrichDuration tracks AI enrichment wall time. label_mode ∈
 // {freeform, constrained}; result ∈ {ok, llm_err, parse_err,
 // other_err, db_err}. Use the histogram's
-// attune_enrich_duration_seconds_bucket for p95 SLO tracking
-// (target p95 ≤ 30s).
+// attune_enrich_duration_seconds_bucket for p95 and 5s SLO tracking
+// (target p95 ≤ 30s; the 5s bucket supports the latency SLO).
 var EnrichDuration = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Name:    "attune_enrich_duration_seconds",
 		Help:    "End-to-end AI enrichment latency per row.",
-		Buckets: prometheus.ExponentialBuckets(0.5, 2, 8), // 0.5s..64s
+		Buckets: []float64{0.5, 1, 2, 4, 5, 8, 16, 32, 64},
 	},
 	[]string{"tenant", "dims_mode", "result"},
 )
@@ -748,6 +748,46 @@ var APIKeyUsageTotal = prometheus.NewCounterVec(
 	[]string{"tenant", "key_prefix"},
 )
 
+// MCPToolCallsTotal counts MCP tool-call outcomes by tenant and tool.
+// result ∈ {ok, client_error, denied, rate_limited, internal_error}.
+var MCPToolCallsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_mcp_tool_calls_total",
+		Help: "MCP tool-call outcomes by tenant, tool, and result.",
+	},
+	[]string{"tenant", "tool", "result"},
+)
+
+// MCPToolLatency records end-to-end MCP tool-call latency.
+var MCPToolLatency = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_mcp_tool_latency_seconds",
+		Help:    "MCP tool-call latency by tenant and tool.",
+		Buckets: prometheus.ExponentialBuckets(0.05, 2, 9), // 50ms..12.8s
+	},
+	[]string{"tenant", "tool"},
+)
+
+// GDPRJobTotal counts GDPR job lifecycle events by request type and result.
+// result ∈ {started, completed, failed, cancelled, revoked}.
+var GDPRJobTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_gdpr_job_total",
+		Help: "GDPR job lifecycle events by tenant, request type, and result.",
+	},
+	[]string{"tenant", "request_type", "result"},
+)
+
+// GDPRJobDuration records end-to-end GDPR job duration.
+var GDPRJobDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_gdpr_job_duration_seconds",
+		Help:    "GDPR job duration by tenant and request type.",
+		Buckets: prometheus.ExponentialBuckets(1, 2, 18), // 1s..36h
+	},
+	[]string{"tenant", "request_type"},
+)
+
 // AuditRowsWrittenTotal counts successful immutable audit-log writes by action.
 var AuditRowsWrittenTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -1055,6 +1095,10 @@ var allMetrics = []prometheus.Collector{
 	APIKeyIPDeniedTotal,
 	APIKeyRateLimitedTotal,
 	APIKeyUsageTotal,
+	MCPToolCallsTotal,
+	MCPToolLatency,
+	GDPRJobTotal,
+	GDPRJobDuration,
 	AuditRowsWrittenTotal,
 	AuditRowsPrunedTotal,
 	AuditPruneDurationSeconds,
@@ -1154,6 +1198,10 @@ func RegisteredMetricNames() []string {
 		"attune_apikey_ip_denied_total",
 		"attune_apikey_rate_limited_total",
 		"attune_apikey_usage_total",
+		"attune_mcp_tool_calls_total",
+		"attune_mcp_tool_latency_seconds",
+		"attune_gdpr_job_total",
+		"attune_gdpr_job_duration_seconds",
 		"attune_audit_rows_written_total",
 		"attune_audit_rows_pruned_total",
 		"attune_audit_prune_duration_seconds",

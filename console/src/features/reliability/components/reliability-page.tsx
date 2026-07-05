@@ -1,0 +1,541 @@
+import { Link } from '@tanstack/react-router'
+import type { TFunction } from 'i18next'
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  Bot,
+  FileDown,
+  FileText,
+  KeyRound,
+  type LucideIcon,
+  PackageX,
+  Radar,
+  RefreshCw,
+  Scale,
+  ShieldAlert,
+  ShieldCheck,
+} from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { PageHero, PageHeroMetric } from '@/components/page-hero'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useDocumentTitle } from '@/hooks/use-document-title'
+import { cn } from '@/lib/utils'
+import { type ReliabilityCatalogEntry, reliabilityCatalog } from '../reliability-catalog'
+import { replayWorksheetDownloadHref, replayWorksheetDownloadName } from '../replay-worksheet'
+import { ReplayWorksheetCard } from './replay-worksheet-card'
+
+export type Tone = 'default' | 'active' | 'urgent'
+
+export type ReliabilityStatus = 'pass' | 'warn' | 'fail' | 'skipped'
+
+export type ReliabilityMetric = {
+  tone: Tone
+  heroTone?: Tone
+  value: string
+  hint: string
+}
+
+export type ReliabilityReadinessMetric = ReliabilityMetric & {
+  status?: ReliabilityStatus
+}
+
+export interface ReliabilityPageProps {
+  tenantName: string
+  dashboardHref: string
+  isRefreshing: boolean
+  onRefreshAll: () => void
+  failedQueries: Array<{ label: string; message: string }>
+  readiness: ReliabilityReadinessMetric
+  authMode: ReliabilityMetric
+  apiKeys: ReliabilityMetric
+  mcpClients: ReliabilityMetric
+  gdpr: ReliabilityMetric
+  deadDeliveries: ReliabilityMetric
+}
+
+const TONE_CLASS: Record<Tone, { box: string; icon: string }> = {
+  default: {
+    box: 'border-border/60 bg-background/88 shadow-[0_18px_38px_-34px_rgba(15,23,42,0.18)]',
+    icon: 'text-slate-500',
+  },
+  active: {
+    box: 'border-emerald-300/55 bg-emerald-50/85 shadow-[0_18px_38px_-34px_rgba(16,185,129,0.2)]',
+    icon: 'text-emerald-600 dark:text-emerald-400',
+  },
+  urgent: {
+    box: 'border-amber-300/55 bg-amber-50/85 shadow-[0_18px_38px_-34px_rgba(245,158,11,0.2)]',
+    icon: 'text-amber-600 dark:text-amber-400',
+  },
+}
+
+function formatObjective(objective: number) {
+  return `${(objective * 100).toFixed(1)}%`
+}
+
+function scopeLabel(scope: ReliabilityCatalogEntry['scope'], t: TFunction) {
+  switch (scope) {
+    case 'tenant':
+      return t('reliability.catalog.scope.tenant', '按 tenant')
+    case 'destination_type':
+      return t('reliability.catalog.scope.destination_type', '按 destination_type')
+    default:
+      return t('reliability.catalog.scope.global', '全局')
+  }
+}
+
+function runbookHrefForAlert(alertName: string) {
+  return `https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#${alertName.toLowerCase()}`
+}
+
+function replayReportHref() {
+  return 'https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-replay-template.md'
+}
+
+function policyReferenceHref() {
+  return 'https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-policy-reference.md'
+}
+
+function openSloBundleHref() {
+  return 'https://github.com/Phixsura/attune/blob/main/observability/openslo/attune-slo.yaml'
+}
+
+function ReliabilityStat({
+  label,
+  value,
+  hint,
+  tone = 'default',
+  icon: Icon,
+}: {
+  label: string
+  value: string
+  hint?: string
+  tone?: Tone
+  icon: LucideIcon
+}) {
+  const styles = TONE_CLASS[tone]
+  return (
+    <div className={cn('rounded-[1.15rem] border px-4 py-3.5', styles.box)}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+            {label}
+          </div>
+          <div className="mt-1 text-[1.45rem] font-semibold tracking-tight text-foreground [font-variant-numeric:tabular-nums]">
+            {value}
+          </div>
+        </div>
+        <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', styles.icon)} strokeWidth={1.8} />
+      </div>
+      {hint ? <div className="mt-1.5 text-xs leading-5 text-muted-foreground">{hint}</div> : null}
+    </div>
+  )
+}
+
+function QuickLink({
+  title,
+  description,
+  icon: Icon,
+  to,
+  href,
+  download,
+}: {
+  title: string
+  description: string
+  icon: LucideIcon
+  to?: string
+  href?: string
+  download?: string
+}) {
+  const className =
+    'group flex items-start gap-3 rounded-[1rem] border border-border/60 bg-background/85 px-4 py-3.5 transition-all hover:-translate-y-0.5 hover:border-primary/20 hover:bg-background hover:shadow-[0_18px_40px_-36px_rgba(15,23,42,0.18)]'
+  const inner = (
+    <>
+      <div className="mt-0.5 rounded-lg border border-border/60 bg-muted/25 p-2 text-foreground/80">
+        <Icon className="h-4 w-4" strokeWidth={1.8} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold text-foreground">{title}</div>
+          <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-foreground" />
+        </div>
+        <div className="mt-1 text-sm leading-6 text-muted-foreground">{description}</div>
+      </div>
+    </>
+  )
+  if (href) {
+    return (
+      <a
+        href={href}
+        target={download ? undefined : '_blank'}
+        rel={download ? undefined : 'noreferrer'}
+        download={download}
+        className={className}
+      >
+        {inner}
+      </a>
+    )
+  }
+  return (
+    <Link to={to ?? '/'} className={className}>
+      {inner}
+    </Link>
+  )
+}
+
+export function ReliabilityPage({
+  tenantName,
+  dashboardHref,
+  isRefreshing,
+  onRefreshAll,
+  failedQueries,
+  readiness,
+  authMode,
+  apiKeys,
+  mcpClients,
+  gdpr,
+  deadDeliveries,
+}: ReliabilityPageProps) {
+  const { t } = useTranslation()
+  useDocumentTitle(t('reliability.title', 'Reliability'))
+
+  const readinessIcon = readiness.status === 'fail' ? ShieldAlert : ShieldCheck
+  const replayWorksheetHref = replayWorksheetDownloadHref(tenantName, dashboardHref)
+
+  return (
+    <div className="space-y-6">
+      <PageHero
+        eyebrow={t('shell.groups.administration')}
+        title={t('reliability.title', 'Reliability')}
+        subtitle={t('reliability.subtitle', { tenant: tenantName })}
+        actions={
+          <>
+            <Button variant="outline" size="sm" disabled={isRefreshing} onClick={onRefreshAll}>
+              <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', isRefreshing && 'animate-spin')} />
+              {t('reliability.refresh', '刷新')}
+            </Button>
+            <Button asChild size="sm" variant="default">
+              <a href={dashboardHref} target="_blank" rel="noreferrer">
+                <Radar className="mr-1.5 h-3.5 w-3.5" />
+                {t('reliability.open_dashboard', '打开 tenant impact dashboard')}
+              </a>
+            </Button>
+          </>
+        }
+        metrics={
+          <>
+            <PageHeroMetric
+              label={t('reliability.metrics.readiness', '就绪')}
+              value={readiness.value}
+              hint={readiness.hint}
+              tone={readiness.heroTone ?? readiness.tone}
+            />
+            <PageHeroMetric
+              label={t('reliability.metrics.auth', '认证')}
+              value={authMode.value}
+              hint={authMode.hint}
+              tone={authMode.heroTone ?? authMode.tone}
+            />
+            <PageHeroMetric
+              label={t('reliability.metrics.api_keys', 'API key')}
+              value={apiKeys.value}
+              hint={apiKeys.hint}
+              tone={apiKeys.heroTone ?? apiKeys.tone}
+            />
+            <PageHeroMetric
+              label={t('reliability.metrics.mcp_clients', 'MCP 客户端')}
+              value={mcpClients.value}
+              hint={mcpClients.hint}
+              tone={mcpClients.heroTone ?? mcpClients.tone}
+            />
+            <PageHeroMetric
+              label={t('reliability.metrics.gdpr', 'GDPR')}
+              value={gdpr.value}
+              hint={gdpr.hint}
+              tone={gdpr.heroTone ?? gdpr.tone}
+            />
+            <PageHeroMetric
+              label={t('reliability.metrics.dead_deliveries', '死信投递')}
+              value={deadDeliveries.value}
+              hint={deadDeliveries.hint}
+              tone={deadDeliveries.heroTone ?? deadDeliveries.tone}
+            />
+          </>
+        }
+      />
+
+      <Card className="border-border/60 shadow-none">
+        <CardHeader className="space-y-1">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle className="text-base">
+              {t('reliability.catalog.title', 'SLO 目录')}
+            </CardTitle>
+            <div className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+              {t('reliability.catalog.count', '{{count}} 个 SLO', {
+                count: reliabilityCatalog.length,
+              })}
+            </div>
+          </div>
+          <CardDescription>
+            {t(
+              'reliability.catalog.description',
+              '驱动 Grafana 告警、tenant 排名、历史 burn、剩余预算、dependency triage 和 routing metadata 的单一来源。',
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {reliabilityCatalog.map((slo) => (
+              <li
+                key={slo.key}
+                className="rounded-[1rem] border border-border/60 bg-background/85 p-4 shadow-[0_18px_40px_-36px_rgba(15,23,42,0.18)]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-foreground">{slo.title}</div>
+                    <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {slo.owner} · {slo.escalation} · {scopeLabel(slo.scope, t)}
+                    </div>
+                  </div>
+                  <div className="rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-[11px] font-semibold text-foreground/80">
+                    {formatObjective(slo.objective)}
+                  </div>
+                </div>
+                <div className="mt-3 text-sm leading-6 text-muted-foreground">
+                  {slo.overviewDescription}
+                </div>
+                <div className="mt-3 rounded-[0.9rem] border border-border/60 bg-muted/15 px-3 py-2.5">
+                  <div className="text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+                    {t('reliability.catalog.policy_title', '推荐策略')}
+                  </div>
+                  <div className="mt-1 text-sm leading-6 text-foreground">{slo.policySummary}</div>
+                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {slo.policyNote}
+                  </div>
+                </div>
+                <div className="mt-2 rounded-[0.9rem] border border-amber-300/45 bg-amber-50/75 px-3 py-2.5 dark:border-amber-400/20 dark:bg-amber-500/[0.08]">
+                  <div className="text-[11px] font-semibold tracking-[0.14em] text-amber-800 uppercase dark:text-amber-200">
+                    {t('reliability.catalog.budget_exception_title', '预算例外')}
+                  </div>
+                  <div className="mt-1 text-sm leading-6 text-foreground">
+                    {slo.budgetExceptionPolicy}
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {slo.budgetExceptionNote}
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap gap-2 text-[11px] font-medium text-muted-foreground">
+                    <span className="rounded-full border border-border/60 bg-muted/20 px-2 py-1">
+                      {t('reliability.catalog.alert_label', '告警标签')}: {slo.alertLabel}
+                    </span>
+                    <span className="rounded-full border border-border/60 bg-muted/20 px-2 py-1">
+                      {slo.recordedRatioBase}
+                    </span>
+                    <span className="rounded-full border border-border/60 bg-muted/20 px-2 py-1">
+                      {slo.includeInTenantRank
+                        ? t('reliability.catalog.tenant_ranked', '参与 tenant 排名')
+                        : t('reliability.catalog.global_only', '仅全局')}
+                    </span>
+                  </div>
+                  <a
+                    href={runbookHrefForAlert(slo.alertName)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/10"
+                  >
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                    {t('reliability.catalog.runbook', '打开 runbook')}
+                  </a>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+
+      {failedQueries.length > 0 && (
+        <Card className="border-amber-600/20 bg-amber-600/[0.04] shadow-none dark:border-amber-500/20 dark:bg-amber-500/[0.04]">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
+              <AlertTriangle className="h-4 w-4" />
+              {t('reliability.error_title', '部分可靠性数据加载失败')}
+            </CardTitle>
+            <CardDescription className="text-amber-950/70 dark:text-amber-100/70">
+              {t('reliability.error_body', '你可以先查看已加载的卡片，再刷新重试。')}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {failedQueries.map((failure) => (
+              <div
+                key={failure.label}
+                className="rounded-[0.9rem] border border-amber-500/15 bg-background/75 px-3 py-2.5 text-sm"
+              >
+                <div className="font-medium text-foreground">{failure.label}</div>
+                <div className="mt-1 text-muted-foreground">{failure.message}</div>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" onClick={onRefreshAll}>
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              {t('reliability.retry_all', '重试全部')}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)]">
+        <Card className="border-border/60 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">
+              {t('reliability.sections.snapshot', '运行快照')}
+            </CardTitle>
+            <CardDescription>
+              {t(
+                'reliability.sections.snapshot_description',
+                '把当前控制面、认证、密钥、MCP、GDPR 和投递压力放在一张卡片里。',
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            <ReliabilityStat
+              label={t('reliability.links.system_readiness', '系统就绪')}
+              value={readiness.value}
+              hint={readiness.hint}
+              tone={readiness.tone}
+              icon={readinessIcon}
+            />
+            <ReliabilityStat
+              label={t('reliability.links.security', '安全设置')}
+              value={authMode.value}
+              hint={authMode.hint}
+              tone={authMode.tone}
+              icon={ShieldCheck}
+            />
+            <ReliabilityStat
+              label={t('reliability.links.api_keys', 'API key')}
+              value={apiKeys.value}
+              hint={apiKeys.hint}
+              tone={apiKeys.tone}
+              icon={KeyRound}
+            />
+            <ReliabilityStat
+              label={t('reliability.links.mcp_clients', 'MCP 客户端')}
+              value={mcpClients.value}
+              hint={mcpClients.hint}
+              tone={mcpClients.tone}
+              icon={Bot}
+            />
+            <ReliabilityStat
+              label={t('reliability.links.gdpr', 'GDPR')}
+              value={gdpr.value}
+              hint={gdpr.hint}
+              tone={gdpr.tone}
+              icon={Scale}
+            />
+            <ReliabilityStat
+              label={t('reliability.links.dead_deliveries', '死信投递')}
+              value={deadDeliveries.value}
+              hint={deadDeliveries.hint}
+              tone={deadDeliveries.tone}
+              icon={PackageX}
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/60 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">
+              {t('reliability.sections.shortcuts', '快速入口')}
+            </CardTitle>
+            <CardDescription>
+              {t('reliability.sections.shortcuts_description', '跳到对应页面做深挖。')}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <QuickLink
+              title={t('reliability.links.system_readiness', '系统就绪')}
+              description={t(
+                'reliability.links.system_readiness_desc',
+                '配置、数据库、迁移、加密和 worker 检查。',
+              )}
+              icon={Radar}
+              to="/administration/system-readiness"
+            />
+            <QuickLink
+              title={t('reliability.links.security', '安全设置')}
+              description={t('reliability.links.security_desc', '认证模式和 break-glass token。')}
+              icon={ShieldCheck}
+              to="/administration/security"
+            />
+            <QuickLink
+              title={t('reliability.links.api_keys', 'API key')}
+              description={t('reliability.links.api_keys_desc', '密钥库存、过期和使用情况。')}
+              icon={KeyRound}
+              to="/integrations/api-keys"
+            />
+            <QuickLink
+              title={t('reliability.links.mcp_clients', 'MCP 客户端')}
+              description={t('reliability.links.mcp_clients_desc', 'OAuth 客户端和工具策略。')}
+              icon={Bot}
+              to="/mcp-clients"
+            />
+            <QuickLink
+              title={t('reliability.links.gdpr', 'GDPR')}
+              description={t('reliability.links.gdpr_desc', '请求队列、导出和删除计划。')}
+              icon={Scale}
+              to="/administration/gdpr"
+            />
+            <QuickLink
+              title={t('reliability.links.dead_deliveries', '死信投递')}
+              description={t(
+                'reliability.links.dead_deliveries_desc',
+                '失败类型、重试状态和 in-flight 任务。',
+              )}
+              icon={PackageX}
+              to="/administration/dead-deliveries"
+            />
+            <QuickLink
+              title={t('reliability.links.policy_reference', '策略参考')}
+              description={t(
+                'reliability.links.policy_reference_desc',
+                '每个 SLO 的 objective、burn window 和 traffic guard 起点。',
+              )}
+              icon={Scale}
+              href={policyReferenceHref()}
+            />
+            <QuickLink
+              title={t('reliability.links.openslo_bundle', 'OpenSLO 导出')}
+              description={t(
+                'reliability.links.openslo_bundle_desc',
+                '可携带的 SLO bundle，适合导入/导出验证。',
+              )}
+              icon={Scale}
+              href={openSloBundleHref()}
+            />
+            <QuickLink
+              title={t('reliability.links.replay_report', 'Replay report')}
+              description={t(
+                'reliability.links.replay_report_desc',
+                'Historical outage comparison matrix, replay worksheet, and backfill template.',
+              )}
+              icon={FileText}
+              href={replayReportHref()}
+            />
+            <QuickLink
+              title={t('reliability.links.replay_download', '下载 replay 工作表')}
+              description={t(
+                'reliability.links.replay_download_desc',
+                '预填当前 tenant 和 dashboard 上下文的 markdown 文件。',
+              )}
+              icon={FileDown}
+              href={replayWorksheetHref}
+              download={replayWorksheetDownloadName}
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      <ReplayWorksheetCard tenantName={tenantName} dashboardHref={dashboardHref} />
+    </div>
+  )
+}

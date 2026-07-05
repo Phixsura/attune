@@ -107,14 +107,19 @@ func (s *Service) Export(ctx context.Context, tenantID, rawSubjectKey string, ac
 	if subjectKey == "" {
 		return nil, ErrInvalidSubjectKey
 	}
+	startedAt := time.Now()
+	recordGDPRJobStart(tenantID, gdprRequestTypeExport)
 	data, err := s.repo.Export(ctx, tenantID, subjectKey)
 	if err != nil {
+		recordGDPRJobTerminal(tenantID, gdprRequestTypeExport, gdprJobResultFailed, startedAt)
 		return nil, translateRepoError(err)
 	}
 	archive, err := buildZIP(tenantID, data)
 	if err != nil {
+		recordGDPRJobTerminal(tenantID, gdprRequestTypeExport, gdprJobResultFailed, startedAt)
 		return nil, fmt.Errorf("build export zip: %w", err)
 	}
+	recordGDPRJobTerminal(tenantID, gdprRequestTypeExport, gdprJobResultCompleted, startedAt)
 	if err := s.record(ctx, tenantID, subjectKey, actor, "gdpr.export", "Exported GDPR bundle for subject", nil, map[string]any{
 		"subject_hash": subjectkey.Hash(tenantID, subjectKey),
 		"counts":       auditCounts(data.Counts),
@@ -134,12 +139,16 @@ func (s *Service) Delete(ctx context.Context, tenantID, rawSubjectKey string, ac
 		return nil, ErrInvalidSubjectKey
 	}
 	subjectHash := subjectkey.Hash(tenantID, subjectKey)
+	startedAt := time.Now()
+	recordGDPRJobStart(tenantID, gdprRequestTypeDelete)
 	store, ok := s.repo.(requestStore)
 	if !ok {
 		result, err := s.repo.Delete(ctx, tenantID, subjectKey)
 		if err != nil {
+			recordGDPRJobTerminal(tenantID, gdprRequestTypeDelete, gdprJobResultFailed, startedAt)
 			return nil, translateRepoError(err)
 		}
+		recordGDPRJobTerminal(tenantID, gdprRequestTypeDelete, gdprJobResultCompleted, startedAt)
 		if err := s.RecordDeleteCompletion(ctx, tenantID, subjectKey, actor, result); err != nil {
 			return nil, err
 		}
@@ -148,6 +157,7 @@ func (s *Service) Delete(ctx context.Context, tenantID, rawSubjectKey string, ac
 	executeAfter := time.Now().UTC().Add(s.deleteGraceWindow)
 	result, err := store.CreateDeleteRequest(ctx, tenantID, subjectKey, subjectHash, actor.Type, actor.ID, executeAfter)
 	if err != nil {
+		recordGDPRJobTerminal(tenantID, gdprRequestTypeDelete, gdprJobResultFailed, startedAt)
 		return nil, translateRepoError(err)
 	}
 	if err := s.record(ctx, tenantID, subjectKey, actor, "gdpr.delete.requested", "Scheduled GDPR subject delete", nil, map[string]any{
@@ -156,6 +166,7 @@ func (s *Service) Delete(ctx context.Context, tenantID, rawSubjectKey string, ac
 		"counts":        auditCounts(result.Counts),
 		"execute_after": executeAfter.Format(time.RFC3339),
 	}); err != nil {
+		recordGDPRJobTerminal(tenantID, gdprRequestTypeDelete, gdprJobResultFailed, startedAt)
 		return nil, err
 	}
 	result.Status = gdprrepo.RequestStatusScheduled
@@ -172,6 +183,7 @@ func (s *Service) CancelDeleteRequest(ctx context.Context, tenantID, requestID s
 	if err != nil {
 		return err
 	}
+	recordGDPRJobTerminal(tenantID, gdprRequestTypeDelete, gdprJobResultCancelled, req.CreatedAt)
 	if err := s.record(ctx, tenantID, req.SubjectKey, actor, "gdpr.delete.cancelled", "Cancelled scheduled GDPR subject delete", nil, map[string]any{
 		"request_id":   req.ID,
 		"subject_hash": req.SubjectHash,

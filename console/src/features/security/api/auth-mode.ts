@@ -1,3 +1,4 @@
+import { queryOptions } from '@tanstack/react-query'
 import { api, getCsrfToken } from '@/lib/api-client'
 
 export interface AuthModeResponse {
@@ -25,6 +26,14 @@ export interface FallbackResponse {
 
 export async function getAuthMode(): Promise<AuthModeResponse> {
   return api<AuthModeResponse>('/fb/v1/console/auth/sso/mode')
+}
+
+export function authModeQuery() {
+  return queryOptions({
+    queryKey: ['auth-mode'] as const,
+    queryFn: getAuthMode,
+    staleTime: 30_000,
+  })
 }
 
 export async function cutoverToSSO(skipBreakglassCheck = false): Promise<CutoverResponse> {

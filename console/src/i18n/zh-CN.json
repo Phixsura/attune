@@ -133,7 +133,68 @@
     "outbox_dead": "死信投递",
     "mcp_clients": "MCP 客户端",
     "system_readiness": "系统就绪",
+    "reliability": "可靠性总览",
     "security": "安全设置"
+  },
+  "reliability": {
+    "title": "可靠性总览",
+    "subtitle": "把系统就绪、认证模式、API key、MCP 客户端、GDPR 压力和死信投递放在同一页。当前 tenant：{{tenant}}。",
+    "hints": {
+      "system_readiness": "{{passed}} 个通过 · {{warn}} 个告警 · {{fail}} 个失败 · 用时 {{elapsed}}。",
+      "api_keys": "{{active}} 个活跃 · {{inactive}} 个非活跃，共 {{total}} 个。",
+      "mcp_clients": "{{active}} 个活跃 · {{revoked}} 个已撤销，共 {{total}} 个。",
+      "gdpr": "{{queued}} 个排队 · {{active}} 个处理中 · {{ready}} 个已就绪导出 · {{scheduled}} 个待执行删除。",
+      "gdpr_expiry": "下一次导出过期：{{value}}。",
+      "dead_deliveries": "{{retryable}} 个可重试 · {{inflight}} 个处理中。"
+    },
+    "catalog": {
+      "title": "SLO 目录",
+      "description": "驱动 Grafana 告警、tenant 排名、历史 burn、剩余预算、dependency triage 和 routing metadata 的单一来源。",
+      "count": "{{count}} 个 SLO",
+      "alert_label": "告警标签",
+      "escalation": "升级路径",
+      "runbook": "打开 runbook",
+      "policy_title": "推荐策略",
+      "budget_exception_title": "预算例外",
+      "tenant_ranked": "参与 tenant 排名",
+      "global_only": "仅全局",
+      "scope": {
+        "tenant": "按 tenant",
+        "destination_type": "按 destination_type",
+        "global": "全局"
+      }
+    },
+    "links": {
+      "api_keys": "API 密钥",
+      "api_keys_desc": "密钥库存、过期和使用情况。",
+      "mcp_clients": "MCP 客户端",
+      "mcp_clients_desc": "OAuth 客户端和工具策略。",
+      "gdpr": "GDPR",
+      "gdpr_desc": "请求队列、导出和删除计划。",
+      "dead_deliveries": "死信投递",
+      "dead_deliveries_desc": "失败类型、重试状态和 in-flight 任务。",
+      "policy_reference": "策略参考",
+      "policy_reference_desc": "每个 SLO 的 objective、burn window、traffic guard 和预算例外起点。",
+      "openslo_bundle": "OpenSLO 导出",
+      "openslo_bundle_desc": "可携带的 SLO bundle，适合导入/导出验证。",
+      "replay_report": "回放报告",
+      "replay_report_desc": "历史故障比较矩阵、回放工作表和回填模板。",
+      "replay_download": "下载 replay 工作表",
+      "replay_download_desc": "预填当前 tenant 和 dashboard 上下文的 markdown 文件。"
+    },
+    "replay_workspace": {
+      "title": "Replay 工作区",
+      "description": "直接复制或下载当前 tenant 的 replay 工作表，并保留完整的上下文占位符。",
+      "copy": "复制工作表",
+      "download": "下载 markdown",
+      "tenant": "当前 tenant",
+      "dashboard": "Dashboard",
+      "mode": "导出模式",
+      "mode_value": "可复制 / 可下载 / 可审阅",
+      "preview": "Markdown 预览",
+      "preview_hint": "这就是下载文件的完整内容",
+      "preview_label": "Replay 工作表 Markdown 预览"
+    }
   },
   "shell": {
     "primary_nav": "主导航",
