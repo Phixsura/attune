@@ -6,15 +6,17 @@ package domain
 type Role string
 
 const (
-	RoleAdmin  Role = "admin"  // Full tenant management
-	RoleMember Role = "member" // Standard operations
-	RoleViewer Role = "viewer" // Read-only access
+	RoleAdmin          Role = "admin"           // Full tenant management
+	RoleDelegatedAdmin Role = "delegated_admin" // Operational tenant management
+	RoleMember         Role = "member"          // Standard operations
+	RoleViewer         Role = "viewer"          // Read-only access
 )
 
 var roleHierarchy = map[Role]int{
-	RoleViewer: 0,
-	RoleMember: 1,
-	RoleAdmin:  2,
+	RoleViewer:         0,
+	RoleMember:         1,
+	RoleDelegatedAdmin: 2,
+	RoleAdmin:          3,
 }
 
 // AtLeast checks if this role meets the minimum requirement.

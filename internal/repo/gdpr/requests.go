@@ -85,7 +85,7 @@ type OperationsSummary struct {
 }
 
 const requestCols = `id, tenant_id, request_type, status, subject_key, subject_hash, subject_display,
-	feedback_count, tag_assignment_count, feedback_audit_count, llm_audit_count,
+	feedback_count, tag_assignment_count, feedback_audit_count, llm_audit_count, outbox_count,
 	archive_filename, COALESCE(error, ''), created_by_type, created_by, created_at, started_at, completed_at, expires_at, downloaded_at, execute_after, cancelled_at, revoked_at`
 
 func scanRequest(row pgx.Row) (*Request, error) {
@@ -102,6 +102,7 @@ func scanRequest(row pgx.Row) (*Request, error) {
 		&req.Counts.TagAssignmentCount,
 		&req.Counts.FeedbackAuditCount,
 		&req.Counts.LLMAuditCount,
+		&req.Counts.OutboxCount,
 		&req.ArchiveFilename,
 		&req.Error,
 		&req.CreatedByType,
@@ -251,11 +252,11 @@ func (r *Repo) CreateDeleteRequest(
 		ctx, `
 		INSERT INTO gdpr_requests (
 			id, tenant_id, request_type, status, subject_key, subject_hash, subject_display,
-			feedback_count, tag_assignment_count, feedback_audit_count, llm_audit_count,
+			feedback_count, tag_assignment_count, feedback_audit_count, llm_audit_count, outbox_count,
 			created_by_type, created_by, execute_after
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		requestID, tenantID, RequestTypeDelete, RequestStatusScheduled, subjectKey, subjectHash, info.subjectDisplay,
-		counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
+		counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount, counts.OutboxCount,
 		createdByType, createdBy, executeAfter.UTC(),
 	); err != nil {
 		return nil, fmt.Errorf("insert gdpr delete request: %w", err)
@@ -350,10 +351,11 @@ func (r *Repo) CompleteDeleteRequest(ctx context.Context, requestID string, coun
 		    tag_assignment_count = $3,
 		    feedback_audit_count = $4,
 		    llm_audit_count = $5,
+		    outbox_count = $6,
 		    completed_at = NOW(),
 		    error = ''
 		WHERE id = $1 AND request_type = 'delete'`,
-		requestID, counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
+		requestID, counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount, counts.OutboxCount,
 	)
 	if err != nil {
 		return fmt.Errorf("complete gdpr delete request: %w", err)

@@ -10,6 +10,8 @@ interface RoleBadgeProps {
 const ROLE_STYLES: Record<Role, string> = {
   admin:
     'bg-red-50 text-red-700 border-red-200 dark:bg-red-500/20 dark:text-red-300 dark:border-red-800',
+  delegated_admin:
+    'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-800',
   member:
     'bg-blue-500/10 text-blue-600 border-blue-200 dark:bg-blue-500/20 dark:text-blue-400 dark:border-blue-800',
   viewer:

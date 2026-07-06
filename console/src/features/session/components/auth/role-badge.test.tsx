@@ -11,6 +11,11 @@ describe('RoleBadge', () => {
     expect(screen.getByText('管理员')).toBeInTheDocument()
   })
 
+  it('renders delegated admin role with correct text', () => {
+    renderWithProviders(<RoleBadge role="delegated_admin" />)
+    expect(screen.getByText('委派管理员')).toBeInTheDocument()
+  })
+
   it('renders member role with correct text', () => {
     renderWithProviders(<RoleBadge role="member" />)
     expect(screen.getByText('成员')).toBeInTheDocument()

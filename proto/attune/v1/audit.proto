@@ -43,6 +43,42 @@ service AuditLogService {
       additional_bindings {get: "/fb/v1/console/audit-log/evidence/{job_id}/download"}
     };
   }
+  rpc ListSavedAuditLogViews(ListSavedAuditLogViewsRequest)
+      returns (ListSavedAuditLogViewsResponse) {
+    option (google.api.http) = {
+      get: "/v1/audit-log/views"
+      additional_bindings {get: "/fb/v1/console/audit-log/views"}
+    };
+  }
+  rpc CreateSavedAuditLogView(CreateSavedAuditLogViewRequest)
+      returns (SavedAuditLogViewResponse) {
+    option (google.api.http) = {
+      post: "/v1/audit-log/views"
+      body: "*"
+      additional_bindings {
+        post: "/fb/v1/console/audit-log/views"
+        body: "*"
+      }
+    };
+  }
+  rpc UpdateSavedAuditLogView(UpdateSavedAuditLogViewRequest)
+      returns (SavedAuditLogViewResponse) {
+    option (google.api.http) = {
+      put: "/v1/audit-log/views/{id}"
+      body: "*"
+      additional_bindings {
+        put: "/fb/v1/console/audit-log/views/{id}"
+        body: "*"
+      }
+    };
+  }
+  rpc DeleteSavedAuditLogView(DeleteSavedAuditLogViewRequest)
+      returns (DeleteSavedAuditLogViewResponse) {
+    option (google.api.http) = {
+      delete: "/v1/audit-log/views/{id}"
+      additional_bindings {delete: "/fb/v1/console/audit-log/views/{id}"}
+    };
+  }
 }
 
 message AuditLogEntry {
@@ -128,3 +164,50 @@ message GetAuditEvidenceExportResponse {
 message DownloadAuditEvidenceExportRequest {
   string job_id = 1;
 }
+
+message AuditLogViewState {
+  repeated string actions = 1;
+  string actor_type = 2;
+  string actor_id = 3;
+  string target_type = 4;
+  string target_id = 5;
+  string from = 6;
+  string to = 7;
+  string local_query = 8;
+  optional string inspected_entry_id = 9;
+}
+
+message SavedAuditLogView {
+  string id = 1;
+  string name = 2;
+  AuditLogViewState state = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+message ListSavedAuditLogViewsRequest {}
+
+message ListSavedAuditLogViewsResponse {
+  repeated SavedAuditLogView items = 1;
+}
+
+message CreateSavedAuditLogViewRequest {
+  string name = 1;
+  AuditLogViewState state = 2;
+}
+
+message UpdateSavedAuditLogViewRequest {
+  string id = 1;
+  string name = 2;
+  AuditLogViewState state = 3;
+}
+
+message SavedAuditLogViewResponse {
+  SavedAuditLogView view = 1;
+}
+
+message DeleteSavedAuditLogViewRequest {
+  string id = 1;
+}
+
+message DeleteSavedAuditLogViewResponse {}

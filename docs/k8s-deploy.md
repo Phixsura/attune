@@ -148,6 +148,8 @@ kubectl -n attune exec deploy/attune -- \
 Create a private `config.yaml` with your external database DSN and secrets:
 
 ```yaml
+profile: production
+
 port: 8090
 
 database:
@@ -192,8 +194,23 @@ rate_limit:
   burst: 300
   disabled: false
 
+security:
+  allow_loopback_egress: false
+  allow_private_egress: false
+  trusted_proxy_hops: 1
+
 custom_webhooks: []
 ```
+
+Keep the Helm chart `profile: production` in your production values file. The
+chart now renders that profile into the runtime `config.yaml`, so the Go
+startup path enforces the same production safety contract. If your ingress or
+reverse proxy terminates TLS, make sure it also forwards
+`X-Forwarded-Proto` and set `security.trusted_proxy_hops` to the number of
+trusted proxy hops in front of attune.
+
+When `config.render.observability.environment` is left empty, the chart uses the
+chart `profile` for the rendered runtime `observability.environment` value.
 
 Use the complete DSN required by your database in this private file. If that DSN
 contains a password, keep it only in the Secret generated from `config.yaml`;

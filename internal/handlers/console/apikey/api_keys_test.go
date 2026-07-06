@@ -114,6 +114,14 @@ func (f *fakeAPIKeysService) ListServiceAccounts(_ context.Context, _ string) ([
 	return nil, nil
 }
 
+func (f *fakeAPIKeysService) UpdateServiceAccount(_ context.Context, _ string, _ uuid.UUID, _ bool) (apikeyrepo.ServiceAccountRow, error) {
+	return apikeyrepo.ServiceAccountRow{}, nil
+}
+
+func (f *fakeAPIKeysService) DeleteServiceAccount(_ context.Context, _ string, _ uuid.UUID) (apikeyrepo.ServiceAccountRow, error) {
+	return apikeyrepo.ServiceAccountRow{}, nil
+}
+
 func (f *fakeAPIKeysService) CreateEventSubscription(_ context.Context, _ string, _ []string, _, _ string) (uuid.UUID, error) {
 	return f.issueID, f.issueErr
 }

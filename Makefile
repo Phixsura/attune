@@ -9,7 +9,7 @@
 # falls back to fixed-version local plugins. To change a proto dependency, run
 # `make proto-deps`.
 
-.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality test fast-check adversarial-check test-live test-live-list test-integration runtime-smoke release-smoke ci-check
+.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality maturity-contract demo-seed demo-reset demo-bootstrap test fast-check adversarial-check test-live test-live-list test-integration runtime-smoke release-smoke ci-check
 
 PNPM ?= corepack pnpm
 FUZZTIME ?= 10s
@@ -57,6 +57,18 @@ observability-load-e2e: ## Send load and verify metrics via Prometheus/Grafana. 
 
 search-quality: ## Verify the committed semantic-search relevance baseline.
 	go run ./internal/tools/searchquality
+
+maturity-contract: ## Verify the platform maturity proposal graph and verification links.
+	bash scripts/lint-maturity-contract.sh
+
+demo-seed: ## Seed or refresh the local demo workspace.
+	go run ./cmd/attune demo seed
+
+demo-reset: ## Clear demo-seeded rows for the local demo workspace.
+	go run ./cmd/attune demo reset
+
+demo-bootstrap: ## Rebuild the demo workspace from a clean baseline.
+	go run ./cmd/attune demo bootstrap
 
 # ── Test tiers (docs/testing.md) ─────────────────────────────────────────
 #
@@ -174,6 +186,10 @@ ci-check: ## Run all CI checks locally before push.
 	@echo "▸ scripts/lint-integration-layout.sh"
 	@bash scripts/lint-integration-layout.sh
 	@echo "✓ lint-integration-layout"
+	@echo
+	@echo "▸ scripts/lint-maturity-contract.sh"
+	@bash scripts/lint-maturity-contract.sh
+	@echo "✓ lint-maturity-contract"
 	@echo
 	@echo "▸ scripts/lint-outbound-conformance.sh"
 	@bash scripts/lint-outbound-conformance.sh

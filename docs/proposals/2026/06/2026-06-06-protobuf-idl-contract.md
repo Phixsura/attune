@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #19 |
-| **Status** | Accepted |
+| **Status** | Implemented |
 | **Started** | 2026-06-06 |
 | **Related** | #66 (inbound adapter framework — relies on the channel-agnostic contract; deferred), #10 (per-tenant enrich-config types ride on this), #36/#37 (Go/TS SDKs generated from the contract), #28/#29/#30 (new console endpoints born proto-native), #15 (CI quality-gate doc), #1/#4 (CI / lint patterns) |
 

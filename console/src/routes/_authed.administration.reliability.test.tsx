@@ -36,6 +36,36 @@ describe('_authed.administration.reliability route', () => {
           checks: [],
         })
       }),
+      http.get('/fb/v1/console/system/recovery', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({
+          status: 'pass',
+          message: 'Last restore drill passed (today)',
+          freshnessWindowSeconds: 604800,
+          ageSeconds: 0,
+          lastRun: {
+            ranAt: '2026-07-01T00:00:00Z',
+            status: 'pass',
+            backupRef: 'nightly-backup',
+            durationMs: 1234,
+          },
+        })
+      }),
+      http.get('/fb/v1/console/system/release', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({
+          serviceVersion: '5d6ea83',
+          environment: 'production',
+          profile: 'production',
+          lifecycleState: 'supported',
+          ownerTeam: 'Platform',
+          compatibilityRules: [],
+          glossary: [],
+          runbookUrl: 'https://github.com/Phixsura/attune/blob/main/docs/private-deploy.md',
+          escalationUrl: 'https://github.com/Phixsura/attune/issues/new/choose',
+          startedAt: '2026-07-01T00:00:00Z',
+        })
+      }),
       http.get('/fb/v1/console/api-keys', ({ request }) => {
         seenPaths.add(new URL(request.url).pathname)
         return HttpResponse.json({ items: [] })
@@ -82,13 +112,15 @@ describe('_authed.administration.reliability route', () => {
       context: { queryClient: QueryClient }
     }) => Promise<unknown>
 
-    await expect(loader({ context: { queryClient } })).resolves.toHaveLength(7)
+    await expect(loader({ context: { queryClient } })).resolves.toHaveLength(9)
     expect(ReliabilityRoute.options.component).toBeTypeOf('function')
     expect(seenPaths).toEqual(
       new Set([
         '/fb/v1/console/me',
         '/fb/v1/console/auth/sso/mode',
         '/fb/v1/console/system/preflight',
+        '/fb/v1/console/system/recovery',
+        '/fb/v1/console/system/release',
         '/fb/v1/console/api-keys',
         '/fb/v1/console/mcp/clients',
         '/fb/v1/console/gdpr/operations',

@@ -82,6 +82,30 @@ func checkTLSConsistency(_ context.Context, env *preflight.Environment) prefligh
 		return r
 	}
 	base := env.Cfg.ConsoleBaseURL
+	if env.Cfg.Security.AllowLoopbackEgress {
+		if env.Cfg.IsProduction() {
+			r.Status = preflight.StatusFail
+			r.Message = "security.allow_loopback_egress must be false in production"
+			r.Remediation = "Set security.allow_loopback_egress to false before production startup."
+			return r
+		}
+		r.Status = preflight.StatusWarn
+		r.Message = "allow_loopback_egress is on"
+		r.Remediation = "Disable security.allow_loopback_egress in production. It permits SSRF to loopback addresses."
+		return r
+	}
+	if env.Cfg.Security.AllowPrivateEgress {
+		if env.Cfg.IsProduction() {
+			r.Status = preflight.StatusFail
+			r.Message = "security.allow_private_egress must be false in production"
+			r.Remediation = "Set security.allow_private_egress to false before production startup."
+			return r
+		}
+		r.Status = preflight.StatusWarn
+		r.Message = "allow_private_egress is on"
+		r.Remediation = "Disable security.allow_private_egress in production. It permits SSRF to private network addresses."
+		return r
+	}
 	if base == "" {
 		r.Status = preflight.StatusSkipped
 		r.Message = "No base_url configured"
@@ -94,21 +118,15 @@ func checkTLSConsistency(_ context.Context, env *preflight.Environment) prefligh
 		return r
 	}
 	if parsed.Scheme != "https" {
+		if env.Cfg.IsProduction() {
+			r.Status = preflight.StatusFail
+			r.Message = "Production console.base_url must use HTTPS"
+			r.Remediation = "Set console.base_url to an https:// URL and terminate TLS before attune."
+			return r
+		}
 		r.Status = preflight.StatusWarn
 		r.Message = "Non-HTTPS base_url — session cookies transmit in cleartext"
 		r.Remediation = "Set console.base_url to an https:// URL. HTTP is acceptable only for local development."
-		return r
-	}
-	if env.Cfg.Security.AllowLoopbackEgress {
-		r.Status = preflight.StatusWarn
-		r.Message = "allow_loopback_egress is on with HTTPS base_url"
-		r.Remediation = "Disable security.allow_loopback_egress in production. It permits SSRF to loopback addresses."
-		return r
-	}
-	if env.Cfg.Security.AllowPrivateEgress {
-		r.Status = preflight.StatusWarn
-		r.Message = "allow_private_egress is on with HTTPS base_url"
-		r.Remediation = "Disable security.allow_private_egress in production. It permits SSRF to private network addresses."
 		return r
 	}
 	r.Status = preflight.StatusPass

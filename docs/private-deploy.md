@@ -113,7 +113,13 @@ Edit `.env` and set:
 | `POSTGRES_PASSWORD` | A strong password, also pasted into `database.url` in `config.yaml`. |
 
 Then edit `config.yaml` and set `database.url`, `console.*`,
-`secrets.tink_keyset`, and the audit retention block. Generate the keyset with:
+`secrets.tink_keyset`, and the audit retention block.
+
+Keep `profile: dev` for this Compose path. The runtime `production` profile is
+for production-safe startup checks with external Postgres and TLS-fronted
+deployments.
+
+Generate the keyset with:
 
 ```bash
 docker compose run --rm attune secrets generate-keyset

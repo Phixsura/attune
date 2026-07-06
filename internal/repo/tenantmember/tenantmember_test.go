@@ -18,13 +18,20 @@ func TestRoleHierarchy(t *testing.T) {
 		expected bool
 	}{
 		{"admin >= admin", domain.RoleAdmin, domain.RoleAdmin, true},
+		{"admin >= delegated admin", domain.RoleAdmin, domain.RoleDelegatedAdmin, true},
 		{"admin >= member", domain.RoleAdmin, domain.RoleMember, true},
 		{"admin >= viewer", domain.RoleAdmin, domain.RoleViewer, true},
+		{"delegated admin >= delegated admin", domain.RoleDelegatedAdmin, domain.RoleDelegatedAdmin, true},
+		{"delegated admin >= member", domain.RoleDelegatedAdmin, domain.RoleMember, true},
+		{"delegated admin >= viewer", domain.RoleDelegatedAdmin, domain.RoleViewer, true},
+		{"delegated admin < admin", domain.RoleDelegatedAdmin, domain.RoleAdmin, false},
 		{"member >= member", domain.RoleMember, domain.RoleMember, true},
 		{"member >= viewer", domain.RoleMember, domain.RoleViewer, true},
+		{"member < delegated admin", domain.RoleMember, domain.RoleDelegatedAdmin, false},
 		{"member < admin", domain.RoleMember, domain.RoleAdmin, false},
 		{"viewer >= viewer", domain.RoleViewer, domain.RoleViewer, true},
 		{"viewer < member", domain.RoleViewer, domain.RoleMember, false},
+		{"viewer < delegated admin", domain.RoleViewer, domain.RoleDelegatedAdmin, false},
 		{"viewer < admin", domain.RoleViewer, domain.RoleAdmin, false},
 	}
 
@@ -44,10 +51,16 @@ func TestRoleCanManage(t *testing.T) {
 	}{
 		{"admin can manage member", domain.RoleAdmin, domain.RoleMember, true},
 		{"admin can manage viewer", domain.RoleAdmin, domain.RoleViewer, true},
+		{"admin can manage delegated admin", domain.RoleAdmin, domain.RoleDelegatedAdmin, true},
 		{"admin cannot manage admin", domain.RoleAdmin, domain.RoleAdmin, false},
+		{"delegated admin can manage member", domain.RoleDelegatedAdmin, domain.RoleMember, true},
+		{"delegated admin can manage viewer", domain.RoleDelegatedAdmin, domain.RoleViewer, true},
+		{"delegated admin cannot manage delegated admin", domain.RoleDelegatedAdmin, domain.RoleDelegatedAdmin, false},
+		{"delegated admin cannot manage admin", domain.RoleDelegatedAdmin, domain.RoleAdmin, false},
 		{"member can manage viewer", domain.RoleMember, domain.RoleViewer, true},
 		{"member cannot manage member", domain.RoleMember, domain.RoleMember, false},
 		{"member cannot manage admin", domain.RoleMember, domain.RoleAdmin, false},
+		{"member cannot manage delegated admin", domain.RoleMember, domain.RoleDelegatedAdmin, false},
 		{"viewer cannot manage anyone", domain.RoleViewer, domain.RoleViewer, false},
 	}
 
@@ -64,6 +77,7 @@ func TestParseRole(t *testing.T) {
 		expected domain.Role
 	}{
 		{"admin", domain.RoleAdmin},
+		{"delegated_admin", domain.RoleDelegatedAdmin},
 		{"member", domain.RoleMember},
 		{"viewer", domain.RoleViewer},
 		{"invalid", domain.RoleViewer},
@@ -80,6 +94,7 @@ func TestParseRole(t *testing.T) {
 
 func TestRoleIsValid(t *testing.T) {
 	assert.True(t, domain.RoleAdmin.IsValid())
+	assert.True(t, domain.RoleDelegatedAdmin.IsValid())
 	assert.True(t, domain.RoleMember.IsValid())
 	assert.True(t, domain.RoleViewer.IsValid())
 	assert.False(t, domain.Role("invalid").IsValid())

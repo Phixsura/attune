@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #30 |
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Started** | 2026-06-14 CST |
 | **Related** | #25 (embedding clustering — provides vector infrastructure), #28/#117 (tags — existing batch pattern), #29/#118 (workflow status — existing batch transition pattern), #19 (proto IDL contract) |
 

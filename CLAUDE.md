@@ -292,11 +292,15 @@ top of the file.
 - Process runtime config is one private YAML file selected by `--config`; never
   commit real deploy config with live database URLs, signing keys, Tink keysets,
   or bootstrap credentials.
+- `profile: production` is the runtime safety gate: it refuses startup unless
+  Console runs over HTTPS and loopback/private egress relaxations are off.
+- `security.trusted_proxy_hops` must match the trusted reverse-proxy chain
+  when attune sits behind ingress or nginx; direct exposure keeps it at `0`.
+- `console.bootstrap_admin` seeds the first admin only while `admins` is empty;
+  clear it from production config after the initial login.
 - LLM provider API keys are write-only inputs through Console/API/CLI and are
   persisted encrypted with `secrets.tink_keyset`; never store provider keys in
   process YAML or committed fixtures.
-- Console `dev_login` + `insecure_cookies` flags are HTTP-only test loops;
-  combined check refuses startup if either is set in a TLS-fronted deploy.
 
 ---
 

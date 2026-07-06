@@ -271,6 +271,25 @@ func TestHandler_AuthenticatedRequestRecordsMetrics(t *testing.T) {
 	assert.InDelta(t, 1, testutil.ToFloat64(infraMetrics.MCPToolCallsTotal.WithLabelValues(tenant, "list_feedback", "ok")), 0.0001)
 }
 
+func TestHandler_AuthenticatedAliasRequestRecordsCanonicalMetrics(t *testing.T) {
+	t.Parallel()
+
+	h := newTestHandler()
+	router := h.Routes()
+	tenant := "tenant-metrics-alias-" + uuid.NewString()
+	token := newTestTokenForTenant(t, h, tenant, []string{"mcp:read"})
+
+	body := `{"jsonrpc":"2.0","method":"feedback.list","id":"1"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.InDelta(t, 1, testutil.ToFloat64(infraMetrics.MCPToolCallsTotal.WithLabelValues(tenant, "list_feedback", "ok")), 0.0001)
+}
+
 func TestHandler_AuthenticatedRequestDeniedByAllowList(t *testing.T) {
 	h := newTestHandler(testHandlerOptions{
 		toolPolicyMode: domain.MCPToolPolicyModeAllowList,

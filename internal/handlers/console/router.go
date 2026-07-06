@@ -12,7 +12,6 @@ package console
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -50,11 +49,13 @@ import (
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
 	consoleworkflow "github.com/Phixsura/attune/internal/handlers/console/workflow"
+	"github.com/Phixsura/attune/internal/pkg/httputil"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
+	breakglasssvc "github.com/Phixsura/attune/internal/service/breakglass"
 )
 
 // Re-exports so cmd/attune can keep a single `console.X` surface even
@@ -188,6 +189,8 @@ type Router struct {
 	mcpClients         *consolemcpclient.Handler
 	auditEvidence      *consoleauditevidence.Handler
 	preflight          http.Handler
+	recovery           http.Handler
+	releaseInfo        http.Handler
 	admins             adminReader
 	rbac               *rbac.Middleware
 }
@@ -535,6 +538,26 @@ func (r *Router) requireAdminStrict(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if r.useRBACForRequest(req) {
 			r.rbac.RequireAdminStrict()(next).ServeHTTP(w, req)
+			return
+		}
+		r.requireAdminLegacy(next).ServeHTTP(w, req)
+	})
+}
+
+func (r *Router) requireDelegatedAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if r.useRBACForRequest(req) {
+			r.rbac.RequireDelegatedAdmin()(next).ServeHTTP(w, req)
+			return
+		}
+		r.requireAdminLegacy(next).ServeHTTP(w, req)
+	})
+}
+
+func (r *Router) requireDelegatedAdminStrict(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if r.useRBACForRequest(req) {
+			r.rbac.RequireDelegatedAdminStrict()(next).ServeHTTP(w, req)
 			return
 		}
 		r.requireAdminLegacy(next).ServeHTTP(w, req)
@@ -1110,6 +1133,29 @@ func (r *Router) mountAPIKeyRelatedResources(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		s.Patch("/{id}", dispatcher.Bind(
+			"console.APIKeysHandler.UpdateServiceAccount",
+			dispatcher.Path(
+				func() *attunev1.UpdateServiceAccountRequest { return ptrext.Of(attunev1.UpdateServiceAccountRequest{}) },
+				dispatcher.JSONBody[*attunev1.UpdateServiceAccountRequest],
+				dispatcher.Param("id", func(req *attunev1.UpdateServiceAccountRequest, id string) { req.Id = id }),
+			),
+			r.apiKeys.UpdateServiceAccount,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateServiceAccountRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		s.Delete("/{id}", dispatcher.Bind(
+			"console.APIKeysHandler.DeleteServiceAccount",
+			dispatcher.Path(
+				func() *attunev1.DeleteServiceAccountRequest { return ptrext.Of(attunev1.DeleteServiceAccountRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.DeleteServiceAccountRequest, id string) { req.Id = id }),
+			),
+			r.apiKeys.DeleteServiceAccount,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteServiceAccountRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 	})
 
 	m.Route("/projects", func(p chi.Router) {
@@ -1244,7 +1290,7 @@ func (r *Router) mountAuditLog(m chi.Router) {
 		return
 	}
 	m.Route("/audit-log", func(a chi.Router) {
-		a.Use(r.requireAdminStrict)
+		a.Use(r.requireDelegatedAdminStrict)
 		a.Get("/", dispatcher.Bind(
 			"console.auditlog.List",
 			dispatcher.Query(
@@ -1257,6 +1303,59 @@ func (r *Router) mountAuditLog(m chi.Router) {
 			}),
 		))
 		a.Get("/export.csv", r.auditLog.ExportCSV)
+		a.Route("/views", func(v chi.Router) {
+			v.Get("/", dispatcher.Bind(
+				"console.auditlog.ListSavedViews",
+				dispatcher.Empty(func() *attunev1.ListSavedAuditLogViewsRequest {
+					return ptrext.Of(attunev1.ListSavedAuditLogViewsRequest{})
+				}),
+				r.auditLog.ListSavedViews,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListSavedAuditLogViewsRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+			v.Post("/", dispatcher.Bind(
+				"console.auditlog.CreateSavedView",
+				dispatcher.JSON(func() *attunev1.CreateSavedAuditLogViewRequest {
+					return ptrext.Of(attunev1.CreateSavedAuditLogViewRequest{})
+				}),
+				r.auditLog.CreateSavedView,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateSavedAuditLogViewRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+			v.Put("/{id}", dispatcher.Bind(
+				"console.auditlog.UpdateSavedView",
+				dispatcher.Combine(
+					func() *attunev1.UpdateSavedAuditLogViewRequest {
+						return ptrext.Of(attunev1.UpdateSavedAuditLogViewRequest{})
+					},
+					dispatcher.JSONBody[*attunev1.UpdateSavedAuditLogViewRequest],
+					dispatcher.Param("id", func(req *attunev1.UpdateSavedAuditLogViewRequest, id string) {
+						req.Id = id
+					}),
+				),
+				r.auditLog.UpdateSavedView,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateSavedAuditLogViewRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+			v.Delete("/{id}", dispatcher.Bind(
+				"console.auditlog.DeleteSavedView",
+				dispatcher.Path(
+					func() *attunev1.DeleteSavedAuditLogViewRequest {
+						return ptrext.Of(attunev1.DeleteSavedAuditLogViewRequest{})
+					},
+					dispatcher.Param("id", func(req *attunev1.DeleteSavedAuditLogViewRequest, id string) {
+						req.Id = id
+					}),
+				),
+				r.auditLog.DeleteSavedView,
+				dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteSavedAuditLogViewRequest) (*session.AuthCtx, error) {
+					return session.FromContext(r.Context()), nil
+				}),
+			))
+		})
 		r.mountAuditEvidence(a)
 	})
 }
@@ -1318,7 +1417,7 @@ func (r *Router) mountGDPR(m chi.Router) {
 		return
 	}
 	m.Route("/gdpr", func(g chi.Router) {
-		g.Use(r.requireAdminStrict)
+		g.Use(r.requireDelegatedAdminStrict)
 		g.Get("/requests", dispatcher.Bind(
 			"console.gdpr.ListRequests",
 			dispatcher.Combine(
@@ -1433,7 +1532,7 @@ func (r *Router) mountGDPR(m chi.Router) {
 
 func (r *Router) mountNotifyTargets(m chi.Router) {
 	m.Route("/notify-targets", func(n chi.Router) {
-		n.Use(r.requireAdmin) // Notify targets are admin-only
+		n.Use(r.requireDelegatedAdmin) // Notify targets are operational settings
 		n.Get("/", dispatcher.Bind(
 			"console.NotifyTargetsHandler.List",
 			dispatcher.Empty(func() *attunev1.ListNotifyTargetsRequest { return ptrext.Of(attunev1.ListNotifyTargetsRequest{}) }),
@@ -1498,7 +1597,7 @@ func (r *Router) mountNotifyTargets(m chi.Router) {
 // with no id path param.
 func (r *Router) mountDigestSubscription(m chi.Router) {
 	m.Group(func(d chi.Router) {
-		d.Use(r.requireAdmin) // Digest subscription is admin-only
+		d.Use(r.requireDelegatedAdmin) // Digest subscription is operational settings
 		d.Get("/digest-subscription", dispatcher.Bind(
 			"console.DigestSubscriptionHandler.Get",
 			dispatcher.Empty(func() *attunev1.GetDigestSubscriptionRequest {
@@ -1943,7 +2042,7 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		e.With(r.requireAdmin).Put("/", dispatcher.Bind(
+		e.With(r.requireDelegatedAdminStrict).Put("/", dispatcher.Bind(
 			"console.EnrichConfigHandler.Update",
 			dispatcher.JSON(func() *attunev1.UpdateEnrichConfigRequest { return ptrext.Of(attunev1.UpdateEnrichConfigRequest{}) }),
 			r.enrichConfig.Update,
@@ -1951,7 +2050,7 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		e.With(r.requireAdmin).Post("/preview", dispatcher.Bind(
+		e.With(r.requireDelegatedAdminStrict).Post("/preview", dispatcher.Bind(
 			"console.EnrichConfigHandler.Preview",
 			dispatcher.JSON(func() *attunev1.PreviewEnrichPromptRequest { return ptrext.Of(attunev1.PreviewEnrichPromptRequest{}) }),
 			r.enrichConfig.Preview,
@@ -1959,7 +2058,7 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		e.With(r.requireAdmin).Post("/eval-suggestions:analyze", dispatcher.Bind(
+		e.With(r.requireDelegatedAdminStrict).Post("/eval-suggestions:analyze", dispatcher.Bind(
 			"console.EnrichConfigHandler.GetEvalSuggestions",
 			dispatcher.JSON(func() *attunev1.GetEvalSuggestionsRequest { return ptrext.Of(attunev1.GetEvalSuggestionsRequest{}) }),
 			r.enrichConfig.GetEvalSuggestions,
@@ -1967,7 +2066,7 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		e.With(r.requireAdmin).Post("/promote", dispatcher.Bind(
+		e.With(r.requireDelegatedAdminStrict).Post("/promote", dispatcher.Bind(
 			"console.EnrichConfigHandler.PromoteSuggestedValue",
 			dispatcher.JSON(func() *attunev1.PromoteSuggestedValueRequest {
 				return ptrext.Of(attunev1.PromoteSuggestedValueRequest{})
@@ -1977,7 +2076,7 @@ func (r *Router) mountEnrichConfig(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		e.With(r.requireAdmin).Post("/versions/{version_id}:activate", dispatcher.Bind(
+		e.With(r.requireDelegatedAdminStrict).Post("/versions/{version_id}:activate", dispatcher.Bind(
 			"console.EnrichConfigHandler.ActivatePromptVersion",
 			dispatcher.Path(
 				func() *attunev1.ActivateEnrichPromptVersionRequest {
@@ -2012,9 +2111,8 @@ func (r *Router) mountEnrichmentRuntime(m chi.Router) {
 	if r.enrichmentRuntime == nil {
 		return
 	}
-	adminOnly := r.requireAdmin
 	m.Route("/enrichment-runtime", func(e chi.Router) {
-		e.Use(adminOnly)
+		e.Use(r.requireDelegatedAdminStrict)
 		e.Get("/", dispatcher.Bind(
 			"console.EnrichmentRuntimeHandler.Get",
 			dispatcher.Empty(func() *attunev1.GetEnrichmentRuntimeRequest { return ptrext.Of(attunev1.GetEnrichmentRuntimeRequest{}) }),
@@ -2054,7 +2152,7 @@ func (r *Router) mountEnrichmentRuntime(m chi.Router) {
 			}),
 		))
 	})
-	m.With(adminOnly).Post("/enrichment-runtime:reset", dispatcher.Bind(
+	m.With(r.requireDelegatedAdminStrict).Post("/enrichment-runtime:reset", dispatcher.Bind(
 		"console.EnrichmentRuntimeHandler.ResetLegacy",
 		dispatcher.JSON(func() *attunev1.ResetEnrichmentRuntimeRequest {
 			return ptrext.Of(attunev1.ResetEnrichmentRuntimeRequest{})
@@ -2064,7 +2162,7 @@ func (r *Router) mountEnrichmentRuntime(m chi.Router) {
 			return session.FromContext(r.Context()), nil
 		}),
 	))
-	m.With(adminOnly).Post("/enrichment-runtime:rollback", dispatcher.Bind(
+	m.With(r.requireDelegatedAdminStrict).Post("/enrichment-runtime:rollback", dispatcher.Bind(
 		"console.EnrichmentRuntimeHandler.RollbackLegacy",
 		dispatcher.JSON(func() *attunev1.RollbackEnrichmentRuntimeRequest {
 			return ptrext.Of(attunev1.RollbackEnrichmentRuntimeRequest{})
@@ -2158,7 +2256,7 @@ func (r *Router) mountInbound(m chi.Router) {
 		return
 	}
 	m.Route("/inbound/sources", func(s chi.Router) {
-		s.Use(r.requireAdmin) // Inbound sources are admin-only
+		s.Use(r.requireDelegatedAdmin) // Inbound sources are operational settings
 		s.Get("/", dispatcher.Bind(
 			"console.inbound.List",
 			dispatcher.Empty(func() *attunev1.ListInboundSourcesRequest { return ptrext.Of(attunev1.ListInboundSourcesRequest{}) }),
@@ -2350,7 +2448,7 @@ func (r *Router) mountTags(m chi.Router) {
 		return
 	}
 	m.Route("/tags", func(t chi.Router) {
-		t.Use(r.requireAdmin) // Tags config is admin-only
+		t.Use(r.requireDelegatedAdmin) // Tags config is operational settings
 		t.Get("/", dispatcher.Bind(
 			"console.TagHandler.List",
 			dispatcher.Query(
@@ -2456,7 +2554,7 @@ func (r *Router) mountWorkflow(m chi.Router) {
 		return
 	}
 	m.Route("/workflow", func(w chi.Router) {
-		w.Use(r.requireAdmin)
+		w.Use(r.requireDelegatedAdmin)
 		w.Get("/states", dispatcher.Bind(
 			"console.WorkflowHandler.ListStates",
 			dispatcher.Query(
@@ -2637,14 +2735,24 @@ func (r *Router) authProviders(w http.ResponseWriter, req *http.Request) {
 	}
 	resp.OIDCOnly = oidcOnly
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	httputil.WriteJSON(w, http.StatusOK, resp)
 }
 
 // SetPreflightHandler sets the system preflight handler for production
 // readiness checks (#149).
 func (r *Router) SetPreflightHandler(h http.Handler) {
 	r.preflight = h
+}
+
+// SetRecoveryHandler sets the restore-drill recovery handler.
+func (r *Router) SetRecoveryHandler(h http.Handler) {
+	r.recovery = h
+}
+
+// SetReleaseInfoHandler sets the system release metadata handler for the
+// Reliability page.
+func (r *Router) SetReleaseInfoHandler(h http.Handler) {
+	r.releaseInfo = h
 }
 
 // SetBreakGlassHandler sets the break-glass login handler (#158).
@@ -2662,13 +2770,22 @@ func (r *Router) SetSSOCutoverHandler(h *auth.SSOCutoverHandler) {
 	r.ssoCutover = h
 }
 
+// mountPreflight mounts the admin-only system readiness, recovery, and release routes.
 func (r *Router) mountPreflight(m chi.Router) {
-	if r.preflight == nil {
+	if r.preflight == nil && r.recovery == nil && r.releaseInfo == nil {
 		return
 	}
 	m.Route("/system", func(s chi.Router) {
 		s.Use(r.requireAdmin)
-		s.Get("/preflight", r.preflight.ServeHTTP)
+		if r.preflight != nil {
+			s.Get("/preflight", r.preflight.ServeHTTP)
+		}
+		if r.recovery != nil {
+			s.Get("/recovery", r.recovery.ServeHTTP)
+		}
+		if r.releaseInfo != nil {
+			s.Get("/release", r.releaseInfo.ServeHTTP)
+		}
 	})
 }
 
@@ -2695,7 +2812,18 @@ func (r *Router) mountSSOCutover(m chi.Router) {
 			a.Route("/breakglass", func(b chi.Router) {
 				b.Get("/tokens", r.breakglassAPI.List)
 				b.Post("/issue", r.breakglassAPI.Issue)
+				b.Post("/tokens/revoke-all", r.breakglassAPI.RevokeAll)
 				b.Post("/tokens/{id}/revoke", r.breakglassAPI.Revoke)
+				var lockout *breakglasssvc.LockoutTracker
+				if r.breakglass != nil {
+					lockout = r.breakglass.Lockout()
+				}
+				b.Get("/lockouts", func(w http.ResponseWriter, req *http.Request) {
+					r.breakglassAPI.ListLockouts(w, req, lockout)
+				})
+				b.Post("/lockouts/{ip}/unlock", func(w http.ResponseWriter, req *http.Request) {
+					r.breakglassAPI.UnlockIP(w, req, lockout)
+				})
 			})
 		}
 	})

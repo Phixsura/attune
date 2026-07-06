@@ -107,6 +107,16 @@ func (m *Middleware) RequireAdminStrict() func(http.Handler) http.Handler {
 	return m.RequireRoleStrict(domain.RoleAdmin)
 }
 
+// RequireDelegatedAdmin is a convenience method for operational settings routes (cached).
+func (m *Middleware) RequireDelegatedAdmin() func(http.Handler) http.Handler {
+	return m.RequireRole(domain.RoleDelegatedAdmin)
+}
+
+// RequireDelegatedAdminStrict bypasses cache — use for sensitive delegated-admin mutations.
+func (m *Middleware) RequireDelegatedAdminStrict() func(http.Handler) http.Handler {
+	return m.RequireRoleStrict(domain.RoleDelegatedAdmin)
+}
+
 // RequireMember is a convenience method for member+ routes.
 func (m *Middleware) RequireMember() func(http.Handler) http.Handler {
 	return m.RequireRole(domain.RoleMember)

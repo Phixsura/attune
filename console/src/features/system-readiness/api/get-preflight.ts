@@ -1,8 +1,12 @@
 import { queryOptions } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
+import type { PreflightStatus as SharedPreflightStatus } from '@/lib/preflight'
+import type {
+  PreflightCheckResult as SystemPreflightCheckResult,
+  PreflightReportResponse as SystemPreflightReportResponse,
+} from '@/proto/attune/v1/system'
 
-export type PreflightStatus = 'pass' | 'warn' | 'fail' | 'skipped'
-
+export type PreflightStatus = SharedPreflightStatus
 export type PreflightCategory =
   | 'config'
   | 'database'
@@ -13,18 +17,15 @@ export type PreflightCategory =
   | 'metrics'
   | 'worker'
 
-export interface PreflightCheckResult {
-  name: string
+export interface PreflightCheckResult
+  extends Omit<SystemPreflightCheckResult, 'category' | 'status'> {
   category: PreflightCategory
   status: PreflightStatus
-  message: string
-  remediation?: string
 }
 
-export interface PreflightReport {
+export interface PreflightReport extends Omit<SystemPreflightReportResponse, 'status' | 'checks'> {
   status: PreflightStatus
   checks: PreflightCheckResult[]
-  elapsed: string
 }
 
 export const preflightQuery = () =>

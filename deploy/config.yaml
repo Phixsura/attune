@@ -7,6 +7,8 @@
 # - secrets.tink_keyset with output from:
 #     docker compose run --rm attune secrets generate-keyset
 
+profile: dev
+
 port: 8090
 
 database:
@@ -26,7 +28,7 @@ ingest:
   cors_allowed_origins: []
 
 console:
-  base_url: "https://attune.example.com"
+  base_url: "http://localhost:8090"
   session_key: "replace-with-32-or-more-random-characters"
   bootstrap_admin:
     email: "admin@example.com"

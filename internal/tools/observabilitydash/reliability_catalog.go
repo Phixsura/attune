@@ -80,10 +80,6 @@ func reliabilityBurnExpr(slo reliabilitySLO, window string) string {
 	return burnRate(reliabilitySignalExpr(slo, window), reliabilityObjectiveBudget(slo))
 }
 
-func reliabilityTenantRankExpr(slo reliabilitySLO) string {
-	return topkBurn(reliabilitySignalExpr(slo, "ratio5m"), reliabilityObjectiveBudget(slo))
-}
-
 func reliabilityPolicySummary(slo reliabilitySLO) string {
 	return fmt.Sprintf(
 		"Start at %s objective; page at %s on 5m and 1h; warn at %s on 30m and 6h; keep traffic floor > %.2f.",
@@ -192,109 +188,6 @@ func reliabilityBudgetExceptionPolicy(slo reliabilitySLO) string {
 
 func reliabilityBudgetExceptionNote(slo reliabilitySLO) string {
 	return slo.BudgetException.Note
-}
-
-func reliabilityOverviewCardPos(index int) gridPos {
-	switch {
-	case index < 4:
-		return gp(index*6, 5, 6, 4)
-	default:
-		return gp((index-4)*8, 9, 8, 4)
-	}
-}
-
-func reliabilityBurnOverviewPanels() []panel {
-	catalog := reliabilityCatalog()
-	panels := make([]panel, 0, len(catalog))
-	for i, slo := range catalog {
-		panels = append(panels, statDesc(
-			3+i,
-			slo.Title,
-			slo.OverviewDescription,
-			reliabilityBurnExpr(slo, "ratio5m"),
-			"short",
-			reliabilityOverviewCardPos(i),
-			greenWarnRed(1, fastBurnThreshold),
-		))
-	}
-	return panels
-}
-
-func reliabilityBurnTrendPanel() panel {
-	catalog := reliabilityCatalog()
-	targets := make([]target, 0, len(catalog)*2)
-	ref := 'A'
-	for _, slo := range catalog {
-		targets = append(targets, targetExpr(string(ref), reliabilityBurnExpr(slo, "ratio5m"), slo.TrendLegendBase+" 5m"))
-		ref++
-		targets = append(targets, targetExpr(string(ref), reliabilityBurnExpr(slo, "ratio1h"), slo.TrendLegendBase+" 1h"))
-		ref++
-	}
-	return seriesDesc(10, "Burn by SLO", "5m and 1h burn multipliers for the service-owned SLOs. The fast-burn page threshold is 14.4x; the slow-burn policy uses a lower threshold over a longer window.", targets, "short", gp(0, 11, 24, 8))
-}
-
-func reliabilityBurnHistoryPanel() panel {
-	catalog := reliabilityCatalog()
-	targets := make([]target, 0, len(catalog)*2)
-	ref := 'A'
-	for _, slo := range catalog {
-		targets = append(targets, targetExpr(string(ref), reliabilityBurnHistoryExpr(slo, "7d", "5m"), slo.TrendLegendBase+" 7d"))
-		ref++
-		targets = append(targets, targetExpr(string(ref), reliabilityBurnHistoryExpr(slo, "30d", "1h"), slo.TrendLegendBase+" 30d"))
-		ref++
-	}
-	return seriesDesc(32, "Burn history", "7d and 30d average burn by SLO. Use this with Burn trend to tell a spike from a sustained regression.", targets, "short", gp(0, 69, 24, 8))
-}
-
-func reliabilityRemainingBudgetPanel() panel {
-	catalog := reliabilityCatalog()
-	targets := make([]target, 0, len(catalog))
-	ref := 'A'
-	for _, slo := range catalog {
-		targets = append(targets, targetExpr(string(ref), reliabilityRemainingBudgetExpr(slo, "30d", "1h"), slo.TrendLegendBase+" remaining"))
-		ref++
-	}
-	return seriesDesc(33, "Remaining budget", "Trailing 30d error budget remaining by SLO. Use this with Burn history to tell whether the surface still has room or is already exhausted.", targets, "percentunit", gp(0, 77, 24, 8))
-}
-
-func reliabilityTenantBurnRankingPanel() panel {
-	catalog := reliabilityCatalog()
-	targets := make([]target, 0, len(catalog))
-	ref := 'A'
-	for _, slo := range catalog {
-		if !slo.IncludeInTenantRank {
-			continue
-		}
-		targets = append(targets, targetExprSparse(string(ref), reliabilityTenantRankExpr(slo), "{{tenant}} / "+slo.TenantRankLegendBase))
-		ref++
-	}
-	return barDesc(12, "Tenant burn ranking", "Current 5m burn multipliers for tenant-scoped SLOs. Use this to answer who is burning budget fastest before opening the detailed SLO pages.", targets, "short", gp(0, 20, 12, 8))
-}
-
-func reliabilityDependencyHealthPanel() panel {
-	return seriesDesc(35, "Dependency health", "Upstream dependency check outcomes and latency. Use this to identify whether a service-wide burn is likely coming from a failing dependency before leaving the reliability surface.", []target{
-		targetExpr("A", `sum by (dependency, result) (rate(attune_dependency_health_check_total[$__rate_interval]))`, "{{dependency}} / {{result}}"),
-		targetExpr("B", `histogram_quantile(0.95, sum by (le, dependency) (rate(attune_dependency_health_check_duration_seconds_bucket[$__rate_interval])))`, "{{dependency}} p95"),
-	}, "short", gp(0, 86, 24, 8))
-}
-
-func reliabilityRoutingMetadataPanel() panel {
-	catalog := reliabilityCatalog()
-	var b strings.Builder
-	b.WriteString("| SLO | Owner | Escalation | Runbook |\n")
-	b.WriteString("| --- | --- | --- | --- |\n")
-	for _, slo := range catalog {
-		fmt.Fprintf(&b, "| %s | %s | %s | [Open runbook](%s) |\n", slo.Title, slo.Owner, slo.Escalation, reliabilityRunbookURL(slo.AlertName))
-	}
-	return textPanel(37, "Routing table", "Owning area, escalation path, and runbook links for the reliability surface.", b.String(), gp(0, 96, 24, 10))
-}
-
-func reliabilityBurnHistoryExpr(slo reliabilitySLO, rangeWindow, resolution string) string {
-	return fmt.Sprintf(`avg_over_time((%s)[%s:%s])`, reliabilityBurnExpr(slo, "ratio5m"), rangeWindow, resolution)
-}
-
-func reliabilityRemainingBudgetExpr(slo reliabilitySLO, rangeWindow, resolution string) string {
-	return fmt.Sprintf(`clamp_min(1 - avg_over_time((%s)[%s:%s]), 0)`, reliabilityBurnExpr(slo, "ratio5m"), rangeWindow, resolution)
 }
 
 func reliabilityRunbookURL(alertName string) string {

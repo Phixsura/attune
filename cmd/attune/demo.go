@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/infra/config"
@@ -29,6 +30,7 @@ const (
 	defaultDemoTenantSlug = "attune-demo"
 	defaultDemoTenantName = "Attune Demo"
 	demoSeedActor         = "demo-seed"
+	demoSeedPromptVersion = "demo-seed.v1"
 )
 
 type demoFeedbackSeed struct {
@@ -61,15 +63,23 @@ type demoQualityActionUpdater interface {
 	UpsertQualityActionStatus(context.Context, feedbackrepo.QualityActionUpsert) (*feedbackrepo.QualityAction, error)
 }
 
+type demoWorkspaceExec interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
 func runDemo(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: attune demo seed [--tenant <slug>] [--name <name>]")
+		return fmt.Errorf("usage: attune demo seed|reset|bootstrap [--tenant <slug>] [--name <name>]")
 	}
 	switch args[0] {
 	case "seed":
 		return runDemoSeed(args[1:])
+	case "reset":
+		return runDemoReset(args[1:])
+	case "bootstrap":
+		return runDemoBootstrap(args[1:])
 	default:
-		return fmt.Errorf("unknown demo subcommand %q (have: seed)", args[0])
+		return fmt.Errorf("unknown demo subcommand %q (have: seed, reset, bootstrap)", args[0])
 	}
 }
 
@@ -100,7 +110,90 @@ func runDemoSeed(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf(`Demo workspace ready:
+	printDemoWorkspaceSummary("Demo workspace ready", result)
+	return nil
+}
+
+func runDemoReset(args []string) error {
+	fs := flag.NewFlagSet("demo reset", flag.ContinueOnError)
+	tenantSlug := fs.String("tenant", defaultDemoTenantSlug, "tenant slug to clear")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	slug := strings.TrimSpace(ptrext.Indirect(tenantSlug))
+	if slug == "" {
+		return fmt.Errorf("--tenant is required")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := database.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("pgxpool: %w", err)
+	}
+	defer pool.Close()
+
+	tenantID, found, err := resolveDemoTenant(ctx, pool, slug)
+	if err != nil {
+		return err
+	}
+	if !found {
+		fmt.Printf("Demo workspace already clear for tenant %q.\n", slug)
+		return nil
+	}
+	if err := resetDemoWorkspace(ctx, pool, tenantID); err != nil {
+		return err
+	}
+	fmt.Printf("Demo workspace cleared for tenant %q (%s).\n", slug, tenantID)
+	return nil
+}
+
+func runDemoBootstrap(args []string) error {
+	fs := flag.NewFlagSet("demo bootstrap", flag.ContinueOnError)
+	tenantSlug := fs.String("tenant", defaultDemoTenantSlug, "tenant slug to create or refresh")
+	tenantName := fs.String("name", defaultDemoTenantName, "tenant display name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	slug := strings.TrimSpace(ptrext.Indirect(tenantSlug))
+	if slug == "" {
+		return fmt.Errorf("--tenant is required")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := database.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("pgxpool: %w", err)
+	}
+	defer pool.Close()
+
+	if tenantID, found, err := resolveDemoTenant(ctx, pool, slug); err != nil {
+		return err
+	} else if found {
+		if err := resetDemoWorkspace(ctx, pool, tenantID); err != nil {
+			return err
+		}
+	}
+
+	result, err := seedDemoWorkspace(ctx, pool, slug, ptrext.Indirect(tenantName))
+	if err != nil {
+		return err
+	}
+	printDemoWorkspaceSummary("Demo workspace bootstrapped", result)
+	return nil
+}
+
+func printDemoWorkspaceSummary(title string, result demoSeedResult) {
+	fmt.Printf(`%s:
 
  tenant: %s
  tenant_id: %s
@@ -110,9 +203,8 @@ func runDemoSeed(args []string) error {
 
 Open the Console and visit /control-tower after signing in.
 `,
-		result.TenantSlug, result.TenantID, result.FeedbackRows,
+		title, result.TenantSlug, result.TenantID, result.FeedbackRows,
 		result.SearchRuns, result.QualityActions)
-	return nil
 }
 
 func seedDemoWorkspace(ctx context.Context, pool *pgxpool.Pool, slug, name string) (demoSeedResult, error) {
@@ -169,11 +261,90 @@ func upsertDemoTenant(ctx context.Context, pool *pgxpool.Pool, slug, name string
 	return id, nil
 }
 
+func resolveDemoTenant(ctx context.Context, pool *pgxpool.Pool, slug string) (string, bool, error) {
+	id, err := tenantrepo.NewTenant(pool).ResolveSlug(ctx, slug)
+	if err == nil {
+		return id, true, nil
+	}
+	if errors.Is(err, tenantrepo.ErrTenantNotFound) {
+		return "", false, nil
+	}
+	return "", false, fmt.Errorf("resolve demo tenant: %w", err)
+}
+
+func resetDemoWorkspace(ctx context.Context, pool *pgxpool.Pool, tenantID string) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin demo reset: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := clearDemoWorkspace(ctx, tx, tenantID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit demo reset: %w", err)
+	}
+	return nil
+}
+
+func clearDemoWorkspace(ctx context.Context, exec demoWorkspaceExec, tenantID string) error {
+	if _, err := exec.Exec(ctx, `
+		DELETE FROM notify_outbox
+		 WHERE tenant_id = $1`,
+		tenantID); err != nil {
+		return fmt.Errorf("clear demo outbox rows: %w", err)
+	}
+	if _, err := exec.Exec(ctx, `
+		DELETE FROM llm_audit
+		 WHERE tenant_id = $1`,
+		tenantID); err != nil {
+		return fmt.Errorf("clear demo llm audit rows: %w", err)
+	}
+	if _, err := exec.Exec(ctx, `
+		DELETE FROM classification_quality_failure_events
+		 WHERE tenant_id = $1`,
+		tenantID); err != nil {
+		return fmt.Errorf("clear demo quality failure rows: %w", err)
+	}
+	if _, err := exec.Exec(ctx, `
+		DELETE FROM feedback_search_result_events
+		 WHERE tenant_id = $1`,
+		tenantID); err != nil {
+		return fmt.Errorf("clear demo search events: %w", err)
+	}
+	if _, err := exec.Exec(ctx, `
+		DELETE FROM feedback_search_runs
+		 WHERE tenant_id = $1`,
+		tenantID); err != nil {
+		return fmt.Errorf("clear demo search runs: %w", err)
+	}
+	if _, err := exec.Exec(ctx, `
+		DELETE FROM feedback_quality_actions
+		 WHERE tenant_id = $1`,
+		tenantID); err != nil {
+		return fmt.Errorf("clear demo quality actions: %w", err)
+	}
+	if _, err := exec.Exec(ctx, `
+		DELETE FROM semantic_extraction_runs
+		 WHERE tenant_id = $1`,
+		tenantID); err != nil {
+		return fmt.Errorf("clear demo semantic runs: %w", err)
+	}
+	if _, err := exec.Exec(ctx, `
+		DELETE FROM user_feedback
+		 WHERE tenant_id = $1`,
+		tenantID); err != nil {
+		return fmt.Errorf("clear demo feedback rows: %w", err)
+	}
+	return nil
+}
+
 func clearDemoTelemetry(ctx context.Context, pool *pgxpool.Pool, tenantID string) error {
 	if _, err := pool.Exec(ctx, `
 		DELETE FROM semantic_extraction_runs
 		 WHERE tenant_id = $1
-		   AND prompt_version = 'demo-seed.v1'`, tenantID); err != nil {
+		   AND prompt_version = $2`, tenantID, demoSeedPromptVersion); err != nil {
 		return fmt.Errorf("clear demo semantic runs: %w", err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -223,10 +394,7 @@ func upsertDemoFeedback(
 	}
 	idemKey := "demo-seed-" + seed.Key
 	hash := sha256.Sum256([]byte(tenantID + ":" + idemKey))
-	embedding := ""
-	if seed.Embedding {
-		embedding = demoEmbedding(index)
-	}
+	embedding, embeddingModel, embeddingDims, embeddedAt := demoEmbeddingInsertFields(seed, index, now)
 	createdAt := now.Add(-time.Duration(seed.AgeHours) * time.Hour)
 	var id int64
 	err = pool.QueryRow(ctx, `
@@ -238,13 +406,13 @@ func upsertDemoFeedback(
 		  enriched_at, created_at, updated_at, idempotency_key, idempotency_hash,
 		  embedding, embedding_model, embedding_dims, embedded_at, workflow_state_id)
 		VALUES
-		 ($1, $2, $2, $2, '', $3, $4::jsonb, 'other', $5, $6, '[]'::jsonb, 'done',
-		  $7, $7, 'Demo classification produced by attune demo seed.',
-		  $8::jsonb, $9, $10, 'en', $11, $12, $11, $13, $14,
-		  NULLIF($15, '')::vector,
-		  CASE WHEN $15 = '' THEN '' ELSE 'text-embedding-3-small' END,
-		  CASE WHEN $15 = '' THEN NULL ELSE 256 END,
-		  CASE WHEN $15 = '' THEN NULL ELSE $11 END,
+		 ($1::text, $2::text, $2::text, $2::text, ''::text, $3::text, $4::jsonb, 'other'::text, $5::text, $6::text, '[]'::jsonb, 'done'::text,
+		  $7::text, $7::text, 'Demo classification produced by attune demo seed.'::text,
+		  $8::jsonb, $9::boolean, $10::double precision, 'en'::text, $11::timestamptz, $12::timestamptz, $11::timestamptz, $13::text, $14::bytea,
+		  $15::vector,
+		  $16::text,
+		  $17::integer,
+		  $18::timestamptz,
 		  (SELECT id FROM tenant_workflow_states
 		    WHERE tenant_id = $1 AND is_default AND archived_at IS NULL
 		    ORDER BY position LIMIT 1))
@@ -274,12 +442,19 @@ func upsertDemoFeedback(
 		RETURNING id`,
 		tenantID, seed.UserID, seed.Source, metaJSON, seed.Content, seed.PageURL,
 		seed.Title, attrsJSON, isDemoUrgent(seed.Attrs), seed.Confidence, now,
-		createdAt, idemKey, hash[:], embedding,
+		createdAt, idemKey, hash[:], embedding, embeddingModel, embeddingDims, embeddedAt,
 	).Scan(&id) // ptrext:allow scan-target
 	if err != nil {
 		return 0, fmt.Errorf("upsert demo feedback %q: %w", seed.Key, err)
 	}
 	return id, nil
+}
+
+func demoEmbeddingInsertFields(seed demoFeedbackSeed, index int, now time.Time) (any, string, any, any) {
+	if !seed.Embedding {
+		return nil, "", nil, nil
+	}
+	return demoEmbedding(index), "text-embedding-3-small", 256, now
 }
 
 func insertDemoSemanticRun(ctx context.Context, pool *pgxpool.Pool, tenantID string, feedbackID int64, seed demoFeedbackSeed, now time.Time) error {
@@ -299,12 +474,12 @@ func insertDemoSemanticRun(ctx context.Context, pool *pgxpool.Pool, tenantID str
 		  prompt_version, model, attrs, confidence, rationale, dropped_attrs,
 		  source, logical_model, provider_model, channel_id, channel_name, created_at)
 		VALUES
-		 ($1, $2, $3, $4, $5, 'demo-seed.v1', 'demo-classifier',
-		  $6::jsonb, $7::jsonb, '{}'::jsonb, '{}'::jsonb,
-		  $8, 'demo-classifier', 'demo-classifier-v1', 'demo', 'Demo', $9)`,
+		 ($1, $2, $3, $4, $5, $6, 'demo-classifier',
+		  $7::jsonb, $8::jsonb, '{}'::jsonb, '{}'::jsonb,
+		  $9, 'demo-classifier', 'demo-classifier-v1', 'demo', 'Demo', $10)`,
 		tenantID, feedbackrepo.SemanticSubjectFeedback, feedbackID,
 		feedbackrepo.DefaultDomainPack, feedbackrepo.DefaultSchemaVersion,
-		attrsJSON, confidenceJSON, seed.Source, now.Add(-time.Duration(seed.AgeHours)*time.Hour),
+		demoSeedPromptVersion, attrsJSON, confidenceJSON, seed.Source, now.Add(-time.Duration(seed.AgeHours)*time.Hour),
 	)
 	if err != nil {
 		return fmt.Errorf("insert demo semantic run: %w", err)

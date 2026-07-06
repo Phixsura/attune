@@ -108,17 +108,10 @@ func runServer() error {
 	ctx, cancel := signalContext()
 	defer cancel()
 	logext.Infof(ctx, "[%s] start,port:%d", where, cfg.Port)
-
-	// Install the SSRF egress policy before any outbound transport is built.
-	// Default blocks loopback + private networks (always blocks cloud-metadata /
-	// link-local); config relaxes loopback/private for dev / on-prem.
-	egress := cfg.EgressPolicy()
-	notify.SetEgressPolicy(egress)
-	llmclient.SetEgressPolicy(egress)
-	replydraftsvc.SetEgressPolicy(egress)
-	// Trusted-proxy hop count for client-IP resolution outside the API-key
-	// middleware (audit actor IP, etc.).
-	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)
+	if err := validateConfigSafety(ctx, cfg); err != nil {
+		return err
+	}
+	applyRuntimeHardening(cfg)
 
 	// OpenTelemetry tracer. Empty endpoint = noop; configure
 	// observability.otlp_endpoint to ship spans to a real collector.
@@ -143,6 +136,9 @@ func runServer() error {
 
 	if err := database.CheckPgvector(ctx, pool); err != nil {
 		return fmt.Errorf("pgvector check: %w", err)
+	}
+	if err := validateBootstrapSafety(ctx, cfg, pool); err != nil {
+		return err
 	}
 
 	// Derive restore-drill metrics from restore_drill_runs at scrape time (#151):
@@ -244,6 +240,19 @@ func runServer() error {
 		logext.Warnf(waitCtx, "[%s] enrich runner shutdown timed out,err:%+v", where, err.Error())
 	}
 	return nil
+}
+
+func applyRuntimeHardening(cfg *config.Config) {
+	// Install the SSRF egress policy before any outbound transport is built.
+	// Default blocks loopback + private networks (always blocks cloud-metadata /
+	// link-local); config relaxes loopback/private for dev / on-prem.
+	egress := cfg.EgressPolicy()
+	notify.SetEgressPolicy(egress)
+	llmclient.SetEgressPolicy(egress)
+	replydraftsvc.SetEgressPolicy(egress)
+	// Trusted-proxy hop count for client-IP resolution outside the API-key
+	// middleware (audit actor IP, etc.).
+	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)
 }
 
 func setupRuntimeServices(
@@ -806,9 +815,8 @@ func signalContext() (context.Context, context.CancelFunc) {
 }
 
 // inboundWiring bundles the inbound-framework deps runServer needs to
-// thread into buildRouter + into its shutdown defer. Extracted from
-// runServer in #66 Plan T24 so the boot function stays under the §1
-// CCN/NLOC threshold.
+// thread into buildRouter and into its shutdown defer. Extracted so the
+// boot function stays under the §1 CCN/NLOC threshold.
 type inboundWiring struct {
 	subRouter *chi.Mux
 	secrets   *secretstore.TinkStore

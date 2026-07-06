@@ -34,6 +34,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
 	consoleoutbox "github.com/Phixsura/attune/internal/handlers/console/outbox"
+	"github.com/Phixsura/attune/internal/handlers/console/system"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
@@ -263,6 +264,8 @@ func TestRouterHTTPDispatch_APIKeyRelated(t *testing.T) {
 	}{
 		{"GET /service-accounts/", http.MethodGet, "/service-accounts/", ""},
 		{"POST /service-accounts/", http.MethodPost, "/service-accounts/", `{}`},
+		{"PATCH /service-accounts/{id}", http.MethodPatch, "/service-accounts/sa-1", `{}`},
+		{"DELETE /service-accounts/{id}", http.MethodDelete, "/service-accounts/sa-1", ""},
 		{"GET /projects/", http.MethodGet, "/projects/", ""},
 		{"POST /projects/", http.MethodPost, "/projects/", `{}`},
 		{"GET /oauth2/clients/", http.MethodGet, "/oauth2/clients/", ""},
@@ -297,6 +300,10 @@ func TestRouterHTTPDispatch_AuditLog(t *testing.T) {
 	}{
 		{"GET /audit-log/", http.MethodGet, "/audit-log/", ""},
 		{"GET /audit-log/export.csv", http.MethodGet, "/audit-log/export.csv", ""},
+		{"GET /audit-log/views/", http.MethodGet, "/audit-log/views/", ""},
+		{"POST /audit-log/views/", http.MethodPost, "/audit-log/views/", `{"name":"View 1"}`},
+		{"PUT /audit-log/views/{id}", http.MethodPut, "/audit-log/views/view-1", `{"name":"View 1","state":{}}`},
+		{"DELETE /audit-log/views/{id}", http.MethodDelete, "/audit-log/views/view-1", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -755,10 +762,22 @@ func TestRouterHTTPDispatch_Preflight(t *testing.T) {
 	r.preflight = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	r.releaseInfo = system.NewReleaseHandler(nil)
 	mux := newRecovererMux()
 	r.mountPreflight(mux)
 
 	serveAndAssertDispatched(t, mux, http.MethodGet, "/system/preflight", "")
+	serveAndAssertDispatched(t, mux, http.MethodGet, "/system/release", "")
+}
+
+func TestRouterHTTPDispatch_ReleaseInfo(t *testing.T) {
+	t.Parallel()
+	r := dispatchRouter()
+	r.releaseInfo = system.NewReleaseHandler(nil)
+	mux := newRecovererMux()
+	r.mountPreflight(mux)
+
+	serveAndAssertDispatched(t, mux, http.MethodGet, "/system/release", "")
 }
 
 // ---------- authProviders with OIDC ----------

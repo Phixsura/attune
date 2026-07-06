@@ -20,8 +20,8 @@ import (
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
 )
 
-// Handler owns the local-admin login + logout endpoints (#66 Plan T11)
-// that replace the deleted external-OAuth flow.
+// Handler owns the local-admin login + logout endpoints that replace the
+// deleted external-OAuth flow.
 type Handler struct {
 	signer  *session.Signer
 	admins  adminStore
@@ -226,9 +226,8 @@ func (h *Handler) ensureAdminMembership(ctx context.Context, where, tenantID, us
 // definitive same-site signal.
 //
 // baseURL is the canonical console origin from config
-// (ConsoleBaseURL); both http:// and https:// schemes are matched
-// because dev / loopback deploys may run plain HTTP behind a TLS
-// reverse proxy.
+// (ConsoleBaseURL). The configured scheme is respected, so dev may use
+// http:// while production uses https://.
 func originAllowed(r *http.Request, baseURL string) bool {
 	// Modern browsers send Sec-Fetch-Site since 2020; trust the
 	// explicit "same-origin" / "same-site" / "none" labels.

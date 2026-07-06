@@ -1,4 +1,9 @@
 import { HttpResponse, http } from 'msw'
+import type {
+  ListLockoutsResponse,
+  ListTokensResponse,
+  RevokeAllResponse,
+} from '@/features/security/api/breakglass'
 import type { ApiKey, CreateApiKeyResponse, ListApiKeysResponse } from '@/proto/attune/v1/api_key'
 import type { GetClassificationQualityResponse } from '@/proto/attune/v1/classification_quality'
 import type { DigestSubscription } from '@/proto/attune/v1/digest_subscription'
@@ -472,10 +477,49 @@ const sampleDigestSubscription: DigestSubscription = {
 
 // Auth providers (login page SSO detection)
 export const defaultAuthProviders = { providers: [{ type: 'local' }], oidc_only: false }
+export const defaultAuthMode = { mode: 'hybrid' as const }
+export const defaultBreakGlassTokens: ListTokensResponse = { tokens: [] }
+export const defaultBreakGlassLockouts: ListLockoutsResponse = { lockouts: [] }
+export const defaultBreakGlassRevokeAll: RevokeAllResponse = { revoked: 0 }
 
 export const handlers = [
   http.get(`${BASE}/me`, () => HttpResponse.json(defaultMe)),
   http.get(`${BASE}/auth/providers`, () => HttpResponse.json(defaultAuthProviders)),
+  http.get(`${BASE}/auth/sso/mode`, () => HttpResponse.json(defaultAuthMode)),
+  http.post(`${BASE}/auth/sso/cutover`, () =>
+    HttpResponse.json({ success: true, message: 'Switched to SSO-only mode' }),
+  ),
+  http.post(`${BASE}/auth/sso/fallback`, () =>
+    HttpResponse.json({ success: true, message: 'Switched to hybrid mode' }),
+  ),
+  http.get(`${BASE}/auth/breakglass/tokens`, () => HttpResponse.json(defaultBreakGlassTokens)),
+  http.post(`${BASE}/auth/breakglass/issue`, () =>
+    HttpResponse.json({
+      token: {
+        id: 'bg-token-1',
+        admin_email: 'admin@example.com',
+        expires_at: '2026-07-06T12:00:00Z',
+        issued_by: 'u-1',
+        issued_at: '2026-07-06T11:30:00Z',
+        status: 'valid',
+        allowed_ips: [],
+      },
+      raw_token: 'bg_sample_token',
+      expires_at: '2026-07-06T12:00:00Z',
+    }),
+  ),
+  http.post(`${BASE}/auth/breakglass/tokens/revoke-all`, () =>
+    HttpResponse.json(defaultBreakGlassRevokeAll),
+  ),
+  http.post(
+    `${BASE}/auth/breakglass/tokens/:id/revoke`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.get(`${BASE}/auth/breakglass/lockouts`, () => HttpResponse.json(defaultBreakGlassLockouts)),
+  http.post(
+    `${BASE}/auth/breakglass/lockouts/:ip/unlock`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
 
   http.get(`${BASE}/install/start`, ({ request }) => {
     const url = new URL(request.url)

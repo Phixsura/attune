@@ -130,8 +130,8 @@ func TestAlertRulesHaveActionableAnnotations(t *testing.T) {
 			}
 		}
 	}
-	if count != 39 {
-		t.Fatalf("alert rule count = %d, want 39", count)
+	if count != 53 {
+		t.Fatalf("alert rule count = %d, want 53", count)
 	}
 }
 
@@ -246,11 +246,13 @@ type ruleFile struct {
 }
 
 type ruleGroup struct {
+	Name  string      `yaml:"name"`
 	Rules []alertRule `yaml:"rules"`
 }
 
 type alertRule struct {
 	Alert       string            `yaml:"alert"`
+	Labels      map[string]string `yaml:"labels"`
 	Annotations map[string]string `yaml:"annotations"`
 }
 

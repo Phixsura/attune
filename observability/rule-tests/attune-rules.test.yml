@@ -1,6 +1,5 @@
 rule_files:
   - /etc/prometheus/rules/attune-recording.yml
-  - /etc/prometheus/rules/attune-slo.yml
   - /etc/prometheus/rules/attune-alerts.yml
 
 evaluation_interval: 30s
@@ -55,40 +54,6 @@ tests:
               description: Tenant tenant-a is being rate limited at 200m req/s over 5m. Check Attune Overview > Top tenants by volume.
               runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestratelimited
               summary: Attune ingest is rate limiting sustained traffic
-
-      - eval_time: 20m
-        alertname: AttuneIngestServiceFastBurn
-        exp_alerts:
-          - exp_labels:
-              alertname: AttuneIngestServiceFastBurn
-              service: attune
-              severity: critical
-              slo: ingest_service
-              tenant: tenant-a
-            exp_annotations:
-              action: Inspect ingest internal errors and rate-limit pressure by tenant and source/result, then confirm whether the root cause is a code regression, hot tenant, bad client payloads, or an upstream dependency failure.
-              dashboard: Attune Tenant Impact
-              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a
-              description: Tenant tenant-a is above the 14.4x fast-burn threshold on both 5m and 1h windows. Open Attune Tenant Impact > Burn trend.
-              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestservicefastburn
-              summary: Attune ingest service is burning error budget quickly
-
-      - eval_time: 20m
-        alertname: AttuneIngestServiceSlowBurn
-        exp_alerts:
-          - exp_labels:
-              alertname: AttuneIngestServiceSlowBurn
-              service: attune
-              severity: warning
-              slo: ingest_service
-              tenant: tenant-a
-            exp_annotations:
-              action: Check whether the ingest regression is sustained, compare against recent deploys, and verify whether rate-limit pressure, validation noise, or a hot tenant is masking a real backend failure.
-              dashboard: Attune Tenant Impact
-              dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a
-              description: Tenant tenant-a is above the 6x slow-burn threshold on both 30m and 6h windows. Open Attune Tenant Impact > Burn trend.
-              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestserviceslowburn
-              summary: Attune ingest service is consuming budget too fast
 
       - eval_time: 20m
         alertname: AttuneLLMProviderErrors
@@ -185,7 +150,7 @@ tests:
               slo: ingest_service
               tenant: tenant-a
             exp_annotations:
-              action: Inspect ingest internal errors and rate-limit pressure by tenant and source/result, then confirm whether the root cause is a code regression, hot tenant, bad client payloads, or an upstream dependency failure.
+              action: Inspect ingest internal errors by tenant and source/result, then confirm whether the root cause is a code regression, bad client payloads, or an upstream dependency failure.
               dashboard: Attune Tenant Impact
               dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a
               description: Tenant tenant-a is above the 14.4x fast-burn threshold on both 5m and 1h windows. Open Attune Tenant Impact > Burn trend.
@@ -202,7 +167,7 @@ tests:
               slo: ingest_service
               tenant: tenant-a
             exp_annotations:
-              action: Check whether the ingest regression is sustained, compare against recent deploys, and verify whether rate-limit pressure, validation noise, or a hot tenant is masking a real backend failure.
+              action: Check whether the ingest regression is sustained, compare against recent deploys, and verify if rate-limit pressure or validation noise is masking a real backend failure.
               dashboard: Attune Tenant Impact
               dashboard_url: /d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-a
               description: Tenant tenant-a is above the 6x slow-burn threshold on both 30m and 6h windows. Open Attune Tenant Impact > Burn trend.

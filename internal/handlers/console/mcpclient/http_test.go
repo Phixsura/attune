@@ -345,7 +345,7 @@ func TestHandlerServeGovernanceEndpoints(t *testing.T) {
 
 	t.Run("replace tool policies", func(t *testing.T) {
 		req := routeRequest(
-			authRequest(http.MethodPut, "/", bytes.NewBufferString(`{"policies":[{"tool_name":"list_feedback","effect":"allow"}]}`)),
+			authRequest(http.MethodPut, "/", bytes.NewBufferString(`{"policies":[{"tool_name":"feedback.list","effect":"allow"}]}`)),
 			map[string]string{"id": clientID.String()},
 		)
 		rec := httptest.NewRecorder()

@@ -179,7 +179,7 @@ func TestScanRequest(t *testing.T) {
 
 	req, err := scanRequest(fakeRow{values: []any{
 		"req-1", "tenant-1", RequestTypeDelete, RequestStatusScheduled, "subject-1", "hash-1", "Subject One",
-		1, 2, 3, 4, "bundle.zip", "", "admin", "admin-1", now, ptrext.Of(startedAt), ptrext.Of(completedAt), ptrext.Of(expiresAt), ptrext.Of(downloadedAt),
+		1, 2, 3, 4, 5, "bundle.zip", "", "admin", "admin-1", now, ptrext.Of(startedAt), ptrext.Of(completedAt), ptrext.Of(expiresAt), ptrext.Of(downloadedAt),
 		ptrext.Of(executeAfter), ptrext.Of(cancelledAt), ptrext.Of(revokedAt),
 	}})
 	if err != nil {
@@ -190,6 +190,9 @@ func TestScanRequest(t *testing.T) {
 	}
 	if req.ExecuteAfter == nil || !req.ExecuteAfter.Equal(executeAfter) {
 		t.Fatalf("ExecuteAfter = %v, want %v", req.ExecuteAfter, executeAfter)
+	}
+	if req.Counts.OutboxCount != 5 {
+		t.Fatalf("OutboxCount = %d, want 5", req.Counts.OutboxCount)
 	}
 	if req.RevokedAt == nil || !req.RevokedAt.Equal(revokedAt) {
 		t.Fatalf("RevokedAt = %v, want %v", req.RevokedAt, revokedAt)

@@ -62,6 +62,27 @@ describe('console IA', () => {
     expect(canAccessConsoleItem('viewer', item)).toBe(false)
   })
 
+  it('exposes operational settings to delegated admins', () => {
+    const config = consoleNavItems.find(
+      (candidate) => candidate.path === '/configuration/enrichment-runtime',
+    )
+    const audit = consoleNavItems.find(
+      (candidate) => candidate.path === '/administration/audit-log',
+    )
+    const apiKeys = consoleNavItems.find((candidate) => candidate.path === '/integrations/api-keys')
+
+    expect(config).toBeDefined()
+    expect(audit).toBeDefined()
+    expect(apiKeys).toBeDefined()
+    if (!config || !audit || !apiKeys) {
+      throw new Error('expected delegated-admin nav items to exist')
+    }
+
+    expect(canAccessConsoleItem('delegated_admin', config)).toBe(true)
+    expect(canAccessConsoleItem('delegated_admin', audit)).toBe(true)
+    expect(canAccessConsoleItem('delegated_admin', apiKeys)).toBe(false)
+  })
+
   it('derives visible items from the same access rules used by routes', () => {
     const memberItems = getConsoleItemsForRole('member')
     const viewerItems = getConsoleItemsForRole('viewer')
@@ -78,7 +99,7 @@ describe('console IA', () => {
   })
 
   it('keeps every default group path inside that group for each role', () => {
-    const roles: Role[] = ['admin', 'member', 'viewer']
+    const roles: Role[] = ['admin', 'delegated_admin', 'member', 'viewer']
 
     for (const role of roles) {
       for (const group of consoleNavGroupOrder) {

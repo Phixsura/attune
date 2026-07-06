@@ -155,6 +155,36 @@ func TestEvaluatorEvaluateInvalidClient(t *testing.T) {
 	require.Equal(t, policy.DecisionDeniedClient, decision.Reason)
 }
 
+func TestEvaluatorRejectsDisabledExtensions(t *testing.T) {
+	t.Parallel()
+
+	clientID := uuid.New()
+	sessionID := uuid.New()
+	evaluator := policy.NewEvaluator(
+		stubClientReader{client: ptrext.Of(oauth.Client{
+			ID:             clientID,
+			ToolPolicyMode: domain.MCPToolPolicyModeLegacyAllowAll,
+		})},
+		stubToolPolicyReader{policy: ptrext.Of(policy.ToolPolicy{
+			Effect: domain.MCPToolPolicyEffectAllow,
+		})},
+	)
+
+	decision, err := evaluator.Evaluate(context.Background(), ptrext.Of(oauth.AccessTokenClaims{
+		ClientID:  clientID,
+		SessionID: sessionID,
+		Scopes:    []string{domain.MCPScopeRead},
+	}), tools.ToolMeta{
+		Name:             "external_example",
+		Kind:             tools.ExtensionExternal,
+		EnabledByDefault: false,
+		RequiredScope:    domain.MCPScopeRead,
+	})
+	require.NoError(t, err)
+	require.False(t, decision.Allowed)
+	require.Equal(t, policy.DecisionDeniedExtensionDisabled, decision.Reason)
+}
+
 func mustTool(t *testing.T, name string) tools.ToolMeta {
 	t.Helper()
 

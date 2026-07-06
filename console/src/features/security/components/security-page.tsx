@@ -17,7 +17,7 @@ import {
   Unlock,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { type ChangeEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
@@ -55,8 +55,11 @@ import { authModeQuery, cutoverToSSO, fallbackToHybrid } from '../api/auth-mode'
 import {
   type BreakGlassToken,
   issueBreakGlassToken,
+  listBreakGlassLockouts,
   listBreakGlassTokens,
+  revokeAllBreakGlassTokens,
   revokeBreakGlassToken,
+  unlockBreakGlassLockout,
 } from '../api/breakglass'
 
 type TokenStatus = 'active' | 'used' | 'revoked' | 'expiring' | 'expired'
@@ -132,12 +135,13 @@ function formatTimeRemaining(
 export function SecurityPage() {
   const { t, i18n } = useTranslation()
   const queryClient = useQueryClient()
-  const locale = i18n.language === 'zh' ? zhCN : undefined
+  const locale = i18n.language.startsWith('zh') ? zhCN : undefined
 
   const [showIssueDialog, setShowIssueDialog] = useState(false)
   const [showTokenDialog, setShowTokenDialog] = useState(false)
   const [showCutoverDialog, setShowCutoverDialog] = useState(false)
   const [showFallbackDialog, setShowFallbackDialog] = useState(false)
+  const [showRevokeAllDialog, setShowRevokeAllDialog] = useState(false)
   const [issuedToken, setIssuedToken] = useState<{ token: string; expiresAt: string } | null>(null)
   const [skipBreakglass, setSkipBreakglass] = useState(false)
   const [issueEmail, setIssueEmail] = useState('')
@@ -159,6 +163,11 @@ export function SecurityPage() {
     queryFn: listBreakGlassTokens,
   })
 
+  const { data: lockouts, isLoading: lockoutsLoading } = useQuery({
+    queryKey: ['breakglass-lockouts'],
+    queryFn: listBreakGlassLockouts,
+  })
+
   const cutoverMutation = useMutation({
     mutationFn: () => cutoverToSSO(skipBreakglass),
     onSuccess: (result) => {
@@ -178,6 +187,20 @@ export function SecurityPage() {
       toast.success(t('security.fallback.success', 'Switched to hybrid mode'))
       setShowFallbackDialog(false)
       queryClient.invalidateQueries({ queryKey: ['auth-mode'] })
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error', 'Error')),
+  })
+
+  const revokeAllMutation = useMutation({
+    mutationFn: revokeAllBreakGlassTokens,
+    onSuccess: (result) => {
+      toast.success(
+        t('security.revoke_all.success', 'Revoked {{count}} active tokens', {
+          count: result.revoked,
+        }),
+      )
+      setShowRevokeAllDialog(false)
+      queryClient.invalidateQueries({ queryKey: ['breakglass-tokens'] })
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error', 'Error')),
   })
@@ -213,6 +236,15 @@ export function SecurityPage() {
     onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error', 'Error')),
   })
 
+  const unlockMutation = useMutation({
+    mutationFn: unlockBreakGlassLockout,
+    onSuccess: () => {
+      toast.success(t('security.lockouts.unlocked', 'Lockout cleared'))
+      queryClient.invalidateQueries({ queryKey: ['breakglass-lockouts'] })
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error', 'Error')),
+  })
+
   const [page, setPage] = useState(1)
   const pageSize = 10
 
@@ -222,6 +254,10 @@ export function SecurityPage() {
   const expiringCount = allTokens.filter((tk) => getTokenStatus(tk) === 'expiring').length
   const usedCount = allTokens.filter((tk) => getTokenStatus(tk) === 'used').length
   const revokedCount = allTokens.filter((tk) => getTokenStatus(tk) === 'revoked').length
+  const validTokenCount = activeCount + expiringCount
+  const lockoutRows = [...(lockouts?.lockouts ?? [])].sort(
+    (a, b) => new Date(a.locked_until).getTime() - new Date(b.locked_until).getTime(),
+  )
 
   const totalPages = Math.ceil(allTokens.length / pageSize)
   const paginatedTokens = allTokens.slice((page - 1) * pageSize, page * pageSize)
@@ -306,6 +342,15 @@ export function SecurityPage() {
               <Button size="sm" onClick={() => setShowIssueDialog(true)}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" />
                 {t('security.action.issue', 'Issue Token')}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => setShowRevokeAllDialog(true)}
+                disabled={validTokenCount === 0 || revokeAllMutation.isPending}
+              >
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                {t('security.action.revoke_all', 'Revoke All Active Tokens')}
               </Button>
               {isHybrid ? (
                 <Button size="sm" variant="outline" onClick={() => setShowCutoverDialog(true)}>
@@ -456,6 +501,99 @@ export function SecurityPage() {
         </CardContent>
       </Card>
 
+      <Card className="gap-0 overflow-hidden rounded-[1.2rem] border-border/75 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(249,250,251,0.985))] py-0 shadow-[0_28px_72px_-52px_rgba(15,23,42,0.22)]">
+        <CardHeader className="border-b border-border/55 bg-[linear-gradient(180deg,rgba(248,250,252,0.82),rgba(255,255,255,0.92))] px-5 py-4 sm:px-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-[1.18rem] tracking-tight">
+                {t('security.lockouts.title', 'Break-Glass Lockouts')}
+              </CardTitle>
+              <CardDescription className="mt-1 text-sm leading-[1.35rem]">
+                {t(
+                  'security.lockouts.description',
+                  'IP addresses locked after repeated break-glass failures.',
+                )}
+              </CardDescription>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {t('security.lockouts.count', '{{count}} locked IPs', {
+                count: lockoutRows.length,
+              })}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {lockoutsLoading ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              {t('common.loading', 'Loading...')}
+            </div>
+          ) : lockoutRows.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="pl-5 sm:pl-6">
+                    {t('security.lockouts.col.ip', 'IP')}
+                  </TableHead>
+                  <TableHead>{t('security.lockouts.col.attempts', 'Attempts')}</TableHead>
+                  <TableHead>{t('security.lockouts.col.remaining', 'Remaining')}</TableHead>
+                  <TableHead>{t('security.lockouts.col.locked_until', 'Unlocks at')}</TableHead>
+                  <TableHead className="w-[100px]">
+                    {t('security.lockouts.col.actions', 'Actions')}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {lockoutRows.map((lockout) => (
+                  <TableRow key={lockout.ip}>
+                    <TableCell className="pl-5 font-medium sm:pl-6">{lockout.ip}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {t('security.lockouts.attempts_value', '{{count}} failed attempts', {
+                        count: lockout.attempts,
+                      })}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {t('security.lockouts.remaining_value', '{{count}} min left', {
+                        count: lockout.remaining_mins,
+                      })}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {formatDistanceToNow(new Date(lockout.locked_until), {
+                        addSuffix: true,
+                        locale,
+                      })}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2.5 text-muted-foreground hover:text-foreground"
+                        onClick={() => unlockMutation.mutate(lockout.ip)}
+                        disabled={unlockMutation.isPending}
+                      >
+                        <Unlock className="mr-1.5 h-3.5 w-3.5" />
+                        {t('security.lockouts.unlock', 'Unlock')}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="py-12">
+              <EmptyState
+                icon={ShieldAlert}
+                title={t('security.lockouts.empty_title', 'No locked IPs')}
+                description={t(
+                  'security.lockouts.empty_desc',
+                  'There are no active lockouts right now.',
+                )}
+              />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Issue Dialog */}
       <Dialog open={showIssueDialog} onOpenChange={setShowIssueDialog}>
         <DialogContent>
@@ -473,7 +611,7 @@ export function SecurityPage() {
                 type="email"
                 placeholder="admin@example.com"
                 value={issueEmail}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIssueEmail(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setIssueEmail(e.target.value)}
               />
             </div>
             <div className="space-y-2">
@@ -503,7 +641,7 @@ export function SecurityPage() {
                 id="allowed-ips"
                 placeholder="192.168.1.0/24, 10.0.0.1"
                 value={issueIPs}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIssueIPs(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setIssueIPs(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
                 {t('security.issue.ip_hint', 'Comma-separated CIDRs. Empty = any IP.')}
@@ -683,6 +821,46 @@ export function SecurityPage() {
               {fallbackMutation.isPending
                 ? t('common.processing', 'Processing...')
                 : t('security.fallback.confirm', 'Enable Password')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showRevokeAllDialog} onOpenChange={setShowRevokeAllDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('security.revoke_all.title', 'Revoke All Active Tokens')}</DialogTitle>
+            <DialogDescription>
+              {t(
+                'security.revoke_all.description',
+                'This will immediately invalidate every active or expiring break-glass token.',
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>
+              {t('security.revoke_all.warning_title', 'Emergency revocation')}
+            </AlertTitle>
+            <AlertDescription>
+              {t(
+                'security.revoke_all.warning_desc',
+                'Use this when emergency access should no longer remain usable.',
+              )}
+            </AlertDescription>
+          </Alert>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowRevokeAllDialog(false)}>
+              {t('common.cancel', 'Cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => revokeAllMutation.mutate()}
+              disabled={revokeAllMutation.isPending}
+            >
+              {revokeAllMutation.isPending
+                ? t('common.processing', 'Processing...')
+                : t('security.action.revoke_all', 'Revoke All Active Tokens')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -21,12 +21,24 @@ const keyFixture = {
   environment: '',
 }
 
+const serviceAccountFixture = {
+  id: 'sa-1',
+  name: 'ci-bot',
+  description: 'deployment pipeline',
+  isActive: true,
+  createdAt: '2026-06-07T00:00:00Z',
+  updatedAt: '2026-06-08T00:00:00Z',
+}
+
 describe('ApiKeysPage user flow', () => {
   it('renders existing keys, creates a key with one-time secret, and revokes a key', async () => {
     let createBody: unknown
     let deletedId = ''
     server.use(
       http.get('/fb/v1/console/api-keys', () => HttpResponse.json({ items: [keyFixture] })),
+      http.get('/fb/v1/console/service-accounts', () =>
+        HttpResponse.json({ items: [serviceAccountFixture] }),
+      ),
       http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json({ presets: [] })),
       http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json({ scopes: [] })),
       http.post('/fb/v1/console/api-keys', async ({ request }) => {
@@ -49,6 +61,10 @@ describe('ApiKeysPage user flow', () => {
     })
     expect(screen.getByText('Key 总数')).toBeInTheDocument()
     expect(screen.getByText('Key 治理建议')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('服务账号目录')).toBeInTheDocument()
+      expect(screen.getByText('ci-bot')).toBeInTheDocument()
+    })
     expect(screen.getByText('ak_live_1234…')).toBeInTheDocument()
     expect(screen.getByRole('table', { name: 'API key 列表' })).toBeInTheDocument()
     expect(screen.getByText('可用')).toBeInTheDocument()
@@ -95,5 +111,25 @@ describe('ApiKeysPage user flow', () => {
     await waitFor(() => {
       expect(deletedId).toBe('key-1')
     })
+  })
+
+  it('shows the service-account empty state alongside the key registry empty state', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys', () => HttpResponse.json({ items: [] })),
+      http.get('/fb/v1/console/service-accounts', () => HttpResponse.json({ items: [] })),
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json({ presets: [] })),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json({ scopes: [] })),
+    )
+
+    const { container } = renderWithProviders(<ApiKeysPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('还没有 API key')).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.getByText('还没有服务账号')).toBeInTheDocument()
+    })
+    expect(screen.getByText('服务账号目录')).toBeInTheDocument()
+    await expectNoA11yViolations(container)
   })
 })

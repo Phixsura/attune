@@ -38,6 +38,9 @@ bash scripts/lint-errorcode.sh
 step "lint-integration-layout"
 bash scripts/lint-integration-layout.sh
 
+step "lint-maturity-contract"
+bash scripts/lint-maturity-contract.sh
+
 step "lint-http-response-emission"
 bash scripts/lint-http-response-emission.sh
 

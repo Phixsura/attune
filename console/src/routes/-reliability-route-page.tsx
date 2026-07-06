@@ -7,6 +7,11 @@ import { gdprOperationsQuery } from '@/features/gdpr/api/gdpr-control'
 import { mcpClientsQuery } from '@/features/mcp-clients/api/list-mcp-clients'
 import { deliveriesQuery } from '@/features/outbox-dead/api/list-deliveries'
 import {
+  type RecoveryContextResponse,
+  recoveryContextQuery,
+} from '@/features/reliability/api/get-recovery-context'
+import { releaseContextQuery } from '@/features/reliability/api/get-release-context'
+import {
   type ReliabilityMetric,
   ReliabilityPage,
   type ReliabilityReadinessMetric,
@@ -56,6 +61,122 @@ function statusLabel(status: PreflightStatus | undefined, t: TranslationFunction
   }
 }
 
+function lifecycleLabel(state: string | undefined, t: TranslationFunction) {
+  switch (state) {
+    case 'supported':
+      return t('reliability.release.lifecycle_supported', 'supported')
+    case 'deprecated':
+      return t('reliability.release.lifecycle_deprecated', 'deprecated')
+    case 'migrating':
+      return t('reliability.release.lifecycle_migrating', 'migrating')
+    case 'recovering':
+      return t('reliability.release.lifecycle_recovering', 'recovering')
+    case 'blocked':
+      return t('reliability.release.lifecycle_blocked', 'blocked')
+    default:
+      return state ?? t('common.loading', 'Loading...')
+  }
+}
+
+function lifecycleHint(state: string | undefined, t: TranslationFunction) {
+  switch (state) {
+    case 'supported':
+      return t(
+        'reliability.release.lifecycle_supported_hint',
+        'Current runtime contract is within the supported window.',
+      )
+    case 'deprecated':
+      return t(
+        'reliability.release.lifecycle_deprecated_hint',
+        'This surface is deprecated and should move behind its replacement.',
+      )
+    case 'migrating':
+      return t(
+        'reliability.release.lifecycle_migrating_hint',
+        'Non-production runtime; compatibility can still shift while the contract is moving.',
+      )
+    case 'recovering':
+      return t(
+        'reliability.release.lifecycle_recovering_hint',
+        'Recovery mode is active and the support window is still being re-established.',
+      )
+    case 'blocked':
+      return t(
+        'reliability.release.lifecycle_blocked_hint',
+        'Production runtime is blocked because a dev build or blank release marker is present.',
+      )
+    default:
+      return t('common.loading', 'Loading...')
+  }
+}
+
+function formatRecoveryDuration(durationMs: number) {
+  if (durationMs < 1000) {
+    return `${durationMs}ms`
+  }
+  const seconds = durationMs / 1000
+  if (seconds < 60) {
+    return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`
+  }
+  const minutes = seconds / 60
+  if (minutes < 60) {
+    return `${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)}m`
+  }
+  const hours = minutes / 60
+  if (hours < 24) {
+    return `${hours < 10 ? hours.toFixed(1) : Math.round(hours)}h`
+  }
+  return `${Math.round(hours / 24)}d`
+}
+
+function formatRecoveryWindow(seconds: number) {
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+  const minutes = seconds / 60
+  if (minutes < 60) {
+    return `${Math.round(minutes)}m`
+  }
+  const hours = minutes / 60
+  if (hours < 24) {
+    return `${Math.round(hours)}h`
+  }
+  return `${Math.round(hours / 24)}d`
+}
+
+function recoveryHint(context: RecoveryContextResponse | undefined, t: TranslationFunction) {
+  if (!context) {
+    return t('common.loading', 'Loading...')
+  }
+  const details: string[] = []
+  if (context.lastRun?.backupRef) {
+    details.push(t('reliability.hints.recovery_backup', { value: context.lastRun.backupRef }))
+  }
+  if (context.lastRun) {
+    details.push(
+      t('reliability.hints.recovery_duration', {
+        value: formatRecoveryDuration(context.lastRun.durationMs),
+      }),
+    )
+  }
+  if (context.freshnessWindowSeconds > 0) {
+    details.push(
+      t('reliability.hints.recovery_window', {
+        value: formatRecoveryWindow(context.freshnessWindowSeconds),
+      }),
+    )
+  }
+  const parts = [context.message, ...details]
+  if (context.remediation) {
+    parts.push(context.remediation)
+  }
+  return parts.join(' · ')
+}
+
+function joinSemanticLabels<T extends { label: string }>(items: T[]) {
+  return items.map((item) => item.label).join(' · ')
+}
+
 export function ReliabilityRoutePage() {
   const { t, i18n } = useTranslation()
   const queryClient = useQueryClient()
@@ -68,6 +189,8 @@ export function ReliabilityRoutePage() {
   const mcpClients = useQuery(mcpClientsQuery())
   const gdprOps = useQuery(gdprOperationsQuery())
   const deadDeliveries = useQuery(deliveriesQuery('dead'))
+  const recoveryContext = useQuery(recoveryContextQuery())
+  const releaseContext = useQuery(releaseContextQuery())
 
   const tenantName = me.data?.tenant?.name ?? t('common.loading', 'Loading...')
   const tenantSlug = me.data?.tenant?.slug
@@ -104,6 +227,35 @@ export function ReliabilityRoutePage() {
     deadDeliveries.data?.filter((delivery) => !delivery.inFlight).length ?? 0
   const inflightDeadDeliveries =
     deadDeliveries.data?.filter((delivery) => delivery.inFlight).length ?? 0
+  const recoveryData = recoveryContext.data
+  const releaseData = releaseContext.data
+  const releaseStartedAt = releaseData?.startedAt
+    ? formatDistanceToNow(new Date(releaseData.startedAt), {
+        addSuffix: true,
+        locale,
+      })
+    : null
+  const releaseVersionTone =
+    releaseData?.lifecycleState === 'blocked' ? 'urgent' : releaseData ? 'active' : 'default'
+  const releaseLifecycleTone =
+    releaseData?.lifecycleState === 'blocked' ? 'urgent' : releaseData ? 'active' : 'default'
+  const releaseCompatibilityTone = releaseData ? 'active' : 'default'
+  const releaseEnvironmentTone = releaseData ? 'active' : 'default'
+  const releaseOwnerTone = releaseData ? 'active' : 'default'
+  const releaseLifecycleValue = lifecycleLabel(releaseData?.lifecycleState, t)
+  const releaseLifecycleHintValue = lifecycleHint(releaseData?.lifecycleState, t)
+  const releaseRecoveryTone = statusTone(recoveryData?.status ?? 'skipped')
+  const releaseRecoveryValue = statusLabel(recoveryData?.status, t)
+  const releaseRecoveryHintValue = recoveryHint(recoveryData, t)
+  const releaseCompatibilityValue = releaseData
+    ? `${releaseData.compatibilityRules.length} rules`
+    : t('common.loading', 'Loading...')
+  const releaseCompatibilityHintValue = releaseData
+    ? joinSemanticLabels(releaseData.compatibilityRules)
+    : t('common.loading', 'Loading...')
+  const releaseGlossaryValue = releaseData
+    ? joinSemanticLabels(releaseData.glossary)
+    : t('common.loading', 'Loading...')
 
   const readinessStatus = preflight.data?.status
   const readinessTone = readinessStatus ? statusTone(readinessStatus) : 'default'
@@ -179,6 +331,14 @@ export function ReliabilityRoutePage() {
       label: t('reliability.links.dead_deliveries', '死信投递'),
       message: safeErrorMessage(deadDeliveries.error, t('common.error', 'Error')),
     },
+    recoveryContext.error && {
+      label: t('reliability.release.recovery', '恢复'),
+      message: safeErrorMessage(recoveryContext.error, t('common.error', 'Error')),
+    },
+    releaseContext.error && {
+      label: t('reliability.links.release_context', '发布与归属'),
+      message: safeErrorMessage(releaseContext.error, t('common.error', 'Error')),
+    },
   ].filter(Boolean) as Array<{ label: string; message: string }>
 
   const isRefreshing =
@@ -188,7 +348,9 @@ export function ReliabilityRoutePage() {
     apiKeys.isFetching ||
     mcpClients.isFetching ||
     gdprOps.isFetching ||
-    deadDeliveries.isFetching
+    deadDeliveries.isFetching ||
+    recoveryContext.isFetching ||
+    releaseContext.isFetching
 
   const refreshAll = () => {
     void Promise.all([
@@ -199,6 +361,8 @@ export function ReliabilityRoutePage() {
       queryClient.invalidateQueries({ queryKey: mcpClientsQuery().queryKey }),
       queryClient.invalidateQueries({ queryKey: gdprOperationsQuery().queryKey }),
       queryClient.invalidateQueries({ queryKey: deliveriesQuery('dead').queryKey }),
+      queryClient.invalidateQueries({ queryKey: recoveryContextQuery().queryKey }),
+      queryClient.invalidateQueries({ queryKey: releaseContextQuery().queryKey }),
     ])
   }
 
@@ -243,6 +407,48 @@ export function ReliabilityRoutePage() {
     value: deadDeliveries.data ? formatCount(deadDeliveryCount) : t('common.loading', 'Loading...'),
     hint: deadDeliveriesHint,
   }
+  const releaseVersionMetric: ReliabilityMetric = {
+    tone: releaseVersionTone,
+    heroTone: releaseVersionTone,
+    value: releaseData?.serviceVersion || t('reliability.release.unknown', '未知'),
+    hint: releaseStartedAt
+      ? t('reliability.hints.release_started', { value: releaseStartedAt })
+      : t('common.loading', 'Loading...'),
+  }
+  const releaseEnvironmentMetric: ReliabilityMetric = {
+    tone: releaseEnvironmentTone,
+    heroTone: releaseEnvironmentTone,
+    value: releaseData?.environment || t('reliability.release.unknown', '未知'),
+    hint: releaseData
+      ? t('reliability.hints.release_environment', {
+          value: releaseData.profile || t('reliability.release.unknown', '未知'),
+        })
+      : t('common.loading', 'Loading...'),
+  }
+  const releaseOwnerMetric: ReliabilityMetric = {
+    tone: releaseOwnerTone,
+    heroTone: releaseOwnerTone,
+    value: releaseData?.ownerTeam || t('reliability.release.unknown', '未知'),
+    hint: t('reliability.hints.release_owner', 'Runbook 与升级通道应保持同步。'),
+  }
+  const releaseLifecycleMetric: ReliabilityMetric = {
+    tone: releaseLifecycleTone,
+    heroTone: releaseLifecycleTone,
+    value: releaseLifecycleValue,
+    hint: releaseLifecycleHintValue,
+  }
+  const releaseRecoveryMetric: ReliabilityMetric = {
+    tone: releaseRecoveryTone,
+    heroTone: releaseRecoveryTone,
+    value: releaseRecoveryValue,
+    hint: releaseRecoveryHintValue,
+  }
+  const releaseCompatibilityMetric: ReliabilityMetric = {
+    tone: releaseCompatibilityTone,
+    heroTone: releaseCompatibilityTone,
+    value: releaseCompatibilityValue,
+    hint: releaseCompatibilityHintValue,
+  }
 
   return (
     <ReliabilityPage
@@ -257,6 +463,20 @@ export function ReliabilityRoutePage() {
       mcpClients={mcpMetric}
       gdpr={gdprMetric}
       deadDeliveries={deadMetric}
+      releaseContext={{
+        version: releaseVersionMetric,
+        environment: releaseEnvironmentMetric,
+        owner: releaseOwnerMetric,
+        lifecycle: releaseLifecycleMetric,
+        recovery: releaseRecoveryMetric,
+        compatibility: releaseCompatibilityMetric,
+        glossary: releaseGlossaryValue,
+        runbookHref:
+          releaseData?.runbookUrl ||
+          'https://github.com/Phixsura/attune/blob/main/docs/private-deploy.md',
+        escalationHref:
+          releaseData?.escalationUrl || 'https://github.com/Phixsura/attune/issues/new/choose',
+      }}
     />
   )
 }

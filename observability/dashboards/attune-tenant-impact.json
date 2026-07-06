@@ -107,7 +107,7 @@
         "y": 0
       },
       "options": {
-        "content": "**Targets:** service-owned SLOs burn first; diagnostics stay visible but do not page on their own.\n\n**Flow:** burn trend -\u003e tenant impact -\u003e source / result attribution -\u003e auth, MCP, GDPR, and delivery drilldowns.\n\n**Thresholds:** fast burn \u003e 14.4x · slow burn \u003e 6.0x.",
+        "content": "**Targets:** ingest internal errors \u003c= 0.1% · enrichment success under 5s \u003e= 95% · outbox terminal failures \u003c= 0.1% · OIDC login failures \u003c= 0.1% · API key denials stay explainable\n\n**Flow:** burn trend -\u003e tenant impact -\u003e source / result attribution -\u003e auth, MCP, GDPR, and delivery drilldowns.\n\n**Thresholds:** fast burn \u003e 14.4x · slow burn \u003e 6.0x.",
         "mode": "markdown"
       }
     },
@@ -126,16 +126,16 @@
       "id": 3,
       "type": "stat",
       "title": "Ingest burn x",
-      "description": "Fast burn multiplier for ingest internal errors and rate-limit pressure. 1x means the budget is being consumed at the planned rate; 14.4x is the classic 30d fast-burn page threshold.",
+      "description": "Fast burn multiplier for ingest internal errors. 1x means the budget is being consumed at the planned rate; 14.4x is the classic 30d fast-burn page threshold.",
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 4,
         "x": 0,
         "y": 5
       },
       "targets": [
         {
-          "expr": "((attune:ingest_service_failure_ratio:ratio5m) / 0.001) or vector(0)",
+          "expr": "(((attune:ingest_service_failure_ratio:ratio5m) / 0.001) or vector(0)) or vector(0)",
           "legendFormat": "Ingest burn x",
           "refId": "A"
         }
@@ -194,13 +194,13 @@
       "description": "Fast burn multiplier for enrichment attempts that miss the 5s success target. This is the main user-facing latency SLO.",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
+        "w": 4,
+        "x": 4,
         "y": 5
       },
       "targets": [
         {
-          "expr": "((1 - attune:enrich_success_under_5s:ratio5m) / 0.05) or vector(0)",
+          "expr": "((((1 - attune:enrich_success_under_5s:ratio5m)) / 0.05) or vector(0)) or vector(0)",
           "legendFormat": "Enrich burn x",
           "refId": "A"
         }
@@ -259,13 +259,13 @@
       "description": "Fast burn multiplier for terminal delivery failures. Pair this with outbox lag to tell destination rejection from worker pressure.",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 12,
+        "w": 4,
+        "x": 8,
         "y": 5
       },
       "targets": [
         {
-          "expr": "((attune:outbox_delivery_failure_ratio:ratio5m) / 0.001) or vector(0)",
+          "expr": "(((attune:outbox_delivery_failure_ratio:ratio5m) / 0.001) or vector(0)) or vector(0)",
           "legendFormat": "Outbox burn x",
           "refId": "A"
         }
@@ -324,13 +324,13 @@
       "description": "Fast burn multiplier for failed sign-in attempts. This is a service-owned authentication reliability signal.",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 4,
+        "x": 12,
         "y": 5
       },
       "targets": [
         {
-          "expr": "((attune:oidc_login_failure_ratio:ratio5m) / 0.001) or vector(0)",
+          "expr": "(((attune:oidc_login_failure_ratio:ratio5m) / 0.001) or vector(0)) or vector(0)",
           "legendFormat": "OIDC burn x",
           "refId": "A"
         }
@@ -385,18 +385,18 @@
     {
       "id": 7,
       "type": "stat",
-      "title": "API key burn x",
-      "description": "Fast burn multiplier for access denials on active API keys. Keep this separate from authz denials so policy-driven rejections stay explainable.",
+      "title": "API key denial %",
+      "description": "Share of authenticated API key requests that end in expiration, IP rejection, or throttling. Scope denials are tracked in the authorization panel.",
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 0,
-        "y": 9
+        "w": 4,
+        "x": 16,
+        "y": 5
       },
       "targets": [
         {
-          "expr": "((attune:apikey_access_denial_ratio:ratio5m) / 0.05) or vector(0)",
-          "legendFormat": "API key burn x",
+          "expr": "((attune:apikey_access_denial_ratio:ratio5m) or vector(0)) or vector(0)",
+          "legendFormat": "API key denial %",
           "refId": "A"
         }
       ],
@@ -410,7 +410,7 @@
             "showPoints": "never",
             "spanNulls": true
           },
-          "displayName": "API key burn x",
+          "displayName": "API key denial %",
           "noValue": "0",
           "thresholds": {
             "mode": "absolute",
@@ -421,15 +421,15 @@
               },
               {
                 "color": "orange",
-                "value": 1
+                "value": 0.01
               },
               {
                 "color": "red",
-                "value": 14.4
+                "value": 0.05
               }
             ]
           },
-          "unit": "short"
+          "unit": "percentunit"
         }
       },
       "options": {
@@ -450,18 +450,18 @@
     {
       "id": 8,
       "type": "stat",
-      "title": "MCP burn x",
-      "description": "Fast burn multiplier for MCP tool-call failures. Use this with tool mix and latency to separate tool regressions from policy pressure.",
+      "title": "Validation error %",
+      "description": "Share of ingest requests rejected by request validation. Keep this separate from service failures so client drift does not consume error budget.",
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 8,
-        "y": 9
+        "w": 4,
+        "x": 20,
+        "y": 5
       },
       "targets": [
         {
-          "expr": "((attune:mcp_tool_error_ratio:ratio5m) / 0.001) or vector(0)",
-          "legendFormat": "MCP burn x",
+          "expr": "((attune:ingest_validation_error_ratio:ratio5m) or vector(0)) or vector(0)",
+          "legendFormat": "Validation error %",
           "refId": "A"
         }
       ],
@@ -475,7 +475,7 @@
             "showPoints": "never",
             "spanNulls": true
           },
-          "displayName": "MCP burn x",
+          "displayName": "Validation error %",
           "noValue": "0",
           "thresholds": {
             "mode": "absolute",
@@ -486,15 +486,15 @@
               },
               {
                 "color": "orange",
-                "value": 1
+                "value": 0.02
               },
               {
                 "color": "red",
-                "value": 14.4
+                "value": 0.1
               }
             ]
           },
-          "unit": "short"
+          "unit": "percentunit"
         }
       },
       "options": {
@@ -514,82 +514,17 @@
     },
     {
       "id": 9,
-      "type": "stat",
-      "title": "GDPR burn x",
-      "description": "Fast burn multiplier for GDPR jobs that miss completion. Cancelled and revoked jobs are excluded from the denominator so the lens stays operational.",
-      "gridPos": {
-        "h": 4,
-        "w": 8,
-        "x": 16,
-        "y": 9
-      },
-      "targets": [
-        {
-          "expr": "((1 - attune:gdpr_job_completion_ratio:ratio5m) / 0.001) or vector(0)",
-          "legendFormat": "GDPR burn x",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": true
-          },
-          "displayName": "GDPR burn x",
-          "noValue": "0",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 14.4
-              }
-            ]
-          },
-          "unit": "short"
-        }
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value",
-        "wideLayout": true
-      }
-    },
-    {
-      "id": 10,
       "type": "row",
       "title": "Burn trend",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 10
       }
     },
     {
-      "id": 11,
+      "id": 10,
       "type": "timeseries",
       "title": "Burn by SLO",
       "description": "5m and 1h burn multipliers for the service-owned SLOs. The fast-burn page threshold is 14.4x; the slow-burn policy uses a lower threshold over a longer window.",
@@ -597,7 +532,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 15
+        "y": 11
       },
       "targets": [
         {
@@ -611,12 +546,12 @@
           "refId": "B"
         },
         {
-          "expr": "((1 - attune:enrich_success_under_5s:ratio5m) / 0.05) or vector(0)",
+          "expr": "(((1 - attune:enrich_success_under_5s:ratio5m)) / 0.05) or vector(0)",
           "legendFormat": "enrich 5m",
           "refId": "C"
         },
         {
-          "expr": "((1 - attune:enrich_success_under_5s:ratio1h) / 0.05) or vector(0)",
+          "expr": "(((1 - attune:enrich_success_under_5s:ratio1h)) / 0.05) or vector(0)",
           "legendFormat": "enrich 1h",
           "refId": "D"
         },
@@ -639,36 +574,6 @@
           "expr": "((attune:oidc_login_failure_ratio:ratio1h) / 0.001) or vector(0)",
           "legendFormat": "oidc 1h",
           "refId": "H"
-        },
-        {
-          "expr": "((attune:apikey_access_denial_ratio:ratio5m) / 0.05) or vector(0)",
-          "legendFormat": "apikey 5m",
-          "refId": "I"
-        },
-        {
-          "expr": "((attune:apikey_access_denial_ratio:ratio1h) / 0.05) or vector(0)",
-          "legendFormat": "apikey 1h",
-          "refId": "J"
-        },
-        {
-          "expr": "((attune:mcp_tool_error_ratio:ratio5m) / 0.001) or vector(0)",
-          "legendFormat": "mcp 5m",
-          "refId": "K"
-        },
-        {
-          "expr": "((attune:mcp_tool_error_ratio:ratio1h) / 0.001) or vector(0)",
-          "legendFormat": "mcp 1h",
-          "refId": "L"
-        },
-        {
-          "expr": "((1 - attune:gdpr_job_completion_ratio:ratio5m) / 0.001) or vector(0)",
-          "legendFormat": "gdpr 5m",
-          "refId": "M"
-        },
-        {
-          "expr": "((1 - attune:gdpr_job_completion_ratio:ratio1h) / 0.001) or vector(0)",
-          "legendFormat": "gdpr 1h",
-          "refId": "N"
         }
       ],
       "fieldConfig": {
@@ -699,18 +604,18 @@
       }
     },
     {
-      "id": 12,
+      "id": 11,
       "type": "row",
       "title": "Tenant impact",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 19
       }
     },
     {
-      "id": 13,
+      "id": 12,
       "type": "barchart",
       "title": "Tenant burn ranking",
       "description": "Current 5m burn multipliers for tenant-scoped SLOs. Use this to answer who is burning budget fastest before opening the detailed SLO pages.",
@@ -718,7 +623,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 20
       },
       "targets": [
         {
@@ -727,17 +632,17 @@
           "refId": "A"
         },
         {
-          "expr": "topk(10, (1 - attune:enrich_success_under_5s:ratio5m) / 0.05)",
+          "expr": "topk(10, ((1 - attune:enrich_success_under_5s:ratio5m)) / 0.05)",
           "legendFormat": "{{tenant}} / enrich",
           "refId": "B"
         },
         {
-          "expr": "topk(10, (attune:mcp_tool_error_ratio:ratio5m) / 0.001)",
+          "expr": "topk(10, (sum by (tenant) (rate(attune_mcp_tool_calls_total{result=~\"client_error|internal_error\"}[5m])) / clamp_min(sum by (tenant) (rate(attune_mcp_tool_calls_total{result=~\"ok|client_error|internal_error\"}[5m])), 1e-9)) / 0.001)",
           "legendFormat": "{{tenant}} / mcp",
           "refId": "C"
         },
         {
-          "expr": "topk(10, (1 - attune:gdpr_job_completion_ratio:ratio5m) / 0.001)",
+          "expr": "topk(10, (1 - (\n\t\t\tsum by (tenant) (rate(attune_gdpr_job_total{result=\"completed\"}[5m]))\n\t\t\t/\n\t\t\tclamp_min(\n\t\t\t\tsum by (tenant) (rate(attune_gdpr_job_total{result=\"started\"}[5m]))\n\t\t\t\t- (\n\t\t\t\t\tsum by (tenant) (rate(attune_gdpr_job_total{result=\"cancelled\"}[5m]))\n\t\t\t\t\tor on(tenant) (\n\t\t\t\t\t\tsum by (tenant) (rate(attune_gdpr_job_total{result=\"started\"}[5m])) * 0\n\t\t\t\t\t)\n\t\t\t\t)\n\t\t\t\t- (\n\t\t\t\t\tsum by (tenant) (rate(attune_gdpr_job_total{result=\"revoked\"}[5m]))\n\t\t\t\t\tor on(tenant) (\n\t\t\t\t\t\tsum by (tenant) (rate(attune_gdpr_job_total{result=\"started\"}[5m])) * 0\n\t\t\t\t\t)\n\t\t\t\t),\n\t\t\t\t1e-9\n\t\t\t)\n\t\t)) / 0.001)",
           "legendFormat": "{{tenant}} / gdpr",
           "refId": "D"
         }
@@ -765,7 +670,7 @@
       }
     },
     {
-      "id": 14,
+      "id": 13,
       "type": "timeseries",
       "title": "Tenant intake and attribution",
       "description": "Traffic by source/result plus service-side ingest pressure. This helps separate client schema drift from service regressions.",
@@ -773,7 +678,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 20
       },
       "targets": [
         {
@@ -825,18 +730,18 @@
       }
     },
     {
-      "id": 15,
+      "id": 14,
       "type": "row",
       "title": "Deep dive",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 28
       }
     },
     {
-      "id": 16,
+      "id": 15,
       "type": "timeseries",
       "title": "Enrichment and auth pressure",
       "description": "Enrichment latency by result and the auth path health signals that often precede Console or API support issues.",
@@ -844,7 +749,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 33
+        "y": 29
       },
       "targets": [
         {
@@ -901,7 +806,7 @@
       }
     },
     {
-      "id": 17,
+      "id": 16,
       "type": "timeseries",
       "title": "Delivery pressure",
       "description": "Outbox terminal failures, notifier failures, and delivery attempts by destination type. This tells you whether the issue is worker capacity or destination rejection.",
@@ -909,7 +814,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 29
       },
       "targets": [
         {
@@ -961,18 +866,18 @@
       }
     },
     {
-      "id": 18,
+      "id": 17,
       "type": "row",
       "title": "MCP",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 38
       }
     },
     {
-      "id": 19,
+      "id": 18,
       "type": "stat",
       "title": "MCP success %",
       "description": "Share of MCP tool calls that returned OK, excluding policy denials and rate limits so tool reliability stays separate from governance pressure.",
@@ -980,7 +885,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 43
+        "y": 39
       },
       "targets": [
         {
@@ -1037,7 +942,7 @@
       }
     },
     {
-      "id": 20,
+      "id": 19,
       "type": "stat",
       "title": "MCP denied %",
       "description": "Share of MCP requests denied by policy or throttled by rate limits. High values usually mean governance changes or client misuse.",
@@ -1045,7 +950,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 43
+        "y": 39
       },
       "targets": [
         {
@@ -1102,7 +1007,7 @@
       }
     },
     {
-      "id": 21,
+      "id": 20,
       "type": "stat",
       "title": "MCP calls",
       "description": "Total MCP tool calls in the selected range. Sudden drops usually indicate auth or routing problems before the tool mix changes.",
@@ -1110,7 +1015,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 43
+        "y": 39
       },
       "targets": [
         {
@@ -1150,7 +1055,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 21,
       "type": "stat",
       "title": "MCP p95",
       "description": "P95 MCP tool-call latency. Use this with the tool mix panel to tell a slow downstream tool from a general dispatcher slowdown.",
@@ -1158,7 +1063,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 43
+        "y": 39
       },
       "targets": [
         {
@@ -1215,7 +1120,7 @@
       }
     },
     {
-      "id": 23,
+      "id": 22,
       "type": "timeseries",
       "title": "MCP tool mix",
       "description": "MCP tool call rate split by tool and result. This separates tool execution failures from policy denials and throttling.",
@@ -1223,7 +1128,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 48
+        "y": 44
       },
       "targets": [
         {
@@ -1260,7 +1165,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 23,
       "type": "timeseries",
       "title": "MCP latency by tool",
       "description": "MCP latency percentiles by tool. When this rises without a matching error spike, inspect the downstream tool or adapter.",
@@ -1268,7 +1173,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 48
+        "y": 44
       },
       "targets": [
         {
@@ -1310,18 +1215,18 @@
       }
     },
     {
-      "id": 25,
+      "id": 24,
       "type": "row",
       "title": "GDPR",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 53
       }
     },
     {
-      "id": 26,
+      "id": 25,
       "type": "stat",
       "title": "GDPR completion %",
       "description": "Share of GDPR jobs that completed successfully, excluding intentional cancellations and revocations.",
@@ -1329,7 +1234,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 58
+        "y": 54
       },
       "targets": [
         {
@@ -1386,7 +1291,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 26,
       "type": "stat",
       "title": "GDPR failed %",
       "description": "Share of GDPR jobs that reached a terminal failure. Spikes usually mean queue, worker, or storage problems.",
@@ -1394,7 +1299,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 58
+        "y": 54
       },
       "targets": [
         {
@@ -1451,7 +1356,7 @@
       }
     },
     {
-      "id": 28,
+      "id": 27,
       "type": "stat",
       "title": "GDPR backlog",
       "description": "Approximate outstanding GDPR work in the selected range: started jobs minus terminal jobs. Positive values mean work is not draining.",
@@ -1459,7 +1364,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 58
+        "y": 54
       },
       "targets": [
         {
@@ -1516,7 +1421,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 28,
       "type": "stat",
       "title": "GDPR p95",
       "description": "P95 GDPR job duration. Compare this with backlog to tell slow completion from a stalled queue.",
@@ -1524,7 +1429,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 58
+        "y": 54
       },
       "targets": [
         {
@@ -1581,7 +1486,7 @@
       }
     },
     {
-      "id": 30,
+      "id": 29,
       "type": "timeseries",
       "title": "GDPR state mix",
       "description": "GDPR job state mix by request type. Use this to separate export backlog from delete backlog and intentional cancellations.",
@@ -1589,7 +1494,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 63
+        "y": 59
       },
       "targets": [
         {
@@ -1626,7 +1531,7 @@
       }
     },
     {
-      "id": 31,
+      "id": 30,
       "type": "timeseries",
       "title": "GDPR latency by request",
       "description": "GDPR job duration percentiles by request type. Export and delete have different expected shapes, so keep the split visible.",
@@ -1634,7 +1539,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 63
+        "y": 59
       },
       "targets": [
         {
@@ -1673,343 +1578,6 @@
           "mode": "multi",
           "sort": "none"
         }
-      }
-    },
-    {
-      "id": 32,
-      "type": "row",
-      "title": "Historical reporting",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 72
-      }
-    },
-    {
-      "id": 33,
-      "type": "timeseries",
-      "title": "Burn history",
-      "description": "7d and 30d average burn by SLO. Use this with Burn trend to tell a spike from a sustained regression.",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 73
-      },
-      "targets": [
-        {
-          "expr": "(avg_over_time(((attune:ingest_service_failure_ratio:ratio5m) / 0.001)[7d:5m])) or vector(0)",
-          "legendFormat": "ingest 7d",
-          "refId": "A"
-        },
-        {
-          "expr": "(avg_over_time(((attune:ingest_service_failure_ratio:ratio5m) / 0.001)[30d:1h])) or vector(0)",
-          "legendFormat": "ingest 30d",
-          "refId": "B"
-        },
-        {
-          "expr": "(avg_over_time(((1 - attune:enrich_success_under_5s:ratio5m) / 0.05)[7d:5m])) or vector(0)",
-          "legendFormat": "enrich 7d",
-          "refId": "C"
-        },
-        {
-          "expr": "(avg_over_time(((1 - attune:enrich_success_under_5s:ratio5m) / 0.05)[30d:1h])) or vector(0)",
-          "legendFormat": "enrich 30d",
-          "refId": "D"
-        },
-        {
-          "expr": "(avg_over_time(((attune:outbox_delivery_failure_ratio:ratio5m) / 0.001)[7d:5m])) or vector(0)",
-          "legendFormat": "outbox 7d",
-          "refId": "E"
-        },
-        {
-          "expr": "(avg_over_time(((attune:outbox_delivery_failure_ratio:ratio5m) / 0.001)[30d:1h])) or vector(0)",
-          "legendFormat": "outbox 30d",
-          "refId": "F"
-        },
-        {
-          "expr": "(avg_over_time(((attune:oidc_login_failure_ratio:ratio5m) / 0.001)[7d:5m])) or vector(0)",
-          "legendFormat": "oidc 7d",
-          "refId": "G"
-        },
-        {
-          "expr": "(avg_over_time(((attune:oidc_login_failure_ratio:ratio5m) / 0.001)[30d:1h])) or vector(0)",
-          "legendFormat": "oidc 30d",
-          "refId": "H"
-        },
-        {
-          "expr": "(avg_over_time(((attune:apikey_access_denial_ratio:ratio5m) / 0.05)[7d:5m])) or vector(0)",
-          "legendFormat": "apikey 7d",
-          "refId": "I"
-        },
-        {
-          "expr": "(avg_over_time(((attune:apikey_access_denial_ratio:ratio5m) / 0.05)[30d:1h])) or vector(0)",
-          "legendFormat": "apikey 30d",
-          "refId": "J"
-        },
-        {
-          "expr": "(avg_over_time(((attune:mcp_tool_error_ratio:ratio5m) / 0.001)[7d:5m])) or vector(0)",
-          "legendFormat": "mcp 7d",
-          "refId": "K"
-        },
-        {
-          "expr": "(avg_over_time(((attune:mcp_tool_error_ratio:ratio5m) / 0.001)[30d:1h])) or vector(0)",
-          "legendFormat": "mcp 30d",
-          "refId": "L"
-        },
-        {
-          "expr": "(avg_over_time(((1 - attune:gdpr_job_completion_ratio:ratio5m) / 0.001)[7d:5m])) or vector(0)",
-          "legendFormat": "gdpr 7d",
-          "refId": "M"
-        },
-        {
-          "expr": "(avg_over_time(((1 - attune:gdpr_job_completion_ratio:ratio5m) / 0.001)[30d:1h])) or vector(0)",
-          "legendFormat": "gdpr 30d",
-          "refId": "N"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "axisSoftMax": 1,
-            "axisSoftMin": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": true
-          },
-          "noValue": "0",
-          "unit": "short"
-        }
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 34,
-      "type": "timeseries",
-      "title": "Remaining budget",
-      "description": "Trailing 30d error budget remaining by SLO. Use this with Burn history to tell whether the surface still has room or is already exhausted.",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 81
-      },
-      "targets": [
-        {
-          "expr": "(clamp_min(1 - avg_over_time(((attune:ingest_service_failure_ratio:ratio5m) / 0.001)[30d:1h]), 0)) or vector(0)",
-          "legendFormat": "ingest remaining",
-          "refId": "A"
-        },
-        {
-          "expr": "(clamp_min(1 - avg_over_time(((1 - attune:enrich_success_under_5s:ratio5m) / 0.05)[30d:1h]), 0)) or vector(0)",
-          "legendFormat": "enrich remaining",
-          "refId": "B"
-        },
-        {
-          "expr": "(clamp_min(1 - avg_over_time(((attune:outbox_delivery_failure_ratio:ratio5m) / 0.001)[30d:1h]), 0)) or vector(0)",
-          "legendFormat": "outbox remaining",
-          "refId": "C"
-        },
-        {
-          "expr": "(clamp_min(1 - avg_over_time(((attune:oidc_login_failure_ratio:ratio5m) / 0.001)[30d:1h]), 0)) or vector(0)",
-          "legendFormat": "oidc remaining",
-          "refId": "D"
-        },
-        {
-          "expr": "(clamp_min(1 - avg_over_time(((attune:apikey_access_denial_ratio:ratio5m) / 0.05)[30d:1h]), 0)) or vector(0)",
-          "legendFormat": "apikey remaining",
-          "refId": "E"
-        },
-        {
-          "expr": "(clamp_min(1 - avg_over_time(((attune:mcp_tool_error_ratio:ratio5m) / 0.001)[30d:1h]), 0)) or vector(0)",
-          "legendFormat": "mcp remaining",
-          "refId": "F"
-        },
-        {
-          "expr": "(clamp_min(1 - avg_over_time(((1 - attune:gdpr_job_completion_ratio:ratio5m) / 0.001)[30d:1h]), 0)) or vector(0)",
-          "legendFormat": "gdpr remaining",
-          "refId": "G"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "axisSoftMin": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": true
-          },
-          "noValue": "0",
-          "unit": "percentunit"
-        }
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 35,
-      "type": "row",
-      "title": "Dependency triage",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 89
-      }
-    },
-    {
-      "id": 36,
-      "type": "timeseries",
-      "title": "Dependency health",
-      "description": "Upstream dependency check outcomes and latency. Use this to identify whether a service-wide burn is likely coming from a failing dependency before leaving the reliability surface.",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 90
-      },
-      "targets": [
-        {
-          "expr": "(sum by (dependency, result) (rate(attune_dependency_health_check_total[$__rate_interval]))) or vector(0)",
-          "legendFormat": "{{dependency}} / {{result}}",
-          "refId": "A"
-        },
-        {
-          "expr": "(histogram_quantile(0.95, sum by (le, dependency) (rate(attune_dependency_health_check_duration_seconds_bucket[$__rate_interval])))) or vector(0)",
-          "legendFormat": "{{dependency}} p95",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "axisSoftMax": 1,
-            "axisSoftMin": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": true
-          },
-          "noValue": "0",
-          "unit": "short"
-        }
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 37,
-      "type": "row",
-      "title": "Routing metadata",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 99
-      }
-    },
-    {
-      "id": 38,
-      "type": "text",
-      "title": "Routing table",
-      "description": "Owning area, escalation path, and runbook links for the reliability surface.",
-      "gridPos": {
-        "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 100
-      },
-      "options": {
-        "content": "| SLO | Owner | Escalation | Runbook |\n| --- | --- | --- | --- |\n| Ingest burn x | Ingest | Ingest on-call | [Open runbook](https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneingestservicefastburn) |\n| Enrich burn x | AI Pipeline | AI Pipeline on-call | [Open runbook](https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneenrichmentfastburn) |\n| Outbox burn x | Delivery | Delivery on-call | [Open runbook](https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoutboxdeliveryfastburn) |\n| OIDC burn x | Auth | Auth on-call | [Open runbook](https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneoidcloginfastburn) |\n| API key burn x | Security | Security on-call | [Open runbook](https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneapikeyaccessfastburn) |\n| MCP burn x | MCP | MCP on-call | [Open runbook](https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunemcptoolfastburn) |\n| GDPR burn x | Compliance | Compliance on-call | [Open runbook](https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunegdprjobfastburn) |\n",
-        "mode": "markdown"
-      }
-    },
-    {
-      "id": 39,
-      "type": "row",
-      "title": "Replay / backfill",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 110
-      }
-    },
-    {
-      "id": 40,
-      "type": "text",
-      "title": "Replay report",
-      "description": "Historical outage comparison and backfill worksheet.",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 111
-      },
-      "options": {
-        "content": "**Template:** [Open replay report template](https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-replay-template.md)\n\n**Use with:** Burn history, Remaining budget, Dependency health, Routing table, and the Comparison matrix.\n\n**Capture:** incident window, dominant tenant, likely dependency, replay lens, and the verdict column.",
-        "mode": "markdown"
-      }
-    },
-    {
-      "id": 41,
-      "type": "row",
-      "title": "Policy guide",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 119
-      }
-    },
-    {
-      "id": 42,
-      "type": "text",
-      "title": "Policy guide",
-      "description": "Recommended SLO starting point, guardrails, and exception stance.",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 120
-      },
-      "options": {
-        "content": "**Template:** [Open policy reference](https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-policy-reference.md)\n\n**Use with:** SLO catalog, routing table, replay comparison worksheet, and budget exception register.\n\n**Defaults:** Start from the catalog objective, page at 14.4x on 5m and 1h, warn at 6x on 30m and 6h, keep traffic floors above 0.01, and keep exceptions explicit.",
-        "mode": "markdown"
       }
     }
   ]

@@ -139,6 +139,7 @@ func (h *Handler) Delete(
 		TagAssignmentCount: int32(result.Counts.TagAssignmentCount),
 		FeedbackAuditCount: int32(result.Counts.FeedbackAuditCount),
 		LlmAuditCount:      int32(result.Counts.LLMAuditCount),
+		OutboxCount:        int32(result.Counts.OutboxCount),
 	}))
 }
 

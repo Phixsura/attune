@@ -3,8 +3,13 @@ package main
 import "fmt"
 
 const (
-	fastBurnThreshold = 14.4
-	slowBurnThreshold = 6.0
+	ingestServiceErrorBudget  = 0.001
+	enrichLatencyErrorBudget  = 0.05
+	outboxDeliveryErrorBudget = 0.001
+	oidcLoginErrorBudget      = 0.001
+	apiKeyDenialBudget        = 0.05
+	fastBurnThreshold         = 14.4
+	slowBurnThreshold         = 6.0
 )
 
 func tenantImpactDashboard() dashboard {
@@ -20,15 +25,28 @@ func tenantImpactDashboard() dashboard {
 		labelVar("request_type", "attune_gdpr_job_total", "request_type"),
 	)
 	d.Description = generatedDescription + " SLO burn-rate, tenant impact, and attribution for on-call."
-	d.Panels = append([]panel{
-		textPanel(1, "Tenant impact lens", "How to read burn-rate and impact.", fmt.Sprintf("**Targets:** service-owned SLOs burn first; diagnostics stay visible but do not page on their own.\n\n**Flow:** burn trend -> tenant impact -> source / result attribution -> auth, MCP, GDPR, and delivery drilldowns.\n\n**Thresholds:** fast burn > %.1fx · slow burn > %.1fx.", fastBurnThreshold, slowBurnThreshold), gp(0, 0, 24, 4)),
+	d.Panels = []panel{
+		textPanel(1, "Tenant impact lens", "How to read burn-rate and impact.", fmt.Sprintf("**Targets:** ingest internal errors <= 0.1%% · enrichment success under 5s >= 95%% · outbox terminal failures <= 0.1%% · OIDC login failures <= 0.1%% · API key denials stay explainable\n\n**Flow:** burn trend -> tenant impact -> source / result attribution -> auth, MCP, GDPR, and delivery drilldowns.\n\n**Thresholds:** fast burn > %.1fx · slow burn > %.1fx.", fastBurnThreshold, slowBurnThreshold), gp(0, 0, 24, 4)),
 		rowPanel(2, "Burn overview", 4),
-	}, reliabilityBurnOverviewPanels()...)
-	lower := []panel{
-		rowPanel(9, "Burn trend", 9),
-		reliabilityBurnTrendPanel(),
+		statDesc(3, "Ingest burn x", "Fast burn multiplier for ingest internal errors. 1x means the budget is being consumed at the planned rate; 14.4x is the classic 30d fast-burn page threshold.", zero(burnRate("attune:ingest_service_failure_ratio:ratio5m", ingestServiceErrorBudget)), "short", gp(0, 5, 4, 4), greenWarnRed(1, fastBurnThreshold)),
+		statDesc(4, "Enrich burn x", "Fast burn multiplier for enrichment attempts that miss the 5s success target. This is the main user-facing latency SLO.", zero(burnRate("(1 - attune:enrich_success_under_5s:ratio5m)", enrichLatencyErrorBudget)), "short", gp(4, 5, 4, 4), greenWarnRed(1, fastBurnThreshold)),
+		statDesc(5, "Outbox burn x", "Fast burn multiplier for terminal delivery failures. Pair this with outbox lag to tell destination rejection from worker pressure.", zero(burnRate("attune:outbox_delivery_failure_ratio:ratio5m", outboxDeliveryErrorBudget)), "short", gp(8, 5, 4, 4), greenWarnRed(1, fastBurnThreshold)),
+		statDesc(6, "OIDC burn x", "Fast burn multiplier for failed sign-in attempts. This is a service-owned authentication reliability signal.", zero(burnRate("attune:oidc_login_failure_ratio:ratio5m", oidcLoginErrorBudget)), "short", gp(12, 5, 4, 4), greenWarnRed(1, fastBurnThreshold)),
+		statDesc(7, "API key denial %", "Share of authenticated API key requests that end in expiration, IP rejection, or throttling. Scope denials are tracked in the authorization panel.", zero(`attune:apikey_access_denial_ratio:ratio5m`), "percentunit", gp(16, 5, 4, 4), greenWarnRed(0.01, apiKeyDenialBudget)),
+		statDesc(8, "Validation error %", "Share of ingest requests rejected by request validation. Keep this separate from service failures so client drift does not consume error budget.", zero(`attune:ingest_validation_error_ratio:ratio5m`), "percentunit", gp(20, 5, 4, 4), greenWarnRed(0.02, 0.10)),
+		rowPanel(9, "Burn trend", 10),
+		seriesDesc(10, "Burn by SLO", "5m and 1h burn multipliers for the service-owned SLOs. The fast-burn page threshold is 14.4x; the slow-burn policy uses a lower threshold over a longer window.", []target{
+			targetExpr("A", burnRate("attune:ingest_service_failure_ratio:ratio5m", ingestServiceErrorBudget), "ingest 5m"),
+			targetExpr("B", burnRate("attune:ingest_service_failure_ratio:ratio1h", ingestServiceErrorBudget), "ingest 1h"),
+			targetExpr("C", burnRate("(1 - attune:enrich_success_under_5s:ratio5m)", enrichLatencyErrorBudget), "enrich 5m"),
+			targetExpr("D", burnRate("(1 - attune:enrich_success_under_5s:ratio1h)", enrichLatencyErrorBudget), "enrich 1h"),
+			targetExpr("E", burnRate("attune:outbox_delivery_failure_ratio:ratio5m", outboxDeliveryErrorBudget), "outbox 5m"),
+			targetExpr("F", burnRate("attune:outbox_delivery_failure_ratio:ratio1h", outboxDeliveryErrorBudget), "outbox 1h"),
+			targetExpr("G", burnRate("attune:oidc_login_failure_ratio:ratio5m", oidcLoginErrorBudget), "oidc 5m"),
+			targetExpr("H", burnRate("attune:oidc_login_failure_ratio:ratio1h", oidcLoginErrorBudget), "oidc 1h"),
+		}, "short", gp(0, 11, 24, 8)),
 		rowPanel(11, "Tenant impact", 19),
-		reliabilityTenantBurnRankingPanel(),
+		tenantBurnRankingPanel(),
 		seriesDesc(13, "Tenant intake and attribution", "Traffic by source/result plus service-side ingest pressure. This helps separate client schema drift from service regressions.", []target{
 			targetExpr("A", `sum by (source, result) (rate(attune_ingest_total{tenant=~"$tenant"}[$__rate_interval]))`, "{{source}} / {{result}}"),
 			targetExpr("B", `sum(rate(attune_ingest_rate_limit_total{tenant=~"$tenant"}[$__rate_interval]))`, "rate limited"),
@@ -73,19 +91,7 @@ func tenantImpactDashboard() dashboard {
 			targetExpr("A", `histogram_quantile(0.50, sum by (le, request_type) (rate(attune_gdpr_job_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "p50 / {{request_type}}"),
 			targetExpr("B", `histogram_quantile(0.95, sum by (le, request_type) (rate(attune_gdpr_job_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "p95 / {{request_type}}"),
 		}, "s", gp(12, 59, 12, 8)),
-		rowPanel(31, "Historical reporting", 68),
-		reliabilityBurnHistoryPanel(),
-		reliabilityRemainingBudgetPanel(),
-		rowPanel(34, "Dependency triage", 85),
-		reliabilityDependencyHealthPanel(),
-		rowPanel(36, "Routing metadata", 95),
-		reliabilityRoutingMetadataPanel(),
-		rowPanel(38, "Replay / backfill", 106),
-		reliabilityReplayReportPanel(),
-		rowPanel(40, "Policy guide", 115),
-		reliabilityPolicyGuidePanel(),
 	}
-	d.Panels = append(d.Panels, shiftPanelIDs(1, shiftPanels(4, lower...)...)...)
 	return d
 }
 
@@ -95,4 +101,32 @@ func burnRate(expr string, budget float64) string {
 
 func topkBurn(expr string, budget float64) string {
 	return fmt.Sprintf("topk(10, %s)", burnRate(expr, budget))
+}
+
+func tenantBurnRankingPanel() panel {
+	return barDesc(12, "Tenant burn ranking", "Current 5m burn multipliers for tenant-scoped SLOs. Use this to answer who is burning budget fastest before opening the detailed SLO pages.", []target{
+		targetExprSparse("A", topkBurn("attune:ingest_service_failure_ratio:ratio5m", ingestServiceErrorBudget), "{{tenant}} / ingest"),
+		targetExprSparse("B", topkBurn("(1 - attune:enrich_success_under_5s:ratio5m)", enrichLatencyErrorBudget), "{{tenant}} / enrich"),
+		targetExprSparse("C", topkBurn(`sum by (tenant) (rate(attune_mcp_tool_calls_total{result=~"client_error|internal_error"}[5m])) / clamp_min(sum by (tenant) (rate(attune_mcp_tool_calls_total{result=~"ok|client_error|internal_error"}[5m])), 1e-9)`, 0.001), "{{tenant}} / mcp"),
+		targetExprSparse("D", topkBurn(`1 - (
+			sum by (tenant) (rate(attune_gdpr_job_total{result="completed"}[5m]))
+			/
+			clamp_min(
+				sum by (tenant) (rate(attune_gdpr_job_total{result="started"}[5m]))
+				- (
+					sum by (tenant) (rate(attune_gdpr_job_total{result="cancelled"}[5m]))
+					or on(tenant) (
+						sum by (tenant) (rate(attune_gdpr_job_total{result="started"}[5m])) * 0
+					)
+				)
+				- (
+					sum by (tenant) (rate(attune_gdpr_job_total{result="revoked"}[5m]))
+					or on(tenant) (
+						sum by (tenant) (rate(attune_gdpr_job_total{result="started"}[5m])) * 0
+					)
+				),
+				1e-9
+			)
+		)`, 0.001), "{{tenant}} / gdpr"),
+	}, "short", gp(0, 20, 12, 8))
 }

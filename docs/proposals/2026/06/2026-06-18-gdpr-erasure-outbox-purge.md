@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #131 |
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Started** | 2026-06-18 |
 | **Related** | #126 (GDPR export/delete — origin), #33 (notify outbox dead-queue), defect audit 2026-06-18 |
 
@@ -36,13 +36,14 @@ against `main`.)
 ## Non-goals
 - General outbox **retention/pruning** of delivered rows' PII for *non-erased*
   subjects (a separate retention concern — see Risks).
-- Adding `OutboxCount` to the console GDPR proto/response (additive, can follow).
+- Propagating the outbox purge count into the GDPR request history and Console response.
 
 ## Proposal
 In `deleteLockedSubject` (inside the existing erasure tx, **before** the
 `user_feedback` delete), add `DELETE FROM notify_outbox WHERE feedback_id =
 ANY($1)` — mirroring the existing explicit `DELETE FROM llm_audit`. Count the
-rows into a new `Counts.OutboxCount`.
+rows into a new `Counts.OutboxCount`, persist it on the GDPR request record,
+and surface it in the Console request history.
 
 ## Alternatives considered
 - **`ALTER … ON DELETE CASCADE` on the FK (migration).** Cleaner long-term (any
@@ -64,6 +65,10 @@ rows into a new `Counts.OutboxCount`.
   (`test/integration/postgres/gdpr/gdpr_outbox_test.go`): a subject with a
   `notify_outbox` row is deleted with **no** FK error, `Counts.OutboxCount == 1`,
   and the outbox row is gone.
+- Scheduled-delete integration coverage in
+  `TestPG_GDPRDeleteRequestLifecycle` now confirms the request record persists
+  `outbox_count = 1` for the deletion request history and that the outbox row
+  is removed after execution.
 - Existing `TestPG_GDPRExportDeleteLifecycle` still passes (no outbox rows there
   → `OutboxCount == 0` on both export and delete, so the count-equality assertion
   holds).

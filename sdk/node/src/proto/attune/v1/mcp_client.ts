@@ -52,8 +52,24 @@ export interface MCPRefreshGrant {
   createdAt: string;
 }
 
+export interface MCPClientToolAlias {
+  name: string;
+  deprecated: boolean;
+  replacement: string;
+}
+
+export interface MCPClientToolProvenance {
+  kind: string;
+  reference: string;
+}
+
 export interface MCPClientToolPolicy {
   name: string;
+  kind: string;
+  owner: string;
+  enabledByDefault: boolean;
+  deprecated: boolean;
+  replacement: string;
   requiredScope: string;
   risk: string;
   dataClass: string;
@@ -67,6 +83,8 @@ export interface MCPClientToolPolicy {
   effect: string;
   rateLimitRpm?: number | undefined;
   rateLimitBurst?: number | undefined;
+  aliases: MCPClientToolAlias[];
+  provenance?: MCPClientToolProvenance | undefined;
 }
 
 export interface MCPConnectionProfile {

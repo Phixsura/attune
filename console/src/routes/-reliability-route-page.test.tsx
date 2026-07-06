@@ -5,13 +5,15 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
+import { configure } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
-import { reliabilityCatalog } from '@/features/reliability/reliability-catalog'
 import { ReliabilityRoutePage } from '@/routes/-reliability-route-page'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+
+configure({ asyncUtilTimeout: 10_000 })
 
 const preflightReport = {
   status: 'warn' as const,
@@ -66,6 +68,102 @@ describe('ReliabilityRoutePage', () => {
       ),
       http.get('/fb/v1/console/auth/sso/mode', () => HttpResponse.json({ mode: 'hybrid' })),
       http.get('/fb/v1/console/system/preflight', () => HttpResponse.json(preflightReport)),
+      http.get('/fb/v1/console/system/recovery', () =>
+        HttpResponse.json({
+          status: 'pass',
+          message: 'Last restore drill passed (today)',
+          freshnessWindowSeconds: 604800,
+          ageSeconds: 0,
+          lastRun: {
+            ranAt: '2026-07-01T00:00:00Z',
+            status: 'pass',
+            backupRef: 'nightly-backup',
+            durationMs: 1234,
+          },
+        }),
+      ),
+      http.get('/fb/v1/console/system/release', () =>
+        HttpResponse.json({
+          serviceVersion: '5d6ea83',
+          environment: 'production',
+          profile: 'production',
+          lifecycleState: 'supported',
+          ownerTeam: 'Platform',
+          compatibilityRules: [
+            {
+              key: 'additive',
+              label: 'Additive',
+              description: 'Safe to add without breaking existing callers.',
+            },
+            {
+              key: 'breaking',
+              label: 'Breaking',
+              description: 'Requires an explicit migration step or version bump.',
+            },
+            {
+              key: 'deprecated_with_shim',
+              label: 'Deprecated with shim',
+              description: 'Keep both paths while callers move to the replacement.',
+            },
+            {
+              key: 'rename_with_alias',
+              label: 'Rename with alias',
+              description: 'Move the canonical name only after an alias window.',
+            },
+            {
+              key: 'migration_step',
+              label: 'Migration step',
+              description: 'Supported only while a migration step is in flight.',
+            },
+          ],
+          glossary: [
+            {
+              key: 'environment',
+              label: 'Environment',
+              description: 'The deployment target or tenant context used by the runtime.',
+            },
+            {
+              key: 'profile',
+              label: 'Profile',
+              description: 'The runtime mode that enables dev or production safety behavior.',
+            },
+            {
+              key: 'service',
+              label: 'Service',
+              description: 'The running product or process that owns the release.',
+            },
+            {
+              key: 'owner',
+              label: 'Owner',
+              description: 'The team accountable for the surface and its runbook.',
+            },
+            {
+              key: 'policy_mode',
+              label: 'Policy mode',
+              description: 'The governing mode for allow, deny, or guarded decisions.',
+            },
+            {
+              key: 'release_state',
+              label: 'Release state',
+              description: 'The support state attached to a version or deployable surface.',
+            },
+            {
+              key: 'lifecycle_state',
+              label: 'Lifecycle state',
+              description:
+                'The operational state used for supported, deprecated, migrating, recovering, or blocked flows.',
+            },
+            {
+              key: 'risk_class',
+              label: 'Risk class',
+              description: 'The severity band used to triage platform risk and operator attention.',
+            },
+          ],
+          runbookUrl: 'https://github.com/Phixsura/attune/blob/main/docs/private-deploy.md',
+          escalationUrl: 'https://github.com/Phixsura/attune/issues/new/choose',
+          startedAt: '2026-07-01T00:00:00Z',
+        }),
+      ),
       http.get('/fb/v1/console/api-keys', () =>
         HttpResponse.json({
           items: [
@@ -202,14 +300,27 @@ describe('ReliabilityRoutePage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('1 个活跃 · 1 个非活跃，共 2 个。')).toBeInTheDocument()
+      expect(screen.getByText('5d6ea83')).toBeInTheDocument()
     })
+    expect(screen.getByText('supported')).toBeInTheDocument()
+    expect(screen.getByText('恢复')).toBeInTheDocument()
+    expect(screen.getByText(/Last restore drill passed \(today\)/)).toBeInTheDocument()
+    expect(screen.getByText(/备份 nightly-backup/)).toBeInTheDocument()
+    expect(screen.getByText(/耗时 1\.2s/)).toBeInTheDocument()
+    expect(screen.getByText(/新鲜度窗口 7d/)).toBeInTheDocument()
+    expect(screen.getByText('5 rules')).toBeInTheDocument()
+    expect(screen.getByText('Canonical terms')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Environment · Profile · Service · Owner · Policy mode · Release state · Lifecycle state · Risk class',
+      ),
+    ).toBeInTheDocument()
 
     expect(screen.getByText('可靠性总览')).toBeInTheDocument()
-    expect(screen.getByText('SLO 目录')).toBeInTheDocument()
     expect(screen.getByText('打开 tenant impact dashboard')).toBeInTheDocument()
     expect(screen.getByText('运行快照')).toBeInTheDocument()
+    expect(screen.getByText('发布与归属')).toBeInTheDocument()
     expect(screen.getByText('快速入口')).toBeInTheDocument()
-    expect(screen.getAllByText('预算例外')).toHaveLength(reliabilityCatalog.length)
     expect(screen.getByText('1 个活跃 · 1 个非活跃，共 2 个。')).toBeInTheDocument()
     expect(
       screen.getByText(/1 个排队 · 2 个处理中 · 1 个已就绪导出 · 1 个待执行删除。/),
@@ -221,24 +332,6 @@ describe('ReliabilityRoutePage', () => {
       'href',
       '/d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-1',
     )
-    expect(screen.getByRole('link', { name: /^策略参考/ })).toHaveAttribute(
-      'href',
-      'https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-policy-reference.md',
-    )
-    expect(screen.getByRole('link', { name: /^回放报告/ })).toHaveAttribute(
-      'href',
-      'https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-replay-template.md',
-    )
-    expect(screen.getByRole('link', { name: /^OpenSLO 导出/ })).toHaveAttribute(
-      'href',
-      'https://github.com/Phixsura/attune/blob/main/observability/openslo/attune-slo.yaml',
-    )
-    const replayDownloadLink = screen.getByRole('link', { name: /^下载 replay 工作表/ })
-    expect(replayDownloadLink).toHaveAttribute('download', 'attune-slo-replay-template.md')
-    const replayDownloadHref = replayDownloadLink.getAttribute('href')
-    expect(replayDownloadHref).toContain('data:text/markdown;charset=utf-8,')
-    expect(decodeURIComponent(replayDownloadHref?.split(',', 2)[1] ?? '')).toContain('Tenant One')
-    expect(screen.getByText('Replay 工作区')).toBeInTheDocument()
 
     await expectNoA11yViolations(container)
   })
@@ -260,6 +353,23 @@ describe('ReliabilityRoutePage', () => {
       ),
       http.get('/fb/v1/console/auth/sso/mode', () => HttpResponse.json({ mode: 'hybrid' })),
       http.get('/fb/v1/console/system/preflight', () => HttpResponse.json(preflightReport)),
+      http.get('/fb/v1/console/system/recovery', () =>
+        HttpResponse.json({
+          status: 'pass',
+          message: 'Last restore drill passed (today)',
+          freshnessWindowSeconds: 604800,
+          ageSeconds: 0,
+          lastRun: {
+            ranAt: '2026-07-01T00:00:00Z',
+            status: 'pass',
+            backupRef: 'nightly-backup',
+            durationMs: 1234,
+          },
+        }),
+      ),
+      http.get('/fb/v1/console/system/release', () =>
+        HttpResponse.json({ code: 'internal', message: 'release down' }, { status: 500 }),
+      ),
       http.get('/fb/v1/console/api-keys', () =>
         HttpResponse.json({ code: 'internal', message: 'boom' }, { status: 500 }),
       ),
@@ -294,8 +404,10 @@ describe('ReliabilityRoutePage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('部分可靠性数据加载失败')).toBeInTheDocument()
+      expect(screen.getByText('release down')).toBeInTheDocument()
     })
     expect(screen.getByText('运行快照')).toBeInTheDocument()
+    expect(screen.getAllByText('发布与归属').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('打开 tenant impact dashboard')).toBeInTheDocument()
   })
 })

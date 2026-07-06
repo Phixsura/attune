@@ -10,6 +10,7 @@ export interface Permissions {
   userId: string | undefined
 
   isAdmin: boolean
+  isDelegatedAdmin: boolean
   isMember: boolean
   isViewer: boolean
 
@@ -35,6 +36,7 @@ export function usePermissions(): Permissions {
       userId,
 
       isAdmin: role === 'admin',
+      isDelegatedAdmin: role === 'delegated_admin',
       isMember: role === 'member',
       isViewer: role === 'viewer',
 
@@ -46,7 +48,8 @@ export function usePermissions(): Permissions {
       canManage: () => role === 'admin',
       canDelete: (ownerId?: string) => {
         if (role === 'admin') return true
-        if (role === 'member' && ownerId && ownerId === userId) return true
+        if ((role === 'member' || role === 'delegated_admin') && ownerId && ownerId === userId)
+          return true
         return false
       },
     }),

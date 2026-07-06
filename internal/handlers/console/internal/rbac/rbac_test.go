@@ -271,6 +271,10 @@ func TestRequireConvenienceWrappers(t *testing.T) {
 			return m.RequireAdmin()
 		case "adminStrict":
 			return m.RequireAdminStrict()
+		case "delegatedAdmin":
+			return m.RequireDelegatedAdmin()
+		case "delegatedAdminStrict":
+			return m.RequireDelegatedAdminStrict()
 		case "member":
 			return m.RequireMember()
 		default:
@@ -284,9 +288,15 @@ func TestRequireConvenienceWrappers(t *testing.T) {
 		wantOK bool
 	}{
 		{"RequireAdmin allows admin", "admin", domain.RoleAdmin, true},
+		{"RequireAdmin denies delegated admin", "admin", domain.RoleDelegatedAdmin, false},
 		{"RequireAdmin denies member", "admin", domain.RoleMember, false},
 		{"RequireAdminStrict allows admin", "adminStrict", domain.RoleAdmin, true},
 		{"RequireAdminStrict denies viewer", "adminStrict", domain.RoleViewer, false},
+		{"RequireDelegatedAdmin allows delegated admin", "delegatedAdmin", domain.RoleDelegatedAdmin, true},
+		{"RequireDelegatedAdmin allows admin", "delegatedAdmin", domain.RoleAdmin, true},
+		{"RequireDelegatedAdmin denies member", "delegatedAdmin", domain.RoleMember, false},
+		{"RequireDelegatedAdminStrict allows delegated admin", "delegatedAdminStrict", domain.RoleDelegatedAdmin, true},
+		{"RequireDelegatedAdminStrict denies viewer", "delegatedAdminStrict", domain.RoleViewer, false},
 		{"RequireMember allows member", "member", domain.RoleMember, true},
 		{"RequireMember denies viewer", "member", domain.RoleViewer, false},
 		{"RequireViewer allows viewer", "viewer", domain.RoleViewer, true},

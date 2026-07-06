@@ -64,11 +64,11 @@ func buildListOpts(p ListFeedbackParams) feedback.ConsoleListOpts {
 
 // RegisterReadTools registers read-only MCP tools.
 func RegisterReadTools(d *jsonrpc.Dispatcher, deps *Deps) {
-	d.Register("list_feedback", listFeedback(deps))
-	d.Register("get_feedback", getFeedback(deps))
-	d.Register("list_workflow_states", listWorkflowStates(deps))
-	d.Register("get_workflow_state", getWorkflowState(deps))
-	d.Register("list_tags", listTags(deps))
+	registerCatalogTool(d, "list_feedback", listFeedback(deps))
+	registerCatalogTool(d, "get_feedback", getFeedback(deps))
+	registerCatalogTool(d, "list_workflow_states", listWorkflowStates(deps))
+	registerCatalogTool(d, "get_workflow_state", getWorkflowState(deps))
+	registerCatalogTool(d, "list_tags", listTags(deps))
 }
 
 func listFeedback(deps *Deps) jsonrpc.ToolFunc {

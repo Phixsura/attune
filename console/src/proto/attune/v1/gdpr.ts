@@ -104,6 +104,7 @@ export interface DeleteGdprSubjectResponse {
   tagAssignmentCount: number;
   feedbackAuditCount: number;
   llmAuditCount: number;
+  outboxCount: number;
 }
 
 export interface CancelGdprRequestRequest {
@@ -132,6 +133,7 @@ export interface GdprRequestSummary {
   tagAssignmentCount: number;
   feedbackAuditCount: number;
   llmAuditCount: number;
+  outboxCount: number;
   createdAt: string;
   startedAt?: string | undefined;
   completedAt?: string | undefined;

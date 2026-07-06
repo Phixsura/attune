@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+// SystemService publishes console-only platform health and release context.
+service SystemService {
+  // GET /fb/v1/console/system/preflight — production readiness report.
+  rpc GetPreflight(GetPreflightRequest) returns (PreflightReportResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/system/preflight"};
+  }
+
+  // GET /fb/v1/console/system/recovery — latest restore-drill recovery state.
+  rpc GetRecovery(GetRecoveryRequest) returns (RecoveryContextResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/system/recovery"};
+  }
+
+  // GET /fb/v1/console/system/release — runtime release and ownership metadata.
+  rpc GetRelease(GetReleaseRequest) returns (ReleaseContextResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/system/release"};
+  }
+}
+
+message GetPreflightRequest {}
+
+message PreflightCheckResult {
+  string name = 1;
+  string category = 2;
+  string status = 3;
+  string message = 4;
+  optional string remediation = 5;
+}
+
+message PreflightReportResponse {
+  string status = 1;
+  repeated PreflightCheckResult checks = 2;
+  string elapsed = 3;
+}
+
+message GetRecoveryRequest {}
+
+message RecoveryContextLastRun {
+  string ran_at = 1;
+  string status = 2;
+  string backup_ref = 3;
+  int64 duration_ms = 4;
+}
+
+message RecoveryContextResponse {
+  string status = 1;
+  string message = 2;
+  optional string remediation = 3;
+  int64 freshness_window_seconds = 4;
+  optional int64 age_seconds = 5;
+  optional RecoveryContextLastRun last_run = 6;
+}
+
+message GetReleaseRequest {}
+
+message SemanticDescriptor {
+  string key = 1;
+  string label = 2;
+  string description = 3;
+}
+
+message ReleaseContextResponse {
+  string service_version = 1;
+  string environment = 2;
+  string profile = 3;
+  string lifecycle_state = 4;
+  string owner_team = 5;
+  repeated SemanticDescriptor compatibility_rules = 6;
+  repeated SemanticDescriptor glossary = 7;
+  string runbook_url = 8;
+  optional string escalation_url = 9;
+  string started_at = 10;
+}

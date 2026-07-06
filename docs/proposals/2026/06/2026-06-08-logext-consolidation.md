@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #48 |
-| **Status** | Accepted |
+| **Status** | Implemented |
 | **Started** | 2026-06-08 |
 | **Related** | #9 (built the facade exemption + `--strict` + trace-design doc — this consumes them), #4 (lint-slog origin), #3 (pre-commit), #1 (CI gate), #15 (CLAUDE.md §1 quality-gate table sync), #6/#57 (Prometheus/Grafana overlay — the actual dashboard backend) |
 

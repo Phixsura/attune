@@ -53,22 +53,42 @@ type RefreshGrantDTO struct {
 	CreatedAt string   `json:"created_at"`
 }
 
+// ClientToolAlias describes one compatibility alias for a tool.
+type ClientToolAlias struct {
+	Name        string `json:"name"`
+	Deprecated  bool   `json:"deprecated"`
+	Replacement string `json:"replacement"`
+}
+
+// ClientToolProvenance describes the delivery metadata for a distributable extension.
+type ClientToolProvenance struct {
+	Kind      string `json:"kind"`
+	Reference string `json:"reference"`
+}
+
 // ClientToolPolicy describes one catalogued tool and the client's current effective policy.
 type ClientToolPolicy struct {
-	Name             string `json:"name"`
-	RequiredScope    string `json:"required_scope"`
-	Risk             string `json:"risk"`
-	DataClass        string `json:"data_class"`
-	ReadOnlyHint     bool   `json:"read_only_hint"`
-	DestructiveHint  bool   `json:"destructive_hint"`
-	OpenWorldHint    bool   `json:"open_world_hint"`
-	DefaultRPM       int    `json:"default_rpm"`
-	DefaultBurst     int    `json:"default_burst"`
-	ScopeGranted     bool   `json:"scope_granted"`
-	EffectiveAllowed bool   `json:"effective_allowed"`
-	Effect           string `json:"effect"`
-	RateLimitRPM     *int   `json:"rate_limit_rpm,omitempty"`
-	RateLimitBurst   *int   `json:"rate_limit_burst,omitempty"`
+	Name             string                `json:"name"`
+	Kind             string                `json:"kind"`
+	Owner            string                `json:"owner"`
+	EnabledByDefault bool                  `json:"enabled_by_default"`
+	Deprecated       bool                  `json:"deprecated"`
+	Replacement      string                `json:"replacement"`
+	Aliases          []ClientToolAlias     `json:"aliases,omitempty"`
+	Provenance       *ClientToolProvenance `json:"provenance,omitempty"`
+	RequiredScope    string                `json:"required_scope"`
+	Risk             string                `json:"risk"`
+	DataClass        string                `json:"data_class"`
+	ReadOnlyHint     bool                  `json:"read_only_hint"`
+	DestructiveHint  bool                  `json:"destructive_hint"`
+	OpenWorldHint    bool                  `json:"open_world_hint"`
+	DefaultRPM       int                   `json:"default_rpm"`
+	DefaultBurst     int                   `json:"default_burst"`
+	ScopeGranted     bool                  `json:"scope_granted"`
+	EffectiveAllowed bool                  `json:"effective_allowed"`
+	Effect           string                `json:"effect"`
+	RateLimitRPM     *int                  `json:"rate_limit_rpm,omitempty"`
+	RateLimitBurst   *int                  `json:"rate_limit_burst,omitempty"`
 }
 
 // UpdateRequest updates mutable client governance settings.
@@ -298,9 +318,10 @@ func (h *Handler) ReplaceToolPolicies(ctx context.Context, auth *session.AuthCtx
 
 	replacements := make([]mcprepo.UpsertToolPolicyParams, 0, len(req.Policies))
 	for _, p := range req.Policies {
+		meta, _ := tools.LookupTool(strings.TrimSpace(p.ToolName))
 		replacements = append(replacements, mcprepo.UpsertToolPolicyParams{
 			ClientID:       client.ID,
-			ToolName:       strings.TrimSpace(p.ToolName),
+			ToolName:       meta.Name,
 			Effect:         strings.TrimSpace(p.Effect),
 			RateLimitRPM:   p.RateLimitRPM,
 			RateLimitBurst: p.RateLimitBurst,
@@ -580,36 +601,56 @@ func buildClientToolPolicies(client mcprepo.Client, explicit []mcprepo.ToolPolic
 		overrides[p.ToolName] = p
 	}
 
-	out := make([]ClientToolPolicy, 0, len(tools.ListTools()))
-	for _, meta := range tools.ListTools() {
+	catalog := tools.ListTools()
+	out := make([]ClientToolPolicy, 0, len(catalog))
+	for _, meta := range catalog {
 		override, hasOverride := overrides[meta.Name]
-		scopeGranted := scopeCovers(client.Scopes, meta.RequiredScope)
-		effectiveAllowed := false
-		if scopeGranted {
-			effectiveAllowed = toolEffectiveAllowed(client.ToolPolicyMode, hasOverride, override.Effect)
-		}
-
-		dto := ClientToolPolicy{
-			Name:             meta.Name,
-			RequiredScope:    meta.RequiredScope,
-			Risk:             string(meta.Risk),
-			DataClass:        string(meta.DataClass),
-			ReadOnlyHint:     meta.ReadOnlyHint,
-			DestructiveHint:  meta.DestructiveHint,
-			OpenWorldHint:    meta.OpenWorldHint,
-			DefaultRPM:       meta.DefaultRPM,
-			DefaultBurst:     meta.DefaultBurst,
-			ScopeGranted:     scopeGranted,
-			EffectiveAllowed: effectiveAllowed,
-		}
+		var overridePtr *mcprepo.ToolPolicy
 		if hasOverride {
-			dto.Effect = override.Effect
-			dto.RateLimitRPM = override.RateLimitRPM
-			dto.RateLimitBurst = override.RateLimitBurst
+			overridePtr = ptrext.Of(override)
 		}
-		out = append(out, dto)
+		out = append(out, buildClientToolPolicy(client, meta, overridePtr, hasOverride))
 	}
 	return out
+}
+
+func buildClientToolPolicy(client mcprepo.Client, meta tools.ToolMeta, override *mcprepo.ToolPolicy, hasOverride bool) ClientToolPolicy {
+	scopeGranted := scopeCovers(client.Scopes, meta.RequiredScope)
+	effectiveAllowed := false
+	overrideEffect := ""
+	if override != nil {
+		overrideEffect = override.Effect
+	}
+	if meta.EnabledByDefault && scopeGranted {
+		effectiveAllowed = toolEffectiveAllowed(client.ToolPolicyMode, hasOverride, overrideEffect)
+	}
+
+	dto := ClientToolPolicy{
+		Name:             meta.Name,
+		Kind:             string(meta.Kind),
+		Owner:            meta.Owner,
+		EnabledByDefault: meta.EnabledByDefault,
+		Deprecated:       meta.Deprecated,
+		Replacement:      meta.Replacement,
+		Aliases:          toClientToolAliases(meta.Aliases),
+		Provenance:       toClientToolProvenance(meta.Provenance),
+		RequiredScope:    meta.RequiredScope,
+		Risk:             string(meta.Risk),
+		DataClass:        string(meta.DataClass),
+		ReadOnlyHint:     meta.ReadOnlyHint,
+		DestructiveHint:  meta.DestructiveHint,
+		OpenWorldHint:    meta.OpenWorldHint,
+		DefaultRPM:       meta.DefaultRPM,
+		DefaultBurst:     meta.DefaultBurst,
+		ScopeGranted:     scopeGranted,
+		EffectiveAllowed: effectiveAllowed,
+	}
+	if override != nil {
+		dto.Effect = override.Effect
+		dto.RateLimitRPM = override.RateLimitRPM
+		dto.RateLimitBurst = override.RateLimitBurst
+	}
+	return dto
 }
 
 func validateToolPolicyMode(mode string) error {
@@ -645,22 +686,27 @@ func validateToolPolicyInputs(clientScopes []string, policies []ToolPolicyInput)
 		if name == "" {
 			return ptrext.Of(ValidationError{Field: "policies", Message: "tool_name is required"})
 		}
-		if _, dup := seen[name]; dup {
-			return ptrext.Of(ValidationError{Field: "policies", Message: "duplicate tool_name: " + name})
-		}
-		seen[name] = struct{}{}
 
 		meta, ok := tools.LookupTool(name)
 		if !ok {
 			return ptrext.Of(ValidationError{Field: "policies", Message: "unknown tool: " + name})
 		}
+		canonicalName := meta.Name
+		if _, dup := seen[canonicalName]; dup {
+			return ptrext.Of(ValidationError{Field: "policies", Message: "duplicate tool_name: " + canonicalName})
+		}
+		seen[canonicalName] = struct{}{}
+
 		if !scopeCovers(clientScopes, meta.RequiredScope) {
-			return ptrext.Of(ValidationError{Field: "policies", Message: "tool scope not granted: " + name})
+			return ptrext.Of(ValidationError{Field: "policies", Message: "tool scope not granted: " + canonicalName})
+		}
+		if !meta.EnabledByDefault {
+			return ptrext.Of(ValidationError{Field: "policies", Message: "tool is disabled by catalog: " + canonicalName})
 		}
 
 		effect := strings.TrimSpace(p.Effect)
 		if effect != domain.MCPToolPolicyEffectAllow && effect != domain.MCPToolPolicyEffectDeny {
-			return ptrext.Of(ValidationError{Field: "policies", Message: "invalid effect for tool: " + name})
+			return ptrext.Of(ValidationError{Field: "policies", Message: "invalid effect for tool: " + canonicalName})
 		}
 		if err := validateOptionalPositiveInt("policies.rate_limit_rpm", p.RateLimitRPM); err != nil {
 			return err
@@ -670,6 +716,31 @@ func validateToolPolicyInputs(clientScopes []string, policies []ToolPolicyInput)
 		}
 	}
 	return nil
+}
+
+func toClientToolAliases(in []tools.ToolAlias) []ClientToolAlias {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ClientToolAlias, 0, len(in))
+	for _, alias := range in {
+		out = append(out, ClientToolAlias{
+			Name:        alias.Name,
+			Deprecated:  alias.Deprecated,
+			Replacement: alias.Replacement,
+		})
+	}
+	return out
+}
+
+func toClientToolProvenance(in *tools.ExtensionProvenance) *ClientToolProvenance {
+	if in == nil {
+		return nil
+	}
+	return ptrext.Of(ClientToolProvenance{
+		Kind:      in.Kind,
+		Reference: in.Reference,
+	})
 }
 
 func scopeCovers(scopes []string, required string) bool {

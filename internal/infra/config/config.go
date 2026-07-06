@@ -25,6 +25,11 @@ import (
 
 const defaultPath = "config.yaml"
 
+const (
+	ProfileDev        = "dev"
+	ProfileProduction = "production"
+)
+
 var activePath = defaultPath
 
 // SetPath sets the config path used by Load. Empty resets to the default.
@@ -43,7 +48,8 @@ func Path() string {
 }
 
 type Config struct {
-	Port int
+	Profile string
+	Port    int
 
 	Ingest        IngestConfig
 	Database      DatabaseConfig
@@ -247,6 +253,7 @@ type MCPRateLimitConfig struct {
 }
 
 type yamlConfig struct {
+	Profile        string              `yaml:"profile"`
 	Port           int                 `yaml:"port"`
 	Ingest         IngestConfig        `yaml:"ingest"`
 	Database       DatabaseConfig      `yaml:"database"`
@@ -299,8 +306,8 @@ func LoadPath(path string) (*Config, error) {
 		logext.Errorf(ctx, "[%s] validate failed,err:%+v", where, err.Error())
 		return nil, err
 	}
-	logext.Infof(ctx, "[%s] OK,path:%s,port:%d,console_enabled:%t,secrets:%s,legacy_inbound_key:%t",
-		where, trimmed, c.Port, c.ConsoleSessionKey != "",
+	logext.Infof(ctx, "[%s] OK,path:%s,profile:%s,port:%d,console_enabled:%t,secrets:%s,legacy_inbound_key:%t",
+		where, trimmed, c.Profile, c.Port, c.ConsoleSessionKey != "",
 		secretstore.RedactKeysetForLog(c.Secrets.TinkKeyset),
 		strings.TrimSpace(c.Secrets.LegacyInboundMasterKey) != "")
 	return c, nil
@@ -318,6 +325,7 @@ func parseYAML(raw []byte) (*yamlConfig, error) {
 
 func buildConfig(yc *yamlConfig) (*Config, error) {
 	c := ptrext.Of(Config{
+		Profile:        yc.Profile,
 		Port:           yc.Port,
 		Ingest:         yc.Ingest,
 		Database:       yc.Database,
@@ -519,7 +527,16 @@ func (c *Config) parseSimpleFields() {
 	c.RateLimitDisabled = c.RateLimit.Disabled
 }
 
+// IsProduction reports whether the runtime profile is production.
+func (c *Config) IsProduction() bool {
+	if c == nil {
+		return false
+	}
+	return normalizeProfile(c.Profile) == ProfileProduction
+}
+
 func (c *Config) applyDefaults() {
+	c.Profile = normalizeProfile(c.Profile)
 	if c.Port == 0 {
 		c.Port = DefaultPort
 	}
@@ -629,21 +646,38 @@ func (c *Config) applyObservabilityDefaults() {
 		c.Observability.ServiceVersion = DefaultServiceVersion
 	}
 	if c.Observability.Environment == "" {
-		c.Observability.Environment = DefaultEnvironment
+		c.Observability.Environment = c.Profile
+		if c.Observability.Environment == "" {
+			c.Observability.Environment = DefaultEnvironment
+		}
 	}
 	if c.Observability.OTLPTracesPath == "" {
 		c.Observability.OTLPTracesPath = DefaultOTLPTracesPath
 	}
 }
 
+func normalizeProfile(profile string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(profile))
+	if trimmed == "" {
+		return ProfileDev
+	}
+	return trimmed
+}
+
 func (c *Config) validate() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("config: database.url is required")
+	}
+	if err := c.validateProfile(); err != nil {
+		return err
 	}
 	if err := c.validateSecretsConfig(); err != nil {
 		return err
 	}
 	if err := c.validateConsole(); err != nil {
+		return err
+	}
+	if err := c.validateSecurityConfig(); err != nil {
 		return err
 	}
 	if err := c.OIDC.Validate(); err != nil {
@@ -690,6 +724,15 @@ func (c *Config) validateSecretsConfig() error {
 		return fmt.Errorf("config: secrets.legacy_inbound_master_key: %w", err)
 	}
 	return nil
+}
+
+func (c *Config) validateProfile() error {
+	switch normalizeProfile(c.Profile) {
+	case ProfileDev, ProfileProduction:
+		return nil
+	default:
+		return fmt.Errorf("config: profile must be one of %q or %q", ProfileDev, ProfileProduction)
+	}
 }
 
 func (c *Config) validateIngestConfig() error {
@@ -835,6 +878,9 @@ func (c *Config) validateConsole() error {
 	if !hasSession {
 		return nil
 	}
+	if _, err := url.ParseRequestURI(c.ConsoleBaseURL); err != nil {
+		return fmt.Errorf("config: console.base_url must be a valid URL")
+	}
 	if len(c.ConsoleSessionKey) < 32 {
 		return fmt.Errorf("config: console.session_key must be at least 32 bytes")
 	}
@@ -849,6 +895,13 @@ func (c *Config) validateConsole() error {
 	}
 	if c.Console.BootstrapAdmin.Password == "replace-this-after-first-login" {
 		return fmt.Errorf("config: console.bootstrap_admin.password must be replaced before startup")
+	}
+	return nil
+}
+
+func (c *Config) validateSecurityConfig() error {
+	if c.Security.TrustedProxyHops < 0 {
+		return fmt.Errorf("config: security.trusted_proxy_hops must be non-negative")
 	}
 	return nil
 }

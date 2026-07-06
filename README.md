@@ -66,15 +66,18 @@ docker compose run --rm attune llm routes upsert \
 ```
 
 To preview the Console with realistic feedback, search-quality telemetry, and
-quality-action state before wiring real customer traffic, seed the local demo
-workspace after the app has started:
+quality-action state before wiring real customer traffic, bootstrap the local
+demo workspace after the app has started:
 
 ```bash
-docker compose run --rm attune demo seed
+docker compose run --rm attune demo bootstrap
 ```
 
 Sign in with the configured bootstrap admin and open
 `/console/control-tower` to inspect the operational landing page.
+Use `demo reset` to clear the demo-seeded rows back to an empty tenant, and
+`demo seed` when you only want to refresh the canonical demo data without
+rebuilding the whole baseline.
 
 See [`deploy/README.md`](deploy/README.md) for the compose-kit quick-reference,
 the full [private deployment guide](docs/private-deploy.md) for a step-by-step
@@ -145,7 +148,15 @@ channel, model-ability, route, and channel-test operations.
 | `secrets.tink_keyset` | Shared Tink AEAD keyset from `attune secrets generate-keyset`; all replicas need the same keyset. |
 | `secrets.legacy_inbound_master_key` | Optional migration-only old inbound master key, hex/base64; remove after `attune secrets reencrypt --apply`. |
 | `console.base_url` + `console.session_key` | Console origin and >=32-char session signing secret. |
+| `profile` | Runtime deployment intent. Use `dev` for local/evaluation installs and `production` for production-safe startup checks. |
 | `console.bootstrap_admin` | First admin credentials, used only while `admins` is empty. |
+
+If `observability.environment` is omitted, it follows `profile` so production
+instances report as `production` by default.
+
+If you deploy behind a reverse proxy, set `security.trusted_proxy_hops` to the
+number of trusted hops in front of attune and ensure the proxy forwards
+`X-Forwarded-For` and `X-Forwarded-Proto`.
 
 Runtime secret material is encrypted with the shared Tink keyset. Rotate it in
 distributed deployments with `attune secrets add-key`, `set-primary`,

@@ -28,12 +28,13 @@ func NewAPIKey(pool *pgxpool.Pool) *APIKeyRepo {
 // StoredHash against their own recomputed digest before trusting the
 // row — never compare hashes byte-by-byte to avoid timing oracles.
 type APIKeyRow struct {
-	ID           uuid.UUID
-	TenantID     string
-	StoredHash   []byte
-	ExpiresAt    *time.Time
-	AllowedCIDRs []string
-	RateLimitRPM *int
+	ID                   uuid.UUID
+	TenantID             string
+	StoredHash           []byte
+	ExpiresAt            *time.Time
+	AllowedCIDRs         []string
+	RateLimitRPM         *int
+	ServiceAccountActive bool
 }
 
 // ErrAPIKeyNotFound signals "no active row matched this hash". Service
@@ -162,13 +163,21 @@ func (r *APIKeyRepo) LookupByHash(ctx context.Context, hash []byte) (*APIKeyRow,
 	var allowedCIDRs []string
 	err := r.pool.QueryRow(
 		ctx, `
-		SELECT id, tenant_id, key_hash, expires_at, allowed_cidrs::text[], rate_limit_rpm
-		 FROM external_api_keys
-		 WHERE key_hash = $1
-		 AND is_active = TRUE
-		 AND revoked_at IS NULL`,
+		SELECT e.id, e.tenant_id, e.key_hash, e.expires_at, e.allowed_cidrs::text[], e.rate_limit_rpm,
+		       CASE
+		           WHEN e.service_account_id IS NULL THEN TRUE
+		           WHEN sa.id IS NULL THEN FALSE
+		           ELSE sa.is_active
+		       END
+		 FROM external_api_keys e
+		 LEFT JOIN service_accounts sa
+		   ON sa.id = e.service_account_id
+		  AND sa.tenant_id = e.tenant_id
+		 WHERE e.key_hash = $1
+		 AND e.is_active = TRUE
+		 AND e.revoked_at IS NULL`,
 		hash,
-	).Scan(&row.ID, &row.TenantID, &row.StoredHash, &row.ExpiresAt, &allowedCIDRs, &row.RateLimitRPM)
+	).Scan(&row.ID, &row.TenantID, &row.StoredHash, &row.ExpiresAt, &allowedCIDRs, &row.RateLimitRPM, &row.ServiceAccountActive)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrAPIKeyNotFound
 	}
@@ -556,9 +565,71 @@ func (r *APIKeyRepo) ListServiceAccounts(ctx context.Context, tenantID string) (
 	return out, rows.Err()
 }
 
+// UpdateServiceAccount updates the service account active flag and returns the updated row.
+func (r *APIKeyRepo) UpdateServiceAccount(ctx context.Context, tenantID string, id uuid.UUID, isActive bool) (ServiceAccountRow, error) {
+	var row ServiceAccountRow
+	err := r.pool.QueryRow(
+		ctx, `
+		UPDATE service_accounts
+		SET is_active = $1,
+		    updated_at = NOW()
+		WHERE id = $2 AND tenant_id = $3
+		RETURNING id, tenant_id, name, COALESCE(description, ''), is_active, created_at, updated_at`,
+		isActive, id, tenantID,
+	).Scan(&row.ID, &row.TenantID, &row.Name, &row.Description, &row.IsActive, &row.CreatedAt, &row.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ServiceAccountRow{}, ErrServiceAccountNotFound
+	}
+	if err != nil {
+		return ServiceAccountRow{}, fmt.Errorf("update service account: %w", err)
+	}
+	return row, nil
+}
+
+// DeleteServiceAccount removes a service account and returns the deleted row.
+func (r *APIKeyRepo) DeleteServiceAccount(ctx context.Context, tenantID string, id uuid.UUID) (ServiceAccountRow, error) {
+	var row ServiceAccountRow
+	err := r.pool.QueryRow(
+		ctx, `
+		DELETE FROM service_accounts
+		WHERE id = $1 AND tenant_id = $2
+		RETURNING id, tenant_id, name, COALESCE(description, ''), is_active, created_at, updated_at`,
+		id, tenantID,
+	).Scan(&row.ID, &row.TenantID, &row.Name, &row.Description, &row.IsActive, &row.CreatedAt, &row.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ServiceAccountRow{}, ErrServiceAccountNotFound
+	}
+	if err != nil {
+		return ServiceAccountRow{}, fmt.Errorf("delete service account: %w", err)
+	}
+	return row, nil
+}
+
 // LinkKeyToServiceAccount associates an API key with a service account.
 func (r *APIKeyRepo) LinkKeyToServiceAccount(ctx context.Context, tenantID string, keyID, serviceAccountID uuid.UUID) error {
-	tag, err := r.pool.Exec(
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin link key to service account tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var checkedServiceAccountID uuid.UUID
+	err = tx.QueryRow(
+		ctx, `
+		SELECT id
+		FROM service_accounts
+		WHERE id = $1 AND tenant_id = $2
+		FOR KEY SHARE`,
+		serviceAccountID, tenantID,
+	).Scan(&checkedServiceAccountID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrServiceAccountNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("link key to service account: %w", err)
+	}
+
+	tag, err := tx.Exec(
 		ctx, `
 		UPDATE external_api_keys
 		SET service_account_id = $1
@@ -570,6 +641,9 @@ func (r *APIKeyRepo) LinkKeyToServiceAccount(ctx context.Context, tenantID strin
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrAPIKeyNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit link key to service account tx: %w", err)
 	}
 	return nil
 }

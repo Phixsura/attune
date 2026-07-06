@@ -16,6 +16,7 @@ import (
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	auditlogviewsvc "github.com/Phixsura/attune/internal/service/auditlogview"
 )
 
 type fakeAuditLogService struct {
@@ -24,9 +25,41 @@ type fakeAuditLogService struct {
 	rows       []auditlogrepo.Entry
 }
 
+type fakeSavedViewService struct {
+	listViews []auditlogviewsvc.View
+	saveInput auditlogviewsvc.SaveInput
+	saveView  *auditlogviewsvc.View
+	deleteID  string
+	deleteBy  string
+}
+
 func (f *fakeAuditLogService) List(_ context.Context, filter auditlogsvc.ListFilter) (auditlogrepo.ListResult, error) {
 	f.filter = filter
 	return auditlogrepo.ListResult{Items: f.rows, NextCursor: f.nextCursor}, nil
+}
+
+func (f *fakeSavedViewService) List(_ context.Context, _, _ string) ([]auditlogviewsvc.View, error) {
+	return f.listViews, nil
+}
+
+func (f *fakeSavedViewService) Save(_ context.Context, _, _ string, input auditlogviewsvc.SaveInput) (*auditlogviewsvc.View, error) {
+	f.saveInput = input
+	if f.saveView != nil {
+		return f.saveView, nil
+	}
+	return ptrext.Of(auditlogviewsvc.View{
+		ID:   "view-1",
+		Name: input.Name,
+		State: auditlogviewsvc.State{
+			Actions: input.State.Actions,
+		},
+	}), nil
+}
+
+func (f *fakeSavedViewService) Delete(_ context.Context, _, _, id, updatedBy string) error {
+	f.deleteID = id
+	f.deleteBy = updatedBy
+	return nil
 }
 
 func TestBindListRequestAcceptsSnakeAndCamelCase(t *testing.T) {
@@ -251,6 +284,77 @@ func TestToProto_MapsAllFields(t *testing.T) {
 	require.Equal(t, `{"url":"old"}`, out.GetBeforeJson())
 	require.Equal(t, `{"url":"new"}`, out.GetAfterJson())
 	require.Contains(t, out.GetCreatedAt(), "2026-06-15")
+}
+
+func TestListSavedViewsMapsSavedViews(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 16, 10, 30, 0, 0, time.UTC)
+	handler := NewHandler(ptrext.Of(fakeAuditLogService{}))
+	handler.SetSavedViewService(ptrext.Of(fakeSavedViewService{
+		listViews: []auditlogviewsvc.View{{
+			ID:        "view-1",
+			Name:      "Investigation",
+			State:     auditlogviewsvc.State{Actions: []string{"member.remove"}, LocalQuery: "playwright"},
+			CreatedAt: now.Add(-time.Hour),
+			UpdatedAt: now,
+		}},
+	}))
+	ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth:    ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}),
+	})
+
+	res, err := handler.ListSavedViews(ctx, ptrext.Of(attunev1.ListSavedAuditLogViewsRequest{}))
+	require.NoError(t, err)
+	require.Len(t, res.Body.GetItems(), 1)
+	got := res.Body.GetItems()[0]
+	require.Equal(t, "view-1", got.GetId())
+	require.Equal(t, "Investigation", got.GetName())
+	require.Equal(t, []string{"member.remove"}, got.GetState().GetActions())
+	require.Equal(t, "playwright", got.GetState().GetLocalQuery())
+}
+
+func TestCreateSavedViewDelegatesToService(t *testing.T) {
+	t.Parallel()
+
+	savedSvc := ptrext.Of(fakeSavedViewService{})
+	handler := NewHandler(ptrext.Of(fakeAuditLogService{}))
+	handler.SetSavedViewService(savedSvc)
+	ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth:    ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}),
+	})
+
+	res, err := handler.CreateSavedView(ctx, ptrext.Of(attunev1.CreateSavedAuditLogViewRequest{
+		Name: "Investigation",
+		State: ptrext.Of(attunev1.AuditLogViewState{
+			Actions:    []string{"member.remove"},
+			LocalQuery: "playwright",
+		}),
+	}))
+	require.NoError(t, err)
+	require.Equal(t, "Investigation", savedSvc.saveInput.Name)
+	require.Equal(t, []string{"member.remove"}, savedSvc.saveInput.State.Actions)
+	require.Equal(t, "user-1", savedSvc.saveInput.UpdatedBy)
+	require.Equal(t, "view-1", res.Body.GetView().GetId())
+}
+
+func TestDeleteSavedViewDelegatesToService(t *testing.T) {
+	t.Parallel()
+
+	savedSvc := ptrext.Of(fakeSavedViewService{})
+	handler := NewHandler(ptrext.Of(fakeAuditLogService{}))
+	handler.SetSavedViewService(savedSvc)
+	ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth:    ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}),
+	})
+
+	_, err := handler.DeleteSavedView(ctx, ptrext.Of(attunev1.DeleteSavedAuditLogViewRequest{Id: "view-1"}))
+	require.NoError(t, err)
+	require.Equal(t, "view-1", savedSvc.deleteID)
+	require.Equal(t, "user-1", savedSvc.deleteBy)
 }
 
 func TestCollectQueryValues_MultipleCommaValues(t *testing.T) {

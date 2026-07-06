@@ -49,8 +49,26 @@ export interface MCPRefreshGrant {
   created_at: string
 }
 
+export interface MCPClientToolAlias {
+  name: string
+  deprecated: boolean
+  replacement: string
+}
+
+export interface MCPClientToolProvenance {
+  kind: string
+  reference: string
+}
+
 export interface MCPClientTool {
   name: string
+  kind: string
+  owner: string
+  enabled_by_default: boolean
+  deprecated: boolean
+  replacement: string
+  aliases?: MCPClientToolAlias[]
+  provenance?: MCPClientToolProvenance
   required_scope: string
   risk: string
   data_class: string

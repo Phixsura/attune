@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #14 |
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Started** | 2026-06-04 22:32 CST |
 | **Related** | #1 (CI), #2 (release → reuses this image), #5 (docker-compose) |
 

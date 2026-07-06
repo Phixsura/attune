@@ -201,14 +201,7 @@ func (h *APIKeysHandler) ListServiceAccounts(ctx *dispatcher.RequestContext[*ses
 
 	items := make([]*attunev1.ServiceAccount, 0, len(accounts))
 	for _, sa := range accounts {
-		items = append(items, ptrext.Of(attunev1.ServiceAccount{
-			Id:          sa.ID.String(),
-			Name:        sa.Name,
-			Description: sa.Description,
-			IsActive:    sa.IsActive,
-			CreatedAt:   sa.CreatedAt.UTC().Format(time.RFC3339),
-			UpdatedAt:   sa.UpdatedAt.UTC().Format(time.RFC3339),
-		}))
+		items = append(items, toProtoServiceAccount(sa))
 	}
 
 	return dispatcher.OK(ptrext.Of(attunev1.ListServiceAccountsResponse{Items: items}))
@@ -232,6 +225,16 @@ func (h *APIKeysHandler) CreateServiceAccount(ctx *dispatcher.RequestContext[*se
 		return dispatcher.Fail[*attunev1.CreateServiceAccountResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to create service account")
 	}
 
+	if err := h.recordServiceAccountAudit(ctx, auth, "service_account.create", "Created service account", id.String(), nil, map[string]any{
+		"id":          id.String(),
+		"name":        name,
+		"description": description,
+		"is_active":   true,
+	}); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,service_account_id:%s,err:%+v", where, auth.TenantID, id, err.Error())
+		return dispatcher.Fail[*attunev1.CreateServiceAccountResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	return dispatcher.Created(ptrext.Of(attunev1.CreateServiceAccountResponse{
 		ServiceAccount: ptrext.Of(attunev1.ServiceAccount{
@@ -243,6 +246,91 @@ func (h *APIKeysHandler) CreateServiceAccount(ctx *dispatcher.RequestContext[*se
 			UpdatedAt:   now,
 		}),
 	}))
+}
+
+// UpdateServiceAccount updates a service account's active state.
+func (h *APIKeysHandler) UpdateServiceAccount(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.UpdateServiceAccountRequest) (dispatcher.Result[*attunev1.ServiceAccount], error) {
+	const where = "handlers.console.apikey.UpdateServiceAccount"
+	auth := ctx.Auth
+
+	id, err := uuid.Parse(req.GetId())
+	if err != nil {
+		logext.Warnf(ctx, "[%s] reject: bad id,tenant_id:%s,id:%s", where, auth.TenantID, req.GetId())
+		return dispatcher.Fail[*attunev1.ServiceAccount](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid service account id")
+	}
+
+	if req.IsActive == nil {
+		return dispatcher.Fail[*attunev1.ServiceAccount](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "is_active is required")
+	}
+
+	desiredActive := ptrext.Indirect(req.IsActive)
+	row, err := h.svc.UpdateServiceAccount(ctx, auth.TenantID, id, desiredActive)
+	if err != nil {
+		if errors.Is(err, apikeyrepo.ErrServiceAccountNotFound) {
+			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,service_account_id:%s", where, auth.TenantID, id)
+			return dispatcher.Fail[*attunev1.ServiceAccount](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "service account not found")
+		}
+		logext.Errorf(ctx, "[%s] update service account failed,tenant_id:%s,service_account_id:%s,err:%+v", where, auth.TenantID, id, err.Error())
+		return dispatcher.Fail[*attunev1.ServiceAccount](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to update service account")
+	}
+
+	summary := "Disabled service account"
+	if desiredActive {
+		summary = "Enabled service account"
+	}
+
+	if err := h.recordServiceAccountAudit(ctx, auth, "service_account.update", summary, row.ID.String(), map[string]any{
+		"id":        row.ID.String(),
+		"is_active": !desiredActive,
+	}, map[string]any{
+		"id":          row.ID.String(),
+		"name":        row.Name,
+		"description": row.Description,
+		"is_active":   row.IsActive,
+	}); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,service_account_id:%s,err:%+v", where, auth.TenantID, id, err.Error())
+		return dispatcher.Fail[*attunev1.ServiceAccount](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
+
+	return dispatcher.OK(toProtoServiceAccount(row))
+}
+
+// DeleteServiceAccount removes a service account and detaches linked API keys.
+func (h *APIKeysHandler) DeleteServiceAccount(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.DeleteServiceAccountRequest) (dispatcher.Result[*attunev1.DeleteServiceAccountResponse], error) {
+	const where = "handlers.console.apikey.DeleteServiceAccount"
+	auth := ctx.Auth
+
+	id, err := uuid.Parse(req.GetId())
+	if err != nil {
+		logext.Warnf(ctx, "[%s] reject: bad id,tenant_id:%s,id:%s", where, auth.TenantID, req.GetId())
+		return dispatcher.Fail[*attunev1.DeleteServiceAccountResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid service account id")
+	}
+
+	logext.Infof(ctx, "[%s] start,tenant_id:%s,service_account_id:%s", where, auth.TenantID, id)
+	row, err := h.svc.DeleteServiceAccount(ctx, auth.TenantID, id)
+	if err != nil {
+		if errors.Is(err, apikeyrepo.ErrServiceAccountNotFound) {
+			logext.Warnf(ctx, "[%s] reject: not found,tenant_id:%s,service_account_id:%s", where, auth.TenantID, id)
+			return dispatcher.Fail[*attunev1.DeleteServiceAccountResponse](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "service account not found")
+		}
+		logext.Errorf(ctx, "[%s] delete service account failed,tenant_id:%s,service_account_id:%s,err:%+v", where, auth.TenantID, id, err.Error())
+		return dispatcher.Fail[*attunev1.DeleteServiceAccountResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to delete service account")
+	}
+
+	if err := h.recordServiceAccountAudit(ctx, auth, "service_account.delete", "Deleted service account", row.ID.String(), map[string]any{
+		"id":          row.ID.String(),
+		"name":        row.Name,
+		"description": row.Description,
+		"is_active":   row.IsActive,
+		"created_at":  row.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":  row.UpdatedAt.UTC().Format(time.RFC3339),
+	}, nil); err != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,service_account_id:%s,err:%+v", where, auth.TenantID, id, err.Error())
+		return dispatcher.Fail[*attunev1.DeleteServiceAccountResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log")
+	}
+
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,service_account_id:%s", where, auth.TenantID, id)
+	return dispatcher.NoContent[*attunev1.DeleteServiceAccountResponse]()
 }
 
 // ListEventSubscriptions returns all event webhook subscriptions.
@@ -332,6 +420,22 @@ func (h *APIKeysHandler) ListLeakDetections(ctx *dispatcher.RequestContext[*sess
 	}
 
 	return dispatcher.OK(ptrext.Of(attunev1.ListLeakDetectionsResponse{Items: items}))
+}
+
+func (h *APIKeysHandler) recordServiceAccountAudit(ctx *dispatcher.RequestContext[*session.AuthCtx], auth *session.AuthCtx, action, summary, targetID string, before, after map[string]any) error {
+	if h.audit == nil {
+		return nil
+	}
+	return h.audit.Record(ctx, auditlogsvc.Event{
+		TenantID:   auth.TenantID,
+		Actor:      auditActor(auth, ctx.Request()),
+		Action:     action,
+		TargetType: "service_account",
+		TargetID:   targetID,
+		Summary:    summary,
+		Before:     before,
+		After:      after,
+	})
 }
 
 func parseGracePeriod(s string) (time.Duration, error) {

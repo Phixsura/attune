@@ -1,6 +1,7 @@
 import { HttpResponse, http } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuditLogPage } from '@/features/audit-log/components/audit-log-page'
+import type { AuditLogViewState, SavedAuditLogView } from '@/proto/attune/v1/audit'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
@@ -163,6 +164,163 @@ describe('AuditLogPage', () => {
     expect(
       screen.getByPlaceholderText('在已加载记录里继续搜索动作、摘要、操作者、目标或快照内容'),
     ).toHaveValue('playwright')
+  })
+
+  it('saves the current investigation view into the saved views sidebar', async () => {
+    let savedViews: SavedAuditLogView[] = []
+    let postedBody: { name: string; state?: AuditLogViewState } | null = null
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.remove',
+              targetType: 'member',
+              targetId: 'member-42',
+              summary: 'Removed member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.get('/fb/v1/console/audit-log/views', () => HttpResponse.json({ items: savedViews })),
+      http.post('/fb/v1/console/audit-log/views', async ({ request }) => {
+        const body = (await request.json()) as { name: string; state?: AuditLogViewState }
+        postedBody = body
+        savedViews = [
+          {
+            id: 'view-1',
+            name: '成员删除排查',
+            state: body.state,
+            createdAt: '2026-06-16T10:00:00Z',
+            updatedAt: '2026-06-16T10:00:00Z',
+          },
+        ]
+        return HttpResponse.json({ view: savedViews[0] })
+      }),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '保存当前' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '保存当前' }))
+    await user.clear(screen.getByLabelText('视图名称'))
+    await user.type(screen.getByLabelText('视图名称'), '成员删除排查')
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+
+    await waitFor(() => {
+      expect(postedBody).toEqual({
+        name: '成员删除排查',
+        state: {
+          actions: [],
+          actorId: '',
+          actorType: '',
+          from: '',
+          localQuery: '',
+          targetId: '',
+          targetType: '',
+          to: '',
+        },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('当前选中视图：成员删除排查')).toBeInTheDocument()
+    })
+  })
+
+  it('applies a saved investigation view from the sidebar', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('/fb/v1/console/audit-log', ({ request }) => {
+        urls.push(request.url)
+        const searchParams = new URL(request.url).searchParams
+        if (searchParams.get('action') === 'member.remove') {
+          return HttpResponse.json({
+            items: [
+              {
+                id: '2',
+                actorType: 'admin',
+                actorId: 'user-1',
+                action: 'member.remove',
+                targetType: 'member',
+                targetId: 'member-42',
+                summary: 'playwright removed member',
+                createdAt: '2026-06-16T09:30:00Z',
+              },
+            ],
+          })
+        }
+        return HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        })
+      }),
+      http.get('/fb/v1/console/audit-log/views', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 'view-1',
+              name: '成员删除排查',
+              state: {
+                actions: ['member.remove'],
+                actorType: '',
+                actorId: 'user-1',
+                targetType: 'member',
+                targetId: 'member-42',
+                from: '',
+                to: '',
+                localQuery: 'playwright',
+                inspectedEntryId: '2',
+              },
+              createdAt: '2026-06-16T10:00:00Z',
+              updatedAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(urls).toHaveLength(1)
+    })
+
+    await user.click(screen.getByRole('button', { name: /^成员删除排查/ }))
+
+    await waitFor(() => {
+      expect(urls).toHaveLength(2)
+    })
+    expect(urls[1]).toContain('action=member.remove')
+    expect(urls[1]).toContain('targetId=member-42')
+    expect(urls[1]).toContain('actorId=user-1')
+    expect(urls[1]).toContain('targetType=member')
+    await waitFor(() => {
+      expect(window.location.search).toContain('q=playwright')
+    })
+    expect(window.location.search).toContain('entry=2')
+
+    await waitFor(() => {
+      expect(screen.getByText('当前选中视图：成员删除排查')).toBeInTheDocument()
+    })
+    expect(screen.getByText('当前状态与保存视图一致。')).toBeInTheDocument()
   })
 
   it('reset clears the multi-action summary', async () => {

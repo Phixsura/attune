@@ -14,11 +14,12 @@ import (
 )
 
 const (
-	DecisionAllowed           = "allowed"
-	DecisionDeniedScope       = "denied_scope"
-	DecisionDeniedPolicy      = "denied_policy"
-	DecisionDeniedClient      = "denied_client"
-	DecisionDeniedRateLimited = "rate_limited"
+	DecisionAllowed                 = "allowed"
+	DecisionDeniedScope             = "denied_scope"
+	DecisionDeniedExtensionDisabled = "denied_extension_disabled"
+	DecisionDeniedPolicy            = "denied_policy"
+	DecisionDeniedClient            = "denied_client"
+	DecisionDeniedRateLimited       = "rate_limited"
 )
 
 // ToolPolicy is the per-client override relevant to runtime authorization.
@@ -105,6 +106,12 @@ func (e *Evaluator) Evaluate(ctx context.Context, claims *oauth.AccessTokenClaim
 	if !hasScope(claims.Scopes, tool.RequiredScope) {
 		decision.Allowed = false
 		decision.Reason = DecisionDeniedScope
+		return decision, nil
+	}
+
+	if !tool.EnabledByDefault {
+		decision.Allowed = false
+		decision.Reason = DecisionDeniedExtensionDisabled
 		return decision, nil
 	}
 

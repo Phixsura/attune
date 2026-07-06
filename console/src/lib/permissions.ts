@@ -7,7 +7,7 @@
  * and backend (API authorization) should align with this matrix.
  */
 
-export type Role = 'admin' | 'member' | 'viewer'
+export type Role = 'admin' | 'delegated_admin' | 'member' | 'viewer'
 
 export type Permission =
   // Feedback
@@ -66,6 +66,7 @@ export type Permission =
  * Permission matrix: role -> permissions
  *
  * - admin: Full access
+ * - delegated_admin: Operational settings + governance review
  * - member: Can view and edit feedback, view settings
  * - viewer: Read-only access to feedback and usage
  */
@@ -111,6 +112,34 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     // Navigation
     'nav:settings',
     'nav:llm_config',
+  ]),
+
+  delegated_admin: new Set([
+    // Feedback - operational access without batch delete
+    'feedback:view',
+    'feedback:edit',
+    'feedback:delete',
+    // Settings - operational access
+    'settings:enrich_config:view',
+    'settings:enrich_config:edit',
+    'settings:enrichment_runtime:view',
+    'settings:enrichment_runtime:edit',
+    'settings:inbound:view',
+    'settings:inbound:edit',
+    'settings:notify_targets:view',
+    'settings:notify_targets:edit',
+    'settings:digest:view',
+    'settings:digest:edit',
+    'settings:tags:view',
+    'settings:tags:edit',
+    'settings:workflow:view',
+    'settings:workflow:edit',
+    'settings:audit_log:view',
+    'settings:gdpr:view',
+    // Usage
+    'usage:view',
+    // Navigation
+    'nav:settings',
   ]),
 
   member: new Set([
