@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Console workspace install now recognizes the local package.**
+  `console/pnpm-workspace.yaml` now declares the Console package explicitly, so
+  `pnpm install --frozen-lockfile` in CI can resolve the workspace instead of
+  failing with an empty packages configuration.
+
 - **Sample deploy config no longer carries committed dev credentials.**
   The checked-in `deploy/config.yaml` now keeps PostgreSQL, Console, and Tink
   values as placeholders again, so the private-deploy template no longer ships
