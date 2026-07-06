@@ -39,9 +39,23 @@ describe('usePermissions', () => {
         expect(result.current.role).toBe('admin')
       })
       expect(result.current.isAdmin).toBe(true)
+      expect(result.current.isDelegatedAdmin).toBe(false)
       expect(result.current.isMember).toBe(false)
       expect(result.current.isViewer).toBe(false)
       expect(result.current.userId).toBe('admin-user')
+    })
+
+    it('detects delegated admin role', async () => {
+      mockMeResponse('delegated_admin', 'ops-user')
+      const { result } = renderHook(() => usePermissions(), { wrapper: createWrapper() })
+
+      await waitFor(() => {
+        expect(result.current.role).toBe('delegated_admin')
+      })
+      expect(result.current.isAdmin).toBe(false)
+      expect(result.current.isDelegatedAdmin).toBe(true)
+      expect(result.current.isMember).toBe(false)
+      expect(result.current.isViewer).toBe(false)
     })
 
     it('detects member role', async () => {
@@ -52,6 +66,7 @@ describe('usePermissions', () => {
         expect(result.current.role).toBe('member')
       })
       expect(result.current.isAdmin).toBe(false)
+      expect(result.current.isDelegatedAdmin).toBe(false)
       expect(result.current.isMember).toBe(true)
       expect(result.current.isViewer).toBe(false)
     })
@@ -92,6 +107,24 @@ describe('usePermissions', () => {
       expect(result.current.can('feedback:edit')).toBe(true)
       expect(result.current.can('feedback:batch_delete')).toBe(true)
       expect(result.current.can('settings:members:invite')).toBe(true)
+    })
+
+    it('delegated admin can manage operational settings', async () => {
+      mockMeResponse('delegated_admin', 'ops-user')
+      const { result } = renderHook(() => usePermissions(), { wrapper: createWrapper() })
+
+      await waitFor(() => {
+        expect(result.current.role).toBe('delegated_admin')
+      })
+      expect(result.current.can('feedback:view')).toBe(true)
+      expect(result.current.can('feedback:edit')).toBe(true)
+      expect(result.current.can('feedback:delete')).toBe(true)
+      expect(result.current.can('feedback:batch_delete')).toBe(false)
+      expect(result.current.can('settings:enrich_config:edit')).toBe(true)
+      expect(result.current.can('settings:notify_targets:edit')).toBe(true)
+      expect(result.current.can('settings:audit_log:view')).toBe(true)
+      expect(result.current.can('settings:gdpr:view')).toBe(true)
+      expect(result.current.can('settings:members:invite')).toBe(false)
     })
 
     it('member has limited permissions', async () => {
@@ -149,6 +182,13 @@ describe('usePermissions', () => {
       await waitFor(() => expect(adminResult.current.role).toBe('admin'))
       expect(adminResult.current.canManage()).toBe(true)
 
+      mockMeResponse('delegated_admin', 'ops-user')
+      const { result: delegatedResult } = renderHook(() => usePermissions(), {
+        wrapper: createWrapper(),
+      })
+      await waitFor(() => expect(delegatedResult.current.role).toBe('delegated_admin'))
+      expect(delegatedResult.current.canManage()).toBe(false)
+
       mockMeResponse('member', 'member-user')
       const { result: memberResult } = renderHook(() => usePermissions(), {
         wrapper: createWrapper(),
@@ -176,6 +216,18 @@ describe('usePermissions', () => {
         expect(result.current.role).toBe('member')
       })
       expect(result.current.canDelete('member-user')).toBe(true)
+      expect(result.current.canDelete('other-user')).toBe(false)
+      expect(result.current.canDelete()).toBe(false)
+    })
+
+    it('canDelete allows delegated admin to delete own items only', async () => {
+      mockMeResponse('delegated_admin', 'ops-user')
+      const { result } = renderHook(() => usePermissions(), { wrapper: createWrapper() })
+
+      await waitFor(() => {
+        expect(result.current.role).toBe('delegated_admin')
+      })
+      expect(result.current.canDelete('ops-user')).toBe(true)
       expect(result.current.canDelete('other-user')).toBe(false)
       expect(result.current.canDelete()).toBe(false)
     })

@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow, isToday, isYesterday, type Locale } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import type { TFunction } from 'i18next'
@@ -23,6 +23,14 @@ import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,12 +65,20 @@ import {
   auditLogInfiniteQuery,
   downloadAuditLogCsv,
 } from '@/features/audit-log/api/list-audit-log'
+import {
+  createSavedAuditLogView,
+  deleteSavedAuditLogView,
+  savedAuditLogViewsQuery,
+  updateSavedAuditLogView,
+} from '@/features/audit-log/api/saved-views'
 import { EvidenceExportDialog } from '@/features/audit-log/components/evidence-export-dialog'
+import { SavedAuditLogViewsCard } from '@/features/audit-log/components/saved-audit-log-views-card'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { useRestoreFocusOnClose } from '@/hooks/use-restore-focus-on-close'
 import { restoreFocusWhenReady } from '@/lib/focus'
 import { cn } from '@/lib/utils'
+import type { AuditLogViewState, SavedAuditLogView } from '@/proto/attune/v1/audit'
 
 type AuditDraftState = {
   selectedActions: string[]
@@ -87,6 +103,8 @@ type AuditUrlState = {
   inspectedEntryId: null | string
   localQuery: string
 }
+
+type SavedAuditLogViewDialogMode = 'create' | 'update'
 
 type AppliedFilterDescriptor = {
   key: 'actions' | 'actorId' | 'from' | 'localQuery' | 'targetId' | 'targetType' | 'to'
@@ -172,15 +190,38 @@ export function AuditLogPage() {
   const [evidenceDialogOpen, setEvidenceDialogOpen] = useState(false)
   const [isFilterConsoleExpanded, setIsFilterConsoleExpanded] = useState(false)
   const [expandedBurstKeys, setExpandedBurstKeys] = useState<Set<string>>(() => new Set())
+  const [selectedSavedViewId, setSelectedSavedViewId] = useState<string | null>(null)
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [saveDialogMode, setSaveDialogMode] = useState<SavedAuditLogViewDialogMode>('create')
+  const [saveDialogName, setSaveDialogName] = useState('')
+  const [deletingViewId, setDeletingViewId] = useState<string | null>(null)
   const localQueryInputRef = useRef<HTMLInputElement | null>(null)
   const entryFocusButtonRefs = useRef(new Map<string, HTMLButtonElement>())
   const detailRestoreFocusRef = useRef<HTMLElement | null>(null)
+  const queryClient = useQueryClient()
 
   const deferredLocalQuery = useDeferredValue(localQuery.trim().toLowerCase())
   const draftFilters = draftToFilters(draft)
 
   const query = useInfiniteQuery(auditLogInfiniteQuery(filters))
+  const savedViewsQueryResult = useQuery(savedAuditLogViewsQuery())
   const items = query.data?.pages.flatMap((page) => page.items ?? []) ?? []
+  const savedViews = savedViewsQueryResult.data?.items ?? []
+  const savedViewsErrorMessage = savedViewsQueryResult.isError
+    ? savedViewsQueryResult.error instanceof Error
+      ? savedViewsQueryResult.error.message
+      : t('audit_log.saved_views_load_failed')
+    : null
+  const currentSavedViewState = buildSavedViewState({
+    filters,
+    inspectedEntryId,
+    localQuery,
+  })
+  const selectedSavedView = selectedSavedViewId
+    ? (savedViews.find((view) => view.id === selectedSavedViewId) ?? null)
+    : null
+  const matchingSavedView =
+    savedViews.find((view) => savedViewMatchesCurrent(view, currentSavedViewState)) ?? null
   const visibleItems = deferredLocalQuery
     ? items.filter((item) => matchesLocalAuditQuery(item, deferredLocalQuery, t))
     : items
@@ -219,6 +260,11 @@ export function AuditLogPage() {
       : null
 
   useEffect(() => {
+    if (selectedSavedViewId || !matchingSavedView) return
+    setSelectedSavedViewId(matchingSavedView.id)
+  }, [matchingSavedView, selectedSavedViewId])
+
+  useEffect(() => {
     if (visibleItems.length === 0) {
       if (items.length === 0) {
         setSelectedEntryId(null)
@@ -231,10 +277,11 @@ export function AuditLogPage() {
   }, [items.length, selectedEntryId, visibleItems])
 
   useEffect(() => {
-    if (inspectedEntryId && !items.some((item) => item.id === inspectedEntryId)) {
+    if (!inspectedEntryId || query.isFetching) return
+    if (!items.some((item) => item.id === inspectedEntryId)) {
       setInspectedEntryId(null)
     }
-  }, [inspectedEntryId, items])
+  }, [inspectedEntryId, items, query.isFetching])
 
   useEffect(() => {
     if (!selectedEntryId) return
@@ -304,6 +351,112 @@ export function AuditLogPage() {
       localQuery,
     })
     void handleCopy(viewUrl, t('audit_log.view_copied'))
+  }
+
+  const saveViewMutation = useMutation({
+    mutationFn: async ({
+      id,
+      mode,
+      name,
+      state,
+    }: {
+      id?: string
+      mode: SavedAuditLogViewDialogMode
+      name: string
+      state: AuditLogViewState
+    }) => {
+      const payload = { name, state }
+      if (mode === 'update' && id) {
+        return updateSavedAuditLogView({ id, ...payload })
+      }
+      return createSavedAuditLogView(payload)
+    },
+    onSuccess: async (result, input) => {
+      const view = result.view
+      if (!view) {
+        toast.error(t('audit_log.saved_views_save_failed'))
+        return
+      }
+      await queryClient.invalidateQueries({ queryKey: ['console', 'audit-log', 'views'] })
+      setSelectedSavedViewId(view.id ?? null)
+      setSaveDialogOpen(false)
+      toast.success(
+        input.mode === 'update'
+          ? t('audit_log.saved_views_updated_success', { name: view.name })
+          : t('audit_log.saved_views_created_success', { name: view.name }),
+      )
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : t('audit_log.saved_views_save_failed'))
+    },
+  })
+
+  const deleteViewMutation = useMutation({
+    mutationFn: async (view: SavedAuditLogView) => {
+      await deleteSavedAuditLogView(view.id)
+      return view
+    },
+    onSuccess: async (view) => {
+      await queryClient.invalidateQueries({ queryKey: ['console', 'audit-log', 'views'] })
+      if (selectedSavedViewId === view.id) {
+        setSelectedSavedViewId(null)
+      }
+      toast.success(t('audit_log.saved_views_deleted_success', { name: view.name }))
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : t('audit_log.saved_views_delete_failed'))
+    },
+    onSettled: () => {
+      setDeletingViewId(null)
+    },
+  })
+
+  const handleOpenSaveDialog = (mode: SavedAuditLogViewDialogMode) => {
+    const suggestedName =
+      mode === 'update' && selectedSavedView
+        ? selectedSavedView.name
+        : suggestSavedViewName(currentSavedViewState, t)
+    setSaveDialogMode(mode)
+    setSaveDialogName(suggestedName)
+    setSaveDialogOpen(true)
+  }
+
+  const handleSaveCurrentView = () => {
+    handleOpenSaveDialog(selectedSavedView ? 'update' : 'create')
+  }
+
+  const handleSaveAsNewView = () => {
+    handleOpenSaveDialog('create')
+  }
+
+  const handleSaveDialogSubmit = () => {
+    if (!saveDialogName.trim()) return
+    void saveViewMutation.mutateAsync({
+      id: saveDialogMode === 'update' ? selectedSavedView?.id : undefined,
+      mode: saveDialogMode,
+      name: saveDialogName.trim(),
+      state: currentSavedViewState,
+    })
+  }
+
+  const handleApplySavedView = (view: SavedAuditLogView) => {
+    if (!view.state) return
+    const nextState = savedViewToAuditUrlState(view.state)
+    setSelectedSavedViewId(view.id)
+    setDraft(filtersToDraft(nextState.filters))
+    setFilters({ ...nextState.filters, limit: 50 })
+    setLocalQuery(nextState.localQuery)
+    setInspectedEntryId(nextState.inspectedEntryId)
+    setSelectedEntryId(nextState.inspectedEntryId)
+    setExpandedBurstKeys(new Set())
+    writeAuditLogStateToUrl(nextState, 'push')
+  }
+
+  const handleDeleteSavedView = (view: SavedAuditLogView) => {
+    const confirmed = window.confirm(t('audit_log.saved_views_delete_confirm', { name: view.name }))
+    if (!confirmed) return
+    setDeletingViewId(view.id)
+    void deleteViewMutation.mutateAsync(view)
   }
 
   const handleClearLocalQuery = () => {
@@ -703,193 +856,222 @@ export function AuditLogPage() {
       </header>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(19rem,22rem)_minmax(0,1fr)]">
-        <Card className="overflow-hidden border-border/70 shadow-[0_1px_0_rgba(15,23,42,0.02),0_16px_40px_-30px_rgba(15,23,42,0.24)] xl:sticky xl:top-6 xl:self-start">
-          <CardHeader className="border-b border-border/70 px-5 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                <Filter className="h-3.5 w-3.5 text-muted-foreground" />
-                {t('audit_log.filters_title')}
-              </CardTitle>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="shrink-0"
-                onClick={() => setIsFilterConsoleExpanded((value) => !value)}
-                aria-expanded={isFilterConsoleExpanded}
-              >
-                {isFilterConsoleExpanded
-                  ? t('audit_log.collapse_filters')
-                  : t('audit_log.expand_filters')}
-                <ChevronDown
-                  className={cn(
-                    'h-4 w-4 transition-transform',
-                    isFilterConsoleExpanded && 'rotate-180',
-                  )}
-                />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="px-6 py-6">
-            {isFilterConsoleExpanded ? (
-              <div className="space-y-5">
-                <div className="space-y-3">
-                  <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                    {t('audit_log.presets_title')}
+        <div className="space-y-5">
+          <Card className="overflow-hidden border-border/70 shadow-[0_1px_0_rgba(15,23,42,0.02),0_16px_40px_-30px_rgba(15,23,42,0.24)] xl:sticky xl:top-6 xl:self-start">
+            <CardHeader className="border-b border-border/70 px-5 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                  <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                  {t('audit_log.filters_title')}
+                </CardTitle>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setIsFilterConsoleExpanded((value) => !value)}
+                  aria-expanded={isFilterConsoleExpanded}
+                >
+                  {isFilterConsoleExpanded
+                    ? t('audit_log.collapse_filters')
+                    : t('audit_log.expand_filters')}
+                  <ChevronDown
+                    className={cn(
+                      'h-4 w-4 transition-transform',
+                      isFilterConsoleExpanded && 'rotate-180',
+                    )}
+                  />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="px-6 py-6">
+              {isFilterConsoleExpanded ? (
+                <div className="space-y-5">
+                  <div className="space-y-3">
+                    <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
+                      {t('audit_log.presets_title')}
+                    </div>
+                    <div className="grid gap-2">
+                      {presets.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => handlePreset(preset)}
+                          className="rounded-2xl border border-border/70 bg-background/90 px-4 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.78)] transition hover:border-primary/25 hover:bg-primary/[0.04] focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+                        >
+                          <div className="text-sm font-semibold text-foreground">
+                            {preset.label}
+                          </div>
+                          <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                            {preset.description}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="grid gap-2">
+
+                  <FilterField label={t('audit_log.fields.action')} htmlFor="audit-actions-trigger">
+                    <AuditActionMultiSelect
+                      selected={draft.selectedActions}
+                      onChange={(selectedActions) =>
+                        setDraft((prev) => ({ ...prev, selectedActions }))
+                      }
+                      triggerId="audit-actions-trigger"
+                    />
+                  </FilterField>
+
+                  <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-1">
+                    <FilterField
+                      label={t('audit_log.fields.target_type')}
+                      htmlFor="audit-target-type"
+                    >
+                      <Input
+                        id="audit-target-type"
+                        value={draft.targetType}
+                        onChange={(e) =>
+                          setDraft((prev) => ({ ...prev, targetType: e.target.value }))
+                        }
+                        placeholder={t('audit_log.placeholders.target_type')}
+                      />
+                    </FilterField>
+
+                    <FilterField label={t('audit_log.fields.target_id')} htmlFor="audit-target-id">
+                      <Input
+                        id="audit-target-id"
+                        value={draft.targetId}
+                        onChange={(e) =>
+                          setDraft((prev) => ({ ...prev, targetId: e.target.value }))
+                        }
+                        placeholder={t('audit_log.placeholders.target_id')}
+                      />
+                    </FilterField>
+
+                    <FilterField label={t('audit_log.fields.actor_id')} htmlFor="audit-actor-id">
+                      <Input
+                        id="audit-actor-id"
+                        value={draft.actorId}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, actorId: e.target.value }))}
+                        placeholder={t('audit_log.placeholders.actor_id')}
+                      />
+                    </FilterField>
+
+                    <FilterField label={t('audit_log.filters_from')} htmlFor="audit-from">
+                      <Input
+                        id="audit-from"
+                        type="datetime-local"
+                        value={draft.fromValue}
+                        onChange={(e) =>
+                          setDraft((prev) => ({ ...prev, fromValue: e.target.value }))
+                        }
+                      />
+                    </FilterField>
+
+                    <FilterField label={t('audit_log.filters_to')} htmlFor="audit-to">
+                      <Input
+                        id="audit-to"
+                        type="datetime-local"
+                        value={draft.toValue}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, toValue: e.target.value }))}
+                      />
+                    </FilterField>
+                  </div>
+
+                  <div className="rounded-2xl border border-border/60 bg-muted/20 p-3">
+                    <div className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
+                      {t('audit_log.filters_summary_title')}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <FilterChip active={draft.selectedActions.length > 0}>
+                        {draft.selectedActions.length > 0
+                          ? t('audit_log.filters_actions_selected', {
+                              count: draft.selectedActions.length,
+                            })
+                          : t('audit_log.filters_actions_placeholder')}
+                      </FilterChip>
+                      <FilterChip active={Boolean(draft.targetType)}>
+                        {draft.targetType || t('audit_log.fields.target_type')}
+                      </FilterChip>
+                      <FilterChip active={Boolean(draft.targetId)}>
+                        {draft.targetId || t('audit_log.fields.target_id')}
+                      </FilterChip>
+                      <FilterChip active={Boolean(draft.actorId)}>
+                        {draft.actorId || t('audit_log.fields.actor_id')}
+                      </FilterChip>
+                      <FilterChip active={Boolean(draft.fromValue)}>
+                        {draft.fromValue || t('audit_log.filters_from')}
+                      </FilterChip>
+                      <FilterChip active={Boolean(draft.toValue)}>
+                        {draft.toValue || t('audit_log.filters_to')}
+                      </FilterChip>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3 pt-1">
+                    <Button
+                      type="button"
+                      className="min-w-32"
+                      disabled={!hasPendingChanges}
+                      onClick={handleApply}
+                    >
+                      {t('audit_log.apply')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="min-w-28"
+                      onClick={handleReset}
+                    >
+                      <TimerReset className="mr-2 h-4 w-4" />
+                      {t('audit_log.reset')}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {activeFilterCount > 0 ? (
+                    <div className="rounded-xl border border-primary/20 bg-primary/[0.04] px-4 py-2.5 text-sm text-foreground">
+                      {t('audit_log.compact_filter_active', { count: activeFilterCount })}
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
                     {presets.map((preset) => (
-                      <button
+                      <Button
                         key={preset.id}
                         type="button"
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full"
                         onClick={() => handlePreset(preset)}
-                        className="rounded-2xl border border-border/70 bg-background/90 px-4 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.78)] transition hover:border-primary/25 hover:bg-primary/[0.04] focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
                       >
-                        <div className="text-sm font-semibold text-foreground">{preset.label}</div>
-                        <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                          {preset.description}
-                        </div>
-                      </button>
+                        {preset.label}
+                      </Button>
                     ))}
                   </div>
-                </div>
-
-                <FilterField label={t('audit_log.fields.action')} htmlFor="audit-actions-trigger">
-                  <AuditActionMultiSelect
-                    selected={draft.selectedActions}
-                    onChange={(selectedActions) =>
-                      setDraft((prev) => ({ ...prev, selectedActions }))
-                    }
-                    triggerId="audit-actions-trigger"
-                  />
-                </FilterField>
-
-                <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-1">
-                  <FilterField
-                    label={t('audit_log.fields.target_type')}
-                    htmlFor="audit-target-type"
-                  >
-                    <Input
-                      id="audit-target-type"
-                      value={draft.targetType}
-                      onChange={(e) =>
-                        setDraft((prev) => ({ ...prev, targetType: e.target.value }))
-                      }
-                      placeholder={t('audit_log.placeholders.target_type')}
-                    />
-                  </FilterField>
-
-                  <FilterField label={t('audit_log.fields.target_id')} htmlFor="audit-target-id">
-                    <Input
-                      id="audit-target-id"
-                      value={draft.targetId}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, targetId: e.target.value }))}
-                      placeholder={t('audit_log.placeholders.target_id')}
-                    />
-                  </FilterField>
-
-                  <FilterField label={t('audit_log.fields.actor_id')} htmlFor="audit-actor-id">
-                    <Input
-                      id="audit-actor-id"
-                      value={draft.actorId}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, actorId: e.target.value }))}
-                      placeholder={t('audit_log.placeholders.actor_id')}
-                    />
-                  </FilterField>
-
-                  <FilterField label={t('audit_log.filters_from')} htmlFor="audit-from">
-                    <Input
-                      id="audit-from"
-                      type="datetime-local"
-                      value={draft.fromValue}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, fromValue: e.target.value }))}
-                    />
-                  </FilterField>
-
-                  <FilterField label={t('audit_log.filters_to')} htmlFor="audit-to">
-                    <Input
-                      id="audit-to"
-                      type="datetime-local"
-                      value={draft.toValue}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, toValue: e.target.value }))}
-                    />
-                  </FilterField>
-                </div>
-
-                <div className="rounded-2xl border border-border/60 bg-muted/20 p-3">
-                  <div className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                    {t('audit_log.filters_summary_title')}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <FilterChip active={draft.selectedActions.length > 0}>
-                      {draft.selectedActions.length > 0
-                        ? t('audit_log.filters_actions_selected', {
-                            count: draft.selectedActions.length,
-                          })
-                        : t('audit_log.filters_actions_placeholder')}
-                    </FilterChip>
-                    <FilterChip active={Boolean(draft.targetType)}>
-                      {draft.targetType || t('audit_log.fields.target_type')}
-                    </FilterChip>
-                    <FilterChip active={Boolean(draft.targetId)}>
-                      {draft.targetId || t('audit_log.fields.target_id')}
-                    </FilterChip>
-                    <FilterChip active={Boolean(draft.actorId)}>
-                      {draft.actorId || t('audit_log.fields.actor_id')}
-                    </FilterChip>
-                    <FilterChip active={Boolean(draft.fromValue)}>
-                      {draft.fromValue || t('audit_log.filters_from')}
-                    </FilterChip>
-                    <FilterChip active={Boolean(draft.toValue)}>
-                      {draft.toValue || t('audit_log.filters_to')}
-                    </FilterChip>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-3 pt-1">
-                  <Button
-                    type="button"
-                    className="min-w-32"
-                    disabled={!hasPendingChanges}
-                    onClick={handleApply}
-                  >
-                    {t('audit_log.apply')}
-                  </Button>
-                  <Button type="button" variant="ghost" className="min-w-28" onClick={handleReset}>
+                  <Button type="button" variant="ghost" size="sm" onClick={handleReset}>
                     <TimerReset className="mr-2 h-4 w-4" />
                     {t('audit_log.reset')}
                   </Button>
                 </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {activeFilterCount > 0 ? (
-                  <div className="rounded-xl border border-primary/20 bg-primary/[0.04] px-4 py-2.5 text-sm text-foreground">
-                    {t('audit_log.compact_filter_active', { count: activeFilterCount })}
-                  </div>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  {presets.map((preset) => (
-                    <Button
-                      key={preset.id}
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="rounded-full"
-                      onClick={() => handlePreset(preset)}
-                    >
-                      {preset.label}
-                    </Button>
-                  ))}
-                </div>
-                <Button type="button" variant="ghost" size="sm" onClick={handleReset}>
-                  <TimerReset className="mr-2 h-4 w-4" />
-                  {t('audit_log.reset')}
-                </Button>
-              </div>
+              )}
+            </CardContent>
+          </Card>
+          <SavedAuditLogViewsCard
+            deletingViewId={deletingViewId}
+            errorMessage={savedViewsErrorMessage}
+            isLoading={savedViewsQueryResult.isPending}
+            onApplyView={handleApplySavedView}
+            onDeleteView={handleDeleteSavedView}
+            onSaveAsNew={handleSaveAsNewView}
+            onSaveCurrent={handleSaveCurrentView}
+            selectedViewId={selectedSavedView?.id ?? selectedSavedViewId}
+            selectedViewMatchesCurrent={Boolean(
+              selectedSavedView &&
+                savedViewMatchesCurrent(selectedSavedView, currentSavedViewState),
             )}
-          </CardContent>
-        </Card>
+            selectedViewName={selectedSavedView?.name ?? null}
+            views={savedViews}
+          />
+        </div>
 
         <Card className="overflow-hidden border-border/70 shadow-[0_1px_0_rgba(15,23,42,0.02),0_16px_40px_-32px_rgba(15,23,42,0.22)]">
           <CardHeader className="border-b border-border/70 px-6 py-4">
@@ -1086,6 +1268,69 @@ export function AuditLogPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+        <DialogContent
+          className="sm:max-w-lg"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+          }}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              handleSaveDialogSubmit()
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {saveDialogMode === 'update'
+                  ? t('audit_log.saved_views_update_title')
+                  : t('audit_log.saved_views_create_title')}
+              </DialogTitle>
+              <DialogDescription>
+                {saveDialogMode === 'update'
+                  ? t('audit_log.saved_views_update_description')
+                  : t('audit_log.saved_views_create_description')}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-4">
+              <Label htmlFor="saved-view-name">{t('audit_log.saved_views_name_label')}</Label>
+              <Input
+                id="saved-view-name"
+                value={saveDialogName}
+                onChange={(event) => setSaveDialogName(event.target.value)}
+                placeholder={t('audit_log.saved_views_name_placeholder')}
+                maxLength={80}
+                autoFocus
+                disabled={saveViewMutation.isPending}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setSaveDialogOpen(false)}
+                disabled={saveViewMutation.isPending}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" disabled={saveViewMutation.isPending || !saveDialogName.trim()}>
+                {saveViewMutation.isPending ? (
+                  <>
+                    <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
+                    {t('app.loading')}
+                  </>
+                ) : saveDialogMode === 'update' ? (
+                  t('audit_log.saved_views_update_submit')
+                ) : (
+                  t('audit_log.saved_views_create_submit')
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Sheet open={Boolean(inspectedEntry)} onOpenChange={(open) => !open && handleCloseDetails()}>
         <SheetContent
@@ -2369,6 +2614,85 @@ function buildAuditLogSearchParams({ filters, inspectedEntryId, localQuery }: Au
   if (localQuery.trim()) params.set('q', localQuery.trim())
   if (inspectedEntryId) params.set('entry', inspectedEntryId)
   return params
+}
+
+function buildSavedViewState(state: AuditUrlState): AuditLogViewState {
+  const filters = state.filters
+  const viewState: AuditLogViewState = {
+    actions: [],
+    actorId: '',
+    actorType: '',
+    from: '',
+    localQuery: '',
+    targetId: '',
+    targetType: '',
+    to: '',
+  }
+  const actions = normalizeArray(filters.actions)
+  if (actions.length > 0) viewState.actions = actions
+  if (filters.actorId) viewState.actorId = filters.actorId.trim()
+  if (filters.targetType) viewState.targetType = filters.targetType.trim()
+  if (filters.targetId) viewState.targetId = filters.targetId.trim()
+  if (filters.from) viewState.from = filters.from.trim()
+  if (filters.to) viewState.to = filters.to.trim()
+  if (state.localQuery.trim()) viewState.localQuery = state.localQuery.trim()
+  if (state.inspectedEntryId) {
+    viewState.inspectedEntryId = state.inspectedEntryId.trim()
+  }
+  return viewState
+}
+
+function savedViewToAuditUrlState(state?: AuditLogViewState): AuditUrlState {
+  const filters = savedViewStateToFilters(state)
+  return {
+    filters,
+    inspectedEntryId: state?.inspectedEntryId ?? null,
+    localQuery: state?.localQuery?.trim() ?? '',
+  }
+}
+
+function savedViewStateToFilters(state?: AuditLogViewState): AuditLogFilters {
+  if (!state) return {}
+  return {
+    actions: normalizeArray(state.actions),
+    actorId: state.actorId?.trim() || undefined,
+    from: state.from?.trim() || undefined,
+    targetId: state.targetId?.trim() || undefined,
+    targetType: state.targetType?.trim() || undefined,
+    to: state.to?.trim() || undefined,
+  }
+}
+
+function savedViewMatchesCurrent(view: SavedAuditLogView, currentState: AuditLogViewState) {
+  return savedViewStateSignature(view.state) === savedViewStateSignature(currentState)
+}
+
+function savedViewStateSignature(state?: AuditLogViewState) {
+  const filters = savedViewStateToFilters(state)
+  const localQuery = state?.localQuery?.trim() ?? ''
+  const inspectedEntryId = state?.inspectedEntryId?.trim() ?? ''
+  return [
+    normalizeArray(filters.actions).join('|'),
+    filters.actorId ?? '',
+    filters.from ?? '',
+    filters.targetId ?? '',
+    filters.targetType ?? '',
+    filters.to ?? '',
+    localQuery,
+    inspectedEntryId,
+  ].join('::')
+}
+
+function suggestSavedViewName(state: AuditLogViewState, t: TFunction) {
+  const filters = savedViewStateToFilters(state)
+  const descriptors = describeAppliedFilters(filters, state.localQuery, t)
+  if (descriptors.length === 0) {
+    return t('audit_log.saved_views_default_name')
+  }
+  return descriptors
+    .slice(0, 2)
+    .map((descriptor) => descriptor.label)
+    .join(' · ')
 }
 
 function buildStreamGroups(items: AuditLogEntry[], locale?: Locale): AuditStreamGroup[] {

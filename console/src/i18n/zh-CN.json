@@ -87,6 +87,7 @@
     "trace_id": "追踪 ID",
     "role": {
       "admin": "管理员",
+      "delegated_admin": "委派管理员",
       "member": "成员"
     },
     "change_password": {
@@ -138,62 +139,43 @@
   },
   "reliability": {
     "title": "可靠性总览",
-    "subtitle": "把系统就绪、认证模式、API key、MCP 客户端、GDPR 压力和死信投递放在同一页。当前 tenant：{{tenant}}。",
+    "subtitle": "把系统就绪、认证模式、发布与归属、API key、MCP 客户端、GDPR 压力和死信投递放在同一页。当前 tenant：{{tenant}}。",
     "hints": {
       "system_readiness": "{{passed}} 个通过 · {{warn}} 个告警 · {{fail}} 个失败 · 用时 {{elapsed}}。",
       "api_keys": "{{active}} 个活跃 · {{inactive}} 个非活跃，共 {{total}} 个。",
       "mcp_clients": "{{active}} 个活跃 · {{revoked}} 个已撤销，共 {{total}} 个。",
       "gdpr": "{{queued}} 个排队 · {{active}} 个处理中 · {{ready}} 个已就绪导出 · {{scheduled}} 个待执行删除。",
       "gdpr_expiry": "下一次导出过期：{{value}}。",
-      "dead_deliveries": "{{retryable}} 个可重试 · {{inflight}} 个处理中。"
-    },
-    "catalog": {
-      "title": "SLO 目录",
-      "description": "驱动 Grafana 告警、tenant 排名、历史 burn、剩余预算、dependency triage 和 routing metadata 的单一来源。",
-      "count": "{{count}} 个 SLO",
-      "alert_label": "告警标签",
-      "escalation": "升级路径",
-      "runbook": "打开 runbook",
-      "policy_title": "推荐策略",
-      "budget_exception_title": "预算例外",
-      "tenant_ranked": "参与 tenant 排名",
-      "global_only": "仅全局",
-      "scope": {
-        "tenant": "按 tenant",
-        "destination_type": "按 destination_type",
-        "global": "全局"
-      }
+      "dead_deliveries": "{{retryable}} 个可重试 · {{inflight}} 个处理中。",
+      "release_started": "已启动 {{value}}。",
+      "release_environment": "profile={{value}}。",
+      "release_owner": "Runbook 与升级通道应保持同步。",
+      "recovery_missing": "当前就绪报告中没有恢复演练检查项。",
+      "recovery_backup": "备份 {{value}}",
+      "recovery_duration": "耗时 {{value}}",
+      "recovery_window": "新鲜度窗口 {{value}}"
     },
     "links": {
-      "api_keys": "API 密钥",
-      "api_keys_desc": "密钥库存、过期和使用情况。",
-      "mcp_clients": "MCP 客户端",
-      "mcp_clients_desc": "OAuth 客户端和工具策略。",
-      "gdpr": "GDPR",
-      "gdpr_desc": "请求队列、导出和删除计划。",
-      "dead_deliveries": "死信投递",
-      "dead_deliveries_desc": "失败类型、重试状态和 in-flight 任务。",
-      "policy_reference": "策略参考",
-      "policy_reference_desc": "每个 SLO 的 objective、burn window、traffic guard 和预算例外起点。",
-      "openslo_bundle": "OpenSLO 导出",
-      "openslo_bundle_desc": "可携带的 SLO bundle，适合导入/导出验证。",
-      "replay_report": "回放报告",
-      "replay_report_desc": "历史故障比较矩阵、回放工作表和回填模板。",
-      "replay_download": "下载 replay 工作表",
-      "replay_download_desc": "预填当前 tenant 和 dashboard 上下文的 markdown 文件。"
+      "release_context": "发布与归属"
     },
-    "replay_workspace": {
-      "title": "Replay 工作区",
-      "description": "直接复制或下载当前 tenant 的 replay 工作表，并保留完整的上下文占位符。",
-      "copy": "复制工作表",
-      "download": "下载 markdown",
-      "tenant": "当前 tenant",
-      "dashboard": "Dashboard",
-      "mode": "导出模式",
-      "mode_value": "可复制 / 可下载 / 可审阅",
-      "preview": "Markdown 预览",
-      "preview_hint": "这就是下载文件的完整内容",
-      "preview_label": "Replay 工作表 Markdown 预览"
+    "sections": {
+      "release": "发布与归属",
+      "release_description": "把当前运行版本、部署环境、责任团队、恢复结果和 runbook 放在同一处。",
+      "snapshot": "运行快照",
+      "snapshot_description": "把当前控制面、认证、密钥、MCP、GDPR 和投递压力放在一张卡片里。",
+      "shortcuts": "快速入口",
+      "shortcuts_description": "跳到对应页面做深挖。"
+    },
+    "release": {
+      "version": "版本",
+      "environment": "环境",
+      "owner": "责任团队",
+      "recovery": "恢复",
+      "runbook": "运行手册",
+      "escalation": "升级通道",
+      "runbook_desc": "打开当前发布对应的操作手册。",
+      "escalation_desc": "把问题交给责任人或升级渠道。",
+      "unknown": "未知"
     }
   },
   "shell": {
@@ -329,9 +311,9 @@
     "title": "团队成员",
     "subtitle": "管理租户成员及其角色权限。",
     "directory_title": "成员目录",
-    "directory_help": "当前包含 {{admins}} 位管理员、{{members}} 位成员、{{viewers}} 位只读成员。",
+    "directory_help": "当前包含 {{admins}} 位管理员、{{delegatedAdmins}} 位委派管理员、{{members}} 位成员、{{viewers}} 位只读成员。",
     "active_title": "活跃成员",
-    "active_description": "当前显示 {{visible}} / {{total}} 位已加入成员，其中包含 {{admins}} 位管理员。",
+    "active_description": "当前显示 {{visible}} / {{total}} 位已加入成员，其中包含 {{admins}} 位管理员和 {{delegatedAdmins}} 位委派管理员。",
     "pending_title": "待处理邀请",
     "pending_description": "当前显示 {{visible}} / {{total}} 个待接受邀请。",
     "count": "共 {{count}} 位成员",
@@ -1240,7 +1222,64 @@
       "copy_secret": "复制新 API key"
     },
     "empty_title": "还没有 API key",
-    "empty_body": "签一把就能把 ingest API 接到你的产品里。明文 key 仅签发时返回一次。"
+    "empty_body": "签一把就能把 ingest API 接到你的产品里。明文 key 仅签发时返回一次。",
+    "service_accounts": {
+      "title": "服务账号目录",
+      "description": "统一查看 {{count}} 个服务账号，其中 {{active}} 个启用中。",
+      "create_button": "新增服务账号",
+      "empty_title": "还没有服务账号",
+      "empty_body": "先创建一个服务账号，把自动化凭证和人类登录分开。",
+      "error_title": "服务账号列表暂时无法加载",
+      "error_body": "请稍后重试；如果问题持续，确认当前账号是否具备管理服务账号的权限。",
+      "actions": {
+        "enable": "启用",
+        "disable": "停用",
+        "delete": "删除",
+        "enable_aria": "启用服务账号 {{name}}",
+        "disable_aria": "停用服务账号 {{name}}",
+        "delete_aria": "删除服务账号 {{name}}"
+      },
+      "status": {
+        "active": "启用",
+        "inactive": "停用"
+      },
+      "table": {
+        "name": "名称",
+        "description": "说明",
+        "created": "创建于",
+        "updated": "更新于",
+        "status": "状态",
+        "actions": "操作",
+        "aria_label": "服务账号列表"
+      },
+      "create_dialog": {
+        "title": "新增服务账号",
+        "description": "把自动化身份与人类登录分开，方便后续审计和轮换。",
+        "name_field": "名称",
+        "name_placeholder": "例如：ci-bot",
+        "name_help": "名称应能让操作员看出它的用途。",
+        "description_field": "说明",
+        "description_placeholder": "例如：部署流水线与定时任务",
+        "description_help": "可选。写清楚负责人、用途或自动化场景，后续更容易审计。"
+      },
+      "toggle_dialog": {
+        "title_enable": "启用服务账号 {{name}}？",
+        "title_disable": "停用服务账号 {{name}}？",
+        "description_enable": "启用后，{{name}} 关联的 API key 会恢复通过鉴权。",
+        "description_disable": "停用后，{{name}} 关联的 API key 会立即拒绝鉴权，直到再次启用。",
+        "confirm_enable": "启用",
+        "confirm_disable": "停用"
+      },
+      "delete_dialog": {
+        "title": "删除服务账号 {{name}}？",
+        "description": "删除后，{{name}} 将从目录中移除，关联的 API key 会自动解绑并继续可用。",
+        "warning": "这会永久移除服务账号记录，但不会删除已签发的 API key。"
+      },
+      "created_success": "已创建服务账号 {{name}}",
+      "updated_success": "已更新服务账号 {{name}} 状态",
+      "deleted_success": "已删除服务账号 {{name}}",
+      "update_failed": "更新服务账号失败"
+    }
   },
   "audit_log": {
     "title": "审计日志",
@@ -1252,6 +1291,42 @@
     "copy_failed": "复制失败",
     "copy_view": "复制当前视角",
     "view_copied": "当前排查视角已复制",
+    "saved_views_title": "已保存视图",
+    "saved_views_new": "另存为",
+    "saved_views_save_current": "保存当前",
+    "saved_views_empty": "还没有保存过调查视图。",
+    "saved_views_current_bound": "当前选中视图：{{name}}",
+    "saved_views_current_unbound": "当前还没有绑定保存视图",
+    "saved_views_current_unbound_hint": "保存一个视图后，这里会显示当前是否命中同一份调查态。",
+    "saved_views_current_in_sync": "当前状态与保存视图一致。",
+    "saved_views_current_dirty": "当前状态已经偏离保存视图。",
+    "saved_views_selected": "当前",
+    "saved_views_updated_at": "更新于 {{time}}",
+    "saved_views_delete": "删除视图 {{name}}",
+    "saved_views_delete_confirm": "确认删除“{{name}}”吗？",
+    "saved_views_create_title": "保存当前视图",
+    "saved_views_create_description": "给当前调查态起一个名字，方便后续复用。",
+    "saved_views_update_title": "更新保存视图",
+    "saved_views_update_description": "将当前调查态覆盖到选中的保存视图。",
+    "saved_views_name_label": "视图名称",
+    "saved_views_name_placeholder": "例如：成员删除排查",
+    "saved_views_create_submit": "保存视图",
+    "saved_views_update_submit": "更新视图",
+    "saved_views_created_success": "已保存视图 {{name}}",
+    "saved_views_updated_success": "已更新视图 {{name}}",
+    "saved_views_deleted_success": "已删除视图 {{name}}",
+    "saved_views_save_failed": "保存视图失败",
+    "saved_views_delete_failed": "删除视图失败",
+    "saved_views_load_failed": "加载已保存视图失败",
+    "saved_views_default_name": "未命名视图",
+    "saved_views_summary_empty": "空视图",
+    "saved_views_summary_no_filters": "无筛选条件",
+    "saved_views_summary_actions": "动作 {{count}} 个",
+    "saved_views_summary_actor_id": "操作者 {{value}}",
+    "saved_views_summary_actor_type": "操作者类型 {{value}}",
+    "saved_views_summary_target": "目标 {{type}}",
+    "saved_views_summary_target_with_id": "目标 {{type}} / {{id}}",
+    "saved_views_summary_local_query": "本地检索 {{value}}",
     "filters_title": "筛选条件",
     "filters_help": "可按时间范围、动作、目标类型和操作者筛选。点击“应用筛选”后更新列表。",
     "filters_panel_title": "查询控制台",
@@ -1699,8 +1774,8 @@
     "delete_body": "删除会永久移除该主体关联的反馈、reply draft、embedding 元数据和 linked LLM 审计。控制台只保留哈希化审计痕迹。",
     "delete_button": "永久删除",
     "delete_failed": "删除失败",
-    "delete_success": "已删除 {{feedback}} 条反馈及 {{llmAudit}} 条 LLM 审计记录",
-    "delete_scheduled": "删除请求已排队，将在 {{executeAfter}} 执行，涉及 {{feedback}} 条反馈与 {{llmAudit}} 条 LLM 审计记录",
+    "delete_success": "已删除 {{feedback}} 条反馈、{{llmAudit}} 条 LLM 审计记录，并清理 {{outbox}} 条 Outbox 记录",
+    "delete_scheduled": "删除请求已排队，将在 {{executeAfter}} 执行，涉及 {{feedback}} 条反馈与 {{llmAudit}} 条 LLM 审计记录，并清理 {{outbox}} 条 Outbox 记录",
     "confirm_label": "输入相同的 subject key 以确认删除",
     "confirm_placeholder": "再次输入 subject key",
     "confirm_mismatch": "确认输入与 subject key 不一致",
@@ -1711,7 +1786,7 @@
     "request_col_type": "类型",
     "request_col_subject": "主体",
     "request_col_status": "状态",
-    "request_col_counts": "反馈 / 标签 / 审计 / LLM",
+    "request_col_counts": "反馈 / 标签 / 审计 / LLM / Outbox",
     "request_col_timing": "时间",
     "request_col_action": "操作",
     "request_status_queued": "已创建",
@@ -3207,6 +3282,7 @@
   },
   "role": {
     "admin": "管理员",
+    "delegated_admin": "委派管理员",
     "member": "成员",
     "viewer": "只读"
   },
@@ -3326,6 +3402,16 @@
       "toggle_allow": "允许",
       "toggle_deny": "阻止",
       "scope_missing": "权限不足",
+      "owner": "负责人",
+      "kind": "类型",
+      "default_enabled": "默认启用",
+      "default_disabled": "默认关闭",
+      "deprecated": "已弃用",
+      "replacement": "建议迁移到 {{replacement}}",
+      "aliases": "兼容别名",
+      "alias_deprecated": "已弃用",
+      "alias_replacement": "建议迁移到 {{replacement}}",
+      "provenance": "交付元数据",
       "effect": {
         "none": "无显式规则",
         "allow": "显式允许",
@@ -3466,6 +3552,7 @@
     },
     "action": {
       "issue": "签发令牌",
+      "revoke_all": "撤销全部活跃令牌",
       "enforce_sso": "强制 SSO",
       "enable_password": "启用密码登录"
     },
@@ -3485,6 +3572,31 @@
     },
     "token": {
       "revoked": "令牌已撤销"
+    },
+    "lockouts": {
+      "title": "Break-Glass 锁定",
+      "description": "连续失败后被锁定的 IP 地址。",
+      "count": "{{count}} 个锁定 IP",
+      "empty_title": "暂无锁定 IP",
+      "empty_desc": "当前没有活跃的锁定记录。",
+      "col": {
+        "ip": "IP",
+        "attempts": "失败次数",
+        "remaining": "剩余时间",
+        "locked_until": "解锁时间",
+        "actions": "操作"
+      },
+      "attempts_value": "{{count}} 次失败",
+      "remaining_value": "剩余 {{count}} 分钟",
+      "unlock": "解除锁定",
+      "unlocked": "已解除锁定"
+    },
+    "revoke_all": {
+      "title": "撤销全部活跃令牌",
+      "description": "立即让所有活跃或即将过期的 Break-Glass 令牌失效。",
+      "warning_title": "紧急撤销",
+      "warning_desc": "在不再需要紧急访问时使用此操作。",
+      "success": "已撤销 {{count}} 个活跃令牌"
     },
     "issue": {
       "title": "签发 Break-Glass 令牌",

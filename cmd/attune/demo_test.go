@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	feedbackrepo "github.com/Phixsura/attune/internal/repo/feedback"
@@ -14,7 +17,7 @@ import (
 func TestRunDemoUsage(t *testing.T) {
 	t.Parallel()
 
-	if err := runDemo(nil); err == nil || !strings.Contains(err.Error(), "attune demo seed") {
+	if err := runDemo(nil); err == nil || !strings.Contains(err.Error(), "attune demo seed|reset|bootstrap") {
 		t.Fatalf("runDemo(nil) err = %v, want usage", err)
 	}
 }
@@ -40,6 +43,22 @@ func TestRunDemoSeedRejectsBadFlag(t *testing.T) {
 
 	if err := runDemoSeed([]string{"--bad"}); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
 		t.Fatalf("runDemoSeed bad flag err = %v, want flag validation", err)
+	}
+}
+
+func TestRunDemoResetRequiresTenant(t *testing.T) {
+	t.Parallel()
+
+	if err := runDemoReset([]string{"--tenant", ""}); err == nil || !strings.Contains(err.Error(), "--tenant is required") {
+		t.Fatalf("runDemoReset err = %v, want tenant validation", err)
+	}
+}
+
+func TestRunDemoBootstrapRequiresTenant(t *testing.T) {
+	t.Parallel()
+
+	if err := runDemoBootstrap([]string{"--tenant", ""}); err == nil || !strings.Contains(err.Error(), "--tenant is required") {
+		t.Fatalf("runDemoBootstrap err = %v, want tenant validation", err)
 	}
 }
 
@@ -73,6 +92,68 @@ func TestDemoHelpers(t *testing.T) {
 	}
 	if demoAccount(0) == demoAccount(1) || demoPlan(0) != "enterprise" || demoPlan(1) != "growth" {
 		t.Fatal("demo account and plan helpers should produce varied demo metadata")
+	}
+}
+
+func TestDemoEmbeddingInsertFields(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(123, 0).UTC()
+	embedding, model, dims, embeddedAt := demoEmbeddingInsertFields(demoFeedbackSeed{}, 0, now)
+	if embedding != nil || model != "" || dims != nil || embeddedAt != nil {
+		t.Fatalf("empty embedding fields = %#v, %q, %#v, %#v", embedding, model, dims, embeddedAt)
+	}
+
+	embedding, model, dims, embeddedAt = demoEmbeddingInsertFields(demoFeedbackSeed{Embedding: true}, 2, now)
+	if _, ok := embedding.(string); !ok {
+		t.Fatalf("embedding type = %T, want string", embedding)
+	}
+	if model != "text-embedding-3-small" {
+		t.Fatalf("embedding model = %q, want text-embedding-3-small", model)
+	}
+	if dims != 256 {
+		t.Fatalf("embedding dims = %#v, want 256", dims)
+	}
+	gotAt, ok := embeddedAt.(time.Time)
+	if !ok || !gotAt.Equal(now) {
+		t.Fatalf("embeddedAt = %#v, want %v", embeddedAt, now)
+	}
+}
+
+func TestClearDemoWorkspaceDeletesDemoRows(t *testing.T) {
+	t.Parallel()
+
+	exec := ptrext.Of(fakeDemoWorkspaceExec{})
+	if err := clearDemoWorkspace(context.Background(), exec, "tenant-1"); err != nil {
+		t.Fatalf("clearDemoWorkspace err = %v", err)
+	}
+	wantTables := []string{
+		"notify_outbox",
+		"llm_audit",
+		"classification_quality_failure_events",
+		"feedback_search_result_events",
+		"feedback_search_runs",
+		"feedback_quality_actions",
+		"semantic_extraction_runs",
+		"user_feedback",
+	}
+	if len(exec.calls) != len(wantTables) {
+		t.Fatalf("calls len = %d, want %d", len(exec.calls), len(wantTables))
+	}
+	for i, want := range wantTables {
+		if !strings.Contains(exec.calls[i], want) {
+			t.Fatalf("call[%d] = %q, want table %q", i, exec.calls[i], want)
+		}
+	}
+}
+
+func TestClearDemoWorkspacePropagatesErrors(t *testing.T) {
+	t.Parallel()
+
+	want := errors.New("boom")
+	err := clearDemoWorkspace(context.Background(), ptrext.Of(fakeDemoWorkspaceExec{failOnCall: 3, err: want}), "tenant-1")
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
 	}
 }
 
@@ -188,6 +269,20 @@ func TestSeedDemoQualityActionsPropagatesErrors(t *testing.T) {
 	if !errors.Is(err, want) {
 		t.Fatalf("err = %v, want %v", err, want)
 	}
+}
+
+type fakeDemoWorkspaceExec struct {
+	calls      []string
+	failOnCall int
+	err        error
+}
+
+func (f *fakeDemoWorkspaceExec) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
+	f.calls = append(f.calls, strings.TrimSpace(query))
+	if f.err != nil && len(f.calls) == f.failOnCall {
+		return pgconn.CommandTag{}, f.err
+	}
+	return pgconn.NewCommandTag("DELETE 1"), nil
 }
 
 type fakeDemoSearchRecorder struct {

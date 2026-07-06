@@ -5,10 +5,28 @@ export interface BreakGlassToken {
   admin_email: string
   expires_at: string
   used_at?: string
+  used_from_ip?: string
   issued_by: string
   issued_at: string
   revoked_at?: string
   revoked_by?: string
+  allowed_ips?: string[]
+  status: string
+}
+
+export interface RevokeAllResponse {
+  revoked: number
+}
+
+export interface BreakGlassLockout {
+  ip: string
+  locked_until: string
+  remaining_mins: number
+  attempts: number
+}
+
+export interface ListLockoutsResponse {
+  lockouts: BreakGlassLockout[]
 }
 
 export interface ListTokensResponse {
@@ -40,6 +58,22 @@ export async function issueBreakGlassToken(req: IssueTokenRequest): Promise<Issu
 
 export async function revokeBreakGlassToken(tokenId: string): Promise<void> {
   await api(`/fb/v1/console/auth/breakglass/tokens/${tokenId}/revoke`, {
+    method: 'POST',
+  })
+}
+
+export async function revokeAllBreakGlassTokens(): Promise<RevokeAllResponse> {
+  return api<RevokeAllResponse>('/fb/v1/console/auth/breakglass/tokens/revoke-all', {
+    method: 'POST',
+  })
+}
+
+export async function listBreakGlassLockouts(): Promise<ListLockoutsResponse> {
+  return api<ListLockoutsResponse>('/fb/v1/console/auth/breakglass/lockouts')
+}
+
+export async function unlockBreakGlassLockout(ip: string): Promise<void> {
+  await api(`/fb/v1/console/auth/breakglass/lockouts/${encodeURIComponent(ip)}/unlock`, {
     method: 'POST',
   })
 }

@@ -56,6 +56,7 @@ const scheduledDeleteRequest = {
   tagAssignmentCount: 2,
   feedbackAuditCount: 4,
   llmAuditCount: 3,
+  outboxCount: 1,
   createdAt: '2026-06-17T09:00:00Z',
   executeAfter: '2026-06-17T09:30:00Z',
 }
@@ -71,6 +72,7 @@ const readyExportRequest = {
   tagAssignmentCount: 3,
   feedbackAuditCount: 6,
   llmAuditCount: 4,
+  outboxCount: 0,
   createdAt: '2026-06-17T08:00:00Z',
   archiveFilename: 'bob-export.zip',
   expiresAt: '2026-06-18T08:00:00Z',
@@ -87,6 +89,7 @@ const downloadedExportRequest = {
   tagAssignmentCount: 1,
   feedbackAuditCount: 1,
   llmAuditCount: 1,
+  outboxCount: 0,
   createdAt: '2026-06-16T08:00:00Z',
   archiveFilename: 'charlie-export.zip',
   downloadedAt: '2026-06-16T09:00:00Z',
@@ -103,6 +106,7 @@ const newReadyExportRequest = {
   tagAssignmentCount: 2,
   feedbackAuditCount: 4,
   llmAuditCount: 3,
+  outboxCount: 0,
   createdAt: '2026-06-17T10:00:00Z',
   archiveFilename: 'alice-export.zip',
   expiresAt: '2026-06-18T10:00:00Z',
@@ -218,6 +222,7 @@ describe('GDPRPage', () => {
           tagAssignmentCount: 2,
           feedbackAuditCount: 4,
           llmAuditCount: 3,
+          outboxCount: 1,
         })
       }),
     )
@@ -293,13 +298,16 @@ describe('GDPRPage', () => {
     })
 
     expect(screen.getAllByText(/alice-export\.zip/).length).toBeGreaterThanOrEqual(2)
-    expect(screen.getAllByText(/5\/2\/4\/3/).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('5/2/4/3/1')).toBeInTheDocument()
 
     await user.type(screen.getByTestId('gdpr-confirm-subject-key'), 'alice@example.com')
     await user.click(screen.getByTestId('gdpr-delete-submit'))
 
     await waitFor(() => {
       expect(deleteBody).toEqual({ subjectKey: 'alice@example.com' })
+    })
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('Outbox'))
     })
 
     expect(requestTypeQueries).toContain('all')

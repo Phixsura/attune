@@ -178,6 +178,7 @@ message DeleteGdprSubjectResponse {
   int32 tag_assignment_count = 6;
   int32 feedback_audit_count = 7;
   int32 llm_audit_count = 8;
+  int32 outbox_count = 9;
 }
 
 message CancelGdprRequestRequest {
@@ -216,6 +217,7 @@ message GdprRequestSummary {
   optional string execute_after = 18;
   optional string cancelled_at = 19;
   optional string revoked_at = 20;
+  int32 outbox_count = 21;
 }
 
 message ListGdprRequestsResponse {

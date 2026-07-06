@@ -517,3 +517,23 @@ func TestEnrichmentRuntimeLegacyResetRouteAllowsAdmin(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.True(t, svc.resetCalled)
 }
+
+func TestEnrichmentRuntimeLegacyResetRouteAllowsDelegatedAdmin(t *testing.T) {
+	t.Parallel()
+	svc := ptrext.Of(fakeRuntimeService{})
+	router := ptrext.Of(Router{
+		rbac:              rbac.NewMiddleware(fakeRoleStore{role: domain.RoleDelegatedAdmin}),
+		enrichmentRuntime: consoleenrichmentruntime.NewHandler(svc, 15*time.Minute),
+	})
+	mux := chi.NewRouter()
+	router.mountEnrichmentRuntime(mux)
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, runtimeAuthedReq(http.MethodPost, "/enrichment-runtime:reset", attunev1.ResetEnrichmentRuntimeRequest{
+		ExpectedVersion: 1,
+		ResetAll:        true,
+	}, domain.RoleDelegatedAdmin))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, svc.resetCalled)
+}

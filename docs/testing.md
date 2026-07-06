@@ -159,6 +159,25 @@ ATTUNE_RUNTIME_SMOKE_IMAGE=ghcr.io/phixsura/attune:tag \
   bash scripts/runtime-smoke.sh
 ```
 
+## Developer parity loop — demo workspace
+
+The demo workspace commands keep the Control Tower walk-through repeatable on a
+fresh local install:
+
+```bash
+make demo-bootstrap   # clear any old demo rows, then rebuild the baseline
+make demo-reset       # remove the demo-seeded rows without reseeding
+make demo-seed        # refresh the canonical demo data in place
+```
+
+The same flow is available through the CLI:
+
+```bash
+docker compose run --rm attune demo bootstrap
+docker compose run --rm attune demo reset
+docker compose run --rm attune demo seed
+```
+
 ## Live tier — `make test-live`
 
 The live tier is segregated three ways so it cannot accidentally run:

@@ -119,8 +119,24 @@ message MCPRefreshGrant {
   string created_at = 5;                // RFC3339
 }
 
+message MCPClientToolAlias {
+  string name = 1;
+  bool deprecated = 2;
+  string replacement = 3;
+}
+
+message MCPClientToolProvenance {
+  string kind = 1;
+  string reference = 2;
+}
+
 message MCPClientToolPolicy {
   string name = 1;
+  string kind = 15;
+  string owner = 16;
+  bool enabled_by_default = 17;
+  bool deprecated = 20;
+  string replacement = 21;
   string required_scope = 2;
   string risk = 3;
   string data_class = 4;
@@ -134,6 +150,8 @@ message MCPClientToolPolicy {
   string effect = 12;
   optional int32 rate_limit_rpm = 13;
   optional int32 rate_limit_burst = 14;
+  repeated MCPClientToolAlias aliases = 18;
+  optional MCPClientToolProvenance provenance = 19;
 }
 
 message MCPConnectionProfile {

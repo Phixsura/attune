@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #3 |
-| **Status** | Accepted |
+| **Status** | Implemented |
 | **Started** | 2026-06-05 15:56 CST |
 | **Related** | #1 (CI — same checks as last-line defense), #4 (`lint-slog.sh`, invoked here), #9 (clears lint-slog's known warnings) |
 

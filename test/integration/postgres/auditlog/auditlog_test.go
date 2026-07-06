@@ -75,24 +75,33 @@ func TestPG_AuditLogRejectsUpdateDeleteTruncateAndUnknownAction(t *testing.T) {
 	require.Contains(t, err.Error(), "chk_audit_action_value")
 }
 
-// TestPG_AuditLogAcceptsNewlyRegisteredActions guards migration 057: the
-// chk_audit_action_value constraint must accept the actions whose audit
-// writes were previously dropped silently (enrich_config.promote_suggested
-// from #83; api_key.rotate, a pre-existing gap found by the same audit
-// cross-check). Both the Go allow-list and this DB constraint must list them.
+// TestPG_AuditLogAcceptsNewlyRegisteredActions guards the audit action
+// allow-list: the chk_audit_action_value constraint must accept every action
+// that the Go service records, including actions introduced after the base
+// audit table was first shipped.
 func TestPG_AuditLogAcceptsNewlyRegisteredActions(t *testing.T) {
 	pool := sharedPool
 	ctx := context.Background()
 	tenantID := insertTenant(t, ctx, pool, "audit-new-actions")
 
-	for _, action := range []string{"enrich_config.promote_suggested", "api_key.rotate"} {
+	for _, tc := range []struct {
+		action     string
+		targetType string
+		targetID   string
+	}{
+		{action: "enrich_config.promote_suggested", targetType: "enrich_config", targetID: "acme"},
+		{action: "api_key.rotate", targetType: "api_key", targetID: "key-1"},
+		{action: "service_account.create", targetType: "service_account", targetID: "sa-1"},
+		{action: "service_account.update", targetType: "service_account", targetID: "sa-1"},
+		{action: "service_account.delete", targetType: "service_account", targetID: "sa-1"},
+	} {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO audit_log (
 				tenant_id, actor_type, actor_id, actor_email, actor_ip, actor_user_agent,
 				action, target_type, target_id, summary
-			) VALUES ($1, 'admin', 'user-1', '', '', '', $2, 'enrich_config', 'acme', 'e2e regression')
-		`, tenantID, action)
-		require.NoErrorf(t, err, "DB constraint chk_audit_action_value must accept %q", action)
+			) VALUES ($1, 'admin', 'user-1', '', '', '', $2, $3, $4, 'e2e regression')
+		`, tenantID, tc.action, tc.targetType, tc.targetID)
+		require.NoErrorf(t, err, "DB constraint chk_audit_action_value must accept %q", tc.action)
 	}
 }
 

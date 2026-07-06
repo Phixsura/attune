@@ -109,6 +109,9 @@ var auditEmittedActions = []string{
 	"api_key.rotate",
 	"api_key.create",
 	"api_key.revoke",
+	"service_account.create",
+	"service_account.delete",
+	"service_account.update",
 	"mcp_client.create",
 	"mcp_client.revoke",
 	"mcp_client.update",
@@ -142,45 +145,75 @@ func TestAuditedRouteActionsAreRegistered(t *testing.T) {
 }
 
 func expectedMutatingRouteCoverage() map[string]string {
-	coverage := map[string]string{
-		"POST /install/login":                                "exempt: login flow creates a session but is not a tenant-scoped unified audit event",
-		"POST /logout":                                       "exempt: logout tears down a session only",
-		"POST /me/change-password":                           "exempt: self-service auth flow outside the tenant-scoped unified audit stream",
-		"POST /api-keys/":                                    "audited: api_key.create",
-		"DELETE /api-keys/{id}":                              "audited: api_key.revoke",
-		"POST /api-keys/event-subscriptions":                 "audited: api_key.event_subscription.create",
-		"POST /api-keys/{id}/rotate":                         "audited: api_key.rotate",
-		"PATCH /api-keys/{id}/environment":                   "audited: api_key.environment.update",
-		"PUT /api-keys/policy":                               "audited: api_key.policy.update",
-		"POST /api-keys/approvals":                           "audited: api_key.approval.create",
-		"POST /api-keys/approvals/{id}/review":               "audited: api_key.approval.review",
-		"PUT /api-keys/{id}/tags":                            "audited: api_key.tags.update",
-		"PUT /api-keys/{id}/budget":                          "audited: api_key.budget.update",
-		"POST /api-keys/{id}/temp-token":                     "audited: api_key.temp_token.create",
-		"POST /api-keys/{id}/project":                        "audited: api_key.project.bind",
-		"POST /service-accounts/":                            "audited: service_account.create",
-		"POST /projects/":                                    "audited: project.create",
-		"POST /oauth2/clients/":                              "audited: oauth2_client.create",
-		"POST /secret-managers/":                             "audited: secret_manager.create",
-		"POST /managed-identities/":                          "audited: managed_identity.create",
-		"POST /siem-integrations/":                           "audited: siem_integration.create",
-		"POST /ai-agents/":                                   "audited: ai_agent.create",
-		"POST /api-keys/{id}/rotation-schedule":              "audited: api_key.rotation_schedule.create",
-		"POST /api-keys/{id}/signing-keys":                   "audited: api_key.signing_key.create",
-		"POST /gdpr/step-up/verify":                          "exempt: recent-auth refreshes the session but does not mutate tenant data directly",
-		"POST /audit-log/evidence/":                          "audited: audit_evidence.create",
-		"POST /gdpr/export":                                  "audited: gdpr.export",
-		"POST /gdpr/exports/{job_id}/revoke":                 "audited: gdpr.export.revoked",
-		"POST /gdpr/delete":                                  "audited: gdpr.delete",
-		"POST /gdpr/requests/{request_id}/cancel":            "audited: gdpr.delete.cancelled",
-		"POST /notify-targets/":                              "audited: notify_target.create",
-		"PATCH /notify-targets/{id}":                         "audited: notify_target.update",
-		"DELETE /notify-targets/{id}":                        "audited: notify_target.delete",
-		"POST /notify-targets/{id}/test":                     "audited: notify_target.test",
-		"PUT /digest-subscription":                           "audited: digest_subscription.upsert",
-		"DELETE /digest-subscription":                        "audited: digest_subscription.delete",
-		"POST /feedback/batch/tags":                          "exempt: operational feedback tagging flow, reviewed outside unified control-plane audit",
-		"POST /feedback/transition/batch":                    "exempt: per-feedback workflow audit path, not unified control-plane audit",
+	coverage := make(map[string]string, 64)
+	mergeMutatingRouteCoverage(coverage, authAndAccountMutatingRouteCoverage())
+	mergeMutatingRouteCoverage(coverage, adminMutatingRouteCoverage())
+	mergeMutatingRouteCoverage(coverage, workflowMutatingRouteCoverage())
+	mergeMutatingRouteCoverage(coverage, replyDraftMutatingRouteCoverage())
+	return coverage
+}
+
+func mergeMutatingRouteCoverage(dst, src map[string]string) {
+	for route, decision := range src {
+		dst[route] = decision
+	}
+}
+
+func authAndAccountMutatingRouteCoverage() map[string]string {
+	return map[string]string{
+		"POST /install/login":                   "exempt: login flow creates a session but is not a tenant-scoped unified audit event",
+		"POST /logout":                          "exempt: logout tears down a session only",
+		"POST /me/change-password":              "exempt: self-service auth flow outside the tenant-scoped unified audit stream",
+		"POST /api-keys/":                       "audited: api_key.create",
+		"DELETE /api-keys/{id}":                 "audited: api_key.revoke",
+		"POST /api-keys/event-subscriptions":    "audited: api_key.event_subscription.create",
+		"POST /api-keys/{id}/rotate":            "audited: api_key.rotate",
+		"PATCH /api-keys/{id}/environment":      "audited: api_key.environment.update",
+		"PUT /api-keys/policy":                  "audited: api_key.policy.update",
+		"POST /api-keys/approvals":              "audited: api_key.approval.create",
+		"POST /api-keys/approvals/{id}/review":  "audited: api_key.approval.review",
+		"PUT /api-keys/{id}/tags":               "audited: api_key.tags.update",
+		"PUT /api-keys/{id}/budget":             "audited: api_key.budget.update",
+		"POST /api-keys/{id}/temp-token":        "audited: api_key.temp_token.create",
+		"POST /api-keys/{id}/project":           "audited: api_key.project.bind",
+		"POST /service-accounts/":               "audited: service_account.create",
+		"PATCH /service-accounts/{id}":          "audited: service_account.update",
+		"DELETE /service-accounts/{id}":         "audited: service_account.delete",
+		"POST /projects/":                       "audited: project.create",
+		"POST /oauth2/clients/":                 "audited: oauth2_client.create",
+		"POST /secret-managers/":                "audited: secret_manager.create",
+		"POST /managed-identities/":             "audited: managed_identity.create",
+		"POST /siem-integrations/":              "audited: siem_integration.create",
+		"POST /ai-agents/":                      "audited: ai_agent.create",
+		"POST /api-keys/{id}/rotation-schedule": "audited: api_key.rotation_schedule.create",
+		"POST /api-keys/{id}/signing-keys":      "audited: api_key.signing_key.create",
+	}
+}
+
+func adminMutatingRouteCoverage() map[string]string {
+	return map[string]string{
+		"POST /gdpr/step-up/verify":               "exempt: recent-auth refreshes the session but does not mutate tenant data directly",
+		"POST /audit-log/evidence/":               "audited: audit_evidence.create",
+		"POST /gdpr/export":                       "audited: gdpr.export",
+		"POST /gdpr/exports/{job_id}/revoke":      "audited: gdpr.export.revoked",
+		"POST /gdpr/delete":                       "audited: gdpr.delete",
+		"POST /gdpr/requests/{request_id}/cancel": "audited: gdpr.delete.cancelled",
+		"POST /notify-targets/":                   "audited: notify_target.create",
+		"PATCH /notify-targets/{id}":              "audited: notify_target.update",
+		"DELETE /notify-targets/{id}":             "audited: notify_target.delete",
+		"POST /notify-targets/{id}/test":          "audited: notify_target.test",
+		"PUT /digest-subscription":                "audited: digest_subscription.upsert",
+		"DELETE /digest-subscription":             "audited: digest_subscription.delete",
+		"POST /audit-log/views/":                  "exempt: per-user saved investigation state, not unified control-plane audit",
+		"PUT /audit-log/views/{id}":               "exempt: per-user saved investigation state, not unified control-plane audit",
+		"DELETE /audit-log/views/{id}":            "exempt: per-user saved investigation state, not unified control-plane audit",
+		"POST /feedback/batch/tags":               "exempt: operational feedback tagging flow, reviewed outside unified control-plane audit",
+		"POST /feedback/transition/batch":         "exempt: per-feedback workflow audit path, not unified control-plane audit",
+	}
+}
+
+func workflowMutatingRouteCoverage() map[string]string {
+	return map[string]string{
 		"POST /feedback/batch":                               "audited: feedback.batch_delete for delete payloads; route is payload-multiplexed and non-delete variants are operational",
 		"POST /feedback/search":                              "exempt: read-only semantic search",
 		"POST /feedback/search/events":                       "exempt: search interaction telemetry, not a control-plane mutation",
@@ -236,10 +269,6 @@ func expectedMutatingRouteCoverage() map[string]string {
 		"DELETE /mcp/clients/{id}/grants/{grant_id}":         "audited: mcp_refresh_grant.revoke",
 		"DELETE /mcp/clients/{id}/sessions/{session_id}":     "audited: mcp_session.revoke",
 	}
-	for route, decision := range replyDraftMutatingRouteCoverage() {
-		coverage[route] = decision
-	}
-	return coverage
 }
 
 func replyDraftMutatingRouteCoverage() map[string]string {

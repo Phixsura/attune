@@ -10,7 +10,7 @@ import "net/url"
 // same scheme + host as baseURL.
 //
 // Rescued verbatim from the deleted internal/handlers/console/oauth/oauth.go
-// (#66 Plan T11 — same logic, new home).
+// and kept in the local-admin auth package (same logic, new home).
 //
 // Second-character check: both '/' (protocol-relative URL) and '\\'
 // (browser-quirk path that some clients interpret as host) must be

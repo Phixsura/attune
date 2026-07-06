@@ -9,6 +9,163 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **GDPR delete request history now includes outbox purge counts.**
+  The request history and delete response now persist and surface
+  `notify_outbox` purge counts alongside the existing feedback, tag, and audit
+  totals, so operators can see the full deletion footprint in the Console.
+
+- **Delegated admin role for operational governance.**
+  Added a new `delegated_admin` tenant role, plus RBAC and Console permission
+  support for operational settings, audit-log review, and GDPR overview flows.
+  The members page can now assign the role directly, and the runtime checks and
+  DB constraints accept it across both tenant membership and OIDC role sync.
+
+- **Break-glass emergency controls in the Security page.**
+  Added Security-page actions for revoking all active break-glass tokens,
+  reviewing locked IP addresses, and manually clearing lockouts. The page now
+  keeps the emergency access surface in one place instead of splitting token
+  issuance from lockout recovery.
+
+- **Service account governance card, create flow, and runtime toggle enforcement.**
+  Added a Console API Keys panel that lists tenant service accounts and lets
+  admins create new service accounts with operator-facing naming guidance. The
+  same surface now lets admins enable or disable or delete service accounts in
+  place, and linked API keys fail authentication immediately while their
+  service account is inactive. Deleted service accounts are detached from
+  linked API keys, and service account create, status-toggle, and delete
+  actions now also emit audit events.
+
+### Fixed
+
+- **Console accessibility mocks now cover service-account reads on API Keys.**
+  The Playwright accessibility route harness now responds to the
+  `/service-accounts` list request that the API Keys page issues, so the
+  browser gate no longer treats that legitimate query as an unhandled request.
+
+- **Console accessibility mocks now cover saved audit-log views.**
+  The Playwright accessibility route harness now responds to the audit-log
+  saved-view list and mutation endpoints that the Audit Log page loads, so the
+  browser gate no longer treats that saved-view traffic as an unhandled
+  request.
+
+- **GDPR request summary keeps existing field numbers.**
+  `outbox_count` now lands at the end of `GdprRequestSummary`, so the new
+  summary field stays wire-compatible with the existing proto schema and
+  `buf breaking` passes again.
+
+- **Console workspace install now recognizes the local package.**
+  `console/pnpm-workspace.yaml` now declares the Console package explicitly, so
+  `pnpm install --frozen-lockfile` in CI can resolve the workspace instead of
+  failing with an empty packages configuration.
+
+- **Sample deploy config no longer carries committed dev credentials.**
+  The checked-in `deploy/config.yaml` now keeps PostgreSQL, Console, and Tink
+  values as placeholders again, so the private-deploy template no longer ships
+  with generated credentials in the repository.
+
+- **Service-account audit writes now match the database constraint.**
+  Console service-account create, update, and delete actions now persist audit
+  rows successfully again. The audit action allow-list and the PostgreSQL
+  `chk_audit_action_value` constraint are back in sync, so the API Keys service
+  account flow no longer fails with `failed to write audit log`.
+
+- **Local demo bootstrap now seeds embedded feedback rows reliably.**
+  `attune demo bootstrap` now writes demo feedback with explicit SQL parameter
+  types, so the local docker-compose workspace can be bootstrapped repeatedly
+  without hitting PostgreSQL type inference errors on embedded rows.
+
+- **Service account loading and tenant binding are now fail-closed.**
+  The API Keys page no longer preloads the admin-only service-account list for
+  member access, the service-account panel now shows a retryable error state
+  instead of an empty list when the list request fails, and API-key linking now
+  verifies the target service account belongs to the same tenant before
+  persisting the binding. Cross-tenant service-account IDs in existing data now
+  fail authentication instead of silently inheriting another tenant's status.
+
+- **Maturity contract lint gate for the platform program.**
+  Added `scripts/lint-maturity-contract.sh` plus local `make ci-check` and CI
+  wiring so the platform maturity umbrella proposal, child track links, and
+  verification sections stay aligned. The gate now fails if the program loses
+  traceability or a child proposal drops its verification contract.
+
+- **HTTP response-emission audit false-positive cleanup.**
+  Narrowed the direct-response lint to skip documented low-level response
+  owners and wrappers, and routed the Console auth-providers payload through
+  the shared JSON helper so the main router no longer emits JSON directly.
+
+- **Reliability release context and ownership card.**
+  Added a system release metadata endpoint plus a Reliability-page card that
+  surfaces the active service version, deployment environment, owning team,
+  restore-drill status, runbook link, escalation link, and runtime age.
+  Operators can now see what release is running, how recovery is trending, and
+  where to hand off without leaving the Console. The release / recovery /
+  preflight system endpoints now also share one proto/OpenAPI contract, so the
+  Console and future clients read the same shapes.
+
+- **Dedicated recovery endpoint for restore-drill state.**
+  Added an admin-only `/system/recovery` endpoint backed by the latest recorded
+  restore drill, plus a shared grading helper so preflight and Console now use
+  the same recovery policy. The Reliability page reads that dedicated contract
+  directly, and now surfaces the latest backup reference, drill duration, and
+  freshness window alongside recoverability and remediation so operators do not
+  need to infer them from readiness checks. The preflight, recovery, and
+  release system endpoints are now defined in proto as well, so the runtime
+  contract stays in sync with the generated OpenAPI and client types.
+
+- **Canonical platform semantics and lifecycle state.**
+  Added a domain-level glossary for the platform's core terms plus canonical
+  compatibility rules, and surfaced the current lifecycle state on the release
+  card so operators can tell at a glance whether the runtime is supported,
+  migrating, or blocked.
+
+- **Saved audit-log investigation views.**
+  Added per-user saved audit-log investigation views backed by system
+  settings, with CRUD endpoints and Console support for saving, restoring, and
+  deleting named investigation states. The audit-log sidebar now shows the
+  active saved view binding and highlights when the live investigation matches
+  a saved snapshot.
+
+- **Developer parity demo bootstrap/reset loop.**
+  Added `attune demo seed|reset|bootstrap` plus matching `make demo-*`
+  targets so contributors can clear and rebuild the demo workspace without
+  manual SQL. Demo reset now clears the seeded feedback, telemetry, and
+  control-tower action rows before reseeding, and the README and testing guide
+  now document the fresh-clone bootstrap loop.
+
+- **MCP extension catalog kinds and governance exposure.**
+  Added explicit `core` / `optional` / `external` kinds to the MCP tool
+  catalog, plus owner and default-enablement metadata so the extension plane
+  can distinguish built-in runtime tools from optional and external
+  extensions. The runtime policy evaluator now treats disabled extensions as
+  denied-by-default, and the console governance DTOs and MCP client contract
+  carry the catalog metadata too, which keeps the classification visible at
+  the API boundary instead of burying it inside internal code. The catalog now
+  also supports compatibility aliases with deprecation and replacement
+  metadata, the JSON-RPC registry registers those aliases alongside the
+  canonical method names, policy replacement inputs normalize aliased tool
+  names to their canonical catalog entries, and the Console tool table renders
+  the alias / replacement relationship directly for administrators. The
+  catalog contract also now carries optional provenance metadata so external
+  extensions can declare artifact references without redesigning the registry
+  again later. Canonical tools can now also declare explicit deprecated /
+  replacement metadata, and the Console tool table renders that lifecycle
+  state alongside the alias compatibility hints.
+
+- **Runtime production profile and startup safety contract (#56).**
+  Added a top-level runtime `profile` field with `dev` and `production`
+  modes, plus a production startup safety gate that rejects unsafe Console
+  base URLs, egress settings, malformed Console URLs, and missing bootstrap-
+  admin coverage on fresh installs. The shared preflight checks now mirror the
+  same production rules and warn when the bootstrap seed is still present after
+  admins already exist, and the Helm / Compose examples and deployment docs now
+  render and describe the profile and security proxy settings explicitly.
+  Observability defaults now follow the runtime profile when `observability.environment`
+  is omitted, so production instances report as `production` without extra config.
+  The Helm chart now mirrors that behavior as well: an empty rendered
+  observability environment falls back to the chart `profile`, so dev installs
+  stop advertising themselves as production and production installs still
+  default to `production`.
+
 - **Tenant impact SLO surface for reliability burn-rate operations.**
   Added the new `Attune Tenant Impact` dashboard, including impacted-tenant
   burn ranking, a Console reliability summary page, burn-rate recording rules
@@ -20,35 +177,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   dashboard completion lens. The tenant-impact generator now also exposes MCP
   and GDPR drilldowns with tool and request-type label filters, and API key
   usage is now recorded so the existing access-denial telemetry and security
-  panels have a real success denominator. The burn overview and burn trend are
-  now driven from a typed SLO catalog so the page-worthy SLO set, ranking
-  panel, and alert metadata stay aligned in one place. Ingest burn-rate now
-  counts rate-limit pressure alongside internal failures, and the page-worthy
-  burn alerts carry minimum-volume guards to avoid tiny-tenant noise. The SLO
-  recording and alert rules now live in a dedicated `attune-slo.yml` file,
-  generated from the shared catalog so the tenant-impact patch stays executable
-  and easy to audit alongside the dashboard generator. The same catalog now
-  also exports a portable OpenSLO bundle at `observability/openslo/attune-slo.yaml`,
-  with import / round-trip tests so the SLO definition can move cleanly into
-  vendor-neutral tooling. The tenant-impact dashboard also now includes burn
-  history, remaining-budget, dependency triage, and routing metadata sections
-  so sustained regressions, budget runway, upstream drivers, and the right
-  escalation path are easier to spot without leaving the reliability surface.
-  The generator also now writes a replay / backfill report template at
-  `observability/reports/attune-slo-replay-template.md`, and Console links to
-  the same worksheet so historical incident reviews stay tied to the current
-  policy and runbook metadata. The replay worksheet now includes a generated
-  comparison matrix so historical outage review can be checked against the
-  current policy row by row. It also writes a policy reference report and
-  Console policy cards so the recommended starting objective, burn windows,
-  low-traffic guardrails, budget-exception stance, and exception notes are
-  visible beside the live SLO surface. The portable OpenSLO export now carries
-  matching budget-exception annotations so the policy surface stays explicit
-  across vendor-neutral tooling too. The Console reliability page now also
-  offers a tenant-prefilled replay worksheet download, a replay workspace
-  card with live markdown preview and copy action, and a direct OpenSLO
-  bundle link, so operators can export the working set without leaving the
-  page.
+  panels have a real success denominator.
 
 - **Reply draft review and controlled-send workflow (#164).**
   Added persisted reply-draft cycles, revision history, workflow events,
@@ -848,6 +977,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     `border-t` separators with inline icons instead of rounded containers.
 
 ### Fixed
+
+- **Migration count and protobuf vet cleanup.** Updated the database
+  migration-count expectation to reflect the renamed `098_delegated_admin_role.sql`
+  migration, and switched the audit-log saved-view protobuf mappers to return
+  pointers directly so `go vet` no longer reports protobuf lock-value copy
+  warnings.
 
 - **MCP protocol compatibility and governance hardening (#153).** Improves the
   MCP server's real-world interoperability and operator safety by:

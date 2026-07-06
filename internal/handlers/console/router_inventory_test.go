@@ -71,6 +71,8 @@ var expectedAPIKeyRoutes = []string{
 var expectedAPIKeyRelatedRoutes = []string{
 	"GET /service-accounts/",
 	"POST /service-accounts/",
+	"PATCH /service-accounts/{id}",
+	"DELETE /service-accounts/{id}",
 	"GET /projects/",
 	"POST /projects/",
 	"GET /oauth2/clients/",

@@ -90,6 +90,20 @@ func TestTLSConsistency_NoBaseURL(t *testing.T) {
 	}
 }
 
+func TestTLSConsistency_ProductionPrivateEgressWithoutBaseURLFails(t *testing.T) {
+	r := checkTLSConsistency(context.Background(), &preflight.Environment{
+		Cfg: &config.Config{
+			Profile: config.ProfileProduction,
+			Security: config.SecurityConfig{
+				AllowPrivateEgress: true,
+			},
+		},
+	})
+	if r.Status != preflight.StatusFail {
+		t.Errorf("status = %q; want fail", r.Status)
+	}
+}
+
 func TestTLSConsistency_HTTPWarns(t *testing.T) {
 	r := checkTLSConsistency(context.Background(), &preflight.Environment{
 		Cfg: &config.Config{ConsoleBaseURL: "http://localhost:8080"},
@@ -135,5 +149,49 @@ func TestTLSConsistency_PrivateEgressWithHTTPS(t *testing.T) {
 	}
 	if r.Remediation == "" {
 		t.Error("expected remediation for private egress with HTTPS")
+	}
+}
+
+func TestTLSConsistency_ProductionHTTPFails(t *testing.T) {
+	r := checkTLSConsistency(context.Background(), &preflight.Environment{
+		Cfg: &config.Config{
+			Profile:        config.ProfileProduction,
+			ConsoleBaseURL: "http://feedback.example.com",
+		},
+	})
+	if r.Status != preflight.StatusFail {
+		t.Errorf("status = %q; want fail", r.Status)
+	}
+	if r.Remediation == "" {
+		t.Error("expected remediation for production HTTP base_url")
+	}
+}
+
+func TestTLSConsistency_ProductionLoopbackFlagFails(t *testing.T) {
+	r := checkTLSConsistency(context.Background(), &preflight.Environment{
+		Cfg: &config.Config{
+			Profile:        config.ProfileProduction,
+			ConsoleBaseURL: "https://feedback.example.com",
+			Security:       config.SecurityConfig{AllowLoopbackEgress: true},
+		},
+	})
+	if r.Status != preflight.StatusFail {
+		t.Errorf("status = %q; want fail", r.Status)
+	}
+}
+
+func TestTLSConsistency_ProductionPrivateEgressFlagFails(t *testing.T) {
+	r := checkTLSConsistency(context.Background(), &preflight.Environment{
+		Cfg: &config.Config{
+			Profile:        config.ProfileProduction,
+			ConsoleBaseURL: "https://feedback.example.com",
+			Security:       config.SecurityConfig{AllowPrivateEgress: true},
+		},
+	})
+	if r.Status != preflight.StatusFail {
+		t.Errorf("status = %q; want fail", r.Status)
+	}
+	if r.Remediation == "" {
+		t.Error("expected remediation for production private egress")
 	}
 }

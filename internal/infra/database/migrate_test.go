@@ -95,7 +95,7 @@ func TestMigrationCount(t *testing.T) {
 
 	count := MigrationCount()
 	require.Greater(t, count, 0, "should have at least one migration")
-	require.Equal(t, 97, count, "should match current migration count")
+	require.Equal(t, 100, count, "should match current migration count")
 }
 
 func TestRecordMigrationSQL(t *testing.T) {

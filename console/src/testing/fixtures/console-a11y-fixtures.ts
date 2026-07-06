@@ -12,6 +12,8 @@ import type {
   ListApiKeysResponse,
   ListScopePresetsResponse,
   ListScopesResponse,
+  ListServiceAccountsResponse,
+  ServiceAccount,
 } from '../../proto/attune/v1/api_key'
 import type {
   AuditLogEntry,
@@ -367,6 +369,19 @@ export const consoleA11yIssuedApiKey: CreateApiKeyResponse = {
   secret: 'ak_live_secret_visible_once',
 }
 
+export const consoleA11yServiceAccount: ServiceAccount = {
+  id: 'sa-a11y',
+  name: 'ci-bot',
+  description: 'deployment pipeline',
+  isActive: true,
+  createdAt: '2026-06-21T00:00:00Z',
+  updatedAt: '2026-06-24T07:00:00Z',
+}
+
+export const consoleA11yServiceAccountsList: ListServiceAccountsResponse = {
+  items: [],
+}
+
 export const consoleA11yApiKeyScopes: ListScopesResponse = {
   scopes: [
     {
@@ -490,6 +505,18 @@ export const consoleA11yMcpClient: MCPClient = {
 export const consoleA11yMcpTools: MCPClientTool[] = [
   {
     name: 'list_feedback',
+    kind: 'core',
+    owner: 'feedback',
+    enabled_by_default: true,
+    deprecated: true,
+    replacement: 'get_feedback',
+    aliases: [
+      {
+        name: 'feedback.list',
+        deprecated: true,
+        replacement: 'list_feedback',
+      },
+    ],
     required_scope: 'mcp:read',
     risk: 'read',
     data_class: 'user_content',
@@ -506,6 +533,11 @@ export const consoleA11yMcpTools: MCPClientTool[] = [
   },
   {
     name: 'update_workflow_state',
+    kind: 'core',
+    owner: 'workflow',
+    enabled_by_default: true,
+    deprecated: false,
+    replacement: '',
     required_scope: 'mcp:write',
     risk: 'mutate',
     data_class: 'operational',
@@ -621,6 +653,7 @@ export const consoleA11yGdprRequests: ListGdprRequestsResponse = {
       tagAssignmentCount: 1,
       feedbackAuditCount: 2,
       llmAuditCount: 1,
+      outboxCount: 0,
       createdAt: '2026-06-24T09:00:00Z',
       completedAt: '2026-06-24T09:01:00Z',
       expiresAt: '2026-06-25T09:01:00Z',
@@ -637,6 +670,7 @@ export const consoleA11yGdprRequests: ListGdprRequestsResponse = {
       tagAssignmentCount: 0,
       feedbackAuditCount: 1,
       llmAuditCount: 0,
+      outboxCount: 1,
       createdAt: '2026-06-24T08:30:00Z',
       executeAfter: '2026-06-24T10:30:00Z',
     },
@@ -686,6 +720,7 @@ export const consoleA11yGdprDelete: DeleteGdprSubjectResponse = {
   tagAssignmentCount: 0,
   feedbackAuditCount: 1,
   llmAuditCount: 0,
+  outboxCount: 1,
 }
 
 export const consoleA11yGdprRevoke: RevokeGdprExportResponse = {

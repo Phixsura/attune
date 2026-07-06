@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #29 |
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Started** | 2026-06-14 CST |
 | **Related** | #28 (manual tags — orthogonal labelling layer), #39 (generic audit log — the `feedback_audit_log` table introduced here is designed to serve both), #19 (proto IDL contract), #117 (tags — just merged; workflow status is orthogonal to tags) |
 

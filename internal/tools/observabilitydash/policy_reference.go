@@ -74,14 +74,3 @@ func renderPolicyReferenceReport(entries []reliabilitySLO) ([]byte, error) {
 	b.WriteString("\n")
 	return []byte(b.String()), nil
 }
-
-func reliabilityPolicyGuidePanel() panel {
-	content := strings.Join([]string{
-		"**Template:** [Open policy reference](https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-policy-reference.md)",
-		"",
-		"**Use with:** SLO catalog, routing table, replay comparison worksheet, and budget exception register.",
-		"",
-		"**Defaults:** Start from the catalog objective, page at 14.4x on 5m and 1h, warn at 6x on 30m and 6h, keep traffic floors above 0.01, and keep exceptions explicit.",
-	}, "\n")
-	return textPanel(41, "Policy guide", "Recommended SLO starting point, guardrails, and exception stance.", content, gp(0, 116, 24, 8))
-}

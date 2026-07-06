@@ -31,6 +31,7 @@ import {
   RevokeKeyDialog,
   SecretKeyDialog,
 } from '@/features/api-keys/components/dialogs'
+import { ServiceAccountsCard } from '@/features/api-keys/components/service-accounts-card'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { restoreFocusWhenReady } from '@/lib/focus'
@@ -180,26 +181,30 @@ export function ApiKeysPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/60 shadow-none">
-          <CardHeader>
-            <CardTitle className="text-base">{t('api_keys.playbook_title')}</CardTitle>
-            <CardDescription>{t('api_keys.playbook_description')}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-6">
-            <PlaybookRow
-              title={t('api_keys.playbook.issue_title')}
-              body={t('api_keys.playbook.issue_body')}
-            />
-            <PlaybookRow
-              title={t('api_keys.playbook.review_title')}
-              body={t('api_keys.playbook.review_body')}
-            />
-            <PlaybookRow
-              title={t('api_keys.playbook.revoke_title')}
-              body={t('api_keys.playbook.revoke_body')}
-            />
-          </CardContent>
-        </Card>
+        <div className="space-y-6">
+          <ServiceAccountsCard canEdit={canEdit} />
+
+          <Card className="border-border/60 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-base">{t('api_keys.playbook_title')}</CardTitle>
+              <CardDescription>{t('api_keys.playbook_description')}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-6">
+              <PlaybookRow
+                title={t('api_keys.playbook.issue_title')}
+                body={t('api_keys.playbook.issue_body')}
+              />
+              <PlaybookRow
+                title={t('api_keys.playbook.review_title')}
+                body={t('api_keys.playbook.review_body')}
+              />
+              <PlaybookRow
+                title={t('api_keys.playbook.revoke_title')}
+                body={t('api_keys.playbook.revoke_body')}
+              />
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       <CreateKeyDialog

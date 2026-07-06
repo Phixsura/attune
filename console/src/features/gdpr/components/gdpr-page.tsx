@@ -169,6 +169,7 @@ export function GDPRPage() {
           t('gdpr.delete_scheduled', {
             feedback: resp.feedbackCount,
             llmAudit: resp.llmAuditCount,
+            outbox: resp.outboxCount ?? 0,
             executeAfter: formatTimestamp(resp.executeAfter),
           }),
         )
@@ -497,7 +498,7 @@ export function GDPRPage() {
                         </TableCell>
                         <TableCell className="font-mono text-xs text-muted-foreground">
                           {item.feedbackCount}/{item.tagAssignmentCount}/{item.feedbackAuditCount}/
-                          {item.llmAuditCount}
+                          {item.llmAuditCount}/{item.outboxCount ?? 0}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           <div>{formatTimestamp(item.createdAt)}</div>

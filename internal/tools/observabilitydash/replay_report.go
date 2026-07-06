@@ -139,14 +139,3 @@ func reliabilityReplayLens(slo reliabilitySLO) string {
 		return "tenant / result"
 	}
 }
-
-func reliabilityReplayReportPanel() panel {
-	content := strings.Join([]string{
-		"**Template:** [Open replay report template](https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-replay-template.md)",
-		"",
-		"**Use with:** Burn history, Remaining budget, Dependency health, Routing table, and the Comparison matrix.",
-		"",
-		"**Capture:** incident window, dominant tenant, likely dependency, replay lens, and the verdict column.",
-	}, "\n")
-	return textPanel(39, "Replay report", "Historical outage comparison and backfill worksheet.", content, gp(0, 107, 24, 8))
-}

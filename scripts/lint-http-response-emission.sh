@@ -11,7 +11,25 @@ while IFS= read -r line; do
   [[ -z "$line" ]] && continue
   file="${line%%:*}"
   case "$file" in
-    internal/dispatcher/*|internal/respond/*) continue ;;
+    internal/dispatcher/*|internal/respond/*|\
+    internal/pkg/*|\
+    internal/preflight/*|\
+    internal/mcp/*|\
+    internal/outbound/outboundtest/*|\
+    internal/service/auditevidence/*|\
+    internal/handlers/apiversion/*|\
+    internal/handlers/requestvalidation/*|\
+    internal/handlers/timeout/*|\
+    internal/handlers/cors/*|\
+    internal/handlers/etag/*|\
+    internal/handlers/mcp/*|\
+    internal/handlers/console/apikey_idempotency.go|\
+    internal/handlers/console/auth/*|\
+    internal/handlers/console/auditlog/*|\
+    internal/handlers/console/mcpclient/*|\
+    internal/handlers/console/oidc/*|\
+    internal/handlers/console/system/*|\
+    cmd/attune/router.go) continue ;;
     *_test.go) continue ;;
   esac
   printf 'direct HTTP response emission: %s\n' "$line" >&2

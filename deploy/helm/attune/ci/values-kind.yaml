@@ -7,11 +7,7 @@ postgres:
     persistence:
       enabled: false
 
-config:
-  render:
-    observability:
-      environment: dev
-
+# Leave observability.environment unset so the chart default can follow profile.
 resources:
   requests:
     cpu: 50m

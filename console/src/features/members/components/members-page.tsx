@@ -41,7 +41,7 @@ import { RoleBadge } from '@/features/session/components/auth/role-badge'
 import { type Role, usePermissions } from '@/features/session/hooks/use-permissions'
 import type { Member } from '@/proto/attune/v1/member'
 
-const ROLES: Role[] = ['admin', 'member', 'viewer']
+const ROLES: Role[] = ['admin', 'delegated_admin', 'member', 'viewer']
 
 const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
 
@@ -280,6 +280,7 @@ export function MembersPage() {
                 visible: activeMembers.length,
                 total: memberStats.active,
                 admins: memberStats.admins,
+                delegatedAdmins: memberStats.delegatedAdmins,
               })}
             </CardDescription>
           </div>
@@ -633,6 +634,7 @@ function buildMemberStats(members: Member[]) {
     active: members.filter((member) => member.memberType !== 'invite').length,
     pending: members.filter((member) => member.memberType === 'invite').length,
     admins: members.filter((member) => member.role === 'admin').length,
+    delegatedAdmins: members.filter((member) => member.role === 'delegated_admin').length,
     members: members.filter((member) => member.role === 'member').length,
     viewers: members.filter((member) => member.role === 'viewer').length,
   }
@@ -697,7 +699,12 @@ function getMemberLockReason({
 }): string | null {
   if (!isAdmin) return t('members.role_locked_privilege')
   if (member.userId === actorUserId) return t('members.role_locked_self')
-  const hierarchy: Record<Role, number> = { viewer: 0, member: 1, admin: 2 }
+  const hierarchy: Record<Role, number> = {
+    viewer: 0,
+    member: 1,
+    delegated_admin: 2,
+    admin: 3,
+  }
   if (hierarchy[actorRole] <= hierarchy[member.role as Role]) {
     return t('members.role_locked_privilege')
   }

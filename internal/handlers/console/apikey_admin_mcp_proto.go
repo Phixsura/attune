@@ -316,6 +316,13 @@ func mcpToolPolicyListProto(in []consolemcpclient.ClientToolPolicy) []*attunev1.
 	for _, item := range in {
 		resp := ptrext.Of(attunev1.MCPClientToolPolicy{
 			Name:             item.Name,
+			Kind:             item.Kind,
+			Owner:            item.Owner,
+			EnabledByDefault: item.EnabledByDefault,
+			Deprecated:       item.Deprecated,
+			Replacement:      item.Replacement,
+			Aliases:          mcpToolAliasListProto(item.Aliases),
+			Provenance:       mcpToolProvenanceProto(item.Provenance),
 			RequiredScope:    item.RequiredScope,
 			Risk:             item.Risk,
 			DataClass:        item.DataClass,
@@ -337,6 +344,28 @@ func mcpToolPolicyListProto(in []consolemcpclient.ClientToolPolicy) []*attunev1.
 		out = append(out, resp)
 	}
 	return out
+}
+
+func mcpToolAliasListProto(in []consolemcpclient.ClientToolAlias) []*attunev1.MCPClientToolAlias {
+	out := make([]*attunev1.MCPClientToolAlias, 0, len(in))
+	for _, item := range in {
+		out = append(out, ptrext.Of(attunev1.MCPClientToolAlias{
+			Name:        item.Name,
+			Deprecated:  item.Deprecated,
+			Replacement: item.Replacement,
+		}))
+	}
+	return out
+}
+
+func mcpToolProvenanceProto(in *consolemcpclient.ClientToolProvenance) *attunev1.MCPClientToolProvenance {
+	if in == nil {
+		return nil
+	}
+	return ptrext.Of(attunev1.MCPClientToolProvenance{
+		Kind:      in.Kind,
+		Reference: in.Reference,
+	})
 }
 
 func mcpConnectionProfileProto(in *consolemcpclient.ConnectionProfile) *attunev1.MCPConnectionProfile {

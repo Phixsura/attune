@@ -19,48 +19,67 @@ import (
 func TestLoadPathNewConfig(t *testing.T) {
 	path := writeConfig(t, validConfigYAML(t, validTinkKeyset(t)))
 	cfg, err := LoadPath(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.DatabaseURL != "postgres://attune:test@localhost:5432/attune?sslmode=disable" {
-		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
-	}
-	if cfg.EnricherBatch != DefaultEnricherBatch {
-		t.Fatalf("EnricherBatch = %d", cfg.EnricherBatch)
-	}
-	if cfg.EnricherQueueLen != DefaultEnricherQueueLen {
-		t.Fatalf("EnricherQueueLen = %d", cfg.EnricherQueueLen)
-	}
-	if cfg.EnricherWorkers != DefaultEnricherWorkers {
-		t.Fatalf("EnricherWorkers = %d", cfg.EnricherWorkers)
-	}
-	if cfg.EnricherBatchWindow != DefaultEnricherBatchWindow {
-		t.Fatalf("EnricherBatchWindow = %s", cfg.EnricherBatchWindow)
-	}
-	if cfg.Audit.RetentionDays != DefaultAuditRetentionDays {
-		t.Fatalf("Audit.RetentionDays = %d", cfg.Audit.RetentionDays)
-	}
-	if cfg.AuditPruneInterval != DefaultAuditPruneInterval {
-		t.Fatalf("AuditPruneInterval = %s", cfg.AuditPruneInterval)
-	}
-	if cfg.GDPRExportTTL != DefaultGDPRExportTTL {
-		t.Fatalf("GDPRExportTTL = %s", cfg.GDPRExportTTL)
-	}
-	if cfg.GDPRStepUpTTL != DefaultGDPRStepUpTTL {
-		t.Fatalf("GDPRStepUpTTL = %s", cfg.GDPRStepUpTTL)
-	}
-	if cfg.GDPRDeleteGraceWindow != DefaultGDPRDeleteGraceWindow {
-		t.Fatalf("GDPRDeleteGraceWindow = %s", cfg.GDPRDeleteGraceWindow)
-	}
-	if cfg.ShutdownDrainDelay != DefaultShutdownDrainDelay {
-		t.Fatalf("ShutdownDrainDelay = %s", cfg.ShutdownDrainDelay)
-	}
-	if cfg.ShutdownTimeout != DefaultShutdownTimeout {
-		t.Fatalf("ShutdownTimeout = %s", cfg.ShutdownTimeout)
-	}
-	if cfg.Console.BootstrapAdmin.Email != "admin@example.com" {
-		t.Fatalf("bootstrap admin email = %q", cfg.Console.BootstrapAdmin.Email)
-	}
+	require.NoError(t, err)
+	require.Equal(t, ProfileDev, cfg.Profile)
+	require.Equal(t, "postgres://attune:test@localhost:5432/attune?sslmode=disable", cfg.DatabaseURL)
+	require.Equal(t, DefaultEnricherBatch, cfg.EnricherBatch)
+	require.Equal(t, DefaultEnricherQueueLen, cfg.EnricherQueueLen)
+	require.Equal(t, DefaultEnricherWorkers, cfg.EnricherWorkers)
+	require.Equal(t, DefaultEnricherBatchWindow, cfg.EnricherBatchWindow)
+	require.Equal(t, DefaultAuditRetentionDays, cfg.Audit.RetentionDays)
+	require.Equal(t, DefaultAuditPruneInterval, cfg.AuditPruneInterval)
+	require.Equal(t, DefaultGDPRExportTTL, cfg.GDPRExportTTL)
+	require.Equal(t, DefaultGDPRStepUpTTL, cfg.GDPRStepUpTTL)
+	require.Equal(t, DefaultGDPRDeleteGraceWindow, cfg.GDPRDeleteGraceWindow)
+	require.Equal(t, DefaultShutdownDrainDelay, cfg.ShutdownDrainDelay)
+	require.Equal(t, DefaultShutdownTimeout, cfg.ShutdownTimeout)
+	require.Equal(t, "admin@example.com", cfg.Console.BootstrapAdmin.Email)
+}
+
+func TestLoadPathParsesProductionProfile(t *testing.T) {
+	raw := "profile: production\n" + validConfigYAML(t, validTinkKeyset(t))
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Equal(t, ProfileProduction, cfg.Profile)
+	require.True(t, cfg.IsProduction())
+}
+
+func TestLoadPathDefaultsObservabilityEnvironmentToProfile(t *testing.T) {
+	require.Equal(t, ProfileDev, loadObservabilityEnvironment(t, ""))
+	require.Equal(t, ProfileProduction, loadObservabilityEnvironment(t, "profile: production\n"))
+}
+
+func loadObservabilityEnvironment(t *testing.T, profileLine string) string {
+	t.Helper()
+
+	raw := profileLine + strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"observability:\n  environment: \"test\"\n",
+		"observability:\n",
+		1,
+	)
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	return cfg.Observability.Environment
+}
+
+func TestLoadPathRejectsInvalidProfile(t *testing.T) {
+	raw := "profile: staging\n" + validConfigYAML(t, validTinkKeyset(t))
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: profile must be one of")
+}
+
+func TestLoadPathRejectsInvalidConsoleBaseURL(t *testing.T) {
+	raw := strings.Replace(
+		validConfigYAML(t, validTinkKeyset(t)),
+		"  base_url: \"https://attune.example.com\"",
+		"  base_url: \"://bad\"",
+		1,
+	)
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: console.base_url must be a valid URL")
 }
 
 func TestLoadPathParsesSecurityBlock(t *testing.T) {
@@ -89,6 +108,13 @@ func TestLoadPathSecurityDefaultsAreSafe(t *testing.T) {
 	if cfg.Security.AllowLoopbackEgress || cfg.Security.AllowPrivateEgress || cfg.Security.TrustedProxyHops != 0 {
 		t.Fatalf("security defaults should be locked down, got %+v", cfg.Security)
 	}
+}
+
+func TestLoadPathRejectsNegativeTrustedProxyHops(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nsecurity:\n  trusted_proxy_hops: -1\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "security.trusted_proxy_hops must be non-negative")
 }
 
 func TestLoadPathParsesIngestCORSOrigins(t *testing.T) {

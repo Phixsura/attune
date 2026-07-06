@@ -59,6 +59,10 @@ private networks. Existing deployments that dial only public HTTPS endpoints are
 unaffected; deployments that rely on an internal LLM/IMAP host must set
 `allow_private_egress: true`.
 
+When the runtime config sets `profile: production`, attune refuses startup if
+the Console URL is not HTTPS or either egress relaxation is enabled. Keep
+`profile: dev` for local and evaluation installs.
+
 ### Where the guard applies
 
 | Path | Guard |
@@ -115,6 +119,9 @@ Notes:
 
 - Only `X-Forwarded-For` is consulted (single-header model). If your proxy emits
   only `X-Real-IP`, configure it to also append `X-Forwarded-For`.
+- If the same proxy also terminates TLS, forward `X-Forwarded-Proto: https`
+  (or the equivalent in your ingress controller) so the external HTTPS scheme is
+  preserved end-to-end.
 - chi's `middleware.RealIP` is intentionally **not** used (it would
   unconditionally trust the header and reopen the spoof).
 - `audit_log.actor_ip` records the resolved client IP, so set

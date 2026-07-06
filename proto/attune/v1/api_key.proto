@@ -65,6 +65,17 @@ service ApiKeyService {
       body: "*"
     };
   }
+  // PATCH /fb/v1/console/service-accounts/{id}
+  rpc UpdateServiceAccount(UpdateServiceAccountRequest) returns (ServiceAccount) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/service-accounts/{id}"
+      body: "*"
+    };
+  }
+  // DELETE /fb/v1/console/service-accounts/{id} — remove the service account.
+  rpc DeleteServiceAccount(DeleteServiceAccountRequest) returns (DeleteServiceAccountResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/service-accounts/{id}"};
+  }
 
   // Event subscriptions
   // GET /fb/v1/console/api-keys/event-subscriptions
@@ -455,6 +466,17 @@ message CreateServiceAccountRequest {
 message CreateServiceAccountResponse {
   ServiceAccount service_account = 1;
 }
+
+message UpdateServiceAccountRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional bool is_active = 2;
+}
+
+message DeleteServiceAccountRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message DeleteServiceAccountResponse {}
 
 // Event subscriptions
 message EventSubscription {

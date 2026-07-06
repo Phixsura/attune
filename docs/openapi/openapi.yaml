@@ -1035,6 +1035,100 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/audit-log/views:
+        get:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_ListSavedAuditLogViews
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListSavedAuditLogViewsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_CreateSavedAuditLogView
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateSavedAuditLogViewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SavedAuditLogViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/audit-log/views/{id}:
+        put:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_UpdateSavedAuditLogView
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateSavedAuditLogViewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SavedAuditLogViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        delete:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_DeleteSavedAuditLogView
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteSavedAuditLogViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/classification-quality:
         get:
             tags:
@@ -4279,6 +4373,61 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/service-accounts/{id}:
+        delete:
+            tags:
+                - ApiKeyService
+            description: DELETE /fb/v1/console/service-accounts/{id} — remove the service account.
+            operationId: ApiKeyService_DeleteServiceAccount
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteServiceAccountResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        patch:
+            tags:
+                - ApiKeyService
+            description: PATCH /fb/v1/console/service-accounts/{id}
+            operationId: ApiKeyService_UpdateServiceAccount
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateServiceAccountRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ServiceAccount'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/siem-integrations:
         get:
             tags:
@@ -4318,6 +4467,63 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/CreateSIEMIntegrationResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/system/preflight:
+        get:
+            tags:
+                - SystemService
+            description: GET /fb/v1/console/system/preflight — production readiness report.
+            operationId: SystemService_GetPreflight
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreflightReportResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/system/recovery:
+        get:
+            tags:
+                - SystemService
+            description: GET /fb/v1/console/system/recovery — latest restore-drill recovery state.
+            operationId: SystemService_GetRecovery
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RecoveryContextResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/system/release:
+        get:
+            tags:
+                - SystemService
+            description: GET /fb/v1/console/system/release — runtime release and ownership metadata.
+            operationId: SystemService_GetRelease
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReleaseContextResponse'
                 default:
                     description: Default error response
                     content:
@@ -4941,6 +5147,242 @@ paths:
                     description: OK
                     content:
                         '*/*': {}
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+    /v1/audit-log/views:
+        get:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_ListSavedAuditLogViews
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListSavedAuditLogViewsResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+            parameters:
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+        post:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_CreateSavedAuditLogView
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateSavedAuditLogViewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SavedAuditLogViewResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+            parameters:
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+    /v1/audit-log/views/{id}:
+        put:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_UpdateSavedAuditLogView
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateSavedAuditLogViewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SavedAuditLogViewResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+        delete:
+            tags:
+                - AuditLogService
+            operationId: AuditLogService_DeleteSavedAuditLogView
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteSavedAuditLogViewResponse'
                     headers:
                         X-Attune-Api-Version:
                             description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
@@ -6598,6 +7040,29 @@ components:
                     type: string
                 createdAt:
                     type: string
+        AuditLogViewState:
+            type: object
+            properties:
+                actions:
+                    type: array
+                    items:
+                        type: string
+                actorType:
+                    type: string
+                actorId:
+                    type: string
+                targetType:
+                    type: string
+                targetId:
+                    type: string
+                from:
+                    type: string
+                to:
+                    type: string
+                localQuery:
+                    type: string
+                inspectedEntryId:
+                    type: string
         BatchDeleteOp:
             type: object
             properties:
@@ -7416,6 +7881,13 @@ components:
             properties:
                 integration:
                     $ref: '#/components/schemas/SIEMIntegration'
+        CreateSavedAuditLogViewRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/AuditLogViewState'
         CreateSecretManagerRequest:
             required:
                 - managerType
@@ -7571,6 +8043,9 @@ components:
                 llmAuditCount:
                     type: integer
                     format: int32
+                outboxCount:
+                    type: integer
+                    format: int32
         DeleteGuardPolicyResponse:
             type: object
             properties: {}
@@ -7605,6 +8080,12 @@ components:
             type: object
             properties: {}
         DeleteNotifyTargetResponse:
+            type: object
+            properties: {}
+        DeleteSavedAuditLogViewResponse:
+            type: object
+            properties: {}
+        DeleteServiceAccountResponse:
             type: object
             properties: {}
         DigestSubscription:
@@ -8477,6 +8958,9 @@ components:
                     type: string
                 revokedAt:
                     type: string
+                outboxCount:
+                    type: integer
+                    format: int32
         GdprStepUpStatus:
             type: object
             properties:
@@ -9411,6 +9895,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/SIEMIntegration'
+        ListSavedAuditLogViewsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SavedAuditLogView'
         ListScopePresetsResponse:
             type: object
             properties:
@@ -9519,10 +10010,29 @@ components:
                     type: string
                 revokedAt:
                     type: string
+        MCPClientToolAlias:
+            type: object
+            properties:
+                name:
+                    type: string
+                deprecated:
+                    type: boolean
+                replacement:
+                    type: string
         MCPClientToolPolicy:
             type: object
             properties:
                 name:
+                    type: string
+                kind:
+                    type: string
+                owner:
+                    type: string
+                enabledByDefault:
+                    type: boolean
+                deprecated:
+                    type: boolean
+                replacement:
                     type: string
                 requiredScope:
                     type: string
@@ -9554,6 +10064,19 @@ components:
                 rateLimitBurst:
                     type: integer
                     format: int32
+                aliases:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/MCPClientToolAlias'
+                provenance:
+                    $ref: '#/components/schemas/MCPClientToolProvenance'
+        MCPClientToolProvenance:
+            type: object
+            properties:
+                kind:
+                    type: string
+                reference:
+                    type: string
         MCPConnectionProfile:
             type: object
             properties:
@@ -9828,6 +10351,30 @@ components:
                 usageCount:
                     type: string
             description: Permission usage / unused scope detection
+        PreflightCheckResult:
+            type: object
+            properties:
+                name:
+                    type: string
+                category:
+                    type: string
+                status:
+                    type: string
+                message:
+                    type: string
+                remediation:
+                    type: string
+        PreflightReportResponse:
+            type: object
+            properties:
+                status:
+                    type: string
+                checks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PreflightCheckResult'
+                elapsed:
+                    type: string
         PreviewEnrichPromptRequest:
             required:
                 - sampleContent
@@ -9948,6 +10495,32 @@ components:
         RecordSearchEventResponse:
             type: object
             properties: {}
+        RecoveryContextLastRun:
+            type: object
+            properties:
+                ranAt:
+                    type: string
+                status:
+                    type: string
+                backupRef:
+                    type: string
+                durationMs:
+                    type: string
+        RecoveryContextResponse:
+            type: object
+            properties:
+                status:
+                    type: string
+                message:
+                    type: string
+                remediation:
+                    type: string
+                freshnessWindowSeconds:
+                    type: string
+                ageSeconds:
+                    type: string
+                lastRun:
+                    $ref: '#/components/schemas/RecoveryContextLastRun'
         RedeliverReplySendHookDeliveryRequest:
             type: object
             properties:
@@ -9974,6 +10547,33 @@ components:
                 id:
                     type: string
                 expectedRevision:
+                    type: string
+        ReleaseContextResponse:
+            type: object
+            properties:
+                serviceVersion:
+                    type: string
+                environment:
+                    type: string
+                profile:
+                    type: string
+                lifecycleState:
+                    type: string
+                ownerTeam:
+                    type: string
+                compatibilityRules:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SemanticDescriptor'
+                glossary:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SemanticDescriptor'
+                runbookUrl:
+                    type: string
+                escalationUrl:
+                    type: string
+                startedAt:
                     type: string
         RemoveFeedbackTagResponse:
             type: object
@@ -10484,6 +11084,24 @@ components:
                 createdAt:
                     type: string
             description: SIEM integrations
+        SavedAuditLogView:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/AuditLogViewState'
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        SavedAuditLogViewResponse:
+            type: object
+            properties:
+                view:
+                    $ref: '#/components/schemas/SavedAuditLogView'
         ScopeInfo:
             type: object
             properties:
@@ -10687,6 +11305,15 @@ components:
         SeedDefaultsResponse:
             type: object
             properties: {}
+        SemanticDescriptor:
+            type: object
+            properties:
+                key:
+                    type: string
+                label:
+                    type: string
+                description:
+                    type: string
         SemanticSearchHit:
             type: object
             properties:
@@ -11271,6 +11898,24 @@ components:
                     type: string
                 expectedRevision:
                     type: string
+        UpdateSavedAuditLogViewRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/AuditLogViewState'
+        UpdateServiceAccountRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                isActive:
+                    type: boolean
         UpdateStateRequest:
             type: object
             properties:
@@ -11584,6 +12229,8 @@ tags:
          Uses pgvector embeddings when available, falls back to keyword search.
     - name: SessionService
       description: SessionService backs the console session (login, current tenant + user, logout).
+    - name: SystemService
+      description: SystemService publishes console-only platform health and release context.
     - name: UsageService
       description: UsageService serves the console usage dashboard.
     - name: WorkflowService

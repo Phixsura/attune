@@ -13,6 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type lastRunQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 // Record appends a drill report to restore_drill_runs on the production pool so
 // the readiness surface and audit history can read it.
 func Record(ctx context.Context, prod *pgxpool.Pool, rep DrillReport) error {
@@ -90,7 +94,7 @@ type LastRun struct {
 }
 
 // ReadLast returns the latest recorded drill, or ok=false if none exist.
-func ReadLast(ctx context.Context, prod *pgxpool.Pool) (LastRun, bool, error) {
+func ReadLast(ctx context.Context, prod lastRunQuerier) (LastRun, bool, error) {
 	var lr LastRun
 	var status string
 	err := prod.QueryRow(ctx, `

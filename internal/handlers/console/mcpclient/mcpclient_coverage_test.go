@@ -1274,6 +1274,27 @@ func TestValidateToolPolicyInputs_UnknownTool(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown tool")
 }
 
+func TestValidateToolPolicyInputs_AliasCanonicalizes(t *testing.T) {
+	t.Parallel()
+	err := validateToolPolicyInputs([]string{domain.MCPScopeRead}, []ToolPolicyInput{
+		{ToolName: "feedback.list", Effect: domain.MCPToolPolicyEffectAllow},
+	})
+	require.NoError(t, err)
+}
+
+func TestValidateToolPolicyInputs_AliasCanonicalDuplicate(t *testing.T) {
+	t.Parallel()
+	err := validateToolPolicyInputs(
+		[]string{domain.MCPScopeRead},
+		[]ToolPolicyInput{
+			{ToolName: "list_feedback", Effect: domain.MCPToolPolicyEffectAllow},
+			{ToolName: "feedback.list", Effect: domain.MCPToolPolicyEffectDeny},
+		},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate tool_name: list_feedback")
+}
+
 func TestValidateToolPolicyInputs_InvalidEffect(t *testing.T) {
 	t.Parallel()
 	err := validateToolPolicyInputs([]string{domain.MCPScopeRead}, []ToolPolicyInput{

@@ -290,6 +290,15 @@
                 "disabled": { "type": "boolean" }
               }
             },
+            "security": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "allowLoopbackEgress": { "type": "boolean" },
+                "allowPrivateEgress": { "type": "boolean" },
+                "trustedProxyHops": { "type": "integer", "minimum": 0 }
+              }
+            },
             "oidc": {
               "type": "object",
               "additionalProperties": true,

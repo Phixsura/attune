@@ -35,6 +35,30 @@ describe('hasPermission', () => {
     })
   })
 
+  describe('delegated admin role', () => {
+    const role: Role = 'delegated_admin'
+
+    it('can manage operational feedback and settings', () => {
+      expect(hasPermission(role, 'feedback:view')).toBe(true)
+      expect(hasPermission(role, 'feedback:edit')).toBe(true)
+      expect(hasPermission(role, 'feedback:delete')).toBe(true)
+      expect(hasPermission(role, 'feedback:batch_delete')).toBe(false)
+      expect(hasPermission(role, 'settings:enrich_config:view')).toBe(true)
+      expect(hasPermission(role, 'settings:enrich_config:edit')).toBe(true)
+      expect(hasPermission(role, 'settings:notify_targets:view')).toBe(true)
+      expect(hasPermission(role, 'settings:notify_targets:edit')).toBe(true)
+      expect(hasPermission(role, 'settings:audit_log:view')).toBe(true)
+      expect(hasPermission(role, 'settings:gdpr:view')).toBe(true)
+    })
+
+    it('does not get security-owner navigation', () => {
+      expect(hasPermission(role, 'settings:members:view')).toBe(false)
+      expect(hasPermission(role, 'settings:api_keys:view')).toBe(false)
+      expect(hasPermission(role, 'llm_config:view')).toBe(false)
+      expect(hasPermission(role, 'nav:llm_config')).toBe(false)
+    })
+  })
+
   describe('member role', () => {
     const role: Role = 'member'
 
@@ -112,6 +136,16 @@ describe('getPermissions', () => {
     expect(perms).toContain('feedback:view')
     expect(perms).toContain('settings:members:invite')
     expect(perms.length).toBeGreaterThan(20)
+  })
+
+  it('returns operational permissions for delegated admin', () => {
+    const perms = getPermissions('delegated_admin')
+    expect(perms).toContain('feedback:view')
+    expect(perms).toContain('settings:enrich_config:edit')
+    expect(perms).toContain('settings:audit_log:view')
+    expect(perms).toContain('settings:gdpr:view')
+    expect(perms).not.toContain('settings:members:invite')
+    expect(perms).not.toContain('nav:llm_config')
   })
 
   it('returns limited permissions for viewer', () => {

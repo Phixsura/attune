@@ -214,6 +214,7 @@ func TestDeleteMapsCounts(t *testing.T) {
 				TagAssignmentCount: 2,
 				FeedbackAuditCount: 1,
 				LLMAuditCount:      4,
+				OutboxCount:        7,
 			},
 		}),
 	}), nil, nil, 0)
@@ -229,7 +230,7 @@ func TestDeleteMapsCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Delete err = %v", err)
 	}
-	if result.Body.GetFeedbackCount() != 3 || result.Body.GetLlmAuditCount() != 4 {
+	if result.Body.GetFeedbackCount() != 3 || result.Body.GetLlmAuditCount() != 4 || result.Body.GetOutboxCount() != 7 {
 		t.Fatalf("Delete response = %#v", result.Body)
 	}
 	if result.Body.GetRequestId() != "req-123" {

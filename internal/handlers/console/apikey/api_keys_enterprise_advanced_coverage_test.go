@@ -19,6 +19,7 @@ import (
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 // richFake embeds the base fakeAPIKeysService and overrides specific methods
@@ -118,6 +119,14 @@ type richFake struct {
 	createSvcAccountID  uuid.UUID
 	createSvcAccountErr error
 
+	// UpdateServiceAccount
+	updateSvcAccountRow apikeyrepo.ServiceAccountRow
+	updateSvcAccountErr error
+
+	// DeleteServiceAccount
+	deleteSvcAccountRow apikeyrepo.ServiceAccountRow
+	deleteSvcAccountErr error
+
 	// ListEventSubscriptions
 	listEventSubsResult []apikeyrepo.EventSubscription
 	listEventSubsErr    error
@@ -129,6 +138,15 @@ type richFake struct {
 	// GetUnresolvedLeaks
 	leaksResult []apikeyrepo.LeakDetection
 	leaksErr    error
+}
+
+type capturedAudit struct {
+	events []auditlogsvc.Event
+}
+
+func (c *capturedAudit) Record(_ context.Context, event auditlogsvc.Event) error {
+	c.events = append(c.events, event)
+	return nil
 }
 
 func (f *richFake) GetPolicy(_ context.Context, _ string) (*apikeyrepo.Policy, error) {
@@ -226,6 +244,14 @@ func (f *richFake) ListServiceAccounts(_ context.Context, _ string) ([]apikeyrep
 
 func (f *richFake) CreateServiceAccount(_ context.Context, _, _, _ string) (uuid.UUID, error) {
 	return f.createSvcAccountID, f.createSvcAccountErr
+}
+
+func (f *richFake) UpdateServiceAccount(_ context.Context, _ string, _ uuid.UUID, _ bool) (apikeyrepo.ServiceAccountRow, error) {
+	return f.updateSvcAccountRow, f.updateSvcAccountErr
+}
+
+func (f *richFake) DeleteServiceAccount(_ context.Context, _ string, _ uuid.UUID) (apikeyrepo.ServiceAccountRow, error) {
+	return f.deleteSvcAccountRow, f.deleteSvcAccountErr
 }
 
 func (f *richFake) ListEventSubscriptions(_ context.Context, _ string) ([]apikeyrepo.EventSubscription, error) {
@@ -1604,7 +1630,8 @@ func TestAdvancedCreateServiceAccount_Success(t *testing.T) {
 
 	id := uuid.New()
 	svc := &richFake{createSvcAccountID: id}
-	h := &APIKeysHandler{svc: svc}
+	audit := &capturedAudit{}
+	h := &APIKeysHandler{svc: svc, audit: audit}
 
 	result, err := h.CreateServiceAccount(testRequestContext(), &attunev1.CreateServiceAccountRequest{
 		Name:        "Deploy Bot",
@@ -1616,6 +1643,9 @@ func TestAdvancedCreateServiceAccount_Success(t *testing.T) {
 	require.Equal(t, id.String(), result.Body.GetServiceAccount().GetId())
 	require.Equal(t, "Deploy Bot", result.Body.GetServiceAccount().GetName())
 	require.True(t, result.Body.GetServiceAccount().GetIsActive())
+	require.Len(t, audit.events, 1)
+	require.Equal(t, "service_account.create", audit.events[0].Action)
+	require.Equal(t, id.String(), audit.events[0].TargetID)
 }
 
 func TestAdvancedCreateServiceAccount_EmptyName(t *testing.T) {
@@ -1642,6 +1672,196 @@ func TestAdvancedCreateServiceAccount_ServiceError(t *testing.T) {
 
 	_, err := h.CreateServiceAccount(testRequestContext(), &attunev1.CreateServiceAccountRequest{
 		Name: "Fail Bot",
+	})
+
+	var got *dispatcher.Error
+	require.ErrorAs(t, err, &got)
+	require.Equal(t, http.StatusInternalServerError, got.Status)
+}
+
+func TestAdvancedUpdateServiceAccount_Success(t *testing.T) {
+	t.Parallel()
+
+	id := uuid.New()
+	svc := &richFake{
+		updateSvcAccountRow: apikeyrepo.ServiceAccountRow{
+			ID:          id,
+			TenantID:    "tenant-1",
+			Name:        "Deploy Bot",
+			Description: "deployment automation",
+			IsActive:    false,
+			CreatedAt:   refTime,
+			UpdatedAt:   refTime.Add(1 * time.Minute),
+		},
+	}
+	audit := &capturedAudit{}
+	h := &APIKeysHandler{svc: svc, audit: audit}
+
+	result, err := h.UpdateServiceAccount(testRequestContext(), &attunev1.UpdateServiceAccountRequest{
+		Id:       id.String(),
+		IsActive: ptrext.Of(false),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, result.Status)
+	require.Equal(t, id.String(), result.Body.GetId())
+	require.False(t, result.Body.GetIsActive())
+	require.Equal(t, "Deploy Bot", result.Body.GetName())
+	require.Len(t, audit.events, 1)
+	require.Equal(t, "service_account.update", audit.events[0].Action)
+	require.Equal(t, id.String(), audit.events[0].TargetID)
+}
+
+func TestAdvancedUpdateServiceAccount_MissingActiveState(t *testing.T) {
+	t.Parallel()
+
+	svc := &richFake{}
+	h := &APIKeysHandler{svc: svc}
+
+	_, err := h.UpdateServiceAccount(testRequestContext(), &attunev1.UpdateServiceAccountRequest{
+		Id: uuid.NewString(),
+	})
+
+	var got *dispatcher.Error
+	require.ErrorAs(t, err, &got)
+	require.Equal(t, http.StatusBadRequest, got.Status)
+	require.Equal(t, attunev1.ErrorCode_BAD_REQUEST, got.Code)
+}
+
+func TestAdvancedUpdateServiceAccount_InvalidID(t *testing.T) {
+	t.Parallel()
+
+	svc := &richFake{}
+	h := &APIKeysHandler{svc: svc}
+
+	_, err := h.UpdateServiceAccount(testRequestContext(), &attunev1.UpdateServiceAccountRequest{
+		Id:       "not-a-uuid",
+		IsActive: ptrext.Of(true),
+	})
+
+	var got *dispatcher.Error
+	require.ErrorAs(t, err, &got)
+	require.Equal(t, http.StatusBadRequest, got.Status)
+	require.Equal(t, attunev1.ErrorCode_BAD_ID, got.Code)
+}
+
+func TestAdvancedUpdateServiceAccount_NotFound(t *testing.T) {
+	t.Parallel()
+
+	svc := &richFake{updateSvcAccountErr: apikeyrepo.ErrServiceAccountNotFound}
+	h := &APIKeysHandler{svc: svc}
+
+	_, err := h.UpdateServiceAccount(testRequestContext(), &attunev1.UpdateServiceAccountRequest{
+		Id:       uuid.NewString(),
+		IsActive: ptrext.Of(false),
+	})
+
+	var got *dispatcher.Error
+	require.ErrorAs(t, err, &got)
+	require.Equal(t, http.StatusNotFound, got.Status)
+	require.Equal(t, attunev1.ErrorCode_NOT_FOUND, got.Code)
+}
+
+func TestAdvancedUpdateServiceAccount_ServiceError(t *testing.T) {
+	t.Parallel()
+
+	svc := &richFake{updateSvcAccountErr: errSentinel}
+	h := &APIKeysHandler{svc: svc}
+
+	_, err := h.UpdateServiceAccount(testRequestContext(), &attunev1.UpdateServiceAccountRequest{
+		Id:       uuid.NewString(),
+		IsActive: ptrext.Of(true),
+	})
+
+	var got *dispatcher.Error
+	require.ErrorAs(t, err, &got)
+	require.Equal(t, http.StatusInternalServerError, got.Status)
+}
+
+// ---------- DeleteServiceAccount ----------
+
+func TestAdvancedDeleteServiceAccount_Success(t *testing.T) {
+	t.Parallel()
+
+	id := uuid.New()
+	createdAt := refTime
+	updatedAt := refTime.Add(2 * time.Minute)
+	svc := &richFake{
+		deleteSvcAccountRow: apikeyrepo.ServiceAccountRow{
+			ID:          id,
+			TenantID:    "tenant-1",
+			Name:        "Deploy Bot",
+			Description: "deployment automation",
+			IsActive:    true,
+			CreatedAt:   createdAt,
+			UpdatedAt:   updatedAt,
+		},
+	}
+	audit := &capturedAudit{}
+	h := &APIKeysHandler{svc: svc, audit: audit}
+
+	result, err := h.DeleteServiceAccount(testRequestContextWithUserID(), &attunev1.DeleteServiceAccountRequest{
+		Id: id.String(),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, result.Status)
+	require.Len(t, audit.events, 1)
+	require.Equal(t, "service_account.delete", audit.events[0].Action)
+	require.Equal(t, "service_account", audit.events[0].TargetType)
+	require.Equal(t, id.String(), audit.events[0].TargetID)
+	require.Equal(t, "Deleted service account", audit.events[0].Summary)
+	require.Equal(t, map[string]any{
+		"id":          id.String(),
+		"name":        "Deploy Bot",
+		"description": "deployment automation",
+		"is_active":   true,
+		"created_at":  createdAt.UTC().Format(time.RFC3339),
+		"updated_at":  updatedAt.UTC().Format(time.RFC3339),
+	}, audit.events[0].Before)
+	require.Nil(t, audit.events[0].After)
+}
+
+func TestAdvancedDeleteServiceAccount_InvalidID(t *testing.T) {
+	t.Parallel()
+
+	svc := &richFake{}
+	h := &APIKeysHandler{svc: svc}
+
+	_, err := h.DeleteServiceAccount(testRequestContext(), &attunev1.DeleteServiceAccountRequest{
+		Id: "not-a-uuid",
+	})
+
+	var got *dispatcher.Error
+	require.ErrorAs(t, err, &got)
+	require.Equal(t, http.StatusBadRequest, got.Status)
+	require.Equal(t, attunev1.ErrorCode_BAD_ID, got.Code)
+}
+
+func TestAdvancedDeleteServiceAccount_NotFound(t *testing.T) {
+	t.Parallel()
+
+	svc := &richFake{deleteSvcAccountErr: apikeyrepo.ErrServiceAccountNotFound}
+	h := &APIKeysHandler{svc: svc}
+
+	_, err := h.DeleteServiceAccount(testRequestContext(), &attunev1.DeleteServiceAccountRequest{
+		Id: uuid.NewString(),
+	})
+
+	var got *dispatcher.Error
+	require.ErrorAs(t, err, &got)
+	require.Equal(t, http.StatusNotFound, got.Status)
+	require.Equal(t, attunev1.ErrorCode_NOT_FOUND, got.Code)
+}
+
+func TestAdvancedDeleteServiceAccount_ServiceError(t *testing.T) {
+	t.Parallel()
+
+	svc := &richFake{deleteSvcAccountErr: errSentinel}
+	h := &APIKeysHandler{svc: svc}
+
+	_, err := h.DeleteServiceAccount(testRequestContext(), &attunev1.DeleteServiceAccountRequest{
+		Id: uuid.NewString(),
 	})
 
 	var got *dispatcher.Error

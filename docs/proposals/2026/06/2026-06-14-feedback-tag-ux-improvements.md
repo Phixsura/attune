@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Issue** | #28 |
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Started** | 2026-06-14 CST |
 | **Related** | `2026-06-14-feedback-manual-tags.md` (base implementation — backend complete, frontend basic) |
 

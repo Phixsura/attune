@@ -93,10 +93,63 @@ export interface DownloadAuditEvidenceExportRequest {
   jobId: string;
 }
 
+export interface AuditLogViewState {
+  actions: string[];
+  actorType: string;
+  actorId: string;
+  targetType: string;
+  targetId: string;
+  from: string;
+  to: string;
+  localQuery: string;
+  inspectedEntryId?: string | undefined;
+}
+
+export interface SavedAuditLogView {
+  id: string;
+  name: string;
+  state?: AuditLogViewState | undefined;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListSavedAuditLogViewsRequest {
+}
+
+export interface ListSavedAuditLogViewsResponse {
+  items: SavedAuditLogView[];
+}
+
+export interface CreateSavedAuditLogViewRequest {
+  name: string;
+  state?: AuditLogViewState | undefined;
+}
+
+export interface UpdateSavedAuditLogViewRequest {
+  id: string;
+  name: string;
+  state?: AuditLogViewState | undefined;
+}
+
+export interface SavedAuditLogViewResponse {
+  view?: SavedAuditLogView | undefined;
+}
+
+export interface DeleteSavedAuditLogViewRequest {
+  id: string;
+}
+
+export interface DeleteSavedAuditLogViewResponse {
+}
+
 export interface AuditLogService {
   ListAuditLog(request: ListAuditLogRequest): Promise<ListAuditLogResponse>;
   ExportAuditLogCSV(request: ExportAuditLogCSVRequest): Promise<HttpBody>;
   CreateAuditEvidenceExport(request: CreateAuditEvidenceExportRequest): Promise<CreateAuditEvidenceExportResponse>;
   GetAuditEvidenceExport(request: GetAuditEvidenceExportRequest): Promise<GetAuditEvidenceExportResponse>;
   DownloadAuditEvidenceExport(request: DownloadAuditEvidenceExportRequest): Promise<HttpBody>;
+  ListSavedAuditLogViews(request: ListSavedAuditLogViewsRequest): Promise<ListSavedAuditLogViewsResponse>;
+  CreateSavedAuditLogView(request: CreateSavedAuditLogViewRequest): Promise<SavedAuditLogViewResponse>;
+  UpdateSavedAuditLogView(request: UpdateSavedAuditLogViewRequest): Promise<SavedAuditLogViewResponse>;
+  DeleteSavedAuditLogView(request: DeleteSavedAuditLogViewRequest): Promise<DeleteSavedAuditLogViewResponse>;
 }

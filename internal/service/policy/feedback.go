@@ -31,12 +31,12 @@ func (p *FeedbackPolicy) CanEdit() bool {
 }
 
 // CanDelete returns true if the user can delete the given feedback.
-// Admin can delete any feedback; member can only delete their own.
+// Admin can delete any feedback; member and delegated admin can only delete their own.
 func (p *FeedbackPolicy) CanDelete(feedbackCreatedByUserID string) bool {
 	if p.role == domain.RoleAdmin {
 		return true
 	}
-	if p.role == domain.RoleMember && feedbackCreatedByUserID == p.userID {
+	if (p.role == domain.RoleMember || p.role == domain.RoleDelegatedAdmin) && feedbackCreatedByUserID == p.userID {
 		return true
 	}
 	return false

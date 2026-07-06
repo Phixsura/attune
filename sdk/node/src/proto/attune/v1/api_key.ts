@@ -253,6 +253,18 @@ export interface CreateServiceAccountResponse {
   serviceAccount?: ServiceAccount | undefined;
 }
 
+export interface UpdateServiceAccountRequest {
+  id: string;
+  isActive?: boolean | undefined;
+}
+
+export interface DeleteServiceAccountRequest {
+  id: string;
+}
+
+export interface DeleteServiceAccountResponse {
+}
+
 /** Event subscriptions */
 export interface EventSubscription {
   id: string;
@@ -907,6 +919,10 @@ export interface ApiKeyService {
   ListServiceAccounts(request: ListServiceAccountsRequest): Promise<ListServiceAccountsResponse>;
   /** POST /fb/v1/console/service-accounts */
   CreateServiceAccount(request: CreateServiceAccountRequest): Promise<CreateServiceAccountResponse>;
+  /** PATCH /fb/v1/console/service-accounts/{id} */
+  UpdateServiceAccount(request: UpdateServiceAccountRequest): Promise<ServiceAccount>;
+  /** DELETE /fb/v1/console/service-accounts/{id} — remove the service account. */
+  DeleteServiceAccount(request: DeleteServiceAccountRequest): Promise<DeleteServiceAccountResponse>;
   /**
    * Event subscriptions
    * GET /fb/v1/console/api-keys/event-subscriptions

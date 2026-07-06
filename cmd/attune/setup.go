@@ -31,6 +31,7 @@ import (
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditevidencerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
+	auditlogviewrepo "github.com/Phixsura/attune/internal/repo/auditlogview"
 	breakglassrepo "github.com/Phixsura/attune/internal/repo/breakglass"
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
@@ -58,6 +59,7 @@ import (
 	"github.com/Phixsura/attune/internal/service/apikey"
 	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	auditlogviewsvc "github.com/Phixsura/attune/internal/service/auditlogview"
 	authmodesvc "github.com/Phixsura/attune/internal/service/authmode"
 	breakglasssvc "github.com/Phixsura/attune/internal/service/breakglass"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -180,7 +182,7 @@ func refreshOutboxLag(ctx context.Context, outbox *outboxrepo.OutboxRepo) {
 // the local-admin password flow (auth.Handler + admin.Repo + bootstrap config).
 //
 // Console boots when ConsoleSessionKey is set and ConsoleBaseURL is
-// non-empty. No more dev-login / insecure-cookies escape hatches.
+// non-empty.
 func buildConsoleRouter(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
@@ -201,7 +203,9 @@ func buildConsoleRouter(
 
 	tenantRepo := tenant.NewTenant(pool)
 	userRepo := tenant.NewTenantUserRepo(pool)
+	settingsRepo := systemsettingsrepo.NewRepo(pool)
 	auditLogSvc := auditlogsvc.New(auditlogrepo.New(pool))
+	auditViewSvc := auditlogviewsvc.New(auditlogviewrepo.New(settingsRepo))
 	apiKeySvc := apikey.NewAPIKeys(apikeyrepo.NewAPIKey(pool))
 	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
 	feedbackRepo := feedback.NewFeedback(pool)
@@ -211,6 +215,7 @@ func buildConsoleRouter(
 	oidcUserRepo := oidcuserrepo.NewRepo(pool)
 	me := console.NewMeHandler(signer, tenantRepo, userRepo, adminRepo, oidcUserRepo)
 	auditLog := console.NewAuditLogHandler(auditLogSvc)
+	auditLog.SetSavedViewService(auditViewSvc)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
 	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
@@ -290,9 +295,23 @@ func buildConsoleRouter(
 		usage, enrichConfig, enrichmentRuntimeHandler, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
 		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
+	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo), nil
+}
+
+func configureConsoleRouter(
+	router *console.Router,
+	pool *pgxpool.Pool,
+	cfg *config.Config,
+	settingsRepo *systemsettingsrepo.Repo,
+	auditLogSvc *auditlogsvc.Service,
+	signer *console.Signer,
+	tenantRepo *tenant.TenantRepo,
+	adminRepo *admin.Repo,
+	feedbackRepo *feedback.FeedbackRepo,
+) chi.Router {
 	router.SetQualityActionHandler(console.NewQualityActionHandler(feedbackRepo))
-	attachOptionalHandlers(router, pool, cfg, auditLogSvc, signer, tenantRepo, adminRepo)
-	return router.Mount(), nil
+	attachOptionalHandlers(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo)
+	return router.Mount()
 }
 
 func buildSearchHandler(
@@ -311,12 +330,14 @@ func buildSearchHandler(
 	return searchHandler
 }
 
-func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo) {
+func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, settingsRepo *systemsettingsrepo.Repo, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo) {
 	attachOutboxHandler(router, pool, auditLogSvc)
 	attachAuditEvidenceHandler(router, pool, cfg, auditLogSvc)
 	attachMCPClientHandler(router, cfg, pool, auditLogSvc)
 	attachPreflightHandler(router, cfg, pool)
-	attachSSOCutoverHandler(router, pool, cfg, auditLogSvc, signer, tenantRepo, adminRepo)
+	attachRecoveryHandler(router, pool)
+	attachReleaseInfoHandler(router, cfg)
+	attachSSOCutoverHandler(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo)
 }
 
 // attachOutboxHandler wires the notify dead-queue console handler (#33). Kept
@@ -345,6 +366,16 @@ func attachPreflightHandler(router *console.Router, cfg *config.Config, pool *pg
 	router.SetPreflightHandler(system.NewPreflightHandler(env))
 }
 
+// attachRecoveryHandler wires the restore-drill recovery status handler.
+func attachRecoveryHandler(router *console.Router, pool *pgxpool.Pool) {
+	router.SetRecoveryHandler(system.NewRecoveryHandler(pool))
+}
+
+// attachReleaseInfoHandler wires the Reliability release-context handler.
+func attachReleaseInfoHandler(router *console.Router, cfg *config.Config) {
+	router.SetReleaseInfoHandler(system.NewReleaseHandler(cfg))
+}
+
 // attachMCPClientHandler wires the MCP OAuth client console handler (#93).
 func attachMCPClientHandler(router *console.Router, cfg *config.Config, pool *pgxpool.Pool, audit *auditlogsvc.Service) {
 	h := console.NewMCPClientHandler(
@@ -359,9 +390,8 @@ func attachMCPClientHandler(router *console.Router, cfg *config.Config, pool *pg
 }
 
 // attachSSOCutoverHandler wires the SSO cutover and break-glass handlers (#158).
-func attachSSOCutoverHandler(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, audit *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo) {
+func attachSSOCutoverHandler(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, settingsRepo *systemsettingsrepo.Repo, audit *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo) {
 	bgRepo := breakglassrepo.NewRepo(pool)
-	settingsRepo := systemsettingsrepo.NewRepo(pool)
 	bgSvc := breakglasssvc.NewService(bgRepo, breakglasssvc.DefaultConfig())
 
 	preflightEnv := ptrext.Of(preflight.Environment{Cfg: cfg, Pool: pool})

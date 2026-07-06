@@ -116,6 +116,12 @@ func TestOriginAllowed(t *testing.T) {
 			wantAllow: false,
 		},
 		{
+			name:      "http origin rejected against https baseURL",
+			origin:    "http://example.com",
+			baseURL:   "https://example.com",
+			wantAllow: false,
+		},
+		{
 			name:      "referer fallback same origin",
 			referer:   "https://example.com/login",
 			baseURL:   "https://example.com",

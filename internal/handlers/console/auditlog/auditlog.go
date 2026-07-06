@@ -26,11 +26,16 @@ type auditLogService interface {
 }
 
 type Handler struct {
-	svc auditLogService
+	svc   auditLogService
+	views savedViewService
 }
 
 func NewHandler(svc auditLogService) *Handler {
 	return ptrext.Of(Handler{svc: svc})
+}
+
+func (h *Handler) SetSavedViewService(svc savedViewService) {
+	h.views = svc
 }
 
 func BindListRequest(r *http.Request, req *attunev1.ListAuditLogRequest) error {

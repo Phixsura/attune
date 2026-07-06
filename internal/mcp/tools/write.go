@@ -17,10 +17,10 @@ import (
 
 // RegisterWriteTools registers write MCP tools.
 func RegisterWriteTools(d *jsonrpc.Dispatcher, deps *Deps) {
-	d.Register("update_workflow_state", updateWorkflowState(deps))
-	d.Register("add_tag", addTag(deps))
-	d.Register("remove_tag", removeTag(deps))
-	d.Register("set_urgent", setUrgent(deps))
+	registerCatalogTool(d, "update_workflow_state", updateWorkflowState(deps))
+	registerCatalogTool(d, "add_tag", addTag(deps))
+	registerCatalogTool(d, "remove_tag", removeTag(deps))
+	registerCatalogTool(d, "set_urgent", setUrgent(deps))
 }
 
 // UpdateWorkflowStateParams is the input for update_workflow_state.

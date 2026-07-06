@@ -15,7 +15,7 @@ import (
 
 // RegisterIngestTools registers ingest MCP tools.
 func RegisterIngestTools(d *jsonrpc.Dispatcher, deps *Deps) {
-	d.Register("submit_feedback", submitFeedback(deps))
+	registerCatalogTool(d, "submit_feedback", submitFeedback(deps))
 }
 
 // SubmitFeedbackParams is the input for submit_feedback.

@@ -8,8 +8,8 @@ import (
 	"github.com/Phixsura/attune/internal/restoredrill"
 )
 
-func TestGradeRestoreDrill(t *testing.T) {
-	const fresh = 7 * 24 * time.Hour
+func TestAssessLastRun(t *testing.T) {
+	const fresh = restoredrill.DefaultFreshnessWindow
 	cases := []struct {
 		name   string
 		ok     bool
@@ -28,13 +28,17 @@ func TestGradeRestoreDrill(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := gradeRestoreDrill(tc.ok, tc.status, tc.age, fresh)
-			if got.Status != tc.want {
-				t.Fatalf("gradeRestoreDrill(ok=%v,status=%q,age=%s).Status = %q, want %q\nmessage: %s",
+			got := restoredrill.AssessLastRun(tc.ok, restoredrill.LastRun{Status: tc.status}, tc.age, fresh)
+			if preflight.Status(got.Status) != tc.want {
+				t.Fatalf("AssessLastRun(ok=%v,status=%q,age=%s).Status = %q, want %q\nmessage: %s",
 					tc.ok, tc.status, tc.age, got.Status, tc.want, got.Message)
 			}
-			if got.Name != "backup:restore_drill" || got.Category != preflight.CategoryBackup {
-				t.Fatalf("unexpected name/category: %q / %q", got.Name, got.Category)
+			if tc.ok {
+				if got.Message == "" {
+					t.Fatal("expected a human-readable message")
+				}
+			} else if got.Remediation == "" {
+				t.Fatal("expected remediation for missing drill")
 			}
 		})
 	}

@@ -432,6 +432,7 @@ func requestSummaryProto(item gdprrepo.Request) *attunev1.GdprRequestSummary {
 		TagAssignmentCount: int32(item.Counts.TagAssignmentCount),
 		FeedbackAuditCount: int32(item.Counts.FeedbackAuditCount),
 		LlmAuditCount:      int32(item.Counts.LLMAuditCount),
+		OutboxCount:        int32(item.Counts.OutboxCount),
 		CreatedAt:          item.CreatedAt.UTC().Format(time.RFC3339),
 	})
 	if item.StartedAt != nil {

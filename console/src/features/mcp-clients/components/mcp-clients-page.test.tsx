@@ -78,6 +78,18 @@ const baseDetail = {
   tools: [
     {
       name: 'list_feedback',
+      kind: 'core',
+      owner: 'feedback',
+      enabled_by_default: true,
+      deprecated: true,
+      replacement: 'get_feedback',
+      aliases: [
+        {
+          name: 'feedback.list',
+          deprecated: true,
+          replacement: 'list_feedback',
+        },
+      ],
       required_scope: 'mcp:read',
       risk: 'read',
       data_class: 'user_content',
@@ -94,6 +106,11 @@ const baseDetail = {
     },
     {
       name: 'update_workflow_state',
+      kind: 'core',
+      owner: 'workflow',
+      enabled_by_default: true,
+      deprecated: false,
+      replacement: '',
       required_scope: 'mcp:write',
       risk: 'mutate',
       data_class: 'operational',
@@ -180,6 +197,8 @@ describe('MCPClientsPage user flow', () => {
     expect(screen.getByText('当前只支持交互式 OAuth 宿主')).toBeInTheDocument()
     expect(screen.getByText(/当前不支持 client_credentials 等无头授权流/)).toBeInTheDocument()
     expect(screen.getByText('当前客户端已满足此模板')).toBeInTheDocument()
+    expect(screen.getAllByText('已弃用').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('建议迁移到 get_feedback')).toBeInTheDocument()
 
     await user.click(screen.getByRole('combobox', { name: '宿主模板' }))
     await user.click(await screen.findByRole('option', { name: 'Cursor' }))
@@ -212,6 +231,8 @@ describe('MCPClientsPage user flow', () => {
       .map((node) => node.closest('tr'))
       .find((row) => row && within(row).queryByRole('checkbox'))
     expect(toolRow).toBeTruthy()
+    expect(screen.getByText('feedback.list')).toBeInTheDocument()
+    expect(screen.getByText('兼容别名')).toBeInTheDocument()
     if (!toolRow) return
     await user.click(within(toolRow).getByRole('checkbox', { name: '允许工具 list_feedback' }))
     await user.click(screen.getByRole('button', { name: '保存工具策略' }))

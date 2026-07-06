@@ -507,6 +507,15 @@ jobs:
           echo "  or apply the 'skip-changelog' label (CLAUDE.md §2)."
           exit 1
 
+  # ── maturity-contract: proposal traceability + verification links ─────────
+  maturity-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - run: bash scripts/lint-maturity-contract.sh
+
   # ── Docker image smoke build (multi-arch, no push) ──────────────────────────
   docker-build:
     needs: changes
@@ -590,6 +599,10 @@ jobs:
             -f deploy/helm/attune/ci/values-kind.yaml \
             --set-file config.render.secrets.tinkKeyset=/tmp/attune-keyset.json \
             >/tmp/attune-kind.yaml
+      - name: Assert kind/dev observability defaults
+        run: |
+          grep -Fq 'profile: "dev"' /tmp/attune-kind.yaml
+          grep -Fq 'environment: "dev"' /tmp/attune-kind.yaml
       - name: Render external Postgres values
         run: helm template attune deploy/helm/attune -f deploy/helm/attune/ci/values-external-postgres.yaml >/tmp/attune-external.yaml
       - name: Render production HPA values
@@ -975,7 +988,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-artifacts, lint-migrations, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, sdk-node, sdk-go, changelog, docker-build, compose-config, helm-chart, proto]
+    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-artifacts, lint-migrations, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, sdk-node, sdk-go, changelog, maturity-contract, docker-build, compose-config, helm-chart, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:

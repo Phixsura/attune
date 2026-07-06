@@ -31,6 +31,8 @@ type apiKeysService interface {
 	GetExpiringKeys(ctx context.Context, within time.Duration) ([]apikeyrepo.APIKeyListRow, error)
 	CreateServiceAccount(ctx context.Context, tenantID, name, description string) (uuid.UUID, error)
 	ListServiceAccounts(ctx context.Context, tenantID string) ([]apikeyrepo.ServiceAccountRow, error)
+	UpdateServiceAccount(ctx context.Context, tenantID string, id uuid.UUID, isActive bool) (apikeyrepo.ServiceAccountRow, error)
+	DeleteServiceAccount(ctx context.Context, tenantID string, id uuid.UUID) (apikeyrepo.ServiceAccountRow, error)
 	CreateEventSubscription(ctx context.Context, tenantID string, eventTypes []string, webhookURL, secret string) (uuid.UUID, error)
 	ListEventSubscriptions(ctx context.Context, tenantID string) ([]apikeyrepo.EventSubscription, error)
 	GetUnresolvedLeaks(ctx context.Context, tenantID string) ([]apikeyrepo.LeakDetection, error)
@@ -121,6 +123,17 @@ func toProtoAPIKey(row apikeyrepo.APIKeyListRow, scopes []domain.Scope) *attunev
 		k.RateLimitRpm = ptrext.Of(int32(ptrext.Indirect(row.RateLimitRPM)))
 	}
 	return k
+}
+
+func toProtoServiceAccount(row apikeyrepo.ServiceAccountRow) *attunev1.ServiceAccount {
+	return ptrext.Of(attunev1.ServiceAccount{
+		Id:          row.ID.String(),
+		Name:        row.Name,
+		Description: row.Description,
+		IsActive:    row.IsActive,
+		CreatedAt:   row.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:   row.UpdatedAt.UTC().Format(time.RFC3339),
+	})
 }
 
 func auditActor(auth *session.AuthCtx, req *http.Request) auditlogsvc.Actor {

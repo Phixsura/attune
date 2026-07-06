@@ -193,12 +193,7 @@ func TestIssueSessionCookie_SetsCookie(t *testing.T) {
 	if len(cookies) != 1 {
 		t.Fatalf("expected 1 cookie, got %d", len(cookies))
 	}
-	if cookies[0].Name != SessionCookieName {
-		t.Fatalf("cookie name = %s, want %s", cookies[0].Name, SessionCookieName)
-	}
-	if !cookies[0].HttpOnly || !cookies[0].Secure {
-		t.Fatal("cookie should be HttpOnly and Secure")
-	}
+	assertSessionCookiePolicy(t, cookies[0])
 }
 
 func TestIssueSessionCookieWithType_SetsUserType(t *testing.T) {
@@ -214,6 +209,7 @@ func TestIssueSessionCookieWithType_SetsUserType(t *testing.T) {
 	if len(cookies) != 1 {
 		t.Fatalf("expected 1 cookie, got %d", len(cookies))
 	}
+	assertSessionCookiePolicy(t, cookies[0])
 
 	// Verify the cookie can be decoded and contains the right user type
 	p, err := s.VerifySession(cookies[0].Value)
@@ -235,8 +231,22 @@ func TestClearSessionCookie_ExpiresImmediately(t *testing.T) {
 	if len(cookies) != 1 {
 		t.Fatalf("expected 1 cookie, got %d", len(cookies))
 	}
+	assertSessionCookiePolicy(t, cookies[0])
 	if cookies[0].MaxAge != -1 {
 		t.Fatalf("MaxAge = %d, want -1", cookies[0].MaxAge)
+	}
+}
+
+func assertSessionCookiePolicy(t *testing.T, c *http.Cookie) {
+	t.Helper()
+	if c.Name != SessionCookieName {
+		t.Fatalf("cookie name = %s, want %s", c.Name, SessionCookieName)
+	}
+	if !c.HttpOnly || !c.Secure {
+		t.Fatal("cookie should be HttpOnly and Secure")
+	}
+	if c.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("SameSite = %v, want Lax", c.SameSite)
 	}
 }
 
@@ -260,6 +270,7 @@ func TestRefreshStepUpCookie_UpdatesStepUpTimestamp(t *testing.T) {
 	if len(cookies) != 1 {
 		t.Fatalf("expected 1 cookie, got %d", len(cookies))
 	}
+	assertSessionCookiePolicy(t, cookies[0])
 	payload, err := s.VerifySession(cookies[0].Value)
 	if err != nil {
 		t.Fatalf("VerifySession: %v", err)

@@ -5,13 +5,11 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ReliabilityPage,
   type ReliabilityPageProps,
 } from '@/features/reliability/components/reliability-page'
-import { reliabilityCatalog } from '@/features/reliability/reliability-catalog'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { renderWithProviders, screen } from '@/testing/test-utils'
 
@@ -75,6 +73,48 @@ function buildProps(overrides: Partial<ReliabilityPageProps> = {}): ReliabilityP
       value: '2',
       hint: '1 个可重试 · 1 个处理中。',
     },
+    releaseContext: {
+      version: {
+        tone: 'active',
+        heroTone: 'active',
+        value: '5d6ea83',
+        hint: '已启动 42 分钟前。',
+      },
+      environment: {
+        tone: 'active',
+        heroTone: 'active',
+        value: 'production',
+        hint: 'profile=production。',
+      },
+      owner: {
+        tone: 'active',
+        heroTone: 'active',
+        value: 'Platform',
+        hint: 'Runbook 与升级通道应保持同步。',
+      },
+      lifecycle: {
+        tone: 'active',
+        heroTone: 'active',
+        value: 'supported',
+        hint: 'Current runtime contract is within the supported window.',
+      },
+      recovery: {
+        tone: 'active',
+        heroTone: 'active',
+        value: '通过',
+        hint: 'Last restore drill passed (today)',
+      },
+      compatibility: {
+        tone: 'active',
+        heroTone: 'active',
+        value: '5 rules',
+        hint: 'Additive · Breaking · Deprecated with shim · Rename with alias · Migration step',
+      },
+      glossary:
+        'Environment · Profile · Service · Owner · Policy mode · Release state · Lifecycle state · Risk class',
+      runbookHref: 'https://github.com/Phixsura/attune/blob/main/docs/private-deploy.md',
+      escalationHref: 'https://github.com/Phixsura/attune/issues/new/choose',
+    },
   }
   return {
     ...defaults,
@@ -92,65 +132,33 @@ describe('ReliabilityPage', () => {
 
     await screen.findByText('可靠性总览')
     expect(screen.getByText('可靠性总览')).toBeInTheDocument()
-    expect(screen.getByText('SLO 目录')).toBeInTheDocument()
     expect(screen.getByText('打开 tenant impact dashboard')).toBeInTheDocument()
     expect(screen.getByText('运行快照')).toBeInTheDocument()
+    expect(screen.getByText('发布与归属')).toBeInTheDocument()
     expect(screen.getByText('快速入口')).toBeInTheDocument()
     expect(screen.getByText('1 个活跃 · 1 个非活跃，共 2 个。')).toBeInTheDocument()
     expect(
       screen.getByText(/1 个排队 · 2 个处理中 · 1 个已就绪导出 · 1 个待执行删除。/),
     ).toBeInTheDocument()
     expect(screen.getByText(/1 个可重试 · 1 个处理中。/)).toBeInTheDocument()
-    expect(screen.getAllByRole('listitem')).toHaveLength(reliabilityCatalog.length)
-    expect(screen.getByText(reliabilityCatalog[0].title)).toBeInTheDocument()
+    expect(screen.getByText('5d6ea83')).toBeInTheDocument()
+    expect(screen.getByText('supported')).toBeInTheDocument()
+    expect(screen.getByText('恢复')).toBeInTheDocument()
+    expect(screen.getByText('5 rules')).toBeInTheDocument()
+    expect(screen.getByText('Canonical terms')).toBeInTheDocument()
     expect(
-      within(screen.getAllByRole('listitem')[0]).getByText(
-        new RegExp(reliabilityCatalog[0].escalation),
+      screen.getByText(
+        'Environment · Profile · Service · Owner · Policy mode · Release state · Lifecycle state · Risk class',
       ),
     ).toBeInTheDocument()
-    expect(screen.getAllByRole('link', { name: /runbook/i })).toHaveLength(
-      reliabilityCatalog.length,
-    )
-    expect(screen.getAllByText('推荐策略')).toHaveLength(reliabilityCatalog.length)
-    expect(screen.getAllByText('预算例外')).toHaveLength(reliabilityCatalog.length)
-    expect(
-      within(screen.getAllByRole('listitem')[0]).getByText(reliabilityCatalog[0].policySummary),
-    ).toBeInTheDocument()
-    expect(
-      within(screen.getAllByRole('listitem')[0]).getByText(
-        reliabilityCatalog[0].budgetExceptionPolicy,
-      ),
-    ).toBeInTheDocument()
-    expect(
-      within(screen.getAllByRole('listitem')[0]).getByText(
-        reliabilityCatalog[0].budgetExceptionNote,
-      ),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /^回放报告/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /运行手册/ })).toHaveAttribute(
       'href',
-      'https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-replay-template.md',
+      'https://github.com/Phixsura/attune/blob/main/docs/private-deploy.md',
     )
-    expect(screen.getByRole('link', { name: /^策略参考/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /升级通道/ })).toHaveAttribute(
       'href',
-      'https://github.com/Phixsura/attune/blob/main/observability/reports/attune-slo-policy-reference.md',
+      'https://github.com/Phixsura/attune/issues/new/choose',
     )
-    expect(screen.getByRole('link', { name: /^OpenSLO 导出/ })).toHaveAttribute(
-      'href',
-      'https://github.com/Phixsura/attune/blob/main/observability/openslo/attune-slo.yaml',
-    )
-    const replayDownloadLink = screen.getByRole('link', { name: /^下载 replay 工作表/ })
-    expect(replayDownloadLink).toHaveAttribute('download', 'attune-slo-replay-template.md')
-    const replayDownloadHref = replayDownloadLink.getAttribute('href')
-    expect(replayDownloadHref).toContain('data:text/markdown;charset=utf-8,')
-    const replayDownloadMarkdown = decodeURIComponent(replayDownloadHref?.split(',', 2)[1] ?? '')
-    expect(replayDownloadMarkdown).toContain('Tenant One')
-    expect(replayDownloadMarkdown).toContain(
-      '/d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-1',
-    )
-    expect(replayDownloadMarkdown).toContain(
-      '| SLO | Current policy | Replay lens | Budget exception | Historical observation | Verdict | Runbook |',
-    )
-    expect(screen.getByText('Replay 工作区')).toBeInTheDocument()
 
     const dashboardLink = screen.getByRole('link', { name: '打开 tenant impact dashboard' })
     expect(dashboardLink).toHaveAttribute(

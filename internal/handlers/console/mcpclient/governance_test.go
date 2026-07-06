@@ -198,6 +198,12 @@ func TestHandlerGetReturnsGovernanceDetail(t *testing.T) {
 	for _, tool := range resp.Tools {
 		if tool.Name == "list_feedback" {
 			found = true
+			require.Equal(t, "feedback", tool.Owner)
+			require.True(t, tool.EnabledByDefault)
+			require.Len(t, tool.Aliases, 1)
+			require.Equal(t, "feedback.list", tool.Aliases[0].Name)
+			require.True(t, tool.Aliases[0].Deprecated)
+			require.Equal(t, "list_feedback", tool.Aliases[0].Replacement)
 			require.Equal(t, domain.MCPToolPolicyEffectAllow, tool.Effect)
 			require.True(t, tool.EffectiveAllowed)
 		}

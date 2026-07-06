@@ -669,7 +669,68 @@ function ToolPoliciesCard({
                 <TableRow key={tool.name} className={disabled ? 'opacity-50' : ''}>
                   <TableCell>
                     <div className="font-medium">{tool.name}</div>
-                    <div className="text-xs text-muted-foreground">{tool.data_class}</div>
+                    <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+                      {tool.owner ? (
+                        <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5">
+                          {t('mcp_clients.tools.owner')}: {tool.owner}
+                        </span>
+                      ) : null}
+                      {tool.kind ? (
+                        <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5">
+                          {t('mcp_clients.tools.kind')}: {tool.kind}
+                        </span>
+                      ) : null}
+                      <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5">
+                        {tool.enabled_by_default
+                          ? t('mcp_clients.tools.default_enabled')
+                          : t('mcp_clients.tools.default_disabled')}
+                      </span>
+                      {tool.deprecated ? (
+                        <span className="inline-flex items-center rounded-md bg-rose-500/10 px-1.5 py-0.5 text-rose-700 dark:text-rose-300">
+                          {t('mcp_clients.tools.deprecated')}
+                        </span>
+                      ) : null}
+                      {tool.replacement ? (
+                        <span className="inline-flex items-center rounded-md bg-rose-500/10 px-1.5 py-0.5 text-rose-700 dark:text-rose-300">
+                          {t('mcp_clients.tools.replacement', {
+                            replacement: tool.replacement,
+                          })}
+                        </span>
+                      ) : null}
+                    </div>
+                    {tool.aliases?.length ? (
+                      <div className="mt-1 space-y-1 text-xs text-muted-foreground">
+                        <div className="font-medium">{t('mcp_clients.tools.aliases')}</div>
+                        {tool.aliases.map((alias) => (
+                          <div key={alias.name} className="flex flex-wrap items-center gap-1">
+                            <span className="inline-flex items-center rounded-md bg-amber-500/10 px-1.5 py-0.5 font-mono text-amber-700 dark:text-amber-300">
+                              {alias.name}
+                            </span>
+                            {alias.deprecated ? (
+                              <span>{t('mcp_clients.tools.alias_deprecated')}</span>
+                            ) : null}
+                            {alias.replacement ? (
+                              <span>
+                                {t('mcp_clients.tools.alias_replacement', {
+                                  replacement: alias.replacement,
+                                })}
+                              </span>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {tool.provenance ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+                        <span className="inline-flex items-center rounded-md bg-sky-500/10 px-1.5 py-0.5 text-sky-700 dark:text-sky-300">
+                          {t('mcp_clients.tools.provenance')}: {tool.provenance.kind}
+                        </span>
+                        {tool.provenance.reference ? (
+                          <span className="font-mono">{tool.provenance.reference}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="mt-1 text-xs text-muted-foreground">{tool.data_class}</div>
                   </TableCell>
                   <TableCell className="font-mono text-xs">{tool.required_scope}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{tool.risk}</TableCell>

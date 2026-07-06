@@ -105,6 +105,10 @@ func (s *APIKeys) Lookup(ctx context.Context, raw string) (tenantID string, keyI
 		logext.Warnf(ctx, "[%s] reject: hmac mismatch,key_id:%s", where, row.ID)
 		return "", uuid.Nil, domain.ErrInvalidAPIKey
 	}
+	if !row.ServiceAccountActive {
+		logext.Warnf(ctx, "[%s] reject: linked service account inactive,key_id:%s", where, row.ID)
+		return "", uuid.Nil, domain.ErrInvalidAPIKey
+	}
 	s.touchAsync(row.ID)
 	return row.TenantID, row.ID, nil
 }
@@ -137,6 +141,10 @@ func (s *APIKeys) LookupWithScopesAndIP(ctx context.Context, raw, clientIP strin
 	}
 	if !hmac.Equal(row.StoredHash, digest) {
 		logext.Warnf(ctx, "[%s] reject: hmac mismatch,key_id:%s", where, row.ID)
+		return "", uuid.Nil, nil, nil, domain.ErrInvalidAPIKey
+	}
+	if !row.ServiceAccountActive {
+		logext.Warnf(ctx, "[%s] reject: linked service account inactive,key_id:%s", where, row.ID)
 		return "", uuid.Nil, nil, nil, domain.ErrInvalidAPIKey
 	}
 
@@ -193,6 +201,10 @@ func (s *APIKeys) LookupFull(ctx context.Context, raw, clientIP string) (*Lookup
 	}
 	if !hmac.Equal(row.StoredHash, digest) {
 		logext.Warnf(ctx, "[%s] reject: hmac mismatch,key_id:%s", where, row.ID)
+		return nil, domain.ErrInvalidAPIKey
+	}
+	if !row.ServiceAccountActive {
+		logext.Warnf(ctx, "[%s] reject: linked service account inactive,key_id:%s", where, row.ID)
 		return nil, domain.ErrInvalidAPIKey
 	}
 
@@ -384,6 +396,16 @@ func (s *APIKeys) CreateServiceAccount(ctx context.Context, tenantID, name, desc
 // ListServiceAccounts returns all service accounts for a tenant.
 func (s *APIKeys) ListServiceAccounts(ctx context.Context, tenantID string) ([]apikeyrepo.ServiceAccountRow, error) {
 	return s.repo.ListServiceAccounts(ctx, tenantID)
+}
+
+// UpdateServiceAccount updates a service account's active state.
+func (s *APIKeys) UpdateServiceAccount(ctx context.Context, tenantID string, id uuid.UUID, isActive bool) (apikeyrepo.ServiceAccountRow, error) {
+	return s.repo.UpdateServiceAccount(ctx, tenantID, id, isActive)
+}
+
+// DeleteServiceAccount deletes a service account and detaches linked API keys.
+func (s *APIKeys) DeleteServiceAccount(ctx context.Context, tenantID string, id uuid.UUID) (apikeyrepo.ServiceAccountRow, error) {
+	return s.repo.DeleteServiceAccount(ctx, tenantID, id)
 }
 
 // LinkKeyToServiceAccount associates an API key with a service account.

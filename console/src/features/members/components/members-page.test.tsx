@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { configure } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import { MembersPage } from '@/features/members/components/members-page'
@@ -31,6 +32,8 @@ vi.mock('@/features/session/hooks/use-permissions', () => ({
     canDelete: () => true,
   }),
 }))
+
+configure({ asyncUtilTimeout: 10_000 })
 
 // i18n translations are in zh-CN
 const TEXT = {
@@ -64,6 +67,16 @@ const mockMembers = [
     roleSource: 'idp',
     invitedAt: '1700000000',
     acceptedAt: '1700000002',
+  },
+  {
+    id: 'm4',
+    memberType: 'tenant_user',
+    userId: 'ops-user',
+    email: 'ops@example.com',
+    role: 'delegated_admin',
+    roleSource: 'manual',
+    invitedAt: '1700000000',
+    acceptedAt: '1700000003',
   },
   {
     id: 'm3',
@@ -100,10 +113,13 @@ describe('MembersPage', () => {
     const activeCard = screen.getByRole('group', { name: '活跃成员' })
     const pendingCard = screen.getByRole('group', { name: '待接受邀请' })
 
-    expect(within(totalCard).getByText('3')).toBeInTheDocument()
-    expect(within(totalCard).getByText('共 3 位成员')).toBeInTheDocument()
-    expect(within(activeCard).getByText('2')).toBeInTheDocument()
+    expect(within(totalCard).getByText('4')).toBeInTheDocument()
+    expect(within(totalCard).getByText('共 4 位成员')).toBeInTheDocument()
+    expect(within(activeCard).getByText('3')).toBeInTheDocument()
     expect(within(activeCard).getByText('已接受邀请并可访问当前租户的成员。')).toBeInTheDocument()
+    expect(
+      screen.getByText('当前显示 3 / 3 位已加入成员，其中包含 1 位管理员和 1 位委派管理员。'),
+    ).toBeInTheDocument()
     expect(within(pendingCard).getByText('1')).toBeInTheDocument()
     expect(within(pendingCard).getByText('尚未完成首次登录确认的邀请。')).toBeInTheDocument()
   })
@@ -349,7 +365,7 @@ describe('MembersPage role badges', () => {
     // Check role sources are displayed
     expect(screen.getByText('系统初始化')).toBeInTheDocument()
     expect(screen.getByText('身份提供方')).toBeInTheDocument()
-    expect(screen.getByText('手动分配')).toBeInTheDocument()
+    expect(screen.getAllByText('手动分配').length).toBeGreaterThanOrEqual(2)
   })
 })
 

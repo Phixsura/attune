@@ -6,6 +6,7 @@ import { Route as AdministrationRoute } from '@/routes/_authed.administration'
 import { Route as DeadDeliveriesRoute } from '@/routes/_authed.administration.dead-deliveries'
 import { Route as GDPRRoute } from '@/routes/_authed.administration.gdpr'
 import { Route as ReliabilityRoute } from '@/routes/_authed.administration.reliability'
+import { Route as SecurityRoute } from '@/routes/_authed.administration.security'
 import { Route as ConfigurationRoute } from '@/routes/_authed.configuration'
 import { Route as IntegrationsRoute } from '@/routes/_authed.integrations'
 import { Route as ApiKeysRoute } from '@/routes/_authed.integrations.api-keys'
@@ -19,7 +20,7 @@ interface ThrownRedirect {
   options: { to: string; statusCode?: number }
 }
 
-function mockMe(role: 'admin' | 'member' | 'viewer') {
+function mockMe(role: 'admin' | 'delegated_admin' | 'member' | 'viewer') {
   server.use(
     http.get('/fb/v1/console/me', () =>
       HttpResponse.json({
@@ -64,11 +65,42 @@ describe('route access guards', () => {
     expect(await callBeforeLoad(ApiKeysRoute.options.beforeLoad)).toBeNull()
   })
 
+  it('preloads only the api key registry for integrations api keys', async () => {
+    mockMe('member')
+    expect(await callBeforeLoad(ApiKeysRoute.options.beforeLoad)).toBeNull()
+
+    const seenPaths = new Set<string>()
+    server.use(
+      http.get('/fb/v1/console/api-keys', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ items: [] })
+      }),
+      http.get('/fb/v1/console/service-accounts', () => {
+        throw new Error('service accounts should not be preloaded by the api keys route loader')
+      }),
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const loader = ApiKeysRoute.options.loader as (args: {
+      context: { queryClient: QueryClient }
+    }) => Promise<unknown>
+
+    await expect(loader({ context: { queryClient } })).resolves.toEqual([])
+    expect(seenPaths).toEqual(new Set(['/fb/v1/console/api-keys']))
+  })
+
   it('redirects members away from GDPR administration pages', async () => {
     mockMe('member')
     const thrown = await callBeforeLoad(GDPRRoute.options.beforeLoad)
     expect(isRedirect(thrown)).toBe(true)
     expect((thrown as ThrownRedirect).options.to).toBe('/feedback')
+  })
+
+  it('allows delegated admins into GDPR administration pages', async () => {
+    mockMe('delegated_admin')
+    expect(await callBeforeLoad(GDPRRoute.options.beforeLoad)).toBeNull()
   })
 
   it('keeps dead deliveries admin-only', async () => {
@@ -89,6 +121,16 @@ describe('route access guards', () => {
 
     mockMe('admin')
     expect(await callBeforeLoad(ReliabilityRoute.options.beforeLoad)).toBeNull()
+  })
+
+  it('keeps the security emergency access page admin-only', async () => {
+    mockMe('delegated_admin')
+    const thrown = await callBeforeLoad(SecurityRoute.options.beforeLoad)
+    expect(isRedirect(thrown)).toBe(true)
+    expect((thrown as ThrownRedirect).options.to).toBe('/feedback')
+
+    mockMe('admin')
+    expect(await callBeforeLoad(SecurityRoute.options.beforeLoad)).toBeNull()
   })
 
   it('keeps reply send hook configuration admin-only', async () => {
@@ -139,5 +181,27 @@ describe('route access guards', () => {
     })
     expect(isRedirect(administration)).toBe(true)
     expect((administration as ThrownRedirect).options.to).toBe('/administration/members')
+  })
+
+  it('routes delegated admins to operational settings pages', async () => {
+    mockMe('delegated_admin')
+
+    const configuration = await callBeforeLoad(ConfigurationRoute.options.beforeLoad, {
+      location: { pathname: '/configuration' },
+    })
+    expect(isRedirect(configuration)).toBe(true)
+    expect((configuration as ThrownRedirect).options.to).toBe('/configuration/classification')
+
+    const integrations = await callBeforeLoad(IntegrationsRoute.options.beforeLoad, {
+      location: { pathname: '/integrations' },
+    })
+    expect(isRedirect(integrations)).toBe(true)
+    expect((integrations as ThrownRedirect).options.to).toBe('/integrations/inbound-sources')
+
+    const administration = await callBeforeLoad(AdministrationRoute.options.beforeLoad, {
+      location: { pathname: '/administration' },
+    })
+    expect(isRedirect(administration)).toBe(true)
+    expect((administration as ThrownRedirect).options.to).toBe('/administration/audit-log')
   })
 })

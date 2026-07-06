@@ -162,6 +162,7 @@ func TestPG_GDPRDeleteRequestLifecycle(t *testing.T) {
 	subjectHash := "hash-scheduled"
 	feedbackID := insertFeedback(t, ctx, pool, tenantID, "ext_api:scheduled@example.com", subjectKey, subjectKey, subjectHash, "Needs deletion")
 	writeLLMAudit(t, ctx, pool, tenantID, feedbackID)
+	insertOutbox(t, ctx, pool, tenantID, feedbackID)
 
 	result, err := svc.Delete(ctx, tenantID, subjectKey, actor())
 	if err != nil {
@@ -169,6 +170,9 @@ func TestPG_GDPRDeleteRequestLifecycle(t *testing.T) {
 	}
 	if result.Status != gdprrepo.RequestStatusScheduled {
 		t.Fatalf("Delete schedule status = %q", result.Status)
+	}
+	if result.Counts.OutboxCount != 1 {
+		t.Fatalf("Delete schedule outbox count = %d, want 1", result.Counts.OutboxCount)
 	}
 	if result.ExecuteAfter == nil {
 		t.Fatal("expected execute_after to be set")
@@ -194,7 +198,19 @@ func TestPG_GDPRDeleteRequestLifecycle(t *testing.T) {
 		t.Fatalf("RecordDeleteCompletion: %v", err)
 	}
 
+	requests, err := repo.ListRequests(ctx, gdprrepo.ListRequestFilter{TenantID: tenantID, RequestType: "delete"})
+	if err != nil {
+		t.Fatalf("ListRequests: %v", err)
+	}
+	if len(requests.Items) != 1 {
+		t.Fatalf("expected exactly one delete request, got %d", len(requests.Items))
+	}
+	if requests.Items[0].Counts.OutboxCount != 1 {
+		t.Fatalf("request history outbox count = %d, want 1", requests.Items[0].Counts.OutboxCount)
+	}
+
 	assertFeedbackDeleted(t, ctx, pool, []int64{feedbackID})
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM notify_outbox WHERE feedback_id = $1`, 0, feedbackID)
 	assertAuditLogActionCount(t, ctx, pool, tenantID, "gdpr.delete", 1)
 }
 
