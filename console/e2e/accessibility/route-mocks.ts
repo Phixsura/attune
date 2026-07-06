@@ -8,6 +8,7 @@ import type {
   ReplySendHookDelivery,
   ReplySendHookHealth,
 } from '../../src/proto/attune/v1/ingest'
+import type { Tag } from '../../src/proto/attune/v1/tag'
 import {
   consoleA11yApiKeyPresets,
   consoleA11yApiKeyScopes,
@@ -19,7 +20,6 @@ import {
   consoleA11yEnrichConfigResponse,
   consoleA11yFeedbackDetail,
   consoleA11yFeedbackItems,
-  consoleA11yFeedbackList,
   consoleA11yFeedbackStats,
   consoleA11yGdprDelete,
   consoleA11yGdprExportReady,
@@ -44,7 +44,6 @@ import {
   consoleA11yServiceAccountsList,
   consoleA11yTagsResponse,
   consoleA11yTerminalFeedbackDetail,
-  consoleA11yTerminalFeedbackList,
   consoleA11yTerminalWorkbench,
   consoleA11yWorkflowAudit,
   consoleA11yWorkflowStatesResponse,
@@ -93,10 +92,18 @@ export async function installConsoleApiMocks(
   }
   const state: ApiMockState = {
     auditLogViews: [],
+    feedbackDetails: {
+      'feedback-101': feedbackDetailWithReplyDraft(
+        clone(consoleA11yFeedbackDetail),
+        consoleA11yReplyDraftWorkflow,
+      ),
+      'feedback-201': clone(consoleA11yTerminalFeedbackDetail),
+    },
     replyDraftWorkflow: clone(consoleA11yReplyDraftWorkflow),
     replySendHook: clone(consoleA11yReplySendHook),
     replySendHookDeliveries: clone(consoleA11yReplySendHookDeliveries),
     serviceAccounts: clone(consoleA11yServiceAccountsList.items),
+    tags: clone(consoleA11yTagsResponse.tags),
   }
 
   await page.route('**/fb/v1/console/**', async (route) => {
@@ -139,7 +146,7 @@ async function handleRoute(
     return true
   }
   if (method === 'GET' && path === '/tags') {
-    await fulfillJson(route, consoleA11yTagsResponse)
+    await fulfillJson(route, { tags: state.tags })
     return true
   }
   if (method === 'GET' && path === '/clusters') {
@@ -157,10 +164,7 @@ async function handleRoute(
 
   if (method === 'GET' && path === '/feedback') {
     const terminalOnly = url.searchParams.get('terminal_failed_only') === 'true'
-    await fulfillJson(
-      route,
-      terminalOnly ? consoleA11yTerminalFeedbackList : consoleA11yFeedbackList,
-    )
+    await fulfillJson(route, feedbackListResponse(state, terminalOnly))
     return true
   }
   if (method === 'GET' && path === '/feedback/stats') {
@@ -181,6 +185,38 @@ async function handleRoute(
     await fulfillJson(route, consoleA11yWorkflowAudit)
     return true
   }
+  if (method === 'POST' && path.match(/^\/feedback\/[^/]+\/tags$/)) {
+    const body = readJsonBody(route) as
+      | {
+          feedbackId?: string
+          tagId?: string
+          tagName?: string
+          tagColor?: string
+        }
+      | null
+    const feedbackId = path.split('/')[2]
+    const tag = resolveFeedbackTag(state, body)
+    if (!tag) {
+      await fulfillError(route, 'Tag not found for accessibility gate', 404)
+      return true
+    }
+    const detail = state.feedbackDetails[feedbackId]
+    if (detail) {
+      detail.tags = upsertTag(detail.tags ?? [], tag)
+    }
+    await fulfillJson(route, { tag }, 201)
+    return true
+  }
+  if (method === 'DELETE' && path.match(/^\/feedback\/[^/]+\/tags\/[^/]+$/)) {
+    const feedbackId = path.split('/')[2]
+    const tagId = path.split('/')[4]
+    const detail = state.feedbackDetails[feedbackId]
+    if (detail) {
+      detail.tags = (detail.tags ?? []).filter((tag) => tag.id !== tagId)
+    }
+    await route.fulfill({ status: 204 })
+    return true
+  }
   if (method === 'POST' && path.match(/^\/feedback\/[^/]+\/retry-enrichment$/)) {
     if (options.fail?.feedbackRetryEnrichment) {
       await fulfillError(route, options.fail.feedbackRetryEnrichment, 500)
@@ -190,11 +226,9 @@ async function handleRoute(
     return true
   }
   if (method === 'GET' && path.match(/^\/feedback\/[^/]+$/)) {
-    const detail =
-      path === '/feedback/feedback-201'
-        ? consoleA11yTerminalFeedbackDetail
-        : feedbackDetailWithReplyDraft(state.replyDraftWorkflow)
-    await fulfillJson(route, detail)
+    const feedbackId = path.split('/')[2]
+    const detail = state.feedbackDetails[feedbackId]
+    await fulfillJson(route, detail ? clone(detail) : null, detail ? 200 : 404)
     return true
   }
   if (method === 'POST' && path.match(/^\/feedback\/[^/]+\/reply-draft\/edit$/)) {
@@ -205,6 +239,7 @@ async function handleRoute(
         ? (body as { content: string }).content
         : state.replyDraftWorkflow.activeText
     state.replyDraftWorkflow = editReplyDraftWorkflow(state.replyDraftWorkflow, content)
+    syncReplyDraftFeedbackDetail(state)
     await fulfillJson(route, { workflow: state.replyDraftWorkflow })
     return true
   }
@@ -212,6 +247,7 @@ async function handleRoute(
     const body = readJsonBody(route)
     diagnostics.replyDraftRequests.push({ method, path, body })
     state.replyDraftWorkflow = advanceReplyDraftWorkflow(state.replyDraftWorkflow, 'approved')
+    syncReplyDraftFeedbackDetail(state)
     await fulfillJson(route, { workflow: state.replyDraftWorkflow })
     return true
   }
@@ -219,6 +255,7 @@ async function handleRoute(
     const body = readJsonBody(route)
     diagnostics.replyDraftRequests.push({ method, path, body })
     state.replyDraftWorkflow = advanceReplyDraftWorkflow(state.replyDraftWorkflow, 'rejected')
+    syncReplyDraftFeedbackDetail(state)
     await fulfillJson(route, { workflow: state.replyDraftWorkflow })
     return true
   }
@@ -231,6 +268,7 @@ async function handleRoute(
       idempotencyKey: route.request().headers()['idempotency-key'],
     })
     state.replyDraftWorkflow = advanceReplyDraftWorkflow(state.replyDraftWorkflow, 'sent')
+    syncReplyDraftFeedbackDetail(state)
     await fulfillJson(route, { workflow: state.replyDraftWorkflow, fromCache: false })
     return true
   }
@@ -576,19 +614,81 @@ async function handleRoute(
 
 type ApiMockState = {
   auditLogViews: SavedAuditLogView[]
+  feedbackDetails: Record<string, FeedbackDetail>
   replyDraftWorkflow: ReplyDraftWorkflow
   replySendHook: ReplySendHook
   replySendHookDeliveries: ReplySendHookDelivery[]
   serviceAccounts: ServiceAccount[]
+  tags: Tag[]
 }
 
-function feedbackDetailWithReplyDraft(workflow: ReplyDraftWorkflow): FeedbackDetail {
+function feedbackDetailWithReplyDraft(
+  base: FeedbackDetail,
+  workflow: ReplyDraftWorkflow,
+): FeedbackDetail {
   return {
-    ...consoleA11yFeedbackDetail,
+    ...base,
     replyDraft: workflow.activeText,
-    replyDraftGeneratedAt: workflow.generatedAt ?? consoleA11yFeedbackDetail.replyDraftGeneratedAt,
+    replyDraftGeneratedAt: workflow.generatedAt ?? base.replyDraftGeneratedAt,
     replyDraftWorkflow: workflow,
   }
+}
+
+function syncReplyDraftFeedbackDetail(state: ApiMockState) {
+  const detail = state.feedbackDetails['feedback-101']
+  if (!detail) return
+  state.feedbackDetails['feedback-101'] = feedbackDetailWithReplyDraft(detail, state.replyDraftWorkflow)
+}
+
+function feedbackListResponse(state: ApiMockState, terminalOnly: boolean) {
+  const items = terminalOnly
+    ? [state.feedbackDetails['feedback-201']]
+    : [state.feedbackDetails['feedback-101'], state.feedbackDetails['feedback-201']]
+  return {
+    items: items.map((item) => clone(item)),
+  }
+}
+
+function resolveFeedbackTag(
+  state: ApiMockState,
+  body:
+    | {
+        feedbackId?: string
+        tagId?: string
+        tagName?: string
+        tagColor?: string
+      }
+    | null,
+) {
+  const tagId = body?.tagId?.trim()
+  if (tagId) {
+    return state.tags.find((tag) => tag.id === tagId) ?? null
+  }
+
+  const tagName = body?.tagName?.trim()
+  if (!tagName) return null
+
+  const existing = state.tags.find((tag) => tag.name.toLowerCase() === tagName.toLowerCase())
+  if (existing) return existing
+
+  const created: Tag = {
+    id: `tag-a11y-${state.tags.length + 1}`,
+    name: tagName,
+    color: body?.tagColor?.trim() || '#6b7280',
+    description: '',
+    exclusiveScope: '',
+    usageCount: 0,
+    archived: false,
+    createdBy: 'user-a11y',
+    createdAt: '2026-06-24T09:10:00Z',
+    updatedAt: '2026-06-24T09:10:00Z',
+  }
+  state.tags = upsertTag(state.tags, created)
+  return created
+}
+
+function upsertTag(items: Tag[], tag: Tag): Tag[] {
+  return [...items.filter((item) => item.id !== tag.id), tag]
 }
 
 function editReplyDraftWorkflow(workflow: ReplyDraftWorkflow, content: string): ReplyDraftWorkflow {

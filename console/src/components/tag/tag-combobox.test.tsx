@@ -96,6 +96,31 @@ describe('TagCombobox', () => {
     expect(options[options.length - 1]).toHaveAttribute('id', expect.stringContaining('create'))
   })
 
+  it('hides create option when the exact tag exists outside the selectable list', async () => {
+    const onSelect = vi.fn()
+    const onCreate = vi.fn()
+    const { user } = renderWithProviders(
+      <TagCombobox
+        availableTags={[tags[1], tags[2]]}
+        allTags={tags}
+        onSelect={onSelect}
+        onCreate={onCreate}
+      />,
+    )
+
+    await user.click(screen.getByRole('button'))
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument()
+    })
+    await user.type(screen.getByRole('combobox'), 'bug')
+
+    expect(screen.getByText('标签「bug」已添加到当前反馈')).toBeInTheDocument()
+    expect(screen.queryByText('创建「bug」')).not.toBeInTheDocument()
+
+    await user.keyboard('{Enter}')
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
   it('navigates options with ArrowDown/ArrowUp', async () => {
     const onSelect = vi.fn()
     const { user } = renderWithProviders(<TagCombobox availableTags={tags} onSelect={onSelect} />)

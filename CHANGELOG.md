@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Private-deploy smoke suite now covers base, observability, TLS, failure, and upgrade modules.**
+  Added dedicated smoke targets for the compose base stack, the observability
+  overlay, the TLS reverse-proxy front door, deterministic startup failures,
+  and seeded upgrade paths. The umbrella `make private-deploy-smoke` target now
+  runs the full suite, the CI workflow now exercises the same entrypoint for
+  deploy-related changes, failure artifacts are uploaded from CI, and the
+  private-deploy / testing docs and proposals were updated to match the shipped
+  contract. The observability module also persists Prometheus query payloads
+  plus Grafana datasource and dashboard snapshots into the artifact bundle so
+  failed CI runs leave inspectable overlay evidence.
+
+- **Published release images now get the same private-deploy smoke coverage.**
+  Added a `make private-deploy-smoke-published` entrypoint and a `published`
+  smoke mode that reuses the full suite against a published release image,
+  defaulting to `ghcr.io/phixsura/attune:latest` unless overridden. The release
+  workflow now runs that published-image smoke after pushing a tag, so the
+  shipped image is verified before the release finishes.
+
 - **GDPR delete request history now includes outbox purge counts.**
   The request history and delete response now persist and surface
   `notify_outbox` purge counts alongside the existing feedback, tag, and audit
@@ -36,6 +54,36 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   actions now also emit audit events.
 
 ### Fixed
+
+- **Feedback tag combobox now suppresses duplicate-looking create actions for already assigned tags.**
+  The feedback detail sheet now checks the full tag catalog before showing the
+  inline create CTA, so searching a tag that already exists on the feedback no
+  longer suggests a duplicate-looking create path. The selectable list still
+  hides assigned tags, batch tag pickers keep their existing behavior, the
+  combobox now shows a clearer "already added" empty state for exact matches,
+  and it ignores empty-result arrow navigation instead of drifting into a
+  broken active state.
+
+- **Reliability overview now survives a single snapshot endpoint failure.**
+  The `/administration/reliability` route now preloads its snapshot queries on
+  a best-effort basis, so one 503 no longer kicks operators to the global error
+  boundary. The page can still render the healthy cards and surface the failing
+  card inline, which keeps the reliability dashboard usable during partial
+  backend outages.
+
+- **System readiness now renders failing preflight reports instead of hiding them behind a fetch error.**
+  The `/administration/system-readiness` page now accepts the preflight
+  endpoint's 503 report payload as data, so operators still see the failing
+  checks, remediation text, and summary counts. Reliability now reuses the same
+  interpretation, which keeps the readiness card visible during partial backend
+  failures.
+
+- **Console OIDC RBAC now resolves the session and membership member-type alias.**
+  OIDC sessions store `UserType="oidc"` in the cookie while tenant membership
+  rows use `member_type=oidc_user`. RBAC now normalizes that alias before
+  role lookup and cache invalidation, so Dex SSO users can actually land on
+  the Control Tower instead of tripping the `not a tenant member` error
+  boundary.
 
 - **Console accessibility mocks now cover service-account reads on API Keys.**
   The Playwright accessibility route harness now responds to the

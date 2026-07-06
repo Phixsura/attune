@@ -23,12 +23,14 @@ const PALETTE = [
 
 export function TagCombobox({
   availableTags,
+  allTags,
   onSelect,
   onCreate,
   disabled,
   trigger,
 }: {
   availableTags: Tag[]
+  allTags?: Tag[]
   onSelect: (tagId: string) => void
   onCreate?: (name: string) => void
   disabled?: boolean
@@ -45,8 +47,15 @@ export function TagCombobox({
   const filtered = trimmed
     ? availableTags.filter((tag) => tag.name.toLowerCase().includes(trimmed))
     : availableTags
-  const exactMatch = availableTags.some((tag) => tag.name.toLowerCase() === trimmed)
+  const exactMatchTag = (allTags ?? availableTags).find((tag) => tag.name.toLowerCase() === trimmed)
+  // Use the full known catalog for create suppression so a hidden assigned tag
+  // does not surface a misleading "Create" action.
+  const exactMatch = exactMatchTag != null
   const showCreate = onCreate && trimmed.length > 0 && !exactMatch
+  const emptyState =
+    exactMatch && filtered.length === 0
+      ? t('tags.combobox.exact_match_assigned', { name: query.trim() })
+      : t('tags.combobox.no_results')
 
   const optionCount = filtered.length + (showCreate ? 1 : 0)
 
@@ -69,21 +78,25 @@ export function TagCombobox({
     switch (e.key) {
       case 'ArrowDown': {
         e.preventDefault()
+        if (optionCount === 0) return
         setActiveIndex((i) => (i + 1) % optionCount)
         break
       }
       case 'ArrowUp': {
         e.preventDefault()
+        if (optionCount === 0) return
         setActiveIndex((i) => (i - 1 + optionCount) % optionCount)
         break
       }
       case 'Home': {
         e.preventDefault()
+        if (optionCount === 0) return
         setActiveIndex(0)
         break
       }
       case 'End': {
         e.preventDefault()
+        if (optionCount === 0) return
         setActiveIndex(optionCount - 1)
         break
       }
@@ -185,9 +198,7 @@ export function TagCombobox({
               </button>
             ))
           ) : !showCreate ? (
-            <p className="px-2 py-4 text-center text-sm text-muted-foreground">
-              {t('tags.combobox.no_results')}
-            </p>
+            <p className="px-2 py-4 text-center text-sm text-muted-foreground">{emptyState}</p>
           ) : null}
           {showCreate ? (
             <button

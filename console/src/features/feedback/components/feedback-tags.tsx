@@ -54,7 +54,12 @@ export function FeedbackTagSection({
         ) : (
           <div />
         )}
-        <TagCombobox availableTags={unassigned} onSelect={handleSelect} onCreate={handleCreate} />
+        <TagCombobox
+          availableTags={unassigned}
+          allTags={availableTags}
+          onSelect={handleSelect}
+          onCreate={handleCreate}
+        />
       </div>
 
       {tags.length > 0 ? (
