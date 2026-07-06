@@ -186,14 +186,12 @@ async function handleRoute(
     return true
   }
   if (method === 'POST' && path.match(/^\/feedback\/[^/]+\/tags$/)) {
-    const body = readJsonBody(route) as
-      | {
-          feedbackId?: string
-          tagId?: string
-          tagName?: string
-          tagColor?: string
-        }
-      | null
+    const body = readJsonBody(route) as {
+      feedbackId?: string
+      tagId?: string
+      tagName?: string
+      tagColor?: string
+    } | null
     const feedbackId = path.split('/')[2]
     const tag = resolveFeedbackTag(state, body)
     if (!tag) {
@@ -637,7 +635,10 @@ function feedbackDetailWithReplyDraft(
 function syncReplyDraftFeedbackDetail(state: ApiMockState) {
   const detail = state.feedbackDetails['feedback-101']
   if (!detail) return
-  state.feedbackDetails['feedback-101'] = feedbackDetailWithReplyDraft(detail, state.replyDraftWorkflow)
+  state.feedbackDetails['feedback-101'] = feedbackDetailWithReplyDraft(
+    detail,
+    state.replyDraftWorkflow,
+  )
 }
 
 function feedbackListResponse(state: ApiMockState, terminalOnly: boolean) {
@@ -651,14 +652,12 @@ function feedbackListResponse(state: ApiMockState, terminalOnly: boolean) {
 
 function resolveFeedbackTag(
   state: ApiMockState,
-  body:
-    | {
-        feedbackId?: string
-        tagId?: string
-        tagName?: string
-        tagColor?: string
-      }
-    | null,
+  body: {
+    feedbackId?: string
+    tagId?: string
+    tagName?: string
+    tagColor?: string
+  } | null,
 ) {
   const tagId = body?.tagId?.trim()
   if (tagId) {
