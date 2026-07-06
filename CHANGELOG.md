@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **GDPR request summary keeps existing field numbers.**
+  `outbox_count` now lands at the end of `GdprRequestSummary`, so the new
+  summary field stays wire-compatible with the existing proto schema and
+  `buf breaking` passes again.
+
 - **Console workspace install now recognizes the local package.**
   `console/pnpm-workspace.yaml` now declares the Console package explicitly, so
   `pnpm install --frozen-lockfile` in CI can resolve the workspace instead of

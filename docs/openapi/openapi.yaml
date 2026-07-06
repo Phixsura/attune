@@ -8938,9 +8938,6 @@ components:
                 llmAuditCount:
                     type: integer
                     format: int32
-                outboxCount:
-                    type: integer
-                    format: int32
                 createdAt:
                     type: string
                 startedAt:
@@ -8961,6 +8958,9 @@ components:
                     type: string
                 revokedAt:
                     type: string
+                outboxCount:
+                    type: integer
+                    format: int32
         GdprStepUpStatus:
             type: object
             properties:
