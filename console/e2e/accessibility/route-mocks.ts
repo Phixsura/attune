@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test'
 import type { ServiceAccount } from '../../src/proto/attune/v1/api_key'
+import type { AuditLogViewState, SavedAuditLogView } from '../../src/proto/attune/v1/audit'
 import type {
   FeedbackDetail,
   ReplyDraftWorkflow,
@@ -91,6 +92,7 @@ export async function installConsoleApiMocks(
     semanticSearchRequests: [],
   }
   const state: ApiMockState = {
+    auditLogViews: [],
     replyDraftWorkflow: clone(consoleA11yReplyDraftWorkflow),
     replySendHook: clone(consoleA11yReplySendHook),
     replySendHookDeliveries: clone(consoleA11yReplySendHookDeliveries),
@@ -288,6 +290,49 @@ async function handleRoute(
     await route.fulfill({ status: 204 })
     return true
   }
+
+  if (method === 'GET' && path === '/audit-log/views') {
+    await fulfillJson(route, { items: state.auditLogViews })
+    return true
+  }
+  if (method === 'POST' && path === '/audit-log/views') {
+    const body = readJsonBody(route) as { name?: string; state?: AuditLogViewState } | null
+    const created: SavedAuditLogView = {
+      id: `audit-view-a11y-${state.auditLogViews.length + 1}`,
+      name: body?.name?.trim() || 'Untitled view',
+      state: body?.state,
+      createdAt: '2026-06-24T09:10:00Z',
+      updatedAt: '2026-06-24T09:10:00Z',
+    }
+    state.auditLogViews = upsertSavedAuditView(state.auditLogViews, created)
+    await fulfillJson(route, { view: created }, 201)
+    return true
+  }
+  if (method === 'PUT' && path.match(/^\/audit-log\/views\/[^/]+$/)) {
+    const body = readJsonBody(route) as { name?: string; state?: AuditLogViewState } | null
+    const id = path.split('/')[3]
+    const existing = state.auditLogViews.find((view) => view.id === id)
+    const updated: SavedAuditLogView = {
+      id,
+      name: body?.name?.trim() || existing?.name || 'Untitled view',
+      state: body?.state ?? existing?.state,
+      createdAt: existing?.createdAt ?? '2026-06-24T09:10:00Z',
+      updatedAt: '2026-06-24T09:11:00Z',
+    }
+    state.auditLogViews = upsertSavedAuditView(
+      state.auditLogViews.filter((view) => view.id !== id),
+      updated,
+    )
+    await fulfillJson(route, { view: updated })
+    return true
+  }
+  if (method === 'DELETE' && path.match(/^\/audit-log\/views\/[^/]+$/)) {
+    const id = path.split('/')[3]
+    state.auditLogViews = state.auditLogViews.filter((view) => view.id !== id)
+    await route.fulfill({ status: 204 })
+    return true
+  }
+
   if (method === 'POST' && path === '/api-keys') {
     if (options.fail?.apiKeyCreate) {
       await fulfillError(route, options.fail.apiKeyCreate, 400)
@@ -530,6 +575,7 @@ async function handleRoute(
 }
 
 type ApiMockState = {
+  auditLogViews: SavedAuditLogView[]
   replyDraftWorkflow: ReplyDraftWorkflow
   replySendHook: ReplySendHook
   replySendHookDeliveries: ReplySendHookDelivery[]
@@ -677,6 +723,13 @@ function insertServiceAccount(items: ServiceAccount[], account: ServiceAccount):
   return [...items.filter((item) => item.id !== account.id), account].sort((a, b) =>
     a.name.localeCompare(b.name),
   )
+}
+
+function upsertSavedAuditView(
+  items: SavedAuditLogView[],
+  view: SavedAuditLogView,
+): SavedAuditLogView[] {
+  return [view, ...items.filter((item) => item.id !== view.id)]
 }
 
 function readJsonBody(route: Route) {
