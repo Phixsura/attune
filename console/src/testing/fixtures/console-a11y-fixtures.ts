@@ -12,6 +12,8 @@ import type {
   ListApiKeysResponse,
   ListScopePresetsResponse,
   ListScopesResponse,
+  ListServiceAccountsResponse,
+  ServiceAccount,
 } from '../../proto/attune/v1/api_key'
 import type {
   AuditLogEntry,
@@ -365,6 +367,19 @@ export const consoleA11yIssuedApiKey: CreateApiKeyResponse = {
     usageCount: '0',
   },
   secret: 'ak_live_secret_visible_once',
+}
+
+export const consoleA11yServiceAccount: ServiceAccount = {
+  id: 'sa-a11y',
+  name: 'ci-bot',
+  description: 'deployment pipeline',
+  isActive: true,
+  createdAt: '2026-06-21T00:00:00Z',
+  updatedAt: '2026-06-24T07:00:00Z',
+}
+
+export const consoleA11yServiceAccountsList: ListServiceAccountsResponse = {
+  items: [],
 }
 
 export const consoleA11yApiKeyScopes: ListScopesResponse = {

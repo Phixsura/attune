@@ -1,4 +1,5 @@
 import type { Page, Route } from '@playwright/test'
+import type { ServiceAccount } from '../../src/proto/attune/v1/api_key'
 import type {
   FeedbackDetail,
   ReplyDraftWorkflow,
@@ -38,6 +39,8 @@ import {
   consoleA11yReplySendHook,
   consoleA11yReplySendHookDeliveries,
   consoleA11yRetryEnrichmentResponse,
+  consoleA11yServiceAccount,
+  consoleA11yServiceAccountsList,
   consoleA11yTagsResponse,
   consoleA11yTerminalFeedbackDetail,
   consoleA11yTerminalFeedbackList,
@@ -91,6 +94,7 @@ export async function installConsoleApiMocks(
     replyDraftWorkflow: clone(consoleA11yReplyDraftWorkflow),
     replySendHook: clone(consoleA11yReplySendHook),
     replySendHookDeliveries: clone(consoleA11yReplySendHookDeliveries),
+    serviceAccounts: clone(consoleA11yServiceAccountsList.items),
   }
 
   await page.route('**/fb/v1/console/**', async (route) => {
@@ -233,12 +237,55 @@ async function handleRoute(
     await fulfillJson(route, consoleA11yApiKeysList)
     return true
   }
+  if (method === 'GET' && path === '/service-accounts') {
+    await fulfillJson(route, { items: state.serviceAccounts })
+    return true
+  }
   if (method === 'GET' && path === '/api-keys/scopes') {
     await fulfillJson(route, consoleA11yApiKeyScopes)
     return true
   }
   if (method === 'GET' && path === '/api-keys/presets') {
     await fulfillJson(route, consoleA11yApiKeyPresets)
+    return true
+  }
+  if (method === 'POST' && path === '/service-accounts') {
+    const body = readJsonBody(route) as { description?: string; name?: string } | null
+    const created: ServiceAccount = {
+      ...consoleA11yServiceAccount,
+      id: `sa-a11y-${state.serviceAccounts.length + 1}`,
+      name: body?.name?.trim() || 'new-service-account',
+      description: body?.description?.trim() || '',
+      isActive: true,
+      createdAt: '2026-06-24T09:10:00Z',
+      updatedAt: '2026-06-24T09:10:00Z',
+    }
+    state.serviceAccounts = insertServiceAccount(state.serviceAccounts, created)
+    await fulfillJson(route, { serviceAccount: created }, 201)
+    return true
+  }
+  if (method === 'PATCH' && path.match(/^\/service-accounts\/[^/]+$/)) {
+    const body = readJsonBody(route) as { isActive?: boolean } | null
+    const id = path.split('/')[2]
+    const existing =
+      state.serviceAccounts.find((account) => account.id === id) ?? consoleA11yServiceAccount
+    const updated: ServiceAccount = {
+      ...existing,
+      id,
+      isActive: body?.isActive ?? existing.isActive,
+      updatedAt: '2026-06-24T09:11:00Z',
+    }
+    state.serviceAccounts = insertServiceAccount(
+      state.serviceAccounts.filter((account) => account.id !== id),
+      updated,
+    )
+    await fulfillJson(route, updated)
+    return true
+  }
+  if (method === 'DELETE' && path.match(/^\/service-accounts\/[^/]+$/)) {
+    const id = path.split('/')[2]
+    state.serviceAccounts = state.serviceAccounts.filter((account) => account.id !== id)
+    await route.fulfill({ status: 204 })
     return true
   }
   if (method === 'POST' && path === '/api-keys') {
@@ -486,6 +533,7 @@ type ApiMockState = {
   replyDraftWorkflow: ReplyDraftWorkflow
   replySendHook: ReplySendHook
   replySendHookDeliveries: ReplySendHookDelivery[]
+  serviceAccounts: ServiceAccount[]
 }
 
 function feedbackDetailWithReplyDraft(workflow: ReplyDraftWorkflow): FeedbackDetail {
@@ -623,6 +671,12 @@ function replySendHookHealth(deliveries: ReplySendHookDelivery[]): ReplySendHook
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+function insertServiceAccount(items: ServiceAccount[], account: ServiceAccount): ServiceAccount[] {
+  return [...items.filter((item) => item.id !== account.id), account].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )
 }
 
 function readJsonBody(route: Route) {

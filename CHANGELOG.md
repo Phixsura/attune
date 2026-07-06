@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Console accessibility mocks now cover service-account reads on API Keys.**
+  The Playwright accessibility route harness now responds to the
+  `/service-accounts` list request that the API Keys page issues, so the
+  browser gate no longer treats that legitimate query as an unhandled request.
+
 - **GDPR request summary keeps existing field numbers.**
   `outbox_count` now lands at the end of `GdprRequestSummary`, so the new
   summary field stays wire-compatible with the existing proto schema and
