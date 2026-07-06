@@ -133,7 +133,6 @@ export interface GdprRequestSummary {
   tagAssignmentCount: number;
   feedbackAuditCount: number;
   llmAuditCount: number;
-  outboxCount: number;
   createdAt: string;
   startedAt?: string | undefined;
   completedAt?: string | undefined;
@@ -144,6 +143,7 @@ export interface GdprRequestSummary {
   executeAfter?: string | undefined;
   cancelledAt?: string | undefined;
   revokedAt?: string | undefined;
+  outboxCount: number;
 }
 
 export interface ListGdprRequestsResponse {
