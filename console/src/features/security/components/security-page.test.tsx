@@ -19,7 +19,7 @@ vi.mock('sonner', () => ({
 const activeToken: BreakGlassToken = {
   id: 'token-1',
   admin_email: 'admin@example.com',
-  expires_at: '2026-07-06T12:30:00Z',
+  expires_at: '2099-07-06T12:30:00Z',
   issued_by: 'issuer-1',
   issued_at: '2026-07-05T11:30:00Z',
   status: 'valid',
