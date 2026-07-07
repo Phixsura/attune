@@ -41,6 +41,13 @@ jobs:
           path: pr
           persist-credentials: false
 
+      # Keep the main checkout on the same active-token fixture as the PR so
+      # the shared security suite can produce a coverage baseline.
+      - name: Normalize security fixture on main
+        run: |
+          perl -0pi -e "s/expires_at: '2026-07-06T12:30:00Z'/expires_at: '2099-07-06T12:30:00Z'/" \
+            main/console/src/features/security/components/security-page.test.tsx
+
       # Install pnpm from the PR packageManager field; both checkouts share the
       # same major lockfile shape for this comparison.
       - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8

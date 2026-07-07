@@ -3174,6 +3174,7 @@
     "combobox": {
       "search_placeholder": "搜索标签…",
       "no_results": "无匹配标签",
+      "exact_match_assigned": "标签「{{name}}」已添加到当前反馈",
       "create": "创建「{{name}}」"
     },
     "tooltip": {

@@ -53,6 +53,11 @@ describe('TagCombobox', () => {
     })
     expect(screen.getByRole('listbox')).toBeInTheDocument()
     expect(screen.getAllByRole('option')).toHaveLength(3)
+
+    await user.click(screen.getByRole('button'))
+    await waitFor(() => {
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    })
   })
 
   it('filters tags by search query', async () => {
@@ -66,6 +71,9 @@ describe('TagCombobox', () => {
     await user.type(screen.getByRole('combobox'), 'bug')
     expect(screen.getAllByRole('option')).toHaveLength(1)
     expect(screen.getByText('bug')).toBeInTheDocument()
+
+    await user.keyboard('{Enter}')
+    expect(onSelect).toHaveBeenCalledWith('t1')
   })
 
   it('calls onSelect when clicking a tag option', async () => {
@@ -96,6 +104,31 @@ describe('TagCombobox', () => {
     expect(options[options.length - 1]).toHaveAttribute('id', expect.stringContaining('create'))
   })
 
+  it('hides create option when the exact tag exists outside the selectable list', async () => {
+    const onSelect = vi.fn()
+    const onCreate = vi.fn()
+    const { user } = renderWithProviders(
+      <TagCombobox
+        availableTags={[tags[1], tags[2]]}
+        allTags={tags}
+        onSelect={onSelect}
+        onCreate={onCreate}
+      />,
+    )
+
+    await user.click(screen.getByRole('button'))
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument()
+    })
+    await user.type(screen.getByRole('combobox'), 'bug')
+
+    expect(screen.getByText('标签「bug」已添加到当前反馈')).toBeInTheDocument()
+    expect(screen.queryByText('创建「bug」')).not.toBeInTheDocument()
+
+    await user.keyboard('{Enter}')
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
   it('navigates options with ArrowDown/ArrowUp', async () => {
     const onSelect = vi.fn()
     const { user } = renderWithProviders(<TagCombobox availableTags={tags} onSelect={onSelect} />)
@@ -114,6 +147,14 @@ describe('TagCombobox', () => {
 
     await user.keyboard('{ArrowUp}')
     expect(input).toHaveAttribute('aria-activedescendant', expect.stringContaining('t1'))
+
+    await user.keyboard('{Home}')
+    expect(input).toHaveAttribute('aria-activedescendant', expect.stringContaining('t1'))
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    })
   })
 
   it('selects active option on Enter', async () => {
@@ -143,6 +184,23 @@ describe('TagCombobox', () => {
     await user.type(screen.getByRole('combobox'), 'newone')
     await user.keyboard('{End}{Enter}')
     expect(onCreate).toHaveBeenCalledWith('newone')
+  })
+
+  it('calls onCreate on Enter when a new tag is typed', async () => {
+    const onSelect = vi.fn()
+    const onCreate = vi.fn()
+    const { user } = renderWithProviders(
+      <TagCombobox availableTags={tags} onSelect={onSelect} onCreate={onCreate} />,
+    )
+
+    await user.click(screen.getByRole('button'))
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument()
+    })
+    await user.type(screen.getByRole('combobox'), 'freshlabel')
+    await user.keyboard('{Enter}')
+    expect(onCreate).toHaveBeenCalledWith('freshlabel')
+    expect(onSelect).not.toHaveBeenCalled()
   })
 
   it('displays exclusive scope badge on tag options', async () => {

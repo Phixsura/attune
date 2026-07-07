@@ -388,6 +388,48 @@ test.describe('Console accessibility browser gate', () => {
     await expectNoConsoleDiagnostics(diagnostics)
   })
 
+  test('feedback tags do not offer duplicate create CTA for assigned names', async ({ page }) => {
+    const diagnostics = collectConsoleDiagnostics(page)
+    const apiMocks = await installConsoleApiMocks(page)
+
+    await page.setViewportSize({ width: 1365, height: 768 })
+    await gotoConsoleRoute(page, '/feedback')
+
+    await page
+      .getByRole('button', { name: /#feedback-101/ })
+      .first()
+      .click()
+    const sheet = page.getByRole('dialog')
+    await expect(sheet).toContainText('Focus lost after detail close')
+    await expect(sheet.getByRole('button', { name: '移除标签 accessibility' })).toBeVisible()
+
+    await sheet.getByRole('button', { name: '添加' }).click()
+    const tagSearch = page.getByPlaceholder('搜索标签…')
+    await expect(tagSearch).toBeVisible()
+    await tagSearch.fill('accessibility')
+    const listbox = page.getByRole('listbox')
+    await expect(listbox).toContainText('标签「accessibility」已添加到当前反馈')
+    await expect(page.getByRole('option', { name: '创建「accessibility」' })).toHaveCount(0)
+
+    await tagSearch.press('Escape')
+    await expect(page.getByRole('listbox')).toHaveCount(0)
+
+    await sheet.getByRole('button', { name: '移除标签 accessibility' }).click()
+    await expect(sheet.getByText('暂无标签')).toBeVisible()
+
+    await sheet.getByRole('button', { name: '添加' }).click()
+    await page.getByPlaceholder('搜索标签…').fill('accessibility')
+    await expect(page.getByRole('option', { name: 'accessibility' })).toBeVisible()
+    await expect(page.getByRole('option', { name: '创建「accessibility」' })).toHaveCount(0)
+    await page.getByRole('option', { name: 'accessibility' }).click()
+    await expect(sheet.getByRole('button', { name: '移除标签 accessibility' })).toBeVisible()
+
+    await expectNoDocumentOverflow(page)
+    await expectNoAxeViolations(page)
+    expect(apiMocks.unhandledRequests).toEqual([])
+    await expectNoConsoleDiagnostics(diagnostics)
+  })
+
   test('reply draft review workflow edits, approves, and sends a guarded revision', async ({
     page,
   }) => {
