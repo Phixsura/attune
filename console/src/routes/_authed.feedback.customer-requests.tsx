@@ -25,7 +25,7 @@ function CustomerRequestsRoutePage() {
   )
 }
 
-function parseFeedbackIDs(raw: string) {
+export function parseFeedbackIDs(raw: string) {
   return raw
     .split(',')
     .map((id) => id.trim())
@@ -35,7 +35,7 @@ function parseFeedbackIDs(raw: string) {
     .map((id) => String(id))
 }
 
-function parseFeedbackID(raw: string) {
+export function parseFeedbackID(raw: string) {
   const parsed = Number(raw.trim())
   return Number.isInteger(parsed) && parsed > 0 ? String(parsed) : undefined
 }

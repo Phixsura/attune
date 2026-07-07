@@ -1880,7 +1880,7 @@ function CustomerRequestSkeleton() {
   )
 }
 
-function statusLabel(t: (key: string) => string, status: CustomerRequestStatus) {
+export function statusLabel(t: (key: string) => string, status: CustomerRequestStatus) {
   switch (status) {
     case CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_PLANNED:
       return t('customer_requests.statuses.planned')
@@ -1895,7 +1895,7 @@ function statusLabel(t: (key: string) => string, status: CustomerRequestStatus) 
   }
 }
 
-function priorityLabel(t: (key: string) => string, priority: CustomerRequestPriority) {
+export function priorityLabel(t: (key: string) => string, priority: CustomerRequestPriority) {
   switch (priority) {
     case CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_LOW:
       return t('customer_requests.priorities.low')
@@ -1910,7 +1910,7 @@ function priorityLabel(t: (key: string) => string, priority: CustomerRequestPrio
   }
 }
 
-function deliveryHealthLabel(
+export function deliveryHealthLabel(
   health: CustomerRequestDeliveryHealth | undefined,
   t: (key: string) => string,
 ) {
@@ -1930,7 +1930,7 @@ function deliveryHealthLabel(
   }
 }
 
-function syncStateLabel(state: CustomerRequestIssueSyncState, t: (key: string) => string) {
+export function syncStateLabel(state: CustomerRequestIssueSyncState, t: (key: string) => string) {
   switch (state) {
     case CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING:
       return t('customer_requests.sync_states.pending')
@@ -1945,7 +1945,7 @@ function syncStateLabel(state: CustomerRequestIssueSyncState, t: (key: string) =
   }
 }
 
-function supporterLabel(
+export function supporterLabel(
   item: Pick<
     CustomerRequestCustomerLink | CustomerRequestVote,
     'accountDisplay' | 'accountKey' | 'subjectDisplay' | 'subjectHash' | 'subjectKey'
@@ -1960,7 +1960,7 @@ function supporterLabel(
   )
 }
 
-function parseMoneyCents(raw: string) {
+export function parseMoneyCents(raw: string) {
   const trimmed = raw.trim()
   if (!trimmed) return undefined
   const parsed = Number(trimmed)
@@ -1968,7 +1968,7 @@ function parseMoneyCents(raw: string) {
   return parsed
 }
 
-function formatMoney(cents: string | number | undefined, currency = 'USD') {
+export function formatMoney(cents: string | number | undefined, currency = 'USD') {
   const value = Number(cents ?? 0) / 100
   if (!Number.isFinite(value)) return `${currency} 0`
   try {
@@ -1982,7 +1982,7 @@ function formatMoney(cents: string | number | undefined, currency = 'USD') {
   }
 }
 
-function parseFeedbackIDs(raw: string) {
+export function parseFeedbackIDs(raw: string) {
   return raw
     .split(',')
     .map((id) => id.trim())

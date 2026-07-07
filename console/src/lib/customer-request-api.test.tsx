@@ -1,0 +1,300 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { HttpResponse, http } from 'msw'
+import type { ReactNode } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  customerRequestDetailQuery,
+  customerRequestKeys,
+  customerRequestsInfiniteQuery,
+  useAddCustomerRequestNote,
+  useAddCustomerRequestVote,
+  useCreateCustomerRequest,
+  useDeleteCustomerRequestNote,
+  useLinkCustomerRequestCustomer,
+  useLinkCustomerRequestFeedback,
+  useLinkCustomerRequestIssue,
+  useMergeCustomerRequests,
+  usePromoteFeedbackToCustomerRequest,
+  useRecordCustomerRequestIssueSync,
+  useRemoveCustomerRequestVote,
+  useUnlinkCustomerRequestCustomer,
+  useUnlinkCustomerRequestFeedback,
+  useUnlinkCustomerRequestIssue,
+  useUpdateCustomerRequest,
+} from '@/lib/customer-request-api'
+import {
+  CustomerRequestDeliveryHealth,
+  type CustomerRequestDetail,
+  CustomerRequestImportance,
+  CustomerRequestIssueSyncState,
+  CustomerRequestPriority,
+  CustomerRequestSort,
+  CustomerRequestStatus,
+  CustomerRequestVisibility,
+  SortDirection,
+} from '@/proto/attune/v1/customer_request'
+import { server } from '@/testing/mocks/server'
+import { renderHook, waitFor } from '@/testing/test-utils'
+
+const baseURL = '/fb/v1/console/customer-requests'
+const requestID = '11111111-1111-1111-1111-111111111111'
+
+function makeQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+}
+
+function wrapperFor(queryClient: QueryClient) {
+  return ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  )
+}
+
+describe('customer request API', () => {
+  it('builds list query params for filters and pagination', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        urls.push(request.url)
+        const cursor = new URL(request.url).searchParams.get('cursor')
+        return HttpResponse.json({ requests: [], nextCursor: cursor ? undefined : 'next-page' })
+      }),
+    )
+
+    await makeQueryClient().fetchInfiniteQuery({
+      ...customerRequestsInfiniteQuery({
+        q: '  exports  ',
+        status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
+        priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
+        ownerMemberId: 'member-1',
+        visibility: CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ALL,
+        sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE,
+        direction: SortDirection.SORT_DIRECTION_DESC,
+        feedbackId: '42',
+      }),
+      pages: 2,
+    })
+
+    expect(urls).toHaveLength(2)
+    const first = new URL(urls[0])
+    expect(first.searchParams.get('q')).toBe('exports')
+    expect(first.searchParams.get('status')).toBe(
+      CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
+    )
+    expect(first.searchParams.get('priority')).toBe(
+      CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
+    )
+    expect(first.searchParams.get('owner_member_id')).toBe('member-1')
+    expect(first.searchParams.get('visibility')).toBe(
+      CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ALL,
+    )
+    expect(first.searchParams.get('sort')).toBe(
+      CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE,
+    )
+    expect(first.searchParams.get('direction')).toBe(SortDirection.SORT_DIRECTION_DESC)
+    expect(first.searchParams.get('feedback_id')).toBe('42')
+    expect(first.searchParams.get('limit')).toBe('50')
+    expect(first.searchParams.has('cursor')).toBe(false)
+    expect(new URL(urls[1]).searchParams.get('cursor')).toBe('next-page')
+  })
+
+  it('keeps empty list filters out of the query string', async () => {
+    let url = ''
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        url = request.url
+        return HttpResponse.json({ requests: [] })
+      }),
+    )
+
+    await makeQueryClient().fetchInfiniteQuery(customerRequestsInfiniteQuery({ q: '   ' }))
+
+    const params = new URL(url).searchParams
+    expect(params.get('limit')).toBe('50')
+    expect(params.has('q')).toBe(false)
+    expect(params.has('status')).toBe(false)
+  })
+
+  it('fetches details only when an id is present', async () => {
+    let path = ''
+    const detail = sampleDetail(requestID)
+    server.use(
+      http.get(`${baseURL}/${requestID}`, ({ request }) => {
+        path = new URL(request.url).pathname
+        return HttpResponse.json(detail)
+      }),
+    )
+
+    const disabled = customerRequestDetailQuery(null)
+    expect(disabled.enabled).toBe(false)
+    expect(disabled.queryKey).toEqual(customerRequestKeys.detail(''))
+
+    await expect(
+      makeQueryClient().fetchQuery(customerRequestDetailQuery(requestID)),
+    ).resolves.toEqual(detail)
+    expect(path).toBe(`${baseURL}/${requestID}`)
+  })
+
+  it('posts mutating actions and refreshes customer request caches', async () => {
+    const calls: Array<{ method: string; path: string; body?: unknown }> = []
+    const detail = sampleDetail('cached-request')
+    server.use(
+      http.all(/\/fb\/v1\/console\/customer-requests.*/, async ({ request }) => {
+        calls.push({
+          method: request.method,
+          path: new URL(request.url).pathname,
+          body:
+            request.method === 'GET' || request.method === 'DELETE'
+              ? undefined
+              : await request.json(),
+        })
+        return HttpResponse.json(detail)
+      }),
+    )
+    const qc = makeQueryClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(
+      () => ({
+        create: useCreateCustomerRequest(),
+        promote: usePromoteFeedbackToCustomerRequest(),
+        update: useUpdateCustomerRequest(requestID),
+        linkFeedback: useLinkCustomerRequestFeedback(requestID),
+        unlinkFeedback: useUnlinkCustomerRequestFeedback(requestID),
+        linkCustomer: useLinkCustomerRequestCustomer(requestID),
+        unlinkCustomer: useUnlinkCustomerRequestCustomer(requestID),
+        addVote: useAddCustomerRequestVote(requestID),
+        removeVote: useRemoveCustomerRequestVote(requestID),
+        addNote: useAddCustomerRequestNote(requestID),
+        deleteNote: useDeleteCustomerRequestNote(requestID),
+        merge: useMergeCustomerRequests(requestID),
+        linkIssue: useLinkCustomerRequestIssue(requestID),
+        unlinkIssue: useUnlinkCustomerRequestIssue(requestID),
+        recordSync: useRecordCustomerRequestIssueSync(requestID),
+      }),
+      { wrapper: wrapperFor(qc) },
+    )
+
+    await result.current.create.mutateAsync({
+      title: 'Export bundles',
+      description: 'CSV exports',
+      status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
+      priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
+      ownerMemberId: 'member-1',
+      idempotencyKey: 'create-key',
+    })
+    await result.current.promote.mutateAsync({
+      feedbackIds: ['101', '102'],
+      title: 'Promoted request',
+      status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
+      priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_MEDIUM,
+      idempotencyKey: 'promote-key',
+    })
+    await result.current.update.mutateAsync({ title: 'Renamed' })
+    await result.current.linkFeedback.mutateAsync({
+      feedbackId: '42',
+      importance: CustomerRequestImportance.CUSTOMER_REQUEST_IMPORTANCE_IMPORTANT,
+      note: 'strong signal',
+    })
+    await result.current.unlinkFeedback.mutateAsync('42')
+    await result.current.linkCustomer.mutateAsync({
+      subjectKey: 'subject-1',
+      accountKey: 'acme',
+      accountRevenueCents: '120000',
+    })
+    await result.current.unlinkCustomer.mutateAsync('customer-link-1')
+    await result.current.addVote.mutateAsync({ subjectKey: 'subject-1', weight: 3 })
+    await result.current.removeVote.mutateAsync('vote-1')
+    await result.current.addNote.mutateAsync({ body: 'Coordinate with ACME.' })
+    await result.current.deleteNote.mutateAsync('note-1')
+    await result.current.merge.mutateAsync({ targetId: 'target-1', idempotencyKey: 'merge-key' })
+    await result.current.linkIssue.mutateAsync({
+      provider: 'github',
+      externalUrl: 'https://github.com/Phixsura/attune/issues/212',
+      externalKey: '212',
+      title: 'Customer requests',
+      status: 'open',
+    })
+    await result.current.unlinkIssue.mutateAsync('issue-link-1')
+    await result.current.recordSync.mutateAsync({
+      issueLinkId: 'issue-link-1',
+      syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+      status: 'done',
+    })
+
+    await waitFor(() => expect(calls).toHaveLength(15))
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      `POST ${baseURL}`,
+      `POST ${baseURL}:promote-feedback`,
+      `PATCH ${baseURL}/${requestID}`,
+      `POST ${baseURL}/${requestID}/feedback`,
+      `DELETE ${baseURL}/${requestID}/feedback/42`,
+      `POST ${baseURL}/${requestID}/customers`,
+      `DELETE ${baseURL}/${requestID}/customers/customer-link-1`,
+      `POST ${baseURL}/${requestID}/votes`,
+      `DELETE ${baseURL}/${requestID}/votes/vote-1`,
+      `POST ${baseURL}/${requestID}/notes`,
+      `DELETE ${baseURL}/${requestID}/notes/note-1`,
+      `POST ${baseURL}/${requestID}:merge`,
+      `POST ${baseURL}/${requestID}/issue-links`,
+      `DELETE ${baseURL}/${requestID}/issue-links/issue-link-1`,
+      `POST ${baseURL}/${requestID}/issue-links/issue-link-1:record-sync`,
+    ])
+    expect(calls[2].body).toEqual({ id: requestID, title: 'Renamed' })
+    expect(calls[9].body).toEqual({ id: requestID, body: 'Coordinate with ACME.' })
+    expect(calls[14].body).toEqual({
+      id: requestID,
+      issueLinkId: 'issue-link-1',
+      syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+      status: 'done',
+    })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.all })
+    expect(qc.getQueryData(customerRequestKeys.detail('cached-request'))).toEqual(detail)
+  })
+})
+
+function sampleDetail(id: string): CustomerRequestDetail {
+  return {
+    request: {
+      id,
+      displayId: 'CR-1',
+      displayNumber: '1',
+      title: 'Export bundles',
+      status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
+      priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
+      supportingFeedbackCount: 0,
+      customerCount: 0,
+      linkedIssueCount: 0,
+      hiddenFeedbackCount: 0,
+      firstFeedbackAt: '',
+      latestFeedbackAt: '',
+      createdAt: '2026-07-07T00:00:00Z',
+      updatedAt: '2026-07-07T00:00:00Z',
+      accountCount: 0,
+      voteCount: 0,
+      duplicateRequestCount: 0,
+      revenueImpactCents: '0',
+      revenueCurrency: 'USD',
+      decisionScore: 0,
+      decisionScoreExplanation: '',
+      deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS,
+      syncedIssueCount: 0,
+      staleIssueCount: 0,
+      failedIssueCount: 0,
+      pendingIssueCount: 0,
+      manualIssueCount: 0,
+    },
+    description: 'CSV exports',
+    feedback: [],
+    issueLinks: [],
+    auditEntries: [],
+    customers: [],
+    votes: [],
+    duplicates: [],
+    accountProfiles: [],
+    notes: [],
+  }
+}

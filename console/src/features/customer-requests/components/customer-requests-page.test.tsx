@@ -5,6 +5,7 @@ import {
   CustomerRequestDeliveryHealth,
   type CustomerRequestDetail,
   CustomerRequestImportance,
+  CustomerRequestIssueSyncState,
   type CustomerRequestNote,
   type CustomerRequestOwner,
   CustomerRequestPriority,
@@ -139,6 +140,91 @@ describe('CustomerRequestsPage', () => {
     )
   })
 
+  it('renders status, priority, delivery health variants and loads another page', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        urls.push(request.url)
+        const cursor = new URL(request.url).searchParams.get('cursor')
+        return HttpResponse.json(
+          cursor
+            ? {
+                requests: [
+                  sampleSummary({
+                    id: 'request-manual',
+                    displayNumber: '6',
+                    displayId: 'CR-6',
+                    title: 'Manual handoff',
+                    status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_CANCELLED,
+                    priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_NONE,
+                    deliveryHealth:
+                      CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL,
+                  }),
+                ],
+              }
+            : {
+                requests: [
+                  sampleSummary({
+                    id: 'request-planned',
+                    displayNumber: '2',
+                    displayId: 'CR-2',
+                    title: 'Planned rollout',
+                    status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_PLANNED,
+                    priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_LOW,
+                    deliveryHealth:
+                      CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED,
+                  }),
+                  sampleSummary({
+                    id: 'request-progress',
+                    displayNumber: '3',
+                    displayId: 'CR-3',
+                    title: 'In progress sync',
+                    status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_IN_PROGRESS,
+                    priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_MEDIUM,
+                    deliveryHealth:
+                      CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE,
+                  }),
+                  sampleSummary({
+                    id: 'request-shipped',
+                    displayNumber: '4',
+                    displayId: 'CR-4',
+                    title: 'Shipped handoff',
+                    status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_SHIPPED,
+                    priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_URGENT,
+                    deliveryHealth:
+                      CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING,
+                  }),
+                  sampleSummary({
+                    id: 'request-open',
+                    displayNumber: '5',
+                    displayId: 'CR-5',
+                    title: 'No links yet',
+                    deliveryHealth:
+                      CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS,
+                  }),
+                ],
+                nextCursor: 'next-page',
+              },
+        )
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await screen.findByText('Planned rollout')
+    expect(screen.getByText('In progress sync')).toBeInTheDocument()
+    expect(screen.getByText('Shipped handoff')).toBeInTheDocument()
+    expect(screen.getByText('No links yet')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /加载中/ }))
+
+    await screen.findByText('Manual handoff')
+    await user.type(screen.getByLabelText('搜索标题或 CR 编号'), 'rollout')
+    await waitFor(() =>
+      expect(urls.some((url) => new URL(url).searchParams.get('q') === 'rollout')).toBe(true),
+    )
+    expect(urls.some((url) => new URL(url).searchParams.get('cursor') === 'next-page')).toBe(true)
+  })
+
   it('updates owner from the detail drawer', async () => {
     const member = sampleMember()
     let payload: Record<string, unknown> | undefined
@@ -266,6 +352,93 @@ describe('CustomerRequestsPage', () => {
     expect(payload).not.toHaveProperty('accountRevenueCents')
   })
 
+  it('links a customer with account profile fields', async () => {
+    let payload: Record<string, unknown> | undefined
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+    server.use(
+      http.post(`${baseURL}/${requestID}/customers`, async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(sampleDetail())
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getAllByPlaceholderText('客户标识')[0], 'buyer-1')
+    await user.type(within(dialog).getAllByPlaceholderText('客户名称')[0], 'Buyer One')
+    await user.type(within(dialog).getAllByPlaceholderText('账户标识')[0], 'acme')
+    await user.type(within(dialog).getAllByPlaceholderText('账户名称')[0], 'Acme')
+    await user.type(within(dialog).getAllByPlaceholderText('收入分')[0], '12345')
+    await user.clear(within(dialog).getAllByPlaceholderText('币种')[0])
+    await user.type(within(dialog).getAllByPlaceholderText('币种')[0], 'eur')
+    await user.type(within(dialog).getAllByPlaceholderText('层级')[0], 'enterprise')
+    await user.type(within(dialog).getAllByPlaceholderText('规模')[0], 'mid')
+    await user.type(within(dialog).getAllByPlaceholderText('生命周期')[0], 'active')
+    await user.click(within(dialog).getByRole('button', { name: '添加客户' }))
+
+    await waitFor(() => expect(payload).toBeDefined())
+    expect(payload).toMatchObject({
+      id: requestID,
+      subjectKey: 'buyer-1',
+      subjectDisplay: 'Buyer One',
+      accountKey: 'acme',
+      accountDisplay: 'Acme',
+      accountRevenueCents: '12345',
+      accountRevenueCurrency: 'EUR',
+      accountTier: 'enterprise',
+      accountSizeSegment: 'mid',
+      accountLifecycleStatus: 'active',
+    })
+  })
+
+  it('adds a vote with account profile fields', async () => {
+    let payload: Record<string, unknown> | undefined
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+    server.use(
+      http.post(`${baseURL}/${requestID}/votes`, async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(sampleDetail())
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getAllByPlaceholderText('客户标识')[1], 'voter-1')
+    await user.type(within(dialog).getAllByPlaceholderText('客户名称')[1], 'Vote Owner')
+    await user.type(within(dialog).getAllByPlaceholderText('账户标识')[1], 'globex')
+    await user.type(within(dialog).getAllByPlaceholderText('账户名称')[1], 'Globex')
+    await user.clear(within(dialog).getByPlaceholderText('权重'))
+    await user.type(within(dialog).getByPlaceholderText('权重'), '7')
+    await user.type(within(dialog).getAllByPlaceholderText('收入分')[1], '98765')
+    await user.clear(within(dialog).getAllByPlaceholderText('币种')[1])
+    await user.type(within(dialog).getAllByPlaceholderText('币种')[1], 'gbp')
+    await user.type(within(dialog).getAllByPlaceholderText('层级')[1], 'strategic')
+    await user.type(within(dialog).getAllByPlaceholderText('规模')[1], 'enterprise')
+    await user.type(within(dialog).getAllByPlaceholderText('生命周期')[1], 'renewal')
+    await user.click(within(dialog).getByRole('button', { name: '添加投票' }))
+
+    await waitFor(() => expect(payload).toBeDefined())
+    expect(payload).toMatchObject({
+      id: requestID,
+      subjectKey: 'voter-1',
+      subjectDisplay: 'Vote Owner',
+      accountKey: 'globex',
+      accountDisplay: 'Globex',
+      weight: 7,
+      accountRevenueCents: '98765',
+      accountRevenueCurrency: 'GBP',
+      accountTier: 'strategic',
+      accountSizeSegment: 'enterprise',
+      accountLifecycleStatus: 'renewal',
+    })
+  })
+
   it('adds an internal note from the detail drawer', async () => {
     let payload: Record<string, unknown> | undefined
     let detailResponse = sampleDetail()
@@ -320,6 +493,306 @@ describe('CustomerRequestsPage', () => {
     await waitFor(() =>
       expect(within(dialog).queryByText('Prioritize after ACME review.')).not.toBeInTheDocument(),
     )
+  })
+
+  it('renders populated detail sections and removes linked records', async () => {
+    const detail = sampleDetail({
+      status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_PLANNED,
+      priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_URGENT,
+      deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED,
+      feedback: [
+        {
+          feedbackId: '42',
+          content: 'Raw export request',
+          source: 'web',
+          type: 'feature',
+          userId: 'user-42',
+          subjectDisplay: 'Ada',
+          enrichedTitle: 'Need enterprise CSV export',
+          importance: CustomerRequestImportance.CUSTOMER_REQUEST_IMPORTANCE_CRITICAL,
+          note: 'from renewal call',
+          linkedBy: 'tester',
+          linkedAt: '2026-07-07T00:05:00Z',
+          createdAt: '2026-07-07T00:00:00Z',
+        },
+      ],
+      customers: [
+        {
+          id: 'customer-link-1',
+          subjectKey: 'subject-1',
+          subjectHash: '',
+          subjectDisplay: 'Acme buyer',
+          accountKey: 'acme',
+          accountDisplay: 'Acme',
+          note: 'renewal blocker',
+          createdBy: 'tester',
+          createdAt: '2026-07-07T00:10:00Z',
+        },
+      ],
+      votes: [
+        {
+          id: 'vote-1',
+          subjectKey: 'subject-1',
+          subjectHash: '',
+          subjectDisplay: 'Vote champion',
+          accountKey: 'acme',
+          accountDisplay: 'Acme',
+          weight: 4,
+          note: 'exec sponsor',
+          createdBy: 'tester',
+          createdAt: '2026-07-07T00:20:00Z',
+        },
+      ],
+      issueLinks: [
+        {
+          id: 'issue-link-1',
+          provider: 'github',
+          externalKey: '212',
+          externalUrl: 'https://github.com/Phixsura/attune/issues/212',
+          title: 'GitHub #212',
+          status: 'open',
+          createdBy: 'tester',
+          createdAt: '2026-07-07T00:25:00Z',
+          updatedAt: '2026-07-07T00:25:00Z',
+          lastSyncedAt: '2026-07-07T00:30:00Z',
+          syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED,
+          externalStatusCategory: 'in_progress',
+          externalAssignee: 'ops@example.com',
+          externalUpdatedAt: '2026-07-07T00:30:00Z',
+          syncError: 'rate limited',
+        },
+      ],
+      duplicates: [
+        {
+          id: 'duplicate-1',
+          displayId: 'CR-9',
+          title: 'Older duplicate',
+          mergedAt: '2026-07-07T00:35:00Z',
+        },
+      ],
+      auditEntries: [
+        {
+          id: 'audit-1',
+          action: 'created',
+          actorType: 'user',
+          actorId: 'tester',
+          summary: 'Request created',
+          createdAt: '2026-07-07T00:40:00Z',
+        },
+      ],
+      notes: [sampleNote()],
+      accountProfiles: [
+        {
+          accountKey: 'acme',
+          accountDisplay: 'Acme Corp',
+          revenueCents: '1250000',
+          revenueCurrency: 'USD',
+          tier: 'enterprise',
+          sizeSegment: 'mid_market',
+          lifecycleStatus: 'active',
+          crmProvider: 'salesforce',
+          crmExternalId: '001',
+          source: 'manual',
+          updatedAt: '2026-07-07T00:45:00Z',
+        },
+      ],
+    })
+    const deletes: string[] = []
+    let syncPayload: Record<string, unknown> | undefined
+    mockList({ requests: [detail.request ?? sampleSummary()] })
+    mockDetail(detail)
+    server.use(
+      http.delete(`${baseURL}/${requestID}/feedback/42`, () => {
+        deletes.push('feedback')
+        return HttpResponse.json(detail)
+      }),
+      http.delete(`${baseURL}/${requestID}/customers/customer-link-1`, () => {
+        deletes.push('customer')
+        return HttpResponse.json(detail)
+      }),
+      http.delete(`${baseURL}/${requestID}/votes/vote-1`, () => {
+        deletes.push('vote')
+        return HttpResponse.json(detail)
+      }),
+      http.delete(`${baseURL}/${requestID}/issue-links/issue-link-1`, () => {
+        deletes.push('issue')
+        return HttpResponse.json(detail)
+      }),
+      http.post(
+        `${baseURL}/${requestID}/issue-links/issue-link-1:record-sync`,
+        async ({ request }) => {
+          syncPayload = (await request.json()) as Record<string, unknown>
+          return HttpResponse.json(detail)
+        },
+      ),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('Need enterprise CSV export')).toBeInTheDocument()
+    expect(within(dialog).getByText('Acme buyer')).toBeInTheDocument()
+    expect(within(dialog).getByText('Vote champion')).toBeInTheDocument()
+    expect(within(dialog).getByText('GitHub #212')).toBeInTheDocument()
+    expect(within(dialog).getByText('rate limited')).toBeInTheDocument()
+    expect(within(dialog).getByText('Acme Corp')).toBeInTheDocument()
+    expect(within(dialog).getByText('CR-9')).toBeInTheDocument()
+    expect(within(dialog).getByText('Request created')).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: '记录同步' }))
+    await waitFor(() => expect(syncPayload).toBeDefined())
+    expect(syncPayload).toMatchObject({
+      id: requestID,
+      issueLinkId: 'issue-link-1',
+      syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+      status: 'open',
+    })
+
+    await user.click(within(dialog).getByRole('button', { name: '移除引用' }))
+    await user.click(within(dialog).getByRole('button', { name: '移除投票' }))
+    await user.click(within(dialog).getByRole('button', { name: '移除客户' }))
+    await user.click(within(dialog).getByRole('button', { name: '移除反馈' }))
+
+    await waitFor(() => expect(deletes).toEqual(['issue', 'vote', 'customer', 'feedback']))
+  })
+
+  it('keeps detail actions available when mutations fail', async () => {
+    const detail = sampleDetail({
+      feedback: [
+        {
+          feedbackId: '42',
+          content: 'Raw export request',
+          source: 'web',
+          type: 'feature',
+          userId: 'user-42',
+          subjectDisplay: 'Ada',
+          enrichedTitle: 'Need enterprise CSV export',
+          importance: CustomerRequestImportance.CUSTOMER_REQUEST_IMPORTANCE_CRITICAL,
+          note: '',
+          linkedBy: 'tester',
+          linkedAt: '2026-07-07T00:05:00Z',
+          createdAt: '2026-07-07T00:00:00Z',
+        },
+      ],
+      customers: [
+        {
+          id: 'customer-link-1',
+          subjectKey: 'subject-1',
+          subjectHash: '',
+          subjectDisplay: 'Acme buyer',
+          accountKey: 'acme',
+          accountDisplay: 'Acme',
+          note: '',
+          createdBy: 'tester',
+          createdAt: '2026-07-07T00:10:00Z',
+        },
+      ],
+      votes: [
+        {
+          id: 'vote-1',
+          subjectKey: 'subject-1',
+          subjectHash: '',
+          subjectDisplay: 'Vote champion',
+          accountKey: 'acme',
+          accountDisplay: 'Acme',
+          weight: 4,
+          note: '',
+          createdBy: 'tester',
+          createdAt: '2026-07-07T00:20:00Z',
+        },
+      ],
+      notes: [sampleNote()],
+      issueLinks: [
+        {
+          id: 'issue-link-1',
+          provider: 'github',
+          externalKey: '212',
+          externalUrl: 'https://github.com/Phixsura/attune/issues/212',
+          title: 'GitHub #212',
+          status: 'open',
+          createdBy: 'tester',
+          createdAt: '2026-07-07T00:25:00Z',
+          updatedAt: '2026-07-07T00:25:00Z',
+          lastSyncedAt: '2026-07-07T00:30:00Z',
+          syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE,
+          externalStatusCategory: 'in_progress',
+          externalAssignee: 'ops@example.com',
+          externalUpdatedAt: '2026-07-07T00:30:00Z',
+          syncError: '',
+        },
+      ],
+    })
+    const failures: string[] = []
+    const fail = (name: string) => {
+      failures.push(name)
+      return HttpResponse.json({ code: 'INTERNAL', message: `${name} failed` }, { status: 500 })
+    }
+    mockList({ requests: [detail.request ?? sampleSummary()] })
+    mockDetail(detail)
+    server.use(
+      http.post(`${baseURL}/${requestID}:merge`, () => fail('merge')),
+      http.post(`${baseURL}/${requestID}/feedback`, () => fail('feedback')),
+      http.post(`${baseURL}/${requestID}/customers`, () => fail('customer')),
+      http.post(`${baseURL}/${requestID}/votes`, () => fail('vote')),
+      http.post(`${baseURL}/${requestID}/notes`, () => fail('note')),
+      http.post(`${baseURL}/${requestID}/issue-links`, () => fail('issue-link')),
+      http.post(`${baseURL}/${requestID}/issue-links/issue-link-1:record-sync`, () =>
+        fail('record-sync'),
+      ),
+      http.delete(`${baseURL}/${requestID}/feedback/42`, () => fail('unlink-feedback')),
+      http.delete(`${baseURL}/${requestID}/customers/customer-link-1`, () =>
+        fail('unlink-customer'),
+      ),
+      http.delete(`${baseURL}/${requestID}/votes/vote-1`, () => fail('remove-vote')),
+      http.delete(`${baseURL}/${requestID}/notes/${noteID}`, () => fail('delete-note')),
+      http.delete(`${baseURL}/${requestID}/issue-links/issue-link-1`, () => fail('unlink-issue')),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+
+    await user.type(within(dialog).getByPlaceholderText('目标客户需求 UUID'), targetRequestID)
+    await user.click(within(dialog).getByRole('button', { name: '合并' }))
+    await waitFor(() => expect(failures).toContain('merge'))
+
+    await user.type(within(dialog).getByPlaceholderText('反馈 ID'), '42')
+    await user.click(within(dialog).getByRole('button', { name: '添加反馈' }))
+    await waitFor(() => expect(failures).toContain('feedback'))
+
+    await user.type(within(dialog).getAllByPlaceholderText('客户标识')[0], 'buyer-1')
+    await user.click(within(dialog).getByRole('button', { name: '添加客户' }))
+    await waitFor(() => expect(failures).toContain('customer'))
+
+    await user.type(within(dialog).getAllByPlaceholderText('客户标识')[1], 'voter-1')
+    await user.click(within(dialog).getByRole('button', { name: '添加投票' }))
+    await waitFor(() => expect(failures).toContain('vote'))
+
+    await user.type(within(dialog).getByLabelText('备注内容'), 'failed note')
+    await user.click(within(dialog).getByRole('button', { name: '添加备注' }))
+    await waitFor(() => expect(failures).toContain('note'))
+
+    await user.type(
+      within(dialog).getByPlaceholderText('Issue URL'),
+      'https://github.com/Phixsura/attune/issues/212',
+    )
+    await user.click(within(dialog).getByRole('button', { name: '添加引用' }))
+    await waitFor(() => expect(failures).toContain('issue-link'))
+
+    await user.click(within(dialog).getByRole('button', { name: '记录同步' }))
+    await waitFor(() => expect(failures).toContain('record-sync'))
+    await user.click(within(dialog).getByRole('button', { name: '移除引用' }))
+    await waitFor(() => expect(failures).toContain('unlink-issue'))
+    await user.click(within(dialog).getByRole('button', { name: '删除备注' }))
+    await waitFor(() => expect(failures).toContain('delete-note'))
+    await user.click(within(dialog).getByRole('button', { name: '移除投票' }))
+    await waitFor(() => expect(failures).toContain('remove-vote'))
+    await user.click(within(dialog).getByRole('button', { name: '移除客户' }))
+    await waitFor(() => expect(failures).toContain('unlink-customer'))
+    await user.click(within(dialog).getByRole('button', { name: '移除反馈' }))
+    await waitFor(() => expect(failures).toContain('unlink-feedback'))
   })
 
   it('switches the detail drawer to the merge target after merging', async () => {

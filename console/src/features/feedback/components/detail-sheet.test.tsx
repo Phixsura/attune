@@ -146,6 +146,7 @@ describe('FeedbackDetailSheet', () => {
       <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
     )
 
+    await userEvent.type(await screen.findByLabelText('搜索客户需求'), 'Export')
     await userEvent.click(await screen.findByRole('button', { name: /CR-9.*Export bundles/s }))
     await userEvent.click(screen.getByRole('button', { name: '关联需求' }))
 
