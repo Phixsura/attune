@@ -716,6 +716,12 @@ func summaryToProto(summary repo.Summary) *attunev1.CustomerRequestSummary {
 		RevenueCurrency:          summary.RevenueCurrency,
 		DecisionScore:            int32(summary.DecisionScore),
 		DecisionScoreExplanation: summary.DecisionScoreExplanation,
+		DeliveryHealth:           deliveryHealthToProto(summary.DeliveryHealth),
+		SyncedIssueCount:         int32(summary.SyncedIssueCount),
+		StaleIssueCount:          int32(summary.StaleIssueCount),
+		FailedIssueCount:         int32(summary.FailedIssueCount),
+		PendingIssueCount:        int32(summary.PendingIssueCount),
+		ManualIssueCount:         int32(summary.ManualIssueCount),
 		FirstFeedbackAt:          formatTime(summary.FirstFeedbackAt),
 		LatestFeedbackAt:         formatTime(summary.LatestFeedbackAt),
 		CreatedAt:                formatTime(ptrext.Of(summary.CreatedAt)),
@@ -974,6 +980,23 @@ func syncStateToProto(state repo.IssueSyncState) attunev1.CustomerRequestIssueSy
 	}
 }
 
+func deliveryHealthToProto(health repo.DeliveryHealth) attunev1.CustomerRequestDeliveryHealth {
+	switch health {
+	case repo.DeliveryHealthFailed:
+		return attunev1.CustomerRequestDeliveryHealth_CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED
+	case repo.DeliveryHealthStale:
+		return attunev1.CustomerRequestDeliveryHealth_CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE
+	case repo.DeliveryHealthPending:
+		return attunev1.CustomerRequestDeliveryHealth_CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING
+	case repo.DeliveryHealthSynced:
+		return attunev1.CustomerRequestDeliveryHealth_CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED
+	case repo.DeliveryHealthManual:
+		return attunev1.CustomerRequestDeliveryHealth_CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL
+	default:
+		return attunev1.CustomerRequestDeliveryHealth_CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS
+	}
+}
+
 func statusesFromProto(statuses []attunev1.CustomerRequestStatus) ([]repo.Status, error) {
 	out := make([]repo.Status, 0, len(statuses))
 	for _, status := range statuses {
@@ -1029,6 +1052,8 @@ func sortFromProto(value attunev1.CustomerRequestSort) repo.Sort {
 		return repo.SortRevenueImpact
 	case attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DECISION_SCORE:
 		return repo.SortDecisionScore
+	case attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DELIVERY_HEALTH:
+		return repo.SortDeliveryHealth
 	default:
 		return repo.SortUpdatedAt
 	}

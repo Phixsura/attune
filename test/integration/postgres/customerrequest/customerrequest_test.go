@@ -125,6 +125,32 @@ func TestPGCustomerRequestDecisionIntelligence(t *testing.T) {
 	assertDecisionScoreSort(t, e, fixture.highValue.ID, detail.Summary.DecisionScore)
 }
 
+func TestPGCustomerRequestDeliveryHealthRollup(t *testing.T) {
+	e := setup(t)
+	failed := e.createRequest(t, e.tenantID, "Failed sync request")
+	stale := e.createRequest(t, e.tenantID, "Stale sync request")
+	pending := e.createRequest(t, e.tenantID, "Pending sync request")
+	manual := e.createRequest(t, e.tenantID, "Manual sync request")
+	synced := e.createRequest(t, e.tenantID, "Synced sync request")
+	noLinks := e.createRequest(t, e.tenantID, "No issue links request")
+
+	tx := e.begin(t)
+	seedIssueState(t, e, tx, failed.ID, "failed", crrepo.IssueSyncStateFailed)
+	seedIssueState(t, e, tx, stale.ID, "stale", crrepo.IssueSyncStateStale)
+	seedIssueState(t, e, tx, pending.ID, "pending", crrepo.IssueSyncStatePending)
+	seedIssueState(t, e, tx, manual.ID, "manual", crrepo.IssueSyncStateManual)
+	seedIssueState(t, e, tx, synced.ID, "synced", crrepo.IssueSyncStateSynced)
+	commit(t, e.ctx, tx)
+
+	assertDeliveryHealth(t, e, failed.ID, crrepo.DeliveryHealthFailed, 0, 0, 1, 0, 0)
+	assertDeliveryHealth(t, e, stale.ID, crrepo.DeliveryHealthStale, 0, 1, 0, 0, 0)
+	assertDeliveryHealth(t, e, pending.ID, crrepo.DeliveryHealthPending, 0, 0, 0, 1, 0)
+	assertDeliveryHealth(t, e, manual.ID, crrepo.DeliveryHealthManual, 0, 0, 0, 0, 1)
+	assertDeliveryHealth(t, e, synced.ID, crrepo.DeliveryHealthSynced, 1, 0, 0, 0, 0)
+	assertDeliveryHealth(t, e, noLinks.ID, crrepo.DeliveryHealthNoLinks, 0, 0, 0, 0, 0)
+	assertDeliveryHealthSort(t, e, failed.ID, stale.ID, pending.ID)
+}
+
 type decisionIntelligenceFixture struct {
 	highValue crrepo.Summary
 	lowValue  crrepo.Summary
@@ -246,6 +272,10 @@ func assertDecisionIntelligenceDetail(
 	if detail.IssueLinks[0].Status != "closed" || detail.IssueLinks[0].ExternalStatusCategory != "done" {
 		t.Fatalf("issue sync status = %q/%q, want closed/done", detail.IssueLinks[0].Status, detail.IssueLinks[0].ExternalStatusCategory)
 	}
+	if detail.Summary.DeliveryHealth != crrepo.DeliveryHealthSynced || detail.Summary.SyncedIssueCount != 1 {
+		t.Fatalf("delivery health = %s synced=%d, want synced/1",
+			detail.Summary.DeliveryHealth, detail.Summary.SyncedIssueCount)
+	}
 	if fixture.issue.LastSyncedAt == nil {
 		t.Fatalf("RecordIssueSyncTx returned nil LastSyncedAt")
 	}
@@ -266,6 +296,94 @@ func assertDecisionScoreSort(t *testing.T, e env, highValueID uuid.UUID, highSco
 	if len(list.Items) < 2 || list.Items[0].ID != highValueID {
 		t.Fatalf("top decision score item = %+v, want %s first after score %d",
 			list.Items, highValueID, highScore)
+	}
+}
+
+func seedIssueState(
+	t *testing.T,
+	e env,
+	tx pgx.Tx,
+	requestID uuid.UUID,
+	key string,
+	state crrepo.IssueSyncState,
+) {
+	t.Helper()
+	issue, err := e.repo.LinkIssueTx(e.ctx, tx, crrepo.IssueLinkInput{
+		TenantID:    e.tenantID,
+		RequestID:   requestID,
+		Provider:    "other",
+		ExternalKey: key,
+		ExternalURL: "https://example.com/" + key,
+		Title:       key,
+		ActorID:     "operator",
+	})
+	if err != nil {
+		rollback(t, e.ctx, tx)
+		t.Fatalf("LinkIssueTx %s: %v", key, err)
+	}
+	if state == crrepo.IssueSyncStateManual {
+		return
+	}
+	_, err = e.repo.RecordIssueSyncTx(e.ctx, tx, crrepo.IssueSyncInput{
+		TenantID:    e.tenantID,
+		RequestID:   requestID,
+		IssueLinkID: issue.ID,
+		SyncState:   state,
+		Status:      string(state),
+		ActorID:     "operator",
+	})
+	if err != nil {
+		rollback(t, e.ctx, tx)
+		t.Fatalf("RecordIssueSyncTx %s: %v", key, err)
+	}
+}
+
+func assertDeliveryHealth(
+	t *testing.T,
+	e env,
+	requestID uuid.UUID,
+	health crrepo.DeliveryHealth,
+	synced, stale, failed, pending, manual int,
+) {
+	t.Helper()
+	detail, err := e.repo.GetDetail(e.ctx, e.tenantID, requestID, 50)
+	if err != nil {
+		t.Fatalf("GetDetail delivery health: %v", err)
+	}
+	summary := detail.Summary
+	if summary.DeliveryHealth != health ||
+		summary.SyncedIssueCount != synced ||
+		summary.StaleIssueCount != stale ||
+		summary.FailedIssueCount != failed ||
+		summary.PendingIssueCount != pending ||
+		summary.ManualIssueCount != manual {
+		t.Fatalf("delivery health summary = %s synced:%d stale:%d failed:%d pending:%d manual:%d",
+			summary.DeliveryHealth,
+			summary.SyncedIssueCount,
+			summary.StaleIssueCount,
+			summary.FailedIssueCount,
+			summary.PendingIssueCount,
+			summary.ManualIssueCount)
+	}
+}
+
+func assertDeliveryHealthSort(t *testing.T, e env, failedID, staleID, pendingID uuid.UUID) {
+	t.Helper()
+	list, err := e.repo.List(e.ctx, crrepo.ListFilter{
+		TenantID:   e.tenantID,
+		Visibility: crrepo.VisibilityAll,
+		Sort:       crrepo.SortDeliveryHealth,
+		Direction:  crrepo.DirectionDesc,
+	})
+	if err != nil {
+		t.Fatalf("List by delivery health: %v", err)
+	}
+	if len(list.Items) < 3 {
+		t.Fatalf("delivery health list len = %d, want at least 3", len(list.Items))
+	}
+	if list.Items[0].ID != failedID || list.Items[1].ID != staleID || list.Items[2].ID != pendingID {
+		t.Fatalf("delivery health order = %s, %s, %s; want failed/stale/pending",
+			list.Items[0].ID, list.Items[1].ID, list.Items[2].ID)
 	}
 }
 

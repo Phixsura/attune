@@ -1373,6 +1373,7 @@ paths:
                         - CUSTOMER_REQUEST_SORT_PRIORITY
                         - CUSTOMER_REQUEST_SORT_REVENUE_IMPACT
                         - CUSTOMER_REQUEST_SORT_DECISION_SCORE
+                        - CUSTOMER_REQUEST_SORT_DELIVERY_HEALTH
                     type: string
                     format: enum
                 - name: direction
@@ -8845,6 +8846,32 @@ components:
                     format: int32
                 decisionScoreExplanation:
                     type: string
+                deliveryHealth:
+                    enum:
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_UNSPECIFIED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED
+                    type: string
+                    format: enum
+                syncedIssueCount:
+                    type: integer
+                    format: int32
+                staleIssueCount:
+                    type: integer
+                    format: int32
+                failedIssueCount:
+                    type: integer
+                    format: int32
+                pendingIssueCount:
+                    type: integer
+                    format: int32
+                manualIssueCount:
+                    type: integer
+                    format: int32
         CustomerRequestVote:
             type: object
             properties:

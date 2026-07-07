@@ -66,6 +66,7 @@ import { cn } from '@/lib/utils'
 import {
   type CustomerRequestAccountProfile,
   type CustomerRequestCustomerLink,
+  CustomerRequestDeliveryHealth,
   type CustomerRequestDuplicate,
   type CustomerRequestFeedbackEvidence,
   CustomerRequestImportance,
@@ -432,6 +433,9 @@ function CustomerRequestToolbar({
           <SelectItem value={CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE}>
             {t('customer_requests.sorts.decision_score')}
           </SelectItem>
+          <SelectItem value={CustomerRequestSort.CUSTOMER_REQUEST_SORT_DELIVERY_HEALTH}>
+            {t('customer_requests.sorts.delivery_health')}
+          </SelectItem>
         </SelectContent>
       </Select>
     </div>
@@ -461,6 +465,7 @@ function CustomerRequestRow({
           </span>
           <StatusPill status={item.status} />
           <PriorityPill priority={item.priority} />
+          <DeliveryHealthPill health={item.deliveryHealth} />
         </div>
         <h2 className="truncate text-base font-semibold">{item.title}</h2>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
@@ -476,6 +481,14 @@ function CustomerRequestRow({
             })}
           </span>
           <span>{t('customer_requests.decision_score', { count: item.decisionScore })}</span>
+          <span>
+            {t('customer_requests.issue_sync_counts', {
+              synced: item.syncedIssueCount,
+              stale: item.staleIssueCount,
+              failed: item.failedIssueCount,
+              pending: item.pendingIssueCount,
+            })}
+          </span>
           {item.duplicateRequestCount > 0 ? (
             <span>
               {t('customer_requests.duplicate_count', { count: item.duplicateRequestCount })}
@@ -589,6 +602,19 @@ function CustomerRequestDetailSheet({
               <Metric
                 label={t('customer_requests.decision_score', {
                   count: detail.data.request?.decisionScore ?? 0,
+                })}
+              />
+              <Metric
+                label={t('customer_requests.delivery_health', {
+                  value: deliveryHealthLabel(detail.data.request?.deliveryHealth, t),
+                })}
+              />
+              <Metric
+                label={t('customer_requests.issue_sync_counts', {
+                  synced: detail.data.request?.syncedIssueCount ?? 0,
+                  stale: detail.data.request?.staleIssueCount ?? 0,
+                  failed: detail.data.request?.failedIssueCount ?? 0,
+                  pending: detail.data.request?.pendingIssueCount ?? 0,
                 })}
               />
             </div>
@@ -1722,6 +1748,26 @@ function PriorityPill({ priority }: { priority: CustomerRequestPriority }) {
   )
 }
 
+function DeliveryHealthPill({ health }: { health: CustomerRequestDeliveryHealth }) {
+  const { t } = useTranslation()
+  return (
+    <span
+      className={cn(
+        'rounded px-2 py-0.5 text-xs',
+        health === CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED
+          ? 'bg-destructive text-destructive-foreground'
+          : health === CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE
+            ? 'bg-amber-100 text-amber-900'
+            : health === CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING
+              ? 'bg-sky-100 text-sky-900'
+              : 'bg-muted',
+      )}
+    >
+      {deliveryHealthLabel(health, t)}
+    </span>
+  )
+}
+
 function CustomerRequestSkeleton() {
   return (
     <div className="space-y-3">
@@ -1759,6 +1805,26 @@ function priorityLabel(t: (key: string) => string, priority: CustomerRequestPrio
       return t('customer_requests.priorities.urgent')
     default:
       return t('customer_requests.priorities.none')
+  }
+}
+
+function deliveryHealthLabel(
+  health: CustomerRequestDeliveryHealth | undefined,
+  t: (key: string) => string,
+) {
+  switch (health) {
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED:
+      return t('customer_requests.delivery_health_states.failed')
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE:
+      return t('customer_requests.delivery_health_states.stale')
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING:
+      return t('customer_requests.delivery_health_states.pending')
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED:
+      return t('customer_requests.delivery_health_states.synced')
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL:
+      return t('customer_requests.delivery_health_states.manual')
+    default:
+      return t('customer_requests.delivery_health_states.no_links')
   }
 }
 

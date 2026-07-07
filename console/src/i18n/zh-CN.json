@@ -230,6 +230,8 @@
     "hidden_feedback_count": "{{count}} 条隐藏反馈",
     "revenue_impact": "收入影响 {{value}}",
     "decision_score": "决策分 {{count}}",
+    "delivery_health": "交付健康 {{value}}",
+    "issue_sync_counts": "{{synced}} 已同步 · {{stale}} 过期 · {{failed}} 失败 · {{pending}} 待同步",
     "latest_feedback": "最新反馈 {{value}}",
     "first_feedback": "首条反馈 {{value}}",
     "updated": "更新于 {{value}}",
@@ -322,7 +324,16 @@
       "latest_feedback_at": "最新反馈",
       "priority": "优先级",
       "revenue_impact": "收入影响",
-      "decision_score": "决策分"
+      "decision_score": "决策分",
+      "delivery_health": "交付健康"
+    },
+    "delivery_health_states": {
+      "no_links": "无交付引用",
+      "manual": "手动跟踪",
+      "pending": "待同步",
+      "synced": "已同步",
+      "stale": "可能过期",
+      "failed": "同步失败"
     },
     "sync_states": {
       "manual": "手动引用",

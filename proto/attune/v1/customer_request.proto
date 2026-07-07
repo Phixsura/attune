@@ -122,6 +122,7 @@ enum CustomerRequestSort {
   CUSTOMER_REQUEST_SORT_PRIORITY = 5;
   CUSTOMER_REQUEST_SORT_REVENUE_IMPACT = 6;
   CUSTOMER_REQUEST_SORT_DECISION_SCORE = 7;
+  CUSTOMER_REQUEST_SORT_DELIVERY_HEALTH = 8;
 }
 
 enum CustomerRequestIssueSyncState {
@@ -131,6 +132,16 @@ enum CustomerRequestIssueSyncState {
   CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED = 3;
   CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE = 4;
   CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED = 5;
+}
+
+enum CustomerRequestDeliveryHealth {
+  CUSTOMER_REQUEST_DELIVERY_HEALTH_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS = 1;
+  CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL = 2;
+  CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING = 3;
+  CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED = 4;
+  CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE = 5;
+  CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED = 6;
 }
 
 enum SortDirection {
@@ -172,6 +183,12 @@ message CustomerRequestSummary {
   string revenue_currency = 22;
   int32 decision_score = 23;
   string decision_score_explanation = 24;
+  CustomerRequestDeliveryHealth delivery_health = 25;
+  int32 synced_issue_count = 26;
+  int32 stale_issue_count = 27;
+  int32 failed_issue_count = 28;
+  int32 pending_issue_count = 29;
+  int32 manual_issue_count = 30;
 }
 
 message CustomerRequestFeedbackEvidence {

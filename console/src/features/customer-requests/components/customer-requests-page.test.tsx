@@ -2,6 +2,7 @@ import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { CustomerRequestsPage } from '@/features/customer-requests/components/customer-requests-page'
 import {
+  CustomerRequestDeliveryHealth,
   type CustomerRequestDetail,
   CustomerRequestImportance,
   type CustomerRequestOwner,
@@ -33,6 +34,7 @@ describe('CustomerRequestsPage', () => {
     expect(screen.getAllByText('1 位客户').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/收入影响/).length).toBeGreaterThan(0)
     expect(screen.getAllByText('决策分 114').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('已同步').length).toBeGreaterThan(0)
   })
 
   it('posts a create request payload from the dialog', async () => {
@@ -375,7 +377,13 @@ function sampleSummary(overrides: Partial<CustomerRequestSummary> = {}): Custome
     revenueCurrency: 'USD',
     decisionScore: 114,
     decisionScoreExplanation:
-      'priority=high feedback=2 customers=1 accounts=1 votes=3 revenue_cents=2400000',
+      'priority=high feedback=2 customers=1 accounts=1 votes=3 revenue_cents=2400000 delivery_health=synced',
+    deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED,
+    syncedIssueCount: 1,
+    staleIssueCount: 0,
+    failedIssueCount: 0,
+    pendingIssueCount: 0,
+    manualIssueCount: 0,
     latestFeedbackAt: '2026-07-07T00:30:00Z',
     firstFeedbackAt: '2026-07-07T00:00:00Z',
     ...overrides,

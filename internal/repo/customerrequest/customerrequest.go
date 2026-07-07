@@ -67,6 +67,7 @@ const (
 	SortPriority                Sort = "priority"
 	SortRevenueImpact           Sort = "revenue_impact"
 	SortDecisionScore           Sort = "decision_score"
+	SortDeliveryHealth          Sort = "delivery_health"
 )
 
 type Direction string
@@ -84,6 +85,17 @@ const (
 	IssueSyncStateSynced  IssueSyncState = "synced"
 	IssueSyncStateStale   IssueSyncState = "stale"
 	IssueSyncStateFailed  IssueSyncState = "failed"
+)
+
+type DeliveryHealth string
+
+const (
+	DeliveryHealthNoLinks DeliveryHealth = "no_links"
+	DeliveryHealthManual  DeliveryHealth = "manual"
+	DeliveryHealthPending DeliveryHealth = "pending"
+	DeliveryHealthSynced  DeliveryHealth = "synced"
+	DeliveryHealthStale   DeliveryHealth = "stale"
+	DeliveryHealthFailed  DeliveryHealth = "failed"
 )
 
 var (
@@ -131,6 +143,13 @@ type Summary struct {
 	RevenueCurrency          string
 	DecisionScore            int
 	DecisionScoreExplanation string
+	DeliveryHealth           DeliveryHealth
+	DeliveryHealthRank       int
+	SyncedIssueCount         int
+	StaleIssueCount          int
+	FailedIssueCount         int
+	PendingIssueCount        int
+	ManualIssueCount         int
 	FirstFeedbackAt          *time.Time
 	LatestFeedbackAt         *time.Time
 }
@@ -496,6 +515,8 @@ func orderByClause(sort Sort, direction Direction) string {
 		expr = "revenue_impact_cents"
 	case SortDecisionScore:
 		expr = "decision_score"
+	case SortDeliveryHealth:
+		expr = "delivery_health_rank"
 	}
 	return expr + " " + dir + " NULLS LAST, cr.id " + dir
 }
@@ -1335,6 +1356,27 @@ const summarySelectSQLText = `
 				+ LEAST(COALESCE(vc.vote_count, 0) * 4, 80)
 				+ LEAST((COALESCE(ai.revenue_impact_cents, 0) / 100000)::int, 100)
 			)::int AS decision_score,
+			CASE
+				WHEN COALESCE(ic.linked_issue_count, 0) = 0 THEN 'no_links'
+				WHEN COALESCE(ic.failed_issue_count, 0) > 0 THEN 'failed'
+				WHEN COALESCE(ic.stale_issue_count, 0) > 0 THEN 'stale'
+				WHEN COALESCE(ic.pending_issue_count, 0) > 0 THEN 'pending'
+				WHEN COALESCE(ic.synced_issue_count, 0) = COALESCE(ic.linked_issue_count, 0) THEN 'synced'
+				ELSE 'manual'
+			END AS delivery_health,
+			CASE
+				WHEN COALESCE(ic.failed_issue_count, 0) > 0 THEN 5
+				WHEN COALESCE(ic.stale_issue_count, 0) > 0 THEN 4
+				WHEN COALESCE(ic.pending_issue_count, 0) > 0 THEN 3
+				WHEN COALESCE(ic.linked_issue_count, 0) = 0 THEN 0
+				WHEN COALESCE(ic.synced_issue_count, 0) = COALESCE(ic.linked_issue_count, 0) THEN 1
+				ELSE 2
+			END AS delivery_health_rank,
+			COALESCE(ic.synced_issue_count, 0),
+			COALESCE(ic.stale_issue_count, 0),
+			COALESCE(ic.failed_issue_count, 0),
+			COALESCE(ic.pending_issue_count, 0),
+			COALESCE(ic.manual_issue_count, 0),
 			fc.first_feedback_at,
 			fc.latest_feedback_at
 		FROM customer_requests cr
@@ -1386,7 +1428,13 @@ const summarySelectSQLText = `
 			) supporters
 		) sc ON TRUE
 		LEFT JOIN LATERAL (
-			SELECT COUNT(*)::int AS linked_issue_count
+			SELECT
+				COUNT(*)::int AS linked_issue_count,
+				COUNT(*) FILTER (WHERE il.sync_state = 'synced')::int AS synced_issue_count,
+				COUNT(*) FILTER (WHERE il.sync_state = 'stale')::int AS stale_issue_count,
+				COUNT(*) FILTER (WHERE il.sync_state = 'failed')::int AS failed_issue_count,
+				COUNT(*) FILTER (WHERE il.sync_state = 'pending')::int AS pending_issue_count,
+				COUNT(*) FILTER (WHERE il.sync_state = 'manual')::int AS manual_issue_count
 			FROM customer_request_issue_links il
 			WHERE il.tenant_id = cr.tenant_id
 			  AND il.request_id = cr.id
@@ -1436,7 +1484,7 @@ type scanner interface {
 func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 	var ownerMemberID, mergedInto sql.NullString
 	var ownerID, ownerType, ownerUserID, ownerEmail, ownerRole sql.NullString
-	var status, priority string
+	var status, priority, deliveryHealth string
 	err := row.Scan(
 		&out.ID,
 		&out.TenantID,
@@ -1468,6 +1516,13 @@ func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 		&out.RevenueImpactCents,
 		&out.RevenueCurrency,
 		&out.DecisionScore,
+		&deliveryHealth,
+		&out.DeliveryHealthRank,
+		&out.SyncedIssueCount,
+		&out.StaleIssueCount,
+		&out.FailedIssueCount,
+		&out.PendingIssueCount,
+		&out.ManualIssueCount,
 		&out.FirstFeedbackAt,
 		&out.LatestFeedbackAt,
 	)
@@ -1476,6 +1531,7 @@ func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 	}
 	out.Status = Status(status)
 	out.Priority = Priority(priority)
+	out.DeliveryHealth = DeliveryHealth(deliveryHealth)
 	out.DecisionScoreExplanation = decisionScoreExplanation(out)
 	if ownerMemberID.Valid {
 		parsed, parseErr := uuid.Parse(ownerMemberID.String)
@@ -1977,13 +2033,14 @@ func decisionScoreExplanation(summary *Summary) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"priority=%s feedback=%d customers=%d accounts=%d votes=%d revenue_cents=%d",
+		"priority=%s feedback=%d customers=%d accounts=%d votes=%d revenue_cents=%d delivery_health=%s",
 		summary.Priority,
 		summary.SupportingFeedbackCount,
 		summary.CustomerCount,
 		summary.AccountCount,
 		summary.VoteCount,
 		summary.RevenueImpactCents,
+		summary.DeliveryHealth,
 	)
 }
 

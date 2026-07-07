@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   metadata, generated contract fields, audit coverage, and Console controls for
   inspecting account context and recording delivery issue sync state.
 
+- **Customer Requests now roll linked issue sync state into delivery health.**
+  Added request-level delivery health, per-state linked issue sync counts,
+  delivery-health sorting, generated contract fields, Console row badges and
+  detail metrics, and PostgreSQL coverage for failed, stale, pending, manual,
+  synced, and no-link rollups.
+
 - **Private-deploy smoke suite now covers base, observability, TLS, failure, and upgrade modules.**
   Added dedicated smoke targets for the compose base stack, the observability
   overlay, the TLS reverse-proxy front door, deterministic startup failures,

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
 import type { Dimension } from '@/proto/attune/v1/common'
 import {
+  CustomerRequestDeliveryHealth,
   CustomerRequestImportance,
   CustomerRequestPriority,
   CustomerRequestStatus,
@@ -1319,7 +1320,13 @@ function customerRequestSummary(
     revenueCurrency: 'USD',
     decisionScore: 67,
     decisionScoreExplanation:
-      'priority=high feedback=1 customers=1 accounts=1 votes=0 revenue_cents=0',
+      'priority=high feedback=1 customers=1 accounts=1 votes=0 revenue_cents=0 delivery_health=no_links',
+    deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS,
+    syncedIssueCount: 0,
+    staleIssueCount: 0,
+    failedIssueCount: 0,
+    pendingIssueCount: 0,
+    manualIssueCount: 0,
     ...overrides,
   }
 }
