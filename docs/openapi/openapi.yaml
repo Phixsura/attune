@@ -1371,6 +1371,8 @@ paths:
                         - CUSTOMER_REQUEST_SORT_SUPPORTING_FEEDBACK_COUNT
                         - CUSTOMER_REQUEST_SORT_LATEST_FEEDBACK_AT
                         - CUSTOMER_REQUEST_SORT_PRIORITY
+                        - CUSTOMER_REQUEST_SORT_REVENUE_IMPACT
+                        - CUSTOMER_REQUEST_SORT_DECISION_SCORE
                     type: string
                     format: enum
                 - name: direction
@@ -1653,6 +1655,41 @@ paths:
                   required: true
                   schema:
                     type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/issue-links/{issueLinkId}:record-sync:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_RecordCustomerRequestIssueSync
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: issueLinkId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RecordCustomerRequestIssueSyncRequest'
+                required: true
             responses:
                 "200":
                     description: OK
@@ -7268,6 +7305,20 @@ components:
                     format: int32
                 note:
                     type: string
+                accountRevenueCents:
+                    type: string
+                accountRevenueCurrency:
+                    type: string
+                accountTier:
+                    type: string
+                accountSizeSegment:
+                    type: string
+                accountLifecycleStatus:
+                    type: string
+                accountCrmProvider:
+                    type: string
+                accountCrmExternalId:
+                    type: string
         AddFeedbackTagRequest:
             type: object
             properties:
@@ -8523,6 +8574,31 @@ components:
                 maxUses:
                     type: integer
                     format: int32
+        CustomerRequestAccountProfile:
+            type: object
+            properties:
+                accountKey:
+                    type: string
+                accountDisplay:
+                    type: string
+                revenueCents:
+                    type: string
+                revenueCurrency:
+                    type: string
+                tier:
+                    type: string
+                sizeSegment:
+                    type: string
+                lifecycleStatus:
+                    type: string
+                crmProvider:
+                    type: string
+                crmExternalId:
+                    type: string
+                source:
+                    type: string
+                updatedAt:
+                    type: string
         CustomerRequestAuditEntry:
             type: object
             properties:
@@ -8559,6 +8635,8 @@ components:
                     type: string
                 createdAt:
                     type: string
+                accountProfile:
+                    $ref: '#/components/schemas/CustomerRequestAccountProfile'
         CustomerRequestDetail:
             type: object
             properties:
@@ -8590,6 +8668,10 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/CustomerRequestDuplicate'
+                accountProfiles:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestAccountProfile'
         CustomerRequestDuplicate:
             type: object
             properties:
@@ -8656,6 +8738,24 @@ components:
                 updatedAt:
                     type: string
                 lastSyncedAt:
+                    type: string
+                syncState:
+                    enum:
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED
+                    type: string
+                    format: enum
+                externalStatusCategory:
+                    type: string
+                externalAssignee:
+                    type: string
+                externalUpdatedAt:
+                    type: string
+                syncError:
                     type: string
         CustomerRequestOwner:
             type: object
@@ -8736,6 +8836,15 @@ components:
                 duplicateRequestCount:
                     type: integer
                     format: int32
+                revenueImpactCents:
+                    type: string
+                revenueCurrency:
+                    type: string
+                decisionScore:
+                    type: integer
+                    format: int32
+                decisionScoreExplanation:
+                    type: string
         CustomerRequestVote:
             type: object
             properties:
@@ -8760,6 +8869,8 @@ components:
                     type: string
                 createdAt:
                     type: string
+                accountProfile:
+                    $ref: '#/components/schemas/CustomerRequestAccountProfile'
         DeleteApiKeyResponse:
             type: object
             properties: {}
@@ -10464,6 +10575,20 @@ components:
                     type: string
                 note:
                     type: string
+                accountRevenueCents:
+                    type: string
+                accountRevenueCurrency:
+                    type: string
+                accountTier:
+                    type: string
+                accountSizeSegment:
+                    type: string
+                accountLifecycleStatus:
+                    type: string
+                accountCrmProvider:
+                    type: string
+                accountCrmExternalId:
+                    type: string
         LinkFeedbackToCustomerRequestRequest:
             required:
                 - id
@@ -11360,6 +11485,36 @@ components:
                 updatedAt:
                     type: string
                 updatedBy:
+                    type: string
+        RecordCustomerRequestIssueSyncRequest:
+            required:
+                - id
+                - issueLinkId
+            type: object
+            properties:
+                id:
+                    type: string
+                issueLinkId:
+                    type: string
+                syncState:
+                    enum:
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED
+                    type: string
+                    format: enum
+                status:
+                    type: string
+                externalStatusCategory:
+                    type: string
+                externalAssignee:
+                    type: string
+                externalUpdatedAt:
+                    type: string
+                syncError:
                     type: string
         RecordSearchEventRequest:
             type: object

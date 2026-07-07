@@ -65,6 +65,8 @@ const (
 	SortSupportingFeedbackCount Sort = "supporting_feedback_count"
 	SortLatestFeedbackAt        Sort = "latest_feedback_at"
 	SortPriority                Sort = "priority"
+	SortRevenueImpact           Sort = "revenue_impact"
+	SortDecisionScore           Sort = "decision_score"
 )
 
 type Direction string
@@ -72,6 +74,16 @@ type Direction string
 const (
 	DirectionAsc  Direction = "asc"
 	DirectionDesc Direction = "desc"
+)
+
+type IssueSyncState string
+
+const (
+	IssueSyncStateManual  IssueSyncState = "manual"
+	IssueSyncStatePending IssueSyncState = "pending"
+	IssueSyncStateSynced  IssueSyncState = "synced"
+	IssueSyncStateStale   IssueSyncState = "stale"
+	IssueSyncStateFailed  IssueSyncState = "failed"
 )
 
 var (
@@ -92,31 +104,35 @@ type Owner struct {
 }
 
 type Summary struct {
-	ID                      uuid.UUID
-	TenantID                string
-	DisplayNumber           int64
-	DisplayID               string
-	Title                   string
-	Description             string
-	Status                  Status
-	Priority                Priority
-	OwnerMemberID           *uuid.UUID
-	Owner                   *Owner
-	CreatedBy               string
-	UpdatedBy               string
-	MergedIntoRequestID     *uuid.UUID
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
-	ArchivedAt              *time.Time
-	SupportingFeedbackCount int
-	CustomerCount           int
-	AccountCount            int
-	LinkedIssueCount        int
-	VoteCount               int
-	DuplicateRequestCount   int
-	HiddenFeedbackCount     int
-	FirstFeedbackAt         *time.Time
-	LatestFeedbackAt        *time.Time
+	ID                       uuid.UUID
+	TenantID                 string
+	DisplayNumber            int64
+	DisplayID                string
+	Title                    string
+	Description              string
+	Status                   Status
+	Priority                 Priority
+	OwnerMemberID            *uuid.UUID
+	Owner                    *Owner
+	CreatedBy                string
+	UpdatedBy                string
+	MergedIntoRequestID      *uuid.UUID
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	ArchivedAt               *time.Time
+	SupportingFeedbackCount  int
+	CustomerCount            int
+	AccountCount             int
+	LinkedIssueCount         int
+	VoteCount                int
+	DuplicateRequestCount    int
+	HiddenFeedbackCount      int
+	RevenueImpactCents       int64
+	RevenueCurrency          string
+	DecisionScore            int
+	DecisionScoreExplanation string
+	FirstFeedbackAt          *time.Time
+	LatestFeedbackAt         *time.Time
 }
 
 type FeedbackEvidence struct {
@@ -135,16 +151,35 @@ type FeedbackEvidence struct {
 }
 
 type IssueLink struct {
-	ID           uuid.UUID
-	Provider     string
-	ExternalKey  string
-	ExternalURL  string
-	Title        string
-	Status       string
-	CreatedBy    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	LastSyncedAt *time.Time
+	ID                     uuid.UUID
+	Provider               string
+	ExternalKey            string
+	ExternalURL            string
+	Title                  string
+	Status                 string
+	CreatedBy              string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	LastSyncedAt           *time.Time
+	SyncState              IssueSyncState
+	ExternalStatusCategory string
+	ExternalAssignee       string
+	ExternalUpdatedAt      *time.Time
+	SyncError              string
+}
+
+type AccountProfile struct {
+	AccountKey      string
+	AccountDisplay  string
+	RevenueCents    int64
+	RevenueCurrency string
+	Tier            string
+	SizeSegment     string
+	LifecycleStatus string
+	CRMProvider     string
+	CRMExternalID   string
+	Source          string
+	UpdatedAt       time.Time
 }
 
 type CustomerLink struct {
@@ -157,6 +192,7 @@ type CustomerLink struct {
 	Note           string
 	CreatedBy      string
 	CreatedAt      time.Time
+	AccountProfile *AccountProfile
 }
 
 type Vote struct {
@@ -170,6 +206,7 @@ type Vote struct {
 	Note           string
 	CreatedBy      string
 	CreatedAt      time.Time
+	AccountProfile *AccountProfile
 }
 
 type Duplicate struct {
@@ -180,12 +217,13 @@ type Duplicate struct {
 }
 
 type Detail struct {
-	Summary       Summary
-	Feedback      []FeedbackEvidence
-	IssueLinks    []IssueLink
-	CustomerLinks []CustomerLink
-	Votes         []Vote
-	Duplicates    []Duplicate
+	Summary         Summary
+	Feedback        []FeedbackEvidence
+	IssueLinks      []IssueLink
+	CustomerLinks   []CustomerLink
+	Votes           []Vote
+	Duplicates      []Duplicate
+	AccountProfiles []AccountProfile
 }
 
 type ListFilter struct {
@@ -249,6 +287,7 @@ type CustomerLinkInput struct {
 	AccountDisplay string
 	Note           string
 	ActorID        string
+	AccountProfile AccountProfileInput
 }
 
 type VoteInput struct {
@@ -262,6 +301,7 @@ type VoteInput struct {
 	Weight         int
 	Note           string
 	ActorID        string
+	AccountProfile AccountProfileInput
 }
 
 type IssueLinkInput struct {
@@ -273,6 +313,33 @@ type IssueLinkInput struct {
 	Title       string
 	Status      string
 	ActorID     string
+}
+
+type AccountProfileInput struct {
+	AccountKey      string
+	AccountDisplay  string
+	RevenueCents    int64
+	RevenueCurrency string
+	Tier            string
+	SizeSegment     string
+	LifecycleStatus string
+	CRMProvider     string
+	CRMExternalID   string
+	Source          string
+	ActorID         string
+}
+
+type IssueSyncInput struct {
+	TenantID               string
+	RequestID              uuid.UUID
+	IssueLinkID            uuid.UUID
+	SyncState              IssueSyncState
+	Status                 string
+	ExternalStatusCategory string
+	ExternalAssignee       string
+	ExternalUpdatedAt      *time.Time
+	SyncError              string
+	ActorID                string
 }
 
 type MergeResult struct {
@@ -425,6 +492,10 @@ func orderByClause(sort Sort, direction Direction) string {
 		expr = "fc.latest_feedback_at"
 	case SortPriority:
 		expr = "CASE cr.priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END"
+	case SortRevenueImpact:
+		expr = "revenue_impact_cents"
+	case SortDecisionScore:
+		expr = "decision_score"
 	}
 	return expr + " " + dir + " NULLS LAST, cr.id " + dir
 }
@@ -468,13 +539,15 @@ func loadDetail(ctx context.Context, db queryer, tenantID string, id uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
+	accountProfiles := collectAccountProfiles(customers, votes)
 	return ptrext.Of(Detail{
-		Summary:       ptrext.Indirect(summary),
-		Feedback:      feedback,
-		IssueLinks:    issues,
-		CustomerLinks: customers,
-		Votes:         votes,
-		Duplicates:    duplicates,
+		Summary:         ptrext.Indirect(summary),
+		Feedback:        feedback,
+		IssueLinks:      issues,
+		CustomerLinks:   customers,
+		Votes:           votes,
+		Duplicates:      duplicates,
+		AccountProfiles: accountProfiles,
 	}), nil
 }
 
@@ -497,7 +570,8 @@ func (r *Repo) CreateTx(ctx context.Context, tx pgx.Tx, in CreateInput) (*Summar
 		return nil, err
 	}
 	var id uuid.UUID
-	err = tx.QueryRow(ctx, `
+	err = tx.QueryRow(
+		ctx, `
 		INSERT INTO customer_requests (
 			tenant_id, display_number, display_id, title, description, status, priority,
 			owner_member_id, created_by, updated_by
@@ -564,7 +638,8 @@ func (r *Repo) UpdateTx(ctx context.Context, tx pgx.Tx, in UpdateInput) (*Summar
 	if in.OwnerMemberIDSet {
 		owner = in.OwnerMemberID
 	}
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.Exec(
+		ctx, `
 		UPDATE customer_requests
 		SET title = $3,
 		    description = $4,
@@ -585,7 +660,8 @@ func (r *Repo) UpdateTx(ctx context.Context, tx pgx.Tx, in UpdateInput) (*Summar
 }
 
 func (r *Repo) LinkFeedbackTx(ctx context.Context, tx pgx.Tx, in LinkFeedbackInput) error {
-	err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(
+		ctx, `
 		INSERT INTO customer_request_feedback_links (
 			tenant_id, request_id, feedback_id, importance, note, created_by
 		)
@@ -613,7 +689,8 @@ func (r *Repo) LinkFeedbackTx(ctx context.Context, tx pgx.Tx, in LinkFeedbackInp
 }
 
 func (r *Repo) UnlinkFeedbackTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID uuid.UUID, feedbackID int64, actorID string) error {
-	tag, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(
+		ctx, `
 		DELETE FROM customer_request_feedback_links
 		WHERE tenant_id = $1 AND request_id = $2 AND feedback_id = $3`,
 		tenantID, requestID, feedbackID,
@@ -628,8 +705,12 @@ func (r *Repo) UnlinkFeedbackTx(ctx context.Context, tx pgx.Tx, tenantID string,
 }
 
 func (r *Repo) LinkCustomerTx(ctx context.Context, tx pgx.Tx, in CustomerLinkInput) (*CustomerLink, error) {
+	if err := upsertAccountProfileTx(ctx, tx, in.TenantID, in.AccountProfile); err != nil {
+		return nil, err
+	}
 	var id uuid.UUID
-	err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(
+		ctx, `
 		INSERT INTO customer_request_customer_links (
 			tenant_id, request_id, subject_key, subject_hash, subject_display,
 			account_key, account_display, note, created_by
@@ -668,7 +749,8 @@ func (r *Repo) UnlinkCustomerTx(ctx context.Context, tx pgx.Tx, tenantID string,
 	if err != nil {
 		return nil, err
 	}
-	tag, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(
+		ctx, `
 		DELETE FROM customer_request_customer_links
 		WHERE tenant_id = $1 AND request_id = $2 AND id = $3`,
 		tenantID, requestID, linkID,
@@ -686,8 +768,12 @@ func (r *Repo) UnlinkCustomerTx(ctx context.Context, tx pgx.Tx, tenantID string,
 }
 
 func (r *Repo) AddVoteTx(ctx context.Context, tx pgx.Tx, in VoteInput) (*Vote, error) {
+	if err := upsertAccountProfileTx(ctx, tx, in.TenantID, in.AccountProfile); err != nil {
+		return nil, err
+	}
 	var id uuid.UUID
-	err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(
+		ctx, `
 		INSERT INTO customer_request_votes (
 			tenant_id, request_id, subject_key, subject_hash, subject_display,
 			account_key, account_display, weight, note, created_by
@@ -727,7 +813,8 @@ func (r *Repo) RemoveVoteTx(ctx context.Context, tx pgx.Tx, tenantID string, req
 	if err != nil {
 		return nil, err
 	}
-	tag, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(
+		ctx, `
 		DELETE FROM customer_request_votes
 		WHERE tenant_id = $1 AND request_id = $2 AND id = $3`,
 		tenantID, requestID, voteID,
@@ -746,7 +833,8 @@ func (r *Repo) RemoveVoteTx(ctx context.Context, tx pgx.Tx, tenantID string, req
 
 func (r *Repo) LinkIssueTx(ctx context.Context, tx pgx.Tx, in IssueLinkInput) (*IssueLink, error) {
 	var id uuid.UUID
-	err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(
+		ctx, `
 		INSERT INTO customer_request_issue_links (
 			tenant_id, request_id, provider, external_key, external_url, title, status, created_by
 		)
@@ -779,7 +867,8 @@ func (r *Repo) UnlinkIssueTx(ctx context.Context, tx pgx.Tx, tenantID string, re
 	if err != nil {
 		return nil, err
 	}
-	tag, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(
+		ctx, `
 		DELETE FROM customer_request_issue_links
 		WHERE tenant_id = $1 AND request_id = $2 AND id = $3`,
 		tenantID, requestID, issueLinkID,
@@ -794,6 +883,40 @@ func (r *Repo) UnlinkIssueTx(ctx context.Context, tx pgx.Tx, tenantID string, re
 		return nil, err
 	}
 	return link, nil
+}
+
+func (r *Repo) RecordIssueSyncTx(ctx context.Context, tx pgx.Tx, in IssueSyncInput) (*IssueLink, error) {
+	tag, err := tx.Exec(
+		ctx, `
+		UPDATE customer_request_issue_links
+		SET status = $4,
+		    sync_state = $5,
+		    external_status_category = $6,
+		    external_assignee = $7,
+		    external_updated_at = $8,
+		    sync_error = $9,
+		    last_synced_at = NOW()
+		WHERE tenant_id = $1 AND request_id = $2 AND id = $3`,
+		in.TenantID,
+		in.RequestID,
+		in.IssueLinkID,
+		in.Status,
+		in.SyncState,
+		in.ExternalStatusCategory,
+		in.ExternalAssignee,
+		in.ExternalUpdatedAt,
+		in.SyncError,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("record issue sync: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrLinkNotFound
+	}
+	if err := touchRequestTx(ctx, tx, in.TenantID, in.RequestID, in.ActorID); err != nil {
+		return nil, err
+	}
+	return getIssueLink(ctx, tx, in.TenantID, in.RequestID, in.IssueLinkID)
 }
 
 func (r *Repo) MergeTx(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, targetID uuid.UUID, actorID string) (MergeResult, error) {
@@ -829,7 +952,8 @@ func (r *Repo) MergeTx(ctx context.Context, tx pgx.Tx, tenantID string, sourceID
 		return MergeResult{}, err
 	}
 
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.Exec(
+		ctx, `
 		UPDATE customer_requests
 		SET merged_into_request_id = $3,
 		    archived_at = NOW(),
@@ -973,7 +1097,8 @@ func countFeedbackLinks(ctx context.Context, tx pgx.Tx, tenantID string, request
 
 func copyFeedbackLinks(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, targetID uuid.UUID, actorID string) (int, error) {
 	var count int
-	err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(
+		ctx, `
 		WITH moved AS (
 			INSERT INTO customer_request_feedback_links (
 				tenant_id, request_id, feedback_id, importance, note, created_by, created_at
@@ -1001,7 +1126,8 @@ func countCustomerLinks(ctx context.Context, tx pgx.Tx, tenantID string, request
 
 func copyCustomerLinks(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, targetID uuid.UUID, actorID string) (int, error) {
 	var count int
-	err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(
+		ctx, `
 		WITH moved AS (
 			INSERT INTO customer_request_customer_links (
 				tenant_id, request_id, subject_key, subject_hash, subject_display,
@@ -1031,7 +1157,8 @@ func countVotes(ctx context.Context, tx pgx.Tx, tenantID string, requestID uuid.
 
 func copyVotes(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, targetID uuid.UUID, actorID string) (int, error) {
 	var count int
-	err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(
+		ctx, `
 		WITH moved AS (
 			INSERT INTO customer_request_votes (
 				tenant_id, request_id, subject_key, subject_hash, subject_display,
@@ -1061,12 +1188,17 @@ func countIssueLinks(ctx context.Context, tx pgx.Tx, tenantID string, requestID 
 
 func copyIssueLinks(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, targetID uuid.UUID, actorID string) (int, error) {
 	var count int
-	err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(
+		ctx, `
 		WITH moved AS (
 			INSERT INTO customer_request_issue_links (
-				tenant_id, request_id, provider, external_key, external_url, title, status, created_by, last_synced_at
+				tenant_id, request_id, provider, external_key, external_url, title, status,
+				created_by, last_synced_at, sync_state, external_status_category,
+				external_assignee, external_updated_at, sync_error
 			)
-			SELECT tenant_id, $3, provider, external_key, external_url, title, status, $4, last_synced_at
+			SELECT tenant_id, $3, provider, external_key, external_url, title, status,
+			       $4, last_synced_at, sync_state, external_status_category,
+			       external_assignee, external_updated_at, sync_error
 			FROM customer_request_issue_links
 			WHERE tenant_id = $1 AND request_id = $2
 			ON CONFLICT (tenant_id, request_id, provider, external_key) DO NOTHING
@@ -1078,8 +1210,72 @@ func copyIssueLinks(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, t
 	return count, err
 }
 
+func upsertAccountProfileTx(ctx context.Context, tx pgx.Tx, tenantID string, in AccountProfileInput) error {
+	if strings.TrimSpace(in.AccountKey) == "" {
+		return nil
+	}
+	source := strings.TrimSpace(in.Source)
+	if source == "" {
+		source = "manual"
+	}
+	currency := strings.TrimSpace(in.RevenueCurrency)
+	if currency == "" {
+		currency = "USD"
+	}
+	_, err := tx.Exec(
+		ctx, `
+		INSERT INTO customer_request_accounts (
+			tenant_id,
+			account_key,
+			account_display,
+			revenue_cents,
+			revenue_currency,
+			tier,
+			size_segment,
+			lifecycle_status,
+			crm_provider,
+			crm_external_id,
+			source,
+			created_by,
+			updated_by
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+		ON CONFLICT (tenant_id, account_key)
+		DO UPDATE SET
+			account_display = COALESCE(NULLIF(EXCLUDED.account_display, ''), customer_request_accounts.account_display),
+			revenue_cents = CASE
+				WHEN EXCLUDED.revenue_cents > 0 THEN EXCLUDED.revenue_cents
+				ELSE customer_request_accounts.revenue_cents
+			END,
+			revenue_currency = COALESCE(NULLIF(EXCLUDED.revenue_currency, ''), customer_request_accounts.revenue_currency),
+			tier = COALESCE(NULLIF(EXCLUDED.tier, ''), customer_request_accounts.tier),
+			size_segment = COALESCE(NULLIF(EXCLUDED.size_segment, ''), customer_request_accounts.size_segment),
+			lifecycle_status = COALESCE(NULLIF(EXCLUDED.lifecycle_status, ''), customer_request_accounts.lifecycle_status),
+			crm_provider = COALESCE(NULLIF(EXCLUDED.crm_provider, ''), customer_request_accounts.crm_provider),
+			crm_external_id = COALESCE(NULLIF(EXCLUDED.crm_external_id, ''), customer_request_accounts.crm_external_id),
+			source = EXCLUDED.source,
+			updated_by = EXCLUDED.updated_by`,
+		tenantID,
+		strings.TrimSpace(in.AccountKey),
+		strings.TrimSpace(in.AccountDisplay),
+		in.RevenueCents,
+		currency,
+		strings.TrimSpace(in.Tier),
+		strings.TrimSpace(in.SizeSegment),
+		strings.TrimSpace(in.LifecycleStatus),
+		strings.TrimSpace(in.CRMProvider),
+		strings.TrimSpace(in.CRMExternalID),
+		source,
+		in.ActorID,
+	)
+	if err != nil {
+		return mapWriteError(err, "upsert customer request account")
+	}
+	return nil
+}
+
 func touchRequestTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID uuid.UUID, actorID string) error {
-	tag, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(
+		ctx, `
 		UPDATE customer_requests
 		SET updated_by = $3
 		WHERE tenant_id = $1 AND id = $2`,
@@ -1094,11 +1290,10 @@ func touchRequestTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID u
 	return nil
 }
 
-func summarySelectSQL() string {
-	return `
-		SELECT
-			cr.id,
-			cr.tenant_id,
+const summarySelectSQLText = `
+			SELECT
+				cr.id,
+				cr.tenant_id,
 			cr.display_number,
 			cr.display_id,
 			cr.title,
@@ -1124,6 +1319,22 @@ func summarySelectSQL() string {
 			COALESCE(vc.vote_count, 0),
 			COALESCE(dc.duplicate_request_count, 0),
 			COALESCE(fc.hidden_feedback_count, 0),
+			COALESCE(ai.revenue_impact_cents, 0),
+			COALESCE(ai.revenue_currency, 'USD'),
+			(
+				CASE cr.priority
+					WHEN 'urgent' THEN 80
+					WHEN 'high' THEN 60
+					WHEN 'medium' THEN 40
+					WHEN 'low' THEN 20
+					ELSE 0
+				END
+				+ LEAST(COALESCE(fc.supporting_feedback_count, 0) * 2, 80)
+				+ LEAST(COALESCE(sc.customer_count, 0) * 5, 100)
+				+ LEAST(COALESCE(sc.account_count, 0) * 8, 120)
+				+ LEAST(COALESCE(vc.vote_count, 0) * 4, 80)
+				+ LEAST((COALESCE(ai.revenue_impact_cents, 0) / 100000)::int, 100)
+			)::int AS decision_score,
 			fc.first_feedback_at,
 			fc.latest_feedback_at
 		FROM customer_requests cr
@@ -1187,11 +1398,35 @@ func summarySelectSQL() string {
 			  AND v.request_id = cr.id
 		) vc ON TRUE
 		LEFT JOIN LATERAL (
+			SELECT
+				COALESCE(SUM(ca.revenue_cents), 0)::bigint AS revenue_impact_cents,
+				COALESCE(MIN(NULLIF(ca.revenue_currency, '')), 'USD') AS revenue_currency
+			FROM (
+				SELECT DISTINCT account_key
+				FROM customer_request_customer_links cl
+				WHERE cl.tenant_id = cr.tenant_id
+				  AND cl.request_id = cr.id
+				  AND cl.account_key <> ''
+				UNION
+				SELECT DISTINCT account_key
+				FROM customer_request_votes v
+				WHERE v.tenant_id = cr.tenant_id
+				  AND v.request_id = cr.id
+				  AND v.account_key <> ''
+			) accounts
+			JOIN customer_request_accounts ca
+			  ON ca.tenant_id = cr.tenant_id
+			 AND ca.account_key = accounts.account_key
+		) ai ON TRUE
+		LEFT JOIN LATERAL (
 			SELECT COUNT(*)::int AS duplicate_request_count
-			FROM customer_requests dup
-			WHERE dup.tenant_id = cr.tenant_id
-			  AND dup.merged_into_request_id = cr.id
-		) dc ON TRUE`
+				FROM customer_requests dup
+				WHERE dup.tenant_id = cr.tenant_id
+				  AND dup.merged_into_request_id = cr.id
+			) dc ON TRUE`
+
+func summarySelectSQL() string {
+	return summarySelectSQLText
 }
 
 type scanner interface {
@@ -1230,6 +1465,9 @@ func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 		&out.VoteCount,
 		&out.DuplicateRequestCount,
 		&out.HiddenFeedbackCount,
+		&out.RevenueImpactCents,
+		&out.RevenueCurrency,
+		&out.DecisionScore,
 		&out.FirstFeedbackAt,
 		&out.LatestFeedbackAt,
 	)
@@ -1238,6 +1476,7 @@ func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 	}
 	out.Status = Status(status)
 	out.Priority = Priority(priority)
+	out.DecisionScoreExplanation = decisionScoreExplanation(out)
 	if ownerMemberID.Valid {
 		parsed, parseErr := uuid.Parse(ownerMemberID.String)
 		if parseErr != nil {
@@ -1323,10 +1562,33 @@ func listEvidence(ctx context.Context, db queryer, tenantID string, requestID uu
 
 func listCustomerLinks(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID) ([]CustomerLink, error) {
 	rows, err := db.Query(ctx, `
-		SELECT id, subject_key, subject_hash, subject_display, account_key, account_display, note, created_by, created_at
-		FROM customer_request_customer_links
-		WHERE tenant_id = $1 AND request_id = $2
-		ORDER BY created_at DESC, id DESC`, tenantID, requestID)
+		SELECT
+			cl.id,
+			cl.subject_key,
+			cl.subject_hash,
+			cl.subject_display,
+			cl.account_key,
+			cl.account_display,
+			cl.note,
+			cl.created_by,
+			cl.created_at,
+			ca.account_key,
+			ca.account_display,
+			ca.revenue_cents,
+			ca.revenue_currency,
+			ca.tier,
+			ca.size_segment,
+			ca.lifecycle_status,
+			ca.crm_provider,
+			ca.crm_external_id,
+			ca.source,
+			ca.updated_at
+		FROM customer_request_customer_links cl
+		LEFT JOIN customer_request_accounts ca
+		  ON ca.tenant_id = cl.tenant_id
+		 AND ca.account_key = cl.account_key
+		WHERE cl.tenant_id = $1 AND cl.request_id = $2
+		ORDER BY cl.created_at DESC, cl.id DESC`, tenantID, requestID)
 	if err != nil {
 		return nil, fmt.Errorf("list customer request customer links: %w", err)
 	}
@@ -1344,10 +1606,34 @@ func listCustomerLinks(ctx context.Context, db queryer, tenantID string, request
 
 func getCustomerLink(ctx context.Context, db queryer, tenantID string, requestID, linkID uuid.UUID) (*CustomerLink, error) {
 	var out CustomerLink
-	err := scanCustomerLink(db.QueryRow(ctx, `
-		SELECT id, subject_key, subject_hash, subject_display, account_key, account_display, note, created_by, created_at
-		FROM customer_request_customer_links
-		WHERE tenant_id = $1 AND request_id = $2 AND id = $3`,
+	err := scanCustomerLink(db.QueryRow(
+		ctx, `
+		SELECT
+			cl.id,
+			cl.subject_key,
+			cl.subject_hash,
+			cl.subject_display,
+			cl.account_key,
+			cl.account_display,
+			cl.note,
+			cl.created_by,
+			cl.created_at,
+			ca.account_key,
+			ca.account_display,
+			ca.revenue_cents,
+			ca.revenue_currency,
+			ca.tier,
+			ca.size_segment,
+			ca.lifecycle_status,
+			ca.crm_provider,
+			ca.crm_external_id,
+			ca.source,
+			ca.updated_at
+		FROM customer_request_customer_links cl
+		LEFT JOIN customer_request_accounts ca
+		  ON ca.tenant_id = cl.tenant_id
+		 AND ca.account_key = cl.account_key
+		WHERE cl.tenant_id = $1 AND cl.request_id = $2 AND cl.id = $3`,
 		tenantID, requestID, linkID,
 	), &out) // ptrext:allow scan-target
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1360,7 +1646,8 @@ func getCustomerLink(ctx context.Context, db queryer, tenantID string, requestID
 }
 
 func scanCustomerLink(row scanner, out *CustomerLink) error { // ptrext:allow scan-target
-	return row.Scan(
+	var profile accountProfileScan
+	err := row.Scan(
 		&out.ID,
 		&out.SubjectKey,
 		&out.SubjectHash,
@@ -1370,15 +1657,55 @@ func scanCustomerLink(row scanner, out *CustomerLink) error { // ptrext:allow sc
 		&out.Note,
 		&out.CreatedBy,
 		&out.CreatedAt,
+		&profile.AccountKey,
+		&profile.AccountDisplay,
+		&profile.RevenueCents,
+		&profile.RevenueCurrency,
+		&profile.Tier,
+		&profile.SizeSegment,
+		&profile.LifecycleStatus,
+		&profile.CRMProvider,
+		&profile.CRMExternalID,
+		&profile.Source,
+		&profile.UpdatedAt,
 	)
+	if err != nil {
+		return err
+	}
+	out.AccountProfile = profile.toProfile()
+	return nil
 }
 
 func listVotes(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID) ([]Vote, error) {
 	rows, err := db.Query(ctx, `
-		SELECT id, subject_key, subject_hash, subject_display, account_key, account_display, weight, note, created_by, created_at
-		FROM customer_request_votes
-		WHERE tenant_id = $1 AND request_id = $2
-		ORDER BY created_at DESC, id DESC`, tenantID, requestID)
+		SELECT
+			v.id,
+			v.subject_key,
+			v.subject_hash,
+			v.subject_display,
+			v.account_key,
+			v.account_display,
+			v.weight,
+			v.note,
+			v.created_by,
+			v.created_at,
+			ca.account_key,
+			ca.account_display,
+			ca.revenue_cents,
+			ca.revenue_currency,
+			ca.tier,
+			ca.size_segment,
+			ca.lifecycle_status,
+			ca.crm_provider,
+			ca.crm_external_id,
+			ca.source,
+			ca.updated_at
+		FROM customer_request_votes v
+		LEFT JOIN customer_request_accounts ca
+		  ON ca.tenant_id = v.tenant_id
+		 AND ca.account_key = v.account_key
+		WHERE v.tenant_id = $1 AND v.request_id = $2
+		ORDER BY v.created_at DESC, v.id DESC`, tenantID, requestID)
 	if err != nil {
 		return nil, fmt.Errorf("list customer request votes: %w", err)
 	}
@@ -1396,10 +1723,35 @@ func listVotes(ctx context.Context, db queryer, tenantID string, requestID uuid.
 
 func getVote(ctx context.Context, db queryer, tenantID string, requestID, voteID uuid.UUID) (*Vote, error) {
 	var out Vote
-	err := scanVote(db.QueryRow(ctx, `
-		SELECT id, subject_key, subject_hash, subject_display, account_key, account_display, weight, note, created_by, created_at
-		FROM customer_request_votes
-		WHERE tenant_id = $1 AND request_id = $2 AND id = $3`,
+	err := scanVote(db.QueryRow(
+		ctx, `
+		SELECT
+			v.id,
+			v.subject_key,
+			v.subject_hash,
+			v.subject_display,
+			v.account_key,
+			v.account_display,
+			v.weight,
+			v.note,
+			v.created_by,
+			v.created_at,
+			ca.account_key,
+			ca.account_display,
+			ca.revenue_cents,
+			ca.revenue_currency,
+			ca.tier,
+			ca.size_segment,
+			ca.lifecycle_status,
+			ca.crm_provider,
+			ca.crm_external_id,
+			ca.source,
+			ca.updated_at
+		FROM customer_request_votes v
+		LEFT JOIN customer_request_accounts ca
+		  ON ca.tenant_id = v.tenant_id
+		 AND ca.account_key = v.account_key
+		WHERE v.tenant_id = $1 AND v.request_id = $2 AND v.id = $3`,
 		tenantID, requestID, voteID,
 	), &out) // ptrext:allow scan-target
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1412,7 +1764,8 @@ func getVote(ctx context.Context, db queryer, tenantID string, requestID, voteID
 }
 
 func scanVote(row scanner, out *Vote) error { // ptrext:allow scan-target
-	return row.Scan(
+	var profile accountProfileScan
+	err := row.Scan(
 		&out.ID,
 		&out.SubjectKey,
 		&out.SubjectHash,
@@ -1423,7 +1776,23 @@ func scanVote(row scanner, out *Vote) error { // ptrext:allow scan-target
 		&out.Note,
 		&out.CreatedBy,
 		&out.CreatedAt,
+		&profile.AccountKey,
+		&profile.AccountDisplay,
+		&profile.RevenueCents,
+		&profile.RevenueCurrency,
+		&profile.Tier,
+		&profile.SizeSegment,
+		&profile.LifecycleStatus,
+		&profile.CRMProvider,
+		&profile.CRMExternalID,
+		&profile.Source,
+		&profile.UpdatedAt,
 	)
+	if err != nil {
+		return err
+	}
+	out.AccountProfile = profile.toProfile()
+	return nil
 }
 
 func listDuplicates(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID) ([]Duplicate, error) {
@@ -1449,7 +1818,22 @@ func listDuplicates(ctx context.Context, db queryer, tenantID string, requestID 
 
 func listIssueLinks(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID) ([]IssueLink, error) {
 	rows, err := db.Query(ctx, `
-		SELECT id, provider, external_key, external_url, title, status, created_by, created_at, updated_at, last_synced_at
+		SELECT
+			id,
+			provider,
+			external_key,
+			external_url,
+			title,
+			status,
+			created_by,
+			created_at,
+			updated_at,
+			last_synced_at,
+			sync_state,
+			external_status_category,
+			external_assignee,
+			external_updated_at,
+			sync_error
 		FROM customer_request_issue_links
 		WHERE tenant_id = $1 AND request_id = $2
 		ORDER BY created_at DESC, id DESC`, tenantID, requestID)
@@ -1470,8 +1854,24 @@ func listIssueLinks(ctx context.Context, db queryer, tenantID string, requestID 
 
 func getIssueLink(ctx context.Context, db queryer, tenantID string, requestID, issueLinkID uuid.UUID) (*IssueLink, error) {
 	var out IssueLink
-	err := scanIssueLink(db.QueryRow(ctx, `
-		SELECT id, provider, external_key, external_url, title, status, created_by, created_at, updated_at, last_synced_at
+	err := scanIssueLink(db.QueryRow(
+		ctx, `
+		SELECT
+			id,
+			provider,
+			external_key,
+			external_url,
+			title,
+			status,
+			created_by,
+			created_at,
+			updated_at,
+			last_synced_at,
+			sync_state,
+			external_status_category,
+			external_assignee,
+			external_updated_at,
+			sync_error
 		FROM customer_request_issue_links
 		WHERE tenant_id = $1 AND request_id = $2 AND id = $3`,
 		tenantID, requestID, issueLinkID,
@@ -1486,7 +1886,8 @@ func getIssueLink(ctx context.Context, db queryer, tenantID string, requestID, i
 }
 
 func scanIssueLink(row scanner, out *IssueLink) error { // ptrext:allow scan-target
-	return row.Scan(
+	var syncState string
+	err := row.Scan(
 		&out.ID,
 		&out.Provider,
 		&out.ExternalKey,
@@ -1497,6 +1898,92 @@ func scanIssueLink(row scanner, out *IssueLink) error { // ptrext:allow scan-tar
 		&out.CreatedAt,
 		&out.UpdatedAt,
 		&out.LastSyncedAt,
+		&syncState,
+		&out.ExternalStatusCategory,
+		&out.ExternalAssignee,
+		&out.ExternalUpdatedAt,
+		&out.SyncError,
+	)
+	if err != nil {
+		return err
+	}
+	out.SyncState = IssueSyncState(syncState)
+	return nil
+}
+
+type accountProfileScan struct {
+	AccountKey      sql.NullString
+	AccountDisplay  sql.NullString
+	RevenueCents    sql.NullInt64
+	RevenueCurrency sql.NullString
+	Tier            sql.NullString
+	SizeSegment     sql.NullString
+	LifecycleStatus sql.NullString
+	CRMProvider     sql.NullString
+	CRMExternalID   sql.NullString
+	Source          sql.NullString
+	UpdatedAt       sql.NullTime
+}
+
+func (s accountProfileScan) toProfile() *AccountProfile {
+	if !s.AccountKey.Valid {
+		return nil
+	}
+	return ptrext.Of(AccountProfile{
+		AccountKey:      s.AccountKey.String,
+		AccountDisplay:  s.AccountDisplay.String,
+		RevenueCents:    s.RevenueCents.Int64,
+		RevenueCurrency: s.RevenueCurrency.String,
+		Tier:            s.Tier.String,
+		SizeSegment:     s.SizeSegment.String,
+		LifecycleStatus: s.LifecycleStatus.String,
+		CRMProvider:     s.CRMProvider.String,
+		CRMExternalID:   s.CRMExternalID.String,
+		Source:          s.Source.String,
+		UpdatedAt:       s.UpdatedAt.Time,
+	})
+}
+
+func collectAccountProfiles(customers []CustomerLink, votes []Vote) []AccountProfile {
+	seen := make(map[string]struct{})
+	out := make([]AccountProfile, 0)
+	for _, item := range customers {
+		if item.AccountProfile == nil {
+			continue
+		}
+		profile := ptrext.Indirect(item.AccountProfile)
+		if _, ok := seen[profile.AccountKey]; ok {
+			continue
+		}
+		seen[profile.AccountKey] = struct{}{}
+		out = append(out, profile)
+	}
+	for _, item := range votes {
+		if item.AccountProfile == nil {
+			continue
+		}
+		profile := ptrext.Indirect(item.AccountProfile)
+		if _, ok := seen[profile.AccountKey]; ok {
+			continue
+		}
+		seen[profile.AccountKey] = struct{}{}
+		out = append(out, profile)
+	}
+	return out
+}
+
+func decisionScoreExplanation(summary *Summary) string {
+	if summary == nil {
+		return ""
+	}
+	return fmt.Sprintf(
+		"priority=%s feedback=%d customers=%d accounts=%d votes=%d revenue_cents=%d",
+		summary.Priority,
+		summary.SupportingFeedbackCount,
+		summary.CustomerCount,
+		summary.AccountCount,
+		summary.VoteCount,
+		summary.RevenueImpactCents,
 	)
 }
 

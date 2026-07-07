@@ -164,6 +164,7 @@ func TestRouterHTTPDispatch_Session(t *testing.T) {
 		{"POST /customer-requests/11111111-1111-1111-1111-111111111111:merge", http.MethodPost, "/customer-requests/11111111-1111-1111-1111-111111111111:merge", `{}`},
 		{"POST /customer-requests/11111111-1111-1111-1111-111111111111/issue-links", http.MethodPost, "/customer-requests/11111111-1111-1111-1111-111111111111/issue-links", `{}`},
 		{"DELETE /customer-requests/11111111-1111-1111-1111-111111111111/issue-links/22222222-2222-2222-2222-222222222222", http.MethodDelete, "/customer-requests/11111111-1111-1111-1111-111111111111/issue-links/22222222-2222-2222-2222-222222222222", ""},
+		{"POST /customer-requests/11111111-1111-1111-1111-111111111111/issue-links/22222222-2222-2222-2222-222222222222:record-sync", http.MethodPost, "/customer-requests/11111111-1111-1111-1111-111111111111/issue-links/22222222-2222-2222-2222-222222222222:record-sync", `{}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1315,6 +1315,11 @@ function customerRequestSummary(
     voteCount: 0,
     duplicateRequestCount: 0,
     hiddenFeedbackCount: 0,
+    revenueImpactCents: '0',
+    revenueCurrency: 'USD',
+    decisionScore: 67,
+    decisionScoreExplanation:
+      'priority=high feedback=1 customers=1 accounts=1 votes=0 revenue_cents=0',
     ...overrides,
   }
 }
@@ -1329,5 +1334,6 @@ function customerRequestDetail(request: CustomerRequestSummary) {
     customers: [],
     votes: [],
     duplicates: [],
+    accountProfiles: [],
   }
 }

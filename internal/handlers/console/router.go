@@ -638,6 +638,25 @@ func (r *Router) mountCustomerRequestIssues(cr chi.Router) {
 			return session.FromContext(r.Context()), nil
 		}),
 	))
+	cr.With(r.requireMember).Post("/{id}/issue-links/{issue_link_id}:record-sync", dispatcher.Bind(
+		"console.CustomerRequestHandler.RecordIssueSync",
+		dispatcher.Combine(
+			func() *attunev1.RecordCustomerRequestIssueSyncRequest {
+				return ptrext.Of(attunev1.RecordCustomerRequestIssueSyncRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.RecordCustomerRequestIssueSyncRequest],
+			dispatcher.Param("id", func(req *attunev1.RecordCustomerRequestIssueSyncRequest, id string) {
+				req.Id = id
+			}),
+			dispatcher.Param("issue_link_id", func(req *attunev1.RecordCustomerRequestIssueSyncRequest, id string) {
+				req.IssueLinkId = id
+			}),
+		),
+		r.customerRequests.RecordIssueSync,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RecordCustomerRequestIssueSyncRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountCustomerRequestMerge(cr chi.Router) {

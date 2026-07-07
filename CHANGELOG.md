@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   and assignment, merge-target detail handoff, and feedback-scoped deep-link
   workflows.
 
+- **Customer Requests now include account value and delivery sync decision signals.**
+  Added request-level revenue impact, deterministic decision scores, account
+  profiles on customer links and votes, revenue/score sorting, issue-link sync
+  metadata, generated contract fields, audit coverage, and Console controls for
+  inspecting account context and recording delivery issue sync state.
+
 - **Private-deploy smoke suite now covers base, observability, TLS, failure, and upgrade modules.**
   Added dedicated smoke targets for the compose base stack, the observability
   overlay, the TLS reverse-proxy front door, deterministic startup failures,

@@ -33,7 +33,10 @@ var (
 	ErrInvalidIssueURL     = errors.New("customer request issue url invalid")
 )
 
-var idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
+var (
+	idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
+	currencyPattern       = regexp.MustCompile(`^[A-Z]{3}$`)
+)
 
 type AuditEntry struct {
 	ID        int64
@@ -126,6 +129,7 @@ type LinkCustomerInput struct {
 	AccountKey     string
 	AccountDisplay string
 	Note           string
+	AccountProfile AccountProfileInput
 	Actor          auditlogsvc.Actor
 }
 
@@ -139,7 +143,18 @@ type VoteInput struct {
 	AccountDisplay string
 	Weight         int
 	Note           string
+	AccountProfile AccountProfileInput
 	Actor          auditlogsvc.Actor
+}
+
+type AccountProfileInput struct {
+	RevenueCents    *int64
+	RevenueCurrency string
+	Tier            string
+	SizeSegment     string
+	LifecycleStatus string
+	CRMProvider     string
+	CRMExternalID   string
 }
 
 type MergeInput struct {
@@ -159,6 +174,19 @@ type LinkIssueInput struct {
 	Title       string
 	Status      string
 	Actor       auditlogsvc.Actor
+}
+
+type IssueSyncInput struct {
+	TenantID               string
+	RequestID              uuid.UUID
+	IssueLinkID            uuid.UUID
+	SyncState              repo.IssueSyncState
+	Status                 string
+	ExternalStatusCategory string
+	ExternalAssignee       string
+	ExternalUpdatedAt      string
+	SyncError              string
+	Actor                  auditlogsvc.Actor
 }
 
 func (s *Service) List(ctx context.Context, in ListInput) (repo.ListResult, error) {
@@ -344,6 +372,19 @@ func (s *Service) LinkCustomer(ctx context.Context, in LinkCustomerInput) (*Deta
 		AccountDisplay: normalized.AccountDisplay,
 		Note:           normalized.Note,
 		ActorID:        normalized.Actor.ID,
+		AccountProfile: repo.AccountProfileInput{
+			AccountKey:      normalized.AccountKey,
+			AccountDisplay:  normalized.AccountDisplay,
+			RevenueCents:    accountRevenueCents(normalized.AccountProfile),
+			RevenueCurrency: normalized.AccountProfile.RevenueCurrency,
+			Tier:            normalized.AccountProfile.Tier,
+			SizeSegment:     normalized.AccountProfile.SizeSegment,
+			LifecycleStatus: normalized.AccountProfile.LifecycleStatus,
+			CRMProvider:     normalized.AccountProfile.CRMProvider,
+			CRMExternalID:   normalized.AccountProfile.CRMExternalID,
+			Source:          "manual",
+			ActorID:         normalized.Actor.ID,
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -410,6 +451,19 @@ func (s *Service) AddVote(ctx context.Context, in VoteInput) (*Detail, error) {
 		Weight:         normalized.Weight,
 		Note:           normalized.Note,
 		ActorID:        normalized.Actor.ID,
+		AccountProfile: repo.AccountProfileInput{
+			AccountKey:      normalized.AccountKey,
+			AccountDisplay:  normalized.AccountDisplay,
+			RevenueCents:    accountRevenueCents(normalized.AccountProfile),
+			RevenueCurrency: normalized.AccountProfile.RevenueCurrency,
+			Tier:            normalized.AccountProfile.Tier,
+			SizeSegment:     normalized.AccountProfile.SizeSegment,
+			LifecycleStatus: normalized.AccountProfile.LifecycleStatus,
+			CRMProvider:     normalized.AccountProfile.CRMProvider,
+			CRMExternalID:   normalized.AccountProfile.CRMExternalID,
+			Source:          "manual",
+			ActorID:         normalized.Actor.ID,
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -532,6 +586,46 @@ func (s *Service) UnlinkIssue(ctx context.Context, tenantID string, requestID, i
 		return nil, err
 	}
 	return s.detail(ctx, tenantID, requestID, 50)
+}
+
+func (s *Service) RecordIssueSync(ctx context.Context, in IssueSyncInput) (*Detail, error) {
+	normalized, err := normalizeIssueSync(in)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	link, err := s.repo.RecordIssueSyncTx(ctx, tx, repo.IssueSyncInput{
+		TenantID:               normalized.TenantID,
+		RequestID:              normalized.RequestID,
+		IssueLinkID:            normalized.IssueLinkID,
+		SyncState:              normalized.SyncState,
+		Status:                 normalized.Status,
+		ExternalStatusCategory: normalized.ExternalStatusCategory,
+		ExternalAssignee:       normalized.ExternalAssignee,
+		ExternalUpdatedAt:      parseOptionalTime(normalized.ExternalUpdatedAt),
+		SyncError:              normalized.SyncError,
+		ActorID:                normalized.Actor.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, normalized.TenantID, normalized.RequestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, normalized.Actor, "customer_request.record_issue_sync", summary.Summary,
+		"Recorded issue sync state", issueAuditMetadata(normalized.RequestID, ptrext.Indirect(link))); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, normalized.TenantID, normalized.RequestID, 50)
 }
 
 func (s *Service) createInTransaction(ctx context.Context, in CreateInput, action string, extra map[string]any) (*Detail, error) {
@@ -739,6 +833,11 @@ func normalizeCustomerLink(in LinkCustomerInput) (LinkCustomerInput, error) {
 	if !validSupporterFields(in.SubjectKey, in.SubjectHash, in.SubjectDisplay, in.AccountKey, in.AccountDisplay, in.Note) {
 		return LinkCustomerInput{}, ErrValidation
 	}
+	profile, err := normalizeAccountProfile(in.AccountKey, in.AccountProfile)
+	if err != nil {
+		return LinkCustomerInput{}, err
+	}
+	in.AccountProfile = profile
 	return in, nil
 }
 
@@ -764,7 +863,61 @@ func normalizeVote(in VoteInput) (VoteInput, error) {
 	if !validSupporterFields(in.SubjectKey, in.SubjectHash, in.SubjectDisplay, in.AccountKey, in.AccountDisplay, in.Note) {
 		return VoteInput{}, ErrValidation
 	}
+	profile, err := normalizeAccountProfile(in.AccountKey, in.AccountProfile)
+	if err != nil {
+		return VoteInput{}, err
+	}
+	in.AccountProfile = profile
 	return in, nil
+}
+
+func normalizeAccountProfile(accountKey string, in AccountProfileInput) (AccountProfileInput, error) {
+	in.RevenueCurrency = strings.ToUpper(strings.TrimSpace(in.RevenueCurrency))
+	in.Tier = strings.TrimSpace(in.Tier)
+	in.SizeSegment = strings.TrimSpace(in.SizeSegment)
+	in.LifecycleStatus = strings.TrimSpace(in.LifecycleStatus)
+	in.CRMProvider = strings.TrimSpace(in.CRMProvider)
+	in.CRMExternalID = strings.TrimSpace(in.CRMExternalID)
+	if strings.TrimSpace(accountKey) == "" {
+		if hasAccountProfileInput(in) {
+			return AccountProfileInput{}, ErrValidation
+		}
+		return AccountProfileInput{}, nil
+	}
+	if in.RevenueCurrency == "" {
+		in.RevenueCurrency = "USD"
+	}
+	if in.RevenueCents != nil && ptrext.Indirect(in.RevenueCents) < 0 {
+		return AccountProfileInput{}, ErrValidation
+	}
+	if !currencyPattern.MatchString(in.RevenueCurrency) {
+		return AccountProfileInput{}, ErrValidation
+	}
+	if utf8.RuneCountInString(in.Tier) > 120 ||
+		utf8.RuneCountInString(in.SizeSegment) > 120 ||
+		utf8.RuneCountInString(in.LifecycleStatus) > 120 ||
+		utf8.RuneCountInString(in.CRMProvider) > 120 ||
+		utf8.RuneCountInString(in.CRMExternalID) > 512 {
+		return AccountProfileInput{}, ErrValidation
+	}
+	return in, nil
+}
+
+func hasAccountProfileInput(in AccountProfileInput) bool {
+	return in.RevenueCents != nil ||
+		strings.TrimSpace(in.RevenueCurrency) != "" ||
+		strings.TrimSpace(in.Tier) != "" ||
+		strings.TrimSpace(in.SizeSegment) != "" ||
+		strings.TrimSpace(in.LifecycleStatus) != "" ||
+		strings.TrimSpace(in.CRMProvider) != "" ||
+		strings.TrimSpace(in.CRMExternalID) != ""
+}
+
+func accountRevenueCents(in AccountProfileInput) int64 {
+	if in.RevenueCents == nil {
+		return 0
+	}
+	return ptrext.Indirect(in.RevenueCents)
 }
 
 func validSupporterFields(subjectKey, subjectHash, subjectDisplay, accountKey, accountDisplay, note string) bool {
@@ -800,6 +953,35 @@ func normalizeIssueInput(in LinkIssueInput) (LinkIssueInput, error) {
 	}
 	if utf8.RuneCountInString(in.ExternalURL) > 2048 || utf8.RuneCountInString(in.Title) > 500 || utf8.RuneCountInString(in.Status) > 120 {
 		return LinkIssueInput{}, ErrValidation
+	}
+	return in, nil
+}
+
+func normalizeIssueSync(in IssueSyncInput) (IssueSyncInput, error) {
+	in.Status = strings.TrimSpace(in.Status)
+	in.ExternalStatusCategory = strings.TrimSpace(in.ExternalStatusCategory)
+	in.ExternalAssignee = strings.TrimSpace(in.ExternalAssignee)
+	in.ExternalUpdatedAt = strings.TrimSpace(in.ExternalUpdatedAt)
+	in.SyncError = strings.TrimSpace(in.SyncError)
+	if in.TenantID == "" || in.RequestID == uuid.Nil || in.IssueLinkID == uuid.Nil {
+		return IssueSyncInput{}, ErrValidation
+	}
+	if in.SyncState == "" {
+		in.SyncState = repo.IssueSyncStateSynced
+	}
+	if !validIssueSyncState(in.SyncState) {
+		return IssueSyncInput{}, ErrValidation
+	}
+	if in.ExternalUpdatedAt != "" {
+		if _, err := time.Parse(time.RFC3339, in.ExternalUpdatedAt); err != nil {
+			return IssueSyncInput{}, ErrValidation
+		}
+	}
+	if utf8.RuneCountInString(in.Status) > 120 ||
+		utf8.RuneCountInString(in.ExternalStatusCategory) > 120 ||
+		utf8.RuneCountInString(in.ExternalAssignee) > 500 ||
+		utf8.RuneCountInString(in.SyncError) > 2000 {
+		return IssueSyncInput{}, ErrValidation
 	}
 	return in, nil
 }
@@ -889,6 +1071,26 @@ func validProvider(provider string) bool {
 	default:
 		return false
 	}
+}
+
+func validIssueSyncState(state repo.IssueSyncState) bool {
+	switch state {
+	case repo.IssueSyncStateManual, repo.IssueSyncStatePending, repo.IssueSyncStateSynced, repo.IssueSyncStateStale, repo.IssueSyncStateFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func parseOptionalTime(raw string) *time.Time {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil
+	}
+	return ptrext.Of(parsed)
 }
 
 func deriveExternalKey(provider string, parsed *url.URL) string {

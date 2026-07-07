@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import {
   ArrowRight,
   ClipboardList,
+  DollarSign,
   ExternalLink,
   GitMerge,
   Loader2,
@@ -52,6 +53,7 @@ import {
   useLinkCustomerRequestIssue,
   useMergeCustomerRequests,
   usePromoteFeedbackToCustomerRequest,
+  useRecordCustomerRequestIssueSync,
   useRemoveCustomerRequestVote,
   useUnlinkCustomerRequestCustomer,
   useUnlinkCustomerRequestFeedback,
@@ -62,11 +64,13 @@ import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { type Member, membersQuery } from '@/lib/members-api'
 import { cn } from '@/lib/utils'
 import {
+  type CustomerRequestAccountProfile,
   type CustomerRequestCustomerLink,
   type CustomerRequestDuplicate,
   type CustomerRequestFeedbackEvidence,
   CustomerRequestImportance,
   type CustomerRequestIssueLink,
+  CustomerRequestIssueSyncState,
   type CustomerRequestOwner,
   CustomerRequestPriority,
   CustomerRequestSort,
@@ -422,6 +426,12 @@ function CustomerRequestToolbar({
           <SelectItem value={CustomerRequestSort.CUSTOMER_REQUEST_SORT_PRIORITY}>
             {t('customer_requests.sorts.priority')}
           </SelectItem>
+          <SelectItem value={CustomerRequestSort.CUSTOMER_REQUEST_SORT_REVENUE_IMPACT}>
+            {t('customer_requests.sorts.revenue_impact')}
+          </SelectItem>
+          <SelectItem value={CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE}>
+            {t('customer_requests.sorts.decision_score')}
+          </SelectItem>
         </SelectContent>
       </Select>
     </div>
@@ -460,6 +470,12 @@ function CustomerRequestRow({
           <span>{t('customer_requests.customer_count', { count: item.customerCount })}</span>
           <span>{t('customer_requests.vote_count', { count: item.voteCount })}</span>
           <span>{t('customer_requests.issue_count', { count: item.linkedIssueCount })}</span>
+          <span>
+            {t('customer_requests.revenue_impact', {
+              value: formatMoney(item.revenueImpactCents, item.revenueCurrency),
+            })}
+          </span>
+          <span>{t('customer_requests.decision_score', { count: item.decisionScore })}</span>
           {item.duplicateRequestCount > 0 ? (
             <span>
               {t('customer_requests.duplicate_count', { count: item.duplicateRequestCount })}
@@ -562,7 +578,25 @@ function CustomerRequestDetailSheet({
                   count: detail.data.request?.duplicateRequestCount ?? 0,
                 })}
               />
+              <Metric
+                label={t('customer_requests.revenue_impact', {
+                  value: formatMoney(
+                    detail.data.request?.revenueImpactCents,
+                    detail.data.request?.revenueCurrency,
+                  ),
+                })}
+              />
+              <Metric
+                label={t('customer_requests.decision_score', {
+                  count: detail.data.request?.decisionScore ?? 0,
+                })}
+              />
             </div>
+            {detail.data.request?.decisionScoreExplanation ? (
+              <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                {detail.data.request.decisionScoreExplanation}
+              </div>
+            ) : null}
             {detail.data.description ? (
               <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
                 {detail.data.description}
@@ -622,6 +656,17 @@ function CustomerRequestDetailSheet({
                       item={item}
                       canEdit={canEdit}
                     />
+                  ))}
+                </div>
+              )}
+            </DetailSection>
+            <DetailSection title={t('customer_requests.accounts')}>
+              {detail.data.accountProfiles.length === 0 ? (
+                <EmptyLine text={t('customer_requests.no_accounts')} />
+              ) : (
+                <div className="space-y-2">
+                  {detail.data.accountProfiles.map((item) => (
+                    <AccountProfileRow key={item.accountKey} item={item} />
                   ))}
                 </div>
               )}
@@ -876,35 +921,74 @@ function CustomerLinkForm({ requestID }: { requestID: string }) {
   const [subjectDisplay, setSubjectDisplay] = useState('')
   const [accountKey, setAccountKey] = useState('')
   const [accountDisplay, setAccountDisplay] = useState('')
+  const [revenueCents, setRevenueCents] = useState('')
+  const [currency, setCurrency] = useState('USD')
+  const [tier, setTier] = useState('')
+  const [sizeSegment, setSizeSegment] = useState('')
+  const [lifecycleStatus, setLifecycleStatus] = useState('')
   const link = useLinkCustomerRequestCustomer(requestID)
   const normalizedSubjectKey = subjectKey.trim()
   const normalizedAccountKey = accountKey.trim()
+  const hasAccountProfile = normalizedAccountKey.length > 0
+  const parsedRevenue = parseMoneyCents(revenueCents)
   if (!requestID) return null
   return (
-    <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto]">
-      <Input
-        value={subjectKey}
-        placeholder={t('customer_requests.subject_key_placeholder')}
-        onChange={(event) => setSubjectKey(event.target.value)}
-      />
-      <Input
-        value={subjectDisplay}
-        placeholder={t('customer_requests.subject_display_placeholder')}
-        onChange={(event) => setSubjectDisplay(event.target.value)}
-      />
-      <Input
-        value={accountKey}
-        placeholder={t('customer_requests.account_key_placeholder')}
-        onChange={(event) => setAccountKey(event.target.value)}
-      />
-      <Input
-        value={accountDisplay}
-        placeholder={t('customer_requests.account_display_placeholder')}
-        onChange={(event) => setAccountDisplay(event.target.value)}
-      />
+    <div className="rounded-md border p-3">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <Input
+          value={subjectKey}
+          placeholder={t('customer_requests.subject_key_placeholder')}
+          onChange={(event) => setSubjectKey(event.target.value)}
+        />
+        <Input
+          value={subjectDisplay}
+          placeholder={t('customer_requests.subject_display_placeholder')}
+          onChange={(event) => setSubjectDisplay(event.target.value)}
+        />
+        <Input
+          value={accountKey}
+          placeholder={t('customer_requests.account_key_placeholder')}
+          onChange={(event) => setAccountKey(event.target.value)}
+        />
+        <Input
+          value={accountDisplay}
+          placeholder={t('customer_requests.account_display_placeholder')}
+          onChange={(event) => setAccountDisplay(event.target.value)}
+        />
+        <Input
+          value={revenueCents}
+          inputMode="numeric"
+          placeholder={t('customer_requests.revenue_cents_placeholder')}
+          onChange={(event) => setRevenueCents(event.target.value)}
+        />
+        <Input
+          value={currency}
+          maxLength={3}
+          placeholder={t('customer_requests.currency_placeholder')}
+          onChange={(event) => setCurrency(event.target.value.toUpperCase())}
+        />
+        <Input
+          value={tier}
+          placeholder={t('customer_requests.tier_placeholder')}
+          onChange={(event) => setTier(event.target.value)}
+        />
+        <Input
+          value={sizeSegment}
+          placeholder={t('customer_requests.size_segment_placeholder')}
+          onChange={(event) => setSizeSegment(event.target.value)}
+        />
+        <Input
+          value={lifecycleStatus}
+          placeholder={t('customer_requests.lifecycle_placeholder')}
+          onChange={(event) => setLifecycleStatus(event.target.value)}
+        />
+      </div>
       <Button
+        className="mt-2"
         disabled={
-          link.isPending || (normalizedSubjectKey.length === 0 && normalizedAccountKey.length === 0)
+          link.isPending ||
+          (normalizedSubjectKey.length === 0 && normalizedAccountKey.length === 0) ||
+          parsedRevenue === null
         }
         onClick={() =>
           link.mutate(
@@ -913,6 +997,16 @@ function CustomerLinkForm({ requestID }: { requestID: string }) {
               subjectDisplay: subjectDisplay.trim(),
               accountKey: normalizedAccountKey,
               accountDisplay: accountDisplay.trim(),
+              accountRevenueCents:
+                hasAccountProfile && parsedRevenue !== undefined
+                  ? String(parsedRevenue)
+                  : undefined,
+              accountRevenueCurrency: hasAccountProfile ? currency.trim() || undefined : undefined,
+              accountTier: hasAccountProfile ? tier.trim() || undefined : undefined,
+              accountSizeSegment: hasAccountProfile ? sizeSegment.trim() || undefined : undefined,
+              accountLifecycleStatus: hasAccountProfile
+                ? lifecycleStatus.trim() || undefined
+                : undefined,
             },
             {
               onSuccess: () => {
@@ -920,6 +1014,11 @@ function CustomerLinkForm({ requestID }: { requestID: string }) {
                 setSubjectDisplay('')
                 setAccountKey('')
                 setAccountDisplay('')
+                setRevenueCents('')
+                setCurrency('USD')
+                setTier('')
+                setSizeSegment('')
+                setLifecycleStatus('')
               },
               onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
             },
@@ -940,46 +1039,84 @@ function VoteForm({ requestID }: { requestID: string }) {
   const [accountKey, setAccountKey] = useState('')
   const [accountDisplay, setAccountDisplay] = useState('')
   const [weight, setWeight] = useState('1')
+  const [revenueCents, setRevenueCents] = useState('')
+  const [currency, setCurrency] = useState('USD')
+  const [tier, setTier] = useState('')
+  const [sizeSegment, setSizeSegment] = useState('')
+  const [lifecycleStatus, setLifecycleStatus] = useState('')
   const add = useAddCustomerRequestVote(requestID)
   const normalizedSubjectKey = subjectKey.trim()
   const normalizedAccountKey = accountKey.trim()
+  const hasAccountProfile = normalizedAccountKey.length > 0
   const parsedWeight = Number(weight)
+  const parsedRevenue = parseMoneyCents(revenueCents)
   if (!requestID) return null
   return (
-    <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_7rem_auto]">
-      <Input
-        value={subjectKey}
-        placeholder={t('customer_requests.subject_key_placeholder')}
-        onChange={(event) => setSubjectKey(event.target.value)}
-      />
-      <Input
-        value={subjectDisplay}
-        placeholder={t('customer_requests.subject_display_placeholder')}
-        onChange={(event) => setSubjectDisplay(event.target.value)}
-      />
-      <Input
-        value={accountKey}
-        placeholder={t('customer_requests.account_key_placeholder')}
-        onChange={(event) => setAccountKey(event.target.value)}
-      />
-      <Input
-        value={accountDisplay}
-        placeholder={t('customer_requests.account_display_placeholder')}
-        onChange={(event) => setAccountDisplay(event.target.value)}
-      />
-      <Input
-        value={weight}
-        inputMode="numeric"
-        placeholder={t('customer_requests.vote_weight')}
-        onChange={(event) => setWeight(event.target.value)}
-      />
+    <div className="rounded-md border p-3">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <Input
+          value={subjectKey}
+          placeholder={t('customer_requests.subject_key_placeholder')}
+          onChange={(event) => setSubjectKey(event.target.value)}
+        />
+        <Input
+          value={subjectDisplay}
+          placeholder={t('customer_requests.subject_display_placeholder')}
+          onChange={(event) => setSubjectDisplay(event.target.value)}
+        />
+        <Input
+          value={accountKey}
+          placeholder={t('customer_requests.account_key_placeholder')}
+          onChange={(event) => setAccountKey(event.target.value)}
+        />
+        <Input
+          value={accountDisplay}
+          placeholder={t('customer_requests.account_display_placeholder')}
+          onChange={(event) => setAccountDisplay(event.target.value)}
+        />
+        <Input
+          value={weight}
+          inputMode="numeric"
+          placeholder={t('customer_requests.vote_weight')}
+          onChange={(event) => setWeight(event.target.value)}
+        />
+        <Input
+          value={revenueCents}
+          inputMode="numeric"
+          placeholder={t('customer_requests.revenue_cents_placeholder')}
+          onChange={(event) => setRevenueCents(event.target.value)}
+        />
+        <Input
+          value={currency}
+          maxLength={3}
+          placeholder={t('customer_requests.currency_placeholder')}
+          onChange={(event) => setCurrency(event.target.value.toUpperCase())}
+        />
+        <Input
+          value={tier}
+          placeholder={t('customer_requests.tier_placeholder')}
+          onChange={(event) => setTier(event.target.value)}
+        />
+        <Input
+          value={sizeSegment}
+          placeholder={t('customer_requests.size_segment_placeholder')}
+          onChange={(event) => setSizeSegment(event.target.value)}
+        />
+        <Input
+          value={lifecycleStatus}
+          placeholder={t('customer_requests.lifecycle_placeholder')}
+          onChange={(event) => setLifecycleStatus(event.target.value)}
+        />
+      </div>
       <Button
+        className="mt-2"
         disabled={
           add.isPending ||
           (normalizedSubjectKey.length === 0 && normalizedAccountKey.length === 0) ||
           !Number.isInteger(parsedWeight) ||
           parsedWeight < 1 ||
-          parsedWeight > 100
+          parsedWeight > 100 ||
+          parsedRevenue === null
         }
         onClick={() =>
           add.mutate(
@@ -989,6 +1126,16 @@ function VoteForm({ requestID }: { requestID: string }) {
               accountKey: normalizedAccountKey,
               accountDisplay: accountDisplay.trim(),
               weight: parsedWeight,
+              accountRevenueCents:
+                hasAccountProfile && parsedRevenue !== undefined
+                  ? String(parsedRevenue)
+                  : undefined,
+              accountRevenueCurrency: hasAccountProfile ? currency.trim() || undefined : undefined,
+              accountTier: hasAccountProfile ? tier.trim() || undefined : undefined,
+              accountSizeSegment: hasAccountProfile ? sizeSegment.trim() || undefined : undefined,
+              accountLifecycleStatus: hasAccountProfile
+                ? lifecycleStatus.trim() || undefined
+                : undefined,
             },
             {
               onSuccess: () => {
@@ -997,6 +1144,11 @@ function VoteForm({ requestID }: { requestID: string }) {
                 setAccountKey('')
                 setAccountDisplay('')
                 setWeight('1')
+                setRevenueCents('')
+                setCurrency('USD')
+                setTier('')
+                setSizeSegment('')
+                setLifecycleStatus('')
               },
               onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
             },
@@ -1339,6 +1491,39 @@ function VoteRow({
   )
 }
 
+function AccountProfileRow({ item }: { item: CustomerRequestAccountProfile }) {
+  const { t } = useTranslation()
+  return (
+    <div className="rounded-md border p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <div className="font-medium">{item.accountDisplay || item.accountKey}</div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>{item.accountKey}</span>
+            {item.tier ? <span>{item.tier}</span> : null}
+            {item.sizeSegment ? <span>{item.sizeSegment}</span> : null}
+            {item.lifecycleStatus ? <span>{item.lifecycleStatus}</span> : null}
+          </div>
+          {item.crmProvider || item.crmExternalId ? (
+            <div className="text-xs text-muted-foreground">
+              {[item.crmProvider, item.crmExternalId].filter(Boolean).join(' · ')}
+            </div>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-1 rounded bg-muted px-2 py-1 text-xs font-medium">
+          <DollarSign className="size-3.5" />
+          {formatMoney(item.revenueCents, item.revenueCurrency)}
+        </div>
+      </div>
+      {item.updatedAt ? (
+        <div className="mt-2 text-xs text-muted-foreground">
+          {t('customer_requests.updated', { value: formatDate(item.updatedAt) })}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function DuplicateRow({ item }: { item: CustomerRequestDuplicate }) {
   return (
     <div className="rounded-md border p-3 text-sm">
@@ -1415,38 +1600,84 @@ function IssueLinkRow({
 }) {
   const { t } = useTranslation()
   const unlink = useUnlinkCustomerRequestIssue(requestID)
+  const recordSync = useRecordCustomerRequestIssueSync(requestID)
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
-      <a
-        className="flex min-w-0 items-center gap-2 hover:underline"
-        href={item.externalUrl}
-        target="_blank"
-        rel="noreferrer"
-      >
-        <span className="min-w-0 truncate">
-          {item.title || item.externalKey || item.externalUrl}
-        </span>
-        <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
-      </a>
-      {canEdit ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t('customer_requests.unlink_issue')}
-          disabled={unlink.isPending}
-          onClick={() =>
-            unlink.mutate(item.id, {
-              onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
-            })
-          }
-        >
-          {unlink.isPending ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Trash2 className="size-4" />
-          )}
-        </Button>
-      ) : null}
+    <div className="rounded-md border p-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <a
+            className="flex min-w-0 items-center gap-2 hover:underline"
+            href={item.externalUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span className="min-w-0 truncate">
+              {item.title || item.externalKey || item.externalUrl}
+            </span>
+            <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
+          </a>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>{syncStateLabel(item.syncState, t)}</span>
+            {item.status ? <span>{item.status}</span> : null}
+            {item.externalStatusCategory ? <span>{item.externalStatusCategory}</span> : null}
+            {item.externalAssignee ? <span>{item.externalAssignee}</span> : null}
+            {item.lastSyncedAt ? (
+              <span>
+                {t('customer_requests.last_synced', { value: formatDate(item.lastSyncedAt) })}
+              </span>
+            ) : null}
+          </div>
+          {item.syncError ? <p className="text-xs text-destructive">{item.syncError}</p> : null}
+        </div>
+        {canEdit ? (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={recordSync.isPending}
+              onClick={() =>
+                recordSync.mutate(
+                  {
+                    issueLinkId: item.id,
+                    syncState:
+                      CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+                    status: item.status,
+                  },
+                  {
+                    onError: (err) =>
+                      toast.error(err instanceof Error ? err.message : t('common.error')),
+                  },
+                )
+              }
+            >
+              {recordSync.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="size-4" />
+              )}
+              {t('customer_requests.record_sync')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t('customer_requests.unlink_issue')}
+              disabled={unlink.isPending}
+              onClick={() =>
+                unlink.mutate(item.id, {
+                  onError: (err) =>
+                    toast.error(err instanceof Error ? err.message : t('common.error')),
+                })
+              }
+            >
+              {unlink.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+            </Button>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -1531,6 +1762,21 @@ function priorityLabel(t: (key: string) => string, priority: CustomerRequestPrio
   }
 }
 
+function syncStateLabel(state: CustomerRequestIssueSyncState, t: (key: string) => string) {
+  switch (state) {
+    case CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING:
+      return t('customer_requests.sync_states.pending')
+    case CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED:
+      return t('customer_requests.sync_states.synced')
+    case CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE:
+      return t('customer_requests.sync_states.stale')
+    case CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED:
+      return t('customer_requests.sync_states.failed')
+    default:
+      return t('customer_requests.sync_states.manual')
+  }
+}
+
 function supporterLabel(
   item: Pick<
     CustomerRequestCustomerLink | CustomerRequestVote,
@@ -1544,6 +1790,28 @@ function supporterLabel(
     item.accountDisplay ||
     item.accountKey
   )
+}
+
+function parseMoneyCents(raw: string) {
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+  const parsed = Number(trimmed)
+  if (!Number.isInteger(parsed) || parsed < 0) return null
+  return parsed
+}
+
+function formatMoney(cents: string | number | undefined, currency = 'USD') {
+  const value = Number(cents ?? 0) / 100
+  if (!Number.isFinite(value)) return `${currency} 0`
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currency || 'USD',
+      maximumFractionDigits: value >= 1000 ? 0 : 2,
+    }).format(value)
+  } catch {
+    return `${currency || 'USD'} ${value.toFixed(value >= 1000 ? 0 : 2)}`
+  }
 }
 
 function parseFeedbackIDs(raw: string) {

@@ -72,6 +72,12 @@ service CustomerRequestService {
   rpc UnlinkCustomerRequestIssue(UnlinkCustomerRequestIssueRequest) returns (CustomerRequestDetail) {
     option (google.api.http) = {delete: "/fb/v1/console/customer-requests/{id}/issue-links/{issue_link_id}"};
   }
+  rpc RecordCustomerRequestIssueSync(RecordCustomerRequestIssueSyncRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests/{id}/issue-links/{issue_link_id}:record-sync"
+      body: "*"
+    };
+  }
 }
 
 enum CustomerRequestStatus {
@@ -114,6 +120,17 @@ enum CustomerRequestSort {
   CUSTOMER_REQUEST_SORT_SUPPORTING_FEEDBACK_COUNT = 3;
   CUSTOMER_REQUEST_SORT_LATEST_FEEDBACK_AT = 4;
   CUSTOMER_REQUEST_SORT_PRIORITY = 5;
+  CUSTOMER_REQUEST_SORT_REVENUE_IMPACT = 6;
+  CUSTOMER_REQUEST_SORT_DECISION_SCORE = 7;
+}
+
+enum CustomerRequestIssueSyncState {
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL = 1;
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING = 2;
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED = 3;
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE = 4;
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED = 5;
 }
 
 enum SortDirection {
@@ -151,6 +168,10 @@ message CustomerRequestSummary {
   int32 account_count = 18;
   int32 vote_count = 19;
   int32 duplicate_request_count = 20;
+  int64 revenue_impact_cents = 21;
+  string revenue_currency = 22;
+  int32 decision_score = 23;
+  string decision_score_explanation = 24;
 }
 
 message CustomerRequestFeedbackEvidence {
@@ -179,6 +200,11 @@ message CustomerRequestIssueLink {
   string created_at = 8;
   string updated_at = 9;
   string last_synced_at = 10;
+  CustomerRequestIssueSyncState sync_state = 11;
+  string external_status_category = 12;
+  string external_assignee = 13;
+  string external_updated_at = 14;
+  string sync_error = 15;
 }
 
 message CustomerRequestCustomerLink {
@@ -191,6 +217,7 @@ message CustomerRequestCustomerLink {
   string note = 7;
   string created_by = 8;
   string created_at = 9;
+  CustomerRequestAccountProfile account_profile = 10;
 }
 
 message CustomerRequestVote {
@@ -204,6 +231,21 @@ message CustomerRequestVote {
   string note = 8;
   string created_by = 9;
   string created_at = 10;
+  CustomerRequestAccountProfile account_profile = 11;
+}
+
+message CustomerRequestAccountProfile {
+  string account_key = 1;
+  string account_display = 2;
+  int64 revenue_cents = 3;
+  string revenue_currency = 4;
+  string tier = 5;
+  string size_segment = 6;
+  string lifecycle_status = 7;
+  string crm_provider = 8;
+  string crm_external_id = 9;
+  string source = 10;
+  string updated_at = 11;
 }
 
 message CustomerRequestDuplicate {
@@ -231,6 +273,7 @@ message CustomerRequestDetail {
   repeated CustomerRequestCustomerLink customers = 6;
   repeated CustomerRequestVote votes = 7;
   repeated CustomerRequestDuplicate duplicates = 8;
+  repeated CustomerRequestAccountProfile account_profiles = 9;
 }
 
 message ListCustomerRequestsRequest {
@@ -304,6 +347,13 @@ message LinkCustomerToCustomerRequestRequest {
   optional string account_key = 5;
   optional string account_display = 6;
   optional string note = 7;
+  optional int64 account_revenue_cents = 8;
+  optional string account_revenue_currency = 9;
+  optional string account_tier = 10;
+  optional string account_size_segment = 11;
+  optional string account_lifecycle_status = 12;
+  optional string account_crm_provider = 13;
+  optional string account_crm_external_id = 14;
 }
 
 message UnlinkCustomerFromCustomerRequestRequest {
@@ -320,6 +370,13 @@ message AddCustomerRequestVoteRequest {
   optional string account_display = 6;
   int32 weight = 7;
   optional string note = 8;
+  optional int64 account_revenue_cents = 9;
+  optional string account_revenue_currency = 10;
+  optional string account_tier = 11;
+  optional string account_size_segment = 12;
+  optional string account_lifecycle_status = 13;
+  optional string account_crm_provider = 14;
+  optional string account_crm_external_id = 15;
 }
 
 message RemoveCustomerRequestVoteRequest {
@@ -345,4 +402,15 @@ message LinkCustomerRequestIssueRequest {
 message UnlinkCustomerRequestIssueRequest {
   string id = 1 [(google.api.field_behavior) = REQUIRED];
   string issue_link_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RecordCustomerRequestIssueSyncRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string issue_link_id = 2 [(google.api.field_behavior) = REQUIRED];
+  CustomerRequestIssueSyncState sync_state = 3;
+  optional string status = 4;
+  optional string external_status_category = 5;
+  optional string external_assignee = 6;
+  optional string external_updated_at = 7;
+  optional string sync_error = 8;
 }

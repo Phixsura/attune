@@ -20,6 +20,7 @@ import type {
   ListCustomerRequestsResponse,
   MergeCustomerRequestsRequest,
   PromoteFeedbackToCustomerRequestRequest,
+  RecordCustomerRequestIssueSyncRequest,
   SortDirection,
   UpdateCustomerRequestRequest,
 } from '@/proto/attune/v1/customer_request'
@@ -211,6 +212,21 @@ export function useUnlinkCustomerRequestIssue(id: string) {
       api<CustomerRequestDetail>(
         `${BASE}/${encodeURIComponent(id)}/issue-links/${encodeURIComponent(issueLinkId)}`,
         { method: 'DELETE' },
+      ),
+    onSuccess: (detail) => updateCustomerRequestCache(qc, detail),
+  })
+}
+
+export function useRecordCustomerRequestIssueSync(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: Omit<RecordCustomerRequestIssueSyncRequest, 'id'>) =>
+      api<CustomerRequestDetail>(
+        `${BASE}/${encodeURIComponent(id)}/issue-links/${encodeURIComponent(body.issueLinkId)}:record-sync`,
+        {
+          method: 'POST',
+          body: { id, ...body },
+        },
       ),
     onSuccess: (detail) => updateCustomerRequestCache(qc, detail),
   })

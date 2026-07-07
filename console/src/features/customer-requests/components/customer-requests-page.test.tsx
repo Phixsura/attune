@@ -31,6 +31,8 @@ describe('CustomerRequestsPage', () => {
     expect(screen.getByPlaceholderText('反馈 ID')).toBeInTheDocument()
     expect(screen.getAllByText('2 条反馈').length).toBeGreaterThan(0)
     expect(screen.getAllByText('1 位客户').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/收入影响/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('决策分 114').length).toBeGreaterThan(0)
   })
 
   it('posts a create request payload from the dialog', async () => {
@@ -233,6 +235,33 @@ describe('CustomerRequestsPage', () => {
     })
   })
 
+  it('links a subject-only customer without account profile defaults', async () => {
+    let payload: Record<string, unknown> | undefined
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+    server.use(
+      http.post(`${baseURL}/${requestID}/customers`, async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(sampleDetail())
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getAllByPlaceholderText('客户标识')[0], 'customer-1')
+    await user.click(within(dialog).getByRole('button', { name: '添加客户' }))
+
+    await waitFor(() => expect(payload).toBeDefined())
+    expect(payload).toMatchObject({
+      id: requestID,
+      subjectKey: 'customer-1',
+    })
+    expect(payload).not.toHaveProperty('accountRevenueCurrency')
+    expect(payload).not.toHaveProperty('accountRevenueCents')
+  })
+
   it('switches the detail drawer to the merge target after merging', async () => {
     let payload: Record<string, unknown> | undefined
     const targetDetail = sampleDetail({
@@ -342,6 +371,11 @@ function sampleSummary(overrides: Partial<CustomerRequestSummary> = {}): Custome
     voteCount: 3,
     duplicateRequestCount: 0,
     hiddenFeedbackCount: 0,
+    revenueImpactCents: '2400000',
+    revenueCurrency: 'USD',
+    decisionScore: 114,
+    decisionScoreExplanation:
+      'priority=high feedback=2 customers=1 accounts=1 votes=3 revenue_cents=2400000',
     latestFeedbackAt: '2026-07-07T00:30:00Z',
     firstFeedbackAt: '2026-07-07T00:00:00Z',
     ...overrides,
@@ -361,5 +395,20 @@ function sampleDetail(
     customers: overrides.customers ?? [],
     votes: overrides.votes ?? [],
     duplicates: overrides.duplicates ?? [],
+    accountProfiles: overrides.accountProfiles ?? [
+      {
+        accountKey: 'acme',
+        accountDisplay: 'Acme',
+        revenueCents: '2400000',
+        revenueCurrency: 'USD',
+        tier: 'enterprise',
+        sizeSegment: 'mid_market',
+        lifecycleStatus: 'active',
+        crmProvider: 'salesforce',
+        crmExternalId: '001',
+        source: 'manual',
+        updatedAt: '2026-07-07T00:10:00Z',
+      },
+    ],
   }
 }

@@ -38,6 +38,7 @@ type service interface {
 	Merge(ctx context.Context, in svc.MergeInput) (*svc.Detail, error)
 	LinkIssue(ctx context.Context, in svc.LinkIssueInput) (*svc.Detail, error)
 	UnlinkIssue(ctx context.Context, tenantID string, requestID, issueLinkID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error)
+	RecordIssueSync(ctx context.Context, in svc.IssueSyncInput) (*svc.Detail, error)
 }
 
 type Handler struct {
@@ -298,7 +299,16 @@ func (h *Handler) LinkCustomer(
 		AccountKey:     req.GetAccountKey(),
 		AccountDisplay: req.GetAccountDisplay(),
 		Note:           req.GetNote(),
-		Actor:          actor(ctx),
+		AccountProfile: accountProfileInput(
+			req.AccountRevenueCents,
+			req.AccountRevenueCurrency,
+			req.AccountTier,
+			req.AccountSizeSegment,
+			req.AccountLifecycleStatus,
+			req.AccountCrmProvider,
+			req.AccountCrmExternalId,
+		),
+		Actor: actor(ctx),
 	})
 	if err != nil {
 		return h.detailError(ctx, err)
@@ -349,7 +359,16 @@ func (h *Handler) AddVote(
 		AccountDisplay: req.GetAccountDisplay(),
 		Weight:         int(req.GetWeight()),
 		Note:           req.GetNote(),
-		Actor:          actor(ctx),
+		AccountProfile: accountProfileInput(
+			req.AccountRevenueCents,
+			req.AccountRevenueCurrency,
+			req.AccountTier,
+			req.AccountSizeSegment,
+			req.AccountLifecycleStatus,
+			req.AccountCrmProvider,
+			req.AccountCrmExternalId,
+		),
+		Actor: actor(ctx),
 	})
 	if err != nil {
 		return h.detailError(ctx, err)
@@ -450,6 +469,43 @@ func (h *Handler) UnlinkIssue(
 		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid issue link id")
 	}
 	detail, err := h.service.UnlinkIssue(ctx, ctx.Auth.TenantID, id, issueID, actor(ctx))
+	if err != nil {
+		return h.detailError(ctx, err)
+	}
+	return dispatcher.OK(detailToProto(ptrext.Indirect(detail)))
+}
+
+func (h *Handler) RecordIssueSync(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.RecordCustomerRequestIssueSyncRequest,
+) (dispatcher.Result[*attunev1.CustomerRequestDetail], error) {
+	if h.service == nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "customer requests not configured")
+	}
+	id, err := uuid.Parse(req.GetId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid customer request id")
+	}
+	issueID, err := uuid.Parse(req.GetIssueLinkId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid issue link id")
+	}
+	syncState, err := syncStateFromProto(req.GetSyncState())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid sync state")
+	}
+	detail, err := h.service.RecordIssueSync(ctx, svc.IssueSyncInput{
+		TenantID:               ctx.Auth.TenantID,
+		RequestID:              id,
+		IssueLinkID:            issueID,
+		SyncState:              syncState,
+		Status:                 req.GetStatus(),
+		ExternalStatusCategory: req.GetExternalStatusCategory(),
+		ExternalAssignee:       req.GetExternalAssignee(),
+		ExternalUpdatedAt:      req.GetExternalUpdatedAt(),
+		SyncError:              req.GetSyncError(),
+		Actor:                  actor(ctx),
+	})
 	if err != nil {
 		return h.detailError(ctx, err)
 	}
@@ -572,6 +628,26 @@ func optionalUUID(raw *string) (*uuid.UUID, error) {
 	return ptrext.Of(parsed), nil
 }
 
+func accountProfileInput(
+	revenueCents *int64,
+	revenueCurrency *string,
+	tier *string,
+	sizeSegment *string,
+	lifecycleStatus *string,
+	crmProvider *string,
+	crmExternalID *string,
+) svc.AccountProfileInput {
+	return svc.AccountProfileInput{
+		RevenueCents:    revenueCents,
+		RevenueCurrency: ptrext.Indirect(revenueCurrency),
+		Tier:            ptrext.Indirect(tier),
+		SizeSegment:     ptrext.Indirect(sizeSegment),
+		LifecycleStatus: ptrext.Indirect(lifecycleStatus),
+		CRMProvider:     ptrext.Indirect(crmProvider),
+		CRMExternalID:   ptrext.Indirect(crmExternalID),
+	}
+}
+
 func detailToProto(detail svc.Detail) *attunev1.CustomerRequestDetail {
 	feedback := make([]*attunev1.CustomerRequestFeedbackEvidence, 0, len(detail.Request.Feedback))
 	for _, item := range detail.Request.Feedback {
@@ -593,6 +669,10 @@ func detailToProto(detail svc.Detail) *attunev1.CustomerRequestDetail {
 	for _, item := range detail.Request.Duplicates {
 		duplicates = append(duplicates, duplicateToProto(item))
 	}
+	accountProfiles := make([]*attunev1.CustomerRequestAccountProfile, 0, len(detail.Request.AccountProfiles))
+	for _, item := range detail.Request.AccountProfiles {
+		accountProfiles = append(accountProfiles, accountProfileToProto(item))
+	}
 	audit := make([]*attunev1.CustomerRequestAuditEntry, 0, len(detail.AuditEntries))
 	for _, item := range detail.AuditEntries {
 		audit = append(audit, ptrext.Of(attunev1.CustomerRequestAuditEntry{
@@ -605,36 +685,41 @@ func detailToProto(detail svc.Detail) *attunev1.CustomerRequestDetail {
 		}))
 	}
 	return ptrext.Of(attunev1.CustomerRequestDetail{
-		Request:      summaryToProto(detail.Request.Summary),
-		Description:  detail.Request.Summary.Description,
-		Feedback:     feedback,
-		IssueLinks:   issues,
-		AuditEntries: audit,
-		Customers:    customers,
-		Votes:        votes,
-		Duplicates:   duplicates,
+		Request:         summaryToProto(detail.Request.Summary),
+		Description:     detail.Request.Summary.Description,
+		Feedback:        feedback,
+		IssueLinks:      issues,
+		AuditEntries:    audit,
+		Customers:       customers,
+		Votes:           votes,
+		Duplicates:      duplicates,
+		AccountProfiles: accountProfiles,
 	})
 }
 
 func summaryToProto(summary repo.Summary) *attunev1.CustomerRequestSummary {
 	out := ptrext.Of(attunev1.CustomerRequestSummary{
-		Id:                      summary.ID.String(),
-		DisplayId:               summary.DisplayID,
-		DisplayNumber:           summary.DisplayNumber,
-		Title:                   summary.Title,
-		Status:                  statusToProto(summary.Status),
-		Priority:                priorityToProto(summary.Priority),
-		SupportingFeedbackCount: int32(summary.SupportingFeedbackCount),
-		CustomerCount:           int32(summary.CustomerCount),
-		AccountCount:            int32(summary.AccountCount),
-		LinkedIssueCount:        int32(summary.LinkedIssueCount),
-		VoteCount:               int32(summary.VoteCount),
-		DuplicateRequestCount:   int32(summary.DuplicateRequestCount),
-		HiddenFeedbackCount:     int32(summary.HiddenFeedbackCount),
-		FirstFeedbackAt:         formatTime(summary.FirstFeedbackAt),
-		LatestFeedbackAt:        formatTime(summary.LatestFeedbackAt),
-		CreatedAt:               formatTime(ptrext.Of(summary.CreatedAt)),
-		UpdatedAt:               formatTime(ptrext.Of(summary.UpdatedAt)),
+		Id:                       summary.ID.String(),
+		DisplayId:                summary.DisplayID,
+		DisplayNumber:            summary.DisplayNumber,
+		Title:                    summary.Title,
+		Status:                   statusToProto(summary.Status),
+		Priority:                 priorityToProto(summary.Priority),
+		SupportingFeedbackCount:  int32(summary.SupportingFeedbackCount),
+		CustomerCount:            int32(summary.CustomerCount),
+		AccountCount:             int32(summary.AccountCount),
+		LinkedIssueCount:         int32(summary.LinkedIssueCount),
+		VoteCount:                int32(summary.VoteCount),
+		DuplicateRequestCount:    int32(summary.DuplicateRequestCount),
+		HiddenFeedbackCount:      int32(summary.HiddenFeedbackCount),
+		RevenueImpactCents:       summary.RevenueImpactCents,
+		RevenueCurrency:          summary.RevenueCurrency,
+		DecisionScore:            int32(summary.DecisionScore),
+		DecisionScoreExplanation: summary.DecisionScoreExplanation,
+		FirstFeedbackAt:          formatTime(summary.FirstFeedbackAt),
+		LatestFeedbackAt:         formatTime(summary.LatestFeedbackAt),
+		CreatedAt:                formatTime(ptrext.Of(summary.CreatedAt)),
+		UpdatedAt:                formatTime(ptrext.Of(summary.UpdatedAt)),
 	})
 	if summary.Owner != nil {
 		owner := ptrext.Indirect(summary.Owner)
@@ -674,21 +759,26 @@ func feedbackToProto(item repo.FeedbackEvidence) *attunev1.CustomerRequestFeedba
 
 func issueToProto(item repo.IssueLink) *attunev1.CustomerRequestIssueLink {
 	return ptrext.Of(attunev1.CustomerRequestIssueLink{
-		Id:           item.ID.String(),
-		Provider:     item.Provider,
-		ExternalKey:  item.ExternalKey,
-		ExternalUrl:  item.ExternalURL,
-		Title:        item.Title,
-		Status:       item.Status,
-		CreatedBy:    item.CreatedBy,
-		CreatedAt:    formatTime(ptrext.Of(item.CreatedAt)),
-		UpdatedAt:    formatTime(ptrext.Of(item.UpdatedAt)),
-		LastSyncedAt: formatTime(item.LastSyncedAt),
+		Id:                     item.ID.String(),
+		Provider:               item.Provider,
+		ExternalKey:            item.ExternalKey,
+		ExternalUrl:            item.ExternalURL,
+		Title:                  item.Title,
+		Status:                 item.Status,
+		CreatedBy:              item.CreatedBy,
+		CreatedAt:              formatTime(ptrext.Of(item.CreatedAt)),
+		UpdatedAt:              formatTime(ptrext.Of(item.UpdatedAt)),
+		LastSyncedAt:           formatTime(item.LastSyncedAt),
+		SyncState:              syncStateToProto(item.SyncState),
+		ExternalStatusCategory: item.ExternalStatusCategory,
+		ExternalAssignee:       item.ExternalAssignee,
+		ExternalUpdatedAt:      formatTime(item.ExternalUpdatedAt),
+		SyncError:              item.SyncError,
 	})
 }
 
 func customerToProto(item repo.CustomerLink) *attunev1.CustomerRequestCustomerLink {
-	return ptrext.Of(attunev1.CustomerRequestCustomerLink{
+	out := ptrext.Of(attunev1.CustomerRequestCustomerLink{
 		Id:             item.ID.String(),
 		SubjectKey:     item.SubjectKey,
 		SubjectHash:    item.SubjectHash,
@@ -699,10 +789,14 @@ func customerToProto(item repo.CustomerLink) *attunev1.CustomerRequestCustomerLi
 		CreatedBy:      item.CreatedBy,
 		CreatedAt:      formatTime(ptrext.Of(item.CreatedAt)),
 	})
+	if item.AccountProfile != nil {
+		out.AccountProfile = accountProfileToProto(ptrext.Indirect(item.AccountProfile))
+	}
+	return out
 }
 
 func voteToProto(item repo.Vote) *attunev1.CustomerRequestVote {
-	return ptrext.Of(attunev1.CustomerRequestVote{
+	out := ptrext.Of(attunev1.CustomerRequestVote{
 		Id:             item.ID.String(),
 		SubjectKey:     item.SubjectKey,
 		SubjectHash:    item.SubjectHash,
@@ -713,6 +807,26 @@ func voteToProto(item repo.Vote) *attunev1.CustomerRequestVote {
 		Note:           item.Note,
 		CreatedBy:      item.CreatedBy,
 		CreatedAt:      formatTime(ptrext.Of(item.CreatedAt)),
+	})
+	if item.AccountProfile != nil {
+		out.AccountProfile = accountProfileToProto(ptrext.Indirect(item.AccountProfile))
+	}
+	return out
+}
+
+func accountProfileToProto(item repo.AccountProfile) *attunev1.CustomerRequestAccountProfile {
+	return ptrext.Of(attunev1.CustomerRequestAccountProfile{
+		AccountKey:      item.AccountKey,
+		AccountDisplay:  item.AccountDisplay,
+		RevenueCents:    item.RevenueCents,
+		RevenueCurrency: item.RevenueCurrency,
+		Tier:            item.Tier,
+		SizeSegment:     item.SizeSegment,
+		LifecycleStatus: item.LifecycleStatus,
+		CrmProvider:     item.CRMProvider,
+		CrmExternalId:   item.CRMExternalID,
+		Source:          item.Source,
+		UpdatedAt:       formatTime(ptrext.Of(item.UpdatedAt)),
 	})
 }
 
@@ -826,6 +940,40 @@ func importanceToProto(importance repo.Importance) attunev1.CustomerRequestImpor
 	}
 }
 
+func syncStateFromProto(state attunev1.CustomerRequestIssueSyncState) (repo.IssueSyncState, error) {
+	switch state {
+	case attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED:
+		return repo.IssueSyncStateSynced, nil
+	case attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL:
+		return repo.IssueSyncStateManual, nil
+	case attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING:
+		return repo.IssueSyncStatePending, nil
+	case attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED:
+		return repo.IssueSyncStateSynced, nil
+	case attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE:
+		return repo.IssueSyncStateStale, nil
+	case attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED:
+		return repo.IssueSyncStateFailed, nil
+	default:
+		return "", errors.New("invalid sync state")
+	}
+}
+
+func syncStateToProto(state repo.IssueSyncState) attunev1.CustomerRequestIssueSyncState {
+	switch state {
+	case repo.IssueSyncStatePending:
+		return attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING
+	case repo.IssueSyncStateSynced:
+		return attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED
+	case repo.IssueSyncStateStale:
+		return attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE
+	case repo.IssueSyncStateFailed:
+		return attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED
+	default:
+		return attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL
+	}
+}
+
 func statusesFromProto(statuses []attunev1.CustomerRequestStatus) ([]repo.Status, error) {
 	out := make([]repo.Status, 0, len(statuses))
 	for _, status := range statuses {
@@ -877,6 +1025,10 @@ func sortFromProto(value attunev1.CustomerRequestSort) repo.Sort {
 		return repo.SortLatestFeedbackAt
 	case attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_PRIORITY:
 		return repo.SortPriority
+	case attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_REVENUE_IMPACT:
+		return repo.SortRevenueImpact
+	case attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DECISION_SCORE:
+		return repo.SortDecisionScore
 	default:
 		return repo.SortUpdatedAt
 	}
@@ -966,6 +1118,10 @@ func bindSort(raw string) attunev1.CustomerRequestSort {
 		return attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_LATEST_FEEDBACK_AT
 	case "priority", "customer_request_sort_priority":
 		return attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_PRIORITY
+	case "revenue_impact", "customer_request_sort_revenue_impact":
+		return attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_REVENUE_IMPACT
+	case "decision_score", "customer_request_sort_decision_score":
+		return attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DECISION_SCORE
 	default:
 		return attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_UPDATED_AT
 	}

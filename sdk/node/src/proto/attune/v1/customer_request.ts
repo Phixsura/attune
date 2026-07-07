@@ -52,6 +52,18 @@ export enum CustomerRequestSort {
   CUSTOMER_REQUEST_SORT_SUPPORTING_FEEDBACK_COUNT = "CUSTOMER_REQUEST_SORT_SUPPORTING_FEEDBACK_COUNT",
   CUSTOMER_REQUEST_SORT_LATEST_FEEDBACK_AT = "CUSTOMER_REQUEST_SORT_LATEST_FEEDBACK_AT",
   CUSTOMER_REQUEST_SORT_PRIORITY = "CUSTOMER_REQUEST_SORT_PRIORITY",
+  CUSTOMER_REQUEST_SORT_REVENUE_IMPACT = "CUSTOMER_REQUEST_SORT_REVENUE_IMPACT",
+  CUSTOMER_REQUEST_SORT_DECISION_SCORE = "CUSTOMER_REQUEST_SORT_DECISION_SCORE",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum CustomerRequestIssueSyncState {
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED = "CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED",
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL = "CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL",
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING = "CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING",
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED = "CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED",
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE = "CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE",
+  CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED = "CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED",
   UNRECOGNIZED = "UNRECOGNIZED",
 }
 
@@ -91,6 +103,10 @@ export interface CustomerRequestSummary {
   accountCount: number;
   voteCount: number;
   duplicateRequestCount: number;
+  revenueImpactCents: string;
+  revenueCurrency: string;
+  decisionScore: number;
+  decisionScoreExplanation: string;
 }
 
 export interface CustomerRequestFeedbackEvidence {
@@ -119,6 +135,11 @@ export interface CustomerRequestIssueLink {
   createdAt: string;
   updatedAt: string;
   lastSyncedAt: string;
+  syncState: CustomerRequestIssueSyncState;
+  externalStatusCategory: string;
+  externalAssignee: string;
+  externalUpdatedAt: string;
+  syncError: string;
 }
 
 export interface CustomerRequestCustomerLink {
@@ -131,6 +152,7 @@ export interface CustomerRequestCustomerLink {
   note: string;
   createdBy: string;
   createdAt: string;
+  accountProfile?: CustomerRequestAccountProfile | undefined;
 }
 
 export interface CustomerRequestVote {
@@ -144,6 +166,21 @@ export interface CustomerRequestVote {
   note: string;
   createdBy: string;
   createdAt: string;
+  accountProfile?: CustomerRequestAccountProfile | undefined;
+}
+
+export interface CustomerRequestAccountProfile {
+  accountKey: string;
+  accountDisplay: string;
+  revenueCents: string;
+  revenueCurrency: string;
+  tier: string;
+  sizeSegment: string;
+  lifecycleStatus: string;
+  crmProvider: string;
+  crmExternalId: string;
+  source: string;
+  updatedAt: string;
 }
 
 export interface CustomerRequestDuplicate {
@@ -171,6 +208,7 @@ export interface CustomerRequestDetail {
   customers: CustomerRequestCustomerLink[];
   votes: CustomerRequestVote[];
   duplicates: CustomerRequestDuplicate[];
+  accountProfiles: CustomerRequestAccountProfile[];
 }
 
 export interface ListCustomerRequestsRequest {
@@ -244,6 +282,13 @@ export interface LinkCustomerToCustomerRequestRequest {
   accountKey?: string | undefined;
   accountDisplay?: string | undefined;
   note?: string | undefined;
+  accountRevenueCents?: string | undefined;
+  accountRevenueCurrency?: string | undefined;
+  accountTier?: string | undefined;
+  accountSizeSegment?: string | undefined;
+  accountLifecycleStatus?: string | undefined;
+  accountCrmProvider?: string | undefined;
+  accountCrmExternalId?: string | undefined;
 }
 
 export interface UnlinkCustomerFromCustomerRequestRequest {
@@ -260,6 +305,13 @@ export interface AddCustomerRequestVoteRequest {
   accountDisplay?: string | undefined;
   weight: number;
   note?: string | undefined;
+  accountRevenueCents?: string | undefined;
+  accountRevenueCurrency?: string | undefined;
+  accountTier?: string | undefined;
+  accountSizeSegment?: string | undefined;
+  accountLifecycleStatus?: string | undefined;
+  accountCrmProvider?: string | undefined;
+  accountCrmExternalId?: string | undefined;
 }
 
 export interface RemoveCustomerRequestVoteRequest {
@@ -287,6 +339,17 @@ export interface UnlinkCustomerRequestIssueRequest {
   issueLinkId: string;
 }
 
+export interface RecordCustomerRequestIssueSyncRequest {
+  id: string;
+  issueLinkId: string;
+  syncState: CustomerRequestIssueSyncState;
+  status?: string | undefined;
+  externalStatusCategory?: string | undefined;
+  externalAssignee?: string | undefined;
+  externalUpdatedAt?: string | undefined;
+  syncError?: string | undefined;
+}
+
 export interface CustomerRequestService {
   ListCustomerRequests(request: ListCustomerRequestsRequest): Promise<ListCustomerRequestsResponse>;
   GetCustomerRequest(request: GetCustomerRequestRequest): Promise<CustomerRequestDetail>;
@@ -302,4 +365,5 @@ export interface CustomerRequestService {
   MergeCustomerRequests(request: MergeCustomerRequestsRequest): Promise<CustomerRequestDetail>;
   LinkCustomerRequestIssue(request: LinkCustomerRequestIssueRequest): Promise<CustomerRequestDetail>;
   UnlinkCustomerRequestIssue(request: UnlinkCustomerRequestIssueRequest): Promise<CustomerRequestDetail>;
+  RecordCustomerRequestIssueSync(request: RecordCustomerRequestIssueSyncRequest): Promise<CustomerRequestDetail>;
 }

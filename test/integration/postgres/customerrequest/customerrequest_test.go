@@ -118,6 +118,157 @@ func TestPGCustomerRequestTenantIsolation(t *testing.T) {
 	}
 }
 
+func TestPGCustomerRequestDecisionIntelligence(t *testing.T) {
+	e := setup(t)
+	fixture := seedDecisionIntelligence(t, e)
+	detail := assertDecisionIntelligenceDetail(t, e, fixture)
+	assertDecisionScoreSort(t, e, fixture.highValue.ID, detail.Summary.DecisionScore)
+}
+
+type decisionIntelligenceFixture struct {
+	highValue crrepo.Summary
+	lowValue  crrepo.Summary
+	issue     *crrepo.IssueLink
+}
+
+func seedDecisionIntelligence(t *testing.T, e env) decisionIntelligenceFixture {
+	t.Helper()
+	highValue := e.createRequest(t, e.tenantID, "Revenue-backed request")
+	lowValue := e.createRequest(t, e.tenantID, "Low evidence request")
+
+	externalUpdatedAt := time.Date(2026, 7, 7, 9, 30, 0, 0, time.UTC)
+	tx := e.begin(t)
+	_, err := e.repo.LinkCustomerTx(e.ctx, tx, crrepo.CustomerLinkInput{
+		TenantID:       e.tenantID,
+		RequestID:      highValue.ID,
+		SubjectKey:     "user:ada",
+		SubjectDisplay: "Ada Lovelace",
+		AccountKey:     "account:acme",
+		AccountDisplay: "Acme Inc",
+		ActorID:        "operator",
+		AccountProfile: crrepo.AccountProfileInput{
+			AccountKey:      "account:acme",
+			AccountDisplay:  "Acme Inc",
+			RevenueCents:    2_400_000,
+			RevenueCurrency: "USD",
+			Tier:            "enterprise",
+			SizeSegment:     "mid_market",
+			LifecycleStatus: "active",
+			CRMProvider:     "salesforce",
+			CRMExternalID:   "001",
+			Source:          "manual",
+			ActorID:         "operator",
+		},
+	})
+	if err != nil {
+		rollback(t, e.ctx, tx)
+		t.Fatalf("LinkCustomerTx: %v", err)
+	}
+	_, err = e.repo.AddVoteTx(e.ctx, tx, crrepo.VoteInput{
+		TenantID:   e.tenantID,
+		RequestID:  highValue.ID,
+		SubjectKey: "user:ada",
+		AccountKey: "account:acme",
+		Weight:     5,
+		ActorID:    "operator",
+		AccountProfile: crrepo.AccountProfileInput{
+			AccountKey:      "account:acme",
+			AccountDisplay:  "Acme Inc",
+			RevenueCents:    2_400_000,
+			RevenueCurrency: "USD",
+			Source:          "manual",
+			ActorID:         "operator",
+		},
+	})
+	if err != nil {
+		rollback(t, e.ctx, tx)
+		t.Fatalf("AddVoteTx: %v", err)
+	}
+	issue, err := e.repo.LinkIssueTx(e.ctx, tx, crrepo.IssueLinkInput{
+		TenantID:    e.tenantID,
+		RequestID:   highValue.ID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		Title:       "Customer Requests",
+		Status:      "open",
+		ActorID:     "operator",
+	})
+	if err != nil {
+		rollback(t, e.ctx, tx)
+		t.Fatalf("LinkIssueTx: %v", err)
+	}
+	issue, err = e.repo.RecordIssueSyncTx(e.ctx, tx, crrepo.IssueSyncInput{
+		TenantID:               e.tenantID,
+		RequestID:              highValue.ID,
+		IssueLinkID:            issue.ID,
+		SyncState:              crrepo.IssueSyncStateSynced,
+		Status:                 "closed",
+		ExternalStatusCategory: "done",
+		ExternalAssignee:       "product-eng",
+		ExternalUpdatedAt:      &externalUpdatedAt,
+		ActorID:                "operator",
+	})
+	if err != nil {
+		rollback(t, e.ctx, tx)
+		t.Fatalf("RecordIssueSyncTx: %v", err)
+	}
+	commit(t, e.ctx, tx)
+	return decisionIntelligenceFixture{
+		highValue: highValue,
+		lowValue:  lowValue,
+		issue:     issue,
+	}
+}
+
+func assertDecisionIntelligenceDetail(
+	t *testing.T,
+	e env,
+	fixture decisionIntelligenceFixture,
+) *crrepo.Detail {
+	t.Helper()
+	detail, err := e.repo.GetDetail(e.ctx, e.tenantID, fixture.highValue.ID, 50)
+	if err != nil {
+		t.Fatalf("GetDetail high value: %v", err)
+	}
+	if detail.Summary.RevenueImpactCents != 2_400_000 {
+		t.Fatalf("RevenueImpactCents = %d, want 2400000", detail.Summary.RevenueImpactCents)
+	}
+	if detail.Summary.DecisionScore <= fixture.lowValue.DecisionScore {
+		t.Fatalf("DecisionScore = %d, want above low value %d", detail.Summary.DecisionScore, fixture.lowValue.DecisionScore)
+	}
+	if len(detail.AccountProfiles) != 1 || detail.AccountProfiles[0].Tier != "enterprise" {
+		t.Fatalf("AccountProfiles = %+v, want enterprise Acme profile", detail.AccountProfiles)
+	}
+	if len(detail.IssueLinks) != 1 || detail.IssueLinks[0].SyncState != crrepo.IssueSyncStateSynced {
+		t.Fatalf("IssueLinks = %+v, want synced issue link", detail.IssueLinks)
+	}
+	if detail.IssueLinks[0].Status != "closed" || detail.IssueLinks[0].ExternalStatusCategory != "done" {
+		t.Fatalf("issue sync status = %q/%q, want closed/done", detail.IssueLinks[0].Status, detail.IssueLinks[0].ExternalStatusCategory)
+	}
+	if fixture.issue.LastSyncedAt == nil {
+		t.Fatalf("RecordIssueSyncTx returned nil LastSyncedAt")
+	}
+	return detail
+}
+
+func assertDecisionScoreSort(t *testing.T, e env, highValueID uuid.UUID, highScore int) {
+	t.Helper()
+	list, err := e.repo.List(e.ctx, crrepo.ListFilter{
+		TenantID:   e.tenantID,
+		Visibility: crrepo.VisibilityAll,
+		Sort:       crrepo.SortDecisionScore,
+		Direction:  crrepo.DirectionDesc,
+	})
+	if err != nil {
+		t.Fatalf("List by decision score: %v", err)
+	}
+	if len(list.Items) < 2 || list.Items[0].ID != highValueID {
+		t.Fatalf("top decision score item = %+v, want %s first after score %d",
+			list.Items, highValueID, highScore)
+	}
+}
+
 func TestPGCustomerRequestOwnerMustBelongToTenant(t *testing.T) {
 	e := setup(t)
 	otherTenant := e.createTenant(t, "customer-request-owner-other")
@@ -563,7 +714,8 @@ func (e env) createTenant(t *testing.T, slug string) string {
 func (e env) createMember(t *testing.T, tenantID, userID, email string) uuid.UUID {
 	t.Helper()
 	var rawID string
-	err := e.pool.QueryRow(e.ctx, `
+	err := e.pool.QueryRow(
+		e.ctx, `
 		INSERT INTO tenant_members (
 			tenant_id, member_type, user_id, email, role, role_source, accepted_at
 		)
@@ -603,7 +755,8 @@ func (e env) createRequest(t *testing.T, tenantID, title string) crrepo.Summary 
 func (e env) seedFeedback(t *testing.T, tenantID, userID, subjectKey string) int64 {
 	t.Helper()
 	var id int64
-	err := e.pool.QueryRow(e.ctx, `
+	err := e.pool.QueryRow(
+		e.ctx, `
 		INSERT INTO user_feedback (tenant_id, user_id, subject_key, subject_hash, subject_display, source, content)
 		VALUES ($1, $2, $3, $3, $2, 'web', 'customer feedback')
 		RETURNING id`,
@@ -617,7 +770,8 @@ func (e env) seedFeedback(t *testing.T, tenantID, userID, subjectKey string) int
 
 func (e env) softDeleteFeedback(t *testing.T, tenantID string, feedbackID int64) {
 	t.Helper()
-	tag, err := e.pool.Exec(e.ctx, `
+	tag, err := e.pool.Exec(
+		e.ctx, `
 		UPDATE user_feedback
 		SET deleted_at = NOW()
 		WHERE tenant_id = $1 AND id = $2`,
