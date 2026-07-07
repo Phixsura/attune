@@ -18,6 +18,9 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'feedback:edit')).toBe(true)
       expect(hasPermission(role, 'feedback:delete')).toBe(true)
       expect(hasPermission(role, 'feedback:batch_delete')).toBe(true)
+      expect(hasPermission(role, 'customer_request:view')).toBe(true)
+      expect(hasPermission(role, 'customer_request:edit')).toBe(true)
+      expect(hasPermission(role, 'customer_request:merge')).toBe(true)
     })
 
     it('has all settings permissions', () => {
@@ -43,6 +46,9 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'feedback:edit')).toBe(true)
       expect(hasPermission(role, 'feedback:delete')).toBe(true)
       expect(hasPermission(role, 'feedback:batch_delete')).toBe(false)
+      expect(hasPermission(role, 'customer_request:view')).toBe(true)
+      expect(hasPermission(role, 'customer_request:edit')).toBe(true)
+      expect(hasPermission(role, 'customer_request:merge')).toBe(true)
       expect(hasPermission(role, 'settings:enrich_config:view')).toBe(true)
       expect(hasPermission(role, 'settings:enrich_config:edit')).toBe(true)
       expect(hasPermission(role, 'settings:notify_targets:view')).toBe(true)
@@ -67,6 +73,9 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'feedback:edit')).toBe(true)
       expect(hasPermission(role, 'feedback:delete')).toBe(true)
       expect(hasPermission(role, 'feedback:batch_delete')).toBe(false)
+      expect(hasPermission(role, 'customer_request:view')).toBe(true)
+      expect(hasPermission(role, 'customer_request:edit')).toBe(true)
+      expect(hasPermission(role, 'customer_request:merge')).toBe(false)
     })
 
     it('can view settings but not edit', () => {
@@ -93,6 +102,9 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'feedback:edit')).toBe(false)
       expect(hasPermission(role, 'feedback:delete')).toBe(false)
       expect(hasPermission(role, 'feedback:batch_delete')).toBe(false)
+      expect(hasPermission(role, 'customer_request:view')).toBe(true)
+      expect(hasPermission(role, 'customer_request:edit')).toBe(false)
+      expect(hasPermission(role, 'customer_request:merge')).toBe(false)
     })
 
     it('cannot access settings', () => {
@@ -151,9 +163,10 @@ describe('getPermissions', () => {
   it('returns limited permissions for viewer', () => {
     const perms = getPermissions('viewer')
     expect(perms).toContain('feedback:view')
+    expect(perms).toContain('customer_request:view')
     expect(perms).toContain('usage:view')
     expect(perms).not.toContain('feedback:edit')
-    expect(perms.length).toBe(2)
+    expect(perms.length).toBe(3)
   })
 
   it('returns empty array for invalid role', () => {

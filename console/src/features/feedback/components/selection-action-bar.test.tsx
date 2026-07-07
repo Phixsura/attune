@@ -38,6 +38,18 @@ describe('SelectionActionBar', () => {
     expect(screen.queryByRole('button', { name: /删除/ })).not.toBeInTheDocument()
   })
 
+  it('shows customer request promotion when handler is provided', async () => {
+    const onPromoteToCustomerRequest = vi.fn()
+    const { user } = renderWithProviders(
+      <SelectionActionBar
+        {...defaultProps}
+        onPromoteToCustomerRequest={onPromoteToCustomerRequest}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: /从反馈提升/ }))
+    expect(onPromoteToCustomerRequest).toHaveBeenCalledTimes(1)
+  })
+
   it('shows loading state with message', () => {
     renderWithProviders(
       <SelectionActionBar {...defaultProps} isLoading loadingMessage="处理中..." />,

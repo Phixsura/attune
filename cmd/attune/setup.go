@@ -11,6 +11,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console"
+	consolecustomerrequest "github.com/Phixsura/attune/internal/handlers/console/customerrequest"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
 	consolefeedback "github.com/Phixsura/attune/internal/handlers/console/feedback"
@@ -33,6 +34,7 @@ import (
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	auditlogviewrepo "github.com/Phixsura/attune/internal/repo/auditlogview"
 	breakglassrepo "github.com/Phixsura/attune/internal/repo/breakglass"
+	customerrequestrepo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	enrichruntime "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
@@ -62,6 +64,7 @@ import (
 	auditlogviewsvc "github.com/Phixsura/attune/internal/service/auditlogview"
 	authmodesvc "github.com/Phixsura/attune/internal/service/authmode"
 	breakglasssvc "github.com/Phixsura/attune/internal/service/breakglass"
+	customerrequestsvc "github.com/Phixsura/attune/internal/service/customerrequest"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	evalsvc "github.com/Phixsura/attune/internal/service/eval"
@@ -256,11 +259,9 @@ func buildConsoleRouter(
 
 	// Batch operations service dependencies.
 	idempotencyRepo := idempotencyrepo.New(pool)
+	customerRequestHandler := buildCustomerRequestHandler(pool, idempotencyRepo, auditLogSvc)
 	jobRepo := feedbackjobrepo.New(pool)
-	batchRateLimiter := ratelimit.NewMemorySlidingLimiter()
-	batchConcurrency := ratelimit.NewMemoryConcurrencyLimiter()
-	batchSvc := feedbackbatch.New(feedbackRepo, idempotencyRepo, jobRepo, batchRateLimiter, batchConcurrency)
-	batchHandler := console.NewBatchHandler(batchSvc)
+	batchSvc, batchHandler := buildBatchHandler(feedbackRepo, idempotencyRepo, jobRepo)
 
 	searchHandler := buildSearchHandler(pool, secrets, feedbackRepo, tagAssignmentRepo, wfStateRepo)
 
@@ -269,33 +270,60 @@ func buildConsoleRouter(
 
 	memberRepo := tenantmember.NewRepo(pool) // RBAC (#38); passed to both NewMemberHandler and NewRouter
 	memberHandler := console.NewMemberHandler(memberRepo)
-	apiKeys.SetAuditLogger(auditLogSvc)
-	feedback.SetAuditLogger(auditLogSvc)
-	notifyTargets.SetAuditLogger(auditLogSvc)
-	inboundHandler.SetAuditLogger(auditLogSvc)
-	memberHandler.SetAuditLogger(auditLogSvc)
-	guardPolicies.SetAuditLogger(auditLogSvc)
-	enrichConfig.SetAuditLogger(auditLogSvc)
-	if enrichmentRuntimeHandler != nil {
-		enrichmentRuntimeHandler.SetAuditLogger(auditLogSvc)
+	auditTargets := []consoleAuditTarget{
+		func(audit *auditlogsvc.Service) { apiKeys.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { feedback.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { notifyTargets.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { inboundHandler.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { memberHandler.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { guardPolicies.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { enrichConfig.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { jobHandler.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { llmConfig.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { workflowHandler.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { batchHandler.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { digestSub.SetAuditLogger(audit) },
+		func(audit *auditlogsvc.Service) { tagHandler.SetAuditLogger(audit) },
 	}
-	jobHandler.SetAuditLogger(auditLogSvc)
-	llmConfig.SetAuditLogger(auditLogSvc)
-	workflowHandler.SetAuditLogger(auditLogSvc)
-	batchHandler.SetAuditLogger(auditLogSvc)
-	digestSub.SetAuditLogger(auditLogSvc)
-	tagHandler.SetAuditLogger(auditLogSvc)
+	if enrichmentRuntimeHandler != nil {
+		auditTargets = append(auditTargets, func(audit *auditlogsvc.Service) {
+			enrichmentRuntimeHandler.SetAuditLogger(audit)
+		})
+	}
+	wireConsoleAuditLoggers(auditTargets, auditLogSvc)
 
 	router := console.NewRouter(
 		signer, authHandler, changePasswordHandler, me, auditLog, apiKeys, notifyTargets, feedback,
-		batchHandler,
-		searchHandler,
-		jobHandler,
-		gdprHandler,
-		usage, enrichConfig, enrichmentRuntimeHandler, guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub,
-		tagHandler, tagAssignmentHandler, workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
+		batchHandler, searchHandler, jobHandler, gdprHandler, usage, enrichConfig, enrichmentRuntimeHandler,
+		guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub, tagHandler, tagAssignmentHandler,
+		workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
+	router.SetCustomerRequestHandler(customerRequestHandler)
 	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo), nil
+}
+
+type consoleAuditTarget func(*auditlogsvc.Service)
+
+func wireConsoleAuditLoggers(targets []consoleAuditTarget, auditLogSvc *auditlogsvc.Service) {
+	for _, target := range targets {
+		target(auditLogSvc)
+	}
+}
+
+func buildCustomerRequestHandler(pool *pgxpool.Pool, idempotencyRepo idempotencyrepo.Store, auditLogSvc *auditlogsvc.Service) *consolecustomerrequest.Handler {
+	customerRequestRepo := customerrequestrepo.New(pool)
+	return console.NewCustomerRequestHandler(customerrequestsvc.New(customerRequestRepo, idempotencyRepo, auditLogSvc))
+}
+
+func buildBatchHandler(feedbackRepo *feedback.FeedbackRepo, idempotencyRepo idempotencyrepo.Store, jobRepo feedbackjobrepo.Store) (feedbackbatch.Service, *consolefeedback.BatchHandler) {
+	batchSvc := feedbackbatch.New(
+		feedbackRepo,
+		idempotencyRepo,
+		jobRepo,
+		ratelimit.NewMemorySlidingLimiter(),
+		ratelimit.NewMemoryConcurrencyLimiter(),
+	)
+	return batchSvc, console.NewBatchHandler(batchSvc)
 }
 
 func configureConsoleRouter(

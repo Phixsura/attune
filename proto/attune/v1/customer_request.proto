@@ -1,0 +1,348 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+service CustomerRequestService {
+  rpc ListCustomerRequests(ListCustomerRequestsRequest) returns (ListCustomerRequestsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/customer-requests"};
+  }
+  rpc GetCustomerRequest(GetCustomerRequestRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {get: "/fb/v1/console/customer-requests/{id}"};
+  }
+  rpc CreateCustomerRequest(CreateCustomerRequestRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests"
+      body: "*"
+    };
+  }
+  rpc UpdateCustomerRequest(UpdateCustomerRequestRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/customer-requests/{id}"
+      body: "*"
+    };
+  }
+  rpc PromoteFeedbackToCustomerRequest(PromoteFeedbackToCustomerRequestRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests:promote-feedback"
+      body: "*"
+    };
+  }
+  rpc LinkFeedbackToCustomerRequest(LinkFeedbackToCustomerRequestRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests/{id}/feedback"
+      body: "*"
+    };
+  }
+  rpc UnlinkFeedbackFromCustomerRequest(UnlinkFeedbackFromCustomerRequestRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {delete: "/fb/v1/console/customer-requests/{id}/feedback/{feedback_id}"};
+  }
+  rpc LinkCustomerToCustomerRequest(LinkCustomerToCustomerRequestRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests/{id}/customers"
+      body: "*"
+    };
+  }
+  rpc UnlinkCustomerFromCustomerRequest(UnlinkCustomerFromCustomerRequestRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {delete: "/fb/v1/console/customer-requests/{id}/customers/{customer_link_id}"};
+  }
+  rpc AddCustomerRequestVote(AddCustomerRequestVoteRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests/{id}/votes"
+      body: "*"
+    };
+  }
+  rpc RemoveCustomerRequestVote(RemoveCustomerRequestVoteRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {delete: "/fb/v1/console/customer-requests/{id}/votes/{vote_id}"};
+  }
+  rpc MergeCustomerRequests(MergeCustomerRequestsRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests/{source_id}:merge"
+      body: "*"
+    };
+  }
+  rpc LinkCustomerRequestIssue(LinkCustomerRequestIssueRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests/{id}/issue-links"
+      body: "*"
+    };
+  }
+  rpc UnlinkCustomerRequestIssue(UnlinkCustomerRequestIssueRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {delete: "/fb/v1/console/customer-requests/{id}/issue-links/{issue_link_id}"};
+  }
+}
+
+enum CustomerRequestStatus {
+  CUSTOMER_REQUEST_STATUS_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_STATUS_OPEN = 1;
+  CUSTOMER_REQUEST_STATUS_PLANNED = 2;
+  CUSTOMER_REQUEST_STATUS_IN_PROGRESS = 3;
+  CUSTOMER_REQUEST_STATUS_SHIPPED = 4;
+  CUSTOMER_REQUEST_STATUS_CANCELLED = 5;
+}
+
+enum CustomerRequestPriority {
+  CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_PRIORITY_NONE = 1;
+  CUSTOMER_REQUEST_PRIORITY_LOW = 2;
+  CUSTOMER_REQUEST_PRIORITY_MEDIUM = 3;
+  CUSTOMER_REQUEST_PRIORITY_HIGH = 4;
+  CUSTOMER_REQUEST_PRIORITY_URGENT = 5;
+}
+
+enum CustomerRequestImportance {
+  CUSTOMER_REQUEST_IMPORTANCE_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_IMPORTANCE_NORMAL = 1;
+  CUSTOMER_REQUEST_IMPORTANCE_IMPORTANT = 2;
+  CUSTOMER_REQUEST_IMPORTANCE_CRITICAL = 3;
+}
+
+enum CustomerRequestVisibility {
+  CUSTOMER_REQUEST_VISIBILITY_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_VISIBILITY_ACTIVE = 1;
+  CUSTOMER_REQUEST_VISIBILITY_MERGED = 2;
+  CUSTOMER_REQUEST_VISIBILITY_ARCHIVED = 3;
+  CUSTOMER_REQUEST_VISIBILITY_ALL = 4;
+}
+
+enum CustomerRequestSort {
+  CUSTOMER_REQUEST_SORT_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_SORT_UPDATED_AT = 1;
+  CUSTOMER_REQUEST_SORT_CUSTOMER_COUNT = 2;
+  CUSTOMER_REQUEST_SORT_SUPPORTING_FEEDBACK_COUNT = 3;
+  CUSTOMER_REQUEST_SORT_LATEST_FEEDBACK_AT = 4;
+  CUSTOMER_REQUEST_SORT_PRIORITY = 5;
+}
+
+enum SortDirection {
+  SORT_DIRECTION_UNSPECIFIED = 0;
+  SORT_DIRECTION_ASC = 1;
+  SORT_DIRECTION_DESC = 2;
+}
+
+message CustomerRequestOwner {
+  string id = 1;
+  string member_type = 2;
+  string user_id = 3;
+  string email = 4;
+  string role = 5;
+}
+
+message CustomerRequestSummary {
+  string id = 1;
+  string display_id = 2;
+  int64 display_number = 3;
+  string title = 4;
+  CustomerRequestStatus status = 5;
+  CustomerRequestPriority priority = 6;
+  CustomerRequestOwner owner = 7;
+  int32 supporting_feedback_count = 8;
+  int32 customer_count = 9;
+  int32 linked_issue_count = 10;
+  int32 hidden_feedback_count = 11;
+  string first_feedback_at = 12;
+  string latest_feedback_at = 13;
+  optional string merged_into_request_id = 14;
+  string created_at = 15;
+  string updated_at = 16;
+  optional string archived_at = 17;
+  int32 account_count = 18;
+  int32 vote_count = 19;
+  int32 duplicate_request_count = 20;
+}
+
+message CustomerRequestFeedbackEvidence {
+  int64 feedback_id = 1;
+  string content = 2;
+  string source = 3;
+  string type = 4;
+  string user_id = 5;
+  string subject_display = 6;
+  string enriched_title = 7;
+  CustomerRequestImportance importance = 8;
+  string note = 9;
+  string linked_by = 10;
+  string linked_at = 11;
+  string created_at = 12;
+}
+
+message CustomerRequestIssueLink {
+  string id = 1;
+  string provider = 2;
+  string external_key = 3;
+  string external_url = 4;
+  string title = 5;
+  string status = 6;
+  string created_by = 7;
+  string created_at = 8;
+  string updated_at = 9;
+  string last_synced_at = 10;
+}
+
+message CustomerRequestCustomerLink {
+  string id = 1;
+  string subject_key = 2;
+  string subject_hash = 3;
+  string subject_display = 4;
+  string account_key = 5;
+  string account_display = 6;
+  string note = 7;
+  string created_by = 8;
+  string created_at = 9;
+}
+
+message CustomerRequestVote {
+  string id = 1;
+  string subject_key = 2;
+  string subject_hash = 3;
+  string subject_display = 4;
+  string account_key = 5;
+  string account_display = 6;
+  int32 weight = 7;
+  string note = 8;
+  string created_by = 9;
+  string created_at = 10;
+}
+
+message CustomerRequestDuplicate {
+  string id = 1;
+  string display_id = 2;
+  string title = 3;
+  string merged_at = 4;
+}
+
+message CustomerRequestAuditEntry {
+  int64 id = 1;
+  string action = 2;
+  string actor_type = 3;
+  string actor_id = 4;
+  string summary = 5;
+  string created_at = 6;
+}
+
+message CustomerRequestDetail {
+  CustomerRequestSummary request = 1;
+  string description = 2;
+  repeated CustomerRequestFeedbackEvidence feedback = 3;
+  repeated CustomerRequestIssueLink issue_links = 4;
+  repeated CustomerRequestAuditEntry audit_entries = 5;
+  repeated CustomerRequestCustomerLink customers = 6;
+  repeated CustomerRequestVote votes = 7;
+  repeated CustomerRequestDuplicate duplicates = 8;
+}
+
+message ListCustomerRequestsRequest {
+  string q = 1;
+  repeated CustomerRequestStatus status = 2;
+  repeated CustomerRequestPriority priority = 3;
+  optional string owner_member_id = 4;
+  CustomerRequestVisibility visibility = 5;
+  CustomerRequestSort sort = 6;
+  SortDirection direction = 7;
+  optional int32 limit = 8;
+  optional string cursor = 9;
+  optional int64 feedback_id = 10;
+}
+
+message ListCustomerRequestsResponse {
+  repeated CustomerRequestSummary requests = 1;
+  optional string next_cursor = 2;
+}
+
+message GetCustomerRequestRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional int32 evidence_limit = 2;
+}
+
+message CreateCustomerRequestRequest {
+  string title = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string description = 2;
+  CustomerRequestStatus status = 3;
+  CustomerRequestPriority priority = 4;
+  optional string owner_member_id = 5;
+  string idempotency_key = 6 [(google.api.field_behavior) = REQUIRED];
+}
+
+message UpdateCustomerRequestRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string title = 2;
+  optional string description = 3;
+  optional CustomerRequestStatus status = 4;
+  optional CustomerRequestPriority priority = 5;
+  optional string owner_member_id = 6;
+}
+
+message PromoteFeedbackToCustomerRequestRequest {
+  repeated int64 feedback_ids = 1 [(google.api.field_behavior) = REQUIRED];
+  string title = 2 [(google.api.field_behavior) = REQUIRED];
+  optional string description = 3;
+  CustomerRequestStatus status = 4;
+  CustomerRequestPriority priority = 5;
+  optional string owner_member_id = 6;
+  string idempotency_key = 7 [(google.api.field_behavior) = REQUIRED];
+}
+
+message LinkFeedbackToCustomerRequestRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  int64 feedback_id = 2 [(google.api.field_behavior) = REQUIRED];
+  CustomerRequestImportance importance = 3;
+  optional string note = 4;
+}
+
+message UnlinkFeedbackFromCustomerRequestRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  int64 feedback_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message LinkCustomerToCustomerRequestRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string subject_key = 2;
+  optional string subject_hash = 3;
+  optional string subject_display = 4;
+  optional string account_key = 5;
+  optional string account_display = 6;
+  optional string note = 7;
+}
+
+message UnlinkCustomerFromCustomerRequestRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string customer_link_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message AddCustomerRequestVoteRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string subject_key = 2;
+  optional string subject_hash = 3;
+  optional string subject_display = 4;
+  optional string account_key = 5;
+  optional string account_display = 6;
+  int32 weight = 7;
+  optional string note = 8;
+}
+
+message RemoveCustomerRequestVoteRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string vote_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message MergeCustomerRequestsRequest {
+  string source_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string target_id = 2 [(google.api.field_behavior) = REQUIRED];
+  string idempotency_key = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+message LinkCustomerRequestIssueRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string provider = 2 [(google.api.field_behavior) = REQUIRED];
+  string external_url = 3 [(google.api.field_behavior) = REQUIRED];
+  optional string external_key = 4;
+  optional string title = 5;
+  optional string status = 6;
+}
+
+message UnlinkCustomerRequestIssueRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string issue_link_id = 2 [(google.api.field_behavior) = REQUIRED];
+}

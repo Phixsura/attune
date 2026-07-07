@@ -1,4 +1,4 @@
-import { ArrowRight, Loader2, RefreshCw, Tags, Trash2, X } from 'lucide-react'
+import { ArrowRight, ClipboardList, Loader2, RefreshCw, Tags, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { TagCombobox } from '@/components/tag/tag-combobox'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,7 @@ export function SelectionActionBar({
   onBatchTransition,
   onBatchDelete,
   onBatchRetryEnrichment,
+  onPromoteToCustomerRequest,
   terminalFailureCount,
   onCancel,
   isLoading,
@@ -39,6 +40,7 @@ export function SelectionActionBar({
   onBatchTransition?: (toStateId: string) => void
   onBatchDelete?: () => void
   onBatchRetryEnrichment?: () => void
+  onPromoteToCustomerRequest?: () => void
   terminalFailureCount?: number
   onCancel: () => void
   isLoading?: boolean
@@ -128,6 +130,18 @@ export function SelectionActionBar({
             ))}
           </SelectContent>
         </Select>
+      ) : null}
+
+      {onPromoteToCustomerRequest ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-7 gap-1.5 text-xs"
+          onClick={onPromoteToCustomerRequest}
+        >
+          <ClipboardList className="h-3.5 w-3.5" />
+          {t('customer_requests.promote')}
+        </Button>
       ) : null}
 
       {/* Retry enrichment button */}

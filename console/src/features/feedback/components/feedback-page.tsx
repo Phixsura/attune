@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import {
@@ -146,6 +146,7 @@ export function FeedbackPage({
   initialQualityFilters,
 }: FeedbackPageProps) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const displayOf = useDisplayName()
   const { can } = usePermissions()
   const canViewLLMConfig = can('llm_config:view')
@@ -391,6 +392,14 @@ export function FeedbackPage({
   const batchDelete = useBatchDeleteFeedback()
   const [retryDialogOpen, setRetryDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const handlePromoteToCustomerRequest = useCallback(() => {
+    const feedbackIDs = Array.from(selected)
+    if (feedbackIDs.length === 0) return
+    void navigate({
+      to: '/feedback/customer-requests',
+      search: { promote_feedback_ids: feedbackIDs.join(','), feedback_id: undefined },
+    })
+  }, [navigate, selected])
 
   const handleSearchModeChange = useCallback(
     (mode: FeedbackSearchMode) => {
@@ -984,6 +993,7 @@ export function FeedbackPage({
                           onBatchTransition={handleBatchTransition}
                           onBatchDelete={handleBatchDelete}
                           onBatchRetryEnrichment={handleBatchRetryEnrichment}
+                          onPromoteToCustomerRequest={handlePromoteToCustomerRequest}
                           terminalFailureCount={selectedTerminalFailures.length}
                           onCancel={clear}
                         />

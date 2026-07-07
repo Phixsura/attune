@@ -33,6 +33,7 @@ import type {
   LLMRoute,
   TestLLMChannelResponse,
 } from '@/proto/attune/v1/llm_config'
+import type { ListMembersResponse } from '@/proto/attune/v1/member'
 import type {
   ListNotifyTargetsResponse,
   NotifyTarget,
@@ -79,6 +80,7 @@ export const defaultMe: GetMeResponse = {
   },
   csrfToken: 'csrf-test-token',
 }
+export const defaultMembersList: ListMembersResponse = { members: [] }
 
 // API keys -----------------------------------------------------------------
 export const defaultApiKeysList: ListApiKeysResponse = { items: [] }
@@ -484,6 +486,7 @@ export const defaultBreakGlassRevokeAll: RevokeAllResponse = { revoked: 0 }
 
 export const handlers = [
   http.get(`${BASE}/me`, () => HttpResponse.json(defaultMe)),
+  http.get(`${BASE}/members`, () => HttpResponse.json(defaultMembersList)),
   http.get(`${BASE}/auth/providers`, () => HttpResponse.json(defaultAuthProviders)),
   http.get(`${BASE}/auth/sso/mode`, () => HttpResponse.json(defaultAuthMode)),
   http.post(`${BASE}/auth/sso/cutover`, () =>

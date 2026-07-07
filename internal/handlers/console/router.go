@@ -28,6 +28,7 @@ import (
 	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/clusters"
+	consolecustomerrequest "github.com/Phixsura/attune/internal/handlers/console/customerrequest"
 	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
@@ -93,6 +94,7 @@ var (
 	NewInboundHandler            = consoleinbound.NewHandler
 	NewLLMConfigHandler          = consolellmconfig.NewHandler
 	NewClustersHandler           = clusters.NewClustersHandler
+	NewCustomerRequestHandler    = consolecustomerrequest.NewHandler
 	NewDigestSubscriptionHandler = digestsubscription.NewHandler
 	NewOutboxHandler             = consoleoutbox.NewHandler
 	NewTagHandler                = consoletag.NewHandler
@@ -170,6 +172,7 @@ type Router struct {
 	feedbackBatch      *feedback.BatchHandler
 	feedbackSearch     *feedback.SearchHandler
 	qualityActions     *feedback.QualityActionHandler
+	customerRequests   *consolecustomerrequest.Handler
 	feedbackJob        *feedbackjob.Handler
 	gdpr               *consolegdpr.Handler
 	usage              *usage.UsageHandler
@@ -340,6 +343,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountPreflight(m)
 	r.mountSSOCutover(m)
 	r.mountDigestSubscription(m)
+	r.mountCustomerRequests(m)
 	r.mountFeedback(m)
 	r.mountReplySendHook(m)
 	m.Group(func(u chi.Router) {
@@ -405,6 +409,267 @@ func (r *Router) mountSession(m chi.Router) {
 
 func (r *Router) SetQualityActionHandler(h *feedback.QualityActionHandler) {
 	r.qualityActions = h
+}
+
+func (r *Router) SetCustomerRequestHandler(h *consolecustomerrequest.Handler) {
+	r.customerRequests = h
+}
+
+func (r *Router) mountCustomerRequests(m chi.Router) {
+	if r.customerRequests == nil {
+		return
+	}
+	m.Route("/customer-requests", func(cr chi.Router) {
+		cr.Use(r.requireViewer)
+		r.mountCustomerRequestReads(cr)
+		r.mountCustomerRequestBaseMutations(cr)
+		r.mountCustomerRequestFeedback(cr)
+		r.mountCustomerRequestCustomers(cr)
+		r.mountCustomerRequestVotes(cr)
+		r.mountCustomerRequestIssues(cr)
+		r.mountCustomerRequestMerge(cr)
+	})
+	r.mountCustomerRequestPromotion(m)
+}
+
+func (r *Router) mountCustomerRequestReads(cr chi.Router) {
+	cr.Get("/", dispatcher.Bind(
+		"console.CustomerRequestHandler.List",
+		dispatcher.Query(
+			func() *attunev1.ListCustomerRequestsRequest {
+				return ptrext.Of(attunev1.ListCustomerRequestsRequest{})
+			},
+			consolecustomerrequest.BindListRequest,
+		),
+		r.customerRequests.List,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListCustomerRequestsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.Get("/{id}", dispatcher.Bind(
+		"console.CustomerRequestHandler.Get",
+		dispatcher.Path(
+			func() *attunev1.GetCustomerRequestRequest {
+				return ptrext.Of(attunev1.GetCustomerRequestRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.GetCustomerRequestRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.Get,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetCustomerRequestRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountCustomerRequestBaseMutations(cr chi.Router) {
+	cr.With(r.requireMember).Post("/", dispatcher.Bind(
+		"console.CustomerRequestHandler.Create",
+		dispatcher.JSON(func() *attunev1.CreateCustomerRequestRequest {
+			return ptrext.Of(attunev1.CreateCustomerRequestRequest{})
+		}),
+		r.customerRequests.Create,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateCustomerRequestRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.With(r.requireMember).Patch("/{id}", dispatcher.Bind(
+		"console.CustomerRequestHandler.Update",
+		dispatcher.Combine(
+			func() *attunev1.UpdateCustomerRequestRequest {
+				return ptrext.Of(attunev1.UpdateCustomerRequestRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateCustomerRequestRequest],
+			dispatcher.Param("id", func(req *attunev1.UpdateCustomerRequestRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.Update,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateCustomerRequestRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountCustomerRequestFeedback(cr chi.Router) {
+	cr.With(r.requireMember).Post("/{id}/feedback", dispatcher.Bind(
+		"console.CustomerRequestHandler.LinkFeedback",
+		dispatcher.Combine(
+			func() *attunev1.LinkFeedbackToCustomerRequestRequest {
+				return ptrext.Of(attunev1.LinkFeedbackToCustomerRequestRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.LinkFeedbackToCustomerRequestRequest],
+			dispatcher.Param("id", func(req *attunev1.LinkFeedbackToCustomerRequestRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.LinkFeedback,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.LinkFeedbackToCustomerRequestRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.With(r.requireMember).Delete("/{id}/feedback/{feedback_id}", dispatcher.Bind(
+		"console.CustomerRequestHandler.UnlinkFeedback",
+		dispatcher.Path(
+			func() *attunev1.UnlinkFeedbackFromCustomerRequestRequest {
+				return ptrext.Of(attunev1.UnlinkFeedbackFromCustomerRequestRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.UnlinkFeedbackFromCustomerRequestRequest, id string) {
+				req.Id = id
+			}),
+			dispatcher.ParamInt64("feedback_id", func(req *attunev1.UnlinkFeedbackFromCustomerRequestRequest, id int64) {
+				req.FeedbackId = id
+			}, "feedback_id must be an integer"),
+		),
+		r.customerRequests.UnlinkFeedback,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UnlinkFeedbackFromCustomerRequestRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountCustomerRequestCustomers(cr chi.Router) {
+	cr.With(r.requireMember).Post("/{id}/customers", dispatcher.Bind(
+		"console.CustomerRequestHandler.LinkCustomer",
+		dispatcher.Combine(
+			func() *attunev1.LinkCustomerToCustomerRequestRequest {
+				return ptrext.Of(attunev1.LinkCustomerToCustomerRequestRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.LinkCustomerToCustomerRequestRequest],
+			dispatcher.Param("id", func(req *attunev1.LinkCustomerToCustomerRequestRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.LinkCustomer,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.LinkCustomerToCustomerRequestRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.With(r.requireMember).Delete("/{id}/customers/{customer_link_id}", dispatcher.Bind(
+		"console.CustomerRequestHandler.UnlinkCustomer",
+		dispatcher.Path(
+			func() *attunev1.UnlinkCustomerFromCustomerRequestRequest {
+				return ptrext.Of(attunev1.UnlinkCustomerFromCustomerRequestRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.UnlinkCustomerFromCustomerRequestRequest, id string) {
+				req.Id = id
+			}),
+			dispatcher.Param("customer_link_id", func(req *attunev1.UnlinkCustomerFromCustomerRequestRequest, id string) {
+				req.CustomerLinkId = id
+			}),
+		),
+		r.customerRequests.UnlinkCustomer,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UnlinkCustomerFromCustomerRequestRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountCustomerRequestVotes(cr chi.Router) {
+	cr.With(r.requireMember).Post("/{id}/votes", dispatcher.Bind(
+		"console.CustomerRequestHandler.AddVote",
+		dispatcher.Combine(
+			func() *attunev1.AddCustomerRequestVoteRequest {
+				return ptrext.Of(attunev1.AddCustomerRequestVoteRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.AddCustomerRequestVoteRequest],
+			dispatcher.Param("id", func(req *attunev1.AddCustomerRequestVoteRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.AddVote,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.AddCustomerRequestVoteRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.With(r.requireMember).Delete("/{id}/votes/{vote_id}", dispatcher.Bind(
+		"console.CustomerRequestHandler.RemoveVote",
+		dispatcher.Path(
+			func() *attunev1.RemoveCustomerRequestVoteRequest {
+				return ptrext.Of(attunev1.RemoveCustomerRequestVoteRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.RemoveCustomerRequestVoteRequest, id string) {
+				req.Id = id
+			}),
+			dispatcher.Param("vote_id", func(req *attunev1.RemoveCustomerRequestVoteRequest, id string) {
+				req.VoteId = id
+			}),
+		),
+		r.customerRequests.RemoveVote,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RemoveCustomerRequestVoteRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountCustomerRequestIssues(cr chi.Router) {
+	cr.With(r.requireMember).Post("/{id}/issue-links", dispatcher.Bind(
+		"console.CustomerRequestHandler.LinkIssue",
+		dispatcher.Combine(
+			func() *attunev1.LinkCustomerRequestIssueRequest {
+				return ptrext.Of(attunev1.LinkCustomerRequestIssueRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.LinkCustomerRequestIssueRequest],
+			dispatcher.Param("id", func(req *attunev1.LinkCustomerRequestIssueRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.LinkIssue,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.LinkCustomerRequestIssueRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.With(r.requireMember).Delete("/{id}/issue-links/{issue_link_id}", dispatcher.Bind(
+		"console.CustomerRequestHandler.UnlinkIssue",
+		dispatcher.Path(
+			func() *attunev1.UnlinkCustomerRequestIssueRequest {
+				return ptrext.Of(attunev1.UnlinkCustomerRequestIssueRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.UnlinkCustomerRequestIssueRequest, id string) {
+				req.Id = id
+			}),
+			dispatcher.Param("issue_link_id", func(req *attunev1.UnlinkCustomerRequestIssueRequest, id string) {
+				req.IssueLinkId = id
+			}),
+		),
+		r.customerRequests.UnlinkIssue,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UnlinkCustomerRequestIssueRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountCustomerRequestMerge(cr chi.Router) {
+	cr.With(r.requireDelegatedAdminStrict).Post("/{source_id}:merge", dispatcher.Bind(
+		"console.CustomerRequestHandler.Merge",
+		dispatcher.Combine(
+			func() *attunev1.MergeCustomerRequestsRequest {
+				return ptrext.Of(attunev1.MergeCustomerRequestsRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.MergeCustomerRequestsRequest],
+			dispatcher.Param("source_id", func(req *attunev1.MergeCustomerRequestsRequest, id string) {
+				req.SourceId = id
+			}),
+		),
+		r.customerRequests.Merge,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.MergeCustomerRequestsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountCustomerRequestPromotion(m chi.Router) {
+	m.With(r.requireMember).Post("/customer-requests:promote-feedback", dispatcher.Bind(
+		"console.CustomerRequestHandler.PromoteFeedback",
+		dispatcher.JSON(func() *attunev1.PromoteFeedbackToCustomerRequestRequest {
+			return ptrext.Of(attunev1.PromoteFeedbackToCustomerRequestRequest{})
+		}),
+		r.customerRequests.PromoteFeedback,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PromoteFeedbackToCustomerRequestRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountQualityActions(m chi.Router) {

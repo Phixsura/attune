@@ -1,0 +1,1201 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package customerrequest coordinates Customer Request validation, idempotency,
+// merge semantics, and audit recording.
+package customerrequest
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"regexp"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
+	"github.com/Phixsura/attune/internal/repo/idempotency"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+)
+
+var (
+	ErrValidation          = errors.New("customer request validation failed")
+	ErrIdempotencyConflict = errors.New("customer request idempotency conflict")
+	ErrRequestInProgress   = errors.New("customer request is already in progress")
+	ErrUnsupportedProvider = errors.New("customer request issue provider unsupported")
+	ErrInvalidIssueURL     = errors.New("customer request issue url invalid")
+)
+
+var idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
+
+type AuditEntry struct {
+	ID        int64
+	Action    string
+	ActorType string
+	ActorID   string
+	Summary   string
+	CreatedAt time.Time
+}
+
+type Detail struct {
+	Request      repo.Detail
+	AuditEntries []AuditEntry
+}
+
+type Service struct {
+	repo        *repo.Repo
+	idempotency idempotency.Store
+	audit       *auditlogsvc.Service
+}
+
+func New(r *repo.Repo, idem idempotency.Store, audit *auditlogsvc.Service) *Service {
+	return ptrext.Of(Service{repo: r, idempotency: idem, audit: audit})
+}
+
+type ListInput struct {
+	TenantID      string
+	Query         string
+	Statuses      []repo.Status
+	Priorities    []repo.Priority
+	OwnerMemberID *uuid.UUID
+	Visibility    repo.Visibility
+	Sort          repo.Sort
+	Direction     repo.Direction
+	Limit         int
+	Cursor        string
+	FeedbackID    int64
+}
+
+type CreateInput struct {
+	TenantID       string
+	Title          string
+	Description    string
+	Status         repo.Status
+	Priority       repo.Priority
+	OwnerMemberID  *uuid.UUID
+	IdempotencyKey string
+	Actor          auditlogsvc.Actor
+}
+
+type UpdateInput struct {
+	TenantID         string
+	ID               uuid.UUID
+	Title            *string
+	Description      *string
+	Status           *repo.Status
+	Priority         *repo.Priority
+	OwnerMemberIDSet bool
+	OwnerMemberID    *uuid.UUID
+	Actor            auditlogsvc.Actor
+}
+
+type PromoteInput struct {
+	TenantID       string
+	FeedbackIDs    []int64
+	Title          string
+	Description    string
+	Status         repo.Status
+	Priority       repo.Priority
+	OwnerMemberID  *uuid.UUID
+	IdempotencyKey string
+	Actor          auditlogsvc.Actor
+}
+
+type LinkFeedbackInput struct {
+	TenantID   string
+	RequestID  uuid.UUID
+	FeedbackID int64
+	Importance repo.Importance
+	Note       string
+	Actor      auditlogsvc.Actor
+}
+
+type LinkCustomerInput struct {
+	TenantID       string
+	RequestID      uuid.UUID
+	SubjectKey     string
+	SubjectHash    string
+	SubjectDisplay string
+	AccountKey     string
+	AccountDisplay string
+	Note           string
+	Actor          auditlogsvc.Actor
+}
+
+type VoteInput struct {
+	TenantID       string
+	RequestID      uuid.UUID
+	SubjectKey     string
+	SubjectHash    string
+	SubjectDisplay string
+	AccountKey     string
+	AccountDisplay string
+	Weight         int
+	Note           string
+	Actor          auditlogsvc.Actor
+}
+
+type MergeInput struct {
+	TenantID       string
+	SourceID       uuid.UUID
+	TargetID       uuid.UUID
+	IdempotencyKey string
+	Actor          auditlogsvc.Actor
+}
+
+type LinkIssueInput struct {
+	TenantID    string
+	RequestID   uuid.UUID
+	Provider    string
+	ExternalURL string
+	ExternalKey string
+	Title       string
+	Status      string
+	Actor       auditlogsvc.Actor
+}
+
+func (s *Service) List(ctx context.Context, in ListInput) (repo.ListResult, error) {
+	if in.TenantID == "" {
+		return repo.ListResult{}, ErrValidation
+	}
+	return s.repo.List(ctx, repo.ListFilter{
+		TenantID:      in.TenantID,
+		Query:         in.Query,
+		Statuses:      in.Statuses,
+		Priorities:    in.Priorities,
+		OwnerMemberID: in.OwnerMemberID,
+		Visibility:    defaultVisibility(in.Visibility),
+		Sort:          defaultSort(in.Sort),
+		Direction:     defaultDirection(in.Direction),
+		Limit:         in.Limit,
+		Cursor:        in.Cursor,
+		FeedbackID:    in.FeedbackID,
+	})
+}
+
+func (s *Service) Get(ctx context.Context, tenantID string, id uuid.UUID, evidenceLimit int) (*Detail, error) {
+	return s.detail(ctx, tenantID, id, evidenceLimit)
+}
+
+func (s *Service) Create(ctx context.Context, in CreateInput) (*Detail, error) {
+	normalized, err := normalizeCreate(in)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateOwner(ctx, normalized.TenantID, normalized.OwnerMemberID); err != nil {
+		return nil, err
+	}
+	cached, acquired, err := s.acquireIdempotency(ctx, normalized.TenantID, normalized.IdempotencyKey, "create", createIdempotencyPayload(normalized))
+	if err != nil || cached != nil {
+		return cached, err
+	}
+	detail, err := s.createInTransaction(ctx, normalized, "customer_request.create", nil)
+	return s.completeIdempotency(ctx, normalized.TenantID, normalized.IdempotencyKey, acquired, detail, err)
+}
+
+func (s *Service) Update(ctx context.Context, in UpdateInput) (*Detail, error) {
+	normalized, err := normalizeUpdate(in)
+	if err != nil {
+		return nil, err
+	}
+	if normalized.OwnerMemberIDSet {
+		if err := s.validateOwner(ctx, normalized.TenantID, normalized.OwnerMemberID); err != nil {
+			return nil, err
+		}
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	before, after, err := s.repo.UpdateTx(ctx, tx, repo.UpdateInput{
+		TenantID:         normalized.TenantID,
+		ID:               normalized.ID,
+		Title:            normalized.Title,
+		Description:      normalized.Description,
+		Status:           normalized.Status,
+		Priority:         normalized.Priority,
+		OwnerMemberIDSet: normalized.OwnerMemberIDSet,
+		OwnerMemberID:    normalized.OwnerMemberID,
+		ActorID:          normalized.Actor.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, normalized.Actor, "customer_request.update", ptrext.Indirect(after),
+		"Updated customer request", updateAuditBeforeAfter(ptrext.Indirect(before), ptrext.Indirect(after))); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, normalized.TenantID, normalized.ID, 50)
+}
+
+func (s *Service) PromoteFeedback(ctx context.Context, in PromoteInput) (*Detail, error) {
+	normalized, err := normalizePromote(in)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateOwner(ctx, normalized.TenantID, normalized.OwnerMemberID); err != nil {
+		return nil, err
+	}
+	cached, acquired, err := s.acquireIdempotency(ctx, normalized.TenantID, normalized.IdempotencyKey, "promote", promoteIdempotencyPayload(normalized))
+	if err != nil || cached != nil {
+		return cached, err
+	}
+	detail, err := s.promoteInTransaction(ctx, normalized)
+	return s.completeIdempotency(ctx, normalized.TenantID, normalized.IdempotencyKey, acquired, detail, err)
+}
+
+func (s *Service) LinkFeedback(ctx context.Context, in LinkFeedbackInput) (*Detail, error) {
+	normalized, err := normalizeLinkFeedback(in)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := s.repo.LinkFeedbackTx(ctx, tx, repo.LinkFeedbackInput{
+		TenantID:   normalized.TenantID,
+		RequestID:  normalized.RequestID,
+		FeedbackID: normalized.FeedbackID,
+		Importance: normalized.Importance,
+		Note:       normalized.Note,
+		ActorID:    normalized.Actor.ID,
+	}); err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, normalized.TenantID, normalized.RequestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, normalized.Actor, "customer_request.link_feedback", summary.Summary,
+		"Linked feedback to customer request", map[string]any{
+			"request_id":  normalized.RequestID.String(),
+			"feedback_id": normalized.FeedbackID,
+			"importance":  normalized.Importance,
+			"note_length": utf8.RuneCountInString(normalized.Note),
+		}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, normalized.TenantID, normalized.RequestID, 50)
+}
+
+func (s *Service) UnlinkFeedback(ctx context.Context, tenantID string, requestID uuid.UUID, feedbackID int64, actor auditlogsvc.Actor) (*Detail, error) {
+	if tenantID == "" || feedbackID <= 0 {
+		return nil, ErrValidation
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := s.repo.UnlinkFeedbackTx(ctx, tx, tenantID, requestID, feedbackID, actor.ID); err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, tenantID, requestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, actor, "customer_request.unlink_feedback", summary.Summary,
+		"Unlinked feedback from customer request", map[string]any{
+			"request_id":  requestID.String(),
+			"feedback_id": feedbackID,
+		}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, tenantID, requestID, 50)
+}
+
+func (s *Service) LinkCustomer(ctx context.Context, in LinkCustomerInput) (*Detail, error) {
+	normalized, err := normalizeCustomerLink(in)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	link, err := s.repo.LinkCustomerTx(ctx, tx, repo.CustomerLinkInput{
+		TenantID:       normalized.TenantID,
+		RequestID:      normalized.RequestID,
+		SubjectKey:     normalized.SubjectKey,
+		SubjectHash:    normalized.SubjectHash,
+		SubjectDisplay: normalized.SubjectDisplay,
+		AccountKey:     normalized.AccountKey,
+		AccountDisplay: normalized.AccountDisplay,
+		Note:           normalized.Note,
+		ActorID:        normalized.Actor.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, normalized.TenantID, normalized.RequestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, normalized.Actor, "customer_request.link_customer", summary.Summary,
+		"Linked customer to customer request", customerAuditMetadata(normalized.RequestID, ptrext.Indirect(link))); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, normalized.TenantID, normalized.RequestID, 50)
+}
+
+func (s *Service) UnlinkCustomer(ctx context.Context, tenantID string, requestID, linkID uuid.UUID, actor auditlogsvc.Actor) (*Detail, error) {
+	if tenantID == "" || requestID == uuid.Nil || linkID == uuid.Nil {
+		return nil, ErrValidation
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	link, err := s.repo.UnlinkCustomerTx(ctx, tx, tenantID, requestID, linkID, actor.ID)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, tenantID, requestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, actor, "customer_request.unlink_customer", summary.Summary,
+		"Unlinked customer from customer request", customerAuditMetadata(requestID, ptrext.Indirect(link))); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, tenantID, requestID, 50)
+}
+
+func (s *Service) AddVote(ctx context.Context, in VoteInput) (*Detail, error) {
+	normalized, err := normalizeVote(in)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	vote, err := s.repo.AddVoteTx(ctx, tx, repo.VoteInput{
+		TenantID:       normalized.TenantID,
+		RequestID:      normalized.RequestID,
+		SubjectKey:     normalized.SubjectKey,
+		SubjectHash:    normalized.SubjectHash,
+		SubjectDisplay: normalized.SubjectDisplay,
+		AccountKey:     normalized.AccountKey,
+		AccountDisplay: normalized.AccountDisplay,
+		Weight:         normalized.Weight,
+		Note:           normalized.Note,
+		ActorID:        normalized.Actor.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, normalized.TenantID, normalized.RequestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, normalized.Actor, "customer_request.add_vote", summary.Summary,
+		"Added vote to customer request", voteAuditMetadata(normalized.RequestID, ptrext.Indirect(vote))); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, normalized.TenantID, normalized.RequestID, 50)
+}
+
+func (s *Service) RemoveVote(ctx context.Context, tenantID string, requestID, voteID uuid.UUID, actor auditlogsvc.Actor) (*Detail, error) {
+	if tenantID == "" || requestID == uuid.Nil || voteID == uuid.Nil {
+		return nil, ErrValidation
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	vote, err := s.repo.RemoveVoteTx(ctx, tx, tenantID, requestID, voteID, actor.ID)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, tenantID, requestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, actor, "customer_request.remove_vote", summary.Summary,
+		"Removed vote from customer request", voteAuditMetadata(requestID, ptrext.Indirect(vote))); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, tenantID, requestID, 50)
+}
+
+func (s *Service) Merge(ctx context.Context, in MergeInput) (*Detail, error) {
+	if in.TenantID == "" || in.SourceID == uuid.Nil || in.TargetID == uuid.Nil || in.SourceID == in.TargetID {
+		return nil, ErrValidation
+	}
+	if !idempotencyKeyPattern.MatchString(strings.TrimSpace(in.IdempotencyKey)) {
+		return nil, ErrValidation
+	}
+	cached, acquired, err := s.acquireIdempotency(ctx, in.TenantID, in.IdempotencyKey, "merge", mergeIdempotencyPayload(in))
+	if err != nil || cached != nil {
+		return cached, err
+	}
+	detail, err := s.mergeInTransaction(ctx, in)
+	return s.completeIdempotency(ctx, in.TenantID, in.IdempotencyKey, acquired, detail, err)
+}
+
+func (s *Service) LinkIssue(ctx context.Context, in LinkIssueInput) (*Detail, error) {
+	normalized, err := normalizeIssueInput(in)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	link, err := s.repo.LinkIssueTx(ctx, tx, repo.IssueLinkInput{
+		TenantID:    normalized.TenantID,
+		RequestID:   normalized.RequestID,
+		Provider:    normalized.Provider,
+		ExternalKey: normalized.ExternalKey,
+		ExternalURL: normalized.ExternalURL,
+		Title:       normalized.Title,
+		Status:      normalized.Status,
+		ActorID:     normalized.Actor.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, normalized.TenantID, normalized.RequestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, normalized.Actor, "customer_request.link_issue", summary.Summary,
+		"Linked issue to customer request", issueAuditMetadata(normalized.RequestID, ptrext.Indirect(link))); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, normalized.TenantID, normalized.RequestID, 50)
+}
+
+func (s *Service) UnlinkIssue(ctx context.Context, tenantID string, requestID, issueLinkID uuid.UUID, actor auditlogsvc.Actor) (*Detail, error) {
+	if tenantID == "" || requestID == uuid.Nil || issueLinkID == uuid.Nil {
+		return nil, ErrValidation
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	link, err := s.repo.UnlinkIssueTx(ctx, tx, tenantID, requestID, issueLinkID, actor.ID)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, tenantID, requestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, actor, "customer_request.unlink_issue", summary.Summary,
+		"Unlinked issue from customer request", issueAuditMetadata(requestID, ptrext.Indirect(link))); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, tenantID, requestID, 50)
+}
+
+func (s *Service) createInTransaction(ctx context.Context, in CreateInput, action string, extra map[string]any) (*Detail, error) {
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	created, err := s.repo.CreateTx(ctx, tx, repo.CreateInput{
+		TenantID:      in.TenantID,
+		Title:         in.Title,
+		Description:   in.Description,
+		Status:        in.Status,
+		Priority:      in.Priority,
+		OwnerMemberID: in.OwnerMemberID,
+		ActorID:       in.Actor.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	after := createAuditMetadata(ptrext.Indirect(created), in.IdempotencyKey)
+	for k, v := range extra {
+		after[k] = v
+	}
+	if err := s.recordAuditTx(ctx, tx, in.Actor, action, ptrext.Indirect(created),
+		createAuditSummary(action, ptrext.Indirect(created)), after); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, in.TenantID, created.ID, 50)
+}
+
+func (s *Service) promoteInTransaction(ctx context.Context, in PromoteInput) (*Detail, error) {
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	created, err := s.repo.CreateTx(ctx, tx, repo.CreateInput{
+		TenantID:      in.TenantID,
+		Title:         in.Title,
+		Description:   in.Description,
+		Status:        in.Status,
+		Priority:      in.Priority,
+		OwnerMemberID: in.OwnerMemberID,
+		ActorID:       in.Actor.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, feedbackID := range in.FeedbackIDs {
+		if err := s.repo.LinkFeedbackTx(ctx, tx, repo.LinkFeedbackInput{
+			TenantID:   in.TenantID,
+			RequestID:  created.ID,
+			FeedbackID: feedbackID,
+			Importance: repo.ImportanceNormal,
+			ActorID:    in.Actor.ID,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	after := createAuditMetadata(ptrext.Indirect(created), in.IdempotencyKey)
+	after["feedback_ids"] = in.FeedbackIDs
+	after["feedback_count"] = len(in.FeedbackIDs)
+	if err := s.recordAuditTx(ctx, tx, in.Actor, "customer_request.promote_feedback", ptrext.Indirect(created),
+		"Promoted feedback to customer request", after); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, in.TenantID, created.ID, 50)
+}
+
+func (s *Service) mergeInTransaction(ctx context.Context, in MergeInput) (*Detail, error) {
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	result, err := s.repo.MergeTx(ctx, tx, in.TenantID, in.SourceID, in.TargetID, in.Actor.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !result.AlreadyMergedIntoTarget {
+		if err := s.recordMergeAuditTx(ctx, tx, in.TenantID, in.Actor, result); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, in.TenantID, in.TargetID, 50)
+}
+
+func (s *Service) validateOwner(ctx context.Context, tenantID string, ownerID *uuid.UUID) error {
+	if ownerID == nil {
+		return nil
+	}
+	_, err := s.repo.GetOwner(ctx, tenantID, ptrext.Indirect(ownerID))
+	return err
+}
+
+func normalizeCreate(in CreateInput) (CreateInput, error) {
+	in.Title = strings.TrimSpace(in.Title)
+	in.Description = strings.TrimSpace(in.Description)
+	in.Status = defaultStatus(in.Status)
+	in.Priority = defaultPriority(in.Priority)
+	in.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
+	if err := validateCreateFields(in.TenantID, in.Title, in.Description, in.Status, in.Priority, in.IdempotencyKey); err != nil {
+		return CreateInput{}, err
+	}
+	return in, nil
+}
+
+func normalizePromote(in PromoteInput) (PromoteInput, error) {
+	in.Title = strings.TrimSpace(in.Title)
+	in.Description = strings.TrimSpace(in.Description)
+	in.Status = defaultStatus(in.Status)
+	in.Priority = defaultPriority(in.Priority)
+	in.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
+	ids := dedupeFeedbackIDs(in.FeedbackIDs)
+	if len(ids) == 0 || len(ids) > 100 {
+		return PromoteInput{}, ErrValidation
+	}
+	in.FeedbackIDs = ids
+	if err := validateCreateFields(in.TenantID, in.Title, in.Description, in.Status, in.Priority, in.IdempotencyKey); err != nil {
+		return PromoteInput{}, err
+	}
+	return in, nil
+}
+
+func validateCreateFields(tenantID, title, description string, status repo.Status, priority repo.Priority, key string) error {
+	if tenantID == "" || utf8.RuneCountInString(title) == 0 || utf8.RuneCountInString(title) > 200 {
+		return ErrValidation
+	}
+	if utf8.RuneCountInString(description) > 10000 {
+		return ErrValidation
+	}
+	if !validStatus(status) || !validPriority(priority) {
+		return ErrValidation
+	}
+	if !idempotencyKeyPattern.MatchString(key) {
+		return ErrValidation
+	}
+	return nil
+}
+
+func normalizeUpdate(in UpdateInput) (UpdateInput, error) {
+	if in.TenantID == "" || in.ID == uuid.Nil {
+		return UpdateInput{}, ErrValidation
+	}
+	if in.Title != nil {
+		value := strings.TrimSpace(ptrext.Indirect(in.Title))
+		if utf8.RuneCountInString(value) == 0 || utf8.RuneCountInString(value) > 200 {
+			return UpdateInput{}, ErrValidation
+		}
+		in.Title = ptrext.Of(value)
+	}
+	if in.Description != nil {
+		value := strings.TrimSpace(ptrext.Indirect(in.Description))
+		if utf8.RuneCountInString(value) > 10000 {
+			return UpdateInput{}, ErrValidation
+		}
+		in.Description = ptrext.Of(value)
+	}
+	if in.Status != nil && !validStatus(ptrext.Indirect(in.Status)) {
+		return UpdateInput{}, ErrValidation
+	}
+	if in.Priority != nil && !validPriority(ptrext.Indirect(in.Priority)) {
+		return UpdateInput{}, ErrValidation
+	}
+	return in, nil
+}
+
+func normalizeLinkFeedback(in LinkFeedbackInput) (LinkFeedbackInput, error) {
+	if in.TenantID == "" || in.RequestID == uuid.Nil || in.FeedbackID <= 0 {
+		return LinkFeedbackInput{}, ErrValidation
+	}
+	if in.Importance == "" {
+		in.Importance = repo.ImportanceNormal
+	}
+	in.Note = strings.TrimSpace(in.Note)
+	if !validImportance(in.Importance) || utf8.RuneCountInString(strings.TrimSpace(in.Note)) > 5000 {
+		return LinkFeedbackInput{}, ErrValidation
+	}
+	return in, nil
+}
+
+func normalizeCustomerLink(in LinkCustomerInput) (LinkCustomerInput, error) {
+	in.SubjectKey = strings.TrimSpace(in.SubjectKey)
+	in.SubjectHash = strings.TrimSpace(in.SubjectHash)
+	in.SubjectDisplay = strings.TrimSpace(in.SubjectDisplay)
+	in.AccountKey = strings.TrimSpace(in.AccountKey)
+	in.AccountDisplay = strings.TrimSpace(in.AccountDisplay)
+	in.Note = strings.TrimSpace(in.Note)
+	if in.TenantID == "" || in.RequestID == uuid.Nil {
+		return LinkCustomerInput{}, ErrValidation
+	}
+	if in.SubjectKey == "" && in.SubjectHash == "" && in.AccountKey == "" {
+		return LinkCustomerInput{}, ErrValidation
+	}
+	if !validSupporterFields(in.SubjectKey, in.SubjectHash, in.SubjectDisplay, in.AccountKey, in.AccountDisplay, in.Note) {
+		return LinkCustomerInput{}, ErrValidation
+	}
+	return in, nil
+}
+
+func normalizeVote(in VoteInput) (VoteInput, error) {
+	in.SubjectKey = strings.TrimSpace(in.SubjectKey)
+	in.SubjectHash = strings.TrimSpace(in.SubjectHash)
+	in.SubjectDisplay = strings.TrimSpace(in.SubjectDisplay)
+	in.AccountKey = strings.TrimSpace(in.AccountKey)
+	in.AccountDisplay = strings.TrimSpace(in.AccountDisplay)
+	in.Note = strings.TrimSpace(in.Note)
+	if in.TenantID == "" || in.RequestID == uuid.Nil {
+		return VoteInput{}, ErrValidation
+	}
+	if in.SubjectKey == "" && in.SubjectHash == "" && in.AccountKey == "" {
+		return VoteInput{}, ErrValidation
+	}
+	if in.Weight == 0 {
+		in.Weight = 1
+	}
+	if in.Weight < 1 || in.Weight > 100 {
+		return VoteInput{}, ErrValidation
+	}
+	if !validSupporterFields(in.SubjectKey, in.SubjectHash, in.SubjectDisplay, in.AccountKey, in.AccountDisplay, in.Note) {
+		return VoteInput{}, ErrValidation
+	}
+	return in, nil
+}
+
+func validSupporterFields(subjectKey, subjectHash, subjectDisplay, accountKey, accountDisplay, note string) bool {
+	return utf8.RuneCountInString(subjectKey) <= 512 &&
+		utf8.RuneCountInString(subjectHash) <= 128 &&
+		utf8.RuneCountInString(subjectDisplay) <= 500 &&
+		utf8.RuneCountInString(accountKey) <= 512 &&
+		utf8.RuneCountInString(accountDisplay) <= 500 &&
+		utf8.RuneCountInString(note) <= 5000
+}
+
+func normalizeIssueInput(in LinkIssueInput) (LinkIssueInput, error) {
+	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
+	in.ExternalURL = strings.TrimSpace(in.ExternalURL)
+	in.ExternalKey = strings.TrimSpace(in.ExternalKey)
+	in.Title = strings.TrimSpace(in.Title)
+	in.Status = strings.TrimSpace(in.Status)
+	if in.TenantID == "" || in.RequestID == uuid.Nil {
+		return LinkIssueInput{}, ErrValidation
+	}
+	if !validProvider(in.Provider) {
+		return LinkIssueInput{}, ErrUnsupportedProvider
+	}
+	parsed, err := url.Parse(in.ExternalURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return LinkIssueInput{}, ErrInvalidIssueURL
+	}
+	if in.ExternalKey == "" {
+		in.ExternalKey = deriveExternalKey(in.Provider, parsed)
+	}
+	if utf8.RuneCountInString(in.ExternalKey) == 0 || utf8.RuneCountInString(in.ExternalKey) > 512 {
+		return LinkIssueInput{}, ErrValidation
+	}
+	if utf8.RuneCountInString(in.ExternalURL) > 2048 || utf8.RuneCountInString(in.Title) > 500 || utf8.RuneCountInString(in.Status) > 120 {
+		return LinkIssueInput{}, ErrValidation
+	}
+	return in, nil
+}
+
+func dedupeFeedbackIDs(ids []int64) []int64 {
+	out := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func defaultStatus(status repo.Status) repo.Status {
+	if status == "" {
+		return repo.StatusOpen
+	}
+	return status
+}
+
+func defaultPriority(priority repo.Priority) repo.Priority {
+	if priority == "" {
+		return repo.PriorityNone
+	}
+	return priority
+}
+
+func defaultVisibility(visibility repo.Visibility) repo.Visibility {
+	if visibility == "" {
+		return repo.VisibilityActive
+	}
+	return visibility
+}
+
+func defaultSort(sort repo.Sort) repo.Sort {
+	if sort == "" {
+		return repo.SortUpdatedAt
+	}
+	return sort
+}
+
+func defaultDirection(direction repo.Direction) repo.Direction {
+	if direction == "" {
+		return repo.DirectionDesc
+	}
+	return direction
+}
+
+func validStatus(status repo.Status) bool {
+	switch status {
+	case repo.StatusOpen, repo.StatusPlanned, repo.StatusInProgress, repo.StatusShipped, repo.StatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func validPriority(priority repo.Priority) bool {
+	switch priority {
+	case repo.PriorityNone, repo.PriorityLow, repo.PriorityMedium, repo.PriorityHigh, repo.PriorityUrgent:
+		return true
+	default:
+		return false
+	}
+}
+
+func validImportance(importance repo.Importance) bool {
+	switch importance {
+	case repo.ImportanceNormal, repo.ImportanceImportant, repo.ImportanceCritical:
+		return true
+	default:
+		return false
+	}
+}
+
+func validProvider(provider string) bool {
+	switch provider {
+	case "github", "jira", "linear", "other":
+		return true
+	default:
+		return false
+	}
+}
+
+func deriveExternalKey(provider string, parsed *url.URL) string {
+	path := strings.Trim(parsed.Path, "/")
+	switch provider {
+	case "github":
+		parts := strings.Split(path, "/")
+		if len(parts) >= 4 && parts[2] == "issues" {
+			return parts[0] + "/" + parts[1] + "#" + parts[3]
+		}
+	case "jira", "linear":
+		if path != "" {
+			parts := strings.Split(path, "/")
+			return parts[len(parts)-1]
+		}
+	}
+	return parsed.String()
+}
+
+func (s *Service) acquireIdempotency(ctx context.Context, tenantID, key, operation string, payload any) (*Detail, bool, error) {
+	if s.idempotency == nil {
+		return nil, false, nil
+	}
+	hash, err := hashPayload(operation, payload)
+	if err != nil {
+		return nil, false, err
+	}
+	record, acquired, err := s.idempotency.Acquire(ctx, tenantID, key, hash, 0)
+	if errors.Is(err, idempotency.ErrHashMismatch) {
+		return nil, false, ErrIdempotencyConflict
+	}
+	if errors.Is(err, idempotency.ErrExpired) {
+		if deleteErr := s.idempotency.Delete(ctx, tenantID, key); deleteErr != nil {
+			return nil, false, deleteErr
+		}
+		record, acquired, err = s.idempotency.Acquire(ctx, tenantID, key, hash, 0)
+		if err != nil {
+			return nil, false, err
+		}
+		if acquired {
+			return nil, true, nil
+		}
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if acquired {
+		return nil, true, nil
+	}
+	if record.Status == idempotency.StatusPending {
+		return nil, false, ErrRequestInProgress
+	}
+	if record.Status == idempotency.StatusCompleted && len(record.ResponseBody) > 0 {
+		var cached Detail
+		if err := json.Unmarshal(record.ResponseBody, &cached); err != nil {
+			return nil, false, err
+		}
+		return ptrext.Of(cached), false, nil
+	}
+	return nil, true, nil
+}
+
+func hashPayload(operation string, payload any) ([]byte, error) {
+	data, err := json.Marshal(struct {
+		Operation string
+		Payload   any
+	}{Operation: operation, Payload: payload})
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(data)
+	return sum[:], nil
+}
+
+func createIdempotencyPayload(in CreateInput) any {
+	return struct {
+		TenantID      string
+		Title         string
+		Description   string
+		Status        repo.Status
+		Priority      repo.Priority
+		OwnerMemberID string
+	}{
+		TenantID:      in.TenantID,
+		Title:         in.Title,
+		Description:   in.Description,
+		Status:        in.Status,
+		Priority:      in.Priority,
+		OwnerMemberID: uuidPtrString(in.OwnerMemberID),
+	}
+}
+
+func promoteIdempotencyPayload(in PromoteInput) any {
+	return struct {
+		TenantID      string
+		FeedbackIDs   []int64
+		Title         string
+		Description   string
+		Status        repo.Status
+		Priority      repo.Priority
+		OwnerMemberID string
+	}{
+		TenantID:      in.TenantID,
+		FeedbackIDs:   in.FeedbackIDs,
+		Title:         in.Title,
+		Description:   in.Description,
+		Status:        in.Status,
+		Priority:      in.Priority,
+		OwnerMemberID: uuidPtrString(in.OwnerMemberID),
+	}
+}
+
+func mergeIdempotencyPayload(in MergeInput) any {
+	return struct {
+		TenantID string
+		SourceID string
+		TargetID string
+	}{
+		TenantID: in.TenantID,
+		SourceID: in.SourceID.String(),
+		TargetID: in.TargetID.String(),
+	}
+}
+
+func (s *Service) completeIdempotency(ctx context.Context, tenantID, key string, acquired bool, detail *Detail, opErr error) (*Detail, error) {
+	if s.idempotency == nil || !acquired {
+		return detail, opErr
+	}
+	if opErr != nil {
+		_ = s.idempotency.Fail(ctx, tenantID, key)
+		return nil, opErr
+	}
+	body, err := json.Marshal(detail)
+	if err != nil {
+		_ = s.idempotency.Fail(ctx, tenantID, key)
+		return nil, err
+	}
+	if err := s.idempotency.Complete(ctx, tenantID, key, 200, body); err != nil {
+		return nil, err
+	}
+	return detail, nil
+}
+
+func (s *Service) detail(ctx context.Context, tenantID string, id uuid.UUID, evidenceLimit int) (*Detail, error) {
+	detail, err := s.repo.GetDetail(ctx, tenantID, id, evidenceLimit)
+	if err != nil {
+		return nil, err
+	}
+	out := ptrext.Of(Detail{Request: ptrext.Indirect(detail)})
+	if s.audit == nil {
+		return out, nil
+	}
+	result, err := s.audit.List(ctx, auditlogsvc.ListFilter{
+		TenantID:   tenantID,
+		TargetType: "customer_request",
+		TargetID:   id.String(),
+		Limit:      20,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out.AuditEntries = make([]AuditEntry, 0, len(result.Items))
+	for _, item := range result.Items {
+		out.AuditEntries = append(out.AuditEntries, AuditEntry{
+			ID:        item.ID,
+			Action:    item.Action,
+			ActorType: item.ActorType,
+			ActorID:   item.ActorID,
+			Summary:   item.Summary,
+			CreatedAt: item.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+func (s *Service) recordAuditTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	actor auditlogsvc.Actor,
+	action string,
+	target repo.Summary,
+	summary string,
+	after any,
+) error {
+	if s.audit == nil {
+		return nil
+	}
+	if actor.Type == "" {
+		actor.Type = "admin"
+	}
+	return s.audit.RecordTx(ctx, tx, auditlogsvc.Event{
+		TenantID:   target.TenantID,
+		Actor:      actor,
+		Action:     action,
+		TargetType: "customer_request",
+		TargetID:   target.ID.String(),
+		Summary:    summary,
+		After:      after,
+	})
+}
+
+func (s *Service) recordMergeAuditTx(ctx context.Context, tx pgx.Tx, tenantID string, actor auditlogsvc.Actor, result repo.MergeResult) error {
+	if s.audit == nil {
+		return nil
+	}
+	if actor.Type == "" {
+		actor.Type = "admin"
+	}
+	return s.audit.RecordTx(ctx, tx, auditlogsvc.Event{
+		TenantID:   tenantID,
+		Actor:      actor,
+		Action:     "customer_request.merge",
+		TargetType: "customer_request",
+		TargetID:   result.TargetID.String(),
+		Summary:    fmt.Sprintf("Merged %s into %s", result.SourceDisplayID, result.TargetDisplayID),
+		After: map[string]any{
+			"source_request_id":                result.SourceID.String(),
+			"target_request_id":                result.TargetID.String(),
+			"moved_feedback_count":             result.MovedFeedbackCount,
+			"moved_customer_count":             result.MovedCustomerCount,
+			"moved_vote_count":                 result.MovedVoteCount,
+			"moved_issue_count":                result.MovedIssueCount,
+			"skipped_duplicate_feedback_count": result.SkippedDuplicateFeedbackCount,
+			"skipped_duplicate_customer_count": result.SkippedDuplicateCustomerCount,
+			"skipped_duplicate_vote_count":     result.SkippedDuplicateVoteCount,
+			"skipped_duplicate_issue_count":    result.SkippedDuplicateIssueCount,
+		},
+	})
+}
+
+func createAuditMetadata(summary repo.Summary, idempotencyKey string) map[string]any {
+	hash := sha256.Sum256([]byte(idempotencyKey))
+	return map[string]any{
+		"request_id":           summary.ID.String(),
+		"display_id":           summary.DisplayID,
+		"title_length":         utf8.RuneCountInString(summary.Title),
+		"status":               summary.Status,
+		"priority":             summary.Priority,
+		"owner_member_id":      uuidPtrString(summary.OwnerMemberID),
+		"idempotency_key_hash": fmt.Sprintf("%x", hash[:8]),
+	}
+}
+
+func createAuditSummary(action string, summary repo.Summary) string {
+	if action == "customer_request.promote_feedback" {
+		return "Promoted feedback to customer request"
+	}
+	if summary.DisplayID == "" {
+		return "Created customer request"
+	}
+	return fmt.Sprintf("Created customer request %s", summary.DisplayID)
+}
+
+func updateAuditBeforeAfter(before, after repo.Summary) map[string]any {
+	return map[string]any{
+		"request_id":          after.ID.String(),
+		"old_status":          before.Status,
+		"new_status":          after.Status,
+		"old_priority":        before.Priority,
+		"new_priority":        after.Priority,
+		"old_owner_member_id": uuidPtrString(before.OwnerMemberID),
+		"new_owner_member_id": uuidPtrString(after.OwnerMemberID),
+		"title_changed":       before.Title != after.Title,
+		"description_changed": before.Description != after.Description,
+	}
+}
+
+func issueAuditMetadata(requestID uuid.UUID, link repo.IssueLink) map[string]any {
+	host := ""
+	if parsed, err := url.Parse(link.ExternalURL); err == nil {
+		host = parsed.Host
+	}
+	return map[string]any{
+		"request_id":    requestID.String(),
+		"issue_link_id": link.ID.String(),
+		"provider":      link.Provider,
+		"external_key":  link.ExternalKey,
+		"url_host":      host,
+	}
+}
+
+func customerAuditMetadata(requestID uuid.UUID, link repo.CustomerLink) map[string]any {
+	return map[string]any{
+		"request_id":       requestID.String(),
+		"customer_link_id": link.ID.String(),
+		"subject_key_set":  link.SubjectKey != "",
+		"subject_hash_set": link.SubjectHash != "",
+		"account_key_set":  link.AccountKey != "",
+		"note_length":      utf8.RuneCountInString(link.Note),
+	}
+}
+
+func voteAuditMetadata(requestID uuid.UUID, vote repo.Vote) map[string]any {
+	return map[string]any{
+		"request_id":       requestID.String(),
+		"vote_id":          vote.ID.String(),
+		"subject_key_set":  vote.SubjectKey != "",
+		"subject_hash_set": vote.SubjectHash != "",
+		"account_key_set":  vote.AccountKey != "",
+		"weight":           vote.Weight,
+		"note_length":      utf8.RuneCountInString(vote.Note),
+	}
+}
+
+func uuidPtrString(id *uuid.UUID) string {
+	if id == nil {
+		return ""
+	}
+	return ptrext.Indirect(id).String()
+}

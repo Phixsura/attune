@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bell,
   Bot,
+  ClipboardList,
   DatabaseZap,
   GitBranch,
   History,
@@ -87,6 +88,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     icon: TriangleAlert,
     labelKey: 'nav.terminal_failures',
     path: '/feedback/terminal-failures',
+  },
+  {
+    group: 'feedback',
+    icon: ClipboardList,
+    labelKey: 'nav.customer_requests',
+    path: '/feedback/customer-requests',
+    permission: 'customer_request:view',
   },
   {
     group: 'feedback',

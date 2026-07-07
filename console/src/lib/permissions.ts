@@ -15,6 +15,10 @@ export type Permission =
   | 'feedback:edit'
   | 'feedback:delete'
   | 'feedback:batch_delete'
+  // Customer Requests
+  | 'customer_request:view'
+  | 'customer_request:edit'
+  | 'customer_request:merge'
   // Settings - AI Classification
   | 'settings:enrich_config:view'
   | 'settings:enrich_config:edit'
@@ -77,6 +81,9 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'feedback:edit',
     'feedback:delete',
     'feedback:batch_delete',
+    'customer_request:view',
+    'customer_request:edit',
+    'customer_request:merge',
     // Settings - full access
     'settings:enrich_config:view',
     'settings:enrich_config:edit',
@@ -119,6 +126,9 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'feedback:view',
     'feedback:edit',
     'feedback:delete',
+    'customer_request:view',
+    'customer_request:edit',
+    'customer_request:merge',
     // Settings - operational access
     'settings:enrich_config:view',
     'settings:enrich_config:edit',
@@ -147,6 +157,8 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'feedback:view',
     'feedback:edit',
     'feedback:delete',
+    'customer_request:view',
+    'customer_request:edit',
     // Settings - view only (no edit)
     'settings:enrich_config:view',
     'settings:guard_policies:view',
@@ -169,6 +181,7 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
   viewer: new Set([
     // Feedback - read only
     'feedback:view',
+    'customer_request:view',
     // Usage
     'usage:view',
     // No settings access, no LLM config access

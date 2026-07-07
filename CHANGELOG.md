@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Customer Requests now turn feedback evidence into product request objects.**
+  Added tenant-scoped Customer Requests with stable display IDs, status,
+  priority, owners, linked feedback evidence, explicit customer/account links,
+  internal demand votes, duplicate-request tracking, delivery issue references,
+  merge-safe backlinks, idempotent create/promote/merge operations, audit
+  events, generated proto/OpenAPI contracts, and Console list/detail plus
+  feedback-selection promotion, feedback-detail link-management, owner filtering
+  and assignment, merge-target detail handoff, and feedback-scoped deep-link
+  workflows.
+
 - **Private-deploy smoke suite now covers base, observability, TLS, failure, and upgrade modules.**
   Added dedicated smoke targets for the compose base stack, the observability
   overlay, the TLS reverse-proxy front door, deterministic startup failures,
