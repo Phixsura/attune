@@ -25,6 +25,8 @@ import (
 
 type service interface {
 	List(ctx context.Context, in svc.ListInput) (repo.ListResult, error)
+	GetScoringSettings(ctx context.Context, tenantID string) (repo.ScoringSettings, error)
+	UpdateScoringSettings(ctx context.Context, in svc.ScoringSettingsInput) (repo.ScoringSettings, error)
 	Get(ctx context.Context, tenantID string, id uuid.UUID, evidenceLimit int) (*svc.Detail, error)
 	Create(ctx context.Context, in svc.CreateInput) (*svc.Detail, error)
 	Update(ctx context.Context, in svc.UpdateInput) (*svc.Detail, error)
@@ -95,6 +97,52 @@ func (h *Handler) List(
 		resp.NextCursor = ptrext.Of(result.NextCursor)
 	}
 	return dispatcher.OK(resp)
+}
+
+func (h *Handler) GetScoringSettings(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	_ *attunev1.GetCustomerRequestScoringSettingsRequest,
+) (dispatcher.Result[*attunev1.CustomerRequestScoringSettings], error) {
+	if h.service == nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestScoringSettings](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "customer requests not configured")
+	}
+	settings, err := h.service.GetScoringSettings(ctx, ctx.Auth.TenantID)
+	if err != nil {
+		return h.scoringSettingsError(ctx, err)
+	}
+	return dispatcher.OK(scoringSettingsToProto(settings))
+}
+
+func (h *Handler) UpdateScoringSettings(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.UpdateCustomerRequestScoringSettingsRequest,
+) (dispatcher.Result[*attunev1.CustomerRequestScoringSettings], error) {
+	if h.service == nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestScoringSettings](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "customer requests not configured")
+	}
+	settings, err := h.service.UpdateScoringSettings(ctx, svc.ScoringSettingsInput{
+		TenantID:             ctx.Auth.TenantID,
+		PriorityNoneWeight:   optionalInt32(req.PriorityNoneWeight),
+		PriorityLowWeight:    optionalInt32(req.PriorityLowWeight),
+		PriorityMediumWeight: optionalInt32(req.PriorityMediumWeight),
+		PriorityHighWeight:   optionalInt32(req.PriorityHighWeight),
+		PriorityUrgentWeight: optionalInt32(req.PriorityUrgentWeight),
+		FeedbackWeight:       optionalInt32(req.FeedbackWeight),
+		FeedbackCap:          optionalInt32(req.FeedbackCap),
+		CustomerWeight:       optionalInt32(req.CustomerWeight),
+		CustomerCap:          optionalInt32(req.CustomerCap),
+		AccountWeight:        optionalInt32(req.AccountWeight),
+		AccountCap:           optionalInt32(req.AccountCap),
+		VoteWeight:           optionalInt32(req.VoteWeight),
+		VoteCap:              optionalInt32(req.VoteCap),
+		RevenueCentsPerPoint: req.RevenueCentsPerPoint,
+		RevenueCap:           optionalInt32(req.RevenueCap),
+		Actor:                actor(ctx),
+	})
+	if err != nil {
+		return h.scoringSettingsError(ctx, err)
+	}
+	return dispatcher.OK(scoringSettingsToProto(settings))
 }
 
 func (h *Handler) Get(
@@ -656,8 +704,26 @@ func (h *Handler) listError(
 	return dispatcher.Fail[*attunev1.ListCustomerRequestsResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to list customer requests")
 }
 
+func (h *Handler) scoringSettingsError(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	err error,
+) (dispatcher.Result[*attunev1.CustomerRequestScoringSettings], error) {
+	if errors.Is(err, svc.ErrValidation) || errors.Is(err, repo.ErrInvalidInput) {
+		return dispatcher.Fail[*attunev1.CustomerRequestScoringSettings](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "invalid customer request scoring settings")
+	}
+	logext.Errorf(ctx, "[console.CustomerRequestHandler.ScoringSettings] failed,tenant_id:%s,err:%+v", ctx.Auth.TenantID, err.Error())
+	return dispatcher.Fail[*attunev1.CustomerRequestScoringSettings](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "customer request scoring settings operation failed")
+}
+
 func actor(ctx *dispatcher.RequestContext[*session.AuthCtx]) auditlogsvc.Actor {
 	return auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request())
+}
+
+func optionalInt32(raw *int32) *int {
+	if raw == nil {
+		return nil
+	}
+	return ptrext.Of(int(ptrext.Indirect(raw)))
 }
 
 func optionalUUID(raw *string) (*uuid.UUID, error) {
@@ -796,6 +862,33 @@ func summaryToProto(summary repo.Summary) *attunev1.CustomerRequestSummary {
 		out.ArchivedAt = ptrext.Of(formatTime(summary.ArchivedAt))
 	}
 	return out
+}
+
+func scoringSettingsToProto(settings repo.ScoringSettings) *attunev1.CustomerRequestScoringSettings {
+	updatedAt := ""
+	if !settings.UpdatedAt.IsZero() {
+		updatedAt = formatTime(ptrext.Of(settings.UpdatedAt))
+	}
+	return ptrext.Of(attunev1.CustomerRequestScoringSettings{
+		TenantId:             settings.TenantID,
+		PriorityNoneWeight:   int32(settings.PriorityNoneWeight),
+		PriorityLowWeight:    int32(settings.PriorityLowWeight),
+		PriorityMediumWeight: int32(settings.PriorityMediumWeight),
+		PriorityHighWeight:   int32(settings.PriorityHighWeight),
+		PriorityUrgentWeight: int32(settings.PriorityUrgentWeight),
+		FeedbackWeight:       int32(settings.FeedbackWeight),
+		FeedbackCap:          int32(settings.FeedbackCap),
+		CustomerWeight:       int32(settings.CustomerWeight),
+		CustomerCap:          int32(settings.CustomerCap),
+		AccountWeight:        int32(settings.AccountWeight),
+		AccountCap:           int32(settings.AccountCap),
+		VoteWeight:           int32(settings.VoteWeight),
+		VoteCap:              int32(settings.VoteCap),
+		RevenueCentsPerPoint: settings.RevenueCentsPerPoint,
+		RevenueCap:           int32(settings.RevenueCap),
+		UpdatedBy:            settings.UpdatedBy,
+		UpdatedAt:            updatedAt,
+	})
 }
 
 func feedbackToProto(item repo.FeedbackEvidence) *attunev1.CustomerRequestFeedbackEvidence {

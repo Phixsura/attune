@@ -276,6 +276,50 @@ func TestNormalizeNoteAndListDefaults(t *testing.T) {
 	}
 }
 
+func TestNormalizeScoringSettingsPatchAndValidation(t *testing.T) {
+	current := repo.DefaultScoringSettings("tenant-a")
+	feedbackWeight := 7
+	revenueCentsPerPoint := int64(250000)
+	normalized, err := normalizeScoringSettings(ScoringSettingsInput{
+		TenantID:             " tenant-a ",
+		FeedbackWeight:       ptrext.Of(feedbackWeight),
+		RevenueCentsPerPoint: ptrext.Of(revenueCentsPerPoint),
+	}, current)
+	if err != nil {
+		t.Fatalf("normalizeScoringSettings() error = %v", err)
+	}
+	if normalized.TenantID != "tenant-a" ||
+		normalized.FeedbackWeight != feedbackWeight ||
+		normalized.PriorityUrgentWeight != current.PriorityUrgentWeight ||
+		normalized.RevenueCentsPerPoint != revenueCentsPerPoint ||
+		normalized.ActorID != "system" {
+		t.Fatalf("normalizeScoringSettings() = %+v, want patch over defaults", normalized)
+	}
+
+	negative := -1
+	if _, err := normalizeScoringSettings(ScoringSettingsInput{
+		TenantID:       "tenant-a",
+		FeedbackWeight: ptrext.Of(negative),
+	}, current); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeScoringSettings(negative) error = %v, want ErrValidation", err)
+	}
+	zeroRevenue := int64(0)
+	if _, err := normalizeScoringSettings(ScoringSettingsInput{
+		TenantID:             "tenant-a",
+		RevenueCentsPerPoint: ptrext.Of(zeroRevenue),
+	}, current); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeScoringSettings(zero revenue divisor) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeScoringSettings(ScoringSettingsInput{}, current); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeScoringSettings(empty tenant) error = %v, want ErrValidation", err)
+	}
+
+	audit := scoringSettingsAuditFields(repo.ScoringSettings{FeedbackWeight: 7, RevenueCentsPerPoint: 250000})
+	if audit["feedback_weight"] != 7 || audit["revenue_cents_per_point"] != int64(250000) {
+		t.Fatalf("scoringSettingsAuditFields() = %+v, want scoring fields", audit)
+	}
+}
+
 func TestNormalizeIssueSyncAndAccountProfiles(t *testing.T) {
 	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	linkID := uuid.MustParse("22222222-2222-2222-2222-222222222222")

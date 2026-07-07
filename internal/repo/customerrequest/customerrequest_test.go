@@ -36,6 +36,9 @@ func TestBuildListQueryFiltersAndOrdering(t *testing.T) {
 
 	for _, want := range []string{
 		"cr.tenant_id = $1",
+		"LEFT JOIN customer_request_scoring_settings css",
+		"COALESCE(css.priority_urgent_weight, 80)",
+		"COALESCE(css.feedback_weight, 2)",
 		"cr.merged_into_request_id IS NOT NULL",
 		"(LOWER(cr.title) LIKE $2 OR LOWER(cr.display_id) LIKE $2)",
 		"cr.status = ANY($3)",
@@ -303,6 +306,55 @@ func TestTransactionHelpers(t *testing.T) {
 
 	_, err = repo.MergeTx(ctx, &fakeRepoTx{}, "tenant-a", requestID, requestID, "admin-1")
 	require.ErrorIs(t, err, ErrConflict)
+}
+
+func TestScoringSettingsDefaultsAndTransactions(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 8, 10, 0, 0, 0, time.UTC)
+	repo := Repo{}
+
+	defaults := DefaultScoringSettings("tenant-a")
+	require.Equal(t, 80, defaults.PriorityUrgentWeight)
+	require.Equal(t, int64(100000), defaults.RevenueCentsPerPoint)
+
+	scanned, err := scanScoringSettings(scoringSettingsRow("tenant-a", "admin-1", now, func(values []any) {
+		values[6] = 7
+		values[14] = int64(250000)
+	}))
+	require.NoError(t, err)
+	require.Equal(t, "tenant-a", scanned.TenantID)
+	require.Equal(t, 7, scanned.FeedbackWeight)
+	require.Equal(t, int64(250000), scanned.RevenueCentsPerPoint)
+
+	tx := &fakeRepoTx{rows: []fakeRepoRow{scoringSettingsRow("tenant-a", "admin-2", now, nil)}}
+	updated, err := repo.UpsertScoringSettingsTx(ctx, tx, ScoringSettingsInput{
+		TenantID:             "tenant-a",
+		PriorityNoneWeight:   1,
+		PriorityLowWeight:    2,
+		PriorityMediumWeight: 3,
+		PriorityHighWeight:   4,
+		PriorityUrgentWeight: 5,
+		FeedbackWeight:       6,
+		FeedbackCap:          7,
+		CustomerWeight:       8,
+		CustomerCap:          9,
+		AccountWeight:        10,
+		AccountCap:           11,
+		VoteWeight:           12,
+		VoteCap:              13,
+		RevenueCentsPerPoint: 14,
+		RevenueCap:           15,
+		ActorID:              "admin-2",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "admin-2", updated.UpdatedBy)
+	require.Equal(t, 20, updated.PriorityLowWeight)
+
+	_, err = repo.UpsertScoringSettingsTx(ctx, &fakeRepoTx{
+		rows: []fakeRepoRow{{err: &pgconn.PgError{Code: "23514"}}},
+	}, ScoringSettingsInput{TenantID: "tenant-a"})
+	require.ErrorIs(t, err, ErrInvalidInput)
 }
 
 func TestUpdateAndCustomerTransactions(t *testing.T) {
@@ -731,6 +783,33 @@ func lockRowValues(displayID string, mergedID *uuid.UUID, archivedAt *time.Time)
 		merged = sql.NullString{String: mergedID.String(), Valid: true}
 	}
 	return []any{displayID, merged, archivedAt}
+}
+
+func scoringSettingsRow(tenantID, updatedBy string, updatedAt time.Time, mutate func([]any)) fakeRepoRow {
+	values := []any{
+		tenantID,
+		0,
+		20,
+		40,
+		60,
+		80,
+		2,
+		80,
+		5,
+		100,
+		8,
+		120,
+		4,
+		80,
+		int64(100000),
+		100,
+		updatedBy,
+		updatedAt,
+	}
+	if mutate != nil {
+		mutate(values)
+	}
+	return fakeRepoRow{values: values}
 }
 
 func containsString(values []string, want string) bool {

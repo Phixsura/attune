@@ -1434,6 +1434,47 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/scoring-settings:
+        get:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_GetCustomerRequestScoringSettings
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestScoringSettings'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        put:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_UpdateCustomerRequestScoringSettings
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateCustomerRequestScoringSettingsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestScoringSettings'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/customer-requests/{id}:
         get:
             tags:
@@ -8855,6 +8896,59 @@ components:
                     type: string
                 role:
                     type: string
+        CustomerRequestScoringSettings:
+            type: object
+            properties:
+                tenantId:
+                    type: string
+                priorityNoneWeight:
+                    type: integer
+                    format: int32
+                priorityLowWeight:
+                    type: integer
+                    format: int32
+                priorityMediumWeight:
+                    type: integer
+                    format: int32
+                priorityHighWeight:
+                    type: integer
+                    format: int32
+                priorityUrgentWeight:
+                    type: integer
+                    format: int32
+                feedbackWeight:
+                    type: integer
+                    format: int32
+                feedbackCap:
+                    type: integer
+                    format: int32
+                customerWeight:
+                    type: integer
+                    format: int32
+                customerCap:
+                    type: integer
+                    format: int32
+                accountWeight:
+                    type: integer
+                    format: int32
+                accountCap:
+                    type: integer
+                    format: int32
+                voteWeight:
+                    type: integer
+                    format: int32
+                voteCap:
+                    type: integer
+                    format: int32
+                revenueCentsPerPoint:
+                    type: string
+                revenueCap:
+                    type: integer
+                    format: int32
+                updatedBy:
+                    type: string
+                updatedAt:
+                    type: string
         CustomerRequestSummary:
             type: object
             properties:
@@ -12911,6 +13005,53 @@ components:
                     format: enum
                 ownerMemberId:
                     type: string
+        UpdateCustomerRequestScoringSettingsRequest:
+            type: object
+            properties:
+                priorityNoneWeight:
+                    type: integer
+                    format: int32
+                priorityLowWeight:
+                    type: integer
+                    format: int32
+                priorityMediumWeight:
+                    type: integer
+                    format: int32
+                priorityHighWeight:
+                    type: integer
+                    format: int32
+                priorityUrgentWeight:
+                    type: integer
+                    format: int32
+                feedbackWeight:
+                    type: integer
+                    format: int32
+                feedbackCap:
+                    type: integer
+                    format: int32
+                customerWeight:
+                    type: integer
+                    format: int32
+                customerCap:
+                    type: integer
+                    format: int32
+                accountWeight:
+                    type: integer
+                    format: int32
+                accountCap:
+                    type: integer
+                    format: int32
+                voteWeight:
+                    type: integer
+                    format: int32
+                voteCap:
+                    type: integer
+                    format: int32
+                revenueCentsPerPoint:
+                    type: string
+                revenueCap:
+                    type: integer
+                    format: int32
         UpdateEnrichConfigRequest:
             type: object
             properties:

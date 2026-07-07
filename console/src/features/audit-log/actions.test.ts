@@ -106,6 +106,7 @@ describe('getActionCategory', () => {
     ['audit_evidence.download', 'test'],
     ['enrich_config.update', 'update'],
     ['member.update_role', 'update'],
+    ['customer_request.update_scoring_settings', 'update'],
     ['enrich_config.activate_version', 'update'],
     ['inbound_source.rotate_secret', 'update'],
     ['inbound_source.pause', 'update'],

@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   duplicating note bodies, request touch semantics, merge-context preservation,
   and PostgreSQL coverage for note lifecycle and audit behavior.
 
+- **Customer Requests now support tenant-configurable decision scoring.**
+  Added scoring settings APIs, persisted tenant weights and caps, audited
+  updates, generated proto/OpenAPI contracts, Console controls for priority,
+  evidence, customer, account, vote, and revenue signals, and PostgreSQL
+  coverage that verifies custom settings reorder decision-score results.
+
 - **Private-deploy smoke suite now covers base, observability, TLS, failure, and upgrade modules.**
   Added dedicated smoke targets for the compose base stack, the observability
   overlay, the TLS reverse-proxy front door, deterministic startup failures,

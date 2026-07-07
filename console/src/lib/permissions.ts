@@ -19,6 +19,7 @@ export type Permission =
   | 'customer_request:view'
   | 'customer_request:edit'
   | 'customer_request:merge'
+  | 'customer_request:configure'
   // Settings - AI Classification
   | 'settings:enrich_config:view'
   | 'settings:enrich_config:edit'
@@ -84,6 +85,7 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'customer_request:view',
     'customer_request:edit',
     'customer_request:merge',
+    'customer_request:configure',
     // Settings - full access
     'settings:enrich_config:view',
     'settings:enrich_config:edit',
@@ -129,6 +131,7 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'customer_request:view',
     'customer_request:edit',
     'customer_request:merge',
+    'customer_request:configure',
     // Settings - operational access
     'settings:enrich_config:view',
     'settings:enrich_config:edit',

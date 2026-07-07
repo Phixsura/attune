@@ -10,9 +10,10 @@ import {
   RefreshCw,
   Save,
   Search,
+  SlidersHorizontal,
   Trash2,
 } from 'lucide-react'
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -45,6 +46,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   type CustomerRequestFilters,
   customerRequestDetailQuery,
+  customerRequestScoringSettingsQuery,
   customerRequestsInfiniteQuery,
   useAddCustomerRequestNote,
   useAddCustomerRequestVote,
@@ -61,6 +63,7 @@ import {
   useUnlinkCustomerRequestFeedback,
   useUnlinkCustomerRequestIssue,
   useUpdateCustomerRequest,
+  useUpdateCustomerRequestScoringSettings,
 } from '@/features/customer-requests/api/customer-requests'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { type Member, membersQuery } from '@/lib/members-api'
@@ -77,6 +80,7 @@ import {
   type CustomerRequestNote,
   type CustomerRequestOwner,
   CustomerRequestPriority,
+  type CustomerRequestScoringSettings,
   CustomerRequestSort,
   CustomerRequestStatus,
   type CustomerRequestSummary,
@@ -106,6 +110,8 @@ export function CustomerRequestsPage({
   const { t } = useTranslation()
   const permissions = usePermissions()
   const canViewMembers = permissions.can('settings:members:view')
+  const canConfigure = permissions.can('customer_request:configure')
+  const canEdit = permissions.can('customer_request:edit')
   const members = useQuery({ ...membersQuery(), enabled: canViewMembers })
   const [filters, setFilters] = useState<CustomerRequestFilters>(() => ({
     ...DEFAULT_FILTERS,
@@ -114,6 +120,7 @@ export function CustomerRequestsPage({
   const [selectedID, setSelectedID] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [promoteOpen, setPromoteOpen] = useState(false)
+  const [scoringOpen, setScoringOpen] = useState(false)
   const initialPromoteKey = initialPromoteFeedbackIDs.join(',')
 
   useEffect(() => {
@@ -149,16 +156,26 @@ export function CustomerRequestsPage({
           <h1 className="text-3xl font-semibold tracking-normal">{t('customer_requests.title')}</h1>
           <p className="text-sm text-muted-foreground">{t('customer_requests.subtitle')}</p>
         </div>
-        {permissions.can('customer_request:edit') ? (
+        {canConfigure || canEdit ? (
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setPromoteOpen(true)}>
-              <ArrowRight className="size-4" />
-              {t('customer_requests.promote')}
-            </Button>
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" />
-              {t('customer_requests.create')}
-            </Button>
+            {canConfigure ? (
+              <Button variant="outline" onClick={() => setScoringOpen(true)}>
+                <SlidersHorizontal className="size-4" />
+                {t('customer_requests.scoring_settings')}
+              </Button>
+            ) : null}
+            {canEdit ? (
+              <>
+                <Button variant="outline" onClick={() => setPromoteOpen(true)}>
+                  <ArrowRight className="size-4" />
+                  {t('customer_requests.promote')}
+                </Button>
+                <Button onClick={() => setCreateOpen(true)}>
+                  <Plus className="size-4" />
+                  {t('customer_requests.create')}
+                </Button>
+              </>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -239,6 +256,9 @@ export function CustomerRequestsPage({
         ownerOptions={ownerOptions}
         onOpenChange={setPromoteOpen}
       />
+      {canConfigure ? (
+        <ScoringSettingsDialog open={scoringOpen} onOpenChange={setScoringOpen} />
+      ) : null}
     </div>
   )
 }
@@ -443,6 +463,260 @@ function CustomerRequestToolbar({
       </Select>
     </div>
   )
+}
+
+type ScoringFormState = {
+  priorityNoneWeight: number
+  priorityLowWeight: number
+  priorityMediumWeight: number
+  priorityHighWeight: number
+  priorityUrgentWeight: number
+  feedbackWeight: number
+  feedbackCap: number
+  customerWeight: number
+  customerCap: number
+  accountWeight: number
+  accountCap: number
+  voteWeight: number
+  voteCap: number
+  revenueCentsPerPoint: string
+  revenueCap: number
+}
+
+const DEFAULT_SCORING_FORM: ScoringFormState = {
+  priorityNoneWeight: 0,
+  priorityLowWeight: 20,
+  priorityMediumWeight: 40,
+  priorityHighWeight: 60,
+  priorityUrgentWeight: 80,
+  feedbackWeight: 2,
+  feedbackCap: 80,
+  customerWeight: 5,
+  customerCap: 100,
+  accountWeight: 8,
+  accountCap: 120,
+  voteWeight: 4,
+  voteCap: 80,
+  revenueCentsPerPoint: '100000',
+  revenueCap: 100,
+}
+
+const PRIORITY_SCORING_FIELDS = [
+  'priorityNoneWeight',
+  'priorityLowWeight',
+  'priorityMediumWeight',
+  'priorityHighWeight',
+  'priorityUrgentWeight',
+] as const
+
+const SIGNAL_SCORING_FIELDS = [
+  'feedbackWeight',
+  'feedbackCap',
+  'customerWeight',
+  'customerCap',
+  'accountWeight',
+  'accountCap',
+  'voteWeight',
+  'voteCap',
+  'revenueCap',
+] as const
+
+function ScoringSettingsDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { t } = useTranslation()
+  const settings = useQuery({ ...customerRequestScoringSettingsQuery(), enabled: open })
+  const update = useUpdateCustomerRequestScoringSettings()
+  const [form, setForm] = useState<ScoringFormState>(DEFAULT_SCORING_FORM)
+
+  useEffect(() => {
+    if (settings.data) setForm(scoringSettingsToForm(settings.data))
+  }, [settings.data])
+
+  const setNumber = (field: keyof ScoringFormState, value: string) => {
+    setForm((current) => ({
+      ...current,
+      [field]: field === 'revenueCentsPerPoint' ? value : normalizeInteger(value),
+    }))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{t('customer_requests.scoring_settings')}</DialogTitle>
+          <DialogDescription className="sr-only">
+            {t('customer_requests.scoring_settings_description')}
+          </DialogDescription>
+        </DialogHeader>
+        {settings.isPending ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+          </div>
+        ) : settings.isError ? (
+          <div className="rounded-md border p-4 text-sm text-destructive">
+            {settings.error?.message}
+          </div>
+        ) : (
+          <div className="space-y-5">
+            <ScoringFieldGrid title={t('customer_requests.scoring_priority_weights')}>
+              {PRIORITY_SCORING_FIELDS.map((field) => (
+                <ScoringNumberInput
+                  key={field}
+                  label={t(`customer_requests.scoring_fields.${field}`)}
+                  value={form[field]}
+                  onChange={(value) => setNumber(field, value)}
+                />
+              ))}
+            </ScoringFieldGrid>
+            <ScoringFieldGrid title={t('customer_requests.scoring_signal_weights')}>
+              {SIGNAL_SCORING_FIELDS.map((field) => (
+                <ScoringNumberInput
+                  key={field}
+                  label={t(`customer_requests.scoring_fields.${field}`)}
+                  value={form[field]}
+                  onChange={(value) => setNumber(field, value)}
+                />
+              ))}
+              <ScoringNumberInput
+                label={t('customer_requests.scoring_fields.revenueCentsPerPoint')}
+                value={form.revenueCentsPerPoint}
+                onChange={(value) => setNumber('revenueCentsPerPoint', value)}
+              />
+            </ScoringFieldGrid>
+            {settings.data?.updatedAt ? (
+              <p className="text-xs text-muted-foreground">
+                {t('customer_requests.scoring_updated', {
+                  actor: settings.data.updatedBy || t('customer_requests.owner_unassigned'),
+                  value: formatDate(settings.data.updatedAt),
+                })}
+              </p>
+            ) : null}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            disabled={settings.isPending || settings.isError || update.isPending}
+            onClick={() =>
+              update.mutate(scoringFormToRequest(form), {
+                onSuccess: () => {
+                  toast.success(t('customer_requests.scoring_saved'))
+                  onOpenChange(false)
+                },
+                onError: (err) =>
+                  toast.error(err instanceof Error ? err.message : t('common.error')),
+              })
+            }
+          >
+            {update.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Save className="size-4" />
+            )}
+            {t('common.save')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ScoringFieldGrid({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium">{title}</h2>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{children}</div>
+    </section>
+  )
+}
+
+function ScoringNumberInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: number | string
+  onChange: (value: string) => void
+}) {
+  const id = useId()
+  return (
+    <div className="space-y-1 text-sm">
+      <Label htmlFor={id} className="text-muted-foreground">
+        {label}
+      </Label>
+      <Input
+        id={id}
+        min={0}
+        inputMode="numeric"
+        type="number"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
+  )
+}
+
+function scoringSettingsToForm(settings: CustomerRequestScoringSettings): ScoringFormState {
+  return {
+    priorityNoneWeight: settings.priorityNoneWeight,
+    priorityLowWeight: settings.priorityLowWeight,
+    priorityMediumWeight: settings.priorityMediumWeight,
+    priorityHighWeight: settings.priorityHighWeight,
+    priorityUrgentWeight: settings.priorityUrgentWeight,
+    feedbackWeight: settings.feedbackWeight,
+    feedbackCap: settings.feedbackCap,
+    customerWeight: settings.customerWeight,
+    customerCap: settings.customerCap,
+    accountWeight: settings.accountWeight,
+    accountCap: settings.accountCap,
+    voteWeight: settings.voteWeight,
+    voteCap: settings.voteCap,
+    revenueCentsPerPoint: settings.revenueCentsPerPoint || '100000',
+    revenueCap: settings.revenueCap,
+  }
+}
+
+function scoringFormToRequest(form: ScoringFormState) {
+  return {
+    priorityNoneWeight: form.priorityNoneWeight,
+    priorityLowWeight: form.priorityLowWeight,
+    priorityMediumWeight: form.priorityMediumWeight,
+    priorityHighWeight: form.priorityHighWeight,
+    priorityUrgentWeight: form.priorityUrgentWeight,
+    feedbackWeight: form.feedbackWeight,
+    feedbackCap: form.feedbackCap,
+    customerWeight: form.customerWeight,
+    customerCap: form.customerCap,
+    accountWeight: form.accountWeight,
+    accountCap: form.accountCap,
+    voteWeight: form.voteWeight,
+    voteCap: form.voteCap,
+    revenueCentsPerPoint: normalizeIntegerString(form.revenueCentsPerPoint, '100000'),
+    revenueCap: form.revenueCap,
+  }
+}
+
+function normalizeInteger(value: string) {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed) || parsed < 0) return 0
+  return parsed
+}
+
+function normalizeIntegerString(value: string, fallback: string) {
+  const trimmed = value.trim()
+  if (!/^\d+$/.test(trimmed)) return fallback
+  return trimmed === '0' ? fallback : trimmed
 }
 
 function CustomerRequestRow({

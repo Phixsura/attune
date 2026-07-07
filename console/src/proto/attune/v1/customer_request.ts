@@ -237,6 +237,48 @@ export interface CustomerRequestDetail {
   notes: CustomerRequestNote[];
 }
 
+export interface CustomerRequestScoringSettings {
+  tenantId: string;
+  priorityNoneWeight: number;
+  priorityLowWeight: number;
+  priorityMediumWeight: number;
+  priorityHighWeight: number;
+  priorityUrgentWeight: number;
+  feedbackWeight: number;
+  feedbackCap: number;
+  customerWeight: number;
+  customerCap: number;
+  accountWeight: number;
+  accountCap: number;
+  voteWeight: number;
+  voteCap: number;
+  revenueCentsPerPoint: string;
+  revenueCap: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface GetCustomerRequestScoringSettingsRequest {
+}
+
+export interface UpdateCustomerRequestScoringSettingsRequest {
+  priorityNoneWeight?: number | undefined;
+  priorityLowWeight?: number | undefined;
+  priorityMediumWeight?: number | undefined;
+  priorityHighWeight?: number | undefined;
+  priorityUrgentWeight?: number | undefined;
+  feedbackWeight?: number | undefined;
+  feedbackCap?: number | undefined;
+  customerWeight?: number | undefined;
+  customerCap?: number | undefined;
+  accountWeight?: number | undefined;
+  accountCap?: number | undefined;
+  voteWeight?: number | undefined;
+  voteCap?: number | undefined;
+  revenueCentsPerPoint?: string | undefined;
+  revenueCap?: number | undefined;
+}
+
 export interface ListCustomerRequestsRequest {
   q: string;
   status: CustomerRequestStatus[];
@@ -388,6 +430,12 @@ export interface RecordCustomerRequestIssueSyncRequest {
 
 export interface CustomerRequestService {
   ListCustomerRequests(request: ListCustomerRequestsRequest): Promise<ListCustomerRequestsResponse>;
+  GetCustomerRequestScoringSettings(
+    request: GetCustomerRequestScoringSettingsRequest,
+  ): Promise<CustomerRequestScoringSettings>;
+  UpdateCustomerRequestScoringSettings(
+    request: UpdateCustomerRequestScoringSettingsRequest,
+  ): Promise<CustomerRequestScoringSettings>;
   GetCustomerRequest(request: GetCustomerRequestRequest): Promise<CustomerRequestDetail>;
   CreateCustomerRequest(request: CreateCustomerRequestRequest): Promise<CustomerRequestDetail>;
   UpdateCustomerRequest(request: UpdateCustomerRequestRequest): Promise<CustomerRequestDetail>;

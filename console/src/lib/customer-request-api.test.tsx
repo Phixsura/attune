@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   customerRequestDetailQuery,
   customerRequestKeys,
+  customerRequestScoringSettingsQuery,
   customerRequestsInfiniteQuery,
   useAddCustomerRequestNote,
   useAddCustomerRequestVote,
@@ -21,6 +22,7 @@ import {
   useUnlinkCustomerRequestFeedback,
   useUnlinkCustomerRequestIssue,
   useUpdateCustomerRequest,
+  useUpdateCustomerRequestScoringSettings,
 } from '@/lib/customer-request-api'
 import {
   CustomerRequestDeliveryHealth,
@@ -28,6 +30,7 @@ import {
   CustomerRequestImportance,
   CustomerRequestIssueSyncState,
   CustomerRequestPriority,
+  type CustomerRequestScoringSettings,
   CustomerRequestSort,
   CustomerRequestStatus,
   CustomerRequestVisibility,
@@ -137,6 +140,47 @@ describe('customer request API', () => {
       makeQueryClient().fetchQuery(customerRequestDetailQuery(requestID)),
     ).resolves.toEqual(detail)
     expect(path).toBe(`${baseURL}/${requestID}`)
+  })
+
+  it('fetches and updates scoring settings', async () => {
+    let payload: Record<string, unknown> | undefined
+    server.use(
+      http.get(`${baseURL}/scoring-settings`, () => HttpResponse.json(sampleScoringSettings())),
+      http.put(`${baseURL}/scoring-settings`, async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(
+          sampleScoringSettings({
+            feedbackWeight: Number(payload.feedbackWeight),
+            revenueCentsPerPoint: String(payload.revenueCentsPerPoint),
+          }),
+        )
+      }),
+    )
+    const qc = makeQueryClient()
+
+    await expect(qc.fetchQuery(customerRequestScoringSettingsQuery())).resolves.toMatchObject({
+      feedbackWeight: 2,
+      revenueCentsPerPoint: '100000',
+    })
+
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useUpdateCustomerRequestScoringSettings(), {
+      wrapper: wrapperFor(qc),
+    })
+    await result.current.mutateAsync({
+      feedbackWeight: 9,
+      revenueCentsPerPoint: '250000',
+    })
+
+    expect(payload).toEqual({
+      feedbackWeight: 9,
+      revenueCentsPerPoint: '250000',
+    })
+    expect(qc.getQueryData(customerRequestKeys.scoring())).toMatchObject({
+      feedbackWeight: 9,
+      revenueCentsPerPoint: '250000',
+    })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.all })
   })
 
   it('posts mutating actions and refreshes customer request caches', async () => {
@@ -296,5 +340,31 @@ function sampleDetail(id: string): CustomerRequestDetail {
     duplicates: [],
     accountProfiles: [],
     notes: [],
+  }
+}
+
+function sampleScoringSettings(
+  overrides: Partial<CustomerRequestScoringSettings> = {},
+): CustomerRequestScoringSettings {
+  return {
+    tenantId: 't-1',
+    priorityNoneWeight: 0,
+    priorityLowWeight: 20,
+    priorityMediumWeight: 40,
+    priorityHighWeight: 60,
+    priorityUrgentWeight: 80,
+    feedbackWeight: 2,
+    feedbackCap: 80,
+    customerWeight: 5,
+    customerCap: 100,
+    accountWeight: 8,
+    accountCap: 120,
+    voteWeight: 4,
+    voteCap: 80,
+    revenueCentsPerPoint: '100000',
+    revenueCap: 100,
+    updatedBy: '',
+    updatedAt: '',
+    ...overrides,
   }
 }

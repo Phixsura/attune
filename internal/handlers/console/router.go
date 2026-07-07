@@ -447,6 +447,26 @@ func (r *Router) mountCustomerRequestReads(cr chi.Router) {
 			return session.FromContext(r.Context()), nil
 		}),
 	))
+	cr.Get("/scoring-settings", dispatcher.Bind(
+		"console.CustomerRequestHandler.GetScoringSettings",
+		dispatcher.Path(func() *attunev1.GetCustomerRequestScoringSettingsRequest {
+			return ptrext.Of(attunev1.GetCustomerRequestScoringSettingsRequest{})
+		}),
+		r.customerRequests.GetScoringSettings,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetCustomerRequestScoringSettingsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.With(r.requireDelegatedAdminStrict).Put("/scoring-settings", dispatcher.Bind(
+		"console.CustomerRequestHandler.UpdateScoringSettings",
+		dispatcher.JSON(func() *attunev1.UpdateCustomerRequestScoringSettingsRequest {
+			return ptrext.Of(attunev1.UpdateCustomerRequestScoringSettingsRequest{})
+		}),
+		r.customerRequests.UpdateScoringSettings,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateCustomerRequestScoringSettingsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 	cr.Get("/{id}", dispatcher.Bind(
 		"console.CustomerRequestHandler.Get",
 		dispatcher.Path(

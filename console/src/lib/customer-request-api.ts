@@ -12,6 +12,7 @@ import type {
   CreateCustomerRequestRequest,
   CustomerRequestDetail,
   CustomerRequestPriority,
+  CustomerRequestScoringSettings,
   CustomerRequestSort,
   CustomerRequestStatus,
   CustomerRequestVisibility,
@@ -24,6 +25,7 @@ import type {
   RecordCustomerRequestIssueSyncRequest,
   SortDirection,
   UpdateCustomerRequestRequest,
+  UpdateCustomerRequestScoringSettingsRequest,
 } from '@/proto/attune/v1/customer_request'
 
 const BASE = '/fb/v1/console/customer-requests'
@@ -44,6 +46,7 @@ export const customerRequestKeys = {
   list: (filters: CustomerRequestFilters) =>
     ['console', 'customer-requests', 'list', filters] as const,
   detail: (id: string) => ['console', 'customer-requests', 'detail', id] as const,
+  scoring: () => ['console', 'customer-requests', 'scoring-settings'] as const,
 }
 
 export const customerRequestsInfiniteQuery = (filters: CustomerRequestFilters = {}) =>
@@ -68,6 +71,14 @@ export const customerRequestDetailQuery = (id: string | null) =>
     queryFn: ({ signal }) =>
       api<CustomerRequestDetail>(`${BASE}/${encodeURIComponent(id ?? '')}`, { signal }),
     staleTime: 10_000,
+  })
+
+export const customerRequestScoringSettingsQuery = () =>
+  queryOptions({
+    queryKey: customerRequestKeys.scoring(),
+    queryFn: ({ signal }) =>
+      api<CustomerRequestScoringSettings>(`${BASE}/scoring-settings`, { signal }),
+    staleTime: 30_000,
   })
 
 export function useCreateCustomerRequest() {
@@ -254,6 +265,21 @@ export function useRecordCustomerRequestIssueSync(id: string) {
         },
       ),
     onSuccess: (detail) => updateCustomerRequestCache(qc, detail),
+  })
+}
+
+export function useUpdateCustomerRequestScoringSettings() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: UpdateCustomerRequestScoringSettingsRequest) =>
+      api<CustomerRequestScoringSettings>(`${BASE}/scoring-settings`, {
+        method: 'PUT',
+        body,
+      }),
+    onSuccess: (settings) => {
+      qc.setQueryData(customerRequestKeys.scoring(), settings)
+      void qc.invalidateQueries({ queryKey: customerRequestKeys.all })
+    },
   })
 }
 

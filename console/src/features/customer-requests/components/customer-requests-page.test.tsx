@@ -9,6 +9,7 @@ import {
   type CustomerRequestNote,
   type CustomerRequestOwner,
   CustomerRequestPriority,
+  type CustomerRequestScoringSettings,
   CustomerRequestStatus,
   type CustomerRequestSummary,
   type ListCustomerRequestsResponse,
@@ -70,6 +71,42 @@ describe('CustomerRequestsPage', () => {
       ownerMemberId: member.id,
     })
     expect(payload?.idempotencyKey).toEqual(expect.stringMatching(/^cr_[A-Za-z0-9_-]+$/))
+  })
+
+  it('updates scoring settings from the settings dialog', async () => {
+    let payload: Record<string, unknown> | undefined
+    mockList({ requests: [] })
+    server.use(
+      http.get(`${baseURL}/scoring-settings`, () => HttpResponse.json(sampleScoringSettings())),
+      http.put(`${baseURL}/scoring-settings`, async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(
+          sampleScoringSettings({
+            feedbackWeight: Number(payload.feedbackWeight),
+            revenueCentsPerPoint: String(payload.revenueCentsPerPoint),
+            updatedBy: 'tester',
+          }),
+        )
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: '评分设置' }))
+    const dialog = await screen.findByRole('dialog', { name: '评分设置' })
+    expect(await within(dialog).findByLabelText('反馈权重')).toHaveValue(2)
+    await user.clear(within(dialog).getByLabelText('反馈权重'))
+    await user.type(within(dialog).getByLabelText('反馈权重'), '9')
+    await user.clear(within(dialog).getByLabelText('每分收入金额'))
+    await user.type(within(dialog).getByLabelText('每分收入金额'), '250000')
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() =>
+      expect(payload).toMatchObject({
+        feedbackWeight: 9,
+        revenueCentsPerPoint: '250000',
+      }),
+    )
   })
 
   it('posts selected feedback ids when promoting feedback', async () => {
@@ -850,6 +887,32 @@ function mockDetail(detail: CustomerRequestDetail) {
 
 function mockMembers(members: Member[]) {
   server.use(http.get('/fb/v1/console/members', () => HttpResponse.json({ members })))
+}
+
+function sampleScoringSettings(
+  overrides: Partial<CustomerRequestScoringSettings> = {},
+): CustomerRequestScoringSettings {
+  return {
+    tenantId: 't-1',
+    priorityNoneWeight: 0,
+    priorityLowWeight: 20,
+    priorityMediumWeight: 40,
+    priorityHighWeight: 60,
+    priorityUrgentWeight: 80,
+    feedbackWeight: 2,
+    feedbackCap: 80,
+    customerWeight: 5,
+    customerCap: 100,
+    accountWeight: 8,
+    accountCap: 120,
+    voteWeight: 4,
+    voteCap: 80,
+    revenueCentsPerPoint: '100000',
+    revenueCap: 100,
+    updatedBy: '',
+    updatedAt: '',
+    ...overrides,
+  }
 }
 
 function sampleMember(overrides: Partial<Member> = {}): Member {

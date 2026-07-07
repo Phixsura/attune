@@ -154,6 +154,47 @@ type Summary struct {
 	LatestFeedbackAt         *time.Time
 }
 
+type ScoringSettings struct {
+	TenantID             string
+	PriorityNoneWeight   int
+	PriorityLowWeight    int
+	PriorityMediumWeight int
+	PriorityHighWeight   int
+	PriorityUrgentWeight int
+	FeedbackWeight       int
+	FeedbackCap          int
+	CustomerWeight       int
+	CustomerCap          int
+	AccountWeight        int
+	AccountCap           int
+	VoteWeight           int
+	VoteCap              int
+	RevenueCentsPerPoint int64
+	RevenueCap           int
+	UpdatedBy            string
+	UpdatedAt            time.Time
+}
+
+type ScoringSettingsInput struct {
+	TenantID             string
+	PriorityNoneWeight   int
+	PriorityLowWeight    int
+	PriorityMediumWeight int
+	PriorityHighWeight   int
+	PriorityUrgentWeight int
+	FeedbackWeight       int
+	FeedbackCap          int
+	CustomerWeight       int
+	CustomerCap          int
+	AccountWeight        int
+	AccountCap           int
+	VoteWeight           int
+	VoteCap              int
+	RevenueCentsPerPoint int64
+	RevenueCap           int
+	ActorID              string
+}
+
 type FeedbackEvidence struct {
 	FeedbackID     int64
 	Content        string
@@ -408,6 +449,127 @@ func (r *Repo) Begin(ctx context.Context) (pgx.Tx, error) {
 type queryer interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func DefaultScoringSettings(tenantID string) ScoringSettings {
+	return ScoringSettings{
+		TenantID:             tenantID,
+		PriorityNoneWeight:   0,
+		PriorityLowWeight:    20,
+		PriorityMediumWeight: 40,
+		PriorityHighWeight:   60,
+		PriorityUrgentWeight: 80,
+		FeedbackWeight:       2,
+		FeedbackCap:          80,
+		CustomerWeight:       5,
+		CustomerCap:          100,
+		AccountWeight:        8,
+		AccountCap:           120,
+		VoteWeight:           4,
+		VoteCap:              80,
+		RevenueCentsPerPoint: 100000,
+		RevenueCap:           100,
+		UpdatedBy:            "",
+	}
+}
+
+func (r *Repo) GetScoringSettings(ctx context.Context, tenantID string) (ScoringSettings, error) {
+	out, err := scanScoringSettings(r.pool.QueryRow(ctx, scoringSettingsSelectSQL()+`
+		WHERE tenant_id = $1`, tenantID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DefaultScoringSettings(tenantID), nil
+	}
+	if err != nil {
+		return ScoringSettings{}, fmt.Errorf("get customer request scoring settings: %w", err)
+	}
+	return out, nil
+}
+
+func (r *Repo) UpsertScoringSettingsTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	in ScoringSettingsInput,
+) (ScoringSettings, error) {
+	out, err := scanScoringSettings(tx.QueryRow(ctx, `
+		INSERT INTO customer_request_scoring_settings (
+			tenant_id,
+			priority_none_weight,
+			priority_low_weight,
+			priority_medium_weight,
+			priority_high_weight,
+			priority_urgent_weight,
+			feedback_weight,
+			feedback_cap,
+			customer_weight,
+			customer_cap,
+			account_weight,
+			account_cap,
+			vote_weight,
+			vote_cap,
+			revenue_cents_per_point,
+			revenue_cap,
+			updated_by
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+		)
+		ON CONFLICT (tenant_id) DO UPDATE SET
+			priority_none_weight = EXCLUDED.priority_none_weight,
+			priority_low_weight = EXCLUDED.priority_low_weight,
+			priority_medium_weight = EXCLUDED.priority_medium_weight,
+			priority_high_weight = EXCLUDED.priority_high_weight,
+			priority_urgent_weight = EXCLUDED.priority_urgent_weight,
+			feedback_weight = EXCLUDED.feedback_weight,
+			feedback_cap = EXCLUDED.feedback_cap,
+			customer_weight = EXCLUDED.customer_weight,
+			customer_cap = EXCLUDED.customer_cap,
+			account_weight = EXCLUDED.account_weight,
+			account_cap = EXCLUDED.account_cap,
+			vote_weight = EXCLUDED.vote_weight,
+			vote_cap = EXCLUDED.vote_cap,
+			revenue_cents_per_point = EXCLUDED.revenue_cents_per_point,
+			revenue_cap = EXCLUDED.revenue_cap,
+			updated_by = EXCLUDED.updated_by
+		RETURNING
+			tenant_id,
+			priority_none_weight,
+			priority_low_weight,
+			priority_medium_weight,
+			priority_high_weight,
+			priority_urgent_weight,
+			feedback_weight,
+			feedback_cap,
+			customer_weight,
+			customer_cap,
+			account_weight,
+			account_cap,
+			vote_weight,
+			vote_cap,
+			revenue_cents_per_point,
+			revenue_cap,
+			updated_by,
+			updated_at`,
+		in.TenantID,
+		in.PriorityNoneWeight,
+		in.PriorityLowWeight,
+		in.PriorityMediumWeight,
+		in.PriorityHighWeight,
+		in.PriorityUrgentWeight,
+		in.FeedbackWeight,
+		in.FeedbackCap,
+		in.CustomerWeight,
+		in.CustomerCap,
+		in.AccountWeight,
+		in.AccountCap,
+		in.VoteWeight,
+		in.VoteCap,
+		in.RevenueCentsPerPoint,
+		in.RevenueCap,
+		in.ActorID,
+	))
+	if err != nil {
+		return ScoringSettings{}, mapWriteError(err, "upsert customer request scoring settings")
+	}
+	return out, nil
 }
 
 func (r *Repo) List(ctx context.Context, filter ListFilter) (ListResult, error) {
@@ -1458,17 +1620,32 @@ const summarySelectSQLText = `
 			COALESCE(ai.revenue_currency, 'USD'),
 			(
 				CASE cr.priority
-					WHEN 'urgent' THEN 80
-					WHEN 'high' THEN 60
-					WHEN 'medium' THEN 40
-					WHEN 'low' THEN 20
-					ELSE 0
+					WHEN 'urgent' THEN COALESCE(css.priority_urgent_weight, 80)
+					WHEN 'high' THEN COALESCE(css.priority_high_weight, 60)
+					WHEN 'medium' THEN COALESCE(css.priority_medium_weight, 40)
+					WHEN 'low' THEN COALESCE(css.priority_low_weight, 20)
+					ELSE COALESCE(css.priority_none_weight, 0)
 				END
-				+ LEAST(COALESCE(fc.supporting_feedback_count, 0) * 2, 80)
-				+ LEAST(COALESCE(sc.customer_count, 0) * 5, 100)
-				+ LEAST(COALESCE(sc.account_count, 0) * 8, 120)
-				+ LEAST(COALESCE(vc.vote_count, 0) * 4, 80)
-				+ LEAST((COALESCE(ai.revenue_impact_cents, 0) / 100000)::int, 100)
+				+ LEAST(
+					COALESCE(fc.supporting_feedback_count, 0) * COALESCE(css.feedback_weight, 2),
+					COALESCE(css.feedback_cap, 80)
+				)
+				+ LEAST(
+					COALESCE(sc.customer_count, 0) * COALESCE(css.customer_weight, 5),
+					COALESCE(css.customer_cap, 100)
+				)
+				+ LEAST(
+					COALESCE(sc.account_count, 0) * COALESCE(css.account_weight, 8),
+					COALESCE(css.account_cap, 120)
+				)
+				+ LEAST(
+					COALESCE(vc.vote_count, 0) * COALESCE(css.vote_weight, 4),
+					COALESCE(css.vote_cap, 80)
+				)
+				+ LEAST(
+					(COALESCE(ai.revenue_impact_cents, 0) / COALESCE(NULLIF(css.revenue_cents_per_point, 0), 100000))::int,
+					COALESCE(css.revenue_cap, 100)
+				)
 			)::int AS decision_score,
 			CASE
 				WHEN COALESCE(ic.linked_issue_count, 0) = 0 THEN 'no_links'
@@ -1497,6 +1674,8 @@ const summarySelectSQLText = `
 		LEFT JOIN tenant_members tm
 		  ON tm.tenant_id = cr.tenant_id
 		 AND tm.id = cr.owner_member_id
+		LEFT JOIN customer_request_scoring_settings css
+		  ON css.tenant_id = cr.tenant_id
 		LEFT JOIN LATERAL (
 			SELECT
 				COUNT(*) FILTER (WHERE uf.id IS NOT NULL AND uf.deleted_at IS NULL)::int AS supporting_feedback_count,
@@ -1675,6 +1854,55 @@ func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 		})
 	}
 	return nil
+}
+
+func scoringSettingsSelectSQL() string {
+	return `
+		SELECT
+			tenant_id,
+			priority_none_weight,
+			priority_low_weight,
+			priority_medium_weight,
+			priority_high_weight,
+			priority_urgent_weight,
+			feedback_weight,
+			feedback_cap,
+			customer_weight,
+			customer_cap,
+			account_weight,
+			account_cap,
+			vote_weight,
+			vote_cap,
+			revenue_cents_per_point,
+			revenue_cap,
+			updated_by,
+			updated_at
+		FROM customer_request_scoring_settings`
+}
+
+func scanScoringSettings(row scanner) (ScoringSettings, error) { // ptrext:allow scan-target
+	var out ScoringSettings
+	err := row.Scan(
+		&out.TenantID,
+		&out.PriorityNoneWeight,
+		&out.PriorityLowWeight,
+		&out.PriorityMediumWeight,
+		&out.PriorityHighWeight,
+		&out.PriorityUrgentWeight,
+		&out.FeedbackWeight,
+		&out.FeedbackCap,
+		&out.CustomerWeight,
+		&out.CustomerCap,
+		&out.AccountWeight,
+		&out.AccountCap,
+		&out.VoteWeight,
+		&out.VoteCap,
+		&out.RevenueCentsPerPoint,
+		&out.RevenueCap,
+		&out.UpdatedBy,
+		&out.UpdatedAt,
+	)
+	return out, err
 }
 
 func listEvidence(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID, limit int) ([]FeedbackEvidence, error) {

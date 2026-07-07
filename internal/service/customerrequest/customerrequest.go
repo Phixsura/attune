@@ -76,6 +76,26 @@ type ListInput struct {
 	FeedbackID    int64
 }
 
+type ScoringSettingsInput struct {
+	TenantID             string
+	PriorityNoneWeight   *int
+	PriorityLowWeight    *int
+	PriorityMediumWeight *int
+	PriorityHighWeight   *int
+	PriorityUrgentWeight *int
+	FeedbackWeight       *int
+	FeedbackCap          *int
+	CustomerWeight       *int
+	CustomerCap          *int
+	AccountWeight        *int
+	AccountCap           *int
+	VoteWeight           *int
+	VoteCap              *int
+	RevenueCentsPerPoint *int64
+	RevenueCap           *int
+	Actor                auditlogsvc.Actor
+}
+
 type CreateInput struct {
 	TenantID       string
 	Title          string
@@ -213,6 +233,45 @@ func (s *Service) List(ctx context.Context, in ListInput) (repo.ListResult, erro
 		Cursor:        in.Cursor,
 		FeedbackID:    in.FeedbackID,
 	})
+}
+
+func (s *Service) GetScoringSettings(ctx context.Context, tenantID string) (repo.ScoringSettings, error) {
+	if strings.TrimSpace(tenantID) == "" {
+		return repo.ScoringSettings{}, ErrValidation
+	}
+	return s.repo.GetScoringSettings(ctx, strings.TrimSpace(tenantID))
+}
+
+func (s *Service) UpdateScoringSettings(ctx context.Context, in ScoringSettingsInput) (repo.ScoringSettings, error) {
+	tenantID := strings.TrimSpace(in.TenantID)
+	if tenantID == "" {
+		return repo.ScoringSettings{}, ErrValidation
+	}
+	before, err := s.repo.GetScoringSettings(ctx, tenantID)
+	if err != nil {
+		return repo.ScoringSettings{}, err
+	}
+	normalized, err := normalizeScoringSettings(in, before)
+	if err != nil {
+		return repo.ScoringSettings{}, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return repo.ScoringSettings{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	after, err := s.repo.UpsertScoringSettingsTx(ctx, tx, normalized)
+	if err != nil {
+		return repo.ScoringSettings{}, err
+	}
+	if err := s.recordScoringSettingsAuditTx(ctx, tx, normalized.TenantID, in.Actor, before, after); err != nil {
+		return repo.ScoringSettings{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return repo.ScoringSettings{}, err
+	}
+	return after, nil
 }
 
 func (s *Service) Get(ctx context.Context, tenantID string, id uuid.UUID, evidenceLimit int) (*Detail, error) {
@@ -827,6 +886,90 @@ func normalizePromote(in PromoteInput) (PromoteInput, error) {
 	return in, nil
 }
 
+func normalizeScoringSettings(
+	in ScoringSettingsInput,
+	current repo.ScoringSettings,
+) (repo.ScoringSettingsInput, error) {
+	tenantID := strings.TrimSpace(in.TenantID)
+	if tenantID == "" {
+		return repo.ScoringSettingsInput{}, ErrValidation
+	}
+	out := repo.ScoringSettingsInput{
+		TenantID:             tenantID,
+		PriorityNoneWeight:   patchInt(current.PriorityNoneWeight, in.PriorityNoneWeight),
+		PriorityLowWeight:    patchInt(current.PriorityLowWeight, in.PriorityLowWeight),
+		PriorityMediumWeight: patchInt(current.PriorityMediumWeight, in.PriorityMediumWeight),
+		PriorityHighWeight:   patchInt(current.PriorityHighWeight, in.PriorityHighWeight),
+		PriorityUrgentWeight: patchInt(current.PriorityUrgentWeight, in.PriorityUrgentWeight),
+		FeedbackWeight:       patchInt(current.FeedbackWeight, in.FeedbackWeight),
+		FeedbackCap:          patchInt(current.FeedbackCap, in.FeedbackCap),
+		CustomerWeight:       patchInt(current.CustomerWeight, in.CustomerWeight),
+		CustomerCap:          patchInt(current.CustomerCap, in.CustomerCap),
+		AccountWeight:        patchInt(current.AccountWeight, in.AccountWeight),
+		AccountCap:           patchInt(current.AccountCap, in.AccountCap),
+		VoteWeight:           patchInt(current.VoteWeight, in.VoteWeight),
+		VoteCap:              patchInt(current.VoteCap, in.VoteCap),
+		RevenueCentsPerPoint: patchInt64(current.RevenueCentsPerPoint, in.RevenueCentsPerPoint),
+		RevenueCap:           patchInt(current.RevenueCap, in.RevenueCap),
+		ActorID:              strings.TrimSpace(in.Actor.ID),
+	}
+	if out.ActorID == "" {
+		out.ActorID = "system"
+	}
+	for _, check := range scoringWeightChecks(out) {
+		if !validWeight(check.value, check.limit) {
+			return repo.ScoringSettingsInput{}, ErrValidation
+		}
+	}
+	if out.RevenueCentsPerPoint <= 0 || out.RevenueCentsPerPoint > 100000000000 {
+		return repo.ScoringSettingsInput{}, ErrValidation
+	}
+	return out, nil
+}
+
+func scoringWeightChecks(in repo.ScoringSettingsInput) []struct {
+	value int
+	limit int
+} {
+	return []struct {
+		value int
+		limit int
+	}{
+		{value: in.PriorityNoneWeight, limit: 10000},
+		{value: in.PriorityLowWeight, limit: 10000},
+		{value: in.PriorityMediumWeight, limit: 10000},
+		{value: in.PriorityHighWeight, limit: 10000},
+		{value: in.PriorityUrgentWeight, limit: 10000},
+		{value: in.FeedbackWeight, limit: 1000},
+		{value: in.FeedbackCap, limit: 10000},
+		{value: in.CustomerWeight, limit: 1000},
+		{value: in.CustomerCap, limit: 10000},
+		{value: in.AccountWeight, limit: 1000},
+		{value: in.AccountCap, limit: 10000},
+		{value: in.VoteWeight, limit: 1000},
+		{value: in.VoteCap, limit: 10000},
+		{value: in.RevenueCap, limit: 10000},
+	}
+}
+
+func patchInt(current int, next *int) int {
+	if next == nil {
+		return current
+	}
+	return ptrext.Indirect(next)
+}
+
+func patchInt64(current int64, next *int64) int64 {
+	if next == nil {
+		return current
+	}
+	return ptrext.Indirect(next)
+}
+
+func validWeight(value, limit int) bool {
+	return value >= 0 && value <= limit
+}
+
 func validateCreateFields(tenantID, title, description string, status repo.Status, priority repo.Priority, key string) error {
 	if tenantID == "" || utf8.RuneCountInString(title) == 0 || utf8.RuneCountInString(title) > 200 {
 		return ErrValidation
@@ -1359,6 +1502,9 @@ func (s *Service) recordAuditTx(
 	if actor.Type == "" {
 		actor.Type = "admin"
 	}
+	if actor.ID == "" {
+		actor.ID = "system"
+	}
 	return s.audit.RecordTx(ctx, tx, auditlogsvc.Event{
 		TenantID:   target.TenantID,
 		Actor:      actor,
@@ -1376,6 +1522,9 @@ func (s *Service) recordMergeAuditTx(ctx context.Context, tx pgx.Tx, tenantID st
 	}
 	if actor.Type == "" {
 		actor.Type = "admin"
+	}
+	if actor.ID == "" {
+		actor.ID = "system"
 	}
 	return s.audit.RecordTx(ctx, tx, auditlogsvc.Event{
 		TenantID:   tenantID,
@@ -1398,6 +1547,52 @@ func (s *Service) recordMergeAuditTx(ctx context.Context, tx pgx.Tx, tenantID st
 			"skipped_duplicate_issue_count":    result.SkippedDuplicateIssueCount,
 		},
 	})
+}
+
+func (s *Service) recordScoringSettingsAuditTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	actor auditlogsvc.Actor,
+	before repo.ScoringSettings,
+	after repo.ScoringSettings,
+) error {
+	if s.audit == nil {
+		return nil
+	}
+	if actor.Type == "" {
+		actor.Type = "admin"
+	}
+	return s.audit.RecordTx(ctx, tx, auditlogsvc.Event{
+		TenantID:   tenantID,
+		Actor:      actor,
+		Action:     "customer_request.update_scoring_settings",
+		TargetType: "customer_request_scoring_settings",
+		TargetID:   tenantID,
+		Summary:    "Updated customer request scoring settings",
+		Before:     scoringSettingsAuditFields(before),
+		After:      scoringSettingsAuditFields(after),
+	})
+}
+
+func scoringSettingsAuditFields(settings repo.ScoringSettings) map[string]any {
+	return map[string]any{
+		"priority_none_weight":    settings.PriorityNoneWeight,
+		"priority_low_weight":     settings.PriorityLowWeight,
+		"priority_medium_weight":  settings.PriorityMediumWeight,
+		"priority_high_weight":    settings.PriorityHighWeight,
+		"priority_urgent_weight":  settings.PriorityUrgentWeight,
+		"feedback_weight":         settings.FeedbackWeight,
+		"feedback_cap":            settings.FeedbackCap,
+		"customer_weight":         settings.CustomerWeight,
+		"customer_cap":            settings.CustomerCap,
+		"account_weight":          settings.AccountWeight,
+		"account_cap":             settings.AccountCap,
+		"vote_weight":             settings.VoteWeight,
+		"vote_cap":                settings.VoteCap,
+		"revenue_cents_per_point": settings.RevenueCentsPerPoint,
+		"revenue_cap":             settings.RevenueCap,
+	}
 }
 
 func createAuditMetadata(summary repo.Summary, idempotencyKey string) map[string]any {

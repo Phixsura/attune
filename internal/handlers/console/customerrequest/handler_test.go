@@ -182,6 +182,41 @@ func TestHandlerListAndGet(t *testing.T) {
 	assertDetailProto(t, gotDetail.Body)
 }
 
+func TestHandlerScoringSettings(t *testing.T) {
+	h := newHandlerHarness()
+	h.fake.scoring = repo.DefaultScoringSettings("tenant-a")
+
+	got, err := h.handler.GetScoringSettings(h.ctx, &attunev1.GetCustomerRequestScoringSettingsRequest{})
+	if err != nil {
+		t.Fatalf("GetScoringSettings() error = %v", err)
+	}
+	if got.Body.GetPriorityUrgentWeight() != 80 || got.Body.GetRevenueCentsPerPoint() != 100000 {
+		t.Fatalf("GetScoringSettings() = %+v, want defaults", got.Body)
+	}
+	if got.Body.GetUpdatedAt() != "" {
+		t.Fatalf("GetScoringSettings() UpdatedAt = %q, want empty default timestamp", got.Body.GetUpdatedAt())
+	}
+
+	feedbackWeight := int32(7)
+	revenueCentsPerPoint := int64(250000)
+	updated, err := h.handler.UpdateScoringSettings(h.ctx, &attunev1.UpdateCustomerRequestScoringSettingsRequest{
+		FeedbackWeight:       ptrext.Of(feedbackWeight),
+		RevenueCentsPerPoint: ptrext.Of(revenueCentsPerPoint),
+	})
+	if err != nil {
+		t.Fatalf("UpdateScoringSettings() error = %v", err)
+	}
+	input := h.fake.last.(svc.ScoringSettingsInput)
+	if input.FeedbackWeight == nil || ptrext.Indirect(input.FeedbackWeight) != 7 ||
+		input.RevenueCentsPerPoint == nil || ptrext.Indirect(input.RevenueCentsPerPoint) != revenueCentsPerPoint ||
+		input.Actor.ID != "user-a" {
+		t.Fatalf("ScoringSettingsInput = %+v, want converted patch and actor", input)
+	}
+	if updated.Body.GetFeedbackWeight() != 7 {
+		t.Fatalf("UpdateScoringSettings() feedback weight = %d, want 7", updated.Body.GetFeedbackWeight())
+	}
+}
+
 func TestHandlerCreateAndUpdate(t *testing.T) {
 	h := newHandlerHarness()
 	create, err := h.handler.Create(h.ctx, &attunev1.CreateCustomerRequestRequest{
@@ -447,14 +482,34 @@ func TestQueryBindConversions(t *testing.T) {
 }
 
 type fakeCustomerRequestService struct {
-	list   repo.ListResult
-	detail *svc.Detail
-	last   any
+	list    repo.ListResult
+	detail  *svc.Detail
+	scoring repo.ScoringSettings
+	last    any
 }
 
 func (f *fakeCustomerRequestService) List(_ context.Context, in svc.ListInput) (repo.ListResult, error) {
 	f.last = in
 	return f.list, nil
+}
+
+func (f *fakeCustomerRequestService) GetScoringSettings(_ context.Context, tenantID string) (repo.ScoringSettings, error) {
+	if f.scoring.TenantID == "" {
+		return repo.DefaultScoringSettings(tenantID), nil
+	}
+	return f.scoring, nil
+}
+
+func (f *fakeCustomerRequestService) UpdateScoringSettings(_ context.Context, in svc.ScoringSettingsInput) (repo.ScoringSettings, error) {
+	f.last = in
+	out := repo.DefaultScoringSettings(in.TenantID)
+	if in.FeedbackWeight != nil {
+		out.FeedbackWeight = ptrext.Indirect(in.FeedbackWeight)
+	}
+	if in.RevenueCentsPerPoint != nil {
+		out.RevenueCentsPerPoint = ptrext.Indirect(in.RevenueCentsPerPoint)
+	}
+	return out, nil
 }
 
 func (f *fakeCustomerRequestService) Get(_ context.Context, _ string, _ uuid.UUID, _ int) (*svc.Detail, error) {

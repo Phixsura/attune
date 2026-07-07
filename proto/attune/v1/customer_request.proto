@@ -9,6 +9,15 @@ service CustomerRequestService {
   rpc ListCustomerRequests(ListCustomerRequestsRequest) returns (ListCustomerRequestsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/customer-requests"};
   }
+  rpc GetCustomerRequestScoringSettings(GetCustomerRequestScoringSettingsRequest) returns (CustomerRequestScoringSettings) {
+    option (google.api.http) = {get: "/fb/v1/console/customer-requests/scoring-settings"};
+  }
+  rpc UpdateCustomerRequestScoringSettings(UpdateCustomerRequestScoringSettingsRequest) returns (CustomerRequestScoringSettings) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/customer-requests/scoring-settings"
+      body: "*"
+    };
+  }
   rpc GetCustomerRequest(GetCustomerRequestRequest) returns (CustomerRequestDetail) {
     option (google.api.http) = {get: "/fb/v1/console/customer-requests/{id}"};
   }
@@ -308,6 +317,47 @@ message CustomerRequestDetail {
   repeated CustomerRequestDuplicate duplicates = 8;
   repeated CustomerRequestAccountProfile account_profiles = 9;
   repeated CustomerRequestNote notes = 10;
+}
+
+message CustomerRequestScoringSettings {
+  string tenant_id = 1;
+  int32 priority_none_weight = 2;
+  int32 priority_low_weight = 3;
+  int32 priority_medium_weight = 4;
+  int32 priority_high_weight = 5;
+  int32 priority_urgent_weight = 6;
+  int32 feedback_weight = 7;
+  int32 feedback_cap = 8;
+  int32 customer_weight = 9;
+  int32 customer_cap = 10;
+  int32 account_weight = 11;
+  int32 account_cap = 12;
+  int32 vote_weight = 13;
+  int32 vote_cap = 14;
+  int64 revenue_cents_per_point = 15;
+  int32 revenue_cap = 16;
+  string updated_by = 17;
+  string updated_at = 18;
+}
+
+message GetCustomerRequestScoringSettingsRequest {}
+
+message UpdateCustomerRequestScoringSettingsRequest {
+  optional int32 priority_none_weight = 1;
+  optional int32 priority_low_weight = 2;
+  optional int32 priority_medium_weight = 3;
+  optional int32 priority_high_weight = 4;
+  optional int32 priority_urgent_weight = 5;
+  optional int32 feedback_weight = 6;
+  optional int32 feedback_cap = 7;
+  optional int32 customer_weight = 8;
+  optional int32 customer_cap = 9;
+  optional int32 account_weight = 10;
+  optional int32 account_cap = 11;
+  optional int32 vote_weight = 12;
+  optional int32 vote_cap = 13;
+  optional int64 revenue_cents_per_point = 14;
+  optional int32 revenue_cap = 15;
 }
 
 message ListCustomerRequestsRequest {

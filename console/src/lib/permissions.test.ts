@@ -21,6 +21,7 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'customer_request:view')).toBe(true)
       expect(hasPermission(role, 'customer_request:edit')).toBe(true)
       expect(hasPermission(role, 'customer_request:merge')).toBe(true)
+      expect(hasPermission(role, 'customer_request:configure')).toBe(true)
     })
 
     it('has all settings permissions', () => {
@@ -49,6 +50,7 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'customer_request:view')).toBe(true)
       expect(hasPermission(role, 'customer_request:edit')).toBe(true)
       expect(hasPermission(role, 'customer_request:merge')).toBe(true)
+      expect(hasPermission(role, 'customer_request:configure')).toBe(true)
       expect(hasPermission(role, 'settings:enrich_config:view')).toBe(true)
       expect(hasPermission(role, 'settings:enrich_config:edit')).toBe(true)
       expect(hasPermission(role, 'settings:notify_targets:view')).toBe(true)
@@ -76,6 +78,7 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'customer_request:view')).toBe(true)
       expect(hasPermission(role, 'customer_request:edit')).toBe(true)
       expect(hasPermission(role, 'customer_request:merge')).toBe(false)
+      expect(hasPermission(role, 'customer_request:configure')).toBe(false)
     })
 
     it('can view settings but not edit', () => {
@@ -105,6 +108,7 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'customer_request:view')).toBe(true)
       expect(hasPermission(role, 'customer_request:edit')).toBe(false)
       expect(hasPermission(role, 'customer_request:merge')).toBe(false)
+      expect(hasPermission(role, 'customer_request:configure')).toBe(false)
     })
 
     it('cannot access settings', () => {

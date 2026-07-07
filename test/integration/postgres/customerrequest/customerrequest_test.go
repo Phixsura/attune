@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	crrepo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	idempotencyrepo "github.com/Phixsura/attune/internal/repo/idempotency"
@@ -124,6 +125,84 @@ func TestPGCustomerRequestDecisionIntelligence(t *testing.T) {
 	fixture := seedDecisionIntelligence(t, e)
 	detail := assertDecisionIntelligenceDetail(t, e, fixture)
 	assertDecisionScoreSort(t, e, fixture.highValue.ID, detail.Summary.DecisionScore)
+}
+
+func TestPGCustomerRequestScoringSettingsCustomizeDecisionScore(t *testing.T) {
+	e := setup(t)
+	highRevenue := e.createRequest(t, e.tenantID, "High revenue request")
+	broadFeedback := e.createRequest(t, e.tenantID, "Broad feedback request")
+	feedbackIDs := []int64{
+		e.seedFeedback(t, e.tenantID, "broad-user-1", "broad-subject-1"),
+		e.seedFeedback(t, e.tenantID, "broad-user-2", "broad-subject-2"),
+		e.seedFeedback(t, e.tenantID, "broad-user-3", "broad-subject-3"),
+	}
+
+	tx := e.begin(t)
+	_, err := e.repo.LinkCustomerTx(e.ctx, tx, crrepo.CustomerLinkInput{
+		TenantID:       e.tenantID,
+		RequestID:      highRevenue.ID,
+		AccountKey:     "account:large",
+		AccountDisplay: "Large Account",
+		ActorID:        "operator",
+		AccountProfile: crrepo.AccountProfileInput{
+			AccountKey:      "account:large",
+			AccountDisplay:  "Large Account",
+			RevenueCents:    50_000_000,
+			RevenueCurrency: "USD",
+			Source:          "manual",
+			ActorID:         "operator",
+		},
+	})
+	if err != nil {
+		rollback(t, e.ctx, tx)
+		t.Fatalf("LinkCustomerTx high revenue: %v", err)
+	}
+	for _, feedbackID := range feedbackIDs {
+		linkFeedback(t, e.ctx, e.repo, tx, e.tenantID, broadFeedback.ID, feedbackID)
+	}
+	commit(t, e.ctx, tx)
+
+	defaults, err := e.repo.GetScoringSettings(e.ctx, e.tenantID)
+	if err != nil {
+		t.Fatalf("GetScoringSettings defaults: %v", err)
+	}
+	if defaults.FeedbackWeight != 2 || defaults.RevenueCentsPerPoint != 100000 {
+		t.Fatalf("default scoring settings = %+v, want current formula defaults", defaults)
+	}
+
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	feedbackWeight := 100
+	feedbackCap := 1000
+	updated, err := service.UpdateScoringSettings(e.ctx, crsvc.ScoringSettingsInput{
+		TenantID:       e.tenantID,
+		FeedbackWeight: ptrext.Of(feedbackWeight),
+		FeedbackCap:    ptrext.Of(feedbackCap),
+		Actor:          auditlogsvc.Actor{Type: "delegated_admin", ID: "planner-1"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateScoringSettings: %v", err)
+	}
+	if updated.FeedbackWeight != feedbackWeight || updated.FeedbackCap != feedbackCap {
+		t.Fatalf("updated scoring settings = %+v, want feedback-heavy formula", updated)
+	}
+
+	list, err := e.repo.List(e.ctx, crrepo.ListFilter{
+		TenantID:   e.tenantID,
+		Visibility: crrepo.VisibilityAll,
+		Sort:       crrepo.SortDecisionScore,
+		Direction:  crrepo.DirectionDesc,
+	})
+	if err != nil {
+		t.Fatalf("List by custom decision score: %v", err)
+	}
+	if len(list.Items) < 2 || list.Items[0].ID != broadFeedback.ID {
+		t.Fatalf("custom decision-score order = %+v, want broad feedback first", list.Items)
+	}
+	if list.Items[0].DecisionScore <= list.Items[1].DecisionScore {
+		t.Fatalf("custom score did not rank broad request higher: %+v", list.Items[:2])
+	}
+	assertScoringSettingsAuditRows(t, auditRepo, e.tenantID)
 }
 
 func TestPGCustomerRequestDeliveryHealthRollup(t *testing.T) {
@@ -457,6 +536,30 @@ func assertNoteAuditRows(t *testing.T, auditRepo *auditlogrepo.Repo, tenantID, r
 		if after["note_id"] == "" || after["body_length"] == nil {
 			t.Fatalf("note audit after = %v, want note_id and body_length", after)
 		}
+	}
+}
+
+func assertScoringSettingsAuditRows(t *testing.T, auditRepo *auditlogrepo.Repo, tenantID string) {
+	t.Helper()
+	rows, err := auditRepo.List(context.Background(), auditlogrepo.ListFilter{
+		TenantID:   tenantID,
+		Actions:    []string{"customer_request.update_scoring_settings"},
+		TargetType: "customer_request_scoring_settings",
+		TargetID:   tenantID,
+		Unbounded:  true,
+	})
+	if err != nil {
+		t.Fatalf("List scoring settings audit rows: %v", err)
+	}
+	if len(rows.Items) != 1 {
+		t.Fatalf("scoring settings audit rows len = %d, want 1", len(rows.Items))
+	}
+	var after map[string]any
+	if err := json.Unmarshal(rows.Items[0].AfterJSON, &after); err != nil {
+		t.Fatalf("unmarshal scoring settings audit after json: %v", err)
+	}
+	if after["feedback_weight"] != float64(100) || after["feedback_cap"] != float64(1000) {
+		t.Fatalf("scoring settings audit after = %+v, want feedback formula", after)
 	}
 }
 
