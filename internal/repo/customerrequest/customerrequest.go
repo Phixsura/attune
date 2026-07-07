@@ -228,6 +228,13 @@ type Vote struct {
 	AccountProfile *AccountProfile
 }
 
+type Note struct {
+	ID        uuid.UUID
+	Body      string
+	CreatedBy string
+	CreatedAt time.Time
+}
+
 type Duplicate struct {
 	ID        uuid.UUID
 	DisplayID string
@@ -241,6 +248,7 @@ type Detail struct {
 	IssueLinks      []IssueLink
 	CustomerLinks   []CustomerLink
 	Votes           []Vote
+	Notes           []Note
 	Duplicates      []Duplicate
 	AccountProfiles []AccountProfile
 }
@@ -323,6 +331,13 @@ type VoteInput struct {
 	AccountProfile AccountProfileInput
 }
 
+type NoteInput struct {
+	TenantID  string
+	RequestID uuid.UUID
+	Body      string
+	ActorID   string
+}
+
 type IssueLinkInput struct {
 	TenantID    string
 	RequestID   uuid.UUID
@@ -369,6 +384,7 @@ type MergeResult struct {
 	MovedFeedbackCount            int
 	MovedCustomerCount            int
 	MovedVoteCount                int
+	MovedNoteCount                int
 	MovedIssueCount               int
 	SkippedDuplicateFeedbackCount int
 	SkippedDuplicateCustomerCount int
@@ -556,6 +572,10 @@ func loadDetail(ctx context.Context, db queryer, tenantID string, id uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
+	notes, err := listNotes(ctx, db, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
 	duplicates, err := listDuplicates(ctx, db, tenantID, id)
 	if err != nil {
 		return nil, err
@@ -567,6 +587,7 @@ func loadDetail(ctx context.Context, db queryer, tenantID string, id uuid.UUID, 
 		IssueLinks:      issues,
 		CustomerLinks:   customers,
 		Votes:           votes,
+		Notes:           notes,
 		Duplicates:      duplicates,
 		AccountProfiles: accountProfiles,
 	}), nil
@@ -852,6 +873,60 @@ func (r *Repo) RemoveVoteTx(ctx context.Context, tx pgx.Tx, tenantID string, req
 	return vote, nil
 }
 
+func (r *Repo) AddNoteTx(ctx context.Context, tx pgx.Tx, in NoteInput) (*Note, error) {
+	var id uuid.UUID
+	err := tx.QueryRow(
+		ctx, `
+		INSERT INTO customer_request_notes (
+			tenant_id, request_id, body, created_by
+		)
+		SELECT $1, cr.id, $3, $4
+		FROM customer_requests cr
+		WHERE cr.tenant_id = $1
+		  AND cr.id = $2
+		  AND cr.archived_at IS NULL
+		RETURNING id`,
+		in.TenantID, in.RequestID, in.Body, in.ActorID,
+	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if _, getErr := loadSummary(ctx, tx, in.TenantID, in.RequestID); getErr != nil {
+			return nil, getErr
+		}
+		return nil, ErrConflict
+	}
+	if err != nil {
+		return nil, mapWriteError(err, "add note")
+	}
+	if err := touchRequestTx(ctx, tx, in.TenantID, in.RequestID, in.ActorID); err != nil {
+		return nil, err
+	}
+	return getNote(ctx, tx, in.TenantID, in.RequestID, id)
+}
+
+func (r *Repo) DeleteNoteTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID, noteID uuid.UUID, actorID string) (*Note, error) {
+	var note Note
+	err := tx.QueryRow(
+		ctx, `
+		WITH deleted AS (
+			DELETE FROM customer_request_notes
+			WHERE tenant_id = $1 AND request_id = $2 AND id = $3
+			RETURNING id, body, created_by, created_at
+		)
+		SELECT id, body, created_by, created_at FROM deleted`,
+		tenantID, requestID, noteID,
+	).Scan(&note.ID, &note.Body, &note.CreatedBy, &note.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrLinkNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("delete note: %w", err)
+	}
+	if err := touchRequestTx(ctx, tx, tenantID, requestID, actorID); err != nil {
+		return nil, err
+	}
+	return ptrext.Of(note), nil
+}
+
 func (r *Repo) LinkIssueTx(ctx context.Context, tx pgx.Tx, in IssueLinkInput) (*IssueLink, error) {
 	var id uuid.UUID
 	err := tx.QueryRow(
@@ -988,6 +1063,7 @@ func (r *Repo) MergeTx(ctx context.Context, tx pgx.Tx, tenantID string, sourceID
 	result.MovedFeedbackCount = backlinks.MovedFeedback
 	result.MovedCustomerCount = backlinks.MovedCustomers
 	result.MovedVoteCount = backlinks.MovedVotes
+	result.MovedNoteCount = backlinks.MovedNotes
 	result.MovedIssueCount = backlinks.MovedIssues
 	result.SkippedDuplicateFeedbackCount = backlinks.SourceFeedback - backlinks.MovedFeedback
 	result.SkippedDuplicateCustomerCount = backlinks.SourceCustomers - backlinks.MovedCustomers
@@ -1003,6 +1079,8 @@ type mergeBacklinkCounts struct {
 	MovedCustomers  int
 	SourceVotes     int
 	MovedVotes      int
+	SourceNotes     int
+	MovedNotes      int
 	SourceIssues    int
 	MovedIssues     int
 }
@@ -1031,6 +1109,14 @@ func copyMergeBacklinks(ctx context.Context, tx pgx.Tx, tenantID string, sourceI
 		return mergeBacklinkCounts{}, err
 	}
 	out.MovedVotes, err = copyVotes(ctx, tx, tenantID, sourceID, targetID, actorID)
+	if err != nil {
+		return mergeBacklinkCounts{}, err
+	}
+	out.SourceNotes, err = countNotes(ctx, tx, tenantID, sourceID)
+	if err != nil {
+		return mergeBacklinkCounts{}, err
+	}
+	out.MovedNotes, err = copyNotes(ctx, tx, tenantID, sourceID, targetID)
 	if err != nil {
 		return mergeBacklinkCounts{}, err
 	}
@@ -1194,6 +1280,34 @@ func copyVotes(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, target
 		)
 		SELECT COUNT(*)::int FROM moved`,
 		tenantID, sourceID, targetID, actorID,
+	).Scan(&count)
+	return count, err
+}
+
+func countNotes(ctx context.Context, tx pgx.Tx, tenantID string, requestID uuid.UUID) (int, error) {
+	var count int
+	err := tx.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM customer_request_notes
+		WHERE tenant_id = $1 AND request_id = $2`, tenantID, requestID).Scan(&count)
+	return count, err
+}
+
+func copyNotes(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, targetID uuid.UUID) (int, error) {
+	var count int
+	err := tx.QueryRow(
+		ctx, `
+		WITH moved AS (
+			INSERT INTO customer_request_notes (
+				tenant_id, request_id, body, created_by, created_at
+			)
+			SELECT tenant_id, $3, body, created_by, created_at
+			FROM customer_request_notes
+			WHERE tenant_id = $1 AND request_id = $2
+			RETURNING id
+		)
+		SELECT COUNT(*)::int FROM moved`,
+		tenantID, sourceID, targetID,
 	).Scan(&count)
 	return count, err
 }
@@ -1849,6 +1963,45 @@ func scanVote(row scanner, out *Vote) error { // ptrext:allow scan-target
 	}
 	out.AccountProfile = profile.toProfile()
 	return nil
+}
+
+func listNotes(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID) ([]Note, error) {
+	rows, err := db.Query(ctx, `
+		SELECT id, body, created_by, created_at
+		FROM customer_request_notes
+		WHERE tenant_id = $1 AND request_id = $2
+		ORDER BY created_at DESC, id DESC`, tenantID, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("list customer request notes: %w", err)
+	}
+	defer rows.Close()
+	var out []Note
+	for rows.Next() {
+		var item Note
+		if err := rows.Scan(&item.ID, &item.Body, &item.CreatedBy, &item.CreatedAt); err != nil { // ptrext:allow scan-target
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func getNote(ctx context.Context, db queryer, tenantID string, requestID, noteID uuid.UUID) (*Note, error) {
+	var out Note
+	err := db.QueryRow(
+		ctx, `
+		SELECT id, body, created_by, created_at
+		FROM customer_request_notes
+		WHERE tenant_id = $1 AND request_id = $2 AND id = $3`,
+		tenantID, requestID, noteID,
+	).Scan(&out.ID, &out.Body, &out.CreatedBy, &out.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrLinkNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ptrext.Of(out), nil
 }
 
 func listDuplicates(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID) ([]Duplicate, error) {

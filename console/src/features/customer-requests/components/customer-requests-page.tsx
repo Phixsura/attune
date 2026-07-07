@@ -46,8 +46,10 @@ import {
   type CustomerRequestFilters,
   customerRequestDetailQuery,
   customerRequestsInfiniteQuery,
+  useAddCustomerRequestNote,
   useAddCustomerRequestVote,
   useCreateCustomerRequest,
+  useDeleteCustomerRequestNote,
   useLinkCustomerRequestCustomer,
   useLinkCustomerRequestFeedback,
   useLinkCustomerRequestIssue,
@@ -72,6 +74,7 @@ import {
   CustomerRequestImportance,
   type CustomerRequestIssueLink,
   CustomerRequestIssueSyncState,
+  type CustomerRequestNote,
   type CustomerRequestOwner,
   CustomerRequestPriority,
   CustomerRequestSort,
@@ -638,6 +641,23 @@ function CustomerRequestDetailSheet({
             {canEdit ? <CustomerLinkForm requestID={detail.data.request?.id ?? ''} /> : null}
             {canEdit ? <VoteForm requestID={detail.data.request?.id ?? ''} /> : null}
             {canEdit ? <IssueLinkForm requestID={detail.data.request?.id ?? ''} /> : null}
+            <DetailSection title={t('customer_requests.notes')}>
+              {canEdit ? <NoteForm requestID={detail.data.request?.id ?? ''} /> : null}
+              {(detail.data.notes ?? []).length === 0 ? (
+                <EmptyLine text={t('customer_requests.no_notes')} />
+              ) : (
+                <div className="space-y-2">
+                  {(detail.data.notes ?? []).map((item) => (
+                    <NoteRow
+                      key={item.id}
+                      requestID={detail.data.request?.id ?? ''}
+                      item={item}
+                      canEdit={canEdit}
+                    />
+                  ))}
+                </div>
+              )}
+            </DetailSection>
             <DetailSection title={t('customer_requests.linked_feedback')}>
               {detail.data.feedback.length === 0 ? (
                 <EmptyLine text={t('customer_requests.no_feedback')} />
@@ -1188,6 +1208,43 @@ function VoteForm({ requestID }: { requestID: string }) {
   )
 }
 
+function NoteForm({ requestID }: { requestID: string }) {
+  const { t } = useTranslation()
+  const [body, setBody] = useState('')
+  const add = useAddCustomerRequestNote(requestID)
+  const normalizedBody = body.trim()
+  if (!requestID) return null
+  return (
+    <form
+      className="grid gap-2 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (!normalizedBody) return
+        add.mutate(
+          { body: normalizedBody },
+          {
+            onSuccess: () => setBody(''),
+            onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+          },
+        )
+      }}
+    >
+      <textarea
+        aria-label={t('customer_requests.note_body')}
+        className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+        maxLength={5000}
+        value={body}
+        placeholder={t('customer_requests.note_placeholder')}
+        onChange={(event) => setBody(event.target.value)}
+      />
+      <Button type="submit" disabled={add.isPending || normalizedBody.length === 0}>
+        {add.isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+        {t('customer_requests.add_note')}
+      </Button>
+    </form>
+  )
+}
+
 export function CustomerRequestFormDialog({
   open,
   mode,
@@ -1497,6 +1554,51 @@ function VoteRow({
             variant="ghost"
             size="icon"
             aria-label={t('customer_requests.remove_vote')}
+            disabled={remove.isPending}
+            onClick={() =>
+              remove.mutate(item.id, {
+                onError: (err) =>
+                  toast.error(err instanceof Error ? err.message : t('common.error')),
+              })
+            }
+          >
+            {remove.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Trash2 className="size-4" />
+            )}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function NoteRow({
+  requestID,
+  item,
+  canEdit,
+}: {
+  requestID: string
+  item: CustomerRequestNote
+  canEdit: boolean
+}) {
+  const { t } = useTranslation()
+  const remove = useDeleteCustomerRequestNote(requestID)
+  return (
+    <div className="rounded-md border p-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <p className="whitespace-pre-wrap break-words">{item.body}</p>
+          <div className="text-xs text-muted-foreground">
+            {[item.createdBy, formatDate(item.createdAt)].filter(Boolean).join(' · ')}
+          </div>
+        </div>
+        {canEdit ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t('customer_requests.delete_note')}
             disabled={remove.isPending}
             onClick={() =>
               remove.mutate(item.id, {

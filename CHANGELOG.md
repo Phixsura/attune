@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   detail metrics, and PostgreSQL coverage for failed, stale, pending, manual,
   synced, and no-link rollups.
 
+- **Customer Requests now support internal collaboration notes.**
+  Added tenant-scoped request notes with generated API contracts, Console add
+  and delete controls, audit events that record note identity and length without
+  duplicating note bodies, request touch semantics, merge-context preservation,
+  and PostgreSQL coverage for note lifecycle and audit behavior.
+
 - **Private-deploy smoke suite now covers base, observability, TLS, failure, and upgrade modules.**
   Added dedicated smoke targets for the compose base stack, the observability
   overlay, the TLS reverse-proxy front door, deterministic startup failures,

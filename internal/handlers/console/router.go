@@ -426,6 +426,7 @@ func (r *Router) mountCustomerRequests(m chi.Router) {
 		r.mountCustomerRequestFeedback(cr)
 		r.mountCustomerRequestCustomers(cr)
 		r.mountCustomerRequestVotes(cr)
+		r.mountCustomerRequestNotes(cr)
 		r.mountCustomerRequestIssues(cr)
 		r.mountCustomerRequestMerge(cr)
 	})
@@ -598,6 +599,43 @@ func (r *Router) mountCustomerRequestVotes(cr chi.Router) {
 		),
 		r.customerRequests.RemoveVote,
 		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RemoveCustomerRequestVoteRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountCustomerRequestNotes(cr chi.Router) {
+	cr.With(r.requireMember).Post("/{id}/notes", dispatcher.Bind(
+		"console.CustomerRequestHandler.AddNote",
+		dispatcher.Combine(
+			func() *attunev1.AddCustomerRequestNoteRequest {
+				return ptrext.Of(attunev1.AddCustomerRequestNoteRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.AddCustomerRequestNoteRequest],
+			dispatcher.Param("id", func(req *attunev1.AddCustomerRequestNoteRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.AddNote,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.AddCustomerRequestNoteRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.With(r.requireMember).Delete("/{id}/notes/{note_id}", dispatcher.Bind(
+		"console.CustomerRequestHandler.DeleteNote",
+		dispatcher.Path(
+			func() *attunev1.DeleteCustomerRequestNoteRequest {
+				return ptrext.Of(attunev1.DeleteCustomerRequestNoteRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.DeleteCustomerRequestNoteRequest, id string) {
+				req.Id = id
+			}),
+			dispatcher.Param("note_id", func(req *attunev1.DeleteCustomerRequestNoteRequest, id string) {
+				req.NoteId = id
+			}),
+		),
+		r.customerRequests.DeleteNote,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteCustomerRequestNoteRequest) (*session.AuthCtx, error) {
 			return session.FromContext(r.Context()), nil
 		}),
 	))

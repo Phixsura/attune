@@ -208,6 +208,13 @@ export interface CustomerRequestDuplicate {
   mergedAt: string;
 }
 
+export interface CustomerRequestNote {
+  id: string;
+  body: string;
+  createdBy: string;
+  createdAt: string;
+}
+
 export interface CustomerRequestAuditEntry {
   id: string;
   action: string;
@@ -227,6 +234,7 @@ export interface CustomerRequestDetail {
   votes: CustomerRequestVote[];
   duplicates: CustomerRequestDuplicate[];
   accountProfiles: CustomerRequestAccountProfile[];
+  notes: CustomerRequestNote[];
 }
 
 export interface ListCustomerRequestsRequest {
@@ -337,6 +345,16 @@ export interface RemoveCustomerRequestVoteRequest {
   voteId: string;
 }
 
+export interface AddCustomerRequestNoteRequest {
+  id: string;
+  body: string;
+}
+
+export interface DeleteCustomerRequestNoteRequest {
+  id: string;
+  noteId: string;
+}
+
 export interface MergeCustomerRequestsRequest {
   sourceId: string;
   targetId: string;
@@ -380,6 +398,8 @@ export interface CustomerRequestService {
   UnlinkCustomerFromCustomerRequest(request: UnlinkCustomerFromCustomerRequestRequest): Promise<CustomerRequestDetail>;
   AddCustomerRequestVote(request: AddCustomerRequestVoteRequest): Promise<CustomerRequestDetail>;
   RemoveCustomerRequestVote(request: RemoveCustomerRequestVoteRequest): Promise<CustomerRequestDetail>;
+  AddCustomerRequestNote(request: AddCustomerRequestNoteRequest): Promise<CustomerRequestDetail>;
+  DeleteCustomerRequestNote(request: DeleteCustomerRequestNoteRequest): Promise<CustomerRequestDetail>;
   MergeCustomerRequests(request: MergeCustomerRequestsRequest): Promise<CustomerRequestDetail>;
   LinkCustomerRequestIssue(request: LinkCustomerRequestIssueRequest): Promise<CustomerRequestDetail>;
   UnlinkCustomerRequestIssue(request: UnlinkCustomerRequestIssueRequest): Promise<CustomerRequestDetail>;

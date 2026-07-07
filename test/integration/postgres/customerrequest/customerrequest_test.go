@@ -5,6 +5,7 @@
 package customerrequest_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -149,6 +150,49 @@ func TestPGCustomerRequestDeliveryHealthRollup(t *testing.T) {
 	assertDeliveryHealth(t, e, synced.ID, crrepo.DeliveryHealthSynced, 1, 0, 0, 0, 0)
 	assertDeliveryHealth(t, e, noLinks.ID, crrepo.DeliveryHealthNoLinks, 0, 0, 0, 0, 0)
 	assertDeliveryHealthSort(t, e, failed.ID, stale.ID, pending.ID)
+}
+
+func TestPGCustomerRequestNotesWriteAuditAndTouchRequest(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Noted request")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	actor := auditlogsvc.Actor{
+		Type:  "admin",
+		ID:    "operator-1",
+		Email: "operator@example.com",
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	added, err := service.AddNote(e.ctx, crsvc.NoteInput{
+		TenantID:  e.tenantID,
+		RequestID: request.ID,
+		Body:      "  Prioritize after ACME review.  ",
+		Actor:     actor,
+	})
+	if err != nil {
+		t.Fatalf("AddNote: %v", err)
+	}
+	if len(added.Request.Notes) != 1 {
+		t.Fatalf("notes len after add = %d, want 1", len(added.Request.Notes))
+	}
+	note := added.Request.Notes[0]
+	if note.Body != "Prioritize after ACME review." || note.CreatedBy != "operator-1" {
+		t.Fatalf("added note = %+v, want trimmed body and actor", note)
+	}
+	if added.Request.Summary.UpdatedBy != "operator-1" || !added.Request.Summary.UpdatedAt.After(request.UpdatedAt) {
+		t.Fatalf("add note touch = by:%q at:%s, want operator-1 after %s",
+			added.Request.Summary.UpdatedBy, added.Request.Summary.UpdatedAt, request.UpdatedAt)
+	}
+
+	deleted, err := service.DeleteNote(e.ctx, e.tenantID, request.ID, note.ID, actor)
+	if err != nil {
+		t.Fatalf("DeleteNote: %v", err)
+	}
+	if len(deleted.Request.Notes) != 0 {
+		t.Fatalf("notes len after delete = %d, want 0", len(deleted.Request.Notes))
+	}
+	assertNoteAuditRows(t, auditRepo, e.tenantID, request.ID.String())
 }
 
 type decisionIntelligenceFixture struct {
@@ -384,6 +428,35 @@ func assertDeliveryHealthSort(t *testing.T, e env, failedID, staleID, pendingID 
 	if list.Items[0].ID != failedID || list.Items[1].ID != staleID || list.Items[2].ID != pendingID {
 		t.Fatalf("delivery health order = %s, %s, %s; want failed/stale/pending",
 			list.Items[0].ID, list.Items[1].ID, list.Items[2].ID)
+	}
+}
+
+func assertNoteAuditRows(t *testing.T, auditRepo *auditlogrepo.Repo, tenantID, requestID string) {
+	t.Helper()
+	rows, err := auditRepo.List(context.Background(), auditlogrepo.ListFilter{
+		TenantID:   tenantID,
+		Actions:    []string{"customer_request.add_note", "customer_request.delete_note"},
+		TargetType: "customer_request",
+		TargetID:   requestID,
+		Unbounded:  true,
+	})
+	if err != nil {
+		t.Fatalf("List note audit rows: %v", err)
+	}
+	if len(rows.Items) != 2 {
+		t.Fatalf("note audit rows len = %d, want 2", len(rows.Items))
+	}
+	for _, row := range rows.Items {
+		if bytes.Contains(row.AfterJSON, []byte("Prioritize after ACME review")) {
+			t.Fatalf("note audit row leaked body: %s", string(row.AfterJSON))
+		}
+		var after map[string]any
+		if err := json.Unmarshal(row.AfterJSON, &after); err != nil {
+			t.Fatalf("unmarshal note audit after json: %v", err)
+		}
+		if after["note_id"] == "" || after["body_length"] == nil {
+			t.Fatalf("note audit after = %v, want note_id and body_length", after)
+		}
 	}
 }
 
@@ -756,6 +829,7 @@ func (e env) seedAndMergeRequests(t *testing.T, sourceID, targetID uuid.UUID) cr
 	addVote(t, e.ctx, e.repo, tx, e.tenantID, sourceID, "vote:moved", "vote-account:moved")
 	addVote(t, e.ctx, e.repo, tx, e.tenantID, sourceID, "vote:duplicate", "vote-account:duplicate")
 	addVote(t, e.ctx, e.repo, tx, e.tenantID, targetID, "vote:duplicate", "vote-account:duplicate")
+	addNote(t, e.ctx, e.repo, tx, e.tenantID, sourceID, "Source discussion context")
 	linkIssue(t, e.ctx, e.repo, tx, e.tenantID, sourceID, "Phixsura/attune#212")
 	linkIssue(t, e.ctx, e.repo, tx, e.tenantID, sourceID, "Phixsura/attune#213")
 	linkIssue(t, e.ctx, e.repo, tx, e.tenantID, targetID, "Phixsura/attune#213")
@@ -773,6 +847,9 @@ func assertMergeResult(t *testing.T, result crrepo.MergeResult) {
 	assertMovedAndSkipped(t, "customer", result.MovedCustomerCount, result.SkippedDuplicateCustomerCount)
 	assertMovedAndSkipped(t, "vote", result.MovedVoteCount, result.SkippedDuplicateVoteCount)
 	assertMovedAndSkipped(t, "issue", result.MovedIssueCount, result.SkippedDuplicateIssueCount)
+	if result.MovedNoteCount != 1 {
+		t.Fatalf("note moved count = %d, want 1", result.MovedNoteCount)
+	}
 }
 
 func assertMovedAndSkipped(t *testing.T, label string, moved, skipped int) {
@@ -790,6 +867,7 @@ func assertTargetBacklinks(t *testing.T, detail *crrepo.Detail, sourceID uuid.UU
 	assertLen(t, "feedback", len(detail.Feedback), 2)
 	assertLen(t, "customers", len(detail.CustomerLinks), 2)
 	assertLen(t, "votes", len(detail.Votes), 2)
+	assertLen(t, "notes", len(detail.Notes), 1)
 	assertLen(t, "issues", len(detail.IssueLinks), 2)
 	if detail.Summary.DuplicateRequestCount != 1 {
 		t.Fatalf("DuplicateRequestCount = %d, want 1", detail.Summary.DuplicateRequestCount)
@@ -797,6 +875,9 @@ func assertTargetBacklinks(t *testing.T, detail *crrepo.Detail, sourceID uuid.UU
 	assertLen(t, "duplicates", len(detail.Duplicates), 1)
 	if detail.Duplicates[0].ID != sourceID {
 		t.Fatalf("duplicate id = %s, want source %s", detail.Duplicates[0].ID, sourceID)
+	}
+	if detail.Notes[0].Body != "Source discussion context" {
+		t.Fatalf("copied note body = %q, want source context", detail.Notes[0].Body)
 	}
 }
 
@@ -953,6 +1034,18 @@ func addVote(t *testing.T, ctx context.Context, repo *crrepo.Repo, tx pgx.Tx, te
 		ActorID:        "tester",
 	}); err != nil {
 		t.Fatalf("AddVoteTx: %v", err)
+	}
+}
+
+func addNote(t *testing.T, ctx context.Context, repo *crrepo.Repo, tx pgx.Tx, tenantID string, requestID uuid.UUID, body string) {
+	t.Helper()
+	if _, err := repo.AddNoteTx(ctx, tx, crrepo.NoteInput{
+		TenantID:  tenantID,
+		RequestID: requestID,
+		Body:      body,
+		ActorID:   "tester",
+	}); err != nil {
+		t.Fatalf("AddNoteTx: %v", err)
 	}
 }
 

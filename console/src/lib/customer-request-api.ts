@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
 import type {
+  AddCustomerRequestNoteRequest,
   AddCustomerRequestVoteRequest,
   CreateCustomerRequestRequest,
   CustomerRequestDetail,
@@ -175,6 +176,30 @@ export function useRemoveCustomerRequestVote(id: string) {
     mutationFn: (voteId: string) =>
       api<CustomerRequestDetail>(
         `${BASE}/${encodeURIComponent(id)}/votes/${encodeURIComponent(voteId)}`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: (detail) => updateCustomerRequestCache(qc, detail),
+  })
+}
+
+export function useAddCustomerRequestNote(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: Omit<AddCustomerRequestNoteRequest, 'id'>) =>
+      api<CustomerRequestDetail>(`${BASE}/${encodeURIComponent(id)}/notes`, {
+        method: 'POST',
+        body: { id, ...body },
+      }),
+    onSuccess: (detail) => updateCustomerRequestCache(qc, detail),
+  })
+}
+
+export function useDeleteCustomerRequestNote(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (noteId: string) =>
+      api<CustomerRequestDetail>(
+        `${BASE}/${encodeURIComponent(id)}/notes/${encodeURIComponent(noteId)}`,
         { method: 'DELETE' },
       ),
     onSuccess: (detail) => updateCustomerRequestCache(qc, detail),

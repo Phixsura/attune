@@ -28,6 +28,8 @@ var validActions = map[string]struct{}{
 	"customer_request.unlink_customer":   {},
 	"customer_request.add_vote":          {},
 	"customer_request.remove_vote":       {},
+	"customer_request.add_note":          {},
+	"customer_request.delete_note":       {},
 	"customer_request.merge":             {},
 	"customer_request.link_issue":        {},
 	"customer_request.unlink_issue":      {},

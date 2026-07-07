@@ -1340,6 +1340,7 @@ function customerRequestDetail(request: CustomerRequestSummary) {
     auditEntries: [],
     customers: [],
     votes: [],
+    notes: [],
     duplicates: [],
     accountProfiles: [],
   }

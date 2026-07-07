@@ -5,6 +5,7 @@ import {
   CustomerRequestDeliveryHealth,
   type CustomerRequestDetail,
   CustomerRequestImportance,
+  type CustomerRequestNote,
   type CustomerRequestOwner,
   CustomerRequestPriority,
   CustomerRequestStatus,
@@ -16,6 +17,7 @@ import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
 const requestID = '11111111-1111-1111-1111-111111111111'
+const noteID = '44444444-4444-4444-4444-444444444444'
 const targetRequestID = '33333333-3333-3333-3333-333333333333'
 const baseURL = '/fb/v1/console/customer-requests'
 
@@ -264,6 +266,62 @@ describe('CustomerRequestsPage', () => {
     expect(payload).not.toHaveProperty('accountRevenueCents')
   })
 
+  it('adds an internal note from the detail drawer', async () => {
+    let payload: Record<string, unknown> | undefined
+    let detailResponse = sampleDetail()
+    mockList({ requests: [sampleSummary()] })
+    server.use(
+      http.get(`${baseURL}/${requestID}`, () => HttpResponse.json(detailResponse)),
+      http.post(`${baseURL}/${requestID}/notes`, async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        detailResponse = sampleDetail({
+          notes: [sampleNote({ body: String(payload.body) })],
+        })
+        return HttpResponse.json(detailResponse)
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText('备注内容'), 'Prioritize after ACME review.')
+    await user.click(within(dialog).getByRole('button', { name: '添加备注' }))
+
+    await waitFor(() => expect(payload).toBeDefined())
+    expect(payload).toMatchObject({
+      id: requestID,
+      body: 'Prioritize after ACME review.',
+    })
+    expect(await within(dialog).findByText('Prioritize after ACME review.')).toBeInTheDocument()
+  })
+
+  it('deletes an internal note from the detail drawer', async () => {
+    let deleted = false
+    let detailResponse = sampleDetail({ notes: [sampleNote()] })
+    mockList({ requests: [sampleSummary()] })
+    server.use(
+      http.get(`${baseURL}/${requestID}`, () => HttpResponse.json(detailResponse)),
+      http.delete(`${baseURL}/${requestID}/notes/${noteID}`, () => {
+        deleted = true
+        detailResponse = sampleDetail({ notes: [] })
+        return HttpResponse.json(detailResponse)
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('Prioritize after ACME review.')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '删除备注' }))
+
+    await waitFor(() => expect(deleted).toBe(true))
+    await waitFor(() =>
+      expect(within(dialog).queryByText('Prioritize after ACME review.')).not.toBeInTheDocument(),
+    )
+  })
+
   it('switches the detail drawer to the merge target after merging', async () => {
     let payload: Record<string, unknown> | undefined
     const targetDetail = sampleDetail({
@@ -402,6 +460,7 @@ function sampleDetail(
     auditEntries: overrides.auditEntries ?? [],
     customers: overrides.customers ?? [],
     votes: overrides.votes ?? [],
+    notes: overrides.notes ?? [],
     duplicates: overrides.duplicates ?? [],
     accountProfiles: overrides.accountProfiles ?? [
       {
@@ -418,5 +477,15 @@ function sampleDetail(
         updatedAt: '2026-07-07T00:10:00Z',
       },
     ],
+  }
+}
+
+function sampleNote(overrides: Partial<CustomerRequestNote> = {}): CustomerRequestNote {
+  return {
+    id: noteID,
+    body: 'Prioritize after ACME review.',
+    createdBy: 'operator@example.com',
+    createdAt: '2026-07-07T00:15:00Z',
+    ...overrides,
   }
 }

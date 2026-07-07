@@ -35,6 +35,8 @@ type service interface {
 	UnlinkCustomer(ctx context.Context, tenantID string, requestID, linkID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error)
 	AddVote(ctx context.Context, in svc.VoteInput) (*svc.Detail, error)
 	RemoveVote(ctx context.Context, tenantID string, requestID, voteID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error)
+	AddNote(ctx context.Context, in svc.NoteInput) (*svc.Detail, error)
+	DeleteNote(ctx context.Context, tenantID string, requestID, noteID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error)
 	Merge(ctx context.Context, in svc.MergeInput) (*svc.Detail, error)
 	LinkIssue(ctx context.Context, in svc.LinkIssueInput) (*svc.Detail, error)
 	UnlinkIssue(ctx context.Context, tenantID string, requestID, issueLinkID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error)
@@ -398,6 +400,51 @@ func (h *Handler) RemoveVote(
 	return dispatcher.OK(detailToProto(ptrext.Indirect(detail)))
 }
 
+func (h *Handler) AddNote(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.AddCustomerRequestNoteRequest,
+) (dispatcher.Result[*attunev1.CustomerRequestDetail], error) {
+	if h.service == nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "customer requests not configured")
+	}
+	id, err := uuid.Parse(req.GetId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid customer request id")
+	}
+	detail, err := h.service.AddNote(ctx, svc.NoteInput{
+		TenantID:  ctx.Auth.TenantID,
+		RequestID: id,
+		Body:      req.GetBody(),
+		Actor:     actor(ctx),
+	})
+	if err != nil {
+		return h.detailError(ctx, err)
+	}
+	return dispatcher.OK(detailToProto(ptrext.Indirect(detail)))
+}
+
+func (h *Handler) DeleteNote(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.DeleteCustomerRequestNoteRequest,
+) (dispatcher.Result[*attunev1.CustomerRequestDetail], error) {
+	if h.service == nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "customer requests not configured")
+	}
+	id, err := uuid.Parse(req.GetId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid customer request id")
+	}
+	noteID, err := uuid.Parse(req.GetNoteId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid note id")
+	}
+	detail, err := h.service.DeleteNote(ctx, ctx.Auth.TenantID, id, noteID, actor(ctx))
+	if err != nil {
+		return h.detailError(ctx, err)
+	}
+	return dispatcher.OK(detailToProto(ptrext.Indirect(detail)))
+}
+
 func (h *Handler) Merge(
 	ctx *dispatcher.RequestContext[*session.AuthCtx],
 	req *attunev1.MergeCustomerRequestsRequest,
@@ -665,6 +712,10 @@ func detailToProto(detail svc.Detail) *attunev1.CustomerRequestDetail {
 	for _, item := range detail.Request.Votes {
 		votes = append(votes, voteToProto(item))
 	}
+	notes := make([]*attunev1.CustomerRequestNote, 0, len(detail.Request.Notes))
+	for _, item := range detail.Request.Notes {
+		notes = append(notes, noteToProto(item))
+	}
 	duplicates := make([]*attunev1.CustomerRequestDuplicate, 0, len(detail.Request.Duplicates))
 	for _, item := range detail.Request.Duplicates {
 		duplicates = append(duplicates, duplicateToProto(item))
@@ -692,6 +743,7 @@ func detailToProto(detail svc.Detail) *attunev1.CustomerRequestDetail {
 		AuditEntries:    audit,
 		Customers:       customers,
 		Votes:           votes,
+		Notes:           notes,
 		Duplicates:      duplicates,
 		AccountProfiles: accountProfiles,
 	})
@@ -818,6 +870,15 @@ func voteToProto(item repo.Vote) *attunev1.CustomerRequestVote {
 		out.AccountProfile = accountProfileToProto(ptrext.Indirect(item.AccountProfile))
 	}
 	return out
+}
+
+func noteToProto(item repo.Note) *attunev1.CustomerRequestNote {
+	return ptrext.Of(attunev1.CustomerRequestNote{
+		Id:        item.ID.String(),
+		Body:      item.Body,
+		CreatedBy: item.CreatedBy,
+		CreatedAt: formatTime(ptrext.Of(item.CreatedAt)),
+	})
 }
 
 func accountProfileToProto(item repo.AccountProfile) *attunev1.CustomerRequestAccountProfile {
@@ -1147,6 +1208,8 @@ func bindSort(raw string) attunev1.CustomerRequestSort {
 		return attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_REVENUE_IMPACT
 	case "decision_score", "customer_request_sort_decision_score":
 		return attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DECISION_SCORE
+	case "delivery_health", "customer_request_sort_delivery_health":
+		return attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DELIVERY_HEALTH
 	default:
 		return attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_UPDATED_AT
 	}

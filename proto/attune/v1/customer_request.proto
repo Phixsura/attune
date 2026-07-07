@@ -57,6 +57,15 @@ service CustomerRequestService {
   rpc RemoveCustomerRequestVote(RemoveCustomerRequestVoteRequest) returns (CustomerRequestDetail) {
     option (google.api.http) = {delete: "/fb/v1/console/customer-requests/{id}/votes/{vote_id}"};
   }
+  rpc AddCustomerRequestNote(AddCustomerRequestNoteRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests/{id}/notes"
+      body: "*"
+    };
+  }
+  rpc DeleteCustomerRequestNote(DeleteCustomerRequestNoteRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {delete: "/fb/v1/console/customer-requests/{id}/notes/{note_id}"};
+  }
   rpc MergeCustomerRequests(MergeCustomerRequestsRequest) returns (CustomerRequestDetail) {
     option (google.api.http) = {
       post: "/fb/v1/console/customer-requests/{source_id}:merge"
@@ -272,6 +281,13 @@ message CustomerRequestDuplicate {
   string merged_at = 4;
 }
 
+message CustomerRequestNote {
+  string id = 1;
+  string body = 2;
+  string created_by = 3;
+  string created_at = 4;
+}
+
 message CustomerRequestAuditEntry {
   int64 id = 1;
   string action = 2;
@@ -291,6 +307,7 @@ message CustomerRequestDetail {
   repeated CustomerRequestVote votes = 7;
   repeated CustomerRequestDuplicate duplicates = 8;
   repeated CustomerRequestAccountProfile account_profiles = 9;
+  repeated CustomerRequestNote notes = 10;
 }
 
 message ListCustomerRequestsRequest {
@@ -399,6 +416,16 @@ message AddCustomerRequestVoteRequest {
 message RemoveCustomerRequestVoteRequest {
   string id = 1 [(google.api.field_behavior) = REQUIRED];
   string vote_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message AddCustomerRequestNoteRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string body = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message DeleteCustomerRequestNoteRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string note_id = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 message MergeCustomerRequestsRequest {

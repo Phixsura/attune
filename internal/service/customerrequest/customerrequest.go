@@ -147,6 +147,13 @@ type VoteInput struct {
 	Actor          auditlogsvc.Actor
 }
 
+type NoteInput struct {
+	TenantID  string
+	RequestID uuid.UUID
+	Body      string
+	Actor     auditlogsvc.Actor
+}
+
 type AccountProfileInput struct {
 	RevenueCents    *int64
 	RevenueCurrency string
@@ -501,6 +508,66 @@ func (s *Service) RemoveVote(ctx context.Context, tenantID string, requestID, vo
 	}
 	if err := s.recordAuditTx(ctx, tx, actor, "customer_request.remove_vote", summary.Summary,
 		"Removed vote from customer request", voteAuditMetadata(requestID, ptrext.Indirect(vote))); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, tenantID, requestID, 50)
+}
+
+func (s *Service) AddNote(ctx context.Context, in NoteInput) (*Detail, error) {
+	normalized, err := normalizeNote(in)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	note, err := s.repo.AddNoteTx(ctx, tx, repo.NoteInput{
+		TenantID:  normalized.TenantID,
+		RequestID: normalized.RequestID,
+		Body:      normalized.Body,
+		ActorID:   normalized.Actor.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, normalized.TenantID, normalized.RequestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, normalized.Actor, "customer_request.add_note", summary.Summary,
+		"Added note to customer request", noteAuditMetadata(normalized.RequestID, ptrext.Indirect(note))); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, normalized.TenantID, normalized.RequestID, 50)
+}
+
+func (s *Service) DeleteNote(ctx context.Context, tenantID string, requestID, noteID uuid.UUID, actor auditlogsvc.Actor) (*Detail, error) {
+	if tenantID == "" || requestID == uuid.Nil || noteID == uuid.Nil {
+		return nil, ErrValidation
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	note, err := s.repo.DeleteNoteTx(ctx, tx, tenantID, requestID, noteID, actor.ID)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.repo.GetDetailTx(ctx, tx, tenantID, requestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, actor, "customer_request.delete_note", summary.Summary,
+		"Deleted note from customer request", noteAuditMetadata(requestID, ptrext.Indirect(note))); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -868,6 +935,17 @@ func normalizeVote(in VoteInput) (VoteInput, error) {
 		return VoteInput{}, err
 	}
 	in.AccountProfile = profile
+	return in, nil
+}
+
+func normalizeNote(in NoteInput) (NoteInput, error) {
+	in.Body = strings.TrimSpace(in.Body)
+	if in.TenantID == "" || in.RequestID == uuid.Nil {
+		return NoteInput{}, ErrValidation
+	}
+	if utf8.RuneCountInString(in.Body) == 0 || utf8.RuneCountInString(in.Body) > 5000 {
+		return NoteInput{}, ErrValidation
+	}
 	return in, nil
 }
 
@@ -1312,6 +1390,7 @@ func (s *Service) recordMergeAuditTx(ctx context.Context, tx pgx.Tx, tenantID st
 			"moved_feedback_count":             result.MovedFeedbackCount,
 			"moved_customer_count":             result.MovedCustomerCount,
 			"moved_vote_count":                 result.MovedVoteCount,
+			"moved_note_count":                 result.MovedNoteCount,
 			"moved_issue_count":                result.MovedIssueCount,
 			"skipped_duplicate_feedback_count": result.SkippedDuplicateFeedbackCount,
 			"skipped_duplicate_customer_count": result.SkippedDuplicateCustomerCount,
@@ -1392,6 +1471,14 @@ func voteAuditMetadata(requestID uuid.UUID, vote repo.Vote) map[string]any {
 		"account_key_set":  vote.AccountKey != "",
 		"weight":           vote.Weight,
 		"note_length":      utf8.RuneCountInString(vote.Note),
+	}
+}
+
+func noteAuditMetadata(requestID uuid.UUID, note repo.Note) map[string]any {
+	return map[string]any{
+		"request_id":  requestID.String(),
+		"note_id":     note.ID.String(),
+		"body_length": utf8.RuneCountInString(note.Body),
 	}
 }
 

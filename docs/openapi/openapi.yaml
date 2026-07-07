@@ -1704,6 +1704,65 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/notes:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_AddCustomerRequestNote
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AddCustomerRequestNoteRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/notes/{noteId}:
+        delete:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_DeleteCustomerRequestNote
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: noteId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/customer-requests/{id}/votes:
         post:
             tags:
@@ -7284,6 +7343,16 @@ components:
             properties:
                 config:
                     $ref: '#/components/schemas/EnrichConfig'
+        AddCustomerRequestNoteRequest:
+            required:
+                - id
+                - body
+            type: object
+            properties:
+                id:
+                    type: string
+                body:
+                    type: string
         AddCustomerRequestVoteRequest:
             required:
                 - id
@@ -8673,6 +8742,10 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/CustomerRequestAccountProfile'
+                notes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestNote'
         CustomerRequestDuplicate:
             type: object
             properties:
@@ -8757,6 +8830,17 @@ components:
                 externalUpdatedAt:
                     type: string
                 syncError:
+                    type: string
+        CustomerRequestNote:
+            type: object
+            properties:
+                id:
+                    type: string
+                body:
+                    type: string
+                createdBy:
+                    type: string
+                createdAt:
                     type: string
         CustomerRequestOwner:
             type: object
