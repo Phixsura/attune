@@ -5,12 +5,15 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   customerRequestDetailQuery,
   customerRequestKeys,
+  customerRequestSavedViewsQuery,
   customerRequestScoringSettingsQuery,
   customerRequestsInfiniteQuery,
   useAddCustomerRequestNote,
   useAddCustomerRequestVote,
   useCreateCustomerRequest,
+  useCreateCustomerRequestSavedView,
   useDeleteCustomerRequestNote,
+  useDeleteCustomerRequestSavedView,
   useLinkCustomerRequestCustomer,
   useLinkCustomerRequestFeedback,
   useLinkCustomerRequestIssue,
@@ -22,6 +25,7 @@ import {
   useUnlinkCustomerRequestFeedback,
   useUnlinkCustomerRequestIssue,
   useUpdateCustomerRequest,
+  useUpdateCustomerRequestSavedView,
   useUpdateCustomerRequestScoringSettings,
 } from '@/lib/customer-request-api'
 import {
@@ -181,6 +185,126 @@ describe('customer request API', () => {
       revenueCentsPerPoint: '250000',
     })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.all })
+  })
+
+  it('fetches and mutates saved views', async () => {
+    const calls: Array<{ method: string; path: string; body?: unknown }> = []
+    server.use(
+      http.get(`${baseURL}/saved-views`, () =>
+        HttpResponse.json({
+          views: [
+            {
+              id: 'view-1',
+              name: 'Scoreboard',
+              state: {
+                q: 'renewal',
+                status: [CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN],
+                priority: [CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH],
+                sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE,
+                direction: SortDirection.SORT_DIRECTION_DESC,
+              },
+              createdAt: '2026-07-08T00:00:00Z',
+              updatedAt: '2026-07-08T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.post(`${baseURL}/saved-views`, async ({ request }) => {
+        calls.push({
+          method: request.method,
+          path: new URL(request.url).pathname,
+          body: await request.json(),
+        })
+        return HttpResponse.json({ view: { id: 'view-created', name: 'New', state: {} } })
+      }),
+      http.put(`${baseURL}/saved-views/view-1`, async ({ request }) => {
+        calls.push({
+          method: request.method,
+          path: new URL(request.url).pathname,
+          body: await request.json(),
+        })
+        return HttpResponse.json({ view: { id: 'view-1', name: 'Updated', state: {} } })
+      }),
+      http.delete(`${baseURL}/saved-views/view-1`, ({ request }) => {
+        calls.push({ method: request.method, path: new URL(request.url).pathname })
+        return HttpResponse.json({})
+      }),
+    )
+    const qc = makeQueryClient()
+    await expect(qc.fetchQuery(customerRequestSavedViewsQuery())).resolves.toMatchObject({
+      views: [{ id: 'view-1', name: 'Scoreboard' }],
+    })
+
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(
+      () => ({
+        create: useCreateCustomerRequestSavedView(),
+        update: useUpdateCustomerRequestSavedView(),
+        remove: useDeleteCustomerRequestSavedView(),
+      }),
+      { wrapper: wrapperFor(qc) },
+    )
+
+    await result.current.create.mutateAsync({
+      name: 'New',
+      state: {
+        q: 'exports',
+        status: [],
+        priority: [],
+        visibility: CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ACTIVE,
+        sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_REVENUE_IMPACT,
+        direction: SortDirection.SORT_DIRECTION_DESC,
+      },
+    })
+    await result.current.update.mutateAsync({
+      id: 'view-1',
+      name: 'Updated',
+      state: {
+        q: '',
+        status: [],
+        priority: [],
+        visibility: CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ALL,
+        sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT,
+        direction: SortDirection.SORT_DIRECTION_DESC,
+      },
+    })
+    await result.current.remove.mutateAsync('view-1')
+
+    expect(calls).toEqual([
+      {
+        method: 'POST',
+        path: `${baseURL}/saved-views`,
+        body: {
+          name: 'New',
+          state: {
+            q: 'exports',
+            status: [],
+            priority: [],
+            visibility: CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ACTIVE,
+            sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_REVENUE_IMPACT,
+            direction: SortDirection.SORT_DIRECTION_DESC,
+          },
+        },
+      },
+      {
+        method: 'PUT',
+        path: `${baseURL}/saved-views/view-1`,
+        body: {
+          id: 'view-1',
+          name: 'Updated',
+          state: {
+            q: '',
+            status: [],
+            priority: [],
+            visibility: CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ALL,
+            sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT,
+            direction: SortDirection.SORT_DIRECTION_DESC,
+          },
+        },
+      },
+      { method: 'DELETE', path: `${baseURL}/saved-views/view-1` },
+    ])
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.savedViews() })
   })
 
   it('posts mutating actions and refreshes customer request caches', async () => {

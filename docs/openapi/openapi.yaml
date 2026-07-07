@@ -1434,6 +1434,100 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/saved-views:
+        get:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_ListCustomerRequestSavedViews
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCustomerRequestSavedViewsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_CreateCustomerRequestSavedView
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateCustomerRequestSavedViewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestSavedViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/saved-views/{id}:
+        put:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_UpdateCustomerRequestSavedView
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateCustomerRequestSavedViewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestSavedViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        delete:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_DeleteCustomerRequestSavedView
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteCustomerRequestSavedViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/customer-requests/scoring-settings:
         get:
             tags:
@@ -8329,6 +8423,15 @@ components:
                     type: string
                 idempotencyKey:
                     type: string
+        CreateCustomerRequestSavedViewRequest:
+            required:
+                - name
+            type: object
+            properties:
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/CustomerRequestSavedViewState'
         CreateEventSubscriptionRequest:
             required:
                 - eventTypes
@@ -8896,6 +8999,86 @@ components:
                     type: string
                 role:
                     type: string
+        CustomerRequestSavedView:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/CustomerRequestSavedViewState'
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        CustomerRequestSavedViewResponse:
+            type: object
+            properties:
+                view:
+                    $ref: '#/components/schemas/CustomerRequestSavedView'
+        CustomerRequestSavedViewState:
+            type: object
+            properties:
+                q:
+                    type: string
+                status:
+                    type: array
+                    items:
+                        enum:
+                            - CUSTOMER_REQUEST_STATUS_UNSPECIFIED
+                            - CUSTOMER_REQUEST_STATUS_OPEN
+                            - CUSTOMER_REQUEST_STATUS_PLANNED
+                            - CUSTOMER_REQUEST_STATUS_IN_PROGRESS
+                            - CUSTOMER_REQUEST_STATUS_SHIPPED
+                            - CUSTOMER_REQUEST_STATUS_CANCELLED
+                        type: string
+                        format: enum
+                priority:
+                    type: array
+                    items:
+                        enum:
+                            - CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED
+                            - CUSTOMER_REQUEST_PRIORITY_NONE
+                            - CUSTOMER_REQUEST_PRIORITY_LOW
+                            - CUSTOMER_REQUEST_PRIORITY_MEDIUM
+                            - CUSTOMER_REQUEST_PRIORITY_HIGH
+                            - CUSTOMER_REQUEST_PRIORITY_URGENT
+                        type: string
+                        format: enum
+                ownerMemberId:
+                    type: string
+                visibility:
+                    enum:
+                        - CUSTOMER_REQUEST_VISIBILITY_UNSPECIFIED
+                        - CUSTOMER_REQUEST_VISIBILITY_ACTIVE
+                        - CUSTOMER_REQUEST_VISIBILITY_MERGED
+                        - CUSTOMER_REQUEST_VISIBILITY_ARCHIVED
+                        - CUSTOMER_REQUEST_VISIBILITY_ALL
+                    type: string
+                    format: enum
+                sort:
+                    enum:
+                        - CUSTOMER_REQUEST_SORT_UNSPECIFIED
+                        - CUSTOMER_REQUEST_SORT_UPDATED_AT
+                        - CUSTOMER_REQUEST_SORT_CUSTOMER_COUNT
+                        - CUSTOMER_REQUEST_SORT_SUPPORTING_FEEDBACK_COUNT
+                        - CUSTOMER_REQUEST_SORT_LATEST_FEEDBACK_AT
+                        - CUSTOMER_REQUEST_SORT_PRIORITY
+                        - CUSTOMER_REQUEST_SORT_REVENUE_IMPACT
+                        - CUSTOMER_REQUEST_SORT_DECISION_SCORE
+                        - CUSTOMER_REQUEST_SORT_DELIVERY_HEALTH
+                    type: string
+                    format: enum
+                direction:
+                    enum:
+                        - SORT_DIRECTION_UNSPECIFIED
+                        - SORT_DIRECTION_ASC
+                        - SORT_DIRECTION_DESC
+                    type: string
+                    format: enum
+                feedbackId:
+                    type: string
         CustomerRequestScoringSettings:
             type: object
             properties:
@@ -9077,6 +9260,9 @@ components:
                 accountProfile:
                     $ref: '#/components/schemas/CustomerRequestAccountProfile'
         DeleteApiKeyResponse:
+            type: object
+            properties: {}
+        DeleteCustomerRequestSavedViewResponse:
             type: object
             properties: {}
         DeleteDigestSubscriptionResponse:
@@ -10874,6 +11060,13 @@ components:
                 totalCount:
                     type: integer
                     format: int32
+        ListCustomerRequestSavedViewsResponse:
+            type: object
+            properties:
+                views:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestSavedView'
         ListCustomerRequestsResponse:
             type: object
             properties:
@@ -13005,6 +13198,18 @@ components:
                     format: enum
                 ownerMemberId:
                     type: string
+        UpdateCustomerRequestSavedViewRequest:
+            required:
+                - id
+                - name
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/CustomerRequestSavedViewState'
         UpdateCustomerRequestScoringSettingsRequest:
             type: object
             properties:

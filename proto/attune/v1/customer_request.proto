@@ -18,6 +18,24 @@ service CustomerRequestService {
       body: "*"
     };
   }
+  rpc ListCustomerRequestSavedViews(ListCustomerRequestSavedViewsRequest) returns (ListCustomerRequestSavedViewsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/customer-requests/saved-views"};
+  }
+  rpc CreateCustomerRequestSavedView(CreateCustomerRequestSavedViewRequest) returns (CustomerRequestSavedViewResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests/saved-views"
+      body: "*"
+    };
+  }
+  rpc UpdateCustomerRequestSavedView(UpdateCustomerRequestSavedViewRequest) returns (CustomerRequestSavedViewResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/customer-requests/saved-views/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteCustomerRequestSavedView(DeleteCustomerRequestSavedViewRequest) returns (DeleteCustomerRequestSavedViewResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/customer-requests/saved-views/{id}"};
+  }
   rpc GetCustomerRequest(GetCustomerRequestRequest) returns (CustomerRequestDetail) {
     option (google.api.http) = {get: "/fb/v1/console/customer-requests/{id}"};
   }
@@ -359,6 +377,52 @@ message UpdateCustomerRequestScoringSettingsRequest {
   optional int64 revenue_cents_per_point = 14;
   optional int32 revenue_cap = 15;
 }
+
+message CustomerRequestSavedViewState {
+  string q = 1;
+  repeated CustomerRequestStatus status = 2;
+  repeated CustomerRequestPriority priority = 3;
+  optional string owner_member_id = 4;
+  CustomerRequestVisibility visibility = 5;
+  CustomerRequestSort sort = 6;
+  SortDirection direction = 7;
+  optional int64 feedback_id = 8;
+}
+
+message CustomerRequestSavedView {
+  string id = 1;
+  string name = 2;
+  CustomerRequestSavedViewState state = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+message ListCustomerRequestSavedViewsRequest {}
+
+message ListCustomerRequestSavedViewsResponse {
+  repeated CustomerRequestSavedView views = 1;
+}
+
+message CreateCustomerRequestSavedViewRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  CustomerRequestSavedViewState state = 2;
+}
+
+message UpdateCustomerRequestSavedViewRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  CustomerRequestSavedViewState state = 3;
+}
+
+message CustomerRequestSavedViewResponse {
+  CustomerRequestSavedView view = 1;
+}
+
+message DeleteCustomerRequestSavedViewRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message DeleteCustomerRequestSavedViewResponse {}
 
 message ListCustomerRequestsRequest {
   string q = 1;

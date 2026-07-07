@@ -279,6 +279,54 @@ export interface UpdateCustomerRequestScoringSettingsRequest {
   revenueCap?: number | undefined;
 }
 
+export interface CustomerRequestSavedViewState {
+  q: string;
+  status: CustomerRequestStatus[];
+  priority: CustomerRequestPriority[];
+  ownerMemberId?: string | undefined;
+  visibility: CustomerRequestVisibility;
+  sort: CustomerRequestSort;
+  direction: SortDirection;
+  feedbackId?: string | undefined;
+}
+
+export interface CustomerRequestSavedView {
+  id: string;
+  name: string;
+  state?: CustomerRequestSavedViewState | undefined;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListCustomerRequestSavedViewsRequest {
+}
+
+export interface ListCustomerRequestSavedViewsResponse {
+  views: CustomerRequestSavedView[];
+}
+
+export interface CreateCustomerRequestSavedViewRequest {
+  name: string;
+  state?: CustomerRequestSavedViewState | undefined;
+}
+
+export interface UpdateCustomerRequestSavedViewRequest {
+  id: string;
+  name: string;
+  state?: CustomerRequestSavedViewState | undefined;
+}
+
+export interface CustomerRequestSavedViewResponse {
+  view?: CustomerRequestSavedView | undefined;
+}
+
+export interface DeleteCustomerRequestSavedViewRequest {
+  id: string;
+}
+
+export interface DeleteCustomerRequestSavedViewResponse {
+}
+
 export interface ListCustomerRequestsRequest {
   q: string;
   status: CustomerRequestStatus[];
@@ -436,6 +484,18 @@ export interface CustomerRequestService {
   UpdateCustomerRequestScoringSettings(
     request: UpdateCustomerRequestScoringSettingsRequest,
   ): Promise<CustomerRequestScoringSettings>;
+  ListCustomerRequestSavedViews(
+    request: ListCustomerRequestSavedViewsRequest,
+  ): Promise<ListCustomerRequestSavedViewsResponse>;
+  CreateCustomerRequestSavedView(
+    request: CreateCustomerRequestSavedViewRequest,
+  ): Promise<CustomerRequestSavedViewResponse>;
+  UpdateCustomerRequestSavedView(
+    request: UpdateCustomerRequestSavedViewRequest,
+  ): Promise<CustomerRequestSavedViewResponse>;
+  DeleteCustomerRequestSavedView(
+    request: DeleteCustomerRequestSavedViewRequest,
+  ): Promise<DeleteCustomerRequestSavedViewResponse>;
   GetCustomerRequest(request: GetCustomerRequestRequest): Promise<CustomerRequestDetail>;
   CreateCustomerRequest(request: CreateCustomerRequestRequest): Promise<CustomerRequestDetail>;
   UpdateCustomerRequest(request: UpdateCustomerRequestRequest): Promise<CustomerRequestDetail>;

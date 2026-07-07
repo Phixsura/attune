@@ -47,10 +47,15 @@ type service interface {
 
 type Handler struct {
 	service service
+	views   savedViewService
 }
 
 func NewHandler(service service) *Handler {
 	return ptrext.Of(Handler{service: service})
+}
+
+func (h *Handler) SetSavedViewService(service savedViewService) {
+	h.views = service
 }
 
 func (h *Handler) List(

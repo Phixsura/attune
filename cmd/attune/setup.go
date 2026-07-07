@@ -35,6 +35,7 @@ import (
 	auditlogviewrepo "github.com/Phixsura/attune/internal/repo/auditlogview"
 	breakglassrepo "github.com/Phixsura/attune/internal/repo/breakglass"
 	customerrequestrepo "github.com/Phixsura/attune/internal/repo/customerrequest"
+	customerrequestviewrepo "github.com/Phixsura/attune/internal/repo/customerrequestview"
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	enrichruntime "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
@@ -65,6 +66,7 @@ import (
 	authmodesvc "github.com/Phixsura/attune/internal/service/authmode"
 	breakglasssvc "github.com/Phixsura/attune/internal/service/breakglass"
 	customerrequestsvc "github.com/Phixsura/attune/internal/service/customerrequest"
+	customerrequestviewsvc "github.com/Phixsura/attune/internal/service/customerrequestview"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	evalsvc "github.com/Phixsura/attune/internal/service/eval"
@@ -312,7 +314,10 @@ func wireConsoleAuditLoggers(targets []consoleAuditTarget, auditLogSvc *auditlog
 
 func buildCustomerRequestHandler(pool *pgxpool.Pool, idempotencyRepo idempotencyrepo.Store, auditLogSvc *auditlogsvc.Service) *consolecustomerrequest.Handler {
 	customerRequestRepo := customerrequestrepo.New(pool)
-	return console.NewCustomerRequestHandler(customerrequestsvc.New(customerRequestRepo, idempotencyRepo, auditLogSvc))
+	settingsRepo := systemsettingsrepo.NewRepo(pool)
+	handler := console.NewCustomerRequestHandler(customerrequestsvc.New(customerRequestRepo, idempotencyRepo, auditLogSvc))
+	handler.SetSavedViewService(customerrequestviewsvc.New(customerrequestviewrepo.New(settingsRepo)))
+	return handler
 }
 
 func buildBatchHandler(feedbackRepo *feedback.FeedbackRepo, idempotencyRepo idempotencyrepo.Store, jobRepo feedbackjobrepo.Store) (feedbackbatch.Service, *consolefeedback.BatchHandler) {

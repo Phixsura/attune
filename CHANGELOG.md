@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   evidence, customer, account, vote, and revenue signals, and PostgreSQL
   coverage that verifies custom settings reorder decision-score results.
 
+- **Customer Requests now support saved prioritization views.**
+  Added per-user saved views for Customer Request list filters and sorting, with
+  generated API contracts, tenant-scoped persistence, Console save/apply/delete
+  controls, and tests for the saved-view workflow.
+
 - **Private-deploy smoke suite now covers base, observability, TLS, failure, and upgrade modules.**
   Added dedicated smoke targets for the compose base stack, the observability
   overlay, the TLS reverse-proxy front door, deterministic startup failures,

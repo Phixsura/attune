@@ -10,9 +10,12 @@ import {
   type CustomerRequestOwner,
   CustomerRequestPriority,
   type CustomerRequestScoringSettings,
+  CustomerRequestSort,
   CustomerRequestStatus,
   type CustomerRequestSummary,
+  CustomerRequestVisibility,
   type ListCustomerRequestsResponse,
+  SortDirection,
 } from '@/proto/attune/v1/customer_request'
 import type { Member } from '@/proto/attune/v1/member'
 import { server } from '@/testing/mocks/server'
@@ -105,6 +108,106 @@ describe('CustomerRequestsPage', () => {
       expect(payload).toMatchObject({
         feedbackWeight: 9,
         revenueCentsPerPoint: '250000',
+      }),
+    )
+  })
+
+  it('applies, updates, deletes, and creates saved views', async () => {
+    const urls: string[] = []
+    const writes: Array<{ method: string; path: string; body?: unknown }> = []
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({ requests: [] })
+      }),
+      http.get(`${baseURL}/saved-views`, () =>
+        HttpResponse.json({
+          views: [
+            {
+              id: 'view-1',
+              name: 'Scoreboard',
+              state: {
+                q: 'renewal',
+                status: [CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN],
+                priority: [CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH],
+                visibility: CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ALL,
+                sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE,
+                direction: SortDirection.SORT_DIRECTION_DESC,
+              },
+              createdAt: '2026-07-08T00:00:00Z',
+              updatedAt: '2026-07-08T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.put(`${baseURL}/saved-views/view-1`, async ({ request }) => {
+        writes.push({
+          method: request.method,
+          path: new URL(request.url).pathname,
+          body: await request.json(),
+        })
+        return HttpResponse.json({ view: { id: 'view-1', name: 'Scoreboard updated', state: {} } })
+      }),
+      http.delete(`${baseURL}/saved-views/view-1`, ({ request }) => {
+        writes.push({ method: request.method, path: new URL(request.url).pathname })
+        return HttpResponse.json({})
+      }),
+      http.post(`${baseURL}/saved-views`, async ({ request }) => {
+        writes.push({
+          method: request.method,
+          path: new URL(request.url).pathname,
+          body: await request.json(),
+        })
+        return HttpResponse.json({ view: { id: 'view-created', name: 'New planning', state: {} } })
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    const savedViewSelect = await screen.findByRole('combobox', { name: '保存视图' })
+    await waitFor(() => expect(savedViewSelect).not.toBeDisabled())
+    await user.click(savedViewSelect)
+    await user.click(await screen.findByRole('option', { name: 'Scoreboard' }))
+
+    await waitFor(() => {
+      const params = new URL(urls.at(-1) ?? '').searchParams
+      expect(params.get('q')).toBe('renewal')
+      expect(params.get('sort')).toBe(CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE)
+    })
+
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+    const updateDialog = await screen.findByRole('dialog', { name: '保存客户需求视图' })
+    const nameInput = within(updateDialog).getByLabelText('视图名称')
+    await user.clear(nameInput)
+    await user.type(nameInput, 'Scoreboard updated')
+    await user.click(within(updateDialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        method: 'PUT',
+        path: `${baseURL}/saved-views/view-1`,
+        body: expect.objectContaining({ id: 'view-1', name: 'Scoreboard updated' }),
+      }),
+    )
+
+    await user.click(screen.getByRole('button', { name: '删除保存视图' }))
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        method: 'DELETE',
+        path: `${baseURL}/saved-views/view-1`,
+      }),
+    )
+
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+    const createDialog = await screen.findByRole('dialog', { name: '保存客户需求视图' })
+    await user.type(within(createDialog).getByLabelText('视图名称'), 'New planning')
+    await user.click(within(createDialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        method: 'POST',
+        path: `${baseURL}/saved-views`,
+        body: expect.objectContaining({ name: 'New planning' }),
       }),
     )
   })
@@ -878,7 +981,10 @@ describe('CustomerRequestsPage', () => {
 })
 
 function mockList(response: ListCustomerRequestsResponse) {
-  server.use(http.get(baseURL, () => HttpResponse.json(response)))
+  server.use(
+    http.get(baseURL, () => HttpResponse.json(response)),
+    http.get(`${baseURL}/saved-views`, () => HttpResponse.json({ views: [] })),
+  )
 }
 
 function mockDetail(detail: CustomerRequestDetail) {

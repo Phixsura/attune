@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import {
   ArrowRight,
+  Bookmark,
   ClipboardList,
   DollarSign,
   ExternalLink,
@@ -46,12 +47,15 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   type CustomerRequestFilters,
   customerRequestDetailQuery,
+  customerRequestSavedViewsQuery,
   customerRequestScoringSettingsQuery,
   customerRequestsInfiniteQuery,
   useAddCustomerRequestNote,
   useAddCustomerRequestVote,
   useCreateCustomerRequest,
+  useCreateCustomerRequestSavedView,
   useDeleteCustomerRequestNote,
+  useDeleteCustomerRequestSavedView,
   useLinkCustomerRequestCustomer,
   useLinkCustomerRequestFeedback,
   useLinkCustomerRequestIssue,
@@ -63,6 +67,7 @@ import {
   useUnlinkCustomerRequestFeedback,
   useUnlinkCustomerRequestIssue,
   useUpdateCustomerRequest,
+  useUpdateCustomerRequestSavedView,
   useUpdateCustomerRequestScoringSettings,
 } from '@/features/customer-requests/api/customer-requests'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
@@ -80,6 +85,8 @@ import {
   type CustomerRequestNote,
   type CustomerRequestOwner,
   CustomerRequestPriority,
+  type CustomerRequestSavedView,
+  type CustomerRequestSavedViewState,
   type CustomerRequestScoringSettings,
   CustomerRequestSort,
   CustomerRequestStatus,
@@ -179,6 +186,8 @@ export function CustomerRequestsPage({
           </div>
         ) : null}
       </section>
+
+      <CustomerRequestSavedViewsBar filters={filters} onApply={setFilters} />
 
       <CustomerRequestToolbar filters={filters} ownerOptions={ownerOptions} onChange={setFilters} />
 
@@ -463,6 +472,177 @@ function CustomerRequestToolbar({
       </Select>
     </div>
   )
+}
+
+const SAVED_VIEW_NONE = '__current__'
+
+function CustomerRequestSavedViewsBar({
+  filters,
+  onApply,
+}: {
+  filters: CustomerRequestFilters
+  onApply: (filters: CustomerRequestFilters) => void
+}) {
+  const { t } = useTranslation()
+  const inputID = useId()
+  const viewsQuery = useQuery(customerRequestSavedViewsQuery())
+  const create = useCreateCustomerRequestSavedView()
+  const update = useUpdateCustomerRequestSavedView()
+  const remove = useDeleteCustomerRequestSavedView()
+  const [selectedID, setSelectedID] = useState('')
+  const [saveOpen, setSaveOpen] = useState(false)
+  const [name, setName] = useState('')
+  const views = viewsQuery.data?.views ?? []
+  const selected = views.find((view) => view.id === selectedID) ?? null
+  const isSaving = create.isPending || update.isPending
+
+  const openSaveDialog = () => {
+    setName(selected?.name ?? '')
+    setSaveOpen(true)
+  }
+
+  const saveCurrent = () => {
+    const trimmedName = name.trim()
+    if (!trimmedName) return
+    const state = filtersToSavedViewState(filters)
+    const handlers = {
+      onSuccess: (response: { view?: CustomerRequestSavedView }) => {
+        if (response.view?.id) setSelectedID(response.view.id)
+        setSaveOpen(false)
+      },
+      onError: (err: unknown) =>
+        toast.error(err instanceof Error ? err.message : t('common.error')),
+    }
+    if (selected) {
+      update.mutate({ id: selected.id, name: trimmedName, state }, handlers)
+      return
+    }
+    create.mutate({ name: trimmedName, state }, handlers)
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border bg-background p-3 md:flex-row md:items-center md:justify-between">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <Bookmark className="size-4 shrink-0 text-muted-foreground" />
+        <Select
+          value={selectedID || SAVED_VIEW_NONE}
+          disabled={viewsQuery.isPending}
+          onValueChange={(value) => {
+            if (value === SAVED_VIEW_NONE) {
+              setSelectedID('')
+              return
+            }
+            const view = views.find((item) => item.id === value)
+            if (!view) return
+            setSelectedID(view.id)
+            onApply(savedViewStateToFilters(view.state))
+          }}
+        >
+          <SelectTrigger
+            className="min-w-0 md:w-72"
+            aria-label={t('customer_requests.saved_views_label')}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={SAVED_VIEW_NONE}>
+              {t('customer_requests.saved_views_current')}
+            </SelectItem>
+            {views.length === 0 ? (
+              <SelectItem value="__empty__" disabled>
+                {t('customer_requests.saved_views_empty')}
+              </SelectItem>
+            ) : null}
+            {views.map((view) => (
+              <SelectItem key={view.id} value={view.id}>
+                {view.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={openSaveDialog}>
+          <Save className="size-4" />
+          {t('customer_requests.saved_views_save')}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={!selected || remove.isPending}
+          aria-label={t('customer_requests.saved_views_delete')}
+          onClick={() => {
+            if (!selected) return
+            remove.mutate(selected.id, {
+              onSuccess: () => setSelectedID(''),
+              onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+            })
+          }}
+        >
+          {remove.isPending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Trash2 className="size-4" />
+          )}
+        </Button>
+      </div>
+      <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('customer_requests.saved_views_save_title')}</DialogTitle>
+            <DialogDescription className="sr-only">
+              {t('customer_requests.saved_views_save')}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor={inputID}>{t('customer_requests.saved_views_name')}</Label>
+            <Input
+              id={inputID}
+              value={name}
+              maxLength={80}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSaveOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button disabled={isSaving || name.trim().length === 0} onClick={saveCurrent}>
+              {isSaving ? <Loader2 className="size-4 animate-spin" /> : null}
+              {t('common.save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+function filtersToSavedViewState(filters: CustomerRequestFilters): CustomerRequestSavedViewState {
+  return {
+    q: filters.q?.trim() ?? '',
+    status: filters.status ? [filters.status] : [],
+    priority: filters.priority ? [filters.priority] : [],
+    ownerMemberId: filters.ownerMemberId,
+    visibility: filters.visibility ?? CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ACTIVE,
+    sort: filters.sort ?? CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT,
+    direction: filters.direction ?? SortDirection.SORT_DIRECTION_DESC,
+    feedbackId: filters.feedbackId,
+  }
+}
+
+function savedViewStateToFilters(state?: CustomerRequestSavedViewState): CustomerRequestFilters {
+  if (!state) return { ...DEFAULT_FILTERS }
+  return {
+    q: state.q || undefined,
+    status: (state.status ?? [])[0],
+    priority: (state.priority ?? [])[0],
+    ownerMemberId: state.ownerMemberId,
+    visibility: state.visibility || CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ACTIVE,
+    sort: state.sort || CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT,
+    direction: state.direction || SortDirection.SORT_DIRECTION_DESC,
+    feedbackId: state.feedbackId,
+  }
 }
 
 type ScoringFormState = {

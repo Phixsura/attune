@@ -467,6 +467,57 @@ func (r *Router) mountCustomerRequestReads(cr chi.Router) {
 			return session.FromContext(r.Context()), nil
 		}),
 	))
+	cr.Get("/saved-views", dispatcher.Bind(
+		"console.CustomerRequestHandler.ListSavedViews",
+		dispatcher.Empty(func() *attunev1.ListCustomerRequestSavedViewsRequest {
+			return ptrext.Of(attunev1.ListCustomerRequestSavedViewsRequest{})
+		}),
+		r.customerRequests.ListSavedViews,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListCustomerRequestSavedViewsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.Post("/saved-views", dispatcher.Bind(
+		"console.CustomerRequestHandler.CreateSavedView",
+		dispatcher.JSON(func() *attunev1.CreateCustomerRequestSavedViewRequest {
+			return ptrext.Of(attunev1.CreateCustomerRequestSavedViewRequest{})
+		}),
+		r.customerRequests.CreateSavedView,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateCustomerRequestSavedViewRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.Put("/saved-views/{view_id}", dispatcher.Bind(
+		"console.CustomerRequestHandler.UpdateSavedView",
+		dispatcher.Combine(
+			func() *attunev1.UpdateCustomerRequestSavedViewRequest {
+				return ptrext.Of(attunev1.UpdateCustomerRequestSavedViewRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateCustomerRequestSavedViewRequest],
+			dispatcher.Param("view_id", func(req *attunev1.UpdateCustomerRequestSavedViewRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.UpdateSavedView,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateCustomerRequestSavedViewRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.Delete("/saved-views/{view_id}", dispatcher.Bind(
+		"console.CustomerRequestHandler.DeleteSavedView",
+		dispatcher.Path(
+			func() *attunev1.DeleteCustomerRequestSavedViewRequest {
+				return ptrext.Of(attunev1.DeleteCustomerRequestSavedViewRequest{})
+			},
+			dispatcher.Param("view_id", func(req *attunev1.DeleteCustomerRequestSavedViewRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.DeleteSavedView,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteCustomerRequestSavedViewRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 	cr.Get("/{id}", dispatcher.Bind(
 		"console.CustomerRequestHandler.Get",
 		dispatcher.Path(

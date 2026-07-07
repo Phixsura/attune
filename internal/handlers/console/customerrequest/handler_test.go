@@ -20,6 +20,7 @@ import (
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	svc "github.com/Phixsura/attune/internal/service/customerrequest"
+	viewsvc "github.com/Phixsura/attune/internal/service/customerrequestview"
 )
 
 func TestBindListRequestParsesFilters(t *testing.T) {
@@ -122,6 +123,7 @@ func TestBindListRequestRejectsInvalidFeedbackID(t *testing.T) {
 type handlerHarness struct {
 	handler   *Handler
 	fake      *fakeCustomerRequestService
+	views     *fakeSavedViewService
 	ctx       *dispatcher.RequestContext[*session.AuthCtx]
 	requestID uuid.UUID
 	targetID  uuid.UUID
@@ -139,9 +141,13 @@ func newHandlerHarness() handlerHarness {
 		list:   repo.ListResult{Items: []repo.Summary{detail.Request.Summary}, NextCursor: "50"},
 		detail: detail,
 	}
+	views := &fakeSavedViewService{}
+	handler := NewHandler(fake)
+	handler.SetSavedViewService(views)
 	return handlerHarness{
-		handler:   NewHandler(fake),
+		handler:   handler,
 		fake:      fake,
+		views:     views,
 		ctx:       customerRequestHandlerContext(),
 		requestID: requestID,
 		targetID:  targetID,
@@ -214,6 +220,92 @@ func TestHandlerScoringSettings(t *testing.T) {
 	}
 	if updated.Body.GetFeedbackWeight() != 7 {
 		t.Fatalf("UpdateScoringSettings() feedback weight = %d, want 7", updated.Body.GetFeedbackWeight())
+	}
+}
+
+func TestHandlerListsSavedViews(t *testing.T) {
+	h := newHandlerHarness()
+	now := time.Date(2026, 7, 8, 1, 2, 3, 0, time.UTC)
+	h.views.list = []viewsvc.View{{
+		ID:   "view-1",
+		Name: "Priority planning",
+		State: viewsvc.State{
+			Query:         "renewal",
+			Statuses:      []repo.Status{repo.StatusOpen, repo.StatusPlanned},
+			Priorities:    []repo.Priority{repo.PriorityHigh},
+			OwnerMemberID: h.ownerID.String(),
+			Visibility:    repo.VisibilityAll,
+			Sort:          repo.SortDecisionScore,
+			Direction:     repo.DirectionAsc,
+			FeedbackID:    42,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}}
+
+	list, err := h.handler.ListSavedViews(h.ctx, &attunev1.ListCustomerRequestSavedViewsRequest{})
+	if err != nil {
+		t.Fatalf("ListSavedViews() error = %v", err)
+	}
+	view := list.Body.GetViews()[0]
+	if view.GetName() != "Priority planning" ||
+		view.GetState().GetSort() != attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DECISION_SCORE ||
+		view.GetState().GetFeedbackId() != 42 {
+		t.Fatalf("ListSavedViews() = %+v", view)
+	}
+}
+
+func TestHandlerCreatesSavedView(t *testing.T) {
+	h := newHandlerHarness()
+	create, err := h.handler.CreateSavedView(h.ctx, &attunev1.CreateCustomerRequestSavedViewRequest{
+		Name: "Scoreboard",
+		State: &attunev1.CustomerRequestSavedViewState{
+			Q:             "exports",
+			Status:        []attunev1.CustomerRequestStatus{attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_OPEN},
+			Priority:      []attunev1.CustomerRequestPriority{attunev1.CustomerRequestPriority_CUSTOMER_REQUEST_PRIORITY_URGENT},
+			OwnerMemberId: ptrext.Of(h.ownerID.String()),
+			Visibility:    attunev1.CustomerRequestVisibility_CUSTOMER_REQUEST_VISIBILITY_ACTIVE,
+			Sort:          attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_REVENUE_IMPACT,
+			Direction:     attunev1.SortDirection_SORT_DIRECTION_DESC,
+			FeedbackId:    ptrext.Of(int64(101)),
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSavedView() error = %v", err)
+	}
+	if create.Body.GetView().GetName() != "Scoreboard" {
+		t.Fatalf("CreateSavedView() = %+v", create.Body)
+	}
+	input := h.views.last
+	if input.Name != "Scoreboard" || input.State.Query != "exports" ||
+		len(input.State.Statuses) != 1 || input.State.Statuses[0] != repo.StatusOpen ||
+		len(input.State.Priorities) != 1 || input.State.Priorities[0] != repo.PriorityUrgent ||
+		input.State.Sort != repo.SortRevenueImpact || input.State.FeedbackID != 101 {
+		t.Fatalf("Saved view input = %+v", input)
+	}
+}
+
+func TestHandlerUpdatesAndDeletesSavedView(t *testing.T) {
+	h := newHandlerHarness()
+	updated, err := h.handler.UpdateSavedView(h.ctx, &attunev1.UpdateCustomerRequestSavedViewRequest{
+		Id:   "ignored-path-value",
+		Name: "Scoreboard updated",
+		State: &attunev1.CustomerRequestSavedViewState{
+			Sort: attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DELIVERY_HEALTH,
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateSavedView() error = %v", err)
+	}
+	if updated.Body.GetView().GetName() != "Scoreboard updated" || h.views.last.ID != "ignored-path-value" {
+		t.Fatalf("UpdateSavedView() body=%+v input=%+v", updated.Body, h.views.last)
+	}
+
+	if _, err := h.handler.DeleteSavedView(h.ctx, &attunev1.DeleteCustomerRequestSavedViewRequest{Id: "view-1"}); err != nil {
+		t.Fatalf("DeleteSavedView() error = %v", err)
+	}
+	if h.views.deletedID != "view-1" || h.views.deletedUser != "user-a" {
+		t.Fatalf("delete args id=%q user=%q", h.views.deletedID, h.views.deletedUser)
 	}
 }
 
@@ -486,6 +578,52 @@ type fakeCustomerRequestService struct {
 	detail  *svc.Detail
 	scoring repo.ScoringSettings
 	last    any
+}
+
+type fakeSavedViewService struct {
+	list        []viewsvc.View
+	last        viewsvc.SaveInput
+	deletedID   string
+	deletedUser string
+}
+
+func (f *fakeSavedViewService) List(_ context.Context, tenantID, userID string) ([]viewsvc.View, error) {
+	if tenantID != "tenant-a" || userID != "user-a" {
+		return nil, errors.New("unexpected saved view tenant or user")
+	}
+	return f.list, nil
+}
+
+func (f *fakeSavedViewService) Save(_ context.Context, tenantID, userID string, in viewsvc.SaveInput) (*viewsvc.View, error) {
+	if tenantID != "tenant-a" || userID != "user-a" {
+		return nil, errors.New("unexpected saved view tenant or user")
+	}
+	f.last = in
+	return ptrext.Of(viewsvc.View{
+		ID:        firstNonEmpty(in.ID, "view-created"),
+		Name:      in.Name,
+		State:     in.State,
+		CreatedAt: time.Date(2026, 7, 8, 1, 2, 3, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 7, 8, 1, 2, 3, 0, time.UTC),
+	}), nil
+}
+
+func (f *fakeSavedViewService) Delete(_ context.Context, tenantID, userID, id, updatedBy string) error {
+	if tenantID != "tenant-a" || userID != "user-a" || updatedBy != "user-a" {
+		return errors.New("unexpected saved view delete tenant or user")
+	}
+	f.deletedID = id
+	f.deletedUser = userID
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (f *fakeCustomerRequestService) List(_ context.Context, in svc.ListInput) (repo.ListResult, error) {

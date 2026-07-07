@@ -10,21 +10,26 @@ import type {
   AddCustomerRequestNoteRequest,
   AddCustomerRequestVoteRequest,
   CreateCustomerRequestRequest,
+  CreateCustomerRequestSavedViewRequest,
   CustomerRequestDetail,
   CustomerRequestPriority,
+  CustomerRequestSavedViewResponse,
   CustomerRequestScoringSettings,
   CustomerRequestSort,
   CustomerRequestStatus,
   CustomerRequestVisibility,
+  DeleteCustomerRequestSavedViewResponse,
   LinkCustomerRequestIssueRequest,
   LinkCustomerToCustomerRequestRequest,
   LinkFeedbackToCustomerRequestRequest,
+  ListCustomerRequestSavedViewsResponse,
   ListCustomerRequestsResponse,
   MergeCustomerRequestsRequest,
   PromoteFeedbackToCustomerRequestRequest,
   RecordCustomerRequestIssueSyncRequest,
   SortDirection,
   UpdateCustomerRequestRequest,
+  UpdateCustomerRequestSavedViewRequest,
   UpdateCustomerRequestScoringSettingsRequest,
 } from '@/proto/attune/v1/customer_request'
 
@@ -47,6 +52,7 @@ export const customerRequestKeys = {
     ['console', 'customer-requests', 'list', filters] as const,
   detail: (id: string) => ['console', 'customer-requests', 'detail', id] as const,
   scoring: () => ['console', 'customer-requests', 'scoring-settings'] as const,
+  savedViews: () => ['console', 'customer-requests', 'saved-views'] as const,
 }
 
 export const customerRequestsInfiniteQuery = (filters: CustomerRequestFilters = {}) =>
@@ -79,6 +85,14 @@ export const customerRequestScoringSettingsQuery = () =>
     queryFn: ({ signal }) =>
       api<CustomerRequestScoringSettings>(`${BASE}/scoring-settings`, { signal }),
     staleTime: 30_000,
+  })
+
+export const customerRequestSavedViewsQuery = () =>
+  queryOptions({
+    queryKey: customerRequestKeys.savedViews(),
+    queryFn: ({ signal }) =>
+      api<ListCustomerRequestSavedViewsResponse>(`${BASE}/saved-views`, { signal }),
+    staleTime: 15_000,
   })
 
 export function useCreateCustomerRequest() {
@@ -279,6 +293,47 @@ export function useUpdateCustomerRequestScoringSettings() {
     onSuccess: (settings) => {
       qc.setQueryData(customerRequestKeys.scoring(), settings)
       void qc.invalidateQueries({ queryKey: customerRequestKeys.all })
+    },
+  })
+}
+
+export function useCreateCustomerRequestSavedView() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateCustomerRequestSavedViewRequest) =>
+      api<CustomerRequestSavedViewResponse>(`${BASE}/saved-views`, {
+        method: 'POST',
+        body,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: customerRequestKeys.savedViews() })
+    },
+  })
+}
+
+export function useUpdateCustomerRequestSavedView() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: UpdateCustomerRequestSavedViewRequest) =>
+      api<CustomerRequestSavedViewResponse>(`${BASE}/saved-views/${encodeURIComponent(body.id)}`, {
+        method: 'PUT',
+        body,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: customerRequestKeys.savedViews() })
+    },
+  })
+}
+
+export function useDeleteCustomerRequestSavedView() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<DeleteCustomerRequestSavedViewResponse>(`${BASE}/saved-views/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: customerRequestKeys.savedViews() })
     },
   })
 }
