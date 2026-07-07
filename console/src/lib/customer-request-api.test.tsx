@@ -422,6 +422,42 @@ describe('customer request API', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.all })
     expect(qc.getQueryData(customerRequestKeys.detail('cached-request'))).toEqual(detail)
   })
+
+  it('does not cache mutation responses without a request id', async () => {
+    server.use(
+      http.post(baseURL, () => HttpResponse.json({})),
+      http.post(`${baseURL}:promote-feedback`, () => HttpResponse.json({})),
+      http.patch(`${baseURL}/${requestID}`, () => HttpResponse.json({})),
+    )
+    const qc = makeQueryClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(
+      () => ({
+        create: useCreateCustomerRequest(),
+        promote: usePromoteFeedbackToCustomerRequest(),
+        update: useUpdateCustomerRequest(requestID),
+      }),
+      { wrapper: wrapperFor(qc) },
+    )
+
+    await result.current.create.mutateAsync({
+      title: 'Export bundles',
+      status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
+      priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
+      idempotencyKey: 'create-key',
+    })
+    await result.current.promote.mutateAsync({
+      feedbackIds: ['101'],
+      title: 'Promoted request',
+      status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
+      priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_MEDIUM,
+      idempotencyKey: 'promote-key',
+    })
+    await result.current.update.mutateAsync({ title: 'Renamed' })
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.all })
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toBeUndefined()
+  })
 })
 
 function sampleDetail(id: string): CustomerRequestDetail {

@@ -212,6 +212,102 @@ describe('CustomerRequestsPage', () => {
     )
   })
 
+  it('handles saved view defaults and mutation errors', async () => {
+    const urls: string[] = []
+    const writes: Array<{ method: string; path: string; body?: unknown }> = []
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({ requests: [] })
+      }),
+      http.get(`${baseURL}/saved-views`, () =>
+        HttpResponse.json({
+          views: [
+            {
+              id: 'view-defaults',
+              name: 'Defaults',
+              state: {},
+              createdAt: '2026-07-08T00:00:00Z',
+              updatedAt: '2026-07-08T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.put(`${baseURL}/saved-views/view-defaults`, async ({ request }) => {
+        writes.push({
+          method: request.method,
+          path: new URL(request.url).pathname,
+          body: await request.json(),
+        })
+        return HttpResponse.json({ message: 'save failed' }, { status: 500 })
+      }),
+      http.delete(`${baseURL}/saved-views/view-defaults`, ({ request }) => {
+        writes.push({ method: request.method, path: new URL(request.url).pathname })
+        return HttpResponse.json({ message: 'delete failed' }, { status: 500 })
+      }),
+      http.post(`${baseURL}/saved-views`, async ({ request }) => {
+        writes.push({
+          method: request.method,
+          path: new URL(request.url).pathname,
+          body: await request.json(),
+        })
+        return HttpResponse.json({ view: { name: 'Defaults copy', state: {} } })
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    const savedViewSelect = await screen.findByRole('combobox', { name: '保存视图' })
+    await waitFor(() => expect(savedViewSelect).not.toBeDisabled())
+    await user.click(savedViewSelect)
+    await user.click(await screen.findByRole('option', { name: 'Defaults' }))
+
+    await waitFor(() => {
+      const params = new URL(urls.at(-1) ?? '').searchParams
+      expect(params.get('visibility')).toBe(
+        CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ACTIVE,
+      )
+      expect(params.get('sort')).toBe(CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT)
+      expect(params.get('direction')).toBe(SortDirection.SORT_DIRECTION_DESC)
+      expect(params.has('q')).toBe(false)
+    })
+
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+    const updateDialog = await screen.findByRole('dialog', { name: '保存客户需求视图' })
+    await user.click(within(updateDialog).getByRole('button', { name: '保存' }))
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        method: 'PUT',
+        path: `${baseURL}/saved-views/view-defaults`,
+        body: expect.objectContaining({ id: 'view-defaults', name: 'Defaults' }),
+      }),
+    )
+
+    await user.click(within(updateDialog).getByRole('button', { name: '取消' }))
+    await user.click(screen.getByRole('button', { name: '删除保存视图' }))
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        method: 'DELETE',
+        path: `${baseURL}/saved-views/view-defaults`,
+      }),
+    )
+
+    await user.click(savedViewSelect)
+    await user.click(await screen.findByRole('option', { name: '当前筛选' }))
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+    const createDialog = await screen.findByRole('dialog', { name: '保存客户需求视图' })
+    await user.type(within(createDialog).getByLabelText('视图名称'), 'Defaults copy')
+    await user.click(within(createDialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        method: 'POST',
+        path: `${baseURL}/saved-views`,
+        body: expect.objectContaining({ name: 'Defaults copy' }),
+      }),
+    )
+  })
+
   it('posts selected feedback ids when promoting feedback', async () => {
     let payload: Record<string, unknown> | undefined
     mockList({ requests: [] })
